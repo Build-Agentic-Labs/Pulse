@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <rect width="320" height="240" fill="#f4f0e7"/>
+  <rect x="22" y="22" width="276" height="196" rx="14" fill="#fbfaf6" stroke="#d6cdbf" stroke-width="4"/>
+  <path d="M210 55c17 17 22 42 13 64l-27-27-31 31 27 27c-22 9-47 4-64-13-24-24-24-64 0-88s58-18 82 6Z" fill="#27342d"/>
+  <path d="M148 122 72 198" stroke="#1e7e6d" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="75" cy="195" r="16" fill="#536273"/>
+  <text x="24" y="207" fill="#536273" font-family="Arial, sans-serif" font-size="22" font-weight="800">WRENCH</text>
+</svg>

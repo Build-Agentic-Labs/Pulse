@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+*.tsbuildinfo
+
+# local env and deployment state
+.env*
+!.env.example
+.vercel/
+
+# local development certificates
+certificates/*.pem
+
+# Supabase local state
+supabase/.temp/
+
+# generated backup/export data
+backups/
+
+# local tool artifacts
+UFO/.venv/
+UFO/*.zip
+
+# logs and OS files
+*.log
+.DS_Store

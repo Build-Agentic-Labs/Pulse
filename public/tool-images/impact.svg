@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <rect width="320" height="240" fill="#f4f0e7"/>
+  <rect x="22" y="22" width="276" height="196" rx="14" fill="#fbfaf6" stroke="#d6cdbf" stroke-width="4"/>
+  <path d="M83 91h103c13 0 23 10 23 23v16H82c-19 0-35-9-35-20s16-19 36-19Z" fill="#27342d"/>
+  <path d="M203 98h39c13 0 24 11 24 24s-11 24-24 24h-39v-48Z" fill="#1e7e6d"/>
+  <path d="M130 130h43l22 58h-48l-17-58Z" fill="#536273"/>
+  <path d="M151 150h28" stroke="#fbfaf6" stroke-width="8" stroke-linecap="round"/>
+  <text x="24" y="207" fill="#536273" font-family="Arial, sans-serif" font-size="22" font-weight="800">IMPACT</text>
+</svg>

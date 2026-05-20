@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <rect width="320" height="240" fill="#f4f0e7"/>
+  <rect x="22" y="22" width="276" height="196" rx="14" fill="#fbfaf6" stroke="#d6cdbf" stroke-width="4"/>
+  <circle cx="160" cy="112" r="50" fill="#27342d"/>
+  <path d="M139 128 197 70" stroke="#fbfaf6" stroke-width="16" stroke-linecap="round"/>
+  <path d="M129 118 89 158" stroke="#1e7e6d" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="205" cy="62" r="15" fill="#bf622d"/>
+  <text x="24" y="207" fill="#536273" font-family="Arial, sans-serif" font-size="22" font-weight="800">TOOL</text>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <rect width="320" height="240" fill="#f4f0e7"/>
+  <rect x="22" y="22" width="276" height="196" rx="14" fill="#fbfaf6" stroke="#d6cdbf" stroke-width="4"/>
+  <path d="M132 52h56v34h-56z" fill="#536273"/>
+  <path d="M118 86h84l16 103H102l16-103Z" fill="#1e7e6d"/>
+  <path d="M130 115h60v50h-60z" fill="#fbfaf6"/>
+  <path d="M145 140h30" stroke="#bf622d" stroke-width="8" stroke-linecap="round"/>
+  <text x="24" y="207" fill="#536273" font-family="Arial, sans-serif" font-size="22" font-weight="800">LOCK</text>
+</svg>

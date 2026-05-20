@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <rect width="320" height="240" fill="#f4f0e7"/>
+  <rect x="22" y="22" width="276" height="196" rx="14" fill="#fbfaf6" stroke="#d6cdbf" stroke-width="4"/>
+  <path d="M80 150 205 76" stroke="#27342d" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="223" cy="65" r="36" fill="#1e7e6d"/>
+  <circle cx="223" cy="65" r="18" fill="#fbfaf6"/>
+  <path d="M84 150h58" stroke="#536273" stroke-width="28" stroke-linecap="round"/>
+  <text x="24" y="207" fill="#536273" font-family="Arial, sans-serif" font-size="22" font-weight="800">RATCHET</text>
+</svg>

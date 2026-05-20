@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <rect width="320" height="240" fill="#f4f0e7"/>
+  <rect x="22" y="22" width="276" height="196" rx="14" fill="#fbfaf6" stroke="#d6cdbf" stroke-width="4"/>
+  <path d="M92 135h108c19 0 34-15 34-34v-8c0-9-7-16-16-16H92c-18 0-32 14-32 32s14 26 32 26Z" fill="#27342d"/>
+  <path d="M105 91h92c8 0 14 6 14 14s-6 14-14 14h-92c-8 0-14-6-14-14s6-14 14-14Z" fill="#e7edf1"/>
+  <circle cx="236" cy="105" r="28" fill="#1e7e6d"/>
+  <circle cx="236" cy="105" r="14" fill="#fbfaf6"/>
+  <text x="24" y="207" fill="#536273" font-family="Arial, sans-serif" font-size="22" font-weight="800">SOCKET</text>
+</svg>

@@ -3,7 +3,7 @@ import { ExcelGanttRouteShell } from "@/components/project-route-shells";
 
 export const metadata = {
   title: "M-Tools Gantt for Excel",
-  description: "Excel-hosted BuildLogic Gantt workspace",
+  description: "Excel-hosted Pulse Gantt workspace",
 };
 
 export default async function ProjectExcelGanttPage({ params }: { params: Promise<{ projectId: string }> }) {

@@ -8,7 +8,6 @@ import {
   ClipboardList,
   ImageIcon,
   ListChecks,
-  Loader2,
   Menu,
   Plus,
   RefreshCw,
@@ -49,6 +48,7 @@ import {
   loadPlannerStateFromSupabase,
   removeStepToolFromSupabase,
   saveManufacturingStepToSupabase,
+  savePlannerStateToSupabase,
   saveTaskAndManufacturingStepToSupabase,
   saveTaskToSupabase,
   saveTaskWithManufacturingStepsToSupabase,
@@ -61,6 +61,7 @@ import {
   type ToolLibraryItem,
 } from "@/domain/supabase-planner";
 import type { ManufacturingStep, PlannerProjectContext, PlannerState, Task } from "@/domain/types";
+import { NothingLoadingBlock, NothingSpinner } from "@/components/nothing-ui";
 
 const MAX_IMAGE_EDGE = 1280;
 const JPEG_QUALITY = 0.72;
@@ -78,6 +79,20 @@ type MobileNewStepDraftRecord = {
   photos: StepPhotoAttachment[];
   checks: string[];
   updatedAt: string;
+};
+
+type RestorePrompt = {
+  title: string;
+  body: string;
+  restoreLabel: string;
+  onRestore: () => Promise<void>;
+};
+
+type ConfirmPrompt = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  onConfirm: () => Promise<void>;
 };
 
 function compareTasksByWbs(left: Task, right: Task) {
@@ -531,6 +546,8 @@ export function MobilePhotoPortal({
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [confirmDeleteStepId, setConfirmDeleteStepId] = useState<string | null>(null);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
+  const [restorePrompt, setRestorePrompt] = useState<RestorePrompt | null>(null);
+  const [confirmPrompt, setConfirmPrompt] = useState<ConfirmPrompt | null>(null);
   const [captureTimer, setCaptureTimer] = useState<{
     elapsedMs: number;
     running: boolean;
@@ -1219,6 +1236,55 @@ export function MobilePhotoPortal({
     }
   }
 
+  async function restoreDeletedSnapshot(snapshot: PlannerState, selectedTaskIdToRestore: string, restoreScreen: "list" | "detail" = "detail") {
+    setRestorePrompt(null);
+    plannerStateRef.current = snapshot;
+    setPlannerState(snapshot);
+    setSelectedTaskId(selectedTaskIdToRestore);
+    setActiveScreen(restoreScreen);
+    setErrorMessage(null);
+    setSaveState("saving");
+    beginLocalWrite();
+
+    try {
+      await savePlannerStateToSupabase(snapshot);
+      const photoRestores = snapshot.tasks.flatMap((task) =>
+        (task.manufacturingSteps ?? []).flatMap((step) =>
+          getStepPhotoAttachments(task, step.id).map((photo) =>
+            uploadStepPhotoAttachment(task.id, step.id, photo, activeProjectContext),
+          ),
+        ),
+      );
+      if (photoRestores.length) {
+        await Promise.allSettled(photoRestores);
+      }
+      setSaveState("saved");
+    } catch (error) {
+      setSaveState("error");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to restore the deleted item.");
+    } finally {
+      endLocalWrite();
+    }
+  }
+
+  async function restoreDeletedPhoto(taskId: string, stepId: string, photo: StepPhotoAttachment) {
+    setRestorePrompt(null);
+    updateLocalTask(taskId, (task) => upsertStepPhotoAttachments(task, stepId, [photo]));
+    setErrorMessage(null);
+    setSaveState("saving");
+    beginLocalWrite();
+
+    try {
+      await uploadStepPhotoAttachment(taskId, stepId, photo, activeProjectContext);
+      setSaveState("saved");
+    } catch (error) {
+      setSaveState("error");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to restore the selected photo.");
+    } finally {
+      endLocalWrite();
+    }
+  }
+
   function taskScheduleChanged(previousTask: Task | undefined, nextTask: Task) {
     return (
       !previousTask ||
@@ -1543,6 +1609,8 @@ export function MobilePhotoPortal({
       return;
     }
 
+    const previousState = plannerState;
+    const deletedTask = plannerState.tasks.find((task) => task.id === taskId);
     const taskIdsToDelete = new Set([taskId]);
     const remainingTasks = plannerState.tasks
       .filter((task) => !taskIdsToDelete.has(task.id))
@@ -1577,6 +1645,14 @@ export function MobilePhotoPortal({
     try {
       await deletePlannerTask(taskId, projectId);
       setSaveState("saved");
+      if (deletedTask) {
+        setRestorePrompt({
+          title: `Deleted task ${deletedTask.wbs}`,
+          body: "Restore will bring this task and its saved manufacturing steps back to the shared line plan.",
+          restoreLabel: "Restore Task",
+          onRestore: () => restoreDeletedSnapshot(previousState, deletedTask.id),
+        });
+      }
     } catch (error) {
       setSaveState("error");
       setErrorMessage(error instanceof Error ? error.message : "Unable to delete the selected task.");
@@ -1646,6 +1722,14 @@ export function MobilePhotoPortal({
       await softDeleteStepPhotoAttachmentFromSupabase(photoId, taskId, projectId);
 
       setSaveState("saved");
+      if (removedPhoto) {
+        setRestorePrompt({
+          title: "Deleted photo",
+          body: "Restore will attach this photo back to the same manufacturing step.",
+          restoreLabel: "Restore Photo",
+          onRestore: () => restoreDeletedPhoto(taskId, stepId, removedPhoto),
+        });
+      }
     } catch (error) {
       if (removedPhoto) {
         updateLocalTask(taskId, (task) => upsertStepPhotoAttachments(task, stepId, [removedPhoto]));
@@ -1655,6 +1739,19 @@ export function MobilePhotoPortal({
     } finally {
       endLocalWrite();
     }
+  }
+
+  function requestRemovePhoto(stepId: string, photo: StepPhotoAttachment) {
+    setConfirmPrompt({
+      title: "Delete photo?",
+      body: "This removes the photo from the shared step record.",
+      confirmLabel: "Delete Photo",
+      onConfirm: async () => {
+        setConfirmPrompt(null);
+        setRevealedPhotoDeleteId(null);
+        await removePhoto(stepId, photo.id);
+      },
+    });
   }
 
   async function updatePhotoCaption(stepId: string, photoId: string, caption: string) {
@@ -1786,6 +1883,7 @@ export function MobilePhotoPortal({
       return;
     }
 
+    const previousState = plannerState;
     const taskId = selectedTask.id;
     const currentTask = plannerState.tasks.find((task) => task.id === taskId) ?? selectedTask;
     const currentSteps = sortManufacturingSteps(currentTask.manufacturingSteps ?? []);
@@ -1822,6 +1920,12 @@ export function MobilePhotoPortal({
     });
 
     void Promise.allSettled(removedPhotos.map((photo) => softDeleteStepPhotoAttachmentFromSupabase(photo.id, taskId, projectId)));
+    setRestorePrompt({
+      title: `Deleted step ${stepToDelete.sequence}`,
+      body: "Restore will bring this manufacturing step back with its saved tools, part links, and available photos.",
+      restoreLabel: "Restore Step",
+      onRestore: () => restoreDeletedSnapshot(previousState, taskId),
+    });
   }
 
   function resetNewStepDraft(durationText = "5", stepId: string | null = null) {
@@ -2028,7 +2132,7 @@ export function MobilePhotoPortal({
 
     if (toolImage?.imageUrl) {
       return (
-        <div className="relative aspect-[4/3] overflow-hidden rounded bg-white">
+        <div className="relative aspect-[4/3] overflow-hidden rounded bg-surface">
           <img src={toolImage.imageUrl} alt={toolName} className="h-full w-full object-cover" />
         </div>
       );
@@ -2050,7 +2154,7 @@ export function MobilePhotoPortal({
                 : "wrench";
 
     return (
-      <div className="relative aspect-[4/3] overflow-hidden rounded bg-white">
+      <div className="relative aspect-[4/3] overflow-hidden rounded bg-surface">
         <img src={`/tool-images/${toolType}.png`} alt={toolName} className="h-full w-full object-cover" />
       </div>
     );
@@ -2085,18 +2189,18 @@ export function MobilePhotoPortal({
                   onPointerCancel={cancelToolHold}
                   onPointerLeave={cancelToolHold}
                   onContextMenu={(event) => event.preventDefault()}
-                  className="group min-w-0 rounded border border-line bg-white p-0.5 text-left transition active:scale-[0.99]"
+                  className="group min-w-0 rounded border border-line bg-surface p-0.5 text-left transition active:scale-[0.99]"
                   aria-pressed
                 >
                   <div className="relative">
                     {renderToolVisual(tool)}
                     {toolImageBusyKey === toolKey ? (
-                      <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-steel shadow-sm">
-                        <Loader2 size={11} className="animate-spin" />
+                      <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-surface text-steel">
+                        <NothingSpinner inline />
                       </span>
                     ) : null}
                     <span
-                      className={`absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-signal text-white shadow-sm transition md:opacity-0 md:group-hover:opacity-100 ${
+                      className={`absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-danger text-canvas transition md:opacity-0 md:group-hover:opacity-100 ${
                         revealedToolDeleteKey === toolKey ? "opacity-100" : "opacity-0"
                       }`}
                       onClick={(event) => {
@@ -2111,7 +2215,7 @@ export function MobilePhotoPortal({
                       <Trash2 size={11} />
                     </span>
                   </div>
-                  <div className="mt-0.5 line-clamp-2 min-h-[18px] text-[8px] font-black leading-tight text-ink">
+                  <div className="mt-0.5 line-clamp-2 min-h-[18px] text-[8px] font-medium leading-tight text-ink">
                     {tool}
                   </div>
                 </button>
@@ -2119,15 +2223,15 @@ export function MobilePhotoPortal({
             })}
           </div>
         ) : (
-          <div className="rounded border border-dashed border-line bg-[#fbfaf6] px-3 py-2 text-xs font-bold text-steel">
+          <div className="rounded border border-dashed border-line bg-surface-raised px-3 py-2 text-xs font-bold text-steel">
             No tools added to this step yet.
           </div>
         )}
         {libraryTools.length > 0 ? (
           <div>
-            <div className="mb-1 text-[10px] font-black uppercase tracking-wide text-steel">Tool library</div>
+            <div className="mb-1 ui-mono-label">Tool library</div>
             <select
-              className="h-10 w-full rounded border border-line bg-white px-3 text-sm font-bold text-ink outline-none focus:border-copper"
+              className="h-10 w-full rounded border border-line bg-surface px-3 text-sm font-bold text-ink outline-none focus:border-accent"
               defaultValue=""
               onChange={(event) => {
                 const tool = event.currentTarget.value;
@@ -2254,77 +2358,36 @@ export function MobilePhotoPortal({
 
   if (saveState === "loading") {
     return (
-      <main className="mobile-photo-portal min-h-[100svh] bg-[#f2efe6] text-ink">
-        <div className="border-b border-graphite/40 bg-graphite px-4 py-4 text-white">
-          <div className="mx-auto flex max-w-xl items-center justify-between gap-3">
-            <div>
-              <div className="h-3 w-36 animate-pulse rounded bg-white/25" />
-              <div className="mt-2 h-6 w-28 animate-pulse rounded bg-white/35" />
-            </div>
-            <div className="flex gap-2">
-              <div className="h-10 w-20 animate-pulse rounded border border-white/20 bg-white/10" />
-              <div className="h-10 w-20 animate-pulse rounded border border-white/20 bg-white/10" />
-            </div>
-          </div>
-        </div>
-        <div className="mx-auto max-w-xl p-3">
-          <div className="overflow-hidden rounded-md border border-line bg-white shadow-sm">
-            <div className="flex items-center justify-between gap-3 border-b border-line p-3">
-              <div>
-                <div className="h-3 w-36 animate-pulse rounded bg-[#d8d1c3]" />
-                <div className="mt-2 h-5 w-20 animate-pulse rounded bg-[#eee8dd]" />
-              </div>
-              <div className="h-8 w-20 animate-pulse rounded bg-graphite/20" />
-            </div>
-            <div className="flex items-center gap-2 bg-[#fbfaf6] px-3 py-3">
-              <div className="h-px flex-1 bg-line" />
-              <div className="h-3 w-28 animate-pulse rounded bg-[#d8d1c3]" />
-              <div className="h-px flex-1 bg-line" />
-            </div>
-            {Array.from({ length: 7 }).map((_, index) => (
-              <div key={index} className="flex border-b border-line last:border-b-0">
-                <div className="flex min-w-0 flex-1 items-start gap-3 px-3 py-3">
-                  <div className="h-8 w-8 shrink-0 animate-pulse rounded bg-[#eee8dd]" />
-                  <div className="min-w-0 flex-1">
-                    <div className="h-4 w-2/3 animate-pulse rounded bg-[#d8d1c3]" />
-                    <div className="mt-2 flex gap-2">
-                      <div className="h-3 w-20 animate-pulse rounded bg-[#eee8dd]" />
-                      <div className="h-3 w-14 animate-pulse rounded bg-[#eee8dd]" />
-                      <div className="h-3 w-16 animate-pulse rounded bg-[#eee8dd]" />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex w-11 shrink-0 items-center justify-center">
-                  <div className="h-5 w-5 animate-pulse rounded bg-[#eee8dd]" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      <main className="mobile-photo-portal flex min-h-[100svh] items-center justify-center bg-canvas p-6 text-ink">
+        <section className="ui-panel w-full max-w-md p-8">
+          <NothingLoadingBlock title="Loading" body="Reading manufacturing steps and photo drafts." />
+        </section>
       </main>
     );
   }
 
   return (
-    <main className="mobile-photo-portal min-h-[100svh] bg-[#f2efe6] text-ink">
+    <main className="mobile-photo-portal min-h-[100svh] bg-canvas text-ink">
       <header
         ref={mobileHeaderRef}
-        className="fixed inset-x-0 top-0 z-50 border-b border-line bg-graphite px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] text-white shadow-sm"
+        className="fixed inset-x-0 top-0 z-50 border-b border-line bg-surface px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] text-ink"
       >
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-black uppercase tracking-wide text-white/65">BuildLogic Capture</div>
-            <h1 className="truncate text-lg font-black">{derivedState?.product.name ?? "Manufacturing Photos"}</h1>
+            <div className="ui-mono-label">Pulse Capture</div>
+            <h1 className="mt-1 truncate text-lg font-medium text-ink">
+              {derivedState?.product.name ?? "Manufacturing Photos"}
+            </h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {selectedTask ? (
               <button
                 type="button"
                 onClick={captureTimer.running ? stopCaptureTimer : startCaptureTimer}
-                className={`inline-flex h-10 min-w-[108px] items-center justify-center gap-1.5 rounded border px-2 text-xs font-black ${
+                className={`inline-flex h-10 min-w-[108px] items-center justify-center gap-1.5 rounded-full border px-3 text-xs font-medium ${
                   captureTimer.running
-                    ? "border-copper/70 bg-copper text-white"
-                    : "border-white/15 bg-white/10 text-white"
+                    ? "border-ink bg-accent text-canvas"
+                    : "border-border-strong bg-transparent text-ink-secondary"
                 }`}
                 title={
                   captureTimer.running
@@ -2340,7 +2403,7 @@ export function MobilePhotoPortal({
             ) : null}
             <a
               href={projectId ? `/projects/${projectId}/planner` : "/"}
-              className="inline-flex h-10 items-center gap-1 rounded border border-white/15 bg-white/10 px-2.5 text-xs font-black text-white"
+              className="ui-btn-secondary h-10 px-3 text-xs"
             >
               Planner
             </a>
@@ -2350,13 +2413,59 @@ export function MobilePhotoPortal({
 
       <div ref={contentScrollRef} className="min-h-0" style={{ paddingTop: mobileHeaderHeight }}>
       <div className="mx-auto max-w-xl p-3 pb-[calc(2.5rem+env(safe-area-inset-bottom))]">
+        {restorePrompt ? (
+          <div className="mb-3 rounded-md border border-accent/40 bg-accent-muted p-3">
+            <div className="text-sm font-medium text-ink">{restorePrompt.title}</div>
+            <div className="mt-1 text-xs font-bold leading-snug text-steel">{restorePrompt.body}</div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setRestorePrompt(null)}
+                className="h-9 rounded border border-line bg-surface text-xs font-medium text-ink active:bg-surface-sunken"
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={() => void restorePrompt.onRestore()}
+                disabled={saveState === "saving"}
+                className="h-9 rounded bg-accent px-3 text-xs font-medium text-canvas active:bg-highlight-hover disabled:opacity-60"
+              >
+                {restorePrompt.restoreLabel}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {confirmPrompt ? (
+          <div className="mb-3 rounded-md border border-danger/30 bg-danger-muted p-3">
+            <div className="text-sm font-medium text-danger">{confirmPrompt.title}</div>
+            <div className="mt-1 text-xs font-bold leading-snug text-steel">{confirmPrompt.body}</div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmPrompt(null)}
+                className="h-9 rounded border border-line bg-surface text-xs font-medium text-ink active:bg-surface-sunken"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmPrompt.onConfirm()}
+                disabled={saveState === "saving"}
+                className="h-9 rounded bg-danger px-3 text-xs font-medium text-canvas active:bg-danger-hover disabled:opacity-60"
+              >
+                {confirmPrompt.confirmLabel}
+              </button>
+            </div>
+          </div>
+        ) : null}
         {activeScreen === "list" ? (
-        <section className="min-w-0 rounded-md border border-line bg-white shadow-sm">
+        <section className="min-w-0 ui-panel">
           <div className="border-b border-line p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-xs font-black uppercase tracking-wide text-steel">High-Level Processes</div>
-                <div className="text-sm font-black text-ink">
+                <div className="text-xs ui-mono-label tracking-wide text-steel">High-Level Processes</div>
+                <div className="text-sm font-medium text-ink">
                   {taskRows.length} {taskRows.length === 1 ? "task" : "tasks"}
                 </div>
               </div>
@@ -2368,7 +2477,7 @@ export function MobilePhotoPortal({
                     setNewTaskZoneId(selectedTask?.zoneId ?? taskRows[taskRows.length - 1]?.zoneId ?? "");
                     setShowNewTaskForm((current) => !current);
                   }}
-                  className="inline-flex h-8 items-center gap-1 rounded bg-graphite px-2 text-xs font-black text-white active:bg-ink"
+                  className="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-xs font-medium text-canvas active:bg-ink"
                 >
                   <Plus size={13} />
                   Task
@@ -2376,18 +2485,18 @@ export function MobilePhotoPortal({
               </div>
             </div>
             {errorMessage ? (
-              <div className="mt-3 rounded border border-signal/30 bg-[#fce8e3] px-3 py-2 text-xs font-bold text-signal">
+              <div className="mt-3 rounded border border-danger/30 bg-danger-muted px-3 py-2 text-xs font-bold text-danger">
                 {errorMessage}
               </div>
             ) : null}
             {showNewTaskForm ? (
-              <div className="mt-3 rounded border border-copper/35 bg-[#fff8e8] p-2.5">
+              <div className="mt-3 rounded border border-accent/35 bg-accent-muted p-2.5">
                 <label className="block">
-                  <span className="mb-1 block text-[11px] font-black uppercase tracking-wide text-copper">
+                  <span className="mb-1 block text-[11px] ui-mono-label tracking-wide text-accent">
                     New high-level task
                   </span>
                   <input
-                    className="h-11 w-full rounded border border-line bg-white px-3 text-sm font-black text-ink outline-none focus:border-copper"
+                    className="h-11 w-full rounded border border-line bg-surface px-3 text-sm font-medium text-ink outline-none focus:border-accent"
                     value={newTaskName}
                     onChange={(event) => setNewTaskName(event.target.value)}
                     onKeyDown={(event) => {
@@ -2400,11 +2509,11 @@ export function MobilePhotoPortal({
                   />
                 </label>
                 <label className="mt-2 block">
-                  <span className="mb-1 block text-[11px] font-black uppercase tracking-wide text-copper">
+                  <span className="mb-1 block text-[11px] ui-mono-label tracking-wide text-accent">
                     Zone
                   </span>
                   <select
-                    className="h-11 w-full rounded border border-line bg-white px-3 text-sm font-black text-ink outline-none focus:border-copper"
+                    className="h-11 w-full rounded border border-line bg-surface px-3 text-sm font-medium text-ink outline-none focus:border-accent"
                     value={newTaskZoneId}
                     onChange={(event) => setNewTaskZoneId(event.target.value)}
                   >
@@ -2424,7 +2533,7 @@ export function MobilePhotoPortal({
                       setNewTaskZoneId("");
                       setShowNewTaskForm(false);
                     }}
-                    className="h-10 rounded border border-line bg-white px-3 text-xs font-black text-ink active:bg-[#f4f0e7]"
+                    className="h-10 rounded border border-line bg-surface px-3 text-xs font-medium text-ink active:bg-surface-sunken"
                   >
                     Cancel
                   </button>
@@ -2432,9 +2541,9 @@ export function MobilePhotoPortal({
                     type="button"
                     onClick={() => void addHighLevelTask()}
                     disabled={saveState === "saving"}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded bg-graphite px-3 text-xs font-black text-white active:bg-ink disabled:opacity-60"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded bg-accent px-3 text-xs font-medium text-canvas active:bg-ink disabled:opacity-60"
                   >
-                    {saveState === "saving" ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                    {saveState === "saving" ? <NothingSpinner inline /> : <Plus size={14} />}
                     Add Task
                   </button>
                 </div>
@@ -2466,12 +2575,12 @@ export function MobilePhotoPortal({
                 <Fragment key={task.id}>
                   {showZoneDivider ? (
                     <div
-                      className={`flex items-center gap-2 bg-[#fbfaf6] px-3 py-2 ${
-                        index === 0 ? "" : "border-t-2 border-copper/35"
+                      className={`flex items-center gap-2 bg-surface-raised px-3 py-2 ${
+                        index === 0 ? "" : "border-t-2 border-accent/35"
                       }`}
                     >
                       <div className="h-px flex-1 bg-line" />
-                      <div className="shrink-0 text-[10px] font-black uppercase tracking-[0.16em] text-steel">
+                      <div className="shrink-0 ui-mono-label">
                         {zoneLabel}
                       </div>
                       <div className="h-px flex-1 bg-line" />
@@ -2481,26 +2590,26 @@ export function MobilePhotoPortal({
                     <div
                       data-mobile-task-id={task.id}
                       data-drop-placement="before"
-                      className="mx-3 my-1 h-14 rounded-md border border-line bg-[#eef0ec] shadow-inner transition-all duration-200"
+                      className="mx-3 my-1 h-14 ui-panel-sunken transition-all duration-200"
                     />
                   ) : null}
                 <div
                   data-mobile-task-id={task.id}
-                  className={`relative flex border-b border-line bg-white transition-all duration-200 ease-out last:border-b-0 ${
+                  className={`relative flex border-b border-line bg-surface transition-all duration-200 ease-out last:border-b-0 ${
                     draggingTaskId === task.id ? "opacity-35" : ""
                   }`}
                 >
                   <button
                     type="button"
                     onClick={() => selectTask(task.id)}
-                    className="block min-w-0 flex-1 bg-white px-3 py-3 text-left transition active:bg-[#f8f2e8]"
+                    className="block min-w-0 flex-1 bg-surface px-3 py-3 text-left transition active:bg-surface-active"
                   >
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#f2efe6] text-xs font-black text-steel">
+                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-canvas text-xs font-medium text-steel">
                         {task.wbs}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-black text-ink">{task.name}</div>
+                        <div className="truncate text-sm font-medium text-ink">{task.name}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-bold text-steel">
                           <span>{zoneLabel}</span>
                           <span>
@@ -2523,7 +2632,7 @@ export function MobilePhotoPortal({
                     onPointerUp={finishTaskDrag}
                     onPointerCancel={cancelTaskDrag}
                     disabled={saveState === "saving"}
-                    className="flex w-11 shrink-0 touch-none items-center justify-center bg-white text-steel active:bg-[#f8f2e8] disabled:opacity-35"
+                    className="flex w-11 shrink-0 touch-none items-center justify-center bg-surface text-steel active:bg-surface-active disabled:opacity-35"
                     aria-label={`Drag ${task.name} to reorder`}
                     title={`Drag ${task.name} to reorder`}
                   >
@@ -2534,7 +2643,7 @@ export function MobilePhotoPortal({
                     <div
                       data-mobile-task-id={task.id}
                       data-drop-placement="after"
-                      className="mx-3 my-1 h-14 rounded-md border border-line bg-[#eef0ec] shadow-inner transition-all duration-200"
+                      className="mx-3 my-1 h-14 ui-panel-sunken transition-all duration-200"
                     />
                   ) : null}
                 </Fragment>
@@ -2559,7 +2668,7 @@ export function MobilePhotoPortal({
 
               return (
                 <div
-                  className="pointer-events-none fixed z-50 flex rounded-md border border-line bg-white shadow-lg ring-1 ring-black/5"
+                  className="pointer-events-none fixed z-50 flex ui-panel ring-1 ring-black/5"
                   style={{
                     left: dragPreview.x,
                     top: dragPreview.y,
@@ -2569,11 +2678,11 @@ export function MobilePhotoPortal({
                 >
                   <div className="block min-w-0 flex-1 px-3 py-3 text-left">
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-teal text-xs font-black text-white">
+                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-accent text-xs font-medium text-canvas">
                         {draggingTask.wbs}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-black text-ink">{draggingTask.name}</div>
+                        <div className="truncate text-sm font-medium text-ink">{draggingTask.name}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-bold text-steel">
                           <span>{draggingZoneLabel}</span>
                           <span>
@@ -2589,7 +2698,7 @@ export function MobilePhotoPortal({
                       </div>
                     </div>
                   </div>
-                  <div className="flex w-11 shrink-0 items-center justify-center border-l border-line bg-[#fbfaf6] text-steel">
+                  <div className="flex w-11 shrink-0 items-center justify-center border-l border-line bg-surface-raised text-steel">
                     <Menu size={18} strokeWidth={2.4} />
                   </div>
                 </div>
@@ -2598,7 +2707,7 @@ export function MobilePhotoPortal({
           ) : null}
         </section>
         ) : (
-        <section className="min-w-0 rounded-md border border-line bg-white shadow-sm">
+        <section className="min-w-0 ui-panel">
           {selectedTask ? (
             <>
               <div className="border-b border-line p-4">
@@ -2606,7 +2715,7 @@ export function MobilePhotoPortal({
                   <button
                     type="button"
                     onClick={showProcessList}
-                    className="inline-flex items-center gap-1 text-xs font-black uppercase tracking-wide text-steel"
+                    className="inline-flex items-center gap-1 text-xs ui-mono-label tracking-wide text-steel"
                   >
                     <ChevronLeft size={14} />
                     Process list
@@ -2614,7 +2723,7 @@ export function MobilePhotoPortal({
                   <button
                     type="button"
                     onClick={() => setConfirmDeleteTaskId(selectedTask.id)}
-                    className="inline-flex h-8 items-center gap-1 rounded border border-line bg-white px-2 text-[11px] font-black uppercase text-steel active:bg-[#f5e7df]"
+                    className="inline-flex h-8 items-center gap-1 rounded border border-line bg-surface px-2 text-[11px] ui-mono-label text-steel active:bg-danger-muted"
                     aria-label={`Delete task ${selectedTask.wbs}`}
                     title={`Delete task ${selectedTask.wbs}`}
                   >
@@ -2622,12 +2731,12 @@ export function MobilePhotoPortal({
                     Delete
                   </button>
                 </div>
-                <div className="text-[11px] font-black uppercase tracking-wide text-steel">
+                <div className="ui-mono-label">
                   {selectedTask.zoneId ? zoneById.get(selectedTask.zoneId) ?? "Process" : "Process"}
                 </div>
                 {confirmDeleteTaskId === selectedTask.id ? (
-                  <div className="mt-3 rounded border border-signal/30 bg-[#fce8e3] p-3">
-                    <div className="text-sm font-black text-signal">Delete task {selectedTask.wbs}?</div>
+                  <div className="mt-3 rounded border border-danger/30 bg-danger-muted p-3">
+                    <div className="text-sm font-medium text-danger">Delete task {selectedTask.wbs}?</div>
                     <div className="mt-1 text-xs font-bold leading-snug text-steel">
                       This removes the task and its manufacturing steps from the shared line plan.
                     </div>
@@ -2635,14 +2744,14 @@ export function MobilePhotoPortal({
                       <button
                         type="button"
                         onClick={() => setConfirmDeleteTaskId(null)}
-                        className="h-9 rounded border border-line bg-white text-xs font-black text-ink active:bg-[#f4f0e7]"
+                        className="h-9 rounded border border-line bg-surface text-xs font-medium text-ink active:bg-surface-sunken"
                       >
                         Cancel
                       </button>
                       <button
                         type="button"
                         onClick={() => void deleteHighLevelTask(selectedTask.id)}
-                        className="h-9 rounded bg-signal text-xs font-black text-white active:bg-[#8f321f]"
+                        className="h-9 rounded bg-danger text-xs font-medium text-canvas active:bg-danger-hover"
                       >
                         Delete Task
                       </button>
@@ -2650,17 +2759,17 @@ export function MobilePhotoPortal({
                   </div>
                 ) : null}
                 <label className="mt-2 block">
-                  <span className="mb-1 block text-[11px] font-black uppercase tracking-wide text-steel">
+                  <span className="mb-1 block ui-mono-label">
                     High-level task name
                   </span>
-                  <div className="grid grid-cols-[52px_minmax(0,1fr)] overflow-hidden rounded border border-line bg-white">
-                    <div className="flex items-center justify-center border-r border-line bg-[#fbfaf6] text-sm font-black text-steel">
+                  <div className="grid grid-cols-[52px_minmax(0,1fr)] overflow-hidden rounded border border-line bg-surface">
+                    <div className="flex items-center justify-center border-r border-line bg-surface-raised text-sm font-medium text-steel">
                       {selectedTask.wbs}
                     </div>
                     <input
                       key={selectedTask.id}
                       aria-label="High-level task name"
-                      className="h-11 min-w-0 px-3 text-lg font-black leading-tight text-ink outline-none focus:bg-[#fff8e8]"
+                      className="h-11 min-w-0 px-3 text-lg font-medium leading-tight text-ink outline-none focus:bg-accent-muted"
                       defaultValue={selectedTask.name}
                       onBlur={(event) => {
                         const name = event.currentTarget.value.trim() || "Untitled task";
@@ -2689,36 +2798,36 @@ export function MobilePhotoPortal({
 
               <div className="flex flex-col gap-3 p-3">
                 {showNewStepForm ? (
-                  <div className="order-last overflow-hidden rounded-md border border-line bg-white">
+                  <div className="order-last overflow-hidden ui-panel">
                     <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-3">
                       <div>
-                        <div className="text-[11px] font-black uppercase tracking-wide text-copper">New Step</div>
-                        <div className="text-sm font-black text-ink">Add manufacturing step</div>
+                        <div className="text-[11px] ui-mono-label tracking-wide text-accent">New Step</div>
+                        <div className="text-sm font-medium text-ink">Add manufacturing step</div>
                       </div>
                       <button
                         type="button"
                         onClick={closeNewStepForm}
                         disabled={captureTimer.running}
-                        className="text-xs font-black uppercase tracking-wide text-steel disabled:opacity-40"
+                        className="text-xs ui-mono-label tracking-wide text-steel disabled:opacity-40"
                       >
                         {captureTimer.running ? "Timer On" : "Close"}
                       </button>
                     </div>
                     {errorMessage ? (
-                      <div className="m-3 rounded border border-signal/30 bg-[#fce8e3] px-3 py-2 text-xs font-bold text-signal">
+                      <div className="m-3 rounded border border-danger/30 bg-danger-muted px-3 py-2 text-xs font-bold text-danger">
                         {errorMessage}
                       </div>
                     ) : null}
                     <div className="px-3 py-3">
                     <div className="mb-2 flex items-center gap-2">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-[#fbfaf6] text-[11px] font-black text-copper">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
                         1
                       </span>
-                      <div className="text-[11px] font-black uppercase tracking-wide text-steel">Instructions</div>
+                      <div className="ui-mono-label">Instructions</div>
                     </div>
                     <label className="block">
                       <span className="mb-1 flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-black uppercase tracking-wide text-steel">Description</span>
+                        <span className="ui-mono-label">Description</span>
                         <button
                           type="button"
                           onPointerDown={(event) => event.preventDefault()}
@@ -2728,7 +2837,7 @@ export function MobilePhotoPortal({
                             scheduleNewStepAutosave({ instruction });
                             restoreTextareaFocus(newStepInstructionRef.current, instruction.length);
                           }}
-                          className="inline-flex h-7 items-center gap-1 rounded border border-line bg-white px-2 text-[10px] font-black uppercase text-steel active:bg-[#f4f0e7]"
+                          className="inline-flex h-7 items-center gap-1 rounded border border-line bg-surface px-2 text-[10px] ui-mono-label text-steel active:bg-surface-sunken"
                           aria-label="Format new step as bullets"
                           title="Format new step as bullets"
                         >
@@ -2743,7 +2852,7 @@ export function MobilePhotoPortal({
                             window.requestAnimationFrame(() => resizeTextareaToContent(node));
                           }
                         }}
-                        className="min-h-[104px] w-full resize-none overflow-hidden rounded border border-line bg-white px-3 py-2 text-sm font-semibold leading-snug text-ink outline-none focus:border-copper"
+                        className="min-h-[104px] w-full resize-none overflow-hidden rounded border border-line bg-surface px-3 py-2 text-sm font-semibold leading-snug text-ink outline-none focus:border-accent"
                         value={newStepInstruction}
                         onChange={(event) => {
                           const instruction = event.target.value;
@@ -2763,12 +2872,12 @@ export function MobilePhotoPortal({
                       />
                     </label>
                     <label className="mt-3 block max-w-[150px]">
-                      <span className="mb-1 block text-[11px] font-black uppercase tracking-wide text-steel">
+                      <span className="mb-1 block ui-mono-label">
                         Duration
                       </span>
-                      <div className="grid grid-cols-[1fr_56px] overflow-hidden rounded border border-line bg-white">
+                      <div className="grid grid-cols-[1fr_56px] overflow-hidden rounded border border-line bg-surface">
                         <input
-                          className="h-11 min-w-0 px-3 text-base font-black text-ink outline-none"
+                          className="h-11 min-w-0 px-3 text-base font-medium text-ink outline-none"
                           type="text"
                           inputMode="numeric"
                           value={newStepDurationText}
@@ -2780,7 +2889,7 @@ export function MobilePhotoPortal({
                             }
                           }}
                         />
-                        <div className="flex items-center justify-center border-l border-line bg-[#fbfaf6] text-xs font-black uppercase tracking-wide text-steel">
+                        <div className="flex items-center justify-center border-l border-line bg-surface-raised text-xs ui-mono-label tracking-wide text-steel">
                           min
                         </div>
                       </div>
@@ -2788,10 +2897,10 @@ export function MobilePhotoPortal({
                     </div>
                     <div className="border-t border-line px-3 py-3">
                       <div className="mb-2 flex items-center gap-2">
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-[#fbfaf6] text-[11px] font-black text-copper">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
                           2
                         </span>
-                        <div className="text-[11px] font-black uppercase tracking-wide text-steel">
+                        <div className="ui-mono-label">
                           Checks
                         </div>
                       </div>
@@ -2802,15 +2911,15 @@ export function MobilePhotoPortal({
                           return (
                             <label
                               key={option.key}
-                              className={`grid min-h-9 grid-cols-[18px_minmax(0,1fr)] items-center gap-1.5 rounded border px-2 text-[10px] font-black transition ${
+                              className={`grid min-h-9 grid-cols-[18px_minmax(0,1fr)] items-center gap-1.5 rounded border px-2 text-[10px] font-medium transition ${
                                 checked
-                                  ? "border-teal/30 bg-teal/10 text-teal"
-                                  : "border-line bg-[#fbfaf6] text-steel active:border-copper"
+                                  ? "border-accent/30 bg-accent/10 text-accent"
+                                  : "border-line bg-surface-raised text-steel active:border-accent"
                               }`}
                             >
                               <input
                                 type="checkbox"
-                                className="h-3.5 w-3.5 shrink-0 accent-teal"
+                                className="h-3.5 w-3.5 shrink-0 accent-accent"
                                 checked={checked}
                                 onChange={(event) => toggleNewStepDraftCheck(option.key, event.target.checked)}
                               />
@@ -2822,16 +2931,16 @@ export function MobilePhotoPortal({
                     </div>
                     <div className="border-t border-line px-3 py-3">
                       <div className="mb-2 flex items-center gap-2">
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-[#fbfaf6] text-[11px] font-black text-copper">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
                           3
                         </span>
-                        <div className="text-[11px] font-black uppercase tracking-wide text-steel">
+                        <div className="ui-mono-label">
                           Tools & Parts · {newStepDraftTools.length}
                         </div>
                       </div>
                       <div className="grid grid-cols-[minmax(0,1fr)_68px] gap-2">
                         <input
-                          className="h-10 min-w-0 rounded border border-line bg-white px-3 text-sm font-bold text-ink outline-none focus:border-copper"
+                          className="h-10 min-w-0 rounded border border-line bg-surface px-3 text-sm font-bold text-ink outline-none focus:border-accent"
                           value={newStepToolName}
                           onChange={(event) => setNewStepToolName(event.target.value)}
                           onKeyDown={(event) => {
@@ -2845,7 +2954,7 @@ export function MobilePhotoPortal({
                         <button
                           type="button"
                           onClick={addNewStepDraftTool}
-                          className="h-10 rounded bg-graphite px-2 text-xs font-black text-white active:bg-ink"
+                          className="h-10 rounded bg-accent px-2 text-xs font-medium text-canvas active:bg-ink"
                         >
                           Add
                         </button>
@@ -2854,16 +2963,16 @@ export function MobilePhotoPortal({
                     </div>
                     <div className="border-t border-line px-3 py-3">
                       <div className="mb-2 flex items-center gap-2">
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-[#fbfaf6] text-[11px] font-black text-copper">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
                           4
                         </span>
-                        <div className="text-[11px] font-black uppercase tracking-wide text-steel">
+                        <div className="ui-mono-label">
                           Photos · {newStepDraftPhotos.length}
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        <label className="inline-flex h-10 items-center justify-center gap-2 rounded bg-graphite px-3 text-xs font-black text-white active:bg-ink">
-                          {newStepPhotoBusyCount > 0 ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}
+                        <label className="inline-flex h-10 items-center justify-center gap-2 rounded bg-accent px-3 text-xs font-medium text-canvas active:bg-ink">
+                          {newStepPhotoBusyCount > 0 ? <NothingSpinner inline /> : <Camera size={15} />}
                           Camera
                           <input
                             className="sr-only"
@@ -2878,8 +2987,8 @@ export function MobilePhotoPortal({
                             }}
                           />
                         </label>
-                        <label className="inline-flex h-10 items-center justify-center gap-2 rounded border border-line bg-white px-3 text-xs font-black text-ink active:bg-[#f4f0e7]">
-                          {newStepPhotoBusyCount > 0 ? <Loader2 size={15} className="animate-spin" /> : <ImageIcon size={15} />}
+                        <label className="inline-flex h-10 items-center justify-center gap-2 rounded border border-line bg-surface px-3 text-xs font-medium text-ink active:bg-surface-sunken">
+                          {newStepPhotoBusyCount > 0 ? <NothingSpinner inline /> : <ImageIcon size={15} />}
                           Library
                           <input
                             className="sr-only"
@@ -2897,7 +3006,7 @@ export function MobilePhotoPortal({
                       {newStepDraftPhotos.length > 0 ? (
                         <div className="mt-2 grid grid-cols-2 gap-2">
                           {newStepDraftPhotos.map((photo) => (
-                            <div key={photo.id} className="overflow-hidden rounded border border-line bg-[#fbfaf6]">
+                            <div key={photo.id} className="overflow-hidden rounded border border-line bg-surface-raised">
                               <img
                                 src={photo.dataUrl}
                                 alt="New step photo"
@@ -2905,7 +3014,7 @@ export function MobilePhotoPortal({
                               />
                               <div className="flex items-center justify-between gap-2 px-2 py-1.5">
                                 <div className="min-w-0">
-                                  <div className="truncate text-[11px] font-black text-ink">{photo.name}</div>
+                                  <div className="truncate text-[11px] font-medium text-ink">{photo.name}</div>
                                   <div className="text-[10px] font-bold text-steel">
                                     {readablePhotoDate(photo.capturedAt)}
                                   </div>
@@ -2913,7 +3022,7 @@ export function MobilePhotoPortal({
                                 <button
                                   type="button"
                                   onClick={() => removeNewStepDraftPhoto(photo.id)}
-                                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-steel active:bg-[#f5e7df] active:text-signal"
+                                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-steel active:bg-danger-muted active:text-danger"
                                   aria-label="Remove photo"
                                   title="Remove photo"
                                 >
@@ -2923,7 +3032,7 @@ export function MobilePhotoPortal({
                               <label className="block border-t border-line px-1.5 py-1">
                                 <span className="sr-only">Photo note</span>
                                 <textarea
-                                  className="min-h-[34px] w-full resize-none rounded border border-line bg-white px-1.5 py-1 text-[11px] font-semibold leading-tight text-ink outline-none placeholder:text-steel/60 focus:border-copper"
+                                  className="min-h-[34px] w-full resize-none rounded border border-line bg-surface px-1.5 py-1 text-[11px] font-semibold leading-tight text-ink outline-none placeholder:text-steel/60 focus:border-accent"
                                   value={photo.caption ?? ""}
                                   onChange={(event) => updateNewStepDraftPhotoCaption(photo.id, event.currentTarget.value)}
                                   placeholder="Caption"
@@ -2934,7 +3043,7 @@ export function MobilePhotoPortal({
                           ))}
                         </div>
                       ) : (
-                        <div className="mt-2 flex items-center gap-2 rounded border border-dashed border-line bg-[#fbfaf6] px-3 py-2 text-xs font-bold text-steel">
+                        <div className="mt-2 flex items-center gap-2 rounded border border-dashed border-line bg-surface-raised px-3 py-2 text-xs font-bold text-steel">
                           <ImageIcon size={14} />
                           Photos can be attached before this step is saved.
                         </div>
@@ -2944,7 +3053,7 @@ export function MobilePhotoPortal({
                       type="button"
                       onClick={goToNextManufacturingStep}
                       disabled={newStepPhotoBusyCount > 0}
-                      className="inline-flex h-11 w-full items-center justify-center gap-2 border-t border-line bg-graphite px-3 text-sm font-black text-white active:bg-ink disabled:opacity-60"
+                      className="inline-flex h-11 w-full items-center justify-center gap-2 border-t border-line bg-accent px-3 text-sm font-medium text-canvas active:bg-ink disabled:opacity-60"
                     >
                       <Plus size={16} />
                       Next Step
@@ -2954,16 +3063,16 @@ export function MobilePhotoPortal({
                   <button
                     type="button"
                     onClick={openNewStepForm}
-                    className="order-last inline-flex h-11 w-full items-center justify-center gap-2 rounded border border-line bg-white px-3 text-sm font-black text-ink active:bg-[#f4f0e7]"
+                    className="order-last inline-flex h-11 w-full items-center justify-center gap-2 rounded border border-line bg-surface px-3 text-sm font-medium text-ink active:bg-surface-sunken"
                   >
                     <Plus size={16} />
                     Add Manufacturing Step
                   </button>
                 )}
                 {selectedTaskSteps.length === 0 && !showNewStepForm ? (
-                  <div className="rounded-md border border-dashed border-line bg-[#fbfaf6] p-5 text-center">
+                  <div className="rounded-md border border-dashed border-line bg-surface-raised p-5 text-center">
                     <ClipboardList className="mx-auto mb-3 h-7 w-7 text-steel" />
-                    <div className="text-sm font-black text-ink">No manufacturing steps yet</div>
+                    <div className="text-sm font-medium text-ink">No manufacturing steps yet</div>
                     <div className="mt-1 text-xs font-semibold text-steel">
                       Add the first step here with its description, tools, and photos.
                     </div>
@@ -2979,16 +3088,16 @@ export function MobilePhotoPortal({
                   const confirmingDelete = confirmDeleteStepId === step.id;
 
                   return (
-                    <article key={step.id} className="overflow-hidden rounded-md border border-line bg-white">
+                    <article key={step.id} className="overflow-hidden ui-panel">
                       <div className="min-w-0 px-3 py-3">
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
-                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-[#fbfaf6] text-[11px] font-black text-copper">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
                               1
                             </span>
                             <div>
-                              <div className="text-[11px] font-black uppercase tracking-wide text-steel">Instructions</div>
-                              <div className="text-[10px] font-black uppercase tracking-wide text-copper">Step {step.sequence}</div>
+                              <div className="ui-mono-label">Instructions</div>
+                              <div className="text-[10px] ui-mono-label tracking-wide text-accent">Step {step.sequence}</div>
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
@@ -2996,16 +3105,16 @@ export function MobilePhotoPortal({
                               type="button"
                               onClick={() => setConfirmDeleteStepId(step.id)}
                               disabled={saveState === "saving" || isUploading}
-                              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-white text-steel active:border-signal active:bg-[#fce8e3] active:text-signal disabled:opacity-50"
+                              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-steel active:border-danger active:bg-danger-muted active:text-danger disabled:opacity-50"
                               aria-label={`Delete step ${step.sequence}`}
                               title={`Delete step ${step.sequence}`}
                             >
                               <Trash2 size={14} />
                             </button>
-                            <label className="grid grid-cols-[68px_34px] overflow-hidden rounded border border-line bg-white">
+                            <label className="grid grid-cols-[68px_34px] overflow-hidden rounded border border-line bg-surface">
                               <input
                                 aria-label={`Step ${step.sequence} duration minutes`}
-                                className="h-8 min-w-0 px-2 text-right text-sm font-black text-ink outline-none focus:bg-[#fff8e8]"
+                                className="h-8 min-w-0 px-2 text-right text-sm font-medium text-ink outline-none focus:bg-accent-muted"
                                 type="text"
                                 inputMode="decimal"
                                 defaultValue={String(step.durationMinutes ?? 0)}
@@ -3028,22 +3137,22 @@ export function MobilePhotoPortal({
                                   }
                                 }}
                               />
-                              <span className="flex items-center justify-center border-l border-line bg-[#fbfaf6] text-[10px] font-black uppercase tracking-wide text-steel">
+                              <span className="flex items-center justify-center border-l border-line bg-surface-raised ui-mono-label">
                                 min
                               </span>
                             </label>
                           </div>
                         </div>
                         {confirmingDelete ? (
-                          <div className="mt-2 rounded border border-signal/30 bg-[#fce8e3] p-2.5">
-                            <div className="text-xs font-black text-signal">
+                          <div className="mt-2 rounded border border-danger/30 bg-danger-muted p-2.5">
+                            <div className="text-xs font-medium text-danger">
                               Delete step {step.sequence}?
                             </div>
                             <div className="mt-2 grid grid-cols-2 gap-2">
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteStepId(null)}
-                                className="h-9 rounded border border-line bg-white px-3 text-xs font-black text-ink active:bg-[#f4f0e7]"
+                                className="h-9 rounded border border-line bg-surface px-3 text-xs font-medium text-ink active:bg-surface-sunken"
                               >
                                 No
                               </button>
@@ -3051,7 +3160,7 @@ export function MobilePhotoPortal({
                                 type="button"
                                 onClick={() => void deleteManufacturingStep(step.id)}
                                 disabled={saveState === "saving" || isUploading}
-                                className="h-9 rounded bg-signal px-3 text-xs font-black text-white active:bg-[#9f2c1d] disabled:opacity-60"
+                                className="h-9 rounded bg-danger px-3 text-xs font-medium text-canvas active:bg-danger-hover disabled:opacity-60"
                               >
                                 Yes
                               </button>
@@ -3060,7 +3169,7 @@ export function MobilePhotoPortal({
                         ) : null}
                         <label className="mt-3 block">
                           <span className="mb-1 flex items-center justify-between gap-2">
-                            <span className="text-[11px] font-black uppercase tracking-wide text-steel">Description</span>
+                            <span className="ui-mono-label">Description</span>
                             <button
                               type="button"
                               onPointerDown={(event) => event.preventDefault()}
@@ -3076,7 +3185,7 @@ export function MobilePhotoPortal({
 
                                 void updateManufacturingStep(step.id, { instruction });
                               }}
-                              className="inline-flex h-7 items-center gap-1 rounded border border-line bg-white px-2 text-[10px] font-black uppercase text-steel active:bg-[#f4f0e7]"
+                              className="inline-flex h-7 items-center gap-1 rounded border border-line bg-surface px-2 text-[10px] ui-mono-label text-steel active:bg-surface-sunken"
                               aria-label={`Format step ${step.sequence} as bullets`}
                               title={`Format step ${step.sequence} as bullets`}
                             >
@@ -3093,7 +3202,7 @@ export function MobilePhotoPortal({
                               }
                             }}
                             aria-label={`Step ${step.sequence} description`}
-                            className="min-h-[84px] w-full resize-none overflow-hidden rounded border border-line bg-white px-3 py-2 text-sm font-semibold leading-snug text-ink outline-none focus:border-copper"
+                            className="min-h-[84px] w-full resize-none overflow-hidden rounded border border-line bg-surface px-3 py-2 text-sm font-semibold leading-snug text-ink outline-none focus:border-accent"
                             defaultValue={step.instruction}
                             onFocus={(event) => resizeTextareaToContent(event.currentTarget)}
                             onInput={(event) => resizeTextareaToContent(event.currentTarget)}
@@ -3112,17 +3221,17 @@ export function MobilePhotoPortal({
                           />
                         </label>
                           {step.qualityCheck ? (
-                            <div className="mt-2 rounded border border-copper/30 bg-[#fff8e8] px-2 py-1 text-xs font-bold text-copper">
+                            <div className="mt-2 rounded border border-accent/30 bg-accent-muted px-2 py-1 text-xs font-bold text-accent">
                               Checklist: {step.qualityCheck}
                             </div>
                           ) : null}
                       </div>
                       <div className="border-t border-line px-3 py-3">
                         <div className="mb-2 flex items-center gap-2">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-[#fbfaf6] text-[11px] font-black text-copper">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
                             2
                           </span>
-                          <div className="text-[11px] font-black uppercase tracking-wide text-steel">
+                          <div className="ui-mono-label">
                             Checks
                           </div>
                         </div>
@@ -3133,15 +3242,15 @@ export function MobilePhotoPortal({
                             return (
                               <label
                                 key={option.key}
-                                className={`grid min-h-9 grid-cols-[18px_minmax(0,1fr)] items-center gap-1.5 rounded border px-2 text-[10px] font-black transition ${
+                                className={`grid min-h-9 grid-cols-[18px_minmax(0,1fr)] items-center gap-1.5 rounded border px-2 text-[10px] font-medium transition ${
                                   checked
-                                    ? "border-teal/30 bg-teal/10 text-teal"
-                                    : "border-line bg-[#fbfaf6] text-steel active:border-copper"
+                                    ? "border-accent/30 bg-accent/10 text-accent"
+                                    : "border-line bg-surface-raised text-steel active:border-accent"
                                 }`}
                               >
                                 <input
                                   type="checkbox"
-                                  className="h-3.5 w-3.5 shrink-0 accent-teal"
+                                  className="h-3.5 w-3.5 shrink-0 accent-accent"
                                   checked={checked}
                                   onChange={(event) => {
                                     const nextChecks = new Set(selectedChecks);
@@ -3165,16 +3274,16 @@ export function MobilePhotoPortal({
                       </div>
                       <div className="border-t border-line px-3 py-3">
                         <div className="mb-2 flex items-center gap-2">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-[#fbfaf6] text-[11px] font-black text-copper">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
                             3
                           </span>
-                          <div className="text-[11px] font-black uppercase tracking-wide text-steel">
+                          <div className="ui-mono-label">
                             Tools & Parts · {stepTools.length}
                           </div>
                         </div>
                         <div className="grid grid-cols-[minmax(0,1fr)_68px] gap-2">
                           <input
-                            className="h-10 min-w-0 rounded border border-line bg-white px-3 text-sm font-bold text-ink outline-none focus:border-copper"
+                            className="h-10 min-w-0 rounded border border-line bg-surface px-3 text-sm font-bold text-ink outline-none focus:border-accent"
                             value={newStepToolNames[step.id] ?? ""}
                             onChange={(event) =>
                               setNewStepToolNames((current) => ({ ...current, [step.id]: event.target.value }))
@@ -3191,7 +3300,7 @@ export function MobilePhotoPortal({
                             type="button"
                             onClick={() => void addManufacturingStepTool(step.id)}
                             disabled={saveState === "saving"}
-                            className="h-10 rounded bg-graphite px-2 text-xs font-black text-white active:bg-ink disabled:opacity-60"
+                            className="h-10 rounded bg-accent px-2 text-xs font-medium text-canvas active:bg-ink disabled:opacity-60"
                           >
                             Add
                           </button>
@@ -3204,16 +3313,16 @@ export function MobilePhotoPortal({
                       </div>
                       <div className="border-t border-line px-3 py-3">
                       <div className="mb-2 flex items-center gap-2">
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-[#fbfaf6] text-[11px] font-black text-copper">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
                           4
                         </span>
-                        <div className="text-[11px] font-black uppercase tracking-wide text-steel">
+                        <div className="ui-mono-label">
                           Photos · {photos.length}
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        <label className="inline-flex h-10 items-center justify-center gap-2 rounded bg-graphite px-3 text-xs font-black text-white active:bg-ink">
-                          {isUploading ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}
+                        <label className="inline-flex h-10 items-center justify-center gap-2 rounded bg-accent px-3 text-xs font-medium text-canvas active:bg-ink">
+                          {isUploading ? <NothingSpinner inline /> : <Camera size={15} />}
                           Camera
                           <input
                             className="sr-only"
@@ -3228,8 +3337,8 @@ export function MobilePhotoPortal({
                             }}
                           />
                         </label>
-                        <label className="inline-flex h-10 items-center justify-center gap-2 rounded border border-line bg-white px-3 text-xs font-black text-ink active:bg-[#f4f0e7]">
-                          {isUploading ? <Loader2 size={15} className="animate-spin" /> : <ImageIcon size={15} />}
+                        <label className="inline-flex h-10 items-center justify-center gap-2 rounded border border-line bg-surface px-3 text-xs font-medium text-ink active:bg-surface-sunken">
+                          {isUploading ? <NothingSpinner inline /> : <ImageIcon size={15} />}
                           Library
                           <input
                             className="sr-only"
@@ -3248,7 +3357,7 @@ export function MobilePhotoPortal({
                       {photos.length > 0 ? (
                         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                           {photos.map((photo) => (
-                            <div key={photo.id} className="overflow-hidden rounded border border-line bg-white">
+                            <div key={photo.id} className="overflow-hidden rounded border border-line bg-surface">
                               <div
                                 className="relative"
                                 onPointerDown={() => startPhotoHold(photo.id)}
@@ -3266,10 +3375,9 @@ export function MobilePhotoPortal({
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setRevealedPhotoDeleteId(null);
-                                      void removePhoto(step.id, photo.id);
+                                      requestRemovePhoto(step.id, photo);
                                     }}
-                                    className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-signal text-white shadow-lg"
+                                    className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-danger text-canvas"
                                     aria-label="Remove photo"
                                     title="Remove photo"
                                   >
@@ -3280,7 +3388,7 @@ export function MobilePhotoPortal({
                               <label className="block border-t border-line px-1.5 py-1">
                                 <span className="sr-only">Photo note</span>
                                 <textarea
-                                  className="min-h-[34px] w-full resize-none rounded border border-line bg-[#fbfaf6] px-1.5 py-1 text-[11px] font-semibold leading-tight text-ink outline-none placeholder:text-steel/60 focus:border-copper"
+                                  className="min-h-[34px] w-full resize-none rounded border border-line bg-surface-raised px-1.5 py-1 text-[11px] font-semibold leading-tight text-ink outline-none placeholder:text-steel/60 focus:border-accent"
                                   defaultValue={photo.caption ?? ""}
                                   onBlur={(event) => {
                                     void updatePhotoCaption(step.id, photo.id, event.currentTarget.value);
@@ -3293,7 +3401,7 @@ export function MobilePhotoPortal({
                           ))}
                         </div>
                       ) : (
-                        <div className="mt-3 flex items-center gap-2 rounded border border-dashed border-line bg-white px-3 py-2 text-xs font-bold text-steel">
+                        <div className="mt-3 flex items-center gap-2 rounded border border-dashed border-line bg-surface px-3 py-2 text-xs font-bold text-steel">
                           <ImageIcon size={14} />
                           No photos attached to this step yet.
                         </div>

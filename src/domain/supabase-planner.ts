@@ -21,7 +21,7 @@ import type {
 import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "./step-photos";
 import { mergeStepDependencyRefs, splitStepDependencyRefs } from "./step-part-references";
 import { STEP_TOOL_LISTS_FIELD, getTaskStepToolListMap } from "./step-tools";
-import { initialPlannerState } from "./seed";
+import { applyCalculatedFields } from "./calculations";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -741,72 +741,106 @@ function newScopedId(prefix: string) {
   return `${prefix}-${randomId}`;
 }
 
-function cloneInitialPlannerStateForProject(projectId: string, projectName: string): PlannerState {
+async function insertNewProjectPlannerState(state: PlannerState) {
+  if (!state.product.projectId) {
+    throw new Error("Project id is required to seed planner data.");
+  }
+
+  const supabase = plannerClient();
+
+  await throwIfError(supabase.from("products").insert(productRow(state.product)));
+  await throwIfError(supabase.from("scenarios").insert(scenarioRow(state.scenario)));
+
+  if (state.stations.length) {
+    await throwIfError(supabase.from("stations").insert(state.stations.map(stationRow)));
+  }
+
+  if (state.zones.length) {
+    await throwIfError(supabase.from("zones").insert(state.zones.map(zoneRow)));
+  }
+
+  if (state.tasks.length) {
+    await throwIfError(supabase.from("tasks").insert(state.tasks.map(taskRow)));
+  }
+
+  if (state.dependencies.length) {
+    await throwIfError(supabase.from("task_dependencies").insert(state.dependencies.map(dependencyRow)));
+  }
+
+  const steps = manufacturingStepRows(state.tasks);
+  if (steps.length) {
+    await throwIfError(supabase.from("manufacturing_steps").insert(steps));
+  }
+
+  const parts = partReferenceRows(state.tasks);
+  if (parts.length) {
+    await throwIfError(supabase.from("part_references").insert(parts));
+  }
+
+  if (state.actualEvents.length) {
+    await throwIfError(supabase.from("actual_events").insert(state.actualEvents.map(actualEventRow)));
+  }
+
+  if (state.customColumns.length) {
+    await throwIfError(supabase.from("custom_columns").insert(state.customColumns.map(customColumnRow)));
+  }
+}
+
+function createEmptyPlannerStateForProject(projectId: string, projectName: string): PlannerState {
   const token = newScopedId("seed").replace(/^seed-/, "");
   const productId = `product-${token}`;
   const scenarioId = `scenario-${token}`;
-  const stationIdMap = new Map(initialPlannerState.stations.map((station, index) => [station.id, `station-${token}-${index + 1}`]));
-  const zoneIdMap = new Map(initialPlannerState.zones.map((zone, index) => [zone.id, `zone-${token}-${index + 1}`]));
-  const taskIdMap = new Map(initialPlannerState.tasks.map((task, index) => [task.id, `task-${token}-${index + 1}`]));
+  const now = new Date().toISOString();
 
-  const stations = initialPlannerState.stations.map((station) => ({
-    ...station,
-    id: stationIdMap.get(station.id) ?? newScopedId("station"),
-    scenarioId,
-  }));
-  const zones = initialPlannerState.zones.map((zone) => ({
-    ...zone,
-    id: zoneIdMap.get(zone.id) ?? newScopedId("zone"),
-    scenarioId,
-  }));
-  const tasks = initialPlannerState.tasks.map((task) => ({
-    ...task,
-    id: taskIdMap.get(task.id) ?? newScopedId("task"),
-    scenarioId,
-    stationId: stationIdMap.get(task.stationId) ?? task.stationId,
-    zoneId: task.zoneId ? zoneIdMap.get(task.zoneId) : undefined,
-    parentTaskId: task.parentTaskId ? taskIdMap.get(task.parentTaskId) : undefined,
-    dependencyIds: task.dependencyIds.map((dependencyId) => taskIdMap.get(dependencyId) ?? dependencyId),
-    manufacturingSteps: (task.manufacturingSteps ?? []).map((step, index) => ({
-      ...step,
-      id: `step-${taskIdMap.get(task.id) ?? task.id}-${index + 1}`,
-    })),
-    partReferences: (task.partReferences ?? []).map((part, index) => ({
-      ...part,
-      id: `part-${taskIdMap.get(task.id) ?? task.id}-${index + 1}`,
-    })),
-    customFields: {},
-  }));
-
-  return {
-    project: undefined,
-    product: {
-      ...initialPlannerState.product,
+  const { product } = applyCalculatedFields(
+    {
       id: productId,
       projectId,
       name: projectName,
-      sku: undefined,
-      family: undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      revision: "",
+      ownerName: "",
+      status: "draft",
+      targetManHours: 0,
+      demandQuantity: 1,
+      demandPeriod: "day",
+      grossAvailableMinutes: 540,
+      breakMinutes: 30,
+      lunchMinutes: 60,
+      meetingMinutes: 15,
+      plannedDowntimeMinutes: 15,
+      workDaysPerWeek: 5,
+      workWeeksPerMonth: 4.33,
+      availableWorkDaysPerMonth: 0,
+      netAvailableMinutes: 0,
+      weeklyAvailableMinutes: 0,
+      monthlyAvailableMinutes: 0,
+      calculatedTaktMinutes: 0,
+      activeTaktMinutes: 0,
+      createdAt: now,
+      updatedAt: now,
     },
+    [],
+    [],
+  );
+
+  return {
+    project: undefined,
+    product,
     scenario: {
-      ...initialPlannerState.scenario,
       id: scenarioId,
       productId,
       name: "Current State",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      type: "current_state",
+      status: "draft",
+      targetOutput: 1,
+      targetOutputPeriod: "day",
+      createdAt: now,
+      updatedAt: now,
     },
-    stations,
-    zones,
-    tasks,
-    dependencies: initialPlannerState.dependencies.map((dependency, index) => ({
-      ...dependency,
-      id: `dependency-${token}-${index + 1}`,
-      predecessorTaskId: taskIdMap.get(dependency.predecessorTaskId) ?? dependency.predecessorTaskId,
-      successorTaskId: taskIdMap.get(dependency.successorTaskId) ?? dependency.successorTaskId,
-    })),
+    stations: [],
+    zones: [],
+    tasks: [],
+    dependencies: [],
     actualEvents: [],
     customColumns: [],
   };
@@ -860,7 +894,7 @@ export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProje
   await throwIfError(
     supabase.from("profiles").upsert({
       id: userData.user.id,
-      full_name: userData.user.user_metadata?.full_name ?? userData.user.email ?? "BuildLogic User",
+      full_name: userData.user.user_metadata?.full_name ?? userData.user.email ?? "Pulse User",
       avatar_url: userData.user.user_metadata?.avatar_url ?? null,
     }),
   );
@@ -878,7 +912,7 @@ export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProje
       workspace = await throwIfError(
         supabase
           .from("workspaces")
-          .insert({ name: "BuildLogic Workspace", owner_id: userData.user.id })
+          .insert({ name: "Pulse Workspace", owner_id: userData.user.id })
           .select("*")
           .maybeSingle(),
       );
@@ -961,8 +995,14 @@ export async function createProjectWithStarterPlan(workspaceId: string, name: st
     }),
   );
 
-  const starterState = cloneInitialPlannerStateForProject(projectId, projectName);
-  await savePlannerStateToSupabase(starterState);
+  const starterState = createEmptyPlannerStateForProject(projectId, projectName);
+
+  try {
+    await insertNewProjectPlannerState(starterState);
+  } catch (error) {
+    await supabase.from("projects").delete().eq("id", projectId);
+    throw error;
+  }
 
   return loadProjectContext(supabase, projectId);
 }
@@ -1009,6 +1049,13 @@ export async function updateProjectInSupabase(
 
   const supabase = plannerClient();
   await throwIfError(supabase.from("projects").update(row).eq("id", projectId));
+}
+
+export async function deleteProjectFromSupabase(projectId: string) {
+  const supabase = plannerClient();
+
+  await throwIfError(supabase.from("products").delete().eq("project_id", projectId));
+  await throwIfError(supabase.from("projects").delete().eq("id", projectId));
 }
 
 export async function loadWorkspaceMembersFromSupabase(workspaceId: string): Promise<WorkspaceMemberProfile[]> {

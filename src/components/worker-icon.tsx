@@ -30,8 +30,7 @@ export function WorkerIcon({
   const color = workerIconColors[colorIndex % workerIconColors.length];
 
   return (
-    <svg aria-hidden="true" className={`${className} shrink-0 bg-white`} viewBox="0 0 48 48">
-      <rect width="48" height="48" fill="#fff" />
+    <svg aria-hidden="true" className={`${className} shrink-0`} viewBox="0 0 48 48">
       <path d="M16 15.5c.6-5.2 3.7-8.2 8-8.2s7.4 3 8 8.2H16Z" fill={color} />
       <path d="M15.2 15.8h17.6" stroke="#111" strokeLinecap="round" strokeOpacity="0.35" strokeWidth="2.2" />
       <circle cx="24" cy="17.8" r="6.8" fill={color} />

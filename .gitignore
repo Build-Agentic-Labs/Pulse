@@ -27,3 +27,4 @@ UFO/*.zip
 # logs and OS files
 *.log
 .DS_Store
+.vercel

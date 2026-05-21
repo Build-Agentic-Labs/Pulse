@@ -4,32 +4,34 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
-  CheckCircle2,
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
+  ChevronLeft,
   ChevronUp,
   ClipboardList,
   Copy,
   Download,
   Factory,
   FileText,
-  FolderKanban,
   GitBranch,
   ImageIcon,
   ListChecks,
   Pause,
   Play,
   Plus,
-  QrCode,
+  Printer,
   RotateCcw,
   Settings,
   SkipBack,
   SkipForward,
+  Sun,
+  Moon,
   Timer,
   Trash2,
+  X,
 } from "lucide-react";
-import QRCodeGenerator from "qrcode";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   useEffect,
   useMemo,
@@ -107,7 +109,15 @@ import { GanttTimeline } from "./gantt-timeline";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
 import { PlannerDashboardPanel } from "./planner-dashboard-panel";
-import { WorkspaceSidebarDrawer } from "./workspace-sidebar-drawer";
+import { SidebarWorkspacePanel } from "./sidebar-workspace-panel";
+import { SidebarUserPanel } from "./sidebar-user-panel";
+import { NothingLoadingBlock } from "./nothing-ui";
+import { AppSettingsPanel, settingsSections, type SettingsSection } from "./app-settings-panel";
+import { useTheme } from "./theme-provider";
+import {
+  projectContextLabel,
+  shouldShowProductName,
+} from "@/lib/display-names";
 
 type ProductNumberField =
   | "targetManHours"
@@ -141,6 +151,7 @@ type StepPhotoAttachmentEditorProps = {
   compact?: boolean;
   isUploading?: boolean;
   onFilesSelected: (files: File[]) => void;
+  onRequestRemove: (photo: StepPhotoAttachment) => void;
   onRemove: (photoId: string) => void;
 };
 
@@ -151,15 +162,19 @@ const demandPeriodOptions: Array<{ value: DemandPeriod; label: string }> = [
   { value: "year", label: "Yearly" },
 ];
 
-const modules = [
+const SIDEBAR_WIDTH = 200;
+const WORKSPACE_DRAWER_WIDTH = 260;
+
+const plannerModules = [
   { id: "dashboard", label: "Dashboard", icon: Factory },
   { id: "setup", label: "Setup", icon: ClipboardList },
   { id: "gantt", label: "Gantt", icon: GitBranch },
   { id: "procedure", label: "Procedure", icon: ListChecks },
   { id: "balance", label: "Balance", icon: BarChart3 },
   { id: "reports", label: "Reports", icon: FileText },
-  { id: "settings", label: "Settings", icon: Settings },
 ];
+
+const SIMULATION_ENABLED = false;
 
 const playbackSpeeds = [
   { label: "1m/s", value: 1 },
@@ -172,12 +187,74 @@ const MAX_STEP_PHOTO_EDGE = 1280;
 const STEP_PHOTO_JPEG_QUALITY = 0.72;
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
 const PROCEDURE_DRAFT_STORAGE_KEY = "buildlogic-line-planner-procedure-draft-v1";
+const WORKSPACE_SNAPSHOT_STORAGE_PREFIX = "buildlogic-line-planner-workspace-v1";
+
+type WorkspaceSnapshot = {
+  activeModule: string;
+  selectedTaskId?: string;
+  selectedStationId?: string;
+  activeZoneId?: string;
+  detailDrawerCollapsed: boolean;
+  sidebarCollapsed?: boolean;
+  savedAt: string;
+};
 
 type ProcedureDraftSnapshot = {
   taskId: string;
   task: Task;
   savedAt: string;
 };
+
+function workspaceSnapshotStorageKey(projectId?: string) {
+  return `${WORKSPACE_SNAPSHOT_STORAGE_PREFIX}:${projectId || "default"}`;
+}
+
+function isKnownModule(moduleId: unknown): moduleId is string {
+  return typeof moduleId === "string" && [...plannerModules, { id: "settings" }].some((module) => module.id === moduleId);
+}
+
+function readWorkspaceSnapshot(projectId?: string): WorkspaceSnapshot | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const rawSnapshot = window.localStorage.getItem(workspaceSnapshotStorageKey(projectId));
+    if (!rawSnapshot) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(rawSnapshot) as Partial<WorkspaceSnapshot>;
+    if (!isKnownModule(parsed.activeModule)) {
+      return undefined;
+    }
+
+    return {
+      activeModule: parsed.activeModule,
+      selectedTaskId: typeof parsed.selectedTaskId === "string" ? parsed.selectedTaskId : undefined,
+      selectedStationId: typeof parsed.selectedStationId === "string" ? parsed.selectedStationId : undefined,
+      activeZoneId: typeof parsed.activeZoneId === "string" ? parsed.activeZoneId : undefined,
+      detailDrawerCollapsed:
+        typeof parsed.detailDrawerCollapsed === "boolean" ? parsed.detailDrawerCollapsed : true,
+      sidebarCollapsed: typeof parsed.sidebarCollapsed === "boolean" ? parsed.sidebarCollapsed : false,
+      savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : new Date().toISOString(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeWorkspaceSnapshot(projectId: string | undefined, snapshot: WorkspaceSnapshot) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(workspaceSnapshotStorageKey(projectId), JSON.stringify(snapshot));
+  } catch {
+    // Losing the view snapshot should not block planner editing.
+  }
+}
 
 function readProcedureDraftSnapshot() {
   if (typeof window === "undefined") {
@@ -1158,12 +1235,12 @@ function buildSmartAllocationReviewText({
 function StatusPill({ status }: { status: string }) {
   const tone =
     status === "green" || status === "released" || status === "complete"
-      ? "border-teal/20 bg-teal/10 text-teal"
+      ? "border-accent/20 bg-accent/10 text-accent"
       : status === "yellow" || status === "review" || status === "ready" || status === "in_progress"
-        ? "border-amber/30 bg-amber/20 text-[#7a4e09]"
+        ? "border-warn/30 bg-warn-muted/20 text-warn-strong"
         : status === "red" || status === "blocked" || status === "qc_hold" || status === "rework"
-          ? "border-signal/25 bg-signal/10 text-signal"
-          : "border-line bg-[#f4f0e7] text-steel";
+          ? "border-danger/25 bg-danger-muted/10 text-danger"
+          : "border-line bg-surface-sunken text-steel";
 
   return (
     <span className={`inline-flex h-6 items-center rounded border px-2 text-[11px] font-bold uppercase ${tone}`}>
@@ -1191,12 +1268,10 @@ function NumericField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">{label}</span>
-      <div className={`flex h-10 items-center overflow-hidden rounded border border-line ${readOnly ? "bg-[#f4f0e7]" : "bg-white"}`}>
+      <span className="ui-field-label">{label}</span>
+      <div className={`ui-field-shell ${readOnly ? "ui-field-shell-readonly" : ""}`}>
         <ClearableNumberInput
-          className={`number-input h-full min-w-0 flex-1 px-3 text-sm font-semibold outline-none ${
-            readOnly ? "cursor-default bg-[#f4f0e7] text-steel" : "text-ink"
-          }`}
+          className={`number-input ui-field-control ${readOnly ? "ui-field-control-readonly" : ""}`}
           value={value}
           min={0}
           fallbackValue={value ?? 0}
@@ -1210,7 +1285,7 @@ function NumericField({
             }
           }}
         />
-        {suffix ? <span className="border-l border-line px-2 text-xs font-semibold text-steel">{suffix}</span> : null}
+        {suffix ? <span className="ui-field-suffix">{suffix}</span> : null}
       </div>
     </label>
   );
@@ -1222,20 +1297,114 @@ function StepPhotoAttachmentEditor({
   compact = false,
   isUploading = false,
   onFilesSelected,
+  onRequestRemove,
   onRemove,
 }: StepPhotoAttachmentEditorProps) {
   const thumbnailClass = compact ? "h-14 w-16" : "h-20 w-24";
+  const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
+  const canNavigatePreviewPhotos = photos.length > 1;
+
+  function showAdjacentPreviewPhoto(direction: -1 | 1) {
+    if (!previewPhoto || photos.length === 0) {
+      return;
+    }
+
+    const currentIndex = photos.findIndex((photo) => photo.id === previewPhoto.id);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + direction + photos.length) % photos.length : 0;
+    setPreviewPhoto(photos[nextIndex]);
+  }
+
+  useEffect(() => {
+    if (!previewPhoto) {
+      return;
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setPreviewPhoto(null);
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        showAdjacentPreviewPhoto(-1);
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        showAdjacentPreviewPhoto(1);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [photos, previewPhoto]);
+
+  function printPreviewPhoto() {
+    if (!previewPhoto) {
+      return;
+    }
+
+    const printFrame = document.createElement("iframe");
+    printFrame.title = `Print ${previewPhoto.name}`;
+    printFrame.className = "fixed bottom-0 right-0 h-0 w-0 border-0";
+    document.body.appendChild(printFrame);
+
+    const printWindow = printFrame.contentWindow;
+    const printDocument = printWindow?.document;
+    if (!printWindow || !printDocument) {
+      printFrame.remove();
+      return;
+    }
+
+    printDocument.open();
+    printDocument.write("<!doctype html><html><head><title></title></head><body></body></html>");
+    printDocument.close();
+    printDocument.title = previewPhoto.name;
+
+    const style = printDocument.createElement("style");
+    style.textContent =
+      "html,body{margin:0;min-height:100%;background:white;font-family:Arial,sans-serif;}body{display:flex;align-items:center;justify-content:center;padding:24px;}img{max-width:100%;max-height:calc(100vh - 48px);object-fit:contain;}";
+    printDocument.head.appendChild(style);
+
+    const image = printDocument.createElement("img");
+    image.src = previewPhoto.dataUrl;
+    image.alt = `Step ${step.sequence} photo ${previewPhoto.name}`;
+    printDocument.body.appendChild(image);
+
+    let cleanupTimer: number | undefined;
+    const cleanup = () => {
+      if (cleanupTimer) {
+        window.clearTimeout(cleanupTimer);
+      }
+      printFrame.remove();
+    };
+    const printImage = () => {
+      printWindow.focus();
+      printWindow.addEventListener("afterprint", cleanup, { once: true });
+      cleanupTimer = window.setTimeout(cleanup, 30_000);
+      printWindow.print();
+    };
+
+    if (image.complete) {
+      printImage();
+    } else {
+      image.onload = printImage;
+      image.onerror = cleanup;
+    }
+  }
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-steel">
+        <div className="flex items-center gap-1 ui-mono-label">
           <ImageIcon size={compact ? 12 : 13} />
           Photos
           {photos.length > 0 ? <span className="text-steel/70">({photos.length})</span> : null}
         </div>
         <label
-          className={`inline-flex cursor-pointer items-center gap-1 rounded border border-line bg-white font-black uppercase text-graphite hover:border-copper hover:text-copper ${
+          className={`inline-flex cursor-pointer items-center gap-1 rounded border border-line bg-surface ui-mono-label text-ink-secondary hover:border-accent hover:text-accent ${
             compact ? "h-7 px-2 text-[10px]" : "h-8 px-2.5 text-[10px]"
           } ${isUploading ? "pointer-events-none opacity-60" : ""}`}
         >
@@ -1259,19 +1428,30 @@ function StepPhotoAttachmentEditor({
       </div>
 
       {photos.length > 0 ? (
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="step-photo-strip flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-2">
           {photos.map((photo) => (
             <div key={photo.id} className={compact ? "w-16 shrink-0" : "w-24 shrink-0"}>
-              <div className="relative">
-                <img
-                  src={photo.dataUrl}
-                  alt={`Step ${step.sequence} photo`}
-                  className={`${thumbnailClass} rounded border border-line object-cover`}
-                />
+              <div className="group relative">
                 <button
                   type="button"
-                  onClick={() => onRemove(photo.id)}
-                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded bg-white/90 text-steel shadow-sm hover:text-signal"
+                  onClick={() => setPreviewPhoto(photo)}
+                  className="block rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                  aria-label={`Open step ${step.sequence} photo ${photo.name}`}
+                  title="Open photo"
+                >
+                  <img
+                    src={photo.dataUrl}
+                    alt={`Step ${step.sequence} photo`}
+                    className={`${thumbnailClass} rounded border border-line object-cover transition group-hover:border-accent`}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRequestRemove(photo);
+                  }}
+                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded bg-surface/90 text-steel opacity-0 transition hover:text-danger focus:opacity-100 focus-visible:ring-2 focus-visible:ring-accent group-hover:opacity-100 group-focus-within:opacity-100"
                   aria-label={`Remove photo from step ${step.sequence}`}
                   title="Remove photo"
                 >
@@ -1289,6 +1469,74 @@ function StepPhotoAttachmentEditor({
           No photos attached to this step yet.
         </div>
       )}
+      {previewPhoto ? (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-ink/80 p-4 text-canvas"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Step ${step.sequence} photo preview`}
+          onClick={() => setPreviewPhoto(null)}
+        >
+          <div className="flex max-h-full w-full max-w-6xl flex-col gap-3" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] ui-mono-label tracking-wide text-white/70">Step {step.sequence} Photo</div>
+                <div className="truncate text-sm text-canvas">{previewPhoto.name}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={printPreviewPhoto}
+                  className="inline-flex h-9 items-center gap-2 rounded border border-line/20 bg-surface/10 px-3 text-sm text-canvas hover:bg-surface/20"
+                  aria-label="Print photo"
+                  title="Print photo"
+                >
+                  <Printer size={16} />
+                  Print
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewPhoto(null)}
+                  className="flex h-9 w-9 items-center justify-center rounded border border-line/20 bg-surface/10 text-canvas hover:bg-surface/20"
+                  aria-label="Close photo preview"
+                  title="Close"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            </div>
+            <div className="flex min-h-0 items-center justify-center">
+              {canNavigatePreviewPhotos ? (
+                <button
+                  type="button"
+                  onClick={() => showAdjacentPreviewPhoto(-1)}
+                  className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-line/20 bg-ink/60 text-canvas hover:bg-ink/80"
+                  aria-label="Previous photo"
+                  title="Previous photo"
+                >
+                  <ChevronsLeft size={20} />
+                </button>
+              ) : null}
+              <img
+                src={previewPhoto.dataUrl}
+                alt={`Step ${step.sequence} photo ${previewPhoto.name}`}
+                className="max-h-[calc(100dvh-7rem)] max-w-full rounded border border-line/20 object-contain shadow-2xl"
+              />
+              {canNavigatePreviewPhotos ? (
+                <button
+                  type="button"
+                  onClick={() => showAdjacentPreviewPhoto(1)}
+                  className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-line/20 bg-ink/60 text-canvas hover:bg-ink/80"
+                  aria-label="Next photo"
+                  title="Next photo"
+                >
+                  <ChevronsRight size={20} />
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1311,16 +1559,16 @@ function StepPartReferenceEditor({
     ? "grid grid-cols-[42px_minmax(0,1fr)_42px] items-center gap-1"
     : "grid grid-cols-[74px_minmax(0,1fr)_52px] items-center gap-2";
   const inputClass = compact
-    ? "h-7 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-copper"
-    : "h-8 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-copper";
+    ? "h-7 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-accent"
+    : "ui-field-standalone h-9 min-w-0 px-2 text-xs";
   const addClass = compact
-    ? "h-7 text-[10px] font-black uppercase text-graphite hover:text-copper"
-    : "h-8 rounded border border-line bg-white text-[10px] font-black uppercase text-graphite hover:border-copper hover:text-copper";
+    ? "h-7 text-[10px] ui-mono-label text-ink-secondary hover:text-accent"
+    : "ui-btn-ghost h-9 px-2";
 
   return (
     <div className="space-y-1.5">
       <div className={gridClass}>
-        <span className="text-[10px] font-black uppercase tracking-wide text-steel">Parts</span>
+        <span className="ui-field-label mb-0">Parts</span>
         <input
           className={inputClass}
           value={draftValue}
@@ -1342,7 +1590,7 @@ function StepPartReferenceEditor({
         <div className={compact ? "pl-[42px]" : "pl-[74px]"}>
           <select
             aria-label={`Link existing part to step ${step.sequence}`}
-            className="h-8 w-full rounded border border-line bg-white px-2 text-xs font-bold text-ink outline-none focus:border-copper"
+            className="ui-field-standalone h-9 w-full px-2 text-xs"
             value=""
             onChange={(event) => {
               if (event.target.value) {
@@ -1361,9 +1609,9 @@ function StepPartReferenceEditor({
       ) : null}
 
       {linkedParts.length > 0 ? (
-        <div className={`flex flex-wrap gap-x-2 gap-y-1 text-[10px] font-bold text-steel ${compact ? "pl-[42px]" : "pl-[74px]"}`}>
+        <div className={`flex flex-wrap gap-1.5 ${compact ? "pl-[42px]" : "pl-[74px]"}`}>
           {linkedParts.map((part) => (
-            <span key={part.id} className="inline-flex min-w-0 items-center gap-1">
+            <span key={part.id} className="ui-chip inline-flex min-w-0 items-center gap-1 normal-case tracking-normal">
               <span className="max-w-[220px] truncate" title={part.description || part.partNumber}>
                 {part.partNumber}
                 {part.quantity ? ` x${part.quantity}` : ""}
@@ -1371,7 +1619,7 @@ function StepPartReferenceEditor({
               <button
                 type="button"
                 onClick={() => onRemove(part.id)}
-                className="text-steel/70 hover:text-signal"
+                className="text-steel/70 hover:text-danger"
                 aria-label={`Remove ${part.partNumber} from step ${step.sequence}`}
                 title={`Remove ${part.partNumber}`}
               >
@@ -1398,329 +1646,155 @@ function StatCard({
 }) {
   const toneClass =
     tone === "good"
-      ? "border-teal/30 bg-[#ecf5f1]"
+      ? "ui-metric-card-good"
       : tone === "warn"
-        ? "border-amber/40 bg-[#fbf1d9]"
+        ? "ui-metric-card-warn"
         : tone === "bad"
-          ? "border-signal/30 bg-[#f9e7e3]"
-          : "border-line bg-white";
+          ? "ui-metric-card-bad"
+          : "";
 
   return (
-    <div className={`rounded-md border p-3 shadow-sm ${toneClass}`}>
-      <div className="text-[11px] font-bold uppercase tracking-wide text-steel">{label}</div>
-      <div className="mt-2 text-xl font-black tracking-normal text-ink">{value}</div>
-      {meta ? <div className="mt-1 truncate text-xs font-medium text-steel">{meta}</div> : null}
+    <div className={`ui-metric-card ${toneClass}`}>
+      <div className="ui-metric-card-label">{label}</div>
+      <div className="ui-metric-card-value">{value}</div>
+      {meta ? <div className="ui-metric-card-meta">{meta}</div> : null}
     </div>
   );
 }
 
 function TopNav({
-  state,
-  project,
-  saveState,
-  saveError,
-  onSave,
   onExport,
+  sidebarCollapsed,
+  onToggleSidebar,
 }: {
-  state: PlannerState;
-  project?: PlannerProjectContext;
-  saveState: SaveState;
-  saveError?: string;
-  onSave: () => void;
   onExport: () => void;
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
 }) {
-  const [showPhotoPortalQr, setShowPhotoPortalQr] = useState(false);
-  const [phonePortalUrl, setPhonePortalUrl] = useState("");
-  const [phonePortalCandidates, setPhonePortalCandidates] = useState<Array<{ label: string; url: string }>>([]);
-  const [phonePortalQrDataUrl, setPhonePortalQrDataUrl] = useState("");
-  const saveLabel =
-    saveState === "loading"
-      ? "Loading"
-      : saveState === "saving"
-        ? "Saving"
-        : saveState === "saved"
-          ? "Saved"
-          : saveState === "draft"
-            ? "Draft saved locally"
-            : saveState === "retrying"
-              ? "Save failed - retrying"
-              : saveState === "conflict"
-                ? "Conflict"
-          : saveState === "error"
-            ? "Save failed"
-            : "Save";
-
-  useEffect(() => {
-    let mounted = true;
-
-    function fallbackPortalUrl() {
-      if (typeof window === "undefined") {
-        return project?.projectId ? `/projects/${project.projectId}/mobile-photos` : "/mobile-photos";
-      }
-
-      return `${window.location.origin}${project?.projectId ? `/projects/${project.projectId}/mobile-photos` : "/mobile-photos"}`;
-    }
-
-    const phonePortalApiUrl = project?.projectId
-      ? `/api/phone-portal-url?projectId=${encodeURIComponent(project.projectId)}`
-      : "/api/phone-portal-url";
-
-    fetch(phonePortalApiUrl, { cache: "no-store" })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error("Unable to resolve phone portal URL.");
-        }
-
-        return response.json() as Promise<{ candidates?: Array<{ label: string; url: string }>; url?: string }>;
-      })
-      .then((payload) => {
-        if (!mounted) {
-          return;
-        }
-
-        setPhonePortalUrl(payload.url ?? fallbackPortalUrl());
-        setPhonePortalCandidates(payload.candidates ?? []);
-      })
-      .catch(() => {
-        if (mounted) {
-          setPhonePortalUrl(fallbackPortalUrl());
-          setPhonePortalCandidates([]);
-        }
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [project?.projectId]);
-
-  useEffect(() => {
-    let mounted = true;
-
-    if (!showPhotoPortalQr || !phonePortalUrl) {
-      return () => {
-        mounted = false;
-      };
-    }
-
-    QRCodeGenerator.toDataURL(phonePortalUrl, {
-      errorCorrectionLevel: "M",
-      margin: 1,
-      width: 240,
-      color: {
-        dark: "#18251f",
-        light: "#ffffff",
-      },
-    })
-      .then((dataUrl) => {
-        if (mounted) {
-          setPhonePortalQrDataUrl(dataUrl);
-        }
-      })
-      .catch(() => {
-        if (mounted) {
-          setPhonePortalQrDataUrl("");
-        }
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [phonePortalUrl, showPhotoPortalQr]);
+  const { theme, toggleTheme } = useTheme();
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-line bg-graphite px-4 text-white">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded bg-copper text-white">
-          <Factory size={22} strokeWidth={2.4} />
-        </div>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-black uppercase tracking-wide">BuildLogic Line Planner</div>
-          <div className="truncate text-xs text-white/70">{state.product.name}</div>
-        </div>
+    <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between px-3 sm:px-4">
+      <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          className="ui-btn-ghost hidden h-8 w-8 items-center justify-center px-0 lg:inline-flex"
+          title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+          aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+          aria-expanded={!sidebarCollapsed}
+        >
+          <ChevronLeft
+            size={14}
+            strokeWidth={1.75}
+            className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
+          />
+        </button>
+        <div className="ui-brand-compact">Pulse</div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saveState === "loading" || saveState === "saving"}
-          title={saveState === "error" || saveState === "retrying" ? saveError : saveLabel}
-          aria-label={
-            (saveState === "error" || saveState === "retrying") && saveError ? `${saveLabel}: ${saveError}` : saveLabel
-          }
-          className="inline-flex h-9 items-center gap-2 rounded border border-white/15 bg-white/10 px-3 text-sm font-bold text-white shadow-sm transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <CheckCircle2 size={16} />
-          {saveLabel}
+      <div className="flex items-center gap-0.5 sm:gap-1">
+        <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
-        <a
-          href={phonePortalUrl || "https://pulse.agenticlabs.studio/mobile-photos"}
-          className="hidden h-9 items-center gap-2 rounded border border-white/15 bg-white/10 px-3 text-sm font-bold text-white shadow-sm transition hover:bg-white/20 sm:inline-flex"
-        >
-          <ImageIcon size={16} />
-          Photo Portal
-        </a>
-        <button
-          type="button"
-          onClick={() => setShowPhotoPortalQr(true)}
-          className="inline-flex h-9 items-center gap-2 rounded border border-white/15 bg-white/10 px-3 text-sm font-bold text-white shadow-sm transition hover:bg-white/20"
-        >
-          <QrCode size={16} />
-          QR
-        </button>
-        <button
-          type="button"
-          onClick={onExport}
-          className="inline-flex h-9 items-center gap-2 rounded bg-white px-3 text-sm font-bold text-graphite shadow-sm hover:bg-[#f4f0e7]"
-        >
+        <button type="button" onClick={onExport} className="ui-btn-ghost h-10 gap-2">
           <Download size={16} />
           Export
         </button>
       </div>
-      {showPhotoPortalQr ? (
-        <div
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-ink/70 px-4 text-ink"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Phone photo portal QR code"
-          onClick={() => setShowPhotoPortalQr(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-md border border-line bg-white shadow-xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-line p-4">
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-wide text-steel">Phone Portal</div>
-                <div className="mt-1 text-lg font-black leading-tight text-ink">Scan to capture step photos</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPhotoPortalQr(false)}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-line bg-white text-steel hover:bg-[#f4f0e7]"
-                aria-label="Close QR code"
-              >
-                ×
-              </button>
-            </div>
-            <div className="space-y-4 p-4">
-              <div className="flex justify-center rounded border border-line bg-white p-4">
-                {phonePortalQrDataUrl ? (
-                  <img src={phonePortalQrDataUrl} alt="Phone photo portal QR code" className="h-60 w-60" />
-                ) : (
-                  <div className="flex h-60 w-60 items-center justify-center rounded bg-[#fbfaf6] text-sm font-bold text-steel">
-                    Building QR code...
-                  </div>
-                )}
-              </div>
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-black uppercase tracking-wide text-steel">Portal URL</span>
-                <input
-                  className="h-10 w-full rounded border border-line bg-[#fbfaf6] px-3 text-sm font-bold text-ink outline-none focus:border-copper"
-                  value={phonePortalUrl}
-                  onChange={(event) => setPhonePortalUrl(event.target.value)}
-                />
-              </label>
-              {phonePortalCandidates.length > 1 ? (
-                <div>
-                  <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-steel">Try URL</div>
-                  <div className="grid gap-2">
-                    {phonePortalCandidates.map((candidate) => (
-                      <button
-                        key={candidate.url}
-                        type="button"
-                        onClick={() => setPhonePortalUrl(candidate.url)}
-                        className={`min-w-0 rounded border px-3 py-2 text-left text-xs font-bold transition ${
-                          candidate.url === phonePortalUrl
-                            ? "border-teal bg-[#e8f4ef] text-ink"
-                            : "border-line bg-white text-steel hover:bg-[#f4f0e7]"
-                        }`}
-                      >
-                        <span className="mr-2 font-black text-ink">{candidate.label}</span>
-                        <span className="break-all">{candidate.url}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              <div className="grid grid-cols-2 gap-2">
-                <a
-                  href={phonePortalUrl || "/mobile-photos"}
-                  className="inline-flex h-10 items-center justify-center rounded border border-line bg-white text-sm font-black text-ink hover:bg-[#f4f0e7]"
-                >
-                  Open
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setShowPhotoPortalQr(false)}
-                  className="inline-flex h-10 items-center justify-center rounded bg-graphite text-sm font-black text-white hover:bg-ink"
-                >
-                  Done
-                </button>
-              </div>
-              <div className="text-xs font-semibold leading-snug text-steel">
-                Your phone needs to be on the same network as this dev server.
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </header>
   );
 }
 
 function Sidebar({
   activeModule,
+  settingsSection,
   onChange,
+  onOpenSettings,
   project,
-  workspaceDrawerOpen,
-  onToggleWorkspaceDrawer,
 }: {
   activeModule: string;
+  settingsSection: SettingsSection;
   onChange: (moduleId: string) => void;
+  onOpenSettings: (section?: SettingsSection) => void;
   project?: PlannerProjectContext;
-  workspaceDrawerOpen: boolean;
-  onToggleWorkspaceDrawer: () => void;
 }) {
+  const isSettingsModule = activeModule === "settings";
+
   return (
-    <aside className="hidden h-full border-r border-line bg-ink text-white lg:block">
-      <nav className="flex h-full flex-col items-center gap-1 py-3">
-        <button
-          type="button"
-          title={project ? `${project.workspaceName} / ${project.projectName}` : "Workspace"}
-          onClick={onToggleWorkspaceDrawer}
-          aria-expanded={workspaceDrawerOpen}
-          aria-controls="workspace-sidebar-drawer"
-          className={`mb-2 flex h-[58px] w-full flex-col items-center justify-center gap-1 border-l-4 border-b border-white/10 text-[10px] font-bold uppercase transition ${
-            workspaceDrawerOpen
-              ? "border-copper bg-white/15 text-white"
-              : "border-transparent text-white/70 hover:bg-white/10 hover:text-white"
-          }`}
-        >
-          <FolderKanban size={19} />
-          <span>Workspace</span>
-        </button>
-        {modules.map((module) => {
-          const Icon = module.icon;
-          const active = activeModule === module.id;
-          return (
+    <aside className="ui-nav-sidebar">
+      <SidebarWorkspacePanel activeProject={project} />
+
+      <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-2">
+        {isSettingsModule ? (
+          <>
             <button
-              key={module.id}
               type="button"
-              title={module.label}
-              onClick={() => onChange(module.id)}
-              className={`flex h-[54px] w-full flex-col items-center justify-center gap-1 border-l-4 text-[10px] font-bold uppercase transition ${
-                active
-                  ? "border-copper bg-white/10 text-white"
-                  : "border-transparent text-white/60 hover:bg-white/10 hover:text-white"
-              }`}
+              onClick={() => onChange("dashboard")}
+              className="ui-settings-back"
+              title="Back to planner"
             >
-              <Icon size={18} />
-              <span>{module.label}</span>
+              <ChevronLeft size={14} strokeWidth={1.75} />
+              Back to planner
             </button>
-          );
-        })}
+            <div className="space-y-0.5">
+              {settingsSections.map((item) => {
+                const Icon = item.icon;
+                const active = settingsSection === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    title={item.label}
+                    onClick={() => onOpenSettings(item.id)}
+                    className={`ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
+                  >
+                    <Icon size={15} strokeWidth={1.75} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="ui-nav-section">Planner</div>
+            <div className="space-y-0.5">
+              {plannerModules.map((module) => {
+                const Icon = module.icon;
+                const active = activeModule === module.id;
+                return (
+                  <button
+                    key={module.id}
+                    type="button"
+                    title={module.label}
+                    onClick={() => onChange(module.id)}
+                    className={`ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
+                  >
+                    <Icon size={15} strokeWidth={1.75} />
+                    <span>{module.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </nav>
+
+      <div className="mt-auto px-2 py-2">
+        {!isSettingsModule ? (
+          <button
+            type="button"
+            onClick={() => onOpenSettings("general")}
+            className="ui-nav-footer-item"
+          >
+            <Settings size={15} strokeWidth={1.75} />
+            Settings
+          </button>
+        ) : (
+          <SidebarUserPanel />
+        )}
+      </div>
     </aside>
   );
 }
@@ -1774,7 +1848,7 @@ function ScrollDownHint({ className = "" }: { className?: string }) {
       } ${className}`}
       aria-hidden="true"
     >
-      <div className="flex h-7 w-7 items-center justify-center rounded-full border border-copper/20 bg-[#fbfaf6]/90 text-copper/75 shadow-[0_8px_20px_rgba(23,33,27,0.12)] backdrop-blur">
+      <div className="flex h-7 w-7 items-center justify-center rounded-full border border-accent/20 bg-surface-raised/90 text-accent/75 shadow-[0_8px_20px_rgba(23,33,27,0.12)] backdrop-blur">
         <ChevronDown size={15} strokeWidth={2.4} />
       </div>
     </div>
@@ -1786,6 +1860,8 @@ function ProcedureWorkspace({
   zones,
   selectedTask,
   onSelectTask,
+  onConfirmAction,
+  onStepDeleted,
   onUpdateTask,
   onUploadStepPhotos,
   onRemoveStepPhoto,
@@ -1796,6 +1872,8 @@ function ProcedureWorkspace({
   zones: Zone[];
   selectedTask?: Task;
   onSelectTask: (taskId: string) => void;
+  onConfirmAction: (message: FeedbackConfirm) => void;
+  onStepDeleted: (taskSnapshot: Task, step: ManufacturingStep) => void;
   onUpdateTask: (taskId: string, patch: Partial<Task>) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
@@ -1848,7 +1926,7 @@ function ProcedureWorkspace({
     ? calculateTaskManHours({ ...task, plannedDurationMinutes: manufacturingStepDurationMinutes })
     : 0;
   const procedureGridStyle = {
-    "--procedure-nav-width": `${navigatorWidth}px`,
+    width: navigatorWidth,
   } as CSSProperties;
 
   useEffect(() => {
@@ -1958,6 +2036,7 @@ function ProcedureWorkspace({
       return;
     }
 
+    const stepToDelete = manufacturingSteps.find((step) => step.id === stepId);
     const nextSteps = manufacturingSteps
       .filter((step) => step.id !== stepId)
       .map((step, index) => ({ ...step, sequence: index + 1 }));
@@ -1971,6 +2050,25 @@ function ProcedureWorkspace({
       manufacturingSteps: nextSteps,
       plannedDurationMinutes,
       customFields: nextTask.customFields,
+    });
+
+    if (stepToDelete) {
+      onStepDeleted(task, stepToDelete);
+    }
+  }
+
+  function requestRemoveManufacturingStep(stepId: string) {
+    const step = manufacturingSteps.find((candidate) => candidate.id === stepId);
+    if (!step) {
+      return;
+    }
+
+    onConfirmAction({
+      title: `Delete step ${step.sequence}?`,
+      body: "This removes the manufacturing step, its tools, part links, and attached photos from this task.",
+      tone: "danger",
+      confirmLabel: "Delete Step",
+      onConfirm: () => removeManufacturingStep(stepId),
     });
   }
 
@@ -2123,10 +2221,24 @@ function ProcedureWorkspace({
     void onRemoveStepPhoto(task.id, stepId, photoId);
   }
 
+  function requestRemoveManufacturingStepPhoto(stepId: string, photo: StepPhotoAttachment) {
+    if (!task) {
+      return;
+    }
+
+    onConfirmAction({
+      title: "Delete photo?",
+      body: "This removes the photo from the shared step record.",
+      tone: "danger",
+      confirmLabel: "Delete Photo",
+      onConfirm: () => removeManufacturingStepPhoto(stepId, photo.id),
+    });
+  }
+
   if (!task) {
     return (
-      <section className="h-full min-h-0 overflow-hidden bg-[#fbfaf6] p-4">
-        <div className="rounded-md border border-line bg-white p-5 text-sm font-bold text-steel">
+      <section className="ui-workspace-content h-full min-h-0 overflow-hidden p-4">
+        <div className="ui-panel p-5 text-sm font-bold text-steel">
           No task is available for procedure authoring.
         </div>
       </section>
@@ -2134,29 +2246,25 @@ function ProcedureWorkspace({
   }
 
   return (
-    <section
-      className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-[#f7f5ef] lg:grid-cols-[var(--procedure-nav-width)_minmax(0,1fr)]"
-      style={procedureGridStyle}
-    >
-      <aside className="relative min-h-0 overflow-x-hidden overflow-y-auto border-b border-line bg-[#f4f0e7] lg:border-b-0 lg:border-r">
-        <div className="sticky top-0 z-10 border-b border-line bg-[#f4f0e7] px-3 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] font-black uppercase tracking-wide text-steel">Procedure Tasks</div>
-              <div className="mt-0.5 text-xs font-bold text-ink">{tasks.length} task rows</div>
-            </div>
-          </div>
+    <section className="ui-workspace-content flex h-full min-h-0 overflow-hidden">
+      <aside
+        style={procedureGridStyle}
+        className="relative shrink-0 overflow-x-hidden overflow-y-auto"
+      >
+        <div className="sticky top-0 z-10 bg-surface-raised px-2 pb-2 pt-3">
+          <div className="ui-nav-section mb-0 px-0">Procedure tasks</div>
+          <div className="mt-1 text-[11px] text-ink-tertiary">{tasks.length} task rows</div>
         </div>
 
-        <div className="min-w-0 divide-y divide-line">
+        <div className="px-2 pb-2">
           {groupedTasks.map((group) => (
-            <div key={group.id}>
-              <div className="flex items-center gap-2 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-steel">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />
+            <div key={group.id} className="mb-3 last:mb-0">
+              <div className="ui-nav-section mb-1 flex items-center gap-1.5 px-0 normal-case tracking-[0.08em]">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />
                 <span className="min-w-0 truncate">{group.name}</span>
-                <span className="ml-auto text-steel/70">{group.tasks.length}</span>
+                <span className="ml-auto tabular-nums">{group.tasks.length}</span>
               </div>
-              <div className="divide-y divide-line/70">
+              <div className="space-y-0.5">
                 {group.tasks.map((item) => {
                   const active = item.id === task.id;
 
@@ -2165,12 +2273,11 @@ function ProcedureWorkspace({
                       key={item.id}
                       type="button"
                       onClick={() => onSelectTask(item.id)}
-                      className={`grid w-full grid-cols-[46px_minmax(0,1fr)] gap-2 px-3 py-2 text-left text-xs transition ${
-                        active ? "bg-white text-ink" : "text-steel hover:bg-white/60 hover:text-ink"
-                      }`}
+                      title={item.name || "Untitled task"}
+                      className={`ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
                     >
-                      <span className="font-mono text-[11px] font-black">{item.wbs}</span>
-                      <span className="min-w-0 truncate font-bold">{item.name || "Untitled task"}</span>
+                      <span className="w-[38px] shrink-0 font-mono text-[10px] tabular-nums text-ink-tertiary">{item.wbs}</span>
+                      <span className="min-w-0 flex-1 truncate">{item.name || "Untitled task"}</span>
                     </button>
                   );
                 })}
@@ -2183,52 +2290,43 @@ function ProcedureWorkspace({
           type="button"
           onPointerDown={startNavigatorResize}
           className={`absolute right-0 top-0 z-20 hidden h-full w-3 translate-x-1/2 cursor-col-resize touch-none outline-none transition lg:block ${
-            isResizingNavigator ? "bg-copper/10" : "hover:bg-copper/10 focus-visible:bg-copper/10"
+            isResizingNavigator ? "bg-accent/10" : "hover:bg-accent/10 focus-visible:bg-accent/10"
           }`}
           aria-label="Resize procedure task navigator"
           title="Drag to resize procedure task navigator"
         >
           <span
             className={`absolute left-1/2 top-1/2 h-16 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full transition ${
-              isResizingNavigator ? "bg-copper" : "bg-steel/25"
+              isResizingNavigator ? "bg-accent" : "bg-steel/25"
             }`}
           />
         </button>
       </aside>
 
-      <main className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-4 py-4 xl:px-5">
-        <div className="mx-auto max-w-[1500px] space-y-4">
-          <section className="border-b border-line bg-[#fbfaf6] px-1 pb-4">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
-              <div className="min-w-0 pt-1">
-                <div className="text-[11px] font-black uppercase tracking-wide text-steel">Selected Procedure</div>
-                <h1 className="mt-1 text-2xl font-black leading-tight tracking-normal text-ink">
-                  <span className="font-mono text-copper">{task.wbs}</span> {task.name || "Untitled task"}
-                </h1>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-[repeat(4,minmax(0,1fr))] xl:grid-cols-2">
-                {[
-                  ["Zone", zoneById.get(task.zoneId ?? "")?.name ?? "Unzoned"],
-                  ["Duration", formatMinutes(task.plannedDurationMinutes)],
-                  ["Man-Hours", formatManHours(currentManHours)],
-                  ["Operators", `${task.plannedOperators}`],
-                ].map(([label, value]) => (
-                  <div key={label} className="border border-line bg-white px-3 py-2">
-                    <div className="text-[10px] font-black uppercase tracking-wide text-steel">{label}</div>
-                    <div className="mt-1 truncate text-sm font-black text-ink" title={value}>
-                      {value}
-                    </div>
-                  </div>
-                ))}
-              </div>
+      <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 md:px-6">
+        <div className="mx-auto max-w-[1500px] space-y-5">
+          <section>
+            <div className="ui-eyebrow">Selected procedure</div>
+            <h1 className="ui-section-title mt-2">
+              <span className="font-mono text-ink-secondary">{task.wbs}</span> {task.name || "Untitled task"}
+            </h1>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                ["Zone", zoneById.get(task.zoneId ?? "")?.name ?? "Unzoned"],
+                ["Duration", formatMinutes(task.plannedDurationMinutes)],
+                ["Man-Hours", formatManHours(currentManHours)],
+                ["Operators", `${task.plannedOperators}`],
+              ].map(([label, value]) => (
+                <StatCard key={label} label={label} value={value} />
+              ))}
             </div>
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
             <label className="block">
-              <span className="mb-1 block text-[11px] font-black uppercase tracking-wide text-steel">Task Description</span>
+              <span className="ui-field-label">Task Description</span>
               <textarea
-                className="min-h-[170px] w-full resize-y rounded border border-line bg-white px-3 py-2 text-sm font-semibold leading-relaxed text-ink outline-none focus:border-copper"
+                className="ui-field-standalone min-h-[170px] h-auto resize-y py-2 leading-relaxed"
                 value={task.description ?? ""}
                 onChange={(event) => onUpdateTask(task.id, { description: event.target.value })}
                 placeholder="Describe the task scope, boundaries, and expected output."
@@ -2236,9 +2334,9 @@ function ProcedureWorkspace({
             </label>
 
             <label className="block">
-              <span className="mb-1 block text-[11px] font-black uppercase tracking-wide text-steel">Safety Notes</span>
+              <span className="ui-field-label">Safety Notes</span>
               <textarea
-                className="min-h-[170px] w-full resize-y rounded border border-line bg-white px-3 py-2 text-sm font-semibold leading-relaxed text-ink outline-none focus:border-copper"
+                className="ui-field-standalone min-h-[170px] h-auto resize-y py-2 leading-relaxed"
                 value={task.safetyNotes ?? ""}
                 onChange={(event) => onUpdateTask(task.id, { safetyNotes: event.target.value })}
                 placeholder="Safety, lockout, PPE, lifting, or handling notes."
@@ -2247,26 +2345,22 @@ function ProcedureWorkspace({
           </section>
 
           <section>
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-black uppercase tracking-wide text-ink">Manufacturing Steps</h2>
-                <div className="text-xs font-bold text-steel">
+                <h2 className="ui-setup-section-title">Manufacturing Steps</h2>
+                <p className="ui-setup-section-desc">
                   {manufacturingSteps.length} step(s) · step total {formatMinutes(manufacturingStepDurationMinutes)} · {formatManHours(stepDerivedManHours)}
-                </div>
+                </p>
               </div>
-              <button
-                type="button"
-                onClick={addManufacturingStep}
-                className="inline-flex h-9 items-center gap-2 rounded bg-graphite px-3 text-xs font-black text-white hover:bg-ink"
-              >
-                <Plus size={15} />
+              <button type="button" onClick={addManufacturingStep} className="ui-btn-secondary h-9 gap-2 px-3">
+                <Plus size={14} strokeWidth={1.75} />
                 Add Step
               </button>
             </div>
 
-            <div className="border-y border-line">
+            <div className="space-y-3">
               {manufacturingSteps.length === 0 ? (
-                <div className="bg-white px-3 py-5 text-sm font-bold text-steel">
+                <div className="ui-panel px-4 py-5 text-sm text-ink-secondary">
                   Add a blank step to start authoring the procedure for this task.
                 </div>
               ) : (
@@ -2278,13 +2372,13 @@ function ProcedureWorkspace({
                   return (
                     <div
                       key={step.id}
-                      className="grid gap-3 border-b border-line bg-white px-3 py-3 last:border-b-0 xl:grid-cols-[54px_76px_minmax(0,1fr)]"
+                      className="ui-panel grid gap-3 p-4 xl:grid-cols-[54px_76px_minmax(0,1fr)]"
                     >
                       <label className="block">
-                        <span className="mb-1 block whitespace-nowrap text-[10px] font-black uppercase tracking-wide text-steel">Seq</span>
+                        <span className="ui-field-label">Seq</span>
                         <ClearableNumberInput
                           aria-label={`Step ${step.sequence} sequence`}
-                          className="number-input h-9 w-full rounded border border-line bg-[#fbfaf6] px-1 text-center text-sm font-black text-ink outline-none focus:border-copper"
+                          className="number-input ui-field-standalone px-1 text-center"
                           value={step.sequence}
                           min={1}
                           fallbackValue={step.sequence}
@@ -2295,10 +2389,10 @@ function ProcedureWorkspace({
                       </label>
 
                       <label className="block">
-                        <span className="mb-1 block whitespace-nowrap text-[10px] font-black uppercase tracking-wide text-steel">Minutes</span>
+                        <span className="ui-field-label">Minutes</span>
                         <ClearableNumberInput
                           aria-label={`Step ${step.sequence} duration minutes`}
-                          className="number-input h-9 w-full rounded border border-line bg-[#fbfaf6] px-1 text-center text-sm font-black text-ink outline-none focus:border-copper"
+                          className="number-input ui-field-standalone px-1 text-center"
                           value={step.durationMinutes ?? 0}
                           min={0}
                           fallbackValue={step.durationMinutes ?? 0}
@@ -2310,35 +2404,35 @@ function ProcedureWorkspace({
                       <div className="min-w-0 space-y-3">
                         <div>
                           <div className="mb-1 flex items-center justify-between gap-2">
-                            <span className="block text-[10px] font-black uppercase tracking-wide text-steel">Instruction</span>
-                            <div className="flex items-center gap-1.5">
+                            <span className="ui-field-label mb-0">Instruction</span>
+                            <div className="flex items-center gap-1">
                               <button
                                 type="button"
                                 onClick={() =>
                                   updateManufacturingStep(step.id, { instruction: applyInstructionBullets(step.instruction) })
                                 }
-                                className="inline-flex h-7 items-center gap-1 rounded border border-line bg-white px-2 text-[10px] font-black uppercase text-steel hover:border-copper hover:text-copper"
+                                className="ui-btn-ghost h-8 gap-1.5 px-2"
                                 title={`Format step ${step.sequence} as bullets`}
                                 aria-label={`Format step ${step.sequence} as bullets`}
                               >
-                                <ListChecks size={12} />
+                                <ListChecks size={12} strokeWidth={1.75} />
                                 Bullets
                               </button>
                               <button
                                 type="button"
-                                onClick={() => removeManufacturingStep(step.id)}
-                                className="inline-flex h-7 items-center gap-1 rounded border border-line bg-white px-2 text-[10px] font-black uppercase text-steel hover:border-signal hover:bg-[#f5e7df] hover:text-signal"
+                                onClick={() => requestRemoveManufacturingStep(step.id)}
+                                className="ui-btn-ghost h-8 gap-1.5 px-2 text-danger hover:text-danger"
                                 title={`Delete step ${step.sequence}`}
                                 aria-label={`Delete step ${step.sequence}`}
                               >
-                                <Trash2 size={12} />
+                                <Trash2 size={12} strokeWidth={1.75} />
                                 Delete
                               </button>
                             </div>
                           </div>
                           <textarea
                             aria-label={`Step ${step.sequence} instruction`}
-                            className="min-h-[132px] w-full resize-y rounded border border-line bg-[#fbfaf6] px-3 py-2 text-sm font-semibold leading-relaxed text-ink outline-none focus:border-copper"
+                            className="ui-field-standalone min-h-[132px] h-auto resize-y py-2 leading-relaxed"
                             value={step.instruction}
                             onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
                             onKeyDown={(event) =>
@@ -2353,11 +2447,11 @@ function ProcedureWorkspace({
                         <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)]">
 	                          <div className="min-w-0">
 	                            <div className="mb-1 flex items-center justify-between gap-2">
-                                <span className="text-[10px] font-black uppercase tracking-wide text-steel">Tools</span>
+                                <span className="ui-field-label mb-0">Tools</span>
                                 {toolLibrary.length > 0 ? (
                                   <select
                                     aria-label={`Add saved tool to step ${step.sequence}`}
-                                    className="h-7 max-w-[220px] rounded border border-line bg-white px-2 text-[11px] font-bold text-steel outline-none hover:border-copper focus:border-copper"
+                                    className="ui-field-standalone h-8 max-w-[220px] px-2 text-[11px]"
                                     value=""
                                     onChange={(event) => {
                                       if (event.target.value) {
@@ -2376,9 +2470,9 @@ function ProcedureWorkspace({
                                   </select>
                                 ) : null}
                               </div>
-	                            <div className="grid grid-cols-[minmax(0,1fr)_52px] items-center gap-2">
+	                            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
                               <input
-                                className="h-8 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-copper"
+                                className="ui-field-standalone h-9 min-w-0 px-2 text-xs"
                                 value={newStepToolNames[step.id] ?? ""}
                                 onChange={(event) =>
                                   setNewStepToolNames((current) => ({ ...current, [step.id]: event.target.value }))
@@ -2394,20 +2488,20 @@ function ProcedureWorkspace({
                               <button
                                 type="button"
                                 onClick={() => addManufacturingStepTool(step.id)}
-                                className="h-8 rounded border border-line bg-white text-[10px] font-black uppercase text-graphite hover:border-copper hover:text-copper"
+                                className="ui-btn-ghost h-9 px-2"
                               >
                                 Add
                               </button>
                             </div>
                             {stepTools.length > 0 ? (
-                              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-bold text-steel">
+                              <div className="mt-2 flex flex-wrap gap-1.5">
                                 {stepTools.map((tool) => (
-                                  <span key={tool} className="inline-flex min-w-0 items-center gap-1">
+                                  <span key={tool} className="ui-chip inline-flex min-w-0 items-center gap-1 normal-case tracking-normal">
                                     <span className="max-w-[240px] truncate">{tool}</span>
                                     <button
                                       type="button"
                                       onClick={() => removeManufacturingStepTool(step.id, tool)}
-                                      className="text-steel/70 hover:text-signal"
+                                      className="text-ink-tertiary hover:text-danger"
                                       aria-label={`Remove ${tool}`}
                                       title={`Remove ${tool}`}
                                     >
@@ -2435,23 +2529,21 @@ function ProcedureWorkspace({
 	                          </div>
 
                           <div>
-                            <div className="mb-1 text-[10px] font-black uppercase tracking-wide text-steel">Checks</div>
-                            <div className="flex flex-wrap gap-2" role="group" aria-label={`Step ${step.sequence} checks`}>
+                            <div className="mb-2 ui-field-label">Checks</div>
+                            <div className="flex flex-wrap gap-1.5" role="group" aria-label={`Step ${step.sequence} checks`}>
                               {manufacturingStepCheckOptions.map((option) => {
                                 const checked = selectedChecks.has(option.key);
 
                                 return (
                                   <label
                                     key={option.key}
-                                    className={`inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded border px-2 text-[11px] font-black transition ${
-                                      checked
-                                        ? "border-teal/30 bg-teal/10 text-teal"
-                                        : "border-line bg-white text-steel hover:border-copper"
+                                    className={`inline-flex h-8 cursor-pointer items-center gap-1.5 px-2.5 text-[11px] font-medium transition ${
+                                      checked ? "ui-chip-accent normal-case tracking-normal" : "ui-chip normal-case tracking-normal"
                                     }`}
                                   >
                                     <input
                                       type="checkbox"
-                                      className="h-3.5 w-3.5 shrink-0 accent-teal"
+                                      className="h-3.5 w-3.5 shrink-0 accent-accent"
                                       checked={checked}
                                       onChange={(event) => {
                                         const nextChecks = new Set(selectedChecks);
@@ -2475,12 +2567,13 @@ function ProcedureWorkspace({
                           </div>
                         </div>
 
-                        <div className="border-t border-line pt-3">
+                        <div className="border-t border-line/70 pt-3">
                           <StepPhotoAttachmentEditor
                             step={step}
                             photos={stepPhotos}
                             isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
+                            onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
                             onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
                           />
                         </div>
@@ -2493,72 +2586,66 @@ function ProcedureWorkspace({
           </section>
 
           <section>
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-black uppercase tracking-wide text-ink">Part References</h2>
-                  <div className="text-xs font-bold text-steel">{partReferences.length} part reference(s)</div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="ui-setup-section-title">Part References</h2>
+                <p className="ui-setup-section-desc">{partReferences.length} part reference(s)</p>
+              </div>
+              <button type="button" onClick={addPartReference} className="ui-btn-secondary h-8 gap-1.5 px-3 text-[11px]">
+                <Plus size={14} strokeWidth={1.75} />
+                Part
+              </button>
+            </div>
+            <div className="space-y-3">
+              {partReferences.length === 0 ? (
+                <div className="ui-panel px-4 py-4 text-sm text-ink-secondary">
+                  No part references on this task yet.
                 </div>
-                <button
-                  type="button"
-                  onClick={addPartReference}
-                  className="inline-flex h-8 items-center gap-1 rounded border border-line bg-white px-2 text-xs font-black text-ink hover:border-copper"
-                >
-                  <Plus size={14} />
-                  Part
-                </button>
-              </div>
-              <div className="border-y border-line bg-white">
-                {partReferences.length === 0 ? (
-                  <div className="px-3 py-4 text-sm font-bold text-steel">
-                    No part references on this task yet.
+              ) : (
+                partReferences.map((part) => (
+                  <div
+                    key={part.id}
+                    className="ui-panel grid gap-3 p-4 md:grid-cols-[minmax(150px,0.55fr)_80px_minmax(0,1fr)_minmax(0,1fr)]"
+                  >
+                    <label className="block">
+                      <span className="ui-field-label">Part Number</span>
+                      <input
+                        className="ui-field-standalone"
+                        value={part.partNumber}
+                        onChange={(event) => updatePartReference(part.id, { partNumber: event.target.value })}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="ui-field-label">Qty</span>
+                      <ClearableNumberInput
+                        className="number-input ui-field-standalone"
+                        value={part.quantity ?? 0}
+                        min={0}
+                        fallbackValue={part.quantity ?? 0}
+                        precision={0}
+                        normalize={Math.round}
+                        onValueChange={(value) => updatePartReference(part.id, { quantity: value })}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="ui-field-label">Description</span>
+                      <input
+                        className="ui-field-standalone"
+                        value={part.description ?? ""}
+                        onChange={(event) => updatePartReference(part.id, { description: event.target.value })}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="ui-field-label">Disposition / Note</span>
+                      <input
+                        className="ui-field-standalone"
+                        value={part.disposition ?? ""}
+                        onChange={(event) => updatePartReference(part.id, { disposition: event.target.value })}
+                      />
+                    </label>
                   </div>
-                ) : (
-                  partReferences.map((part) => (
-                    <div
-                      key={part.id}
-                      className="grid gap-2 border-b border-line px-3 py-3 last:border-b-0 md:grid-cols-[minmax(150px,0.55fr)_80px_minmax(0,1fr)_minmax(0,1fr)]"
-                    >
-                      <label className="block">
-                        <span className="mb-1 block whitespace-nowrap text-[10px] font-black uppercase tracking-wide text-steel">Part Number</span>
-                        <input
-                          className="h-9 w-full rounded border border-line bg-[#fbfaf6] px-2 text-sm font-bold text-ink outline-none focus:border-copper"
-                          value={part.partNumber}
-                          onChange={(event) => updatePartReference(part.id, { partNumber: event.target.value })}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1 block whitespace-nowrap text-[10px] font-black uppercase tracking-wide text-steel">Qty</span>
-                        <ClearableNumberInput
-                          className="number-input h-9 w-full rounded border border-line bg-[#fbfaf6] px-2 text-sm font-bold text-ink outline-none focus:border-copper"
-                          value={part.quantity ?? 0}
-                          min={0}
-                          fallbackValue={part.quantity ?? 0}
-                          precision={0}
-                          normalize={Math.round}
-                          onValueChange={(value) => updatePartReference(part.id, { quantity: value })}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1 block whitespace-nowrap text-[10px] font-black uppercase tracking-wide text-steel">Description</span>
-                        <input
-                          className="h-9 w-full rounded border border-line bg-[#fbfaf6] px-2 text-sm font-semibold text-ink outline-none focus:border-copper"
-                          value={part.description ?? ""}
-                          onChange={(event) => updatePartReference(part.id, { description: event.target.value })}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="mb-1 block whitespace-nowrap text-[10px] font-black uppercase tracking-wide text-steel">Disposition / Note</span>
-                        <input
-                          className="h-9 w-full rounded border border-line bg-[#fbfaf6] px-2 text-sm font-semibold text-ink outline-none focus:border-copper"
-                          value={part.disposition ?? ""}
-                          onChange={(event) => updatePartReference(part.id, { disposition: event.target.value })}
-                        />
-                      </label>
-                    </div>
-                  ))
-                )}
-              </div>
+                ))
+              )}
             </div>
           </section>
         </div>
@@ -2580,10 +2667,10 @@ function SetupFieldGroup({
   className?: string;
 }) {
   return (
-    <div className={`rounded-md border border-line bg-white/75 p-3 ${className}`}>
+    <div className={className}>
       <div className="mb-3">
-        <div className="text-[11px] font-black uppercase tracking-wide text-ink">{title}</div>
-        {description ? <div className="mt-0.5 text-[11px] font-semibold text-steel">{description}</div> : null}
+        <div className="ui-setup-section-title">{title}</div>
+        {description ? <div className="ui-setup-section-desc">{description}</div> : null}
       </div>
       {children}
     </div>
@@ -2600,46 +2687,43 @@ function ProductSetupPanel({
   onProductText: (field: ProductTextField, value: string) => void;
 }) {
   return (
-    <section className="rounded-md border border-line bg-[#fbfaf6] p-4 shadow-soft">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-black text-ink">Product Setup</h2>
-          <div className="text-xs font-semibold text-steel">Demand, available time, takt, and target labor</div>
-        </div>
-        <StatusPill status={product.status} />
+    <section className="ui-panel p-4">
+      <div className="mb-5">
+        <h2 className="ui-section-title">Product Setup</h2>
+        <div className="ui-section-subtitle">Demand, available time, takt, and target labor</div>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-2">
-        <SetupFieldGroup title="Product Identity" description="What is being planned" className="xl:col-span-2">
+      <div className="divide-y divide-line">
+        <SetupFieldGroup title="Product Identity" description="What is being planned" className="pb-5">
           <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(150px,0.7fr)_minmax(130px,0.6fr)_minmax(150px,0.7fr)]">
             <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">Product</span>
+              <span className="ui-field-label">Product</span>
               <input
-                className="h-10 w-full rounded border border-line bg-white px-3 text-sm font-semibold text-ink outline-none"
+                className="ui-field-standalone"
                 value={product.name}
                 onChange={(event) => onProductText("name", event.target.value)}
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">SKU</span>
+              <span className="ui-field-label">SKU</span>
               <input
-                className="h-10 w-full rounded border border-line bg-white px-3 text-sm font-semibold text-ink outline-none"
+                className="ui-field-standalone"
                 value={product.sku ?? ""}
                 onChange={(event) => onProductText("sku", event.target.value)}
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">Revision</span>
+              <span className="ui-field-label">Revision</span>
               <input
-                className="h-10 w-full rounded border border-line bg-white px-3 text-sm font-semibold text-ink outline-none"
+                className="ui-field-standalone"
                 value={product.revision}
                 onChange={(event) => onProductText("revision", event.target.value)}
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">Status</span>
+              <span className="ui-field-label">Status</span>
               <select
-                className="h-10 w-full rounded border border-line bg-white px-3 text-sm font-semibold text-ink outline-none"
+                className="ui-field-standalone"
                 value={product.status}
                 onChange={(event) => onProductText("status", event.target.value as ProductStatus)}
               >
@@ -2653,13 +2737,14 @@ function ProductSetupPanel({
           </div>
         </SetupFieldGroup>
 
-        <SetupFieldGroup title="Demand & Labor" description="Volume, takt override, and labor target">
-          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+        <div className="grid gap-5 py-5 xl:grid-cols-2">
+          <SetupFieldGroup title="Demand & Labor" description="Volume, takt override, and labor target">
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
             <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">Demand</span>
-              <div className="flex h-10 overflow-hidden rounded border border-line bg-white">
+              <span className="ui-field-label">Demand</span>
+              <div className="ui-field-shell">
                 <ClearableNumberInput
-                  className="number-input h-full min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-ink outline-none"
+                  className="number-input ui-field-control"
                   value={product.demandQuantity}
                   min={0}
                   step={1}
@@ -2668,7 +2753,7 @@ function ProductSetupPanel({
                   onValueChange={(value) => onProductNumber("demandQuantity", value)}
                 />
                 <select
-                  className="h-full w-28 border-l border-line bg-[#f4f0e8] px-2 text-xs font-black uppercase text-steel outline-none"
+                  className="ui-field-addon w-28"
                   value={product.demandPeriod}
                   onChange={(event) => onProductText("demandPeriod", event.target.value as DemandPeriod)}
                 >
@@ -2695,8 +2780,8 @@ function ProductSetupPanel({
           </div>
         </SetupFieldGroup>
 
-        <SetupFieldGroup title="Available Workday" description="Shift time minus planned non-production time">
-          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+          <SetupFieldGroup title="Available Workday" description="Shift time minus planned non-production time">
+            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
             <NumericField
               label="Workday"
               value={product.grossAvailableMinutes}
@@ -2729,8 +2814,9 @@ function ProductSetupPanel({
             />
           </div>
         </SetupFieldGroup>
+        </div>
 
-        <SetupFieldGroup title="Calendar" description="Working pattern used for weekly and monthly capacity" className="xl:col-span-2">
+        <SetupFieldGroup title="Calendar" description="Working pattern used for weekly and monthly capacity" className="pt-5">
           <div className="grid gap-3 md:grid-cols-3">
             <NumericField
               label="Days / Week"
@@ -2773,7 +2859,7 @@ function KpiStrip({ kpis, product }: { kpis: ReturnType<typeof calculateProductK
   )} days/mo`;
 
   return (
-    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+    <section className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-6">
       <StatCard label="Net Available Time" value={formatMinutes(kpis.availableMinutes)} meta={availabilityMeta} />
       <StatCard label="Required Takt" value={formatMinutes(kpis.taktMinutes)} meta="Active takt" tone={taktTone} />
       <StatCard label="Unit Lead Time" value={formatMinutes(kpis.plannedCycleMinutes)} meta="First task start to final finish" />
@@ -2841,7 +2927,7 @@ function ZoneMetricsPanel({ zones, tasks, compact = false }: { zones: Zone[]; ta
 
   if (metrics.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-line bg-[#fbfaf6] p-3 text-xs font-semibold text-steel">
+      <div className="rounded-md border border-dashed border-line bg-surface-raised p-3 text-xs font-semibold text-steel">
         Create a zone in the Gantt to see headcount, man-hours, and cycle time by area.
       </div>
     );
@@ -2850,26 +2936,26 @@ function ZoneMetricsPanel({ zones, tasks, compact = false }: { zones: Zone[]; ta
   return (
     <div className={`grid gap-3 ${compact ? "grid-cols-1" : "md:grid-cols-2 xl:grid-cols-3"}`}>
       {metrics.map((metric) => (
-        <div key={metric.id} className="rounded-md border border-line bg-[#fbfaf6] p-3">
+        <div key={metric.id} className="ui-panel-raised p-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="truncate text-xs font-black uppercase tracking-wide text-ink">{metric.name}</div>
+              <div className="truncate text-xs ui-mono-label tracking-wide text-ink">{metric.name}</div>
               <div className="text-[11px] font-semibold text-steel">{metric.taskCount} high-level task(s)</div>
             </div>
             <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: metric.color }} />
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-wide text-steel">{compact ? "HC" : "Headcount"}</div>
-              <div className="mt-1 text-lg font-black text-ink">{round(metric.headcount, 1)}</div>
+              <div className="ui-mono-label">{compact ? "HC" : "Headcount"}</div>
+              <div className="mt-1 text-lg font-medium text-ink">{round(metric.headcount, 1)}</div>
             </div>
             <div>
-              <div className="text-[10px] font-black uppercase tracking-wide text-steel">MHs</div>
-              <div className="mt-1 text-lg font-black text-ink">{formatManHours(metric.manHours)}</div>
+              <div className="ui-mono-label">MHs</div>
+              <div className="mt-1 text-lg font-medium text-ink">{formatManHours(metric.manHours)}</div>
             </div>
             <div>
-              <div className="text-[10px] font-black uppercase tracking-wide text-steel">Cycle</div>
-              <div className="mt-1 text-lg font-black text-ink">{formatMinutes(metric.cycleMinutes)}</div>
+              <div className="ui-mono-label">Cycle</div>
+              <div className="mt-1 text-lg font-medium text-ink">{formatMinutes(metric.cycleMinutes)}</div>
             </div>
           </div>
         </div>
@@ -2895,6 +2981,7 @@ function CrewReadinessCard({
   tasks: Task[];
   compact?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const period = periodLabel(product.demandPeriod);
   const plannedLaborFits = kpis.plannedManHours <= product.targetManHours;
   const plannedFteFits = kpis.plannedLaborLoadFte <= kpis.budgetedCrewEquivalent;
@@ -2926,15 +3013,15 @@ function CrewReadinessCard({
   const roundingCreatesUnusedCapacity =
     feasible && kpis.wholePersonStaffingRequirement > 0 && kpis.wholePersonStaffingRequirement > kpis.budgetedCrewEquivalent;
   const toneClass = !feasible
-    ? "border-line border-l-signal"
+    ? "border-line border-l-danger"
     : roundingCreatesUnusedCapacity
-      ? "border-line border-l-amber"
-      : "border-line border-l-teal";
+      ? "border-line border-l-warn"
+      : "border-line border-l-accent";
   const statusClass = !feasible
-    ? "border-signal/25 bg-signal/10 text-signal"
+    ? "border-danger/25 bg-danger-muted/10 text-danger"
     : roundingCreatesUnusedCapacity
-      ? "border-amber/30 bg-amber/20 text-[#7a4e09]"
-      : "border-teal/20 bg-teal/10 text-teal";
+      ? "border-warn/30 bg-warn-muted/20 text-warn-strong"
+      : "border-accent/20 bg-accent/10 text-accent";
   const statusLabel = feasible ? "Feasible" : "Needs Review";
   const planChecks = [
     {
@@ -2964,91 +3051,119 @@ function CrewReadinessCard({
   ];
 
   return (
-    <div className={`rounded-md border border-l-4 bg-white p-4 shadow-sm ${toneClass}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line pb-3">
-        <div>
+    <div className={`rounded-md border border-l-4 bg-surface ${expanded ? "p-4" : "p-3"} ${toneClass}`}>
+      <div
+        className={`flex flex-wrap items-start justify-between gap-3 ${expanded ? "border-b border-line pb-3" : ""}`}
+      >
+        <div className="min-w-0 flex-1">
           <div className="text-[11px] font-bold uppercase tracking-wide text-steel">Budgeted Crew</div>
-          <div className="mt-1 flex items-end gap-2">
-            <span className="text-3xl font-black leading-none tracking-normal text-ink">
+          <div className="mt-1 flex flex-wrap items-end gap-x-2 gap-y-1">
+            <span className="text-3xl font-medium leading-none tracking-normal text-ink">
               {round(kpis.budgetedCrewEquivalent, 2)}
             </span>
-            <span className="pb-0.5 text-sm font-black uppercase text-ink">FTE</span>
+            <span className="pb-0.5 text-sm ui-mono-label text-ink">FTE</span>
+            {!expanded ? (
+              <span className="pb-0.5 text-[11px] font-medium text-ink-secondary">
+                · {kpis.wholePersonStaffingRequirement} people · {round(kpis.requiredAverageAllocationPercent, 1)}% avg
+              </span>
+            ) : null}
           </div>
         </div>
-        <span className={`inline-flex h-7 items-center rounded border px-2 text-[11px] font-black uppercase ${statusClass}`}>
-          {statusLabel}
-        </span>
-      </div>
-
-      <div className={`mt-4 grid gap-4 ${compact ? "grid-cols-1" : "xl:grid-cols-[250px_minmax(0,1fr)_220px]"}`}>
-        <div className={`space-y-2 ${compact ? "" : "xl:border-r xl:border-line xl:pr-4"}`}>
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-[10px] font-black uppercase tracking-wide text-steel">Rounded Staffing</span>
-            <span className="text-sm font-black text-ink">{kpis.wholePersonStaffingRequirement} people</span>
-          </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-[10px] font-black uppercase tracking-wide text-steel">Avg Allocation</span>
-            <span className="text-sm font-black text-ink">{round(kpis.requiredAverageAllocationPercent, 1)}%</span>
-          </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-[10px] font-black uppercase tracking-wide text-steel">Labor Budget</span>
-            <span className="text-sm font-black text-ink">{formatManHours(kpis.targetLaborBudgetManHours)}/{period}</span>
-          </div>
-        </div>
-
-        <div className={`min-w-0 ${compact ? "border-t border-line pt-3" : "xl:border-r xl:border-line xl:px-4"}`}>
-          <div className="mb-2 text-[10px] font-black uppercase tracking-wide text-steel">Plan Fit</div>
-          <div className={`grid gap-x-5 gap-y-2 ${compact ? "grid-cols-1" : "sm:grid-cols-4"}`}>
-            {planChecks.map((check) => (
-              <div key={check.label} className="min-w-0">
-                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-steel">
-                  <span className={`h-1.5 w-1.5 rounded-full ${check.fits ? "bg-teal" : "bg-signal"}`} />
-                  {check.label}
-                </div>
-                <div className={`mt-1 text-sm font-black ${check.fits ? "text-ink" : "text-signal"}`}>{check.value}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className={`min-w-0 bg-white ${compact ? "border-t border-line pt-3" : "xl:pl-1"}`}>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="text-[10px] font-black uppercase tracking-wide text-steel">Operators</div>
-            <div className="text-[10px] font-black text-steel">
-              {visibleWorkerCount}/{kpis.wholePersonStaffingRequirement}
-            </div>
-          </div>
-          {visibleWorkers.length ? (
-            <div className="grid grid-cols-4 gap-x-2 gap-y-2">
-              {visibleWorkers.map((letter, index) => {
-                const allocation = operatorAllocations[letter] ?? 0;
-                return (
-                  <div
-                    key={letter}
-                    className="flex min-w-0 flex-col items-center gap-0.5 bg-white"
-                    title={`Operator ${letter}: ${allocation}% allocated`}
-                  >
-                    <WorkerIcon colorIndex={index} letter={letter} />
-                    <span className="text-[9px] font-black leading-none text-steel">{round(allocation, 0)}%</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-[11px] font-semibold text-steel">No staffing requirement yet.</div>
-          )}
-          {kpis.wholePersonStaffingRequirement > WORKER_ICON_LETTERS.length ? (
-            <div className="mt-2 text-[10px] font-semibold text-steel">First {WORKER_ICON_LETTERS.length} icons shown.</div>
+        <div className="flex items-center gap-2">
+          {planningRecommendations.length > 0 ? (
+            <span className="inline-flex h-6 items-center rounded border border-warn/35 bg-accent-muted px-2 text-[10px] ui-mono-label tracking-wide text-warn-strong">
+              {planningRecommendations.length} open
+            </span>
           ) : null}
+          <span className={`inline-flex h-7 items-center rounded border px-2 text-[11px] ui-mono-label ${statusClass}`}>
+            {statusLabel}
+          </span>
+          <button
+            type="button"
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-transparent text-ink-secondary transition hover:border-line hover:bg-surface-muted hover:text-ink"
+            onClick={() => setExpanded((open) => !open)}
+            aria-expanded={expanded}
+            aria-label={expanded ? "Collapse crew plan" : "Expand crew plan"}
+            title={expanded ? "Collapse crew plan" : "Expand crew plan"}
+          >
+            {expanded ? <ChevronUp size={15} strokeWidth={2} /> : <ChevronDown size={15} strokeWidth={2} />}
+          </button>
         </div>
       </div>
 
-      <PlanningRecommendationsPanel
-        compact={compact}
-        onClear={onClearPlanningRecommendations}
-        recommendations={planningRecommendations}
-        onOpenTaskDetail={onOpenTaskDetail}
-      />
+      {expanded ? (
+        <>
+          <div className={`mt-4 grid gap-4 ${compact ? "grid-cols-1" : "xl:grid-cols-[250px_minmax(0,1fr)_220px]"}`}>
+            <div className={`space-y-2 ${compact ? "" : "xl:border-r xl:border-line xl:pr-4"}`}>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="ui-mono-label">Rounded Staffing</span>
+                <span className="text-sm font-medium text-ink">{kpis.wholePersonStaffingRequirement} people</span>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="ui-mono-label">Avg Allocation</span>
+                <span className="text-sm font-medium text-ink">{round(kpis.requiredAverageAllocationPercent, 1)}%</span>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="ui-mono-label">Labor Budget</span>
+                <span className="text-sm font-medium text-ink">{formatManHours(kpis.targetLaborBudgetManHours)}/{period}</span>
+              </div>
+            </div>
+
+            <div className={`min-w-0 ${compact ? "border-t border-line pt-3" : "xl:border-r xl:border-line xl:px-4"}`}>
+              <div className="mb-2 ui-mono-label">Plan Fit</div>
+              <div className={`grid gap-x-5 gap-y-2 ${compact ? "grid-cols-1" : "sm:grid-cols-4"}`}>
+                {planChecks.map((check) => (
+                  <div key={check.label} className="min-w-0">
+                    <div className="flex items-center gap-1.5 ui-mono-label">
+                      <span className={`h-1.5 w-1.5 rounded-full ${check.fits ? "bg-accent" : "bg-danger"}`} />
+                      {check.label}
+                    </div>
+                    <div className={`mt-1 text-sm font-medium ${check.fits ? "text-ink" : "text-danger"}`}>{check.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className={`min-w-0 bg-surface ${compact ? "border-t border-line pt-3" : "xl:pl-1"}`}>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="ui-mono-label">Operators</div>
+                <div className="text-[10px] font-medium text-steel">
+                  {visibleWorkerCount}/{kpis.wholePersonStaffingRequirement}
+                </div>
+              </div>
+              {visibleWorkers.length ? (
+                <div className="grid grid-cols-4 gap-x-2 gap-y-2">
+                  {visibleWorkers.map((letter, index) => {
+                    const allocation = operatorAllocations[letter] ?? 0;
+                    return (
+                      <div
+                        key={letter}
+                        className="flex min-w-0 flex-col items-center gap-0.5 bg-surface"
+                        title={`Operator ${letter}: ${allocation}% allocated`}
+                      >
+                        <WorkerIcon colorIndex={index} letter={letter} />
+                        <span className="text-[9px] font-medium leading-none text-steel">{round(allocation, 0)}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-[11px] font-semibold text-steel">No staffing requirement yet.</div>
+              )}
+              {kpis.wholePersonStaffingRequirement > WORKER_ICON_LETTERS.length ? (
+                <div className="mt-2 text-[10px] font-semibold text-steel">First {WORKER_ICON_LETTERS.length} icons shown.</div>
+              ) : null}
+            </div>
+          </div>
+
+          <PlanningRecommendationsPanel
+            compact={compact}
+            onClear={onClearPlanningRecommendations}
+            recommendations={planningRecommendations}
+            onOpenTaskDetail={onOpenTaskDetail}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -3075,7 +3190,7 @@ function PlanningRecommendationsPanel({
     <div className="mt-4 border-t border-line pt-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wide text-[#7a4e09]">
+          <div className="flex items-center gap-2 text-[10px] ui-mono-label tracking-wide text-warn-strong">
             <AlertTriangle size={14} />
             Planning Recommendations
           </div>
@@ -3084,14 +3199,14 @@ function PlanningRecommendationsPanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex h-6 items-center rounded border border-amber/35 bg-[#fff7e8] px-2 text-[10px] font-black uppercase tracking-wide text-[#7a4e09]">
+          <span className="inline-flex h-6 items-center rounded border border-warn/35 bg-accent-muted px-2 text-[10px] ui-mono-label tracking-wide text-warn-strong">
             {recommendations.length} item(s)
           </span>
           {onClear ? (
             <button
               type="button"
               onClick={onClear}
-              className="inline-flex h-6 items-center rounded border border-line bg-white px-2 text-[10px] font-black uppercase tracking-wide text-steel outline-none transition hover:border-graphite hover:text-ink focus-visible:ring-2 focus-visible:ring-copper"
+              className="inline-flex h-6 items-center rounded border border-line bg-surface px-2 ui-mono-label outline-none transition hover:border-graphite hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
             >
               Clear
             </button>
@@ -3103,32 +3218,32 @@ function PlanningRecommendationsPanel({
         {visibleRecommendations.map((recommendation) => (
           <div
             key={recommendation.taskId}
-            className="grid gap-3 bg-[#fbfaf6] px-2 py-3 text-xs lg:grid-cols-[minmax(160px,0.75fr)_minmax(0,1.4fr)_minmax(150px,0.45fr)] lg:items-center"
+            className="grid gap-3 bg-surface-raised px-2 py-3 text-xs lg:grid-cols-[minmax(160px,0.75fr)_minmax(0,1.4fr)_minmax(150px,0.45fr)] lg:items-center"
           >
             <div className="min-w-0">
-              <div className="truncate font-black text-ink" title={recommendation.taskLabel}>
+              <div className="truncate font-medium text-ink" title={recommendation.taskLabel}>
                 {recommendation.taskLabel}
               </div>
-              <div className="mt-1 inline-flex rounded border border-amber/35 bg-white px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-[#7a4e09]">
+              <div className="mt-1 inline-flex rounded border border-warn/35 bg-surface px-2 py-0.5 text-[9px] ui-mono-label tracking-wide text-warn-strong">
                 {recommendation.classification}
               </div>
             </div>
 
             <div className="min-w-0">
-              <div className="font-black leading-snug text-steel">{recommendation.condition}</div>
+              <div className="font-medium leading-snug text-steel">{recommendation.condition}</div>
               <div className="mt-1 font-semibold leading-snug text-steel">{recommendation.impact}</div>
               <div className="mt-1 font-bold leading-snug text-ink">{recommendation.recommendation}</div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-              <span className="inline-flex h-7 items-center rounded border border-line bg-white px-2 text-[10px] font-black uppercase tracking-wide text-graphite">
+              <span className="inline-flex h-7 items-center rounded border border-line bg-surface px-2 text-[10px] ui-mono-label tracking-wide text-ink-secondary">
                 {recommendation.action}
               </span>
               {onOpenTaskDetail ? (
                 <button
                   type="button"
                   onClick={() => onOpenTaskDetail(recommendation.taskId)}
-                  className="inline-flex h-8 items-center justify-center rounded border border-graphite bg-graphite px-3 text-[11px] font-black text-white outline-none transition hover:bg-ink focus-visible:ring-2 focus-visible:ring-copper"
+                  className="inline-flex h-8 items-center justify-center rounded border border-graphite bg-accent px-3 text-[11px] font-medium text-canvas outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   Review task
                 </button>
@@ -3179,17 +3294,17 @@ function LineReadinessPanel({
   compact?: boolean;
 }) {
   return (
-    <section className="rounded-md border border-line bg-white p-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <section className="ui-panel p-5">
+      <div className="mb-5 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-black text-ink">Line Readiness</h2>
-          <div className="text-xs font-semibold text-steel">{scenarioName}</div>
+          <h2 className="ui-section-title text-base">Line readiness</h2>
+          <div className="ui-section-subtitle">{scenarioName}</div>
         </div>
-        <Timer className="text-copper" size={22} />
+        <Timer className="text-accent" size={20} />
       </div>
-      <div className="space-y-4">
+      <div className="space-y-5">
         <div>
-          <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-steel">Line Summary</div>
+          <div className="mb-3 text-xs font-semibold text-ink-secondary">Line summary</div>
           <div className={`grid gap-3 ${compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-4"}`}>
             <StatCard label="Stations" value={`${stationCount}`} meta="High-level tasks" />
             <StatCard label="Tasks" value={`${taskCount}`} meta="Schedulable rows" />
@@ -3209,7 +3324,7 @@ function LineReadinessPanel({
         </div>
 
         <div>
-          <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-steel">Crew Plan</div>
+          <div className="mb-3 text-xs font-semibold text-ink-secondary">Crew plan</div>
           <CrewReadinessCard
             kpis={kpis}
             onClearPlanningRecommendations={onClearPlanningRecommendations}
@@ -3222,7 +3337,7 @@ function LineReadinessPanel({
         </div>
 
         <div>
-          <div className="mb-2 text-[11px] font-black uppercase tracking-wide text-steel">Zone Metrics</div>
+          <div className="mb-3 text-xs font-semibold text-ink-secondary">Zone metrics</div>
           <ZoneMetricsPanel zones={zones} tasks={tasks} compact={compact} />
         </div>
       </div>
@@ -3246,13 +3361,13 @@ function StationBalance({
   const maxCycle = Math.max(...stations.map((station) => station.plannedCycleMinutes), taktMinutes, 1);
 
   return (
-    <section className="rounded-md border border-line bg-white p-4 shadow-sm">
+    <section className="ui-panel p-4">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h2 className="text-base font-black text-ink">Station Balance</h2>
+          <h2 className="text-base font-medium text-ink">Station Balance</h2>
           <div className="text-xs font-semibold text-steel">Takt line: {formatMinutes(taktMinutes)}</div>
         </div>
-        <BarChart3 className="text-copper" size={22} />
+        <BarChart3 className="text-accent" size={22} />
       </div>
       <div className="space-y-3">
         {stations.map((station) => {
@@ -3264,12 +3379,12 @@ function StationBalance({
               type="button"
               onClick={() => onSelectStation(station.id)}
               className={`w-full rounded border p-3 text-left transition ${
-                selectedStationId === station.id ? "border-teal bg-[#edf7f4]" : "border-line bg-[#fbfaf6] hover:bg-[#f4f0e7]"
+                selectedStationId === station.id ? "border-accent bg-accent-muted" : "border-line bg-surface-raised hover:bg-surface-sunken"
               }`}
             >
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-black text-ink">
+                  <div className="truncate text-sm font-medium text-ink">
                     {station.sequence}. {station.name}
                   </div>
                   <div className="text-xs font-semibold text-steel">
@@ -3277,14 +3392,14 @@ function StationBalance({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {station.bottleneckFlag ? <AlertTriangle size={17} className="text-signal" /> : null}
+                  {station.bottleneckFlag ? <AlertTriangle size={17} className="text-danger" /> : null}
                   <StatusPill status={station.taktStatus} />
                 </div>
               </div>
-              <div className="relative h-5 overflow-hidden rounded bg-[#e9e2d6]">
-                <div className="absolute inset-y-0 w-[2px] bg-signal" style={{ left: `${taktPosition}%` }} />
+              <div className="relative h-5 overflow-hidden rounded bg-surface-sunken">
+                <div className="absolute inset-y-0 w-[2px] bg-danger" style={{ left: `${taktPosition}%` }} />
                 <div
-                  className={`h-full rounded ${station.bottleneckFlag ? "bg-signal" : "bg-teal"}`}
+                  className={`h-full rounded ${station.bottleneckFlag ? "bg-danger" : "bg-accent"}`}
                   style={{ width: `${width}%` }}
                 />
               </div>
@@ -3292,7 +3407,7 @@ function StationBalance({
                 <span>Operators</span>
                 <ClearableNumberInput
                   aria-label={`${station.name} operators`}
-                  className="number-input h-8 w-16 rounded border border-line bg-white px-2 text-right font-bold text-ink outline-none"
+                  className="number-input h-8 w-16 rounded border border-line bg-surface px-2 text-right font-bold text-ink outline-none"
                   value={station.plannedOperators}
                   min={0}
                   fallbackValue={station.plannedOperators}
@@ -3315,6 +3430,8 @@ function DetailDrawer({
   station,
   collapsed,
   isResizing,
+  onConfirmAction,
+  onStepDeleted,
   onToggleCollapsed,
   onResizeStart,
   onUpdateTask,
@@ -3328,6 +3445,8 @@ function DetailDrawer({
   station?: Station;
   collapsed: boolean;
   isResizing: boolean;
+  onConfirmAction: (message: FeedbackConfirm) => void;
+  onStepDeleted: (taskSnapshot: Task, step: ManufacturingStep) => void;
   onToggleCollapsed: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onUpdateTask: (taskId: string, patch: Partial<Task>) => void;
@@ -3338,7 +3457,7 @@ function DetailDrawer({
   toolLibrary: string[];
 }) {
   const drawerClass = `relative hidden h-full min-h-0 overflow-hidden border-l border-line transition-colors duration-300 ease-out xl:block ${
-    collapsed ? "bg-graphite text-white" : "bg-[#fbfaf6] text-ink"
+    collapsed ? "bg-accent text-canvas" : "bg-surface-raised text-ink"
   }`;
   const railClass = `absolute inset-0 flex flex-col items-center pb-44 transition-all duration-200 ease-out ${
     collapsed ? "translate-x-0 opacity-100 delay-100" : "pointer-events-none -translate-x-2 opacity-0"
@@ -3354,19 +3473,19 @@ function DetailDrawer({
       <button
         type="button"
         onClick={onToggleCollapsed}
-        className="mt-4 flex h-8 w-8 items-center justify-center rounded bg-white/10 text-white transition hover:bg-white/20"
+        className="mt-4 flex h-8 w-8 items-center justify-center rounded bg-surface/10 text-canvas transition hover:bg-surface/20"
         title="Expand selected task drawer"
         aria-label="Expand selected task drawer"
       >
         <ChevronsLeft size={16} />
       </button>
       <div
-        className="mt-5 max-h-[220px] max-w-[20px] text-center text-[10px] font-black uppercase tracking-wide text-white/70"
+        className="mt-5 max-h-[220px] max-w-[20px] text-center text-[10px] ui-mono-label tracking-wide text-white/70"
         style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
       >
         Selected Task
       </div>
-      <div className="mt-4 flex h-8 w-8 items-center justify-center rounded border border-white/15 bg-white/10 text-[11px] font-black">
+      <div className="mt-4 flex h-8 w-8 items-center justify-center rounded border border-line/15 bg-surface/10 text-[11px] font-medium">
         {task?.wbs ?? "-"}
       </div>
     </div>
@@ -3376,14 +3495,14 @@ function DetailDrawer({
       type="button"
       onPointerDown={onResizeStart}
       className={`absolute left-0 top-0 z-30 h-full w-3 -translate-x-1/2 cursor-col-resize touch-none outline-none transition ${
-        isResizing ? "bg-copper/10" : "hover:bg-copper/10 focus-visible:bg-copper/10"
+        isResizing ? "bg-accent/10" : "hover:bg-accent/10 focus-visible:bg-accent/10"
       }`}
       aria-label="Resize selected task drawer"
       title="Drag to resize selected task drawer"
     >
       <span
         className={`absolute left-1/2 top-1/2 h-14 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full transition ${
-          isResizing ? "bg-copper" : "bg-steel/25"
+          isResizing ? "bg-accent" : "bg-steel/25"
         }`}
       />
     </button>
@@ -3396,11 +3515,11 @@ function DetailDrawer({
         {collapsedRail}
         <div aria-hidden={collapsed} className={contentClass}>
           <div className="flex items-center justify-between">
-            <div className="text-sm font-black text-ink">Detail</div>
+            <div className="text-sm font-medium text-ink">Detail</div>
             <button
               type="button"
               onClick={onToggleCollapsed}
-              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-white text-steel transition hover:bg-[#f4f0e7]"
+              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-steel transition hover:bg-surface-sunken"
               title="Collapse selected task drawer"
               aria-label="Collapse selected task drawer"
             >
@@ -3451,6 +3570,7 @@ function DetailDrawer({
   }
 
   function removeManufacturingStep(stepId: string) {
+    const stepToDelete = manufacturingSteps.find((step) => step.id === stepId);
     const nextSteps = manufacturingSteps
       .filter((step) => step.id !== stepId)
       .map((step, index) => ({ ...step, sequence: index + 1 }));
@@ -3463,6 +3583,25 @@ function DetailDrawer({
       manufacturingSteps: nextSteps,
       plannedDurationMinutes,
       customFields: nextTask.customFields,
+    });
+
+    if (stepToDelete) {
+      onStepDeleted(currentTask, stepToDelete);
+    }
+  }
+
+  function requestRemoveManufacturingStep(stepId: string) {
+    const step = manufacturingSteps.find((candidate) => candidate.id === stepId);
+    if (!step) {
+      return;
+    }
+
+    onConfirmAction({
+      title: `Delete step ${step.sequence}?`,
+      body: "This removes the manufacturing step, its tools, part links, and attached photos from this task.",
+      tone: "danger",
+      confirmLabel: "Delete Step",
+      onConfirm: () => removeManufacturingStep(stepId),
     });
   }
 
@@ -3596,6 +3735,16 @@ function DetailDrawer({
     void onRemoveStepPhoto(taskId, stepId, photoId);
   }
 
+  function requestRemoveManufacturingStepPhoto(stepId: string, photo: StepPhotoAttachment) {
+    onConfirmAction({
+      title: "Delete photo?",
+      body: "This removes the photo from the shared step record.",
+      tone: "danger",
+      confirmLabel: "Delete Photo",
+      onConfirm: () => removeManufacturingStepPhoto(stepId, photo.id),
+    });
+  }
+
   return (
     <aside data-detail-drawer="true" data-drawer-state={collapsed ? "collapsed" : "expanded"} className={drawerClass}>
       {resizeHandle}
@@ -3604,13 +3753,13 @@ function DetailDrawer({
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[11px] font-bold uppercase tracking-wide text-steel">Selected Task</div>
-            <h2 className="mt-1 text-lg font-black leading-tight text-ink">{task.name}</h2>
+            <h2 className="mt-1 text-lg font-medium leading-tight text-ink">{task.name}</h2>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={onToggleCollapsed}
-              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-white text-steel hover:bg-[#f4f0e7]"
+              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-steel hover:bg-surface-sunken"
               title="Collapse selected task drawer"
               aria-label="Collapse selected task drawer"
             >
@@ -3621,8 +3770,8 @@ function DetailDrawer({
         </div>
 
         <div className="space-y-4">
-        <div className="rounded-md border border-line bg-white p-3">
-          <div className="mb-3 text-xs font-black uppercase tracking-wide text-steel">Station</div>
+        <div className="ui-panel p-3">
+          <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Station</div>
           <div className="text-sm font-bold text-ink">{station.sequence}. {station.name}</div>
           <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-semibold text-steel">
             <span>Cycle {formatMinutes(station.plannedCycleMinutes)}</span>
@@ -3635,22 +3784,22 @@ function DetailDrawer({
         <label className="block">
           <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">Description</span>
           <textarea
-            className="min-h-[110px] w-full resize-none rounded border border-line bg-white px-3 py-2 text-sm text-ink outline-none"
+            className="min-h-[110px] w-full resize-none rounded border border-line bg-surface px-3 py-2 text-sm text-ink outline-none"
             value={task.description ?? ""}
             onChange={(event) => onUpdateTask(task.id, { description: event.target.value })}
           />
         </label>
 
-        <div className="rounded-md border border-line bg-white p-2.5">
+        <div className="ui-panel p-2.5">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-black uppercase tracking-wide text-steel">Manufacturing Steps</div>
+              <div className="text-xs ui-mono-label tracking-wide text-steel">Manufacturing Steps</div>
               <div className="text-xs font-semibold text-steel">{manufacturingSteps.length} step(s)</div>
             </div>
             <button
               type="button"
               onClick={addManufacturingStep}
-              className="inline-flex h-8 items-center gap-1 rounded bg-graphite px-2 text-xs font-bold text-white hover:bg-ink"
+              className="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-xs text-canvas hover:opacity-90"
             >
               <Plus size={14} />
               Step
@@ -3674,11 +3823,11 @@ function DetailDrawer({
                       className="grid grid-cols-[minmax(0,1fr)_22px] gap-1.5 border-b border-line/70 px-1 pb-2 last:border-b-0 last:pb-0"
                     >
                       <div className="min-w-0 space-y-1">
-                        <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-steel">
+                        <div className="flex items-center gap-1 ui-mono-label">
                           <span className="shrink-0">Step</span>
                           <ClearableNumberInput
                             aria-label={`Step ${step.sequence} sequence`}
-                            className="number-input h-6 w-8 rounded border border-line bg-white px-0.5 text-center text-[11px] font-black text-ink outline-none focus:border-copper"
+                            className="number-input h-6 w-8 rounded border border-line bg-surface px-0.5 text-center text-[11px] font-medium text-ink outline-none focus:border-accent"
                             value={step.sequence}
                             min={1}
                             fallbackValue={step.sequence}
@@ -3689,7 +3838,7 @@ function DetailDrawer({
                           <span className="ml-1 shrink-0">Min</span>
                           <ClearableNumberInput
                             aria-label={`Step ${step.sequence} duration minutes`}
-                            className="number-input h-6 w-12 rounded border border-line bg-white px-0.5 text-center text-[11px] font-black text-ink outline-none focus:border-copper"
+                            className="number-input h-6 w-12 rounded border border-line bg-surface px-0.5 text-center text-[11px] font-medium text-ink outline-none focus:border-accent"
                             value={step.durationMinutes ?? 0}
                             min={0}
                             fallbackValue={step.durationMinutes ?? 0}
@@ -3699,7 +3848,7 @@ function DetailDrawer({
                         </div>
                         <textarea
                           aria-label={`Step ${step.sequence} instruction`}
-                          className="min-h-[86px] w-full resize-none rounded border border-line bg-white px-2 py-2 text-sm font-semibold leading-snug text-ink outline-none focus:border-copper"
+                          className="min-h-[86px] w-full resize-none rounded border border-line bg-surface px-2 py-2 text-sm font-semibold leading-snug text-ink outline-none focus:border-accent"
                           value={step.instruction}
                           onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
                           onKeyDown={(event) =>
@@ -3712,7 +3861,7 @@ function DetailDrawer({
                         <button
                           type="button"
                           onClick={() => updateManufacturingStep(step.id, { instruction: applyInstructionBullets(step.instruction) })}
-                          className="inline-flex h-7 items-center gap-1 rounded border border-line bg-white px-2 text-[10px] font-black uppercase text-steel hover:border-copper hover:text-copper"
+                          className="inline-flex h-7 items-center gap-1 rounded border border-line bg-surface px-2 text-[10px] ui-mono-label text-steel hover:border-accent hover:text-accent"
                           aria-label={`Format step ${step.sequence} as bullets`}
                           title={`Format step ${step.sequence} as bullets`}
                         >
@@ -3721,11 +3870,11 @@ function DetailDrawer({
                         </button>
                         <div className="space-y-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-black uppercase tracking-wide text-steel">Tools</span>
+                            <span className="ui-mono-label">Tools</span>
                             {toolLibrary.length > 0 ? (
                               <select
                                 aria-label={`Add saved tool to step ${step.sequence}`}
-                                className="h-7 max-w-[150px] rounded border border-line bg-white px-1.5 text-[10px] font-bold text-steel outline-none focus:border-copper"
+                                className="h-7 max-w-[150px] rounded border border-line bg-surface px-1.5 text-[10px] font-bold text-steel outline-none focus:border-accent"
                                 value=""
                                 onChange={(event) => {
                                   if (event.target.value) {
@@ -3745,9 +3894,9 @@ function DetailDrawer({
                             ) : null}
                           </div>
                           <div className="grid grid-cols-[42px_minmax(0,1fr)_42px] items-center gap-1">
-                            <span className="text-[10px] font-black uppercase tracking-wide text-steel">New</span>
+                            <span className="ui-mono-label">New</span>
                             <input
-                              className="h-7 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-copper"
+                              className="h-7 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-accent"
                               value={newStepToolNames[step.id] ?? ""}
                               onChange={(event) =>
                                 setNewStepToolNames((current) => ({ ...current, [step.id]: event.target.value }))
@@ -3763,7 +3912,7 @@ function DetailDrawer({
                             <button
                               type="button"
                               onClick={() => addManufacturingStepTool(step.id)}
-                              className="h-7 text-[10px] font-black uppercase text-graphite hover:text-copper"
+                              className="h-7 text-[10px] ui-mono-label text-ink-secondary hover:text-accent"
                             >
                               Add
                             </button>
@@ -3779,7 +3928,7 @@ function DetailDrawer({
                                   <button
                                     type="button"
                                     onClick={() => removeManufacturingStepTool(step.id, tool)}
-                                    className="text-steel/70 hover:text-signal"
+                                    className="text-steel/70 hover:text-danger"
                                     aria-label={`Remove ${tool}`}
                                     title={`Remove ${tool}`}
                                   >
@@ -3810,6 +3959,7 @@ function DetailDrawer({
                             compact
                             isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
+                            onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
                             onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
                           />
                         </div>
@@ -3825,15 +3975,15 @@ function DetailDrawer({
                               <label
                                 key={option.key}
                                 title={option.label}
-                                className={`flex h-7 min-w-0 items-center justify-center gap-1 rounded border px-1.5 text-[10px] font-black transition ${
+                                className={`flex h-7 min-w-0 items-center justify-center gap-1 rounded border px-1.5 text-[10px] font-medium transition ${
                                   checked
-                                    ? "border-teal/30 bg-teal/10 text-teal"
-                                    : "border-line bg-white text-steel hover:border-copper"
+                                    ? "border-accent/30 bg-accent/10 text-accent"
+                                    : "border-line bg-surface text-steel hover:border-accent"
                                 }`}
                               >
                                 <input
                                   type="checkbox"
-                                  className="h-3 w-3 shrink-0 accent-teal"
+                                  className="h-3 w-3 shrink-0 accent-accent"
                                   checked={checked}
                                   onChange={(event) => {
                                     const nextChecks = new Set(selectedChecks);
@@ -3857,8 +4007,8 @@ function DetailDrawer({
                       </div>
                       <button
                         type="button"
-                        onClick={() => removeManufacturingStep(step.id)}
-                        className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-steel hover:bg-[#f5e7df] hover:text-signal"
+                        onClick={() => requestRemoveManufacturingStep(step.id)}
+                        className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-steel hover:bg-danger-muted hover:text-danger"
                         title="Remove step"
                         aria-label={`Remove step ${step.sequence}`}
                       >
@@ -3872,16 +4022,16 @@ function DetailDrawer({
           )}
         </div>
 
-        <div className="rounded-md border border-line bg-white p-3">
+        <div className="ui-panel p-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-black uppercase tracking-wide text-steel">Part References</div>
+              <div className="text-xs ui-mono-label tracking-wide text-steel">Part References</div>
               <div className="text-xs font-semibold text-steel">{partReferences.length} part number(s)</div>
             </div>
             <button
               type="button"
               onClick={addPartReference}
-              className="inline-flex h-8 items-center gap-1 rounded bg-graphite px-2 text-xs font-bold text-white hover:bg-ink"
+              className="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-xs text-canvas hover:opacity-90"
             >
               <Plus size={14} />
               Part
@@ -3889,17 +4039,17 @@ function DetailDrawer({
           </div>
           <div className="space-y-3">
             {partReferences.length === 0 ? (
-              <div className="rounded border border-dashed border-line bg-[#fbfaf6] p-3 text-xs font-semibold text-steel">
+              <div className="rounded border border-dashed border-line bg-surface-raised p-3 text-xs font-semibold text-steel">
                 Add part numbers, quantities, and disposition notes used by this task.
               </div>
             ) : null}
             {partReferences.map((part) => (
-              <div key={part.id} className="rounded border border-line bg-[#fbfaf6] p-2">
+              <div key={part.id} className="rounded border border-line bg-surface-raised p-2">
                 <div className="mb-2 grid grid-cols-[1fr_74px_34px] items-end gap-2">
                   <label className="block">
                     <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-steel">Part Number</span>
                     <input
-                      className="h-8 w-full rounded border border-line bg-white px-2 text-sm font-bold text-ink outline-none"
+                      className="h-8 w-full rounded border border-line bg-surface px-2 text-sm font-bold text-ink outline-none"
                       value={part.partNumber}
                       onChange={(event) => updatePartReference(part.id, { partNumber: event.target.value })}
                       placeholder="PN / kit / drawing ref"
@@ -3908,7 +4058,7 @@ function DetailDrawer({
                   <label className="block">
                     <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-steel">Qty</span>
                     <ClearableNumberInput
-                      className="number-input h-8 w-full rounded border border-line bg-white px-2 text-sm font-bold text-ink outline-none"
+                      className="number-input h-8 w-full rounded border border-line bg-surface px-2 text-sm font-bold text-ink outline-none"
                       value={part.quantity ?? 0}
                       min={0}
                       fallbackValue={part.quantity ?? 0}
@@ -3920,7 +4070,7 @@ function DetailDrawer({
                   <button
                     type="button"
                     onClick={() => removePartReference(part.id)}
-                    className="flex h-8 items-center justify-center rounded border border-line bg-white text-steel hover:border-signal hover:text-signal"
+                    className="flex h-8 items-center justify-center rounded border border-line bg-surface text-steel hover:border-danger hover:text-danger"
                     title="Remove part reference"
                   >
                     <Trash2 size={14} />
@@ -3929,7 +4079,7 @@ function DetailDrawer({
                 <label className="mb-2 block">
                   <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-steel">Description</span>
                   <input
-                    className="h-8 w-full rounded border border-line bg-white px-2 text-sm font-semibold text-ink outline-none"
+                    className="h-8 w-full rounded border border-line bg-surface px-2 text-sm font-semibold text-ink outline-none"
                     value={part.description ?? ""}
                     onChange={(event) => updatePartReference(part.id, { description: event.target.value })}
                     placeholder="What the reference is used for"
@@ -3938,7 +4088,7 @@ function DetailDrawer({
                 <label className="block">
                   <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-steel">Disposition / Reference Note</span>
                   <input
-                    className="h-8 w-full rounded border border-line bg-white px-2 text-sm font-semibold text-ink outline-none"
+                    className="h-8 w-full rounded border border-line bg-surface px-2 text-sm font-semibold text-ink outline-none"
                     value={part.disposition ?? ""}
                     onChange={(event) => updatePartReference(part.id, { disposition: event.target.value })}
                     placeholder="Reuse, rework, service part, QC hold, etc."
@@ -3959,14 +4109,14 @@ function DetailDrawer({
           />
           <div>
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-steel">Headcount</div>
-            <div className="flex h-10 items-center rounded border border-line bg-[#f4f0e7] px-3 text-lg font-black text-ink">
+            <div className="flex h-10 items-center rounded border border-line bg-surface-sunken px-3 text-lg font-medium text-ink">
               {task.plannedOperators}
             </div>
           </div>
         </div>
 
-        <div className="rounded-md border border-line bg-white p-3">
-          <div className="mb-3 text-xs font-black uppercase tracking-wide text-steel">Gates</div>
+        <div className="ui-panel p-3">
+          <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Gates</div>
           <div className="grid grid-cols-2 gap-2">
             <label className="flex items-center gap-2 text-sm font-semibold text-ink">
               <input
@@ -4006,7 +4156,7 @@ function DetailDrawer({
         <label className="block">
           <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">Safety Notes</span>
           <textarea
-            className="min-h-[88px] w-full resize-none rounded border border-line bg-white px-3 py-2 text-sm text-ink outline-none"
+            className="min-h-[88px] w-full resize-none rounded border border-line bg-surface px-3 py-2 text-sm text-ink outline-none"
             value={task.safetyNotes ?? ""}
             onChange={(event) => onUpdateTask(task.id, { safetyNotes: event.target.value })}
           />
@@ -4086,11 +4236,11 @@ function PlaybackPanel({
     .find((task) => getTaskWindow(task, bounds.startMs).finishMinute > currentMinute);
 
   return (
-    <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-graphite text-white shadow-[0_-16px_42px_rgba(23,33,27,0.2)]">
+    <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface text-ink">
       <button
         type="button"
         onClick={onToggleCollapsed}
-        className="absolute left-1/2 top-0 flex h-7 w-10 -translate-x-1/2 -translate-y-full items-center justify-center rounded-t-md border border-b-0 border-line bg-graphite text-white hover:bg-ink"
+        className="absolute left-1/2 top-0 flex h-7 w-10 -translate-x-1/2 -translate-y-full items-center justify-center rounded-t-xl border border-b-0 border-line bg-surface text-ink-secondary hover:text-ink"
         title={collapsed ? "Expand playback footer" : "Collapse playback footer"}
         aria-label={collapsed ? "Expand playback footer" : "Collapse playback footer"}
       >
@@ -4102,22 +4252,22 @@ function PlaybackPanel({
             <button
               type="button"
               onClick={onPlayPause}
-              className="flex h-8 w-8 items-center justify-center rounded bg-copper text-white hover:bg-[#995122]"
+              className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-canvas hover:opacity-90"
               title={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? <Pause size={15} /> : <Play size={15} />}
             </button>
-            <div className="text-[11px] font-black uppercase tracking-wide text-white/60">Simulation Time</div>
-            <div className="font-mono text-sm font-black text-white">{formatMinutes(currentMinute)}</div>
+            <div className="text-[11px] font-semibold text-ink-secondary">Simulation time</div>
+            <div className="font-mono text-sm font-semibold text-ink">{formatMinutes(currentMinute)}</div>
           </div>
           <div className="hidden min-w-0 flex-1 items-center gap-3 md:flex">
-            <div className="h-2 flex-1 overflow-hidden rounded bg-white/10">
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
               <div
-                className="h-full rounded bg-copper"
+                className="h-full rounded-full bg-accent"
                 style={{ width: `${Math.min((currentMinute / bounds.durationMinutes) * 100, 100)}%` }}
               />
             </div>
-            <div className="truncate text-xs font-semibold text-white/70">{activeTasks[0]?.name ?? "Idle"}</div>
+            <div className="truncate text-xs font-medium text-ink-secondary">{activeTasks[0]?.name ?? "Idle"}</div>
           </div>
         </div>
       ) : (
@@ -4127,7 +4277,7 @@ function PlaybackPanel({
             <button
               type="button"
               onClick={onPlayPause}
-              className="flex h-10 w-10 items-center justify-center rounded bg-copper text-white hover:bg-[#995122]"
+              className="flex h-10 w-10 items-center justify-center rounded-md bg-accent text-canvas hover:opacity-90"
               title={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? <Pause size={18} /> : <Play size={18} />}
@@ -4135,7 +4285,7 @@ function PlaybackPanel({
             <button
               type="button"
               onClick={() => onStep(-15)}
-              className="flex h-10 w-10 items-center justify-center rounded bg-white/10 text-white hover:bg-white/20"
+              className="flex h-10 w-10 items-center justify-center ui-panel text-ink-secondary hover:bg-surface-muted hover:text-ink"
               title="Step back"
             >
               <SkipBack size={17} />
@@ -4143,7 +4293,7 @@ function PlaybackPanel({
             <button
               type="button"
               onClick={() => onStep(15)}
-              className="flex h-10 w-10 items-center justify-center rounded bg-white/10 text-white hover:bg-white/20"
+              className="flex h-10 w-10 items-center justify-center ui-panel text-ink-secondary hover:bg-surface-muted hover:text-ink"
               title="Step forward"
             >
               <SkipForward size={17} />
@@ -4151,13 +4301,13 @@ function PlaybackPanel({
             <button
               type="button"
               onClick={onReset}
-              className="flex h-10 w-10 items-center justify-center rounded bg-white/10 text-white hover:bg-white/20"
+              className="flex h-10 w-10 items-center justify-center ui-panel text-ink-secondary hover:bg-surface-muted hover:text-ink"
               title="Restart"
             >
               <RotateCcw size={17} />
             </button>
             <select
-              className="h-10 rounded border border-white/20 bg-white/10 px-2 text-sm font-bold text-white outline-none"
+              className="h-10 ui-panel px-2 text-sm font-semibold text-ink outline-none"
               value={speed}
               onChange={(event) => onSpeed(safeNumber(event.target.value, speed))}
             >
@@ -4168,11 +4318,11 @@ function PlaybackPanel({
               ))}
             </select>
           </div>
-          <div className="text-[11px] font-bold uppercase tracking-wide text-white/60">Simulation Time</div>
-          <div className="mt-1 text-2xl font-black">{formatMinutes(currentMinute)}</div>
-          <div className="mt-2 h-2 overflow-hidden rounded bg-white/10">
+          <div className="text-[11px] font-semibold text-ink-secondary">Simulation time</div>
+          <div className="mt-1 text-2xl font-semibold tracking-tight text-ink">{formatMinutes(currentMinute)}</div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-sunken">
             <div
-              className="h-full rounded bg-copper"
+              className="h-full rounded-full bg-accent"
               style={{ width: `${Math.min((currentMinute / bounds.durationMinutes) * 100, 100)}%` }}
             />
           </div>
@@ -4186,16 +4336,16 @@ function PlaybackPanel({
           <StatCard label="Next Gate" value={nextMilestone ? nextMilestone.wbs : "-"} meta={nextMilestone?.name ?? "Complete"} />
         </div>
 
-        <div className="overflow-hidden rounded border border-white/10 bg-white/10">
-          <div className="flex h-8 items-center gap-2 border-b border-white/10 px-3 text-xs font-black uppercase tracking-wide text-white/70">
+        <div className="overflow-hidden rounded-lg border border-line bg-surface-muted">
+          <div className="flex h-8 items-center gap-2 border-b border-line px-3 text-xs font-semibold text-ink-secondary">
             <Activity size={14} />
-            Event Log
+            Event log
           </div>
           <div className="max-h-[104px] overflow-auto px-3 py-2">
             {events.map((event) => (
               <div key={`${event.time}-${event.label}`} className="grid grid-cols-[62px_1fr] gap-2 py-1 text-xs">
-                <span className="font-mono font-bold text-white/60">{formatMinutes(event.time)}</span>
-                <span className="truncate font-semibold text-white">{event.label}</span>
+                <span className="font-mono font-medium text-ink-tertiary">{formatMinutes(event.time)}</span>
+                <span className="truncate font-medium text-ink">{event.label}</span>
               </div>
             ))}
           </div>
@@ -4213,8 +4363,24 @@ export function LineWorkspace({
   projectId?: string;
   projectContext?: PlannerProjectContext;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const plannerQueryString = searchParams.toString();
+  const urlWorkspaceSnapshot = useMemo<Partial<WorkspaceSnapshot>>(() => {
+    const params = new URLSearchParams(plannerQueryString);
+    const requestedModule = params.get("view");
+    return {
+      activeModule: isKnownModule(requestedModule) ? requestedModule : undefined,
+      selectedTaskId: params.get("task") ?? undefined,
+      selectedStationId: params.get("station") ?? undefined,
+      activeZoneId: params.get("zone") ?? undefined,
+    };
+  }, [plannerQueryString]);
+  const initialUrlWorkspaceSnapshotRef = useRef(urlWorkspaceSnapshot);
   const [plannerState, setPlannerState] = useState<PlannerState>(initialPlannerState);
   const [activeModule, setActiveModule] = useState("dashboard");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [selectedTaskId, setSelectedTaskId] = useState(initialPlannerState.tasks[0]?.id);
   const [selectedStationId, setSelectedStationId] = useState(initialPlannerState.stations[0]?.id);
   const [activeZoneId, setActiveZoneId] = useState<string>();
@@ -4223,8 +4389,8 @@ export function LineWorkspace({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackCollapsed, setPlaybackCollapsed] = useState(true);
   const [detailDrawerCollapsed, setDetailDrawerCollapsed] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [detailDrawerWidth, setDetailDrawerWidth] = useState(360);
-  const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false);
   const [isResizingDetailDrawer, setIsResizingDetailDrawer] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("loading");
   const [saveError, setSaveError] = useState<string>();
@@ -4327,6 +4493,71 @@ export function LineWorkspace({
       : currentAllocationRecommendations;
   const activeProjectContext = derivedState.project ?? projectContext;
 
+  useEffect(() => {
+    if (!hasLoadedRemoteState) {
+      return;
+    }
+
+    writeWorkspaceSnapshot(projectId, {
+      activeModule,
+      selectedTaskId,
+      selectedStationId,
+      activeZoneId,
+      detailDrawerCollapsed,
+      sidebarCollapsed,
+      savedAt: new Date().toISOString(),
+    });
+  }, [
+    activeModule,
+    activeZoneId,
+    detailDrawerCollapsed,
+    sidebarCollapsed,
+    hasLoadedRemoteState,
+    projectId,
+    selectedStationId,
+    selectedTaskId,
+  ]);
+
+  useEffect(() => {
+    if (!hasLoadedRemoteState) {
+      return;
+    }
+
+    const params = new URLSearchParams(plannerQueryString);
+    params.set("view", activeModule);
+    if (selectedTaskId) {
+      params.set("task", selectedTaskId);
+    } else {
+      params.delete("task");
+    }
+    if (selectedStationId) {
+      params.set("station", selectedStationId);
+    } else {
+      params.delete("station");
+    }
+    if (activeZoneId) {
+      params.set("zone", activeZoneId);
+    } else {
+      params.delete("zone");
+    }
+
+    const nextQueryString = params.toString();
+    if (nextQueryString === plannerQueryString) {
+      return;
+    }
+
+    router.replace(nextQueryString ? `${pathname}?${nextQueryString}` : pathname, { scroll: false });
+  }, [
+    activeModule,
+    activeZoneId,
+    hasLoadedRemoteState,
+    pathname,
+    plannerQueryString,
+    router,
+    selectedStationId,
+    selectedTaskId,
+  ]);
+
   function hasLocalSaveWork() {
     return (
       saveInFlightRef.current ||
@@ -4409,6 +4640,7 @@ export function LineWorkspace({
 
         if (savedState) {
           const procedureDraft = readProcedureDraftSnapshot();
+          const workspaceSnapshot = readWorkspaceSnapshot(projectId);
           const draftTask = procedureDraft
             ? savedState.tasks.find((task) => task.id === procedureDraft.taskId)
             : undefined;
@@ -4420,12 +4652,36 @@ export function LineWorkspace({
                 ),
               }
             : savedState;
-          const selectedTask = draftTask ? procedureDraft?.task : hydratedState.tasks[0];
+          const snapshotTask = workspaceSnapshot?.selectedTaskId
+            ? hydratedState.tasks.find((task) => task.id === workspaceSnapshot.selectedTaskId)
+            : undefined;
+          const initialUrlWorkspaceSnapshot = initialUrlWorkspaceSnapshotRef.current;
+          const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
+            ? hydratedState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
+            : undefined;
+          const selectedTask = draftTask ? procedureDraft?.task : urlTask ?? snapshotTask ?? hydratedState.tasks[0];
+          const snapshotStation = workspaceSnapshot?.selectedStationId
+            ? hydratedState.stations.find((station) => station.id === workspaceSnapshot.selectedStationId)
+            : undefined;
+          const urlStation = initialUrlWorkspaceSnapshot.selectedStationId
+            ? hydratedState.stations.find((station) => station.id === initialUrlWorkspaceSnapshot.selectedStationId)
+            : undefined;
+          const snapshotZone = workspaceSnapshot?.activeZoneId
+            ? hydratedState.zones.find((zone) => zone.id === workspaceSnapshot.activeZoneId)
+            : undefined;
+          const urlZone = initialUrlWorkspaceSnapshot.activeZoneId
+            ? hydratedState.zones.find((zone) => zone.id === initialUrlWorkspaceSnapshot.activeZoneId)
+            : undefined;
 
           setPlannerState(hydratedState);
+          if (initialUrlWorkspaceSnapshot.activeModule || workspaceSnapshot?.activeModule) {
+            setActiveModule(initialUrlWorkspaceSnapshot.activeModule ?? workspaceSnapshot?.activeModule ?? "dashboard");
+          }
           setSelectedTaskId(selectedTask?.id ?? "");
-          setSelectedStationId(selectedTask?.stationId ?? hydratedState.tasks[0]?.stationId ?? "");
-          setActiveZoneId(undefined);
+          setSelectedStationId(urlStation?.id ?? snapshotStation?.id ?? selectedTask?.stationId ?? hydratedState.tasks[0]?.stationId ?? "");
+          setActiveZoneId(urlZone?.id ?? snapshotZone?.id);
+          setDetailDrawerCollapsed(workspaceSnapshot?.detailDrawerCollapsed ?? true);
+          setSidebarCollapsed(workspaceSnapshot?.sidebarCollapsed ?? false);
           setHasLoadedRemoteState(true);
           if (draftTask && procedureDraft) {
             setSaveState("draft");
@@ -4441,6 +4697,22 @@ export function LineWorkspace({
           return;
         }
 
+        const initialUrlWorkspaceSnapshot = initialUrlWorkspaceSnapshotRef.current;
+        if (initialUrlWorkspaceSnapshot.activeModule) {
+          setActiveModule(initialUrlWorkspaceSnapshot.activeModule);
+        }
+        const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
+          ? initialPlannerState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
+          : undefined;
+        const urlStation = initialUrlWorkspaceSnapshot.selectedStationId
+          ? initialPlannerState.stations.find((station) => station.id === initialUrlWorkspaceSnapshot.selectedStationId)
+          : undefined;
+        if (urlTask) {
+          setSelectedTaskId(urlTask.id);
+        }
+        if (urlStation || urlTask) {
+          setSelectedStationId(urlStation?.id ?? urlTask?.stationId ?? "");
+        }
         setHasLoadedRemoteState(true);
         setSaveState("idle");
       })
@@ -4492,7 +4764,7 @@ export function LineWorkspace({
   }, [derivedState.product.id, derivedState.scenario.id, derivedState.tasks, hasLoadedRemoteState]);
 
   useEffect(() => {
-    if (!isPlaying) {
+    if (!SIMULATION_ENABLED || !isPlaying) {
       return;
     }
 
@@ -4621,6 +4893,36 @@ export function LineWorkspace({
     }
   }
 
+  function notifyRestoreAction({
+    body,
+    onRestore,
+    restoreLabel = "Restore",
+    title,
+  }: {
+    body: string;
+    onRestore: () => void;
+    restoreLabel?: string;
+    title: string;
+  }) {
+    notifyFeedback({
+      title,
+      tone: "warning",
+      persistent: true,
+      content: (
+        <div className="mt-2 space-y-3">
+          <div className="text-sm font-semibold leading-relaxed text-steel">{body}</div>
+          <button
+            type="button"
+            onClick={onRestore}
+            className="inline-flex h-8 items-center justify-center rounded border border-accent bg-surface px-3 text-xs ui-mono-label tracking-wide text-accent transition hover:bg-accent-muted"
+          >
+            {restoreLabel}
+          </button>
+        </div>
+      ),
+    });
+  }
+
   function requestFeedbackConfirm(message: FeedbackConfirm) {
     setFeedbackConfirm(message);
   }
@@ -4645,47 +4947,37 @@ export function LineWorkspace({
 
   const isProcedureModule = activeModule === "procedure";
   const isDashboardModule = activeModule === "dashboard";
-  const showsSchedulingWorkspace = !isProcedureModule && !isDashboardModule && activeModule !== "setup";
+  const isSettingsModule = activeModule === "settings";
+  const showDetailDrawer = false;
+  const showsSchedulingWorkspace =
+    !isProcedureModule && !isDashboardModule && activeModule !== "setup" && !isSettingsModule;
   const selectedTask = derivedState.tasks.find((task) => task.id === selectedTaskId) ?? derivedState.tasks[0];
   const selectedStation = selectedTask
     ? buildProcessStationForTask(selectedTask, derivedState.tasks, kpis.bottleneckStation?.id)
     : undefined;
-  const workspaceGridClass = isProcedureModule
-    ? workspaceDrawerOpen
-      ? "grid h-[calc(100dvh-64px)] min-h-0 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[76px_348px_minmax(0,1fr)]"
-      : "grid h-[calc(100dvh-64px)] min-h-0 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[76px_minmax(0,1fr)]"
-    : workspaceDrawerOpen
-      ? "grid h-[calc(100dvh-64px)] min-h-0 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[76px_348px_minmax(0,1fr)] xl:grid-cols-[76px_348px_minmax(0,1fr)_var(--detail-drawer-width)]"
-      : "grid h-[calc(100dvh-64px)] min-h-0 grid-cols-1 overflow-hidden transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[76px_minmax(0,1fr)] xl:grid-cols-[76px_minmax(0,1fr)_var(--detail-drawer-width)]";
+  const workspaceGridClass = "ui-workspace-shell";
   const workspaceGridStyle = {
+    "--workspace-sidebar-width": sidebarCollapsed ? "0px" : "var(--shell-sidebar)",
     "--detail-drawer-width": detailDrawerCollapsed ? "44px" : `${detailDrawerWidth}px`,
   } as CSSProperties;
 
   if (!hasLoadedRemoteState) {
     return (
-      <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-[#f2efe6] text-ink">
-        <TopNav
-          state={derivedState}
-          project={activeProjectContext}
-          saveState={saveState}
-          saveError={saveError}
-          onSave={() => undefined}
-          onExport={() => undefined}
-        />
-        <div className="grid h-[calc(100dvh-64px)] min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[76px_minmax(0,1fr)]">
-          <Sidebar
-            activeModule={activeModule}
-            onChange={setActiveModule}
-            project={activeProjectContext}
-            workspaceDrawerOpen={false}
-            onToggleWorkspaceDrawer={() => undefined}
-          />
-          <main className="min-h-0 min-w-0 overflow-auto p-4">
-            <section className="rounded-md border border-line bg-white p-5 shadow-sm">
-              <div className="text-sm font-black text-ink">Loading planner data</div>
-              <div className="mt-1 text-xs font-semibold text-steel">
-                Reading the saved line plan from Supabase before rendering the workspace.
-              </div>
+      <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink">
+        <TopNav onExport={() => undefined} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} />
+        <div className="ui-workspace-shell" style={{ "--workspace-sidebar-width": sidebarCollapsed ? "0px" : "var(--shell-sidebar)" } as CSSProperties}>
+          <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
+            <Sidebar
+              activeModule={activeModule}
+              settingsSection={settingsSection}
+              onChange={navigateModule}
+              onOpenSettings={openSettings}
+              project={activeProjectContext}
+            />
+          </div>
+          <main className="ui-workspace-content p-3 sm:p-4">
+            <section className="ui-panel p-8">
+              <NothingLoadingBlock title="Loading" body="Reading the saved line plan from Supabase before rendering the workspace." />
             </section>
           </main>
         </div>
@@ -4702,8 +4994,14 @@ export function LineWorkspace({
 
   async function persistPlannerState(stateToSave: PlannerState) {
     if (stateToSave.tasks.length === 0) {
-      setSaveError("Refusing to save an empty Gantt. Add at least one task before saving.");
+      const message = "Refusing to save an empty Gantt. Add at least one task before saving.";
+      setSaveError(message);
       setSaveState("error");
+      notifyFeedback({
+        title: "Save blocked",
+        body: message,
+        tone: "warning",
+      });
       return;
     }
 
@@ -4725,8 +5023,14 @@ export function LineWorkspace({
       try {
         await savePlannerShellToSupabase(nextState);
       } catch (error) {
-        setSaveError(error instanceof Error ? error.message : "Unable to save planner state.");
+        const message = error instanceof Error ? error.message : "Unable to save planner state.";
+        setSaveError(message);
         setSaveState("error");
+        notifyFeedback({
+          title: "Save failed",
+          body: message,
+          tone: "danger",
+        });
         saveInFlightRef.current = false;
         return;
       }
@@ -4763,9 +5067,15 @@ export function LineWorkspace({
         lastSavedTaskId = nextSave.task.id;
       } catch (error) {
         const failedSave = nextSave;
+        const message = error instanceof Error ? error.message : "Unable to save procedure task.";
         writeProcedureDraftSnapshot(failedSave.task);
-        setSaveError(error instanceof Error ? error.message : "Unable to save procedure task.");
+        setSaveError(message);
         setSaveState("retrying");
+        notifyFeedback({
+          title: "Save failed — retrying",
+          body: message,
+          tone: "warning",
+        });
         procedureSaveInFlightRef.current = false;
         queuedProcedureSaveRef.current = null;
         flushDeferredRemoteRefresh();
@@ -4827,15 +5137,6 @@ export function LineWorkspace({
         void persistProcedureTaskUpdate(nextSave.task, nextSave.tasks);
       }
     }, PROCEDURE_SAVE_DEBOUNCE_MS);
-  }
-
-  async function savePlannerState() {
-    if (activeModule === "procedure" && selectedTask) {
-      await persistProcedureTaskUpdate(selectedTask, derivedState.tasks);
-      return;
-    }
-
-    await persistPlannerState(derivedState);
   }
 
   function updateProductNumber(field: ProductNumberField, value: number) {
@@ -5010,6 +5311,29 @@ export function LineWorkspace({
       await softDeleteStepPhotoAttachmentFromSupabase(photoId, taskId, projectId);
 
       setSaveState("saved");
+      if (removedPhoto) {
+        notifyRestoreAction({
+          title: "Deleted photo",
+          body: "Restore will attach this photo back to the same manufacturing step.",
+          restoreLabel: "Restore Photo",
+          onRestore: () => {
+            setSaveError(undefined);
+            setSaveState("saving");
+            setPlannerState((current) => ({
+              ...current,
+              tasks: current.tasks.map((task) =>
+                task.id === taskId ? upsertStepPhotoAttachments(task, stepId, [removedPhoto as StepPhotoAttachment]) : task,
+              ),
+            }));
+            void uploadStepPhotoAttachment(taskId, stepId, removedPhoto as StepPhotoAttachment, activeProjectContext)
+              .then(() => setSaveState("saved"))
+              .catch((error: unknown) => {
+                setSaveError(error instanceof Error ? error.message : "Unable to restore the selected photo.");
+                setSaveState("error");
+              });
+          },
+        });
+      }
     } catch (error) {
       if (removedPhoto) {
         setPlannerState((current) => ({
@@ -5098,10 +5422,10 @@ export function LineWorkspace({
             readOnly
             value={text}
             onFocus={(event) => event.currentTarget.select()}
-            className="h-[320px] w-full resize-none rounded border border-line bg-white p-3 font-mono text-[11px] leading-relaxed text-ink outline-none focus:border-copper focus:ring-2 focus:ring-copper/20"
+            className="h-[320px] w-full resize-none rounded border border-line bg-surface p-3 font-mono text-[11px] leading-relaxed text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
           />
           {errors.length ? (
-            <div className="rounded border border-line bg-[#fbfaf6] px-3 py-2 text-[11px] font-semibold leading-snug text-steel">
+            <div className="rounded border border-line bg-surface-raised px-3 py-2 text-[11px] font-semibold leading-snug text-steel">
               {errors.join(" ")}
             </div>
           ) : null}
@@ -5337,14 +5661,14 @@ export function LineWorkspace({
           : "IE smart allocation complete",
       content: (
         <div className="space-y-3">
-          <div className="rounded-md border border-line bg-[#fbfaf6] p-3">
-            <div className="text-[10px] font-black uppercase tracking-wide text-steel">IE Agent Summary</div>
+          <div className="ui-panel-raised p-3">
+            <div className="ui-mono-label">IE Agent Summary</div>
             <div className="mt-1 text-sm font-bold leading-snug text-ink">{agentPlan.summary}</div>
           </div>
 
           {hardValidationFailure ? (
-            <div className="rounded-md border border-signal/30 bg-[#f9e7e3] p-3">
-              <div className="text-[10px] font-black uppercase tracking-wide text-signal">Not Applied</div>
+            <div className="rounded-md border border-danger/30 bg-danger-muted p-3">
+              <div className="text-[10px] ui-mono-label tracking-wide text-danger">Not Applied</div>
               <div className="mt-1 text-sm font-bold leading-snug text-ink">
                 The IE agent returned an invalid headcount plan. No Gantt assignments were changed because validation found {validationRejectionReason}.
               </div>
@@ -5352,35 +5676,35 @@ export function LineWorkspace({
           ) : null}
 
           {unallocatedWorkReviews.length ? (
-            <div className="rounded-md border border-amber/35 bg-[#fffaf0]">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber/25 px-3 py-2">
+            <div className="rounded-md border border-warn/35 bg-accent-muted">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warn/25 px-3 py-2">
                 <div>
-                  <div className="text-[10px] font-black uppercase tracking-wide text-[#7a4e09]">Unallocated Required Work</div>
+                  <div className="text-[10px] ui-mono-label tracking-wide text-warn-strong">Unallocated Required Work</div>
                   <div className="mt-0.5 text-xs font-bold text-steel">
                     The plan is feasible only after these staffing exceptions are resolved.
                   </div>
                 </div>
-                <div className="text-[10px] font-black text-[#7a4e09]">{unallocatedWorkReviews.length} exception(s)</div>
+                <div className="text-[10px] font-medium text-warn-strong">{unallocatedWorkReviews.length} exception(s)</div>
               </div>
               <div className="max-h-[190px] overflow-auto">
                 {unallocatedWorkReviews.map((review) => (
                   <div
                     key={review.taskId}
-                    className="grid gap-2 border-b border-amber/20 bg-white px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[minmax(150px,0.8fr)_1.3fr_minmax(120px,0.55fr)]"
+                    className="grid gap-2 border-b border-warn/20 bg-surface px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[minmax(150px,0.8fr)_1.3fr_minmax(120px,0.55fr)]"
                   >
                     <div>
-                      <div className="font-black leading-snug text-ink">{review.taskLabel}</div>
-                      <div className="mt-1 inline-flex rounded border border-amber/35 bg-[#fff7e8] px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-[#7a4e09]">
+                      <div className="font-medium leading-snug text-ink">{review.taskLabel}</div>
+                      <div className="mt-1 inline-flex rounded border border-warn/35 bg-accent-muted px-2 py-0.5 text-[9px] ui-mono-label tracking-wide text-warn-strong">
                         {review.classification}
                       </div>
                     </div>
                     <div>
-                      <div className="font-black text-steel">{review.condition}</div>
+                      <div className="font-medium text-steel">{review.condition}</div>
                       <div className="mt-1 font-semibold leading-snug text-steel">{review.impact}</div>
                       <div className="mt-1 font-bold leading-snug text-ink">{review.recommendation}</div>
                     </div>
                     <div className="flex items-start sm:justify-end">
-                      <span className="inline-flex rounded border border-graphite/20 bg-[#f4f0e7] px-2 py-1 text-[10px] font-black uppercase tracking-wide text-graphite">
+                      <span className="inline-flex rounded border border-graphite/20 bg-surface-sunken px-2 py-1 text-[10px] ui-mono-label tracking-wide text-ink-secondary">
                         {review.action}
                       </span>
                     </div>
@@ -5390,9 +5714,9 @@ export function LineWorkspace({
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-[#fbfaf6] px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 ui-panel-raised px-3 py-2">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-wide text-steel">Review Packet</div>
+              <div className="ui-mono-label">Review Packet</div>
               <div className="mt-0.5 text-xs font-bold text-steel">
                 Copies audit text plus the Gantt data used by Smart Allocation.
               </div>
@@ -5400,29 +5724,29 @@ export function LineWorkspace({
             <button
               type="button"
               onClick={() => void copySmartAllocationReview(reviewText)}
-              className="inline-flex h-9 items-center gap-2 rounded border border-graphite bg-graphite px-3 text-xs font-black text-white outline-none transition hover:bg-ink focus-visible:ring-2 focus-visible:ring-copper"
+              className="inline-flex h-9 items-center gap-2 rounded border border-graphite bg-accent px-3 text-xs font-medium text-canvas outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-accent"
             >
               <Copy size={14} />
               Copy Audit
             </button>
           </div>
 
-          <div className="rounded-md border border-line bg-white">
+          <div className="ui-panel">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
               <div>
-                <div className="text-[10px] font-black uppercase tracking-wide text-steel">Allocation Audit</div>
+                <div className="ui-mono-label">Allocation Audit</div>
                 <div className="mt-0.5 text-xs font-bold text-steel">
                   {round(audit.assignmentCoveragePercent, 0)}% coverage · peak {audit.peakManpower} · spread {formatMinutes(audit.loadSpreadMinutes)}
                 </div>
               </div>
-              <div className="text-[10px] font-black uppercase tracking-wide text-steel">
+              <div className="ui-mono-label">
                 {audit.assignedTaskCount}/{audit.eligibleTaskCount} eligible task(s)
               </div>
             </div>
 
             <div className="p-2">
               <div className="overflow-hidden rounded border border-line">
-                <div className="grid grid-cols-[54px_0.8fr_1fr_1fr] items-center gap-2 border-b border-line bg-[#f4f0e7] px-2 py-1.5 text-[9px] font-black uppercase tracking-wide text-steel">
+                <div className="grid grid-cols-[54px_0.8fr_1fr_1fr] items-center gap-2 border-b border-line bg-surface-sunken px-2 py-1.5 text-[9px] ui-mono-label tracking-wide text-steel">
                   <div>Op</div>
                   <div>Load</div>
                   <div>Work</div>
@@ -5431,27 +5755,27 @@ export function LineWorkspace({
                 {audit.operators.map((operator, index) => {
                   const budgetTone =
                     operator.budgetVarianceMinutes > 1
-                      ? "text-[#7a4e09]"
+                      ? "text-warn-strong"
                       : operator.budgetVarianceMinutes < -1
                         ? "text-steel"
-                        : "text-teal";
+                        : "text-accent";
                   return (
                     <div
                       key={operator.operatorId}
-                      className="grid grid-cols-[54px_0.8fr_1fr_1fr] items-center gap-2 border-b border-line bg-[#fbfaf6] px-2 py-1.5 text-xs last:border-b-0"
+                      className="grid grid-cols-[54px_0.8fr_1fr_1fr] items-center gap-2 border-b border-line bg-surface-raised px-2 py-1.5 text-xs last:border-b-0"
                       title={operator.assignedTaskLabels.join("\n")}
                     >
                       <div className="flex items-center gap-2">
                         <WorkerIcon className="h-6 w-6 shrink-0" colorIndex={index} letter={operator.operatorId} />
                       </div>
                       <div className="whitespace-nowrap">
-                        <span className="font-black text-ink">{formatMinutes(operator.assignedMinutes)}</span>
+                        <span className="font-medium text-ink">{formatMinutes(operator.assignedMinutes)}</span>
                         <span className="ml-1 font-bold text-steel">· {round(operator.utilizationPercent, 0)}%</span>
                       </div>
                       <div className="truncate font-bold text-steel">
                         {operator.assignedTaskCount} task(s) · {operator.idleGapCount > 0 ? `${formatMinutes(operator.idleMinutes)} idle` : "continuous"}
                       </div>
-                      <div className={`truncate font-black ${budgetTone}`}>
+                      <div className={`truncate font-medium ${budgetTone}`}>
                         {operator.budgetVarianceMinutes > 1
                           ? `+${formatMinutes(operator.budgetVarianceMinutes)} vs budget`
                           : operator.budgetVarianceMinutes < -1
@@ -5470,22 +5794,22 @@ export function LineWorkspace({
           </div>
 
           {issueEntries.length ? (
-            <div className="rounded-md border border-line bg-white">
+            <div className="ui-panel">
               <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2">
-                <div className="text-[10px] font-black uppercase tracking-wide text-steel">Needs Review</div>
-                <div className="text-[10px] font-black text-steel">{issueEntries.length} item(s)</div>
+                <div className="ui-mono-label">Needs Review</div>
+                <div className="text-[10px] font-medium text-steel">{issueEntries.length} item(s)</div>
               </div>
               <div className="max-h-[170px] overflow-auto">
                 {visibleIssueEntries.map((issue) => (
-                  <div key={issue.label} className="grid gap-2 border-b border-line bg-[#fbfaf6] px-3 py-2 last:border-b-0 sm:grid-cols-[minmax(180px,1fr)_1.35fr] sm:items-center">
-                    <div className="truncate text-sm font-black leading-snug text-ink" title={issue.label}>
+                  <div key={issue.label} className="grid gap-2 border-b border-line bg-surface-raised px-3 py-2 last:border-b-0 sm:grid-cols-[minmax(180px,1fr)_1.35fr] sm:items-center">
+                    <div className="truncate text-sm font-medium leading-snug text-ink" title={issue.label}>
                       {issue.label}
                     </div>
                     <div className="flex flex-wrap gap-1.5 sm:justify-end">
                       {issue.blockers.map((reason) => (
                         <span
                           key={reason}
-                          className="inline-flex h-6 items-center rounded border border-signal/30 bg-[#f9e7e3] px-2 text-[9px] font-black uppercase tracking-wide text-signal"
+                          className="inline-flex h-6 items-center rounded border border-danger/30 bg-danger-muted px-2 text-[9px] ui-mono-label tracking-wide text-danger"
                         >
                           {reason}
                         </span>
@@ -5493,7 +5817,7 @@ export function LineWorkspace({
                       {issue.warnings.map((reason) => (
                         <span
                           key={reason}
-                          className="inline-flex h-6 items-center rounded border border-amber/35 bg-[#fff7e8] px-2 text-[9px] font-black uppercase tracking-wide text-[#7a4e09]"
+                          className="inline-flex h-6 items-center rounded border border-warn/35 bg-accent-muted px-2 text-[9px] ui-mono-label tracking-wide text-warn-strong"
                         >
                           {reason}
                         </span>
@@ -5502,14 +5826,14 @@ export function LineWorkspace({
                   </div>
                 ))}
                 {issueRemainder > 0 ? (
-                  <div className="bg-white px-3 py-2 text-xs font-bold text-steel">
+                  <div className="bg-surface px-3 py-2 text-xs font-bold text-steel">
                     {issueRemainder} more item(s)
                   </div>
                 ) : null}
               </div>
             </div>
           ) : (
-            <div className="rounded-md border border-teal/25 bg-[#ecf5f1] p-3 text-sm font-bold text-teal">
+            <div className="rounded-md border border-accent/25 bg-accent-muted p-3 text-sm font-bold text-accent">
               All eligible tasks were assigned without review items.
             </div>
           )}
@@ -5679,7 +6003,48 @@ export function LineWorkspace({
     }));
   }
 
-  function deleteZone(zoneId: string) {
+  function restorePlannerSnapshot(snapshot: PlannerState, restoreSelection?: { taskId?: string; stationId?: string; zoneId?: string }) {
+    markDirty();
+    remoteRefreshAppliedRef.current = true;
+    setPlannerState(snapshot);
+    setSelectedTaskId(restoreSelection?.taskId ?? snapshot.tasks[0]?.id ?? "");
+    setSelectedStationId(restoreSelection?.stationId ?? snapshot.tasks[0]?.stationId ?? "");
+    setActiveZoneId(restoreSelection?.zoneId);
+  }
+
+  async function restoreTaskProcedureSnapshot(taskSnapshot: Task, step: ManufacturingStep) {
+    updateProcedureTask(taskSnapshot.id, {
+      manufacturingSteps: taskSnapshot.manufacturingSteps,
+      plannedDurationMinutes: taskSnapshot.plannedDurationMinutes,
+      customFields: taskSnapshot.customFields,
+      partReferences: taskSnapshot.partReferences,
+    });
+
+    const stepPhotos = getStepPhotoAttachments(taskSnapshot, step.id);
+    if (stepPhotos.length > 0) {
+      try {
+        await Promise.all(
+          stepPhotos.map((photo) => uploadStepPhotoAttachment(taskSnapshot.id, step.id, photo, activeProjectContext)),
+        );
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Step restored, but one or more photos could not be restored.");
+        setSaveState("error");
+      }
+    }
+  }
+
+  function notifyDeletedStepRestore(taskSnapshot: Task, step: ManufacturingStep) {
+    notifyRestoreAction({
+      title: `Deleted step ${step.sequence}`,
+      body: "Restore will put the step, tools, part links, and available photo records back on this task.",
+      restoreLabel: "Restore Step",
+      onRestore: () => void restoreTaskProcedureSnapshot(taskSnapshot, step),
+    });
+  }
+
+  function executeDeleteZone(zoneId: string) {
+    const snapshot = plannerState;
+    const deletedZone = derivedState.zones.find((zone) => zone.id === zoneId);
     markDirty();
     setPlannerState((current) => ({
       ...current,
@@ -5693,6 +6058,28 @@ export function LineWorkspace({
       ),
     }));
     setActiveZoneId((current) => (current === zoneId ? undefined : current));
+    notifyRestoreAction({
+      title: `Deleted ${deletedZone?.name || "zone"}`,
+      body: "Tasks were moved out of the deleted zone. Restore will bring the previous zone layout back.",
+      restoreLabel: "Restore Zone",
+      onRestore: () =>
+        restorePlannerSnapshot(snapshot, {
+          taskId: selectedTaskId,
+          stationId: selectedStationId,
+          zoneId,
+        }),
+    });
+  }
+
+  function deleteZone(zoneId: string) {
+    const zone = derivedState.zones.find((candidate) => candidate.id === zoneId);
+    requestFeedbackConfirm({
+      title: `Delete ${zone?.name || "zone"}?`,
+      body: "This removes the zone and moves its tasks into the unzoned section.",
+      tone: "danger",
+      confirmLabel: "Delete Zone",
+      onConfirm: () => executeDeleteZone(zoneId),
+    });
   }
 
   function moveTasksToZone(taskIds: string[], zoneId?: string) {
@@ -5837,7 +6224,13 @@ export function LineWorkspace({
     addTaskToZone(activeZoneId ?? plannerState.tasks[plannerState.tasks.length - 1]?.zoneId);
   }
 
-  function deleteTasks(taskIds: string[]) {
+  function executeDeleteTasks(taskIds: string[]) {
+    if (taskIds.length === 0) {
+      return;
+    }
+
+    const snapshot = plannerState;
+    const deletedTasks = derivedState.tasks.filter((task) => taskIds.includes(task.id));
     markDirty();
     const taskIdsToDelete = new Set(taskIds);
     const nextSelectedTask =
@@ -5867,6 +6260,32 @@ export function LineWorkspace({
 
     setSelectedTaskId(nextSelectedTask?.id ?? "");
     setSelectedStationId(nextSelectedTask?.stationId ?? "");
+    notifyRestoreAction({
+      title: deletedTasks.length === 1 ? `Deleted task ${deletedTasks[0].wbs}` : `Deleted ${deletedTasks.length} tasks`,
+      body: "Restore will bring back the deleted task data and the previous Gantt dependencies.",
+      restoreLabel: deletedTasks.length === 1 ? "Restore Task" : "Restore Tasks",
+      onRestore: () =>
+        restorePlannerSnapshot(snapshot, {
+          taskId: selectedTaskId,
+          stationId: selectedStationId,
+          zoneId: activeZoneId,
+        }),
+    });
+  }
+
+  function deleteTasks(taskIds: string[]) {
+    const tasksToDelete = derivedState.tasks.filter((task) => taskIds.includes(task.id));
+    if (tasksToDelete.length === 0) {
+      return;
+    }
+
+    requestFeedbackConfirm({
+      title: tasksToDelete.length === 1 ? `Delete task ${tasksToDelete[0].wbs}?` : `Delete ${tasksToDelete.length} tasks?`,
+      body: "This removes the selected task data, manufacturing steps, and related Gantt dependencies.",
+      tone: "danger",
+      confirmLabel: tasksToDelete.length === 1 ? "Delete Task" : "Delete Tasks",
+      onConfirm: () => executeDeleteTasks(taskIds),
+    });
   }
 
   function downloadTextFile(content: string, filename: string, type: string) {
@@ -5902,7 +6321,7 @@ export function LineWorkspace({
           <a
             href={exportFile.url}
             download={exportFile.filename}
-            className="inline-flex h-8 items-center rounded border border-graphite bg-graphite px-3 text-xs font-black text-white hover:bg-ink"
+            className="inline-flex h-8 items-center rounded border border-graphite bg-accent px-3 text-xs font-medium text-canvas hover:opacity-90"
           >
             Download manually
           </a>
@@ -5929,7 +6348,7 @@ export function LineWorkspace({
               <a
                 href={exportFile.url}
                 download={exportFile.filename}
-                className="inline-flex h-8 items-center rounded border border-graphite bg-graphite px-3 text-xs font-black text-white hover:bg-ink"
+                className="inline-flex h-8 items-center rounded border border-graphite bg-accent px-3 text-xs font-medium text-canvas hover:opacity-90"
               >
                 Download manually
               </a>
@@ -5937,7 +6356,7 @@ export function LineWorkspace({
                 href={exportFile.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-8 items-center rounded border border-line bg-white px-3 text-xs font-black text-ink hover:bg-[#f4f0e7]"
+                className="inline-flex h-8 items-center rounded border border-line bg-surface px-3 text-xs font-medium text-ink hover:bg-surface-sunken"
               >
                 Open preview
               </a>
@@ -5967,7 +6386,9 @@ export function LineWorkspace({
 
   function openTaskDetail(taskId: string) {
     selectTask(taskId);
-    setDetailDrawerCollapsed(false);
+    if (showDetailDrawer) {
+      setDetailDrawerCollapsed(false);
+    }
   }
 
   function selectStation(stationId: string) {
@@ -5976,6 +6397,15 @@ export function LineWorkspace({
     if (firstStationTask) {
       setSelectedTaskId(firstStationTask.id);
     }
+  }
+
+  function navigateModule(moduleId: string) {
+    setActiveModule(moduleId);
+  }
+
+  function openSettings(section: SettingsSection = "general") {
+    setSettingsSection(section);
+    setActiveModule("settings");
   }
 
   const lineReadinessPanel = (
@@ -5997,39 +6427,27 @@ export function LineWorkspace({
       kpis={kpis}
       onOpenTaskDetail={openTaskDetail}
       product={derivedState.product}
-      compact={activeModule === "setup"}
     />
   );
 
-  const ganttActionClass =
-    "inline-flex h-10 min-w-[116px] items-center justify-center gap-2 rounded-md px-3 text-sm font-bold transition";
-
   return (
-    <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-[#f2efe6] text-ink">
+    <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink">
       <TopNav
-        state={derivedState}
-        project={activeProjectContext}
-        saveState={saveState}
-        saveError={saveError}
-        onSave={savePlannerState}
         onExport={exportMarkdown}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
       />
 
       <div className={workspaceGridClass} style={workspaceGridStyle}>
-        <Sidebar
-          activeModule={activeModule}
-          onChange={setActiveModule}
-          project={activeProjectContext}
-          workspaceDrawerOpen={workspaceDrawerOpen}
-          onToggleWorkspaceDrawer={() => setWorkspaceDrawerOpen((open) => !open)}
-        />
-
-        {workspaceDrawerOpen ? (
-          <WorkspaceSidebarDrawer
-            activeProject={activeProjectContext}
-            onClose={() => setWorkspaceDrawerOpen(false)}
+        <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
+          <Sidebar
+            activeModule={activeModule}
+            settingsSection={settingsSection}
+            onChange={navigateModule}
+            onOpenSettings={openSettings}
+            project={activeProjectContext}
           />
-        ) : null}
+        </div>
 
         {isProcedureModule ? (
           <ProcedureWorkspace
@@ -6037,16 +6455,27 @@ export function LineWorkspace({
             zones={derivedState.zones}
             selectedTask={selectedTask}
             onSelectTask={selectTask}
+            onConfirmAction={requestFeedbackConfirm}
+            onStepDeleted={notifyDeletedStepRestore}
             onUpdateTask={updateProcedureTask}
             onUploadStepPhotos={uploadStepPhotos}
             onRemoveStepPhoto={removeStepPhoto}
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
           />
+        ) : isSettingsModule ? (
+          <main className="min-h-0 min-w-0 overflow-hidden">
+            <AppSettingsPanel
+              showSubnav={false}
+              section={settingsSection}
+              onSectionChange={setSettingsSection}
+              project={activeProjectContext}
+            />
+          </main>
         ) : (
           <main
-            className={`min-h-0 min-w-0 space-y-4 overflow-auto px-4 pt-4 ${
-              isDashboardModule ? "pb-4" : playbackCollapsed ? "pb-20" : "pb-44"
+            className={`ui-workspace-content space-y-4 p-3 sm:p-4 ${
+              isDashboardModule || !SIMULATION_ENABLED ? "pb-6" : playbackCollapsed ? "pb-20" : "pb-44"
             }`}
           >
             {isDashboardModule ? (
@@ -6062,7 +6491,7 @@ export function LineWorkspace({
                 taskCount={derivedState.tasks.length}
                 stationCount={getTopLevelTasks(derivedState.tasks).length}
                 planningRecommendationCount={visibleAllocationRecommendations.length}
-                onNavigateModule={setActiveModule}
+                onNavigateModule={navigateModule}
               >
                 {lineReadinessPanel}
               </PlannerDashboardPanel>
@@ -6071,64 +6500,51 @@ export function LineWorkspace({
                 <KpiStrip kpis={kpis} product={derivedState.product} />
 
                 {activeModule === "setup" ? (
-                  <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_420px]">
-                    <ProductSetupPanel
-                      product={derivedState.product}
-                      onProductNumber={updateProductNumber}
-                      onProductText={updateProductText}
-                    />
-                    {lineReadinessPanel}
-                  </div>
+                  <ProductSetupPanel
+                    product={derivedState.product}
+                    onProductNumber={updateProductNumber}
+                    onProductText={updateProductText}
+                  />
                 ) : (
                   lineReadinessPanel
                 )}
 
                 {showsSchedulingWorkspace ? (
               <>
-                <section className="overflow-hidden rounded-md border border-line bg-white shadow-soft">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-[#fbfaf6] p-4">
+                <section className="ui-panel overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-3 py-4 sm:px-4">
                     <div>
-                      <h2 className="text-base font-black text-ink">Manufacturing Gantt</h2>
-                      <div className="text-xs font-semibold text-steel">
+                      <h2 className="ui-section-title">Manufacturing Gantt</h2>
+                      <p className="ui-section-subtitle">
                         {formatMinutes(timelineBounds.durationMinutes)} planned flow / {totalHeadcount} headcount
-                      </div>
+                      </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={exportGanttDocument}
-                        className={`${ganttActionClass} border border-line bg-white text-ink hover:bg-[#f4f0e7]`}
-                      >
+                    <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
+                      <button type="button" onClick={exportGanttDocument} className="ui-btn-ghost h-10 gap-2">
                         <Download size={16} />
                         Export Setup
                       </button>
-                      <button
-                        type="button"
-                        onClick={addZone}
-                        className={`${ganttActionClass} border border-line bg-white text-ink hover:bg-[#f4f0e7]`}
-                      >
+                      <button type="button" onClick={addZone} className="ui-btn-ghost h-10 gap-2">
                         <Plus size={16} />
                         Zone
                       </button>
-                      <button
-                        type="button"
-                        onClick={addTaskAtBottom}
-                        className={`${ganttActionClass} bg-graphite text-white hover:bg-ink`}
-                      >
+                      <button type="button" onClick={addTaskAtBottom} className="ui-btn-ghost h-10 gap-2">
                         <Plus size={16} />
                         Task
                       </button>
+                      {SIMULATION_ENABLED ? (
                       <button
                         type="button"
                         onClick={() => {
                           setPlaybackCollapsed(false);
                           setIsPlaying(true);
                         }}
-                        className={`${ganttActionClass} bg-copper text-white hover:bg-[#995122]`}
+                        className="ui-btn-ghost h-10 gap-2"
                       >
                         <Play size={16} />
                         Playback
                       </button>
+                      ) : null}
                     </div>
                   </div>
                   <GanttTimeline
@@ -6142,7 +6558,7 @@ export function LineWorkspace({
                     operatorCapacityMinutes={operatorCapacityMinutes}
                     demandQuantity={derivedState.product.demandQuantity}
                     currentMinute={currentMinute}
-                    showPlaybackMarker={isPlaying || currentMinute > 0}
+                    showPlaybackMarker={SIMULATION_ENABLED && (isPlaying || currentMinute > 0)}
                     onSelectTask={selectTask}
                     onOpenTaskDetail={openTaskDetail}
                     onUpdateTask={updateTask}
@@ -6180,12 +6596,14 @@ export function LineWorkspace({
           </main>
         )}
 
-        {!isProcedureModule ? (
+        {showDetailDrawer ? (
           <DetailDrawer
             task={selectedTask}
             station={selectedStation}
             collapsed={detailDrawerCollapsed}
             isResizing={isResizingDetailDrawer}
+            onConfirmAction={requestFeedbackConfirm}
+            onStepDeleted={notifyDeletedStepRestore}
             onToggleCollapsed={() => setDetailDrawerCollapsed((collapsed) => !collapsed)}
             onResizeStart={startDetailDrawerResize}
             onUpdateTask={updateTask}
@@ -6198,7 +6616,7 @@ export function LineWorkspace({
         ) : null}
       </div>
 
-      {!isProcedureModule && !isDashboardModule ? (
+      {SIMULATION_ENABLED && !isProcedureModule && !isDashboardModule ? (
         <PlaybackPanel
           tasks={derivedState.tasks}
           stations={derivedState.stations}

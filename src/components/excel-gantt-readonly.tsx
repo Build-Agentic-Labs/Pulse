@@ -12,6 +12,8 @@ import {
 } from "@/domain/calculations";
 import { loadPlannerStateFromSupabase } from "@/domain/supabase-planner";
 import type { PlannerState, Task, Zone } from "@/domain/types";
+import { chartPalette } from "@/theme/chart-tokens";
+import { NothingLoadingBlock } from "@/components/nothing-ui";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -34,7 +36,7 @@ const UNZONED_ZONE: Zone = {
   scenarioId: "excel",
   sequence: 999,
   name: "Unzoned",
-  color: "#69746f",
+  color: chartPalette.steel,
   createdAt: "",
   updatedAt: "",
 };
@@ -70,14 +72,14 @@ function shortDateTime(value: string) {
 function textColorForFill(fill: string) {
   const hex = fill.replace("#", "");
   if (hex.length !== 6) {
-    return "#ffffff";
+    return chartPalette.white;
   }
 
   const red = Number.parseInt(hex.slice(0, 2), 16);
   const green = Number.parseInt(hex.slice(2, 4), 16);
   const blue = Number.parseInt(hex.slice(4, 6), 16);
   const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
-  return luminance > 0.65 ? "#17211b" : "#ffffff";
+  return luminance > 0.65 ? chartPalette.ink : chartPalette.white;
 }
 
 function tickStep(durationMinutes: number) {
@@ -139,14 +141,14 @@ function buildRows(tasks: Task[], zones: Zone[]): GanttRow[] {
 
 function metricValueClass(tone?: "warning" | "success") {
   if (tone === "warning") {
-    return "border-signal/25 bg-[#fae8e4]";
+    return "border-danger/25 bg-danger-muted";
   }
 
   if (tone === "success") {
-    return "border-teal/25 bg-[#e9f4f0]";
+    return "border-accent/25 bg-accent-muted";
   }
 
-  return "border-line bg-white";
+  return "border-line bg-surface";
 }
 
 function MetricCard({
@@ -163,13 +165,13 @@ function MetricCard({
   tone?: "warning" | "success";
 }) {
   return (
-    <div className={`rounded-md border p-3 shadow-sm ${metricValueClass(tone)}`}>
-      <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wide text-steel">
+    <div className={`rounded-md border p-3 ${metricValueClass(tone)}`}>
+      <div className="flex items-center gap-2 ui-mono-label">
         <Icon size={14} />
         {label}
       </div>
-      <div className="mt-2 text-2xl font-black leading-none text-ink">{value}</div>
-      <div className="mt-2 truncate text-xs font-semibold text-steel">{meta}</div>
+      <div className="mt-2 text-xl font-medium leading-none text-ink">{value}</div>
+      <div className="mt-1 truncate text-[11px] text-ink-secondary">{meta}</div>
     </div>
   );
 }
@@ -237,18 +239,17 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
   }, [derivedState]);
 
   return (
-    <main className="h-[100dvh] overflow-y-auto bg-[#f2efe6] text-ink">
+    <main className="h-[100dvh] overflow-y-auto bg-canvas text-ink">
       <section className="px-5 py-4">
         {loadState === "loading" ? (
-          <div className="rounded-md border border-line bg-white p-5 shadow-sm">
-            <div className="text-sm font-black text-ink">Loading Gantt view</div>
-            <div className="mt-1 text-xs font-semibold text-steel">Reading the saved planner data for Excel.</div>
+          <div className="ui-panel p-8">
+            <NothingLoadingBlock title="Loading" body="Reading the saved planner data for Excel." />
           </div>
         ) : null}
 
         {loadState === "error" ? (
-          <div className="rounded-md border border-signal/30 bg-[#fae8e4] p-5 text-signal shadow-sm">
-            <div className="flex items-center gap-2 text-sm font-black">
+          <div className="rounded-md border border-danger/30 bg-danger-muted p-5 text-danger">
+            <div className="flex items-center gap-2 text-sm font-medium">
               <AlertTriangle size={16} />
               Unable to load Gantt
             </div>
@@ -300,10 +301,10 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
               />
             </div>
 
-            <section className="overflow-hidden rounded-md border border-line bg-white shadow-soft">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-[#fbfaf6] px-4 py-3">
+            <section className="overflow-hidden ui-panel ">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface-raised px-4 py-3">
                 <div>
-                  <h2 className="text-base font-black text-ink">Manufacturing Gantt</h2>
+                  <h2 className="text-base font-medium text-ink">Manufacturing Gantt</h2>
                   <div className="text-xs font-semibold text-steel">
                     {derivedState.product.name} / {derivedState.scenario.name} / view only
                   </div>
@@ -316,7 +317,7 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
                   <button
                     type="button"
                     onClick={loadPlanner}
-                    className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-black text-ink shadow-sm transition hover:bg-[#f4f0e7]"
+                    className="inline-flex h-9 items-center gap-2 ui-panel px-3 text-sm font-medium text-ink transition hover:bg-surface-sunken"
                   >
                     <RefreshCw size={15} />
                     Refresh
@@ -326,8 +327,8 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
 
               <div className="overflow-auto">
                 <div className="min-w-[1120px]">
-                  <div className="grid grid-cols-[360px_minmax(760px,1fr)] border-b border-line bg-white">
-                    <div className="border-r border-line px-4 py-3 text-[10px] font-black uppercase tracking-wide text-steel">
+                  <div className="grid grid-cols-[360px_minmax(760px,1fr)] border-b border-line bg-surface">
+                    <div className="border-r border-line px-4 py-3 ui-mono-label">
                       Task / Zone
                     </div>
                     <div className="relative h-11 px-4">
@@ -335,7 +336,7 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
                         const left = `${Math.min((tick / viewModel.bounds.durationMinutes) * 100, 100)}%`;
                         return (
                           <div key={tick} className="absolute top-0 h-full border-l border-line/80" style={{ left }}>
-                            <span className="absolute left-1 top-3 whitespace-nowrap text-[10px] font-black text-steel">
+                            <span className="absolute left-1 top-3 whitespace-nowrap text-[10px] font-medium text-steel">
                               {formatHourOffset(tick)}
                             </span>
                           </div>
@@ -349,11 +350,11 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
                       if (row.kind === "zone") {
                         const zoneMinutes = row.tasks.reduce((total, task) => total + task.plannedDurationMinutes, 0);
                         return (
-                          <div key={row.id} className="grid min-h-10 grid-cols-[360px_minmax(760px,1fr)] border-b border-line bg-[#f7f5ef]">
+                          <div key={row.id} className="grid min-h-10 grid-cols-[360px_minmax(760px,1fr)] border-b border-line bg-surface-muted">
                             <div className="flex items-center gap-3 border-r border-line px-4 py-2">
                               <span className="h-4 w-4 shrink-0 rounded-sm" style={{ backgroundColor: row.zone.color }} />
                               <div className="min-w-0">
-                                <div className="truncate text-xs font-black uppercase tracking-wide text-ink">{row.zone.name}</div>
+                                <div className="truncate text-xs ui-mono-label tracking-wide text-ink">{row.zone.name}</div>
                                 <div className="text-[10px] font-bold text-steel">
                                   {row.tasks.length} tasks / {formatMinutes(zoneMinutes)}
                                 </div>
@@ -379,13 +380,13 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
                       const fill = overTakt ? "#c33d2e" : row.zone?.color ?? UNZONED_ZONE.color;
 
                       return (
-                        <div key={row.id} className="grid min-h-[52px] grid-cols-[360px_minmax(760px,1fr)] border-b border-line bg-white">
+                        <div key={row.id} className="grid min-h-[52px] grid-cols-[360px_minmax(760px,1fr)] border-b border-line bg-surface">
                           <div className="grid grid-cols-[46px_minmax(0,1fr)_76px] items-center gap-3 border-r border-line px-4 py-2">
-                            <div className="font-mono text-sm font-black text-steel">{row.task.wbs}</div>
+                            <div className="font-mono text-sm font-medium text-steel">{row.task.wbs}</div>
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-black text-ink">{row.task.name}</div>
+                              <div className="truncate text-sm font-medium text-ink">{row.task.name}</div>
                             </div>
-                            <div className="text-right text-xs font-black text-ink">
+                            <div className="text-right text-xs font-medium text-ink">
                               <div>{formatMinutes(row.task.plannedDurationMinutes)}</div>
                               <div className="font-mono text-[10px] text-steel">{round(row.task.plannedManHours, 1)} MH</div>
                             </div>
@@ -400,7 +401,7 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
                               />
                             ))}
                             <div
-                              className="absolute top-3 flex h-7 min-w-12 items-center overflow-hidden rounded-sm px-2 shadow-sm"
+                              className="absolute top-3 flex h-7 min-w-12 items-center overflow-hidden rounded-sm px-2"
                               style={{
                                 left,
                                 width,
@@ -408,7 +409,7 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
                                 color: textColorForFill(fill),
                               }}
                             >
-                              <span className="truncate text-xs font-black">
+                              <span className="truncate text-xs font-medium">
                                 {row.task.wbs} {row.task.name}
                               </span>
                             </div>

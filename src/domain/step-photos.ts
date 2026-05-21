@@ -2,6 +2,9 @@ import type { Task } from "./types";
 
 export const STEP_PHOTO_ATTACHMENTS_FIELD = "stepPhotoAttachments";
 
+import type { PhotoAnnotationDocument } from "./photo-annotations";
+import { normalizePhotoAnnotationDocument } from "./photo-annotations";
+
 export interface StepPhotoAttachment {
   id: string;
   name: string;
@@ -13,6 +16,7 @@ export interface StepPhotoAttachment {
   height?: number;
   storagePath?: string;
   caption?: string;
+  annotations?: PhotoAnnotationDocument;
 }
 
 export type StepPhotoAttachmentMap = Record<string, StepPhotoAttachment[]>;
@@ -47,6 +51,7 @@ function sanitizePhotoAttachment(value: unknown): StepPhotoAttachment | null {
     height: typeof value.height === "number" ? value.height : undefined,
     storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
     caption: typeof value.caption === "string" ? value.caption : undefined,
+    annotations: value.annotations ? normalizePhotoAnnotationDocument(value.annotations) : undefined,
   };
 }
 

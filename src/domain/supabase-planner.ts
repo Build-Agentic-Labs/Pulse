@@ -22,6 +22,7 @@ import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "./step-p
 import { mergeStepDependencyRefs, splitStepDependencyRefs } from "./step-part-references";
 import { STEP_TOOL_LISTS_FIELD, getTaskStepToolListMap } from "./step-tools";
 import { applyCalculatedFields } from "./calculations";
+import { formatDisplayTitle } from "@/lib/display-names";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -252,7 +253,7 @@ function mapZone(row: Record<string, unknown>): Zone {
     id: String(row.id),
     scenarioId: String(row.scenario_id),
     sequence: num(row.sequence, 1),
-    name: String(row.name ?? ""),
+    name: formatDisplayTitle(String(row.name ?? "")),
     color: String(row.color ?? "#15756d"),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -1671,6 +1672,61 @@ export async function uploadToolLibraryImage(
 
   const saved = await throwIfError(supabase.from("tool_library").upsert(row).select("*").single());
   return mapToolLibraryRow(saved as ToolLibraryRow);
+}
+
+export async function upsertToolLibraryMetadata(input: {
+  toolName: string;
+  category?: string;
+  projectId?: string;
+  previousToolName?: string;
+}): Promise<ToolLibraryItem> {
+  const toolName = input.toolName.trim();
+  if (!toolName) {
+    throw new Error("Tool name is required.");
+  }
+
+  const supabase = plannerClient();
+  const projectId = input.projectId;
+  const previousName = input.previousToolName?.trim();
+  let existing: ToolLibraryRow | null = null;
+
+  if (previousName && previousName.toLocaleLowerCase() !== toolName.toLocaleLowerCase()) {
+    const oldId = toolLibraryId(previousName, projectId);
+    existing = (await throwIfError(
+      supabase.from("tool_library").select("*").eq("id", oldId).maybeSingle(),
+    )) as ToolLibraryRow | null;
+
+    if (existing) {
+      await throwIfError(supabase.from("tool_library").delete().eq("id", oldId));
+    }
+  } else {
+    existing = (await throwIfError(
+      supabase.from("tool_library").select("*").eq("id", toolLibraryId(toolName, projectId)).maybeSingle(),
+    )) as ToolLibraryRow | null;
+  }
+
+  const row = {
+    id: toolLibraryId(toolName, projectId),
+    project_id: projectId ?? null,
+    tool_name: toolName,
+    category: input.category?.trim() || null,
+    image_url: existing?.image_url ?? null,
+    storage_path: existing?.storage_path ?? null,
+  };
+
+  const saved = await throwIfError(supabase.from("tool_library").upsert(row).select("*").single());
+  return mapToolLibraryRow(saved as ToolLibraryRow);
+}
+
+export async function deleteToolLibraryFromSupabase(id: string, projectId?: string) {
+  const supabase = plannerClient();
+  let query = supabase.from("tool_library").delete().eq("id", id);
+
+  if (projectId) {
+    query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
+  }
+
+  await throwIfError(query);
 }
 
 export async function softDeleteStepPhotoAttachmentFromSupabase(photoId: string, taskId?: string, projectId?: string) {

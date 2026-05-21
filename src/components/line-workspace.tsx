@@ -20,7 +20,6 @@ import {
   Pause,
   Play,
   Plus,
-  Printer,
   RotateCcw,
   Settings,
   SkipBack,
@@ -63,6 +62,7 @@ import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
   getStepPhotoAttachments,
   removeStepPhotoAttachment,
+  updateStepPhotoAttachment,
   upsertStepPhotoAttachments,
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
@@ -73,7 +73,10 @@ import {
   removePartReferenceFromSteps,
   removeStepPartReference,
 } from "@/domain/step-part-references";
-import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, getStepToolList, removeStepTool } from "@/domain/step-tools";
+import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, getStepToolList, removeStepTool, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
+import { removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
+import { buildProjectToolRegistry, type ProjectToolDefinition } from "@/domain/tool-registry";
+import type { ToolTypeValue } from "@/domain/tool-types";
 import {
   getManufacturingStepCheckSet,
   manufacturingStepCheckOptions,
@@ -82,14 +85,18 @@ import {
 import { applyInstructionBullets, resolveBulletEnter } from "@/domain/instruction-bullets";
 import {
   addStepToolToSupabase,
+  deleteToolLibraryFromSupabase,
   loadPlannerStateFromSupabase,
+  loadToolLibraryFromSupabase,
   removeStepToolFromSupabase,
+  upsertToolLibraryMetadata,
   savePlannerShellToSupabase,
   saveProcedureTaskUpdateToSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
   subscribePlannerStateChanges,
   uploadStepPhotoAttachment,
   type SaveState,
+  type ToolLibraryItem,
 } from "@/domain/supabase-planner";
 import type {
   DemandPeriod,
@@ -112,6 +119,9 @@ import { PlannerDashboardPanel } from "./planner-dashboard-panel";
 import { SidebarWorkspacePanel } from "./sidebar-workspace-panel";
 import { SidebarUserPanel } from "./sidebar-user-panel";
 import { NothingLoadingBlock } from "./nothing-ui";
+import { ProcedureStepToolTable } from "./procedure-step-tool-table";
+import { StepPhotoViewer } from "./step-photo-viewer";
+import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
 import { AppSettingsPanel, settingsSections, type SettingsSection } from "./app-settings-panel";
 import { useTheme } from "./theme-provider";
 import {
@@ -153,6 +163,7 @@ type StepPhotoAttachmentEditorProps = {
   onFilesSelected: (files: File[]) => void;
   onRequestRemove: (photo: StepPhotoAttachment) => void;
   onRemove: (photoId: string) => void;
+  onUpdatePhoto?: (photoId: string, patch: Partial<StepPhotoAttachment>) => void;
 };
 
 const demandPeriodOptions: Array<{ value: DemandPeriod; label: string }> = [
@@ -1299,101 +1310,10 @@ function StepPhotoAttachmentEditor({
   onFilesSelected,
   onRequestRemove,
   onRemove,
+  onUpdatePhoto,
 }: StepPhotoAttachmentEditorProps) {
-  const thumbnailClass = compact ? "h-14 w-16" : "h-20 w-24";
+  const thumbnailClass = compact ? "h-24 w-28" : "h-36 w-48";
   const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
-  const canNavigatePreviewPhotos = photos.length > 1;
-
-  function showAdjacentPreviewPhoto(direction: -1 | 1) {
-    if (!previewPhoto || photos.length === 0) {
-      return;
-    }
-
-    const currentIndex = photos.findIndex((photo) => photo.id === previewPhoto.id);
-    const nextIndex = currentIndex >= 0 ? (currentIndex + direction + photos.length) % photos.length : 0;
-    setPreviewPhoto(photos[nextIndex]);
-  }
-
-  useEffect(() => {
-    if (!previewPhoto) {
-      return;
-    }
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setPreviewPhoto(null);
-        return;
-      }
-
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        showAdjacentPreviewPhoto(-1);
-        return;
-      }
-
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        showAdjacentPreviewPhoto(1);
-      }
-    }
-
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [photos, previewPhoto]);
-
-  function printPreviewPhoto() {
-    if (!previewPhoto) {
-      return;
-    }
-
-    const printFrame = document.createElement("iframe");
-    printFrame.title = `Print ${previewPhoto.name}`;
-    printFrame.className = "fixed bottom-0 right-0 h-0 w-0 border-0";
-    document.body.appendChild(printFrame);
-
-    const printWindow = printFrame.contentWindow;
-    const printDocument = printWindow?.document;
-    if (!printWindow || !printDocument) {
-      printFrame.remove();
-      return;
-    }
-
-    printDocument.open();
-    printDocument.write("<!doctype html><html><head><title></title></head><body></body></html>");
-    printDocument.close();
-    printDocument.title = previewPhoto.name;
-
-    const style = printDocument.createElement("style");
-    style.textContent =
-      "html,body{margin:0;min-height:100%;background:white;font-family:Arial,sans-serif;}body{display:flex;align-items:center;justify-content:center;padding:24px;}img{max-width:100%;max-height:calc(100vh - 48px);object-fit:contain;}";
-    printDocument.head.appendChild(style);
-
-    const image = printDocument.createElement("img");
-    image.src = previewPhoto.dataUrl;
-    image.alt = `Step ${step.sequence} photo ${previewPhoto.name}`;
-    printDocument.body.appendChild(image);
-
-    let cleanupTimer: number | undefined;
-    const cleanup = () => {
-      if (cleanupTimer) {
-        window.clearTimeout(cleanupTimer);
-      }
-      printFrame.remove();
-    };
-    const printImage = () => {
-      printWindow.focus();
-      printWindow.addEventListener("afterprint", cleanup, { once: true });
-      cleanupTimer = window.setTimeout(cleanup, 30_000);
-      printWindow.print();
-    };
-
-    if (image.complete) {
-      printImage();
-    } else {
-      image.onload = printImage;
-      image.onerror = cleanup;
-    }
-  }
 
   return (
     <div className="space-y-2">
@@ -1404,11 +1324,11 @@ function StepPhotoAttachmentEditor({
           {photos.length > 0 ? <span className="text-steel/70">({photos.length})</span> : null}
         </div>
         <label
-          className={`inline-flex cursor-pointer items-center gap-1 rounded border border-line bg-surface ui-mono-label text-ink-secondary hover:border-accent hover:text-accent ${
-            compact ? "h-7 px-2 text-[10px]" : "h-8 px-2.5 text-[10px]"
-          } ${isUploading ? "pointer-events-none opacity-60" : ""}`}
+          className={`ui-btn-ghost cursor-pointer ${compact ? "h-8 gap-1.5 px-2" : "h-10 gap-2"} ${
+            isUploading ? "pointer-events-none opacity-60" : ""
+          }`}
         >
-          <ImageIcon size={compact ? 12 : 13} />
+          <ImageIcon size={compact ? 14 : 16} />
           {isUploading ? "Uploading" : "Upload"}
           <input
             type="file"
@@ -1428,9 +1348,9 @@ function StepPhotoAttachmentEditor({
       </div>
 
       {photos.length > 0 ? (
-        <div className="step-photo-strip flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-2">
+        <div className="step-photo-strip flex max-w-full gap-3 overflow-x-auto overscroll-x-contain pb-2">
           {photos.map((photo) => (
-            <div key={photo.id} className={compact ? "w-16 shrink-0" : "w-24 shrink-0"}>
+            <div key={photo.id} className={compact ? "w-28 shrink-0" : "w-48 shrink-0"}>
               <div className="group relative">
                 <button
                   type="button"
@@ -1451,15 +1371,12 @@ function StepPhotoAttachmentEditor({
                     event.stopPropagation();
                     onRequestRemove(photo);
                   }}
-                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded bg-surface/90 text-steel opacity-0 transition hover:text-danger focus:opacity-100 focus-visible:ring-2 focus-visible:ring-accent group-hover:opacity-100 group-focus-within:opacity-100"
+                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-surface/90 text-steel opacity-0 transition hover:text-danger focus:opacity-100 focus-visible:ring-2 focus-visible:ring-accent group-hover:opacity-100 group-focus-within:opacity-100"
                   aria-label={`Remove photo from step ${step.sequence}`}
                   title="Remove photo"
                 >
                   <Trash2 size={11} />
                 </button>
-              </div>
-              <div className="mt-1 truncate text-[10px] font-bold text-steel" title={photo.name}>
-                {photo.name}
               </div>
             </div>
           ))}
@@ -1470,72 +1387,14 @@ function StepPhotoAttachmentEditor({
         </div>
       )}
       {previewPhoto ? (
-        <div
-          className="fixed inset-0 z-[95] flex items-center justify-center bg-ink/80 p-4 text-canvas"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Step ${step.sequence} photo preview`}
-          onClick={() => setPreviewPhoto(null)}
-        >
-          <div className="flex max-h-full w-full max-w-6xl flex-col gap-3" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[11px] ui-mono-label tracking-wide text-white/70">Step {step.sequence} Photo</div>
-                <div className="truncate text-sm text-canvas">{previewPhoto.name}</div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={printPreviewPhoto}
-                  className="inline-flex h-9 items-center gap-2 rounded border border-line/20 bg-surface/10 px-3 text-sm text-canvas hover:bg-surface/20"
-                  aria-label="Print photo"
-                  title="Print photo"
-                >
-                  <Printer size={16} />
-                  Print
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewPhoto(null)}
-                  className="flex h-9 w-9 items-center justify-center rounded border border-line/20 bg-surface/10 text-canvas hover:bg-surface/20"
-                  aria-label="Close photo preview"
-                  title="Close"
-                >
-                  <X size={17} />
-                </button>
-              </div>
-            </div>
-            <div className="flex min-h-0 items-center justify-center">
-              {canNavigatePreviewPhotos ? (
-                <button
-                  type="button"
-                  onClick={() => showAdjacentPreviewPhoto(-1)}
-                  className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-line/20 bg-ink/60 text-canvas hover:bg-ink/80"
-                  aria-label="Previous photo"
-                  title="Previous photo"
-                >
-                  <ChevronsLeft size={20} />
-                </button>
-              ) : null}
-              <img
-                src={previewPhoto.dataUrl}
-                alt={`Step ${step.sequence} photo ${previewPhoto.name}`}
-                className="max-h-[calc(100dvh-7rem)] max-w-full rounded border border-line/20 object-contain shadow-2xl"
-              />
-              {canNavigatePreviewPhotos ? (
-                <button
-                  type="button"
-                  onClick={() => showAdjacentPreviewPhoto(1)}
-                  className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-line/20 bg-ink/60 text-canvas hover:bg-ink/80"
-                  aria-label="Next photo"
-                  title="Next photo"
-                >
-                  <ChevronsRight size={20} />
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <StepPhotoViewer
+          stepSequence={step.sequence}
+          photo={photos.find((candidate) => candidate.id === previewPhoto.id) ?? previewPhoto}
+          photos={photos}
+          onClose={() => setPreviewPhoto(null)}
+          onPhotoChange={setPreviewPhoto}
+          onUpdatePhoto={onUpdatePhoto}
+        />
       ) : null}
     </div>
   );
@@ -1555,22 +1414,86 @@ function StepPartReferenceEditor({
   const linkedPartIds = new Set(getStepPartReferenceIds(task, step.id));
   const linkedParts = getStepPartReferences(task, step.id);
   const availableParts = partReferences.filter((part) => part.partNumber.trim() && !linkedPartIds.has(part.id));
-  const gridClass = compact
-    ? "grid grid-cols-[42px_minmax(0,1fr)_42px] items-center gap-1"
-    : "grid grid-cols-[74px_minmax(0,1fr)_52px] items-center gap-2";
-  const inputClass = compact
-    ? "h-7 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-accent"
-    : "ui-field-standalone h-9 min-w-0 px-2 text-xs";
-  const addClass = compact
-    ? "h-7 text-[10px] ui-mono-label text-ink-secondary hover:text-accent"
-    : "ui-btn-ghost h-9 px-2";
+  const gridClass = "grid grid-cols-[42px_minmax(0,1fr)_42px] items-center gap-1";
+  const compactInputClass =
+    "h-7 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-accent";
+  const compactAddClass = "h-7 text-[10px] ui-mono-label text-ink-secondary hover:text-accent";
+
+  if (compact) {
+    return (
+      <div className="space-y-1.5">
+        <div className={gridClass}>
+          <span className="ui-field-label mb-0">Parts</span>
+          <input
+            className={compactInputClass}
+            value={draftValue}
+            onChange={(event) => onDraftChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onAddDraft();
+              }
+            }}
+            placeholder="Part number"
+          />
+          <button type="button" onClick={onAddDraft} className={compactAddClass}>
+            Add
+          </button>
+        </div>
+
+        {availableParts.length > 0 ? (
+          <div className="pl-[42px]">
+            <select
+              aria-label={`Link existing part to step ${step.sequence}`}
+              className="ui-field-standalone h-9 w-full px-2 text-xs"
+              value=""
+              onChange={(event) => {
+                if (event.target.value) {
+                  onLinkExisting(event.target.value);
+                }
+              }}
+            >
+              <option value="">Link existing part</option>
+              {availableParts.map((part) => (
+                <option key={part.id} value={part.id}>
+                  {part.partNumber}{part.description ? ` - ${part.description}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
+        {linkedParts.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5 pl-[42px]">
+            {linkedParts.map((part) => (
+              <span key={part.id} className="ui-chip inline-flex min-w-0 items-center gap-1 normal-case tracking-normal">
+                <span className="max-w-[220px] truncate" title={part.description || part.partNumber}>
+                  {part.partNumber}
+                  {part.quantity ? ` x${part.quantity}` : ""}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRemove(part.id)}
+                  className="text-steel/70 hover:text-danger"
+                  aria-label={`Remove ${part.partNumber} from step ${step.sequence}`}
+                  title={`Remove ${part.partNumber}`}
+                >
+                  <Trash2 size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-1.5">
-      <div className={gridClass}>
-        <span className="ui-field-label mb-0">Parts</span>
+    <div className="ui-procedure-step-detail">
+      <span className="ui-field-label mb-0 block">Parts</span>
+      <div className="ui-procedure-step-add-row">
         <input
-          className={inputClass}
+          className="ui-procedure-step-inline-text"
           value={draftValue}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {
@@ -1581,16 +1504,13 @@ function StepPartReferenceEditor({
           }}
           placeholder="Part number"
         />
-        <button type="button" onClick={onAddDraft} className={addClass}>
+        <button type="button" onClick={onAddDraft} className="ui-btn-ghost h-8 shrink-0 px-2 text-[10px]">
           Add
         </button>
-      </div>
-
-      {availableParts.length > 0 ? (
-        <div className={compact ? "pl-[42px]" : "pl-[74px]"}>
+        {availableParts.length > 0 ? (
           <select
             aria-label={`Link existing part to step ${step.sequence}`}
-            className="ui-field-standalone h-9 w-full px-2 text-xs"
+            className="ui-procedure-step-inline-select"
             value=""
             onChange={(event) => {
               if (event.target.value) {
@@ -1605,21 +1525,21 @@ function StepPartReferenceEditor({
               </option>
             ))}
           </select>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       {linkedParts.length > 0 ? (
-        <div className={`flex flex-wrap gap-1.5 ${compact ? "pl-[42px]" : "pl-[74px]"}`}>
+        <div className="ui-procedure-step-chip-list">
           {linkedParts.map((part) => (
-            <span key={part.id} className="ui-chip inline-flex min-w-0 items-center gap-1 normal-case tracking-normal">
-              <span className="max-w-[220px] truncate" title={part.description || part.partNumber}>
+            <span key={part.id} className="ui-procedure-tag group">
+              <span className="min-w-0 truncate" title={part.description || part.partNumber}>
                 {part.partNumber}
                 {part.quantity ? ` x${part.quantity}` : ""}
               </span>
               <button
                 type="button"
                 onClick={() => onRemove(part.id)}
-                className="text-steel/70 hover:text-danger"
+                className="ui-procedure-tag-remove"
                 aria-label={`Remove ${part.partNumber} from step ${step.sequence}`}
                 title={`Remove ${part.partNumber}`}
               >
@@ -1867,6 +1787,7 @@ function ProcedureWorkspace({
   onRemoveStepPhoto,
   onAddStepTool,
   onRemoveStepTool,
+  projectToolRegistry,
 }: {
   tasks: Task[];
   zones: Zone[];
@@ -1879,6 +1800,7 @@ function ProcedureWorkspace({
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onAddStepTool: (taskId: string, stepId: string, toolName: string, sequence?: number) => Promise<void>;
   onRemoveStepTool: (stepId: string, toolName: string) => Promise<void>;
+  projectToolRegistry: Map<string, ProjectToolDefinition>;
 }) {
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [newStepPartNumbers, setNewStepPartNumbers] = useState<Record<string, string>>({});
@@ -2221,6 +2143,15 @@ function ProcedureWorkspace({
     void onRemoveStepPhoto(task.id, stepId, photoId);
   }
 
+  function updateManufacturingStepPhoto(stepId: string, photoId: string, patch: Partial<StepPhotoAttachment>) {
+    if (!task) {
+      return;
+    }
+
+    const nextTask = updateStepPhotoAttachment(task, stepId, photoId, patch);
+    onUpdateTask(task.id, { customFields: nextTask.customFields });
+  }
+
   function requestRemoveManufacturingStepPhoto(stepId: string, photo: StepPhotoAttachment) {
     if (!task) {
       return;
@@ -2259,7 +2190,7 @@ function ProcedureWorkspace({
         <div className="px-2 pb-2">
           {groupedTasks.map((group) => (
             <div key={group.id} className="mb-3 last:mb-0">
-              <div className="ui-nav-section mb-1 flex items-center gap-1.5 px-0 normal-case tracking-[0.08em]">
+              <div className="ui-nav-section ui-procedure-zone-heading mb-1 flex items-center gap-1.5 px-0 normal-case tracking-[0.08em]">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />
                 <span className="min-w-0 truncate">{group.name}</span>
                 <span className="ml-auto tabular-nums">{group.tasks.length}</span>
@@ -2310,7 +2241,7 @@ function ProcedureWorkspace({
             <h1 className="ui-section-title mt-2">
               <span className="font-mono text-ink-secondary">{task.wbs}</span> {task.name || "Untitled task"}
             </h1>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="ui-metric-strip mt-4">
               {[
                 ["Zone", zoneById.get(task.zoneId ?? "")?.name ?? "Unzoned"],
                 ["Duration", formatMinutes(task.plannedDurationMinutes)],
@@ -2352,15 +2283,15 @@ function ProcedureWorkspace({
                   {manufacturingSteps.length} step(s) · step total {formatMinutes(manufacturingStepDurationMinutes)} · {formatManHours(stepDerivedManHours)}
                 </p>
               </div>
-              <button type="button" onClick={addManufacturingStep} className="ui-btn-secondary h-9 gap-2 px-3">
+              <button type="button" onClick={addManufacturingStep} className="ui-btn-ghost h-10 gap-2">
                 <Plus size={14} strokeWidth={1.75} />
                 Add Step
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="ui-procedure-steps">
               {manufacturingSteps.length === 0 ? (
-                <div className="ui-panel px-4 py-5 text-sm text-ink-secondary">
+                <div className="ui-procedure-empty">
                   Add a blank step to start authoring the procedure for this task.
                 </div>
               ) : (
@@ -2370,204 +2301,181 @@ function ProcedureWorkspace({
                   const selectedChecks = getManufacturingStepCheckSet(step.qualityCheck);
 
                   return (
-                    <div
-                      key={step.id}
-                      className="ui-panel grid gap-3 p-4 xl:grid-cols-[54px_76px_minmax(0,1fr)]"
-                    >
-                      <label className="block">
-                        <span className="ui-field-label">Seq</span>
-                        <ClearableNumberInput
-                          aria-label={`Step ${step.sequence} sequence`}
-                          className="number-input ui-field-standalone px-1 text-center"
-                          value={step.sequence}
-                          min={1}
-                          fallbackValue={step.sequence}
-                          precision={0}
-                          normalize={Math.round}
-                          onValueChange={(value) => moveManufacturingStep(step.id, value)}
-                        />
-                      </label>
-
-                      <label className="block">
-                        <span className="ui-field-label">Minutes</span>
-                        <ClearableNumberInput
-                          aria-label={`Step ${step.sequence} duration minutes`}
-                          className="number-input ui-field-standalone px-1 text-center"
-                          value={step.durationMinutes ?? 0}
-                          min={0}
-                          fallbackValue={step.durationMinutes ?? 0}
-                          precision={1}
-                          onValueChange={(value) => updateManufacturingStep(step.id, { durationMinutes: value })}
-                        />
-                      </label>
-
-                      <div className="min-w-0 space-y-3">
-                        <div>
-                          <div className="mb-1 flex items-center justify-between gap-2">
+                    <div key={step.id} className="ui-procedure-step space-y-3">
+                      <div>
+                        <div className="ui-procedure-step-header mb-1">
+                          <div className="ui-procedure-step-header-fields">
                             <span className="ui-field-label mb-0">Instruction</span>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateManufacturingStep(step.id, { instruction: applyInstructionBullets(step.instruction) })
-                                }
-                                className="ui-btn-ghost h-8 gap-1.5 px-2"
-                                title={`Format step ${step.sequence} as bullets`}
-                                aria-label={`Format step ${step.sequence} as bullets`}
-                              >
-                                <ListChecks size={12} strokeWidth={1.75} />
-                                Bullets
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => requestRemoveManufacturingStep(step.id)}
-                                className="ui-btn-ghost h-8 gap-1.5 px-2 text-danger hover:text-danger"
-                                title={`Delete step ${step.sequence}`}
-                                aria-label={`Delete step ${step.sequence}`}
-                              >
-                                <Trash2 size={12} strokeWidth={1.75} />
-                                Delete
-                              </button>
-                            </div>
+                            <label className="ui-procedure-step-inline-field">
+                              <span className="ui-field-label mb-0">Seq</span>
+                              <ClearableNumberInput
+                                aria-label={`Step ${step.sequence} sequence`}
+                                className="number-input ui-procedure-step-inline-value"
+                                value={step.sequence}
+                                min={1}
+                                fallbackValue={step.sequence}
+                                precision={0}
+                                normalize={Math.round}
+                                onValueChange={(value) => moveManufacturingStep(step.id, value)}
+                              />
+                            </label>
+                            <label className="ui-procedure-step-inline-field">
+                              <span className="ui-field-label mb-0">Min</span>
+                              <ClearableNumberInput
+                                aria-label={`Step ${step.sequence} duration minutes`}
+                                className="number-input ui-procedure-step-inline-value ui-procedure-step-inline-value-wide"
+                                value={step.durationMinutes ?? 0}
+                                min={0}
+                                fallbackValue={step.durationMinutes ?? 0}
+                                precision={1}
+                                onValueChange={(value) => updateManufacturingStep(step.id, { durationMinutes: value })}
+                              />
+                            </label>
                           </div>
-                          <textarea
-                            aria-label={`Step ${step.sequence} instruction`}
-                            className="ui-field-standalone min-h-[132px] h-auto resize-y py-2 leading-relaxed"
-                            value={step.instruction}
-                            onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
-                            onKeyDown={(event) =>
-                              handleInstructionBulletKeyDown(event, (instruction) =>
-                                updateManufacturingStep(step.id, { instruction }),
-                              )
-                            }
-                            placeholder="Write the manufacturing instruction for this operation."
+                          <div className="ui-procedure-step-toolbar">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateManufacturingStep(step.id, { instruction: applyInstructionBullets(step.instruction) })
+                              }
+                              className="ui-btn-ghost h-7 gap-1 px-2 text-[10px]"
+                              title={`Format step ${step.sequence} as bullets`}
+                              aria-label={`Format step ${step.sequence} as bullets`}
+                            >
+                              <ListChecks size={12} strokeWidth={1.75} />
+                              Bullets
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => requestRemoveManufacturingStep(step.id)}
+                              className="ui-btn-ghost h-7 gap-1 px-2 text-[10px] text-danger hover:text-danger"
+                              title={`Delete step ${step.sequence}`}
+                              aria-label={`Delete step ${step.sequence}`}
+                            >
+                              <Trash2 size={12} strokeWidth={1.75} />
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                        <textarea
+                          aria-label={`Step ${step.sequence} instruction`}
+                          className="ui-field-standalone ui-procedure-step-instruction h-auto w-full resize-y"
+                          value={step.instruction}
+                          onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
+                          onKeyDown={(event) =>
+                            handleInstructionBulletKeyDown(event, (instruction) =>
+                              updateManufacturingStep(step.id, { instruction }),
+                            )
+                          }
+                          placeholder="Write the manufacturing instruction for this operation."
+                        />
+                      </div>
+
+                      <div className="ui-procedure-step-details">
+                        <div className="ui-procedure-step-detail">
+                          <span className="ui-field-label mb-0 block">Tools</span>
+                          <div className="ui-procedure-step-add-row">
+                            <input
+                              className="ui-procedure-step-inline-text"
+                              value={newStepToolNames[step.id] ?? ""}
+                              onChange={(event) =>
+                                setNewStepToolNames((current) => ({ ...current, [step.id]: event.target.value }))
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  addManufacturingStepTool(step.id);
+                                }
+                              }}
+                              placeholder="Add tool"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => addManufacturingStepTool(step.id)}
+                              className="ui-btn-ghost h-8 shrink-0 px-2 text-[10px]"
+                            >
+                              Add
+                            </button>
+                            {toolLibrary.length > 0 ? (
+                              <select
+                                aria-label={`Add saved tool to step ${step.sequence}`}
+                                className="ui-procedure-step-inline-select"
+                                value=""
+                                onChange={(event) => {
+                                  if (event.target.value) {
+                                    addManufacturingStepToolFromLibrary(step.id, event.target.value);
+                                  }
+                                }}
+                              >
+                                <option value="">Tool library</option>
+                                {toolLibrary
+                                  .filter((tool) => !stepTools.some((stepTool) => stepTool.toLocaleLowerCase() === tool.toLocaleLowerCase()))
+                                  .map((tool) => (
+                                    <option key={tool} value={tool}>
+                                      {tool}
+                                    </option>
+                                  ))}
+                              </select>
+                            ) : null}
+                          </div>
+                          <ProcedureStepToolTable
+                            tools={stepTools}
+                            registry={projectToolRegistry}
+                            onRemove={(toolName) => removeManufacturingStepTool(step.id, toolName)}
+                            removeAriaLabel={(toolName) => `Remove ${toolName} from step ${step.sequence}`}
                           />
                         </div>
 
-                        <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)]">
-	                          <div className="min-w-0">
-	                            <div className="mb-1 flex items-center justify-between gap-2">
-                                <span className="ui-field-label mb-0">Tools</span>
-                                {toolLibrary.length > 0 ? (
-                                  <select
-                                    aria-label={`Add saved tool to step ${step.sequence}`}
-                                    className="ui-field-standalone h-8 max-w-[220px] px-2 text-[11px]"
-                                    value=""
+                        <StepPartReferenceEditor
+                          task={task}
+                          step={step}
+                          partReferences={partReferences}
+                          draftValue={newStepPartNumbers[step.id] ?? ""}
+                          onDraftChange={(value) =>
+                            setNewStepPartNumbers((current) => ({ ...current, [step.id]: value }))
+                          }
+                          onAddDraft={() => addManufacturingStepPartReference(step.id)}
+                          onLinkExisting={(partReferenceId) => linkExistingPartToManufacturingStep(step.id, partReferenceId)}
+                          onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
+                        />
+
+                        <div className="ui-procedure-step-detail">
+                          <span className="ui-field-label mb-0 block">Checks</span>
+                          <div className="ui-procedure-step-checks" role="group" aria-label={`Step ${step.sequence} checks`}>
+                            {manufacturingStepCheckOptions.map((option) => {
+                              const checked = selectedChecks.has(option.key);
+
+                              return (
+                                <label
+                                  key={option.key}
+                                  className={`ui-procedure-step-check ${checked ? "ui-procedure-step-check-active" : ""}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
                                     onChange={(event) => {
-                                      if (event.target.value) {
-                                        addManufacturingStepToolFromLibrary(step.id, event.target.value);
+                                      const nextChecks = new Set(selectedChecks);
+
+                                      if (event.target.checked) {
+                                        nextChecks.add(option.key);
+                                      } else {
+                                        nextChecks.delete(option.key);
                                       }
+
+                                      updateManufacturingStep(step.id, {
+                                        qualityCheck: serializeManufacturingStepCheckSet(nextChecks),
+                                      });
                                     }}
-                                  >
-                                    <option value="">Tool library</option>
-                                    {toolLibrary
-                                      .filter((tool) => !stepTools.some((stepTool) => stepTool.toLocaleLowerCase() === tool.toLocaleLowerCase()))
-                                      .map((tool) => (
-                                        <option key={tool} value={tool}>
-                                          {tool}
-                                        </option>
-                                      ))}
-                                  </select>
-                                ) : null}
-                              </div>
-	                            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                              <input
-                                className="ui-field-standalone h-9 min-w-0 px-2 text-xs"
-                                value={newStepToolNames[step.id] ?? ""}
-                                onChange={(event) =>
-                                  setNewStepToolNames((current) => ({ ...current, [step.id]: event.target.value }))
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    addManufacturingStepTool(step.id);
-                                  }
-                                }}
-                                placeholder="Add tool"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => addManufacturingStepTool(step.id)}
-                                className="ui-btn-ghost h-9 px-2"
-                              >
-                                Add
-                              </button>
-                            </div>
-                            {stepTools.length > 0 ? (
-                              <div className="mt-2 flex flex-wrap gap-1.5">
-                                {stepTools.map((tool) => (
-                                  <span key={tool} className="ui-chip inline-flex min-w-0 items-center gap-1 normal-case tracking-normal">
-                                    <span className="max-w-[240px] truncate">{tool}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeManufacturingStepTool(step.id, tool)}
-                                      className="text-ink-tertiary hover:text-danger"
-                                      aria-label={`Remove ${tool}`}
-                                      title={`Remove ${tool}`}
-                                    >
-                                      <Trash2 size={11} />
-                                    </button>
-                                  </span>
-                                ))}
-	                              </div>
-	                            ) : null}
-	                          </div>
-
-	                          <div>
-	                            <StepPartReferenceEditor
-	                              task={task}
-	                              step={step}
-	                              partReferences={partReferences}
-	                              draftValue={newStepPartNumbers[step.id] ?? ""}
-	                              onDraftChange={(value) =>
-	                                setNewStepPartNumbers((current) => ({ ...current, [step.id]: value }))
-	                              }
-	                              onAddDraft={() => addManufacturingStepPartReference(step.id)}
-	                              onLinkExisting={(partReferenceId) => linkExistingPartToManufacturingStep(step.id, partReferenceId)}
-	                              onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
-	                            />
-	                          </div>
-
-                          <div>
-                            <div className="mb-2 ui-field-label">Checks</div>
-                            <div className="flex flex-wrap gap-1.5" role="group" aria-label={`Step ${step.sequence} checks`}>
-                              {manufacturingStepCheckOptions.map((option) => {
-                                const checked = selectedChecks.has(option.key);
-
-                                return (
-                                  <label
-                                    key={option.key}
-                                    className={`inline-flex h-8 cursor-pointer items-center gap-1.5 px-2.5 text-[11px] font-medium transition ${
-                                      checked ? "ui-chip-accent normal-case tracking-normal" : "ui-chip normal-case tracking-normal"
-                                    }`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      className="h-3.5 w-3.5 shrink-0 accent-accent"
-                                      checked={checked}
-                                      onChange={(event) => {
-                                        const nextChecks = new Set(selectedChecks);
-
-                                        if (event.target.checked) {
-                                          nextChecks.add(option.key);
-                                        } else {
-                                          nextChecks.delete(option.key);
-                                        }
-
-                                        updateManufacturingStep(step.id, {
-                                          qualityCheck: serializeManufacturingStepCheckSet(nextChecks),
-                                        });
-                                      }}
-                                    />
-                                    {option.label}
-                                  </label>
-                                );
-                              })}
-                            </div>
+                                  />
+                                  {option.label}
+                                </label>
+                              );
+                            })}
                           </div>
                         </div>
+                      </div>
 
-                        <div className="border-t border-line/70 pt-3">
+                        <div className="ui-procedure-step-divider">
                           <StepPhotoAttachmentEditor
                             step={step}
                             photos={stepPhotos}
@@ -2575,9 +2483,9 @@ function ProcedureWorkspace({
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
                             onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
                             onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
+                            onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                           />
                         </div>
-                      </div>
                     </div>
                   );
                 })
@@ -2586,39 +2494,37 @@ function ProcedureWorkspace({
           </section>
 
           <section>
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="ui-setup-section-title">Part References</h2>
                 <p className="ui-setup-section-desc">{partReferences.length} part reference(s)</p>
               </div>
-              <button type="button" onClick={addPartReference} className="ui-btn-secondary h-8 gap-1.5 px-3 text-[11px]">
+              <button type="button" onClick={addPartReference} className="ui-btn-ghost h-10 gap-2">
                 <Plus size={14} strokeWidth={1.75} />
                 Part
               </button>
             </div>
-            <div className="space-y-3">
-              {partReferences.length === 0 ? (
-                <div className="ui-panel px-4 py-4 text-sm text-ink-secondary">
-                  No part references on this task yet.
-                </div>
-              ) : (
-                partReferences.map((part) => (
-                  <div
-                    key={part.id}
-                    className="ui-panel grid gap-3 p-4 md:grid-cols-[minmax(150px,0.55fr)_80px_minmax(0,1fr)_minmax(0,1fr)]"
-                  >
-                    <label className="block">
+            {partReferences.length === 0 ? (
+              <div className="ui-procedure-empty">
+                No part references on this task yet.
+              </div>
+            ) : (
+              <div className="ui-procedure-part-editor">
+                {partReferences.map((part) => (
+                  <div key={part.id} className="ui-procedure-part-row">
+                    <label className="block min-w-0">
                       <span className="ui-field-label">Part Number</span>
                       <input
-                        className="ui-field-standalone"
+                        className="ui-procedure-step-inline-text w-full min-w-0"
                         value={part.partNumber}
                         onChange={(event) => updatePartReference(part.id, { partNumber: event.target.value })}
+                        placeholder="Part number"
                       />
                     </label>
                     <label className="block">
                       <span className="ui-field-label">Qty</span>
                       <ClearableNumberInput
-                        className="number-input ui-field-standalone"
+                        className="number-input ui-procedure-step-inline-value"
                         value={part.quantity ?? 0}
                         min={0}
                         fallbackValue={part.quantity ?? 0}
@@ -2627,26 +2533,28 @@ function ProcedureWorkspace({
                         onValueChange={(value) => updatePartReference(part.id, { quantity: value })}
                       />
                     </label>
-                    <label className="block">
+                    <label className="block min-w-0">
                       <span className="ui-field-label">Description</span>
                       <input
-                        className="ui-field-standalone"
+                        className="ui-procedure-step-inline-text w-full min-w-0"
                         value={part.description ?? ""}
                         onChange={(event) => updatePartReference(part.id, { description: event.target.value })}
+                        placeholder="Description"
                       />
                     </label>
-                    <label className="block">
+                    <label className="block min-w-0">
                       <span className="ui-field-label">Disposition / Note</span>
                       <input
-                        className="ui-field-standalone"
+                        className="ui-procedure-step-inline-text w-full min-w-0"
                         value={part.disposition ?? ""}
                         onChange={(event) => updatePartReference(part.id, { disposition: event.target.value })}
+                        placeholder="Note"
                       />
                     </label>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
         <ScrollDownHint />
@@ -3735,6 +3643,11 @@ function DetailDrawer({
     void onRemoveStepPhoto(taskId, stepId, photoId);
   }
 
+  function updateManufacturingStepPhoto(stepId: string, photoId: string, patch: Partial<StepPhotoAttachment>) {
+    const nextTask = updateStepPhotoAttachment(currentTask, stepId, photoId, patch);
+    onUpdateTask(taskId, { customFields: nextTask.customFields });
+  }
+
   function requestRemoveManufacturingStepPhoto(stepId: string, photo: StepPhotoAttachment) {
     onConfirmAction({
       title: "Delete photo?",
@@ -3861,7 +3774,7 @@ function DetailDrawer({
                         <button
                           type="button"
                           onClick={() => updateManufacturingStep(step.id, { instruction: applyInstructionBullets(step.instruction) })}
-                          className="inline-flex h-7 items-center gap-1 rounded border border-line bg-surface px-2 text-[10px] ui-mono-label text-steel hover:border-accent hover:text-accent"
+                          className="ui-btn-ghost h-8 gap-1.5 px-2"
                           aria-label={`Format step ${step.sequence} as bullets`}
                           title={`Format step ${step.sequence} as bullets`}
                         >
@@ -3961,6 +3874,7 @@ function DetailDrawer({
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
                             onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
                             onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
+                            onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                           />
                         </div>
                         <div
@@ -4412,6 +4326,7 @@ export function LineWorkspace({
   const pendingRemoteRefreshRef = useRef(false);
   const [feedbackToasts, setFeedbackToasts] = useState<FeedbackToast[]>([]);
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
+  const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
   const feedbackToastIdRef = useRef(1);
   const feedbackToastTimersRef = useRef<Map<number, number>>(new Map());
   const detailDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -4492,6 +4407,30 @@ export function LineWorkspace({
       ? []
       : currentAllocationRecommendations;
   const activeProjectContext = derivedState.project ?? projectContext;
+  const projectToolRegistry = useMemo(
+    () => buildProjectToolRegistry(derivedState.tasks, toolLibraryItems),
+    [derivedState.tasks, toolLibraryItems],
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    loadToolLibraryFromSupabase(activeProjectContext?.projectId)
+      .then((tools) => {
+        if (active) {
+          setToolLibraryItems(tools);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setToolLibraryItems([]);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeProjectContext?.projectId]);
 
   useEffect(() => {
     if (!hasLoadedRemoteState) {
@@ -5231,6 +5170,111 @@ export function LineWorkspace({
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Unable to remove the tool.");
       setSaveState("error");
+    }
+  }
+
+  async function applyProjectTasksUpdate(nextTasks: Task[]) {
+    setSaveError(undefined);
+    setSaveState("saving");
+
+    const calculated = applyCalculatedFields(derivedState.product, derivedState.stations, nextTasks);
+    const nextState = {
+      ...derivedState,
+      product: calculated.product,
+      stations: calculated.stations,
+      tasks: calculated.tasks,
+    };
+
+    setPlannerState(nextState);
+
+    try {
+      await savePlannerShellToSupabase(nextState);
+      setSaveState("saved");
+      notifyFeedback({
+        title: "Build catalog updated",
+        body: "Tool assignments were saved across the project.",
+        tone: "success",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to save build catalog changes.";
+      setSaveError(message);
+      setSaveState("error");
+      notifyFeedback({
+        title: "Save failed",
+        body: message,
+        tone: "danger",
+      });
+      throw error;
+    }
+  }
+
+  async function saveCatalogTool(
+    entry: ProjectToolCatalogEntry,
+    draft: { name: string; category: ToolTypeValue },
+  ) {
+    const nameChanged = draft.name.trim().toLocaleLowerCase() !== entry.name.toLocaleLowerCase();
+
+    if (nameChanged) {
+      const nextTasks = renameToolInTasks(derivedState.tasks, entry.name, draft.name);
+      await applyProjectTasksUpdate(nextTasks);
+    }
+
+    await upsertToolLibraryMetadata({
+      toolName: draft.name,
+      category: draft.category,
+      projectId,
+      previousToolName: nameChanged ? entry.name : undefined,
+    });
+
+    const tools = await loadToolLibraryFromSupabase(projectId);
+    setToolLibraryItems(tools);
+
+    if (!nameChanged) {
+      notifyFeedback({
+        title: "Tool updated",
+        body: `${draft.name} type saved.`,
+        tone: "success",
+      });
+    }
+  }
+
+  async function deleteCatalogTool(entry: ProjectToolCatalogEntry) {
+    const nextTasks = removeToolFromAllTasks(derivedState.tasks, entry.name);
+    await applyProjectTasksUpdate(nextTasks);
+
+    if (entry.libraryId) {
+      await deleteToolLibraryFromSupabase(entry.libraryId, projectId);
+      const tools = await loadToolLibraryFromSupabase(projectId);
+      setToolLibraryItems(tools);
+    }
+  }
+
+  async function saveCatalogPart(
+    entry: ProjectPartCatalogEntry,
+    draft: { partNumber: string; description: string; quantity: number; disposition: string },
+  ) {
+    const nextTasks = updateTaskPartReference(derivedState.tasks, entry.taskId, entry.part.id, {
+      partNumber: draft.partNumber,
+      description: draft.description,
+      quantity: draft.quantity,
+      disposition: draft.disposition,
+    });
+    const task = nextTasks.find((candidate) => candidate.id === entry.taskId);
+
+    if (task) {
+      updateProcedureTask(entry.taskId, { partReferences: task.partReferences });
+    }
+  }
+
+  async function deleteCatalogPart(entry: ProjectPartCatalogEntry) {
+    const nextTasks = removeTaskPartReference(derivedState.tasks, entry.taskId, entry.part.id);
+    const task = nextTasks.find((candidate) => candidate.id === entry.taskId);
+
+    if (task) {
+      updateProcedureTask(entry.taskId, {
+        partReferences: task.partReferences,
+        manufacturingSteps: task.manufacturingSteps,
+      });
     }
   }
 
@@ -6462,6 +6506,7 @@ export function LineWorkspace({
             onRemoveStepPhoto={removeStepPhoto}
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
+            projectToolRegistry={projectToolRegistry}
           />
         ) : isSettingsModule ? (
           <main className="min-h-0 min-w-0 overflow-hidden">
@@ -6500,11 +6545,22 @@ export function LineWorkspace({
                 <KpiStrip kpis={kpis} product={derivedState.product} />
 
                 {activeModule === "setup" ? (
-                  <ProductSetupPanel
-                    product={derivedState.product}
-                    onProductNumber={updateProductNumber}
-                    onProductText={updateProductText}
-                  />
+                  <div className="space-y-4">
+                    <ProductSetupPanel
+                      product={derivedState.product}
+                      onProductNumber={updateProductNumber}
+                      onProductText={updateProductText}
+                    />
+                    <ProjectCatalogSetupPanel
+                      tasks={derivedState.tasks}
+                      projectToolRegistry={projectToolRegistry}
+                      onSaveTool={saveCatalogTool}
+                      onDeleteTool={deleteCatalogTool}
+                      onSavePart={saveCatalogPart}
+                      onDeletePart={deleteCatalogPart}
+                      onConfirmAction={requestFeedbackConfirm}
+                    />
+                  </div>
                 ) : (
                   lineReadinessPanel
                 )}

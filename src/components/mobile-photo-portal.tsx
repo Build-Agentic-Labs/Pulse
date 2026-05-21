@@ -24,7 +24,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { applyCalculatedFields, formatMinutes, getTimelineBounds } from "@/domain/calculations";
+import { applyCalculatedFields, formatMinutes, getTimelineBounds, getTopLevelTasks } from "@/domain/calculations";
 import { applyInstructionBullets, resolveBulletEnter } from "@/domain/instruction-bullets";
 import { initialPlannerState } from "@/domain/seed";
 import {
@@ -146,6 +146,28 @@ function formatElapsedTimer(milliseconds: number) {
 
 function elapsedMinutesFromTimer(milliseconds: number) {
   return milliseconds > 0 ? Math.max(1, Math.ceil(milliseconds / 60000)) : 0;
+}
+
+type CaptureTimerState = {
+  running: boolean;
+  startedAt: number | null;
+  storedElapsedMs: number;
+  lapMarkerMs: number;
+  activeStepId: string | null;
+  taskId: string | null;
+  taskName: string;
+};
+
+function getCaptureTimerElapsed(timer: CaptureTimerState, now: number) {
+  if (!timer.running || !timer.startedAt) {
+    return timer.storedElapsedMs;
+  }
+
+  return timer.storedElapsedMs + Math.max(0, now - timer.startedAt);
+}
+
+function getCaptureTimerLapElapsed(timer: CaptureTimerState, now: number) {
+  return Math.max(0, getCaptureTimerElapsed(timer, now) - timer.lapMarkerMs);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -548,23 +570,20 @@ export function MobilePhotoPortal({
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
   const [restorePrompt, setRestorePrompt] = useState<RestorePrompt | null>(null);
   const [confirmPrompt, setConfirmPrompt] = useState<ConfirmPrompt | null>(null);
-  const [captureTimer, setCaptureTimer] = useState<{
-    elapsedMs: number;
-    running: boolean;
-    startedAt: number | null;
-    stepId: string | null;
-    taskId: string | null;
-    taskName: string;
-  }>({
-    elapsedMs: 0,
+  const [captureTimer, setCaptureTimer] = useState<CaptureTimerState>({
     running: false,
     startedAt: null,
-    stepId: null,
+    storedElapsedMs: 0,
+    lapMarkerMs: 0,
+    activeStepId: null,
     taskId: null,
     taskName: "",
   });
   const [timerNow, setTimerNow] = useState(() => Date.now());
   const [mobileHeaderHeight, setMobileHeaderHeight] = useState(92);
+  const [newStepMotionPhase, setNewStepMotionPhase] = useState<"idle" | "exit" | "enter">("idle");
+  const [recentlyCompletedStepId, setRecentlyCompletedStepId] = useState<string | null>(null);
+  const newStepMotionTimersRef = useRef<number[]>([]);
   const saveInFlightRef = useRef(false);
   const localWriteCountRef = useRef(0);
   const photoUploadQueuesRef = useRef<Record<string, Promise<void>>>({});
@@ -572,6 +591,7 @@ export function MobilePhotoPortal({
   const mobileHeaderRef = useRef<HTMLElement | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const newStepInstructionRef = useRef<HTMLTextAreaElement | null>(null);
+  const newStepFormRef = useRef<HTMLDivElement | null>(null);
   const stepInstructionRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const photoHoldTimerRef = useRef<number | null>(null);
   const toolHoldTimerRef = useRef<number | null>(null);
@@ -619,7 +639,9 @@ export function MobilePhotoPortal({
       return [];
     }
 
-    return [...derivedState.tasks].filter((task) => task.rowType === "task").sort(compareTasksByWbs);
+    return getTopLevelTasks(derivedState.tasks)
+      .filter((task) => task.rowType === "task")
+      .sort(compareTasksByWbs);
   }, [derivedState]);
   const toolLibrary = useMemo(() => buildStepToolLibrary(taskRows), [taskRows]);
 
@@ -638,6 +660,25 @@ export function MobilePhotoPortal({
         : selectedTaskSteps,
     [newStepId, selectedTaskSteps, showNewStepForm],
   );
+  const draftStepSequence = useMemo(() => {
+    if (!selectedTask) {
+      return 1;
+    }
+
+    if (newStepId) {
+      const existingDraft = (selectedTask.manufacturingSteps ?? []).find((step) => step.id === newStepId);
+      if (existingDraft) {
+        return existingDraft.sequence;
+      }
+    }
+
+    const steps = selectedTask.manufacturingSteps ?? [];
+    if (steps.length === 0) {
+      return 1;
+    }
+
+    return steps.reduce((highest, step) => Math.max(highest, step.sequence), 0) + 1;
+  }, [newStepId, selectedTask]);
   const activeProjectContext = derivedState?.project ?? projectContext;
   const toolImageByName = useMemo(() => {
     const images = new Map<string, ToolLibraryItem>();
@@ -646,10 +687,8 @@ export function MobilePhotoPortal({
     });
     return images;
   }, [toolLibraryItems]);
-  const captureTimerElapsedMs =
-    captureTimer.running && captureTimer.startedAt
-      ? captureTimer.elapsedMs + Math.max(0, timerNow - captureTimer.startedAt)
-      : captureTimer.elapsedMs;
+  const captureTimerElapsedMs = getCaptureTimerElapsed(captureTimer, timerNow);
+  const captureTimerLapElapsedMs = getCaptureTimerLapElapsed(captureTimer, timerNow);
 
   useEffect(() => {
     plannerStateRef.current = plannerState;
@@ -814,6 +853,12 @@ export function MobilePhotoPortal({
     return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
   });
 
+  useEffect(() => {
+    return () => {
+      clearNewStepMotionTimers();
+    };
+  }, []);
+
   function hasLocalSaveWork() {
     return saveInFlightRef.current || Boolean(newStepAutosaveTimerRef.current);
   }
@@ -832,7 +877,9 @@ export function MobilePhotoPortal({
         }
 
         pendingRemoteRefreshRef.current = false;
-        const firstTask = [...savedState.tasks].filter((task) => task.rowType === "task").sort(compareTasksByWbs)[0];
+        const firstTask = getTopLevelTasks(savedState.tasks)
+          .filter((task) => task.rowType === "task")
+          .sort(compareTasksByWbs)[0];
         setPlannerState(savedState);
         setSelectedTaskId((currentTaskId) =>
           savedState.tasks.some((task) => task.id === currentTaskId) ? currentTaskId : firstTask?.id ?? "",
@@ -870,9 +917,99 @@ export function MobilePhotoPortal({
     requestRemotePlannerRefresh();
   }
 
+  function clearNewStepMotionTimers() {
+    newStepMotionTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    newStepMotionTimersRef.current = [];
+  }
+
+  function queueNewStepMotionTimer(callback: () => void, delayMs: number) {
+    const timerId = window.setTimeout(() => {
+      newStepMotionTimersRef.current = newStepMotionTimersRef.current.filter((id) => id !== timerId);
+      callback();
+    }, delayMs);
+    newStepMotionTimersRef.current.push(timerId);
+  }
+
+  function animateScrollToElement(element: HTMLElement, headerOffset: number, duration = 580) {
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion) {
+      element.scrollIntoView({ behavior: "auto", block: "start" });
+      return;
+    }
+
+    const startY = window.scrollY;
+    const targetY = element.getBoundingClientRect().top + window.scrollY - headerOffset;
+    const distance = targetY - startY;
+
+    if (Math.abs(distance) < 6) {
+      return;
+    }
+
+    const startTime = performance.now();
+
+    function easeOutCubic(progress: number) {
+      return 1 - (1 - progress) ** 3;
+    }
+
+    function frame(now: number) {
+      const progress = Math.min((now - startTime) / duration, 1);
+      window.scrollTo(0, startY + distance * easeOutCubic(progress));
+
+      if (progress < 1) {
+        requestAnimationFrame(frame);
+      }
+    }
+
+    requestAnimationFrame(frame);
+  }
+
   function scrollPortalToTop() {
     contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function scrollToNewStepForm() {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const target = newStepFormRef.current;
+        if (!target) {
+          return;
+        }
+
+        animateScrollToElement(target, mobileHeaderHeight + 12);
+
+        queueNewStepMotionTimer(() => {
+          newStepInstructionRef.current?.focus({ preventScroll: true });
+        }, 460);
+      });
+    });
+  }
+
+  function beginNewStepEnterMotion(completedStepId: string | null, onReady: () => void) {
+    if (newStepMotionPhase === "exit") {
+      return;
+    }
+
+    clearNewStepMotionTimers();
+    setRecentlyCompletedStepId(completedStepId);
+    setNewStepMotionPhase("exit");
+
+    queueNewStepMotionTimer(() => {
+      onReady();
+      setNewStepMotionPhase("enter");
+      scrollToNewStepForm();
+
+      queueNewStepMotionTimer(() => {
+        setNewStepMotionPhase("idle");
+      }, 560);
+    }, 180);
+
+    queueNewStepMotionTimer(() => {
+      setRecentlyCompletedStepId(null);
+    }, 1600);
   }
 
   useEffect(() => {
@@ -884,9 +1021,27 @@ export function MobilePhotoPortal({
           return;
         }
 
-        const nextState = savedState ?? initialPlannerState;
-        const firstTask = [...nextState.tasks].filter((task) => task.rowType === "task").sort(compareTasksByWbs)[0];
-        setPlannerState(nextState);
+        if (!savedState) {
+          if (projectId) {
+            setErrorMessage("Unable to load this project's line plan. Confirm you are signed in and have access.");
+            setSaveState("error");
+            return;
+          }
+
+          setPlannerState(initialPlannerState);
+          setSelectedTaskId(
+            getTopLevelTasks(initialPlannerState.tasks)
+              .filter((task) => task.rowType === "task")
+              .sort(compareTasksByWbs)[0]?.id ?? "",
+          );
+          setSaveState("idle");
+          return;
+        }
+
+        const firstTask = getTopLevelTasks(savedState.tasks)
+          .filter((task) => task.rowType === "task")
+          .sort(compareTasksByWbs)[0];
+        setPlannerState(savedState);
         setSelectedTaskId(firstTask?.id ?? "");
         setSaveState("idle");
       })
@@ -1950,8 +2105,16 @@ export function MobilePhotoPortal({
   }
 
   function openNewStepForm() {
-    resetNewStepDraft(getNewStepDefaultDurationText(), selectedTask ? buildNewStepId(selectedTask.id) : null);
+    const stepId = selectedTask ? buildNewStepId(selectedTask.id) : null;
+    resetNewStepDraft(getNewStepDefaultDurationText(), stepId);
     setShowNewStepForm(true);
+
+    if (captureTimer.running && captureTimer.taskId === selectedTask?.id) {
+      setCaptureTimer((current) => ({
+        ...current,
+        activeStepId: stepId,
+      }));
+    }
   }
 
   function closeNewStepForm() {
@@ -1964,6 +2127,42 @@ export function MobilePhotoPortal({
     resetNewStepDraft("5", null);
   }
 
+  function applyLapToActiveStep() {
+    if (!captureTimer.running || !captureTimer.activeStepId || captureTimer.taskId !== selectedTask?.id) {
+      return null;
+    }
+
+    const stepId = captureTimer.activeStepId;
+    const lapMinutes = elapsedMinutesFromTimer(getCaptureTimerLapElapsed(captureTimer, Date.now()));
+    if (!lapMinutes) {
+      return null;
+    }
+
+    const snapshot = getNewStepDraftSnapshot({ stepId, durationText: String(lapMinutes) });
+
+    if (showNewStepForm && newStepIdRef.current === stepId) {
+      setNewStepDurationText(snapshot.durationText);
+      newStepTouchedRef.current = true;
+      persistNewStepDraft(snapshot, { saveTask: true, showSaving: true });
+      return snapshot;
+    }
+
+    if (selectedTaskSteps.some((step) => step.id === stepId)) {
+      void updateManufacturingStep(stepId, { durationMinutes: lapMinutes });
+      return snapshot;
+    }
+
+    return snapshot;
+  }
+
+  function advanceCaptureTimerLap(nextStepId: string | null) {
+    setCaptureTimer((current) => ({
+      ...current,
+      lapMarkerMs: getCaptureTimerElapsed(current, Date.now()),
+      activeStepId: nextStepId,
+    }));
+  }
+
   function startCaptureTimer() {
     if (!selectedTask || captureTimer.running) {
       return;
@@ -1971,62 +2170,33 @@ export function MobilePhotoPortal({
 
     setErrorMessage(null);
 
-    const stepId = showNewStepForm
-      ? ensureDraftStepId(selectedTask.id)
-      : buildNewStepId(selectedTask.id);
-
-    if (!showNewStepForm) {
-      resetNewStepDraft(getNewStepDefaultDurationText(), stepId);
-      setShowNewStepForm(true);
-    }
-
-    setTimerNow(Date.now());
+    const stepId = showNewStepForm ? ensureDraftStepId(selectedTask.id) : null;
+    const now = Date.now();
+    setTimerNow(now);
     setCaptureTimer({
-      elapsedMs: 0,
       running: true,
-      startedAt: Date.now(),
-      stepId,
+      startedAt: now,
+      storedElapsedMs: 0,
+      lapMarkerMs: 0,
+      activeStepId: stepId,
       taskId: selectedTask.id,
       taskName: selectedTask.name,
     });
   }
 
   function stopCaptureTimer() {
-    const elapsedMs =
-      captureTimer.running && captureTimer.startedAt
-        ? captureTimer.elapsedMs + Math.max(0, Date.now() - captureTimer.startedAt)
-        : captureTimer.elapsedMs;
-    const durationMinutes = elapsedMinutesFromTimer(elapsedMs);
-    const stepId = captureTimer.stepId;
-    const timerTaskId = captureTimer.taskId;
+    if (captureTimer.running) {
+      applyLapToActiveStep();
+    }
 
     setCaptureTimer({
-      elapsedMs: 0,
       running: false,
       startedAt: null,
-      stepId: null,
+      storedElapsedMs: 0,
+      lapMarkerMs: 0,
+      activeStepId: null,
       taskId: null,
       taskName: "",
-    });
-
-    if (!durationMinutes) {
-      return;
-    }
-
-    if (!selectedTask || selectedTask.id !== timerTaskId || !stepId) {
-      setErrorMessage("Timer stopped, but the active task changed before the time could be applied.");
-      return;
-    }
-
-    const durationText = String(durationMinutes);
-    setErrorMessage(null);
-    setDraftStepId(stepId);
-    setShowNewStepForm(true);
-    setNewStepDurationText(durationText);
-    newStepTouchedRef.current = true;
-    persistNewStepDraft(getNewStepDraftSnapshot({ stepId, durationText }), {
-      saveTask: true,
-      showSaving: true,
     });
   }
 
@@ -2311,20 +2481,48 @@ export function MobilePhotoPortal({
   }
 
   function goToNextManufacturingStep() {
-    if (captureTimer.running) {
-      setErrorMessage("Stop the timer before moving to the next step.");
+    if (newStepMotionPhase !== "idle") {
       return;
     }
 
     clearNewStepAutosaveTimer();
-    const snapshot = getNewStepDraftSnapshot({ stepId: newStepIdRef.current });
 
-    if (newStepTouchedRef.current || hasDraftStepContent(snapshot)) {
+    const currentStepId = newStepIdRef.current;
+    let snapshot = getNewStepDraftSnapshot({ stepId: currentStepId });
+
+    if (
+      captureTimer.running &&
+      captureTimer.activeStepId === currentStepId &&
+      captureTimer.taskId === selectedTask?.id
+    ) {
+      const lapMinutes = elapsedMinutesFromTimer(getCaptureTimerLapElapsed(captureTimer, Date.now()));
+      if (lapMinutes > 0) {
+        snapshot = getNewStepDraftSnapshot({ stepId: currentStepId, durationText: String(lapMinutes) });
+        setNewStepDurationText(snapshot.durationText);
+        newStepTouchedRef.current = true;
+      }
+    }
+
+    const durationMinutes = Math.max(Number.parseFloat(snapshot.durationText) || 0, 0);
+    if (newStepTouchedRef.current || hasDraftStepContent(snapshot) || durationMinutes > 0) {
       persistNewStepDraft(snapshot, { saveTask: true, showSaving: true });
     }
 
-    resetNewStepDraft("5", selectedTask ? buildNewStepId(selectedTask.id) : null);
-    setShowNewStepForm(true);
+    const completedStepId =
+      currentStepId &&
+      (newStepTouchedRef.current || hasDraftStepContent(snapshot) || durationMinutes > 0)
+        ? currentStepId
+        : null;
+
+    beginNewStepEnterMotion(completedStepId, () => {
+      const nextStepId = selectedTask ? buildNewStepId(selectedTask.id) : null;
+      resetNewStepDraft("5", nextStepId);
+      setShowNewStepForm(true);
+
+      if (captureTimer.running) {
+        advanceCaptureTimerLap(nextStepId);
+      }
+    });
   }
 
   function selectTask(taskId: string) {
@@ -2391,8 +2589,8 @@ export function MobilePhotoPortal({
                 }`}
                 title={
                   captureTimer.running
-                    ? `Stop timer for ${captureTimer.taskName}`
-                    : `Start timer for ${selectedTask.name}`
+                    ? `Stop session timer for ${captureTimer.taskName}`
+                    : `Start session timer for ${selectedTask.name}`
                 }
               >
                 <Timer size={14} />
@@ -2403,7 +2601,7 @@ export function MobilePhotoPortal({
             ) : null}
             <a
               href={projectId ? `/projects/${projectId}/planner` : "/"}
-              className="ui-btn-secondary h-10 px-3 text-xs"
+              className="ui-btn-ghost h-10 px-3 text-xs"
             >
               Planner
             </a>
@@ -2798,11 +2996,20 @@ export function MobilePhotoPortal({
 
               <div className="flex flex-col gap-3 p-3">
                 {showNewStepForm ? (
-                  <div className="order-last overflow-hidden ui-panel">
+                  <div
+                    ref={newStepFormRef}
+                    key={newStepId ?? "new-step-draft"}
+                    className={`order-last overflow-hidden ui-panel ui-photo-mobile-new-step-panel ${
+                      newStepMotionPhase === "exit" ? "is-exiting" : ""
+                    } ${newStepMotionPhase === "enter" ? "is-entering" : ""}`}
+                    style={{ scrollMarginTop: mobileHeaderHeight + 12 }}
+                  >
                     <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-3">
                       <div>
-                        <div className="text-[11px] ui-mono-label tracking-wide text-accent">New Step</div>
-                        <div className="text-sm font-medium text-ink">Add manufacturing step</div>
+                        <div className="text-[11px] ui-mono-label tracking-wide text-accent">Step {draftStepSequence}</div>
+                        <div className="text-sm font-medium text-ink">
+                          {draftStepSequence === 1 ? "Add manufacturing step" : `Capture step ${draftStepSequence}`}
+                        </div>
                       </div>
                       <button
                         type="button"
@@ -2821,9 +3028,12 @@ export function MobilePhotoPortal({
                     <div className="px-3 py-3">
                     <div className="mb-2 flex items-center gap-2">
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
-                        1
+                        {draftStepSequence}
                       </span>
-                      <div className="ui-mono-label">Instructions</div>
+                      <div>
+                        <div className="ui-mono-label">Instructions</div>
+                        <div className="text-[10px] ui-mono-label tracking-wide text-accent">Step {draftStepSequence}</div>
+                      </div>
                     </div>
                     <label className="block">
                       <span className="mb-1 flex items-center justify-between gap-2">
@@ -2875,6 +3085,12 @@ export function MobilePhotoPortal({
                       <span className="mb-1 block ui-mono-label">
                         Duration
                       </span>
+                      {captureTimer.running && captureTimer.activeStepId === newStepId ? (
+                        <div className="mb-1 text-[10px] font-medium text-steel">
+                          Step lap {formatElapsedTimer(captureTimerLapElapsedMs)}
+                          <span className="text-ink-tertiary"> · total {formatElapsedTimer(captureTimerElapsedMs)}</span>
+                        </div>
+                      ) : null}
                       <div className="grid grid-cols-[1fr_56px] overflow-hidden rounded border border-line bg-surface">
                         <input
                           className="h-11 min-w-0 px-3 text-base font-medium text-ink outline-none"
@@ -3056,7 +3272,7 @@ export function MobilePhotoPortal({
                       className="inline-flex h-11 w-full items-center justify-center gap-2 border-t border-line bg-accent px-3 text-sm font-medium text-canvas active:bg-ink disabled:opacity-60"
                     >
                       <Plus size={16} />
-                      Next Step
+                      {captureTimer.running ? "Next Step (lap)" : "Next Step"}
                     </button>
                   </div>
                 ) : (
@@ -3088,12 +3304,17 @@ export function MobilePhotoPortal({
                   const confirmingDelete = confirmDeleteStepId === step.id;
 
                   return (
-                    <article key={step.id} className="overflow-hidden ui-panel">
+                    <article
+                      key={step.id}
+                      className={`overflow-hidden ui-panel ${
+                        recentlyCompletedStepId === step.id ? "ui-photo-mobile-step-just-saved" : ""
+                      }`}
+                    >
                       <div className="min-w-0 px-3 py-3">
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
                             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line bg-surface-raised text-[11px] font-medium text-accent">
-                              1
+                              {step.sequence}
                             </span>
                             <div>
                               <div className="ui-mono-label">Instructions</div>

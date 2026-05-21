@@ -10,13 +10,13 @@ interface PortalUrlCandidate {
 
 const DEFAULT_PUBLIC_PHONE_PORTAL_URL = "https://pulse.agenticlabs.studio/mobile-photos";
 
-function portalPath() {
-  return "/mobile-photos";
+function portalPath(projectId?: string) {
+  return projectId ? `/projects/${projectId}/mobile-photos` : "/mobile-photos";
 }
 
-function normalizePortalUrl(value: string) {
+function normalizePortalUrl(value: string, projectId?: string) {
   const trimmed = value.trim().replace(/\/$/, "");
-  const nextPath = portalPath();
+  const nextPath = portalPath(projectId);
 
   if (trimmed.endsWith(nextPath)) {
     return trimmed;
@@ -34,10 +34,10 @@ function normalizePortalUrl(value: string) {
   return `${trimmed}${nextPath}`;
 }
 
-function findLocalIpv4Candidates(protocol: string, port?: string): PortalUrlCandidate[] {
+function findLocalIpv4Candidates(protocol: string, port?: string, projectId?: string): PortalUrlCandidate[] {
   const interfaces = networkInterfaces();
   const candidates: PortalUrlCandidate[] = [];
-  const nextPath = portalPath();
+  const nextPath = portalPath(projectId);
 
   for (const [name, values] of Object.entries(interfaces)) {
     for (const value of values ?? []) {
@@ -66,6 +66,8 @@ function splitHost(host: string) {
 }
 
 export function GET(request: Request) {
+  const requestUrlObject = new URL(request.url);
+  const projectId = requestUrlObject.searchParams.get("projectId")?.trim() || undefined;
   const publicPortalUrl =
     process.env.PHONE_PORTAL_URL ?? process.env.NEXT_PUBLIC_PHONE_PORTAL_URL ?? DEFAULT_PUBLIC_PHONE_PORTAL_URL;
   const incomingHost = request.headers.get("host") ?? "127.0.0.1:3001";
@@ -73,15 +75,15 @@ export function GET(request: Request) {
   const protocol = forwardedProto ?? (incomingHost.includes("localhost") || incomingHost.includes("127.0.0.1") ? "http" : "https");
   const { hostname, port } = splitHost(incomingHost);
   const localHostnames = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
-  const localCandidates = findLocalIpv4Candidates(protocol, port);
-  const requestUrl = `${protocol}://${hostname}${port ? `:${port}` : ""}${portalPath()}`;
+  const localCandidates = findLocalIpv4Candidates(protocol, port, projectId);
+  const requestUrl = `${protocol}://${hostname}${port ? `:${port}` : ""}${portalPath(projectId)}`;
   const primaryUrl = publicPortalUrl
-    ? normalizePortalUrl(publicPortalUrl)
+    ? normalizePortalUrl(publicPortalUrl, projectId)
     : localHostnames.has(hostname)
       ? localCandidates[0]?.url ?? requestUrl
       : requestUrl;
   const candidates = [
-    { label: "Public", url: normalizePortalUrl(publicPortalUrl) },
+    { label: "Public", url: normalizePortalUrl(publicPortalUrl, projectId) },
     ...localCandidates,
     { label: hostname, url: requestUrl },
   ].filter(

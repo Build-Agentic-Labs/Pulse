@@ -248,7 +248,7 @@ export function PlannerDashboardPanel(props: {
                 ) : null}
               </div>
             </div>
-            <button type="button" onClick={() => setAttentionDismissed(true)} className="ui-btn-secondary h-9 px-3 text-xs">
+            <button type="button" onClick={() => setAttentionDismissed(true)} className="ui-btn-ghost h-9 px-3 text-xs">
               Dismiss
             </button>
           </div>

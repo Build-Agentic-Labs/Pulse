@@ -288,7 +288,7 @@ export function AccountWorkspacePage() {
                     {manageable ? (
                       <button
                         type="button"
-                        className="ui-btn-secondary h-8 gap-1.5 px-3 text-[10px] disabled:opacity-50"
+                        className="ui-btn-ghost h-8 gap-1.5 px-3 text-[10px] disabled:opacity-50"
                         disabled={isSubmitting || workspaceName === group.workspace.name}
                         onClick={() => void saveWorkspaceName(group.workspace.id)}
                       >
@@ -343,14 +343,14 @@ export function AccountWorkspacePage() {
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
-                                className="ui-btn-secondary h-8 px-3 text-[10px] disabled:opacity-50"
+                                className="ui-btn-ghost h-8 px-3 text-[10px] disabled:opacity-50"
                                 disabled={!editable || isSubmitting || projectName === project.name}
                                 onClick={() => void saveProjectName(project.id)}
                               >
                                 Save
                               </button>
                               <Link
-                                className="ui-btn-secondary h-8 gap-1 px-3 text-[10px]"
+                                className="ui-btn-ghost h-8 gap-1 px-3 text-[10px]"
                                 href={projectPlannerHref(project.id)}
                               >
                                 Open
@@ -398,7 +398,7 @@ export function AccountWorkspacePage() {
                         />
                         <button
                           type="submit"
-                          className="ui-btn-secondary h-10 gap-1.5 px-4 text-[10px] disabled:opacity-50"
+                          className="ui-btn-ghost h-10 gap-1.5 px-4 text-[10px] disabled:opacity-50"
                           disabled={!editable || isSubmitting}
                         >
                           <Plus size={14} />

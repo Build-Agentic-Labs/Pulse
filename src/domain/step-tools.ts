@@ -110,3 +110,73 @@ export function removeStepTool(task: Task, stepId: string, toolName: string): Ta
     [stepId]: (map[stepId] ?? []).filter((tool) => tool !== toolName),
   });
 }
+
+function dedupeToolNames(tools: string[]) {
+  return tools
+    .map(cleanToolName)
+    .filter(Boolean)
+    .filter((tool, index, list) => list.findIndex((item) => item.toLocaleLowerCase() === tool.toLocaleLowerCase()) === index);
+}
+
+export function renameToolInTasks(tasks: Task[], fromName: string, toName: string): Task[] {
+  const fromKey = fromName.trim().toLocaleLowerCase();
+  const nextName = cleanToolName(toName);
+
+  if (!fromKey || !nextName || fromKey === nextName.toLocaleLowerCase()) {
+    return tasks;
+  }
+
+  return tasks.map((task) => {
+    const map = getTaskStepToolListMap(task);
+    let changed = false;
+
+    const nextMap = Object.fromEntries(
+      Object.entries(map).map(([stepId, tools]) => {
+        const nextTools = dedupeToolNames(
+          tools.map((tool) => {
+            if (tool.toLocaleLowerCase() !== fromKey) {
+              return tool;
+            }
+
+            changed = true;
+            return nextName;
+          }),
+        );
+
+        return [stepId, nextTools];
+      }),
+    ) as StepToolListMap;
+
+    return changed ? writeStepToolListMap(task, nextMap) : task;
+  });
+}
+
+export function removeToolFromAllTasks(tasks: Task[], toolName: string): Task[] {
+  const targetKey = toolName.trim().toLocaleLowerCase();
+
+  if (!targetKey) {
+    return tasks;
+  }
+
+  return tasks.map((task) => {
+    const map = getTaskStepToolListMap(task);
+    let changed = false;
+
+    const nextMap = Object.fromEntries(
+      Object.entries(map).map(([stepId, tools]) => {
+        const nextTools = tools.filter((tool) => {
+          if (tool.toLocaleLowerCase() === targetKey) {
+            changed = true;
+            return false;
+          }
+
+          return true;
+        });
+
+        return [stepId, nextTools];
+      }),
+    ) as StepToolListMap;
+
+    return changed ? writeStepToolListMap(task, nextMap) : task;
+  });
+}

@@ -16,9 +16,16 @@ export function PlannerRouteShell({ projectId }: { projectId?: string }) {
 }
 
 export function MobilePhotoRouteShell({ projectId }: { projectId?: string }) {
-  const mobileProjectId = projectId === "project-flexboost" ? undefined : projectId;
-
-  return <MobilePhotoPortal projectId={mobileProjectId} />;
+  return (
+    <AuthProjectGate projectId={projectId} routeKind="mobile-photos">
+      {(project) => (
+        <MobilePhotoPortal
+          projectContext={project}
+          projectId={project?.projectId ?? projectId}
+        />
+      )}
+    </AuthProjectGate>
+  );
 }
 
 export function ExcelGanttRouteShell({ projectId }: { projectId?: string }) {

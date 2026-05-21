@@ -4,6 +4,16 @@ function normalizeKey(value: string) {
   return value.trim().toLowerCase();
 }
 
+/** Title-case words for display; fixes inconsistent casing like "FInal Assembly". */
+export function formatDisplayTitle(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+
+  return trimmed.replace(/\b([A-Za-z])([A-Za-z]*)\b/g, (_, first: string, rest: string) => {
+    return first.toUpperCase() + rest.toLowerCase();
+  });
+}
+
 export function displayWorkspaceName(name: string) {
   const trimmed = name.trim();
   if (!trimmed) return "Pulse";

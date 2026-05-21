@@ -168,7 +168,7 @@ export function AuthFormPanel({
               </div>
 
               <button
-                className="ui-btn-secondary h-11 w-full disabled:opacity-40"
+                className="ui-btn-ghost h-11 w-full disabled:opacity-40"
                 type="button"
                 disabled={isSubmitting}
                 onClick={() => onCreateAccount(email, password)}

@@ -30,7 +30,7 @@ const zonesByName: Record<string, { id: string; stationId: string }> = {
     id: "zone-1778212216855",
     stationId: "station-zone-1778212216855",
   },
-  "FInal Assembly": {
+  "Final Assembly": {
     id: "zone-1778281814293",
     stationId: "station-zone-1778281814293",
   },
@@ -63,14 +63,14 @@ const tasks: RestoreTask[] = [
   { wbs: "13", zone: "Sub assemblies", name: "Electric Motor / Clutch Stack Build", startMinute: 0, durationMinutes: 120, operators: ["B"] },
   { wbs: "14", zone: "Sub assemblies", name: "Engine, E-Motor, Alternator Build", startMinute: 210, durationMinutes: 120, operators: ["D"], dependencyWbs: ["13", "5"] },
   { wbs: "15", zone: "Sub assemblies", name: "V2 Cooling system with Panel", startMinute: 0, durationMinutes: 120, operators: [] },
-  { wbs: "16", zone: "FInal Assembly", name: "Assembly Chassis", startMinute: 330, durationMinutes: 120, operators: ["C"], dependencyWbs: ["9"] },
-  { wbs: "17", zone: "FInal Assembly", name: "Install Powertrain Module", startMinute: 450, durationMinutes: 60, operators: ["C"], dependencyWbs: ["16"] },
-  { wbs: "18", zone: "FInal Assembly", name: "Install original cooling and after treatment system", startMinute: 510, durationMinutes: 60, operators: ["D"], dependencyWbs: ["17"] },
-  { wbs: "19", zone: "FInal Assembly", name: "Reinstall control cabinet", startMinute: 570, durationMinutes: 120, operators: ["C"], dependencyWbs: ["18"] },
-  { wbs: "20", zone: "FInal Assembly", name: "Reinstall the panel system", startMinute: 690, durationMinutes: 120, operators: ["D"], dependencyWbs: ["19"] },
-  { wbs: "21", zone: "FInal Assembly", name: "Merge Battery and chassis", startMinute: 810, durationMinutes: 60, operators: ["D"], dependencyWbs: ["20"] },
-  { wbs: "22", zone: "FInal Assembly", name: "Fluid Replenishment", startMinute: 870, durationMinutes: 30, operators: ["C"], dependencyWbs: ["21"] },
-  { wbs: "23", zone: "FInal Assembly", name: "Install on trailer", startMinute: 900, durationMinutes: 60, operators: ["C"], dependencyWbs: ["22", "8"] },
+  { wbs: "16", zone: "Final Assembly", name: "Assembly Chassis", startMinute: 330, durationMinutes: 120, operators: ["C"], dependencyWbs: ["9"] },
+  { wbs: "17", zone: "Final Assembly", name: "Install Powertrain Module", startMinute: 450, durationMinutes: 60, operators: ["C"], dependencyWbs: ["16"] },
+  { wbs: "18", zone: "Final Assembly", name: "Install original cooling and after treatment system", startMinute: 510, durationMinutes: 60, operators: ["D"], dependencyWbs: ["17"] },
+  { wbs: "19", zone: "Final Assembly", name: "Reinstall control cabinet", startMinute: 570, durationMinutes: 120, operators: ["C"], dependencyWbs: ["18"] },
+  { wbs: "20", zone: "Final Assembly", name: "Reinstall the panel system", startMinute: 690, durationMinutes: 120, operators: ["D"], dependencyWbs: ["19"] },
+  { wbs: "21", zone: "Final Assembly", name: "Merge Battery and chassis", startMinute: 810, durationMinutes: 60, operators: ["D"], dependencyWbs: ["20"] },
+  { wbs: "22", zone: "Final Assembly", name: "Fluid Replenishment", startMinute: 870, durationMinutes: 30, operators: ["C"], dependencyWbs: ["21"] },
+  { wbs: "23", zone: "Final Assembly", name: "Install on trailer", startMinute: 900, durationMinutes: 60, operators: ["C"], dependencyWbs: ["22", "8"] },
 ];
 
 function isoAt(minute: number) {

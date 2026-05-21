@@ -1761,7 +1761,31 @@ export async function deletePlannerTask(taskId: string, projectId?: string) {
   await throwIfError(supabase.from("tasks").delete().eq("id", taskId));
 }
 
-export async function saveProcedureTaskUpdateToSupabase(task: Task, _scheduledTasks: Task[], projectId?: string) {
+function mergeTaskWithServerVersions(localTask: Task, serverTask: Task): Task {
+  const serverStepById = new Map((serverTask.manufacturingSteps ?? []).map((step) => [step.id, step]));
+  const localStepIds = new Set((localTask.manufacturingSteps ?? []).map((step) => step.id));
+  const mergedSteps = [
+    ...(localTask.manufacturingSteps ?? []).map((step) => {
+      const serverStep = serverStepById.get(step.id);
+      return serverStep ? { ...serverStep, ...step, version: serverStep.version } : step;
+    }),
+    ...(serverTask.manufacturingSteps ?? []).filter((step) => !localStepIds.has(step.id)),
+  ];
+
+  return {
+    ...serverTask,
+    ...localTask,
+    version: serverTask.version,
+    manufacturingSteps: mergedSteps.length > 0 ? mergedSteps : serverTask.manufacturingSteps,
+  };
+}
+
+export async function saveProcedureTaskUpdateToSupabase(
+  task: Task,
+  _scheduledTasks: Task[],
+  projectId?: string,
+  allowVersionRetry = true,
+) {
   const supabase = plannerClient();
   await assertTaskInProject(supabase, task.id, projectId);
   const { custom_fields: _customFields, ...taskProcedurePatch } = taskRow(task);
@@ -1773,6 +1797,18 @@ export async function saveProcedureTaskUpdateToSupabase(task: Task, _scheduledTa
 
   const savedTask = await throwIfError(taskUpdate.select("id,version").maybeSingle());
   if (!savedTask) {
+    if (allowVersionRetry && task.version !== undefined) {
+      const latestTask = await loadTaskFromSupabase(task.id, projectId);
+      if (latestTask) {
+        return saveProcedureTaskUpdateToSupabase(
+          mergeTaskWithServerVersions(task, latestTask),
+          _scheduledTasks,
+          projectId,
+          false,
+        );
+      }
+    }
+
     throw new Error("Task save conflict. Reload this task before saving again.");
   }
 
@@ -1831,6 +1867,18 @@ export async function saveProcedureTaskUpdateToSupabase(task: Task, _scheduledTa
 
     const savedStep = await throwIfError(stepUpdate.select("id,version").maybeSingle());
     if (!savedStep) {
+      if (allowVersionRetry && step.version !== undefined) {
+        const latestTask = await loadTaskFromSupabase(task.id, projectId);
+        if (latestTask) {
+          return saveProcedureTaskUpdateToSupabase(
+            mergeTaskWithServerVersions(task, latestTask),
+            _scheduledTasks,
+            projectId,
+            false,
+          );
+        }
+      }
+
       throw new Error("Procedure step save conflict. Reload this task before saving again.");
     }
   }

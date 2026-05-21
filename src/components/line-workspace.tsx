@@ -87,6 +87,7 @@ import {
   addStepToolToSupabase,
   deleteToolLibraryFromSupabase,
   loadPlannerStateFromSupabase,
+  loadTaskFromSupabase,
   loadToolLibraryFromSupabase,
   removeStepToolFromSupabase,
   upsertToolLibraryMetadata,
@@ -337,6 +338,27 @@ function applyProcedureVersionSnapshot(task: Task, versionSource: Task) {
       version: sourceStepById.get(step.id)?.version ?? step.version,
     })),
   };
+}
+
+function mergeProcedureDraftWithServer(serverTask: Task, draftTask: Task) {
+  const serverStepById = new Map((serverTask.manufacturingSteps ?? []).map((step) => [step.id, step]));
+  const draftStepIds = new Set((draftTask.manufacturingSteps ?? []).map((step) => step.id));
+  const mergedSteps = [
+    ...(draftTask.manufacturingSteps ?? []).map((draftStep) => {
+      const serverStep = serverStepById.get(draftStep.id);
+      return serverStep ? { ...serverStep, ...draftStep } : draftStep;
+    }),
+    ...(serverTask.manufacturingSteps ?? []).filter((step) => !draftStepIds.has(step.id)),
+  ];
+
+  return applyProcedureVersionSnapshot(
+    {
+      ...serverTask,
+      ...draftTask,
+      manufacturingSteps: mergedSteps.length > 0 ? mergedSteps : serverTask.manufacturingSteps,
+    },
+    serverTask,
+  );
 }
 
 function readBlobAsDataUrl(blob: Blob) {
@@ -4583,12 +4605,12 @@ export function LineWorkspace({
           const draftTask = procedureDraft
             ? savedState.tasks.find((task) => task.id === procedureDraft.taskId)
             : undefined;
-          const hydratedState = draftTask
+          const mergedDraftTask =
+            draftTask && procedureDraft ? mergeProcedureDraftWithServer(draftTask, procedureDraft.task) : undefined;
+          const hydratedState = mergedDraftTask
             ? {
                 ...savedState,
-                tasks: savedState.tasks.map((task) =>
-                  task.id === procedureDraft?.taskId ? { ...task, ...procedureDraft.task } : task,
-                ),
+                tasks: savedState.tasks.map((task) => (task.id === mergedDraftTask.id ? mergedDraftTask : task)),
               }
             : savedState;
           const snapshotTask = workspaceSnapshot?.selectedTaskId
@@ -4598,7 +4620,7 @@ export function LineWorkspace({
           const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
             ? hydratedState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
             : undefined;
-          const selectedTask = draftTask ? procedureDraft?.task : urlTask ?? snapshotTask ?? hydratedState.tasks[0];
+          const selectedTask = mergedDraftTask ?? urlTask ?? snapshotTask ?? hydratedState.tasks[0];
           const snapshotStation = workspaceSnapshot?.selectedStationId
             ? hydratedState.stations.find((station) => station.id === workspaceSnapshot.selectedStationId)
             : undefined;
@@ -4622,11 +4644,10 @@ export function LineWorkspace({
           setDetailDrawerCollapsed(workspaceSnapshot?.detailDrawerCollapsed ?? true);
           setSidebarCollapsed(workspaceSnapshot?.sidebarCollapsed ?? false);
           setHasLoadedRemoteState(true);
-          if (draftTask && procedureDraft) {
+          if (mergedDraftTask && procedureDraft) {
             setSaveState("draft");
             window.setTimeout(() => {
-              scheduleProcedureTaskSave(procedureDraft.task, hydratedState.tasks);
-              setSaveState("retrying");
+              scheduleProcedureTaskSave(mergedDraftTask, hydratedState.tasks);
             }, 250);
             return;
           }
@@ -5024,7 +5045,14 @@ export function LineWorkspace({
             procedureRetryTimerRef.current = null;
             const latestPendingSave = pendingProcedureSaveRef.current ?? failedSave;
             pendingProcedureSaveRef.current = null;
-            void persistProcedureTaskUpdate(latestPendingSave.task, latestPendingSave.tasks);
+            void loadTaskFromSupabase(latestPendingSave.task.id, projectId)
+              .then((latestTask) => {
+                const taskToRetry = latestTask
+                  ? mergeProcedureDraftWithServer(latestTask, latestPendingSave.task)
+                  : latestPendingSave.task;
+                return persistProcedureTaskUpdate(taskToRetry, latestPendingSave.tasks);
+              })
+              .catch(() => persistProcedureTaskUpdate(latestPendingSave.task, latestPendingSave.tasks));
           }, 2500);
         }
         return;

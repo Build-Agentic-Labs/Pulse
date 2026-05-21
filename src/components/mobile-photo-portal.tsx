@@ -43,7 +43,6 @@ import {
 import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import {
   addStepToolToSupabase,
-  deletePlannerTask,
   loadToolLibraryFromSupabase,
   loadPlannerStateFromSupabase,
   removeStepToolFromSupabase,
@@ -158,6 +157,284 @@ type CaptureTimerState = {
   taskName: string;
 };
 
+type ParkedTaskCaptureState = {
+  timer: CaptureTimerState;
+  showNewStepForm: boolean;
+  newStepId: string | null;
+  draftInstruction: string;
+  draftDurationText: string;
+  draftTools: string[];
+  draftPhotos: StepPhotoAttachment[];
+  draftChecks: string[];
+};
+
+type MobileCaptureSessionSnapshot = {
+  captureTimer: CaptureTimerState;
+  parkedCaptureByTaskId: Record<string, ParkedTaskCaptureState>;
+  activeScreen: "list" | "detail";
+  selectedTaskId: string;
+  showNewStepForm: boolean;
+  newStepId: string | null;
+};
+
+const EMPTY_CAPTURE_TIMER: CaptureTimerState = {
+  running: false,
+  startedAt: null,
+  storedElapsedMs: 0,
+  lapMarkerMs: 0,
+  activeStepId: null,
+  taskId: null,
+  taskName: "",
+};
+
+const EMPTY_CAPTURE_SESSION: MobileCaptureSessionSnapshot = {
+  captureTimer: EMPTY_CAPTURE_TIMER,
+  parkedCaptureByTaskId: {},
+  activeScreen: "list",
+  selectedTaskId: "",
+  showNewStepForm: false,
+  newStepId: null,
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeParkedTaskCaptureState(value: unknown): ParkedTaskCaptureState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const timer = normalizeCaptureTimerSnapshot(value.timer as Partial<CaptureTimerState>);
+  if (!timer?.taskId || !timer.activeStepId) {
+    return null;
+  }
+
+  return {
+    timer,
+    showNewStepForm: Boolean(value.showNewStepForm),
+    newStepId: typeof value.newStepId === "string" ? value.newStepId : timer.activeStepId,
+    draftInstruction: typeof value.draftInstruction === "string" ? value.draftInstruction : "",
+    draftDurationText: typeof value.draftDurationText === "string" ? value.draftDurationText : "5",
+    draftTools: Array.isArray(value.draftTools)
+      ? value.draftTools.filter((tool): tool is string => typeof tool === "string")
+      : [],
+    draftPhotos: Array.isArray(value.draftPhotos)
+      ? value.draftPhotos.filter((photo): photo is StepPhotoAttachment => isRecord(photo) && typeof photo.id === "string")
+      : [],
+    draftChecks: Array.isArray(value.draftChecks)
+      ? value.draftChecks.filter((check): check is string => typeof check === "string")
+      : [],
+  };
+}
+
+function normalizeParkedCaptureByTaskId(value: unknown): Record<string, ParkedTaskCaptureState> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.entries(value).reduce<Record<string, ParkedTaskCaptureState>>((parked, [taskId, entry]) => {
+    const normalized = normalizeParkedTaskCaptureState(entry);
+    if (normalized) {
+      parked[taskId] = normalized;
+    }
+    return parked;
+  }, {});
+}
+
+function mobileCaptureSessionStorageKey(projectId?: string) {
+  return projectId ? `pulse:mobile-capture-session:${projectId}` : "pulse:mobile-capture-session:default";
+}
+
+function legacyCaptureTimerStorageKey(projectId?: string) {
+  return projectId ? `pulse:capture-timer:${projectId}` : "pulse:capture-timer:default";
+}
+
+function normalizeCaptureTimerSnapshot(value: Partial<CaptureTimerState> | null | undefined): CaptureTimerState | null {
+  if (!value || typeof value.running !== "boolean") {
+    return null;
+  }
+
+  return {
+    running: value.running,
+    startedAt: null,
+    storedElapsedMs: typeof value.storedElapsedMs === "number" ? value.storedElapsedMs : 0,
+    lapMarkerMs: typeof value.lapMarkerMs === "number" ? value.lapMarkerMs : 0,
+    activeStepId: typeof value.activeStepId === "string" ? value.activeStepId : null,
+    taskId: typeof value.taskId === "string" ? value.taskId : null,
+    taskName: typeof value.taskName === "string" ? value.taskName : "",
+  };
+}
+
+function readMobileCaptureSession(projectId?: string): MobileCaptureSessionSnapshot | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(mobileCaptureSessionStorageKey(projectId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<MobileCaptureSessionSnapshot>;
+      const captureTimer = normalizeCaptureTimerSnapshot(parsed.captureTimer);
+      if (!captureTimer) {
+        return null;
+      }
+
+      return {
+        captureTimer,
+        parkedCaptureByTaskId: normalizeParkedCaptureByTaskId(parsed.parkedCaptureByTaskId),
+        activeScreen: parsed.activeScreen === "detail" ? "detail" : "list",
+        selectedTaskId: typeof parsed.selectedTaskId === "string" ? parsed.selectedTaskId : "",
+        showNewStepForm: Boolean(parsed.showNewStepForm),
+        newStepId: typeof parsed.newStepId === "string" ? parsed.newStepId : null,
+      };
+    }
+
+    const legacyRaw = window.localStorage.getItem(legacyCaptureTimerStorageKey(projectId));
+    if (!legacyRaw) {
+      return null;
+    }
+
+    const legacyTimer = normalizeCaptureTimerSnapshot(JSON.parse(legacyRaw) as Partial<CaptureTimerState>);
+    if (!legacyTimer) {
+      return null;
+    }
+
+    return {
+      captureTimer: legacyTimer,
+      parkedCaptureByTaskId: {},
+      activeScreen: legacyTimer.taskId ? "detail" : "list",
+      selectedTaskId: legacyTimer.taskId ?? "",
+      showNewStepForm: Boolean(legacyTimer.activeStepId),
+      newStepId: legacyTimer.activeStepId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function shouldPersistMobileCaptureSession(session: MobileCaptureSessionSnapshot) {
+  return (
+    session.captureTimer.running ||
+    session.captureTimer.storedElapsedMs > 0 ||
+    Object.keys(session.parkedCaptureByTaskId).length > 0 ||
+    session.activeScreen === "detail" ||
+    session.showNewStepForm ||
+    Boolean(session.selectedTaskId)
+  );
+}
+
+function buildMobileCaptureSessionSnapshot(input: {
+  captureTimer: CaptureTimerState;
+  parkedCaptureByTaskId: Record<string, ParkedTaskCaptureState>;
+  activeScreen: "list" | "detail";
+  selectedTaskId: string;
+  showNewStepForm: boolean;
+  newStepId: string | null;
+}): MobileCaptureSessionSnapshot {
+  const timedStepId =
+    input.captureTimer.taskId === input.selectedTaskId && input.captureTimer.activeStepId
+      ? input.captureTimer.activeStepId
+      : null;
+
+  return {
+    captureTimer: input.captureTimer,
+    parkedCaptureByTaskId: input.parkedCaptureByTaskId,
+    activeScreen: input.activeScreen,
+    selectedTaskId: input.selectedTaskId,
+    showNewStepForm: input.showNewStepForm || Boolean(timedStepId),
+    newStepId: input.newStepId ?? timedStepId,
+  };
+}
+
+function writeMobileCaptureSession(
+  projectId: string | undefined,
+  session: MobileCaptureSessionSnapshot,
+  now: number,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const key = mobileCaptureSessionStorageKey(projectId);
+
+  if (!shouldPersistMobileCaptureSession(session)) {
+    window.localStorage.removeItem(key);
+    window.localStorage.removeItem(legacyCaptureTimerStorageKey(projectId));
+    return;
+  }
+
+  const payload: MobileCaptureSessionSnapshot = {
+    ...session,
+    captureTimer: {
+      ...session.captureTimer,
+      storedElapsedMs: getCaptureTimerElapsed(session.captureTimer, now),
+      startedAt: null,
+    },
+    parkedCaptureByTaskId: Object.fromEntries(
+      Object.entries(session.parkedCaptureByTaskId).map(([taskId, parked]) => [
+        taskId,
+        {
+          ...parked,
+          timer: {
+            ...parked.timer,
+            storedElapsedMs: getCaptureTimerElapsed(parked.timer, now),
+            startedAt: null,
+          },
+        },
+      ]),
+    ),
+  };
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(payload));
+    window.localStorage.removeItem(legacyCaptureTimerStorageKey(projectId));
+  } catch {
+    // Ignore quota/private-mode failures; in-memory state still works for this session.
+  }
+}
+
+function clearMobileCaptureSession(projectId?: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(mobileCaptureSessionStorageKey(projectId));
+    window.localStorage.removeItem(legacyCaptureTimerStorageKey(projectId));
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+}
+
+function restoreRunningCaptureTimer(snapshot: CaptureTimerState, now: number): CaptureTimerState {
+  return {
+    ...snapshot,
+    running: true,
+    storedElapsedMs: getCaptureTimerElapsed(snapshot, now),
+    startedAt: now,
+  };
+}
+
+function readCaptureTimerSnapshot(projectId?: string): CaptureTimerState | null {
+  return readMobileCaptureSession(projectId)?.captureTimer ?? null;
+}
+
+function writeCaptureTimerSnapshot(projectId: string | undefined, timer: CaptureTimerState, now: number) {
+  writeMobileCaptureSession(
+    projectId,
+    {
+      ...EMPTY_CAPTURE_SESSION,
+      captureTimer: timer,
+    },
+    now,
+  );
+}
+
+function clearCaptureTimerSnapshot(projectId?: string) {
+  clearMobileCaptureSession(projectId);
+}
+
 function getCaptureTimerElapsed(timer: CaptureTimerState, now: number) {
   if (!timer.running || !timer.startedAt) {
     return timer.storedElapsedMs;
@@ -170,8 +447,67 @@ function getCaptureTimerLapElapsed(timer: CaptureTimerState, now: number) {
   return Math.max(0, getCaptureTimerElapsed(timer, now) - timer.lapMarkerMs);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+function freezeCaptureTimer(timer: CaptureTimerState, now: number): CaptureTimerState {
+  const elapsed = getCaptureTimerElapsed(timer, now);
+  return {
+    ...timer,
+    running: false,
+    startedAt: null,
+    storedElapsedMs: elapsed,
+  };
+}
+
+function preserveRunningCaptureTimer(timer: CaptureTimerState, now: number): CaptureTimerState {
+  if (!timer.running) {
+    return timer;
+  }
+
+  const elapsed = getCaptureTimerElapsed(timer, now);
+  return {
+    ...timer,
+    running: true,
+    startedAt: now,
+    storedElapsedMs: elapsed,
+  };
+}
+
+type HeaderCaptureTimerEntry = {
+  taskId: string;
+  taskName: string;
+  timer: CaptureTimerState;
+};
+
+function isActiveHeaderCaptureTimer(timer: CaptureTimerState) {
+  return Boolean(timer.taskId && timer.activeStepId && (timer.running || timer.storedElapsedMs > 0));
+}
+
+function collectHeaderCaptureTimers(
+  captureTimer: CaptureTimerState,
+  parkedCaptureByTaskId: Record<string, ParkedTaskCaptureState>,
+): HeaderCaptureTimerEntry[] {
+  const byTaskId = new Map<string, HeaderCaptureTimerEntry>();
+
+  Object.values(parkedCaptureByTaskId).forEach((parked) => {
+    if (!isActiveHeaderCaptureTimer(parked.timer) || !parked.timer.taskId) {
+      return;
+    }
+
+    byTaskId.set(parked.timer.taskId, {
+      taskId: parked.timer.taskId,
+      taskName: parked.timer.taskName,
+      timer: parked.timer,
+    });
+  });
+
+  if (isActiveHeaderCaptureTimer(captureTimer) && captureTimer.taskId) {
+    byTaskId.set(captureTimer.taskId, {
+      taskId: captureTimer.taskId,
+      taskName: captureTimer.taskName,
+      timer: captureTimer,
+    });
+  }
+
+  return [...byTaskId.values()];
 }
 
 function removeStepScopedCustomFields(task: Task, stepId: string): Task {
@@ -567,19 +903,13 @@ export function MobilePhotoPortal({
   const [newStepPhotoBusyCount, setNewStepPhotoBusyCount] = useState(0);
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [confirmDeleteStepId, setConfirmDeleteStepId] = useState<string | null>(null);
-  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
   const [restorePrompt, setRestorePrompt] = useState<RestorePrompt | null>(null);
   const [confirmPrompt, setConfirmPrompt] = useState<ConfirmPrompt | null>(null);
-  const [captureTimer, setCaptureTimer] = useState<CaptureTimerState>({
-    running: false,
-    startedAt: null,
-    storedElapsedMs: 0,
-    lapMarkerMs: 0,
-    activeStepId: null,
-    taskId: null,
-    taskName: "",
-  });
+  const [captureTimer, setCaptureTimer] = useState<CaptureTimerState>(EMPTY_CAPTURE_TIMER);
+  const [parkedCaptureByTaskId, setParkedCaptureByTaskId] = useState<Record<string, ParkedTaskCaptureState>>({});
   const [timerNow, setTimerNow] = useState(() => Date.now());
+  const captureTimerRef = useRef(captureTimer);
+  const parkedCaptureByTaskIdRef = useRef(parkedCaptureByTaskId);
   const [mobileHeaderHeight, setMobileHeaderHeight] = useState(92);
   const [newStepMotionPhase, setNewStepMotionPhase] = useState<"idle" | "exit" | "enter">("idle");
   const [recentlyCompletedStepId, setRecentlyCompletedStepId] = useState<string | null>(null);
@@ -605,6 +935,7 @@ export function MobilePhotoPortal({
   const selectedTaskIdRef = useRef("");
   const remoteRefreshTimerRef = useRef<number | null>(null);
   const pendingRemoteRefreshRef = useRef(false);
+  const sessionHydratedRef = useRef(false);
 
   const derivedState = useMemo<PlannerState | null>(() => {
     if (!plannerState) {
@@ -689,6 +1020,49 @@ export function MobilePhotoPortal({
   }, [toolLibraryItems]);
   const captureTimerElapsedMs = getCaptureTimerElapsed(captureTimer, timerNow);
   const captureTimerLapElapsedMs = getCaptureTimerLapElapsed(captureTimer, timerNow);
+  const headerCaptureTimers = useMemo(() => {
+    const entries = collectHeaderCaptureTimers(captureTimer, parkedCaptureByTaskId);
+
+    return entries.sort((left, right) => {
+      if (activeScreen === "detail") {
+        if (left.taskId === selectedTaskId) {
+          return -1;
+        }
+        if (right.taskId === selectedTaskId) {
+          return 1;
+        }
+      }
+
+      if (left.timer.running !== right.timer.running) {
+        return left.timer.running ? -1 : 1;
+      }
+
+      return left.taskName.localeCompare(right.taskName);
+    });
+  }, [activeScreen, captureTimer, parkedCaptureByTaskId, selectedTaskId]);
+  const viewingHeaderCapture = useMemo(
+    () => headerCaptureTimers.find((entry) => activeScreen === "detail" && entry.taskId === selectedTaskId) ?? null,
+    [activeScreen, headerCaptureTimers, selectedTaskId],
+  );
+  const isViewingCaptureTask = Boolean(viewingHeaderCapture?.timer.running);
+  const canStartCaptureTimer = Boolean(
+    selectedTask &&
+      activeScreen === "detail" &&
+      !(
+        captureTimer.taskId === selectedTask.id &&
+        captureTimer.activeStepId &&
+        captureTimer.running
+      ),
+  );
+  const isTimerOnSelectedTask = Boolean(
+    selectedTask &&
+      captureTimer.taskId === selectedTask.id &&
+      captureTimer.activeStepId,
+  );
+  const hasRunningParkedTimers = useMemo(
+    () => Object.values(parkedCaptureByTaskId).some((parked) => parked.timer.running),
+    [parkedCaptureByTaskId],
+  );
 
   useEffect(() => {
     plannerStateRef.current = plannerState;
@@ -723,13 +1097,116 @@ export function MobilePhotoPortal({
   }, [newStepId]);
 
   useEffect(() => {
-    if (!captureTimer.running) {
+    captureTimerRef.current = captureTimer;
+  }, [captureTimer]);
+
+  useEffect(() => {
+    parkedCaptureByTaskIdRef.current = parkedCaptureByTaskId;
+  }, [parkedCaptureByTaskId]);
+
+  useEffect(() => {
+    sessionHydratedRef.current = false;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!sessionHydratedRef.current) {
+      sessionHydratedRef.current = true;
+      const session = readMobileCaptureSession(projectId);
+      if (!session) {
+        return;
+      }
+
+      if (session.selectedTaskId) {
+        setSelectedTaskId(session.selectedTaskId);
+        selectedTaskIdRef.current = session.selectedTaskId;
+      }
+
+      if (session.activeScreen === "detail") {
+        setActiveScreen("detail");
+      }
+
+      if (session.showNewStepForm) {
+        setShowNewStepForm(true);
+      }
+
+      if (session.newStepId) {
+        setNewStepId(session.newStepId);
+        setDraftStepId(session.newStepId);
+        newStepIdRef.current = session.newStepId;
+      }
+
+      if (session.parkedCaptureByTaskId && Object.keys(session.parkedCaptureByTaskId).length > 0) {
+        const now = Date.now();
+        const restoredParked = Object.fromEntries(
+          Object.entries(session.parkedCaptureByTaskId).map(([taskId, parked]) => [
+            taskId,
+            {
+              ...parked,
+              timer: parked.timer.running ? restoreRunningCaptureTimer(parked.timer, now) : parked.timer,
+            },
+          ]),
+        );
+        setParkedCaptureByTaskId(restoredParked);
+        parkedCaptureByTaskIdRef.current = restoredParked;
+      }
+
+      if (session.captureTimer.running) {
+        const now = Date.now();
+        setCaptureTimer(restoreRunningCaptureTimer(session.captureTimer, now));
+        setTimerNow(now);
+      } else if (session.captureTimer.storedElapsedMs > 0 || session.captureTimer.activeStepId) {
+        setCaptureTimer(session.captureTimer);
+      }
+
+      return;
+    }
+
+    writeMobileCaptureSession(
+      projectId,
+      buildMobileCaptureSessionSnapshot({
+        captureTimer,
+        parkedCaptureByTaskId,
+        activeScreen,
+        selectedTaskId,
+        showNewStepForm,
+        newStepId,
+      }),
+      Date.now(),
+    );
+  }, [captureTimer, parkedCaptureByTaskId, activeScreen, selectedTaskId, showNewStepForm, newStepId, projectId]);
+
+  useEffect(() => {
+    function flushSessionSnapshot() {
+      if (!sessionHydratedRef.current) {
+        return;
+      }
+
+      writeMobileCaptureSession(
+        projectId,
+        buildMobileCaptureSessionSnapshot({
+          captureTimer: captureTimerRef.current,
+          parkedCaptureByTaskId: parkedCaptureByTaskIdRef.current,
+          activeScreen,
+          selectedTaskId: selectedTaskIdRef.current,
+          showNewStepForm,
+          newStepId: newStepIdRef.current,
+        }),
+        Date.now(),
+      );
+    }
+
+    window.addEventListener("pagehide", flushSessionSnapshot);
+    return () => window.removeEventListener("pagehide", flushSessionSnapshot);
+  }, [activeScreen, showNewStepForm, projectId]);
+
+  useEffect(() => {
+    if (!captureTimer.running && !hasRunningParkedTimers) {
       return undefined;
     }
 
     const interval = window.setInterval(() => setTimerNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
-  }, [captureTimer.running]);
+  }, [captureTimer.running, hasRunningParkedTimers]);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -765,8 +1242,14 @@ export function MobilePhotoPortal({
 
   useEffect(() => {
     const viewport = window.visualViewport;
-    let lastViewportHeight = viewport?.height ?? window.innerHeight;
+    let lastKeyboardGap = window.innerHeight - (viewport?.height ?? window.innerHeight);
     let settleTimer: number | null = null;
+
+    function getMaxDocumentScrollTop() {
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const scrollHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+      return Math.max(0, scrollHeight - viewportHeight);
+    }
 
     function settleScrollAfterKeyboardClose() {
       if (settleTimer) {
@@ -775,10 +1258,9 @@ export function MobilePhotoPortal({
 
       settleTimer = window.setTimeout(() => {
         settleTimer = null;
-        const documentElement = document.documentElement;
-        const maxScrollTop = Math.max(0, documentElement.scrollHeight - window.innerHeight);
+        const maxScrollTop = getMaxDocumentScrollTop();
 
-        if (window.scrollY > maxScrollTop) {
+        if (window.scrollY > maxScrollTop + 2) {
           window.scrollTo({ top: maxScrollTop, behavior: "auto" });
         }
       }, 80);
@@ -786,12 +1268,17 @@ export function MobilePhotoPortal({
 
     function handleViewportResize() {
       const nextViewportHeight = viewport?.height ?? window.innerHeight;
+      const keyboardGap = window.innerHeight - nextViewportHeight;
+      const keyboardWasOpen = lastKeyboardGap > 120;
+      const keyboardClosed = keyboardWasOpen && keyboardGap < 80;
 
-      if (nextViewportHeight > lastViewportHeight + 80) {
+      // Only settle after the on-screen keyboard closes. Address-bar hide/show also
+      // grows the visual viewport and was incorrectly snapping long pages back upward.
+      if (keyboardClosed) {
         settleScrollAfterKeyboardClose();
       }
 
-      lastViewportHeight = nextViewportHeight;
+      lastKeyboardGap = keyboardGap;
     }
 
     viewport?.addEventListener("resize", handleViewportResize);
@@ -1041,8 +1528,59 @@ export function MobilePhotoPortal({
         const firstTask = getTopLevelTasks(savedState.tasks)
           .filter((task) => task.rowType === "task")
           .sort(compareTasksByWbs)[0];
+        const session = readMobileCaptureSession(projectId);
+        const preferredTaskId = session?.selectedTaskId;
+        const resolvedTaskId =
+          preferredTaskId && savedState.tasks.some((task) => task.id === preferredTaskId)
+            ? preferredTaskId
+            : firstTask?.id ?? "";
+
         setPlannerState(savedState);
-        setSelectedTaskId(firstTask?.id ?? "");
+        setSelectedTaskId(resolvedTaskId);
+        selectedTaskIdRef.current = resolvedTaskId;
+
+        if (session?.parkedCaptureByTaskId && Object.keys(session.parkedCaptureByTaskId).length > 0) {
+          const now = Date.now();
+          const restoredParked = Object.fromEntries(
+            Object.entries(session.parkedCaptureByTaskId).map(([taskId, parked]) => [
+              taskId,
+              {
+                ...parked,
+                timer: parked.timer.running ? restoreRunningCaptureTimer(parked.timer, now) : parked.timer,
+              },
+            ]),
+          );
+          setParkedCaptureByTaskId(restoredParked);
+          parkedCaptureByTaskIdRef.current = restoredParked;
+        }
+
+        if (session?.activeScreen === "detail" && resolvedTaskId) {
+          setActiveScreen("detail");
+        }
+
+        if (session?.showNewStepForm && resolvedTaskId === preferredTaskId) {
+          setShowNewStepForm(true);
+          const restoredStepId = session.newStepId ?? session.captureTimer.activeStepId;
+          if (restoredStepId) {
+            setNewStepId(restoredStepId);
+            setDraftStepId(restoredStepId);
+            newStepIdRef.current = restoredStepId;
+
+            const restoredTask = savedState.tasks.find((task) => task.id === resolvedTaskId);
+            const restoredStep = restoredTask?.manufacturingSteps?.find((step) => step.id === restoredStepId);
+            if (restoredTask && restoredStep) {
+              setNewStepInstruction(restoredStep.instruction ?? "");
+              if ((restoredStep.durationMinutes ?? 0) > 0) {
+                setNewStepDurationText(String(restoredStep.durationMinutes));
+              }
+              setNewStepDraftTools(getStepToolList(restoredTask, restoredStepId));
+              setNewStepDraftPhotos(getStepPhotoAttachments(restoredTask, restoredStepId));
+              setNewStepDraftChecks(getManufacturingStepCheckSet(restoredStep.qualityCheck));
+              newStepTouchedRef.current = true;
+            }
+          }
+        }
+
         setSaveState("idle");
       })
       .catch((error: unknown) => {
@@ -1752,78 +2290,6 @@ export function MobilePhotoPortal({
     void persistHighLevelTaskReorder(sourceTaskId, targetTaskId, placement);
   }
 
-  async function deleteHighLevelTask(taskId: string) {
-    if (!plannerState) {
-      return;
-    }
-
-    if (taskRows.length <= 1) {
-      setErrorMessage("Keep at least one high-level task in the line plan.");
-      setSaveState("error");
-      setConfirmDeleteTaskId(null);
-      return;
-    }
-
-    const previousState = plannerState;
-    const deletedTask = plannerState.tasks.find((task) => task.id === taskId);
-    const taskIdsToDelete = new Set([taskId]);
-    const remainingTasks = plannerState.tasks
-      .filter((task) => !taskIdsToDelete.has(task.id))
-      .map((task) => ({
-        ...task,
-        dependencyIds: task.dependencyIds.filter((dependencyId) => !taskIdsToDelete.has(dependencyId)),
-        manufacturingSteps: (task.manufacturingSteps ?? []).map((step) => ({
-          ...step,
-          dependencyIds: (step.dependencyIds ?? []).filter(
-            (dependencyId) => !taskDependencyRefBelongsTo(dependencyId, taskIdsToDelete),
-          ),
-        })),
-      }));
-    const nextState: PlannerState = {
-      ...plannerState,
-      tasks: remainingTasks,
-      dependencies: plannerState.dependencies.filter(
-        (dependency) =>
-          !taskIdsToDelete.has(dependency.predecessorTaskId) && !taskIdsToDelete.has(dependency.successorTaskId),
-      ),
-      actualEvents: plannerState.actualEvents.filter((event) => !taskIdsToDelete.has(event.taskId)),
-    };
-    const firstTask = [...remainingTasks].filter((task) => task.rowType === "task").sort(compareTasksByWbs)[0];
-
-    setConfirmDeleteTaskId(null);
-    setPlannerState(nextState);
-    setSelectedTaskId((currentTaskId) => (currentTaskId === taskId ? firstTask?.id ?? "" : currentTaskId));
-    beginLocalWrite();
-    setSaveState("saving");
-    setErrorMessage(null);
-
-    try {
-      await deletePlannerTask(taskId, projectId);
-      setSaveState("saved");
-      if (deletedTask) {
-        setRestorePrompt({
-          title: `Deleted task ${deletedTask.wbs}`,
-          body: "Restore will bring this task and its saved manufacturing steps back to the shared line plan.",
-          restoreLabel: "Restore Task",
-          onRestore: () => restoreDeletedSnapshot(previousState, deletedTask.id),
-        });
-      }
-    } catch (error) {
-      setSaveState("error");
-      setErrorMessage(error instanceof Error ? error.message : "Unable to delete the selected task.");
-      const savedState = await loadPlannerStateFromSupabase(projectId).catch(() => null);
-      if (savedState) {
-        setPlannerState(savedState);
-        const restoredFirstTask = [...savedState.tasks].filter((task) => task.rowType === "task").sort(compareTasksByWbs)[0];
-        setSelectedTaskId((currentTaskId) =>
-          savedState.tasks.some((task) => task.id === currentTaskId) ? currentTaskId : restoredFirstTask?.id ?? "",
-        );
-      }
-    } finally {
-      endLocalWrite();
-    }
-  }
-
   async function handlePhotoFiles(stepId: string, files: File[]) {
     if (!plannerState || !selectedTask || files.length === 0) {
       return;
@@ -2025,12 +2491,251 @@ export function MobilePhotoPortal({
       return;
     }
 
-    const currentTask = plannerState.tasks.find((task) => task.id === selectedTask.id) ?? selectedTask;
+    await updateManufacturingStepOnTask(selectedTask.id, stepId, patch);
+  }
+
+  async function updateManufacturingStepOnTask(taskId: string, stepId: string, patch: Partial<ManufacturingStep>) {
+    if (!plannerState) {
+      return;
+    }
+
+    const currentTask = plannerState.tasks.find((task) => task.id === taskId);
+    if (!currentTask) {
+      return;
+    }
+
     const nextSteps = sortManufacturingSteps(currentTask.manufacturingSteps ?? []).map((step) =>
       step.id === stepId ? { ...step, ...patch } : step,
     );
     const nextTask = withStepDerivedDuration(currentTask, nextSteps);
     await persistTaskWithStepRows(nextTask, stepId, false);
+  }
+
+  function applyLapForTimerState(timer: CaptureTimerState, now = Date.now()) {
+    if (!timer.running || !timer.activeStepId || !timer.taskId) {
+      return null;
+    }
+
+    const lapMinutes = elapsedMinutesFromTimer(getCaptureTimerLapElapsed(timer, now));
+    if (!lapMinutes) {
+      return null;
+    }
+
+    const taskId = timer.taskId;
+    const stepId = timer.activeStepId;
+
+    if (selectedTaskIdRef.current === taskId && newStepIdRef.current === stepId) {
+      const snapshot = getNewStepDraftSnapshot({ stepId, durationText: String(lapMinutes) });
+      if (selectedTaskIdRef.current === taskId) {
+        setNewStepDurationText(snapshot.durationText);
+        newStepTouchedRef.current = true;
+      }
+      persistNewStepDraft(snapshot, { saveTask: true, showSaving: true });
+      return snapshot;
+    }
+
+    const task = plannerStateRef.current?.tasks.find((candidate) => candidate.id === taskId);
+    if (task?.manufacturingSteps?.some((step) => step.id === stepId)) {
+      void updateManufacturingStepOnTask(taskId, stepId, { durationMinutes: lapMinutes });
+      return { stepId, durationText: String(lapMinutes) };
+    }
+
+    return null;
+  }
+
+  function hasTimedCaptureForTask(taskId: string) {
+    const timer = captureTimerRef.current;
+    if (timer.taskId === taskId && timer.activeStepId) {
+      return true;
+    }
+
+    return Boolean(parkedCaptureByTaskIdRef.current[taskId]?.timer.activeStepId);
+  }
+
+  function shouldPreserveTimedStepDraft(taskId = selectedTaskIdRef.current) {
+    return hasTimedCaptureForTask(taskId);
+  }
+
+  function buildParkedTaskCaptureState(taskId: string): ParkedTaskCaptureState | null {
+    const timer = captureTimerRef.current;
+    if (timer.taskId !== taskId || !timer.activeStepId) {
+      return null;
+    }
+
+    const snapshot = getNewStepDraftSnapshot({ stepId: timer.activeStepId });
+    const now = Date.now();
+    return {
+      timer: timer.running ? preserveRunningCaptureTimer(timer, now) : freezeCaptureTimer(timer, now),
+      showNewStepForm: true,
+      newStepId: snapshot.stepId,
+      draftInstruction: snapshot.instruction,
+      draftDurationText: snapshot.durationText,
+      draftTools: snapshot.tools,
+      draftPhotos: snapshot.photos,
+      draftChecks: [...snapshot.checks],
+    };
+  }
+
+  function parkTimedCaptureForTask(taskId: string) {
+    ensureTimedStepDraftPersisted();
+
+    const parked = buildParkedTaskCaptureState(taskId);
+    if (!parked) {
+      return;
+    }
+
+    const nextParked = {
+      ...parkedCaptureByTaskIdRef.current,
+      [taskId]: parked,
+    };
+    parkedCaptureByTaskIdRef.current = nextParked;
+    setParkedCaptureByTaskId(nextParked);
+    captureTimerRef.current = EMPTY_CAPTURE_TIMER;
+    setCaptureTimer(EMPTY_CAPTURE_TIMER);
+    setTimerNow(Date.now());
+  }
+
+  function applyParkedTaskCaptureState(parked: ParkedTaskCaptureState) {
+    setDraftStepId(parked.newStepId);
+    setShowNewStepForm(parked.showNewStepForm);
+    setNewStepInstruction(parked.draftInstruction);
+    setNewStepDurationText(parked.draftDurationText || "5");
+    setNewStepDraftTools(parked.draftTools);
+    setNewStepDraftPhotos(parked.draftPhotos);
+    setNewStepDraftChecks(new Set(parked.draftChecks));
+    newStepTouchedRef.current = true;
+  }
+
+  function restoreParkedTaskCapture(taskId: string) {
+    const parked = parkedCaptureByTaskIdRef.current[taskId];
+    if (!parked) {
+      return false;
+    }
+
+    applyParkedTaskCaptureState(parked);
+    const now = Date.now();
+    const nextTimer = parked.timer.running
+      ? restoreRunningCaptureTimer(parked.timer, now)
+      : parked.timer;
+    captureTimerRef.current = nextTimer;
+    setCaptureTimer(nextTimer);
+    setTimerNow(now);
+
+    const nextParked = { ...parkedCaptureByTaskIdRef.current };
+    delete nextParked[taskId];
+    parkedCaptureByTaskIdRef.current = nextParked;
+    setParkedCaptureByTaskId(nextParked);
+    return true;
+  }
+
+  function resumeCaptureTimerForTask(taskId: string) {
+    const timer = captureTimerRef.current;
+    if (timer.taskId !== taskId || !timer.activeStepId || timer.running) {
+      return;
+    }
+
+    const now = Date.now();
+    const nextTimer = restoreRunningCaptureTimer(timer, now);
+    captureTimerRef.current = nextTimer;
+    setCaptureTimer(nextTimer);
+    setTimerNow(now);
+  }
+
+  function clearTimedCaptureForTask(taskId: string) {
+    const nextParked = { ...parkedCaptureByTaskIdRef.current };
+    delete nextParked[taskId];
+    parkedCaptureByTaskIdRef.current = nextParked;
+    setParkedCaptureByTaskId(nextParked);
+
+    if (captureTimerRef.current.taskId === taskId) {
+      captureTimerRef.current = EMPTY_CAPTURE_TIMER;
+      setCaptureTimer(EMPTY_CAPTURE_TIMER);
+      setTimerNow(Date.now());
+    }
+  }
+
+  function ensureTimedStepDraftPersisted() {
+    const timer = captureTimerRef.current;
+    const taskId = timer.taskId;
+    const stepId = timer.activeStepId;
+    const currentState = plannerStateRef.current;
+
+    if (!taskId || !stepId || !currentState) {
+      return;
+    }
+
+    const task = currentState.tasks.find((candidate) => candidate.id === taskId);
+    if (!task) {
+      return;
+    }
+
+    const snapshot = getNewStepDraftSnapshot({ stepId });
+    const hasStep = (task.manufacturingSteps ?? []).some((step) => step.id === stepId);
+
+    if (hasStep) {
+      saveRecoverableNewStepDraft(snapshot, { taskId });
+      return;
+    }
+
+    const previousSelectedTaskId = selectedTaskIdRef.current;
+    if (previousSelectedTaskId !== taskId) {
+      selectedTaskIdRef.current = taskId;
+    }
+
+    newStepTouchedRef.current = true;
+    persistNewStepDraft(snapshot, { saveTask: true, showSaving: false });
+
+    if (previousSelectedTaskId !== taskId) {
+      selectedTaskIdRef.current = previousSelectedTaskId;
+    }
+  }
+
+  function restoreTimedStepDraft(taskId: string, stepId: string) {
+    if (restoreParkedTaskCapture(taskId)) {
+      return;
+    }
+
+    setDraftStepId(stepId);
+    setShowNewStepForm(true);
+    newStepTouchedRef.current = true;
+
+    const task = plannerStateRef.current?.tasks.find((candidate) => candidate.id === taskId);
+    const step = task?.manufacturingSteps?.find((candidate) => candidate.id === stepId);
+
+    if (task && step) {
+      setNewStepInstruction(step.instruction ?? "");
+      if ((step.durationMinutes ?? 0) > 0) {
+        setNewStepDurationText(String(step.durationMinutes));
+      }
+      setNewStepDraftTools(getStepToolList(task, stepId));
+      setNewStepDraftPhotos(getStepPhotoAttachments(task, stepId));
+      setNewStepDraftChecks(getManufacturingStepCheckSet(step.qualityCheck));
+    }
+
+    if (!captureTimerRef.current.running || captureTimerRef.current.taskId !== taskId) {
+      resumeCaptureTimerForTask(taskId);
+    }
+  }
+
+  function bindCaptureTimerToStep(task: Task, stepId: string | null) {
+    const now = Date.now();
+    setCaptureTimer((current) => {
+      if (!current.running) {
+        return current;
+      }
+
+      const elapsed = getCaptureTimerElapsed(current, now);
+      return {
+        ...current,
+        storedElapsedMs: elapsed,
+        startedAt: now,
+        lapMarkerMs: elapsed,
+        taskId: task.id,
+        taskName: task.name,
+        activeStepId: stepId,
+      };
+    });
+    setTimerNow(now);
   }
 
   async function deleteManufacturingStep(stepId: string) {
@@ -2105,20 +2810,21 @@ export function MobilePhotoPortal({
   }
 
   function openNewStepForm() {
-    const stepId = selectedTask ? buildNewStepId(selectedTask.id) : null;
+    if (!selectedTask) {
+      return;
+    }
+
+    const stepId = buildNewStepId(selectedTask.id);
     resetNewStepDraft(getNewStepDefaultDurationText(), stepId);
     setShowNewStepForm(true);
 
-    if (captureTimer.running && captureTimer.taskId === selectedTask?.id) {
-      setCaptureTimer((current) => ({
-        ...current,
-        activeStepId: stepId,
-      }));
+    if (captureTimerRef.current.running && captureTimerRef.current.taskId === selectedTask.id) {
+      bindCaptureTimerToStep(selectedTask, stepId);
     }
   }
 
   function closeNewStepForm() {
-    if (captureTimer.running) {
+    if (selectedTask && hasTimedCaptureForTask(selectedTask.id)) {
       return;
     }
 
@@ -2128,43 +2834,26 @@ export function MobilePhotoPortal({
   }
 
   function applyLapToActiveStep() {
-    if (!captureTimer.running || !captureTimer.activeStepId || captureTimer.taskId !== selectedTask?.id) {
-      return null;
-    }
-
-    const stepId = captureTimer.activeStepId;
-    const lapMinutes = elapsedMinutesFromTimer(getCaptureTimerLapElapsed(captureTimer, Date.now()));
-    if (!lapMinutes) {
-      return null;
-    }
-
-    const snapshot = getNewStepDraftSnapshot({ stepId, durationText: String(lapMinutes) });
-
-    if (showNewStepForm && newStepIdRef.current === stepId) {
-      setNewStepDurationText(snapshot.durationText);
-      newStepTouchedRef.current = true;
-      persistNewStepDraft(snapshot, { saveTask: true, showSaving: true });
-      return snapshot;
-    }
-
-    if (selectedTaskSteps.some((step) => step.id === stepId)) {
-      void updateManufacturingStep(stepId, { durationMinutes: lapMinutes });
-      return snapshot;
-    }
-
-    return snapshot;
+    return applyLapForTimerState(captureTimerRef.current, Date.now());
   }
 
   function advanceCaptureTimerLap(nextStepId: string | null) {
-    setCaptureTimer((current) => ({
-      ...current,
-      lapMarkerMs: getCaptureTimerElapsed(current, Date.now()),
-      activeStepId: nextStepId,
-    }));
+    const now = Date.now();
+    setCaptureTimer((current) => {
+      const elapsed = getCaptureTimerElapsed(current, now);
+      return {
+        ...current,
+        storedElapsedMs: elapsed,
+        startedAt: now,
+        lapMarkerMs: elapsed,
+        activeStepId: nextStepId,
+      };
+    });
+    setTimerNow(now);
   }
 
-  function startCaptureTimer() {
-    if (!selectedTask || captureTimer.running) {
+  function startCaptureTimerForCurrentTask() {
+    if (!selectedTask || activeScreen !== "detail") {
       return;
     }
 
@@ -2173,7 +2862,28 @@ export function MobilePhotoPortal({
     const stepId = showNewStepForm ? ensureDraftStepId(selectedTask.id) : null;
     const now = Date.now();
     setTimerNow(now);
-    setCaptureTimer({
+
+    if (hasTimedCaptureForTask(selectedTask.id)) {
+      if (
+        captureTimerRef.current.taskId === selectedTask.id &&
+        captureTimerRef.current.activeStepId
+      ) {
+        if (!captureTimerRef.current.running) {
+          resumeCaptureTimerForTask(selectedTask.id);
+        }
+        return;
+      }
+
+      if (restoreParkedTaskCapture(selectedTask.id)) {
+        return;
+      }
+    }
+
+    if (captureTimerRef.current.running && captureTimerRef.current.taskId === selectedTask.id) {
+      return;
+    }
+
+    const nextTimer: CaptureTimerState = {
       running: true,
       startedAt: now,
       storedElapsedMs: 0,
@@ -2181,23 +2891,23 @@ export function MobilePhotoPortal({
       activeStepId: stepId,
       taskId: selectedTask.id,
       taskName: selectedTask.name,
-    });
+    };
+    captureTimerRef.current = nextTimer;
+    setCaptureTimer(nextTimer);
   }
 
   function stopCaptureTimer() {
-    if (captureTimer.running) {
+    const timer = captureTimerRef.current;
+    if (timer.running) {
       applyLapToActiveStep();
     }
 
-    setCaptureTimer({
-      running: false,
-      startedAt: null,
-      storedElapsedMs: 0,
-      lapMarkerMs: 0,
-      activeStepId: null,
-      taskId: null,
-      taskName: "",
-    });
+    if (timer.taskId) {
+      clearTimedCaptureForTask(timer.taskId);
+    } else {
+      setCaptureTimer(EMPTY_CAPTURE_TIMER);
+      setTimerNow(Date.now());
+    }
   }
 
   function addNewStepDraftTool() {
@@ -2492,8 +3202,7 @@ export function MobilePhotoPortal({
 
     if (
       captureTimer.running &&
-      captureTimer.activeStepId === currentStepId &&
-      captureTimer.taskId === selectedTask?.id
+      captureTimer.activeStepId === currentStepId
     ) {
       const lapMinutes = elapsedMinutesFromTimer(getCaptureTimerLapElapsed(captureTimer, Date.now()));
       if (lapMinutes > 0) {
@@ -2526,32 +3235,68 @@ export function MobilePhotoPortal({
   }
 
   function selectTask(taskId: string) {
-    if (captureTimer.running) {
-      setErrorMessage("Stop the timer before switching tasks.");
-      return;
+    const preserveTimedStep = shouldPreserveTimedStepDraft(taskId);
+    const leavingTaskId = selectedTaskIdRef.current;
+
+    if (leavingTaskId && leavingTaskId !== taskId && hasTimedCaptureForTask(leavingTaskId)) {
+      parkTimedCaptureForTask(leavingTaskId);
+    }
+
+    if (preserveTimedStep) {
+      ensureTimedStepDraftPersisted();
+      clearNewStepAutosaveTimer();
+    } else {
+      clearNewStepAutosaveTimer();
+      setShowNewStepForm(false);
+      resetNewStepDraft("5", null);
     }
 
     setSelectedTaskId(taskId);
     setConfirmDeleteStepId(null);
-    setConfirmDeleteTaskId(null);
-    closeNewStepForm();
     setShowNewTaskForm(false);
     setActiveScreen("detail");
+    setErrorMessage(null);
     scrollPortalToTop();
+
+    if (preserveTimedStep) {
+      const stepId =
+        captureTimerRef.current.taskId === taskId && captureTimerRef.current.activeStepId
+          ? captureTimerRef.current.activeStepId
+          : parkedCaptureByTaskIdRef.current[taskId]?.newStepId ?? null;
+
+      if (stepId) {
+        restoreTimedStepDraft(taskId, stepId);
+      }
+    }
   }
 
   function showProcessList() {
-    if (captureTimer.running) {
-      setErrorMessage("Stop the timer before leaving this task.");
-      return;
+    const preserveTimedStep = shouldPreserveTimedStepDraft();
+
+    if (preserveTimedStep) {
+      ensureTimedStepDraftPersisted();
+      clearNewStepAutosaveTimer();
+      setShowNewStepForm(false);
+    } else {
+      clearNewStepAutosaveTimer();
+      setShowNewStepForm(false);
+      resetNewStepDraft("5", null);
     }
 
     setConfirmDeleteStepId(null);
-    setConfirmDeleteTaskId(null);
-    closeNewStepForm();
     setShowNewTaskForm(false);
     setActiveScreen("list");
+    setErrorMessage(null);
     scrollPortalToTop();
+  }
+
+  function openCaptureTaskFromHeader(taskId: string) {
+    if (activeScreen !== "detail" || selectedTaskId !== taskId) {
+      selectTask(taskId);
+      return;
+    }
+
+    resumeCaptureTimerForTask(taskId);
   }
 
   if (saveState === "loading") {
@@ -2578,25 +3323,71 @@ export function MobilePhotoPortal({
             </h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {selectedTask ? (
+            {headerCaptureTimers.length > 0 ? (
+              <div className="ui-photo-mobile-header-timers">
+                {headerCaptureTimers.map((entry, index) => {
+                  const taskName = taskRows.find((task) => task.id === entry.taskId)?.name ?? entry.taskName;
+                  const elapsedMs = getCaptureTimerElapsed(entry.timer, timerNow);
+                  const isViewingEntry = activeScreen === "detail" && selectedTaskId === entry.taskId;
+                  const timerTitle = `${taskName || "Process"} · ${formatElapsedTimer(elapsedMs)}`;
+
+                  return (
+                    <Fragment key={entry.taskId}>
+                      {index > 0 ? <span className="ui-photo-mobile-header-timer-divider" aria-hidden="true" /> : null}
+                      {isViewingEntry ? (
+                        <div
+                          className="ui-btn-ghost ui-photo-mobile-header-timer-current h-10 gap-2 px-2"
+                          title={timerTitle}
+                        >
+                          <span className="ui-photo-mobile-header-timer-name">{taskName || "Process"}</span>
+                          <span className="ui-photo-mobile-header-timer-value">{formatElapsedTimer(elapsedMs)}</span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openCaptureTaskFromHeader(entry.taskId)}
+                          className="ui-btn-ghost h-10 gap-2 px-2"
+                          title={
+                            entry.timer.running
+                              ? `Open ${taskName || "this process"} · timer running`
+                              : `Open ${taskName || "this process"}`
+                          }
+                        >
+                          <span className="ui-photo-mobile-header-timer-name">{taskName || "Process"}</span>
+                          <span className="ui-photo-mobile-header-timer-value">{formatElapsedTimer(elapsedMs)}</span>
+                        </button>
+                      )}
+                    </Fragment>
+                  );
+                })}
+                {isViewingCaptureTask ? (
+                  <>
+                    <span className="ui-photo-mobile-header-timer-divider" aria-hidden="true" />
+                    <button
+                      type="button"
+                      onClick={stopCaptureTimer}
+                      className="ui-btn-ghost h-10 shrink-0 text-danger hover:text-danger"
+                      title={`Stop timer for ${
+                        taskRows.find((task) => task.id === viewingHeaderCapture?.taskId)?.name ??
+                        viewingHeaderCapture?.taskName ??
+                        "this process"
+                      }`}
+                    >
+                      Stop
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+            {canStartCaptureTimer ? (
               <button
                 type="button"
-                onClick={captureTimer.running ? stopCaptureTimer : startCaptureTimer}
-                className={`inline-flex h-10 min-w-[108px] items-center justify-center gap-1.5 rounded-full border px-3 text-xs font-medium ${
-                  captureTimer.running
-                    ? "border-ink bg-accent text-canvas"
-                    : "border-border-strong bg-transparent text-ink-secondary"
-                }`}
-                title={
-                  captureTimer.running
-                    ? `Stop session timer for ${captureTimer.taskName}`
-                    : `Start session timer for ${selectedTask.name}`
-                }
+                onClick={startCaptureTimerForCurrentTask}
+                className="ui-btn-ghost h-10 gap-2 px-3"
+                title={`Start timer for ${selectedTask?.name ?? "this process"}`}
               >
                 <Timer size={14} />
-                <span className={captureTimer.running ? "font-mono tabular-nums" : ""}>
-                  {captureTimer.running ? formatElapsedTimer(captureTimerElapsedMs) : "Timer"}
-                </span>
+                Timer
               </button>
             ) : null}
             <a
@@ -2609,8 +3400,23 @@ export function MobilePhotoPortal({
         </div>
       </header>
 
-      <div ref={contentScrollRef} className="min-h-0" style={{ paddingTop: mobileHeaderHeight }}>
-      <div className="mx-auto max-w-xl p-3 pb-[calc(2.5rem+env(safe-area-inset-bottom))]">
+      <div
+        ref={contentScrollRef}
+        className="min-h-0"
+        style={{
+          paddingTop: mobileHeaderHeight,
+          scrollPaddingBottom: showNewStepForm
+            ? "calc(4.5rem + env(safe-area-inset-bottom))"
+            : "calc(2.5rem + env(safe-area-inset-bottom))",
+        }}
+      >
+      <div
+        className={`mx-auto max-w-xl p-3 ${
+          showNewStepForm
+            ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))]"
+            : "pb-[calc(2.5rem+env(safe-area-inset-bottom))]"
+        }`}
+      >
         {restorePrompt ? (
           <div className="mb-3 rounded-md border border-accent/40 bg-accent-muted p-3">
             <div className="text-sm font-medium text-ink">{restorePrompt.title}</div>
@@ -2909,7 +3715,7 @@ export function MobilePhotoPortal({
           {selectedTask ? (
             <>
               <div className="border-b border-line p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="mb-3">
                   <button
                     type="button"
                     onClick={showProcessList}
@@ -2918,44 +3724,10 @@ export function MobilePhotoPortal({
                     <ChevronLeft size={14} />
                     Process list
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDeleteTaskId(selectedTask.id)}
-                    className="inline-flex h-8 items-center gap-1 rounded border border-line bg-surface px-2 text-[11px] ui-mono-label text-steel active:bg-danger-muted"
-                    aria-label={`Delete task ${selectedTask.wbs}`}
-                    title={`Delete task ${selectedTask.wbs}`}
-                  >
-                    <Trash2 size={13} />
-                    Delete
-                  </button>
                 </div>
                 <div className="ui-mono-label">
                   {selectedTask.zoneId ? zoneById.get(selectedTask.zoneId) ?? "Process" : "Process"}
                 </div>
-                {confirmDeleteTaskId === selectedTask.id ? (
-                  <div className="mt-3 rounded border border-danger/30 bg-danger-muted p-3">
-                    <div className="text-sm font-medium text-danger">Delete task {selectedTask.wbs}?</div>
-                    <div className="mt-1 text-xs font-bold leading-snug text-steel">
-                      This removes the task and its manufacturing steps from the shared line plan.
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteTaskId(null)}
-                        className="h-9 rounded border border-line bg-surface text-xs font-medium text-ink active:bg-surface-sunken"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void deleteHighLevelTask(selectedTask.id)}
-                        className="h-9 rounded bg-danger text-xs font-medium text-canvas active:bg-danger-hover"
-                      >
-                        Delete Task
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
                 <label className="mt-2 block">
                   <span className="mb-1 block ui-mono-label">
                     High-level task name
@@ -3085,10 +3857,14 @@ export function MobilePhotoPortal({
                       <span className="mb-1 block ui-mono-label">
                         Duration
                       </span>
-                      {captureTimer.running && captureTimer.activeStepId === newStepId ? (
+                      {captureTimer.running && isTimerOnSelectedTask && captureTimer.activeStepId === newStepId ? (
                         <div className="mb-1 text-[10px] font-medium text-steel">
                           Step lap {formatElapsedTimer(captureTimerLapElapsedMs)}
-                          <span className="text-ink-tertiary"> · total {formatElapsedTimer(captureTimerElapsedMs)}</span>
+                          <span className="text-ink-tertiary"> · process {formatElapsedTimer(captureTimerElapsedMs)}</span>
+                        </div>
+                      ) : captureTimer.running && isTimerOnSelectedTask ? (
+                        <div className="mb-1 text-[10px] font-medium text-steel">
+                          Process {formatElapsedTimer(captureTimerElapsedMs)}
                         </div>
                       ) : null}
                       <div className="grid grid-cols-[1fr_56px] overflow-hidden rounded border border-line bg-surface">
@@ -3265,15 +4041,17 @@ export function MobilePhotoPortal({
                         </div>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={goToNextManufacturingStep}
-                      disabled={newStepPhotoBusyCount > 0}
-                      className="inline-flex h-11 w-full items-center justify-center gap-2 border-t border-line bg-accent px-3 text-sm font-medium text-canvas active:bg-ink disabled:opacity-60"
-                    >
-                      <Plus size={16} />
-                      {captureTimer.running ? "Next Step (lap)" : "Next Step"}
-                    </button>
+                    <div className="ui-photo-mobile-next-step-bar">
+                      <button
+                        type="button"
+                        onClick={goToNextManufacturingStep}
+                        disabled={newStepPhotoBusyCount > 0}
+                        className="inline-flex h-11 w-full items-center justify-center gap-2 bg-accent px-3 text-sm font-medium text-canvas active:bg-ink disabled:opacity-60"
+                      >
+                        <Plus size={16} />
+                        {captureTimer.running ? "Next Step (lap)" : "Next Step"}
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <button

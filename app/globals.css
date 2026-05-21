@@ -697,6 +697,62 @@ button:disabled {
   will-change: transform, opacity, box-shadow;
 }
 
+.mobile-photo-portal .ui-photo-mobile-next-step-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  padding-top: 0.5rem;
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  backdrop-filter: blur(10px);
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-timers {
+  display: flex;
+  max-width: min(78vw, 28rem);
+  align-items: center;
+  gap: 0.125rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-timers::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-timers .ui-btn-ghost {
+  min-width: 0;
+  flex-shrink: 0;
+  padding-inline: 0.625rem;
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-timer-name {
+  max-width: 6.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-timer-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-timer-current {
+  color: var(--color-ink);
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-timer-divider {
+  width: 1px;
+  height: 1.125rem;
+  flex-shrink: 0;
+  align-self: center;
+  background: color-mix(in srgb, var(--color-line) 72%, transparent);
+}
+
 .mobile-photo-portal .ui-photo-mobile-new-step-panel.is-exiting {
   opacity: 0;
   transform: translateY(14px) scale(0.985);

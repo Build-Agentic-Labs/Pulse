@@ -13,6 +13,7 @@ import type {
   Station,
   Task,
   Workspace,
+  WorkspaceAccessGrant,
   WorkspaceMemberProfile,
   WorkspaceProjectGroup,
   WorkspaceRole,
@@ -201,6 +202,19 @@ function mapProject(row: Record<string, unknown>): Project {
     description: maybeText(row.description),
     status: String(row.status ?? "active") as Project["status"],
     createdBy: maybeText(row.created_by),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapWorkspaceAccessGrant(row: Record<string, unknown>): WorkspaceAccessGrant {
+  return {
+    workspaceId: String(row.workspace_id),
+    email: String(row.email ?? ""),
+    role: String(row.role ?? "editor") as WorkspaceRole,
+    grantedBy: maybeText(row.granted_by),
+    redeemedBy: maybeText(row.redeemed_by),
+    redeemedAt: maybeText(row.redeemed_at),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -967,35 +981,10 @@ export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProje
     }),
   );
 
-  const memberships = await throwIfError(
-    supabase.from("workspace_members").select("workspace_id, role").eq("user_id", userData.user.id),
-  );
+  const { error: redeemError } = await supabase.rpc("redeem_workspace_access_grants");
 
-  if (!memberships?.length) {
-    let workspace = await throwIfError(
-      supabase.from("workspaces").select("*").order("created_at", { ascending: true }).limit(1).maybeSingle(),
-    );
-
-    if (!workspace) {
-      workspace = await throwIfError(
-        supabase
-          .from("workspaces")
-          .insert({ name: "Pulse Workspace", owner_id: userData.user.id })
-          .select("*")
-          .maybeSingle(),
-      );
-    }
-
-    if (workspace) {
-      await throwIfError(
-        supabase.from("workspace_members").insert({
-          workspace_id: workspace.id,
-          user_id: userData.user.id,
-          role: "owner",
-        }),
-      );
-      await throwIfError(supabase.from("workspaces").update({ owner_id: userData.user.id }).eq("id", workspace.id));
-    }
+  if (redeemError && redeemError.code !== "PGRST202") {
+    throw redeemError;
   }
 
   return loadWorkspaceProjectGroups();
@@ -1147,6 +1136,57 @@ export async function loadWorkspaceMembersFromSupabase(workspaceId: string): Pro
       avatarUrl: maybeText(profile?.avatar_url),
     };
   });
+}
+
+export async function loadWorkspaceAccessGrantsFromSupabase(workspaceId: string): Promise<WorkspaceAccessGrant[]> {
+  const supabase = plannerClient();
+  const rows = await throwIfError(
+    supabase
+      .from("workspace_access_grants")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("created_at"),
+  );
+
+  return (rows ?? []).map(mapWorkspaceAccessGrant);
+}
+
+export async function upsertWorkspaceAccessGrantInSupabase(
+  workspaceId: string,
+  email: string,
+  role: WorkspaceRole,
+): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedEmail.endsWith("@anacorp.com")) {
+    throw new Error("Only Anacorp work emails can be granted access.");
+  }
+
+  const supabase = plannerClient();
+  const { data: userData } = await supabase.auth.getUser();
+
+  await throwIfError(
+    supabase.from("workspace_access_grants").upsert(
+      {
+        workspace_id: workspaceId,
+        email: normalizedEmail,
+        role,
+        granted_by: userData.user?.id ?? null,
+      },
+      { onConflict: "workspace_id,email" },
+    ),
+  );
+}
+
+export async function deleteWorkspaceAccessGrantFromSupabase(workspaceId: string, email: string): Promise<void> {
+  const supabase = plannerClient();
+  await throwIfError(
+    supabase
+      .from("workspace_access_grants")
+      .delete()
+      .eq("workspace_id", workspaceId)
+      .eq("email", email.trim().toLowerCase()),
+  );
 }
 
 export async function loadPlannerStateWithProjectFromSupabase(projectId?: string): Promise<{

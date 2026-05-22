@@ -2646,8 +2646,8 @@ function SetupFieldGroup({
   className?: string;
 }) {
   return (
-    <div className={className}>
-      <div className="mb-3">
+    <div className={`ui-setup-section ${className}`}>
+      <div className="ui-setup-section-head">
         <div className="ui-setup-section-title">{title}</div>
         {description ? <div className="ui-setup-section-desc">{description}</div> : null}
       </div>
@@ -2666,14 +2666,16 @@ function ProductSetupPanel({
   onProductText: (field: ProductTextField, value: string) => void;
 }) {
   return (
-    <section className="ui-panel p-4">
-      <div className="mb-5">
-        <h2 className="ui-section-title">Product Setup</h2>
-        <div className="ui-section-subtitle">Demand, available time, takt, and target labor</div>
+    <section className="ui-panel ui-product-setup">
+      <div className="ui-product-setup-head">
+        <div>
+          <h2 className="ui-section-title">Product Setup</h2>
+          <div className="ui-section-subtitle">Demand, available time, takt, and target labor</div>
+        </div>
       </div>
 
-      <div className="divide-y divide-line">
-        <SetupFieldGroup title="Product Identity" description="What is being planned" className="pb-5">
+      <div className="ui-product-setup-body">
+        <SetupFieldGroup title="Product Identity" description="What is being planned">
           <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(150px,0.7fr)_minmax(130px,0.6fr)_minmax(150px,0.7fr)]">
             <label className="block">
               <span className="ui-field-label">Product</span>
@@ -2716,86 +2718,86 @@ function ProductSetupPanel({
           </div>
         </SetupFieldGroup>
 
-        <div className="grid gap-5 py-5 xl:grid-cols-2">
+        <div className="ui-product-setup-split">
           <SetupFieldGroup title="Demand & Labor" description="Volume, takt override, and labor target">
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
-            <label className="block">
-              <span className="ui-field-label">Demand</span>
-              <div className="ui-field-shell">
-                <ClearableNumberInput
-                  className="number-input ui-field-control"
-                  value={product.demandQuantity}
-                  min={0}
-                  step={1}
-                  precision={0}
-                  normalize={Math.round}
-                  onValueChange={(value) => onProductNumber("demandQuantity", value)}
-                />
-                <select
-                  className="ui-field-addon w-28"
-                  value={product.demandPeriod}
-                  onChange={(event) => onProductText("demandPeriod", event.target.value as DemandPeriod)}
-                >
-                  {demandPeriodOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </label>
-            <NumericField
-              label="Manual Takt"
-              value={product.manualTaktMinutes ?? 0}
-              suffix="min"
-              onChange={(value) => onProductNumber("manualTaktMinutes", value)}
-            />
-            <NumericField
-              label="Target MH"
-              value={product.targetManHours}
-              suffix="MH"
-              onChange={(value) => onProductNumber("targetManHours", value)}
-            />
-          </div>
-        </SetupFieldGroup>
+              <label className="block">
+                <span className="ui-field-label">Demand</span>
+                <div className="ui-field-shell">
+                  <ClearableNumberInput
+                    className="number-input ui-field-control"
+                    value={product.demandQuantity}
+                    min={0}
+                    step={1}
+                    precision={0}
+                    normalize={Math.round}
+                    onValueChange={(value) => onProductNumber("demandQuantity", value)}
+                  />
+                  <select
+                    className="ui-field-addon w-28"
+                    value={product.demandPeriod}
+                    onChange={(event) => onProductText("demandPeriod", event.target.value as DemandPeriod)}
+                  >
+                    {demandPeriodOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
+              <NumericField
+                label="Manual Takt"
+                value={product.manualTaktMinutes ?? 0}
+                suffix="min"
+                onChange={(value) => onProductNumber("manualTaktMinutes", value)}
+              />
+              <NumericField
+                label="Target MH"
+                value={product.targetManHours}
+                suffix="MH"
+                onChange={(value) => onProductNumber("targetManHours", value)}
+              />
+            </div>
+          </SetupFieldGroup>
 
           <SetupFieldGroup title="Available Workday" description="Shift time minus planned non-production time">
             <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-            <NumericField
-              label="Workday"
-              value={product.grossAvailableMinutes}
-              suffix="min"
-              onChange={(value) => onProductNumber("grossAvailableMinutes", value)}
-            />
-            <NumericField
-              label="Breaks"
-              value={product.breakMinutes}
-              suffix="min"
-              onChange={(value) => onProductNumber("breakMinutes", value)}
-            />
-            <NumericField
-              label="Lunch"
-              value={product.lunchMinutes}
-              suffix="min"
-              onChange={(value) => onProductNumber("lunchMinutes", value)}
-            />
-            <NumericField
-              label="Meetings"
-              value={product.meetingMinutes}
-              suffix="min"
-              onChange={(value) => onProductNumber("meetingMinutes", value)}
-            />
-            <NumericField
-              label="Planned Downtime"
-              value={product.plannedDowntimeMinutes}
-              suffix="min"
-              onChange={(value) => onProductNumber("plannedDowntimeMinutes", value)}
-            />
-          </div>
-        </SetupFieldGroup>
+              <NumericField
+                label="Workday"
+                value={product.grossAvailableMinutes}
+                suffix="min"
+                onChange={(value) => onProductNumber("grossAvailableMinutes", value)}
+              />
+              <NumericField
+                label="Breaks"
+                value={product.breakMinutes}
+                suffix="min"
+                onChange={(value) => onProductNumber("breakMinutes", value)}
+              />
+              <NumericField
+                label="Lunch"
+                value={product.lunchMinutes}
+                suffix="min"
+                onChange={(value) => onProductNumber("lunchMinutes", value)}
+              />
+              <NumericField
+                label="Meetings"
+                value={product.meetingMinutes}
+                suffix="min"
+                onChange={(value) => onProductNumber("meetingMinutes", value)}
+              />
+              <NumericField
+                label="Planned Downtime"
+                value={product.plannedDowntimeMinutes}
+                suffix="min"
+                onChange={(value) => onProductNumber("plannedDowntimeMinutes", value)}
+              />
+            </div>
+          </SetupFieldGroup>
         </div>
 
-        <SetupFieldGroup title="Calendar" description="Working pattern used for weekly and monthly capacity" className="pt-5">
+        <SetupFieldGroup title="Calendar" description="Working pattern used for weekly and monthly capacity">
           <div className="grid gap-3 md:grid-cols-3">
             <NumericField
               label="Days / Week"
@@ -2838,7 +2840,7 @@ function KpiStrip({ kpis, product }: { kpis: ReturnType<typeof calculateProductK
   )} days/mo`;
 
   return (
-    <section className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-6">
+    <section className="ui-kpi-strip">
       <StatCard label="Net Available Time" value={formatMinutes(kpis.availableMinutes)} meta={availabilityMeta} />
       <StatCard label="Required Takt" value={formatMinutes(kpis.taktMinutes)} meta="Active takt" tone={taktTone} />
       <StatCard label="Unit Lead Time" value={formatMinutes(kpis.plannedCycleMinutes)} meta="First task start to final finish" />
@@ -3262,8 +3264,8 @@ function PlanningRecommendationsPanel({
       <div className="ui-planner-recommendations">
         <div className="ui-planner-readiness-section-head">
           <div>
-            <div className="ui-planner-readiness-section-title">Open allocations</div>
-            <p className="ui-section-subtitle">
+            <div className="ui-planner-recommendations-title">Open allocations</div>
+            <p className="ui-planner-recommendations-subtitle">
               {recommendations.length} required task{recommendations.length === 1 ? "" : "s"} still unallocated
             </p>
           </div>
@@ -3278,11 +3280,11 @@ function PlanningRecommendationsPanel({
           {visibleRecommendations.map((recommendation) => (
             <div key={recommendation.taskId} className="ui-planner-recommendation-row">
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-ink" title={recommendation.taskLabel}>
+                <div className="ui-planner-recommendation-title truncate" title={recommendation.taskLabel}>
                   {recommendation.taskLabel}
                 </div>
-                <div className="mt-0.5 text-[13px] leading-snug text-ink-secondary">{recommendation.condition}</div>
-                <div className="mt-0.5 text-[13px] font-medium text-ink">{recommendation.recommendation}</div>
+                <div className="ui-planner-recommendation-condition">{recommendation.condition}</div>
+                <div className="ui-planner-recommendation-copy">{recommendation.recommendation}</div>
               </div>
               {onOpenTaskDetail ? (
                 <button
@@ -3298,7 +3300,7 @@ function PlanningRecommendationsPanel({
         </div>
 
         {hiddenCount > 0 ? (
-          <p className="mt-2 text-[11px] text-ink-tertiary">
+          <p className="ui-planner-recommendations-more">
             {hiddenCount} more in the Smart Allocation audit packet.
           </p>
         ) : null}
@@ -6815,10 +6817,9 @@ export function LineWorkspace({
               </PlannerDashboardPanel>
             ) : (
               <>
-                <KpiStrip kpis={kpis} product={derivedState.product} />
-
                 {activeModule === "setup" ? (
-                  <div className="space-y-4">
+                  <div className="ui-setup-page space-y-4">
+                    <KpiStrip kpis={kpis} product={derivedState.product} />
                     <ProductSetupPanel
                       product={derivedState.product}
                       onProductNumber={updateProductNumber}
@@ -6835,7 +6836,10 @@ export function LineWorkspace({
                     />
                   </div>
                 ) : (
-                  lineReadinessPanel
+                  <>
+                    <KpiStrip kpis={kpis} product={derivedState.product} />
+                    {lineReadinessPanel}
+                  </>
                 )}
 
                 {showsSchedulingWorkspace ? (

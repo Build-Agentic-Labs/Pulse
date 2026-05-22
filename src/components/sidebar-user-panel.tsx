@@ -4,6 +4,7 @@ import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 type UserProfile = {
   fullName?: string;
@@ -42,8 +43,8 @@ export function SidebarUserPanel() {
     let mounted = true;
 
     async function hydrateUser() {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const user = sessionData.session?.user;
+      const { session } = await resolveSupabaseSession(supabase);
+      const user = session?.user;
 
       if (!mounted) {
         return;

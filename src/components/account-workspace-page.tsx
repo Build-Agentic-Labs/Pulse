@@ -1,22 +1,26 @@
 "use client";
 
 import type { Session } from "@supabase/supabase-js";
-import { Archive, Check, ChevronRight, FolderKanban, LogOut, Moon, Plus, RefreshCw, Sun, Users } from "lucide-react";
+import { Archive, Check, ChevronRight, FolderKanban, LogOut, MailPlus, Moon, Plus, RefreshCw, Sun, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
 import { useTheme } from "@/components/theme-provider";
 import { displayWorkspaceName } from "@/lib/display-names";
+import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import {
   createPlannerSupabaseClient,
   createProjectWithStarterPlan,
+  deleteWorkspaceAccessGrantFromSupabase,
   ensureDefaultWorkspaceMembership,
+  loadWorkspaceAccessGrantsFromSupabase,
   loadWorkspaceMembersFromSupabase,
   loadWorkspaceProjectGroups,
+  upsertWorkspaceAccessGrantInSupabase,
   updateProjectInSupabase,
   updateWorkspaceInSupabase,
 } from "@/domain/supabase-planner";
-import type { Project, WorkspaceMemberProfile, WorkspaceProjectGroup } from "@/domain/types";
+import type { Project, WorkspaceAccessGrant, WorkspaceMemberProfile, WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
 
 function canManage(role?: string) {
   return role === "owner" || role === "admin";
@@ -35,10 +39,13 @@ export function AccountWorkspacePage() {
   const [session, setSession] = useState<Session | null>(null);
   const [groups, setGroups] = useState<WorkspaceProjectGroup[]>([]);
   const [membersByWorkspaceId, setMembersByWorkspaceId] = useState<Record<string, WorkspaceMemberProfile[]>>({});
+  const [grantsByWorkspaceId, setGrantsByWorkspaceId] = useState<Record<string, WorkspaceAccessGrant[]>>({});
   const [status, setStatus] = useState<"loading" | "auth" | "ready" | "error">("loading");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [newProjectNameByWorkspaceId, setNewProjectNameByWorkspaceId] = useState<Record<string, string>>({});
+  const [grantEmailByWorkspaceId, setGrantEmailByWorkspaceId] = useState<Record<string, string>>({});
+  const [grantRoleByWorkspaceId, setGrantRoleByWorkspaceId] = useState<Record<string, WorkspaceRole>>({});
   const [workspaceNameDrafts, setWorkspaceNameDrafts] = useState<Record<string, string>>({});
   const [projectNameDrafts, setProjectNameDrafts] = useState<Record<string, string>>({});
   const statusRef = useRef(status);
@@ -52,6 +59,7 @@ export function AccountWorkspacePage() {
       setStatus("auth");
       setGroups([]);
       setMembersByWorkspaceId({});
+      setGrantsByWorkspaceId({});
       return;
     }
 
@@ -77,6 +85,14 @@ export function AccountWorkspacePage() {
         ] as const),
       );
       setMembersByWorkspaceId(Object.fromEntries(memberEntries));
+
+      const grantEntries = await Promise.all(
+        nextGroups.map(async (group) => [
+          group.workspace.id,
+          canManage(group.role) ? await loadWorkspaceAccessGrantsFromSupabase(group.workspace.id).catch(() => []) : [],
+        ] as const),
+      );
+      setGrantsByWorkspaceId(Object.fromEntries(grantEntries));
       setStatus("ready");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load account workspace data.");
@@ -87,15 +103,15 @@ export function AccountWorkspacePage() {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data, error }) => {
+    void resolveSupabaseSession(supabase).then(({ session: nextSession, error }) => {
       if (!mounted) return;
       if (error) {
         setMessage(error.message);
         setStatus("error");
         return;
       }
-      setSession(data.session);
-      void hydrate(data.session);
+      setSession(nextSession);
+      void hydrate(nextSession);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
@@ -121,6 +137,24 @@ export function AccountWorkspacePage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to sign in.");
     } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function signInWithMicrosoft() {
+    setIsSubmitting(true);
+    setMessage("");
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "azure",
+        options: {
+          redirectTo: typeof window !== "undefined" ? window.location.href : undefined,
+          scopes: "email profile openid",
+        },
+      });
+      if (error) throw error;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to start Microsoft sign in.");
       setIsSubmitting(false);
     }
   }
@@ -161,6 +195,41 @@ export function AccountWorkspacePage() {
       setMessage("Project created.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to create the project.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function saveAccessGrant(workspaceId: string) {
+    const email = grantEmailByWorkspaceId[workspaceId]?.trim();
+    if (!email) {
+      setMessage("Add an Anacorp email first.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setMessage("");
+    try {
+      await upsertWorkspaceAccessGrantInSupabase(workspaceId, email, grantRoleByWorkspaceId[workspaceId] ?? "editor");
+      setGrantEmailByWorkspaceId((current) => ({ ...current, [workspaceId]: "" }));
+      await hydrate(session);
+      setMessage("Access grant saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save access grant.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function removeAccessGrant(workspaceId: string, email: string) {
+    setIsSubmitting(true);
+    setMessage("");
+    try {
+      await deleteWorkspaceAccessGrantFromSupabase(workspaceId, email);
+      await hydrate(session);
+      setMessage("Access grant removed.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to remove access grant.");
     } finally {
       setIsSubmitting(false);
     }
@@ -425,6 +494,94 @@ export function AccountWorkspacePage() {
                         <div className="px-3 py-2.5 text-[12px] text-ink-tertiary">No members visible.</div>
                       )}
                     </div>
+
+                    {manageable ? (
+                      <div className="mt-5">
+                        <div className="flex items-center gap-2">
+                          <MailPlus size={14} className="text-ink-tertiary" />
+                          <span className="ui-setup-section-title">Access grants</span>
+                        </div>
+
+                        <form
+                          className="mt-3 space-y-2"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void saveAccessGrant(group.workspace.id);
+                          }}
+                        >
+                          <label className="block">
+                            <span className="ui-field-label">Work email</span>
+                            <input
+                              className="ui-field-standalone h-9 px-3 text-[12px]"
+                              type="email"
+                              placeholder="name@anacorp.com"
+                              value={grantEmailByWorkspaceId[group.workspace.id] ?? ""}
+                              onChange={(event) =>
+                                setGrantEmailByWorkspaceId((current) => ({
+                                  ...current,
+                                  [group.workspace.id]: event.target.value,
+                                }))
+                              }
+                              disabled={isSubmitting}
+                            />
+                          </label>
+
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                            <select
+                              className="ui-field-standalone h-9 px-3 text-[12px]"
+                              value={grantRoleByWorkspaceId[group.workspace.id] ?? "editor"}
+                              onChange={(event) =>
+                                setGrantRoleByWorkspaceId((current) => ({
+                                  ...current,
+                                  [group.workspace.id]: event.target.value as WorkspaceRole,
+                                }))
+                              }
+                              disabled={isSubmitting}
+                            >
+                              <option value="viewer">Viewer</option>
+                              <option value="editor">Editor</option>
+                              <option value="admin">Admin</option>
+                              <option value="owner">Owner</option>
+                            </select>
+                            <button
+                              type="submit"
+                              className="ui-btn-ghost h-9 gap-1.5 px-3 text-[10px] disabled:opacity-50"
+                              disabled={isSubmitting}
+                            >
+                              <Plus size={13} />
+                              Grant
+                            </button>
+                          </div>
+                        </form>
+
+                        <div className="mt-3 divide-y divide-line rounded-lg border border-line">
+                          {(grantsByWorkspaceId[group.workspace.id] ?? []).length ? (
+                            (grantsByWorkspaceId[group.workspace.id] ?? []).map((grant) => (
+                              <div key={grant.email} className="flex items-center justify-between gap-2 px-3 py-2.5">
+                                <div className="min-w-0">
+                                  <div className="truncate text-[12px] font-medium text-ink">{grant.email}</div>
+                                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-ink-tertiary">
+                                    {grant.role}
+                                    {grant.redeemedAt ? " - redeemed" : ""}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-danger disabled:opacity-50"
+                                  disabled={isSubmitting}
+                                  onClick={() => void removeAccessGrant(group.workspace.id, grant.email)}
+                                  title="Remove grant"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="px-3 py-2.5 text-[12px] text-ink-tertiary">No grants yet.</div>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                   </aside>
                 </div>
               </section>

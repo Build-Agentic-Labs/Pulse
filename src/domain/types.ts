@@ -124,6 +124,17 @@ export interface WorkspaceMemberProfile extends WorkspaceMember {
   avatarUrl?: string;
 }
 
+export interface WorkspaceAccessGrant {
+  workspaceId: string;
+  email: string;
+  role: WorkspaceRole;
+  grantedBy?: string;
+  redeemedBy?: string;
+  redeemedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Project {
   id: string;
   workspaceId: string;

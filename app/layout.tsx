@@ -27,6 +27,9 @@ const doto = Doto({
 export const metadata: Metadata = {
   title: "Pulse",
   description: "Manufacturing line development planner",
+  icons: {
+    icon: "/pulse-favicon.png",
+  },
 };
 
 export const dynamic = "force-dynamic";

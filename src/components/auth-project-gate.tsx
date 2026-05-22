@@ -9,6 +9,7 @@ import {
   ensureDefaultWorkspaceMembership,
 } from "@/domain/supabase-planner";
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
+import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 type ProjectRouteKind = "planner" | "mobile-photos" | "excel/gantt";
 
@@ -19,6 +20,7 @@ type AuthProjectGateProps = {
 };
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
+const WORKSPACE_LOADING_TITLE = "Loading workspace";
 
 function projectHref(projectId: string, routeKind: ProjectRouteKind) {
   return `/projects/${projectId}/${routeKind}`;
@@ -131,7 +133,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data, error }) => {
+    void resolveSupabaseSession(supabase).then(({ session: nextSession, error }) => {
       if (!mounted) {
         return;
       }
@@ -143,9 +145,9 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
         return;
       }
 
-      setSession(data.session);
+      setSession(nextSession);
       setSessionReady(true);
-      void refreshWorkspaceProjects(data.session);
+      void refreshWorkspaceProjects(nextSession);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
@@ -225,9 +227,12 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     }
   }
 
+  const isRedirectingToProject =
+    !projectId && status === "ready" && flatProjects.length > 0;
+
   if (!sessionReady) {
     return (
-      <AppLoadingShell title="Loading workspace" />
+      <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
     );
   }
 
@@ -270,7 +275,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
 
     return (
       <>
-        {!childReady && <AppLoadingShell title="Loading workspace" />}
+        {!childReady && <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />}
         <div style={{ display: childReady ? "contents" : "none" }}>
           {children(selectedProject ?? fallbackProjectContext(projectId), () => setChildReady(true))}
         </div>
@@ -278,9 +283,9 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     );
   }
 
-  if (status === "loading") {
+  if (status === "loading" || isRedirectingToProject) {
     return (
-      <AppLoadingShell title="Loading workspace" />
+      <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
     );
   }
 
@@ -289,6 +294,6 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   }
 
   return (
-    <AppLoadingShell title="Opening project" />
+    <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
   );
 }

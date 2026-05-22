@@ -12,6 +12,7 @@ import {
   updateProjectInSupabase,
 } from "@/domain/supabase-planner";
 import type { PlannerProjectContext, Project, WorkspaceRole } from "@/domain/types";
+import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import { ThemedFeedbackLayer, type FeedbackConfirm } from "./themed-feedback";
 import { UiContextMenu } from "./ui-context-menu";
 
@@ -93,9 +94,9 @@ export function SidebarWorkspacePanel({
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    void resolveSupabaseSession(supabase).then(({ session }) => {
       if (!mounted) return;
-      if (!data.session) {
+      if (!session) {
         setStatus("auth");
         return;
       }

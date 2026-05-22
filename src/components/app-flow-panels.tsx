@@ -104,7 +104,7 @@ export function AuthFormPanel({
     <FlowShell>
       <section className="ui-auth-card">
         <header className="ui-auth-card-header">
-          <div className="ui-auth-brand">{eyebrow}</div>
+          <div className="ui-auth-brand font-display">{eyebrow}</div>
           <p className="ui-eyebrow mt-3">Workspace access</p>
           <h1 className="ui-section-title mt-2">{title}</h1>
           <p className="ui-section-subtitle mt-1">Sign in with your email or create a new account.</p>
@@ -115,7 +115,7 @@ export function AuthFormPanel({
             <label className="block">
               <span className="ui-field-label">Email</span>
               <input
-                className="ui-field-standalone"
+                className="ui-field-standalone font-mono"
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -128,7 +128,7 @@ export function AuthFormPanel({
             <label className="block">
               <span className="ui-field-label">Password</span>
               <input
-                className="ui-field-standalone"
+                className="ui-field-standalone font-mono"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
@@ -148,7 +148,7 @@ export function AuthFormPanel({
             ) : null}
 
             <div className="space-y-2.5 pt-1">
-              <button className="ui-btn-primary h-11 w-full" type="submit" disabled={isSubmitting}>
+              <button className="ui-btn-primary font-mono h-11 w-full" type="submit" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <span className="flex items-center gap-3">
                     <NothingSpinner inline />
@@ -166,7 +166,7 @@ export function AuthFormPanel({
               </div>
 
               <button
-                className="ui-btn-ghost h-11 w-full disabled:opacity-40"
+                className="ui-btn-ghost font-mono h-11 w-full disabled:opacity-40"
                 type="button"
                 disabled={isSubmitting}
                 onClick={() => onCreateAccount(email, password)}

@@ -61,16 +61,14 @@ function formatAuthMessage(message: string) {
 
 export function AppLoadingShell({
   title = "Loading workspace",
-  body = "Reading the latest planner data.",
 }: {
   title?: string;
-  body?: string;
 }) {
   return (
     <FlowShell>
       <section className="ui-auth-card">
         <div className="ui-auth-card-body">
-          <NothingLoadingBlock title={title} body={body} />
+          <NothingLoadingBlock title={title} />
         </div>
       </section>
     </FlowShell>

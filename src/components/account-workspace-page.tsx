@@ -210,10 +210,7 @@ export function AccountWorkspacePage() {
 
   if (status === "loading") {
     return (
-      <AppLoadingShell
-        title="Loading account"
-        body="Loading your workspaces, projects, and member visibility."
-      />
+      <AppLoadingShell title="Loading account" />
     );
   }
 

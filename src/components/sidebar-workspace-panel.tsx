@@ -133,14 +133,23 @@ export function SidebarWorkspacePanel({
     }
   }
 
-  function requestDeleteProject(project: Project) {
+  function requestDeleteProject(project: Project, anchorRect: DOMRect) {
     setDeleteError("");
     setFeedbackConfirm({
       title: "Remove project?",
       body: `"${project.name}" and all of its planner data will be permanently deleted. This cannot be undone.`,
       tone: "danger",
-      confirmLabel: "Remove project",
-      cancelLabel: "Keep project",
+      confirmLabel: "Remove",
+      cancelLabel: "Keep",
+      placement: "anchor",
+      anchorRect: {
+        top: anchorRect.top,
+        right: anchorRect.right,
+        bottom: anchorRect.bottom,
+        left: anchorRect.left,
+        width: anchorRect.width,
+        height: anchorRect.height,
+      },
       onConfirm: () => {
         void executeDeleteProject(project);
       },
@@ -215,6 +224,7 @@ export function SidebarWorkspacePanel({
                 return (
                   <div
                     key={project.id}
+                    data-project-row
                     className={`group/project ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
                   >
                     <Link
@@ -229,7 +239,11 @@ export function SidebarWorkspacePanel({
                       <button
                         type="button"
                         className="inline-flex h-4 w-4 shrink-0 items-center justify-center self-center p-0 text-ink-secondary opacity-0 transition-opacity duration-200 hover:text-ink group-hover/project:opacity-100 disabled:opacity-40"
-                        onClick={() => requestDeleteProject(project)}
+                        onClick={(event) => {
+                          const row = event.currentTarget.closest("[data-project-row]");
+                          const anchor = (row ?? event.currentTarget).getBoundingClientRect();
+                          requestDeleteProject(project, anchor);
+                        }}
                         disabled={isSubmitting}
                         title={`Remove ${project.name}`}
                         aria-label={`Remove ${project.name}`}

@@ -50,16 +50,14 @@ export function NothingLoadingBlock({
 
 export function NothingLoadingShell({
   title = "Loading workspace",
-  body = "Reading the latest planner data.",
 }: {
   title?: string;
-  body?: string;
 }) {
   return (
     <main className="ui-flow-shell">
       <section className="ui-auth-card">
         <div className="ui-auth-card-body">
-          <NothingLoadingBlock title={title} body={body} />
+          <NothingLoadingBlock title={title} />
         </div>
       </section>
     </main>

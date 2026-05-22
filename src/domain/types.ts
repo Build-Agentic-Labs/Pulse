@@ -55,6 +55,7 @@ export type ProjectStatus = "active" | "archived";
 export interface ManufacturingStep {
   id: string;
   sequence: number;
+  name?: string;
   instruction: string;
   durationMinutes?: number;
   qualityCheck?: string;

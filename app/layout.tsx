@@ -27,6 +27,8 @@ export const metadata: Metadata = {
   description: "Manufacturing line development planner",
 };
 
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{

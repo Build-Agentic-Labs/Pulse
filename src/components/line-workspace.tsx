@@ -116,10 +116,10 @@ import { ClearableNumberInput } from "./clearable-number-input";
 import { GanttTimeline } from "./gantt-timeline";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
-import { PlannerDashboardPanel } from "./planner-dashboard-panel";
+import { AppLoadingShell } from "./app-flow-panels";
+import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
 import { SidebarWorkspacePanel } from "./sidebar-workspace-panel";
 import { SidebarUserPanel } from "./sidebar-user-panel";
-import { NothingLoadingBlock } from "./nothing-ui";
 import { ProcedureStepToolTable } from "./procedure-step-tool-table";
 import { StepPhotoViewer } from "./step-photo-viewer";
 import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
@@ -1608,20 +1608,69 @@ function TopNav({
   onExport,
   sidebarCollapsed,
   onToggleSidebar,
+  context,
 }: {
   onExport: () => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  context?: ReturnType<typeof buildPlannerChromeContext>;
 }) {
   const { theme, toggleTheme } = useTheme();
 
+  if (context) {
+    return (
+      <header className="ui-chrome ui-chrome-planner z-40 h-12 shrink-0">
+        <div className="ui-chrome-planner-brand">
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            className="ui-btn-ghost hidden h-8 w-8 shrink-0 items-center justify-center px-0 lg:inline-flex"
+            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            aria-expanded={!sidebarCollapsed}
+          >
+            <ChevronLeft
+              size={14}
+              strokeWidth={1.75}
+              className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
+            />
+          </button>
+          <div className="ui-brand-compact shrink-0">Pulse</div>
+        </div>
+
+        <div className="ui-chrome-planner-context min-w-0">
+          <span className="ui-chrome-context-title truncate">{context.title}</span>
+          <span className="ui-chrome-context-meta hidden min-w-0 truncate sm:inline">
+            <span className={context.statusClass}>{context.status}</span>
+            {context.detail ? (
+              <>
+                <span aria-hidden> · </span>
+                <span>{context.detail}</span>
+              </>
+            ) : null}
+          </span>
+        </div>
+
+        <div className="ui-chrome-planner-actions">
+          <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
+            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <button type="button" onClick={onExport} className="ui-btn-ghost h-10 gap-2">
+            <Download size={16} />
+            Export
+          </button>
+        </div>
+      </header>
+    );
+  }
+
   return (
-    <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between px-3 sm:px-4">
-      <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+    <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between gap-3 px-3 sm:px-4 lg:px-0">
+      <div className="ui-chrome-brand flex min-w-0 items-center gap-1 sm:gap-2 lg:gap-0.5 lg:px-2">
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="ui-btn-ghost hidden h-8 w-8 items-center justify-center px-0 lg:inline-flex"
+          className="ui-btn-ghost hidden h-8 w-8 shrink-0 items-center justify-center px-0 lg:inline-flex"
           title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           aria-expanded={!sidebarCollapsed}
@@ -1632,10 +1681,12 @@ function TopNav({
             className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
           />
         </button>
-        <div className="ui-brand-compact">Pulse</div>
+        <div className="ui-brand-compact shrink-0">Pulse</div>
       </div>
 
-      <div className="flex items-center gap-0.5 sm:gap-1">
+      <div className="flex min-w-0 flex-1 lg:hidden" />
+
+      <div className="flex shrink-0 items-center gap-0.5 sm:gap-1 lg:pr-4">
         <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
@@ -2260,9 +2311,7 @@ function ProcedureWorkspace({
         <div className="mx-auto max-w-[1500px] space-y-5">
           <section>
             <div className="ui-eyebrow">Selected procedure</div>
-            <h1 className="ui-section-title mt-2">
-              <span className="font-mono text-ink-secondary">{task.wbs}</span> {task.name || "Untitled task"}
-            </h1>
+            <h1 className="ui-section-title mt-2">{task.name || "Untitled task"}</h1>
             <div className="ui-metric-strip mt-4">
               {[
                 ["Zone", zoneById.get(task.zoneId ?? "")?.name ?? "Unzoned"],
@@ -2279,7 +2328,7 @@ function ProcedureWorkspace({
             <label className="block">
               <span className="ui-field-label">Task Description</span>
               <textarea
-                className="ui-field-standalone min-h-[170px] h-auto resize-y py-2 leading-relaxed"
+                className="ui-field-standalone min-h-[96px] h-auto resize-y py-2 leading-relaxed"
                 value={task.description ?? ""}
                 onChange={(event) => onUpdateTask(task.id, { description: event.target.value })}
                 placeholder="Describe the task scope, boundaries, and expected output."
@@ -2289,7 +2338,7 @@ function ProcedureWorkspace({
             <label className="block">
               <span className="ui-field-label">Safety Notes</span>
               <textarea
-                className="ui-field-standalone min-h-[170px] h-auto resize-y py-2 leading-relaxed"
+                className="ui-field-standalone min-h-[96px] h-auto resize-y py-2 leading-relaxed"
                 value={task.safetyNotes ?? ""}
                 onChange={(event) => onUpdateTask(task.id, { safetyNotes: event.target.value })}
                 placeholder="Safety, lockout, PPE, lifting, or handling notes."
@@ -2852,13 +2901,55 @@ function buildZoneMetrics(zones: Zone[], tasks: Task[]): ZoneMetric[] {
   return metrics;
 }
 
-function ZoneMetricsPanel({ zones, tasks, compact = false }: { zones: Zone[]; tasks: Task[]; compact?: boolean }) {
+function ZoneMetricsPanel({
+  zones,
+  tasks,
+  compact = false,
+  embedded = false,
+}: {
+  zones: Zone[];
+  tasks: Task[];
+  compact?: boolean;
+  embedded?: boolean;
+}) {
   const metrics = buildZoneMetrics(zones, tasks);
 
   if (metrics.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-line bg-surface-raised p-3 text-xs font-semibold text-steel">
         Create a zone in the Gantt to see headcount, man-hours, and cycle time by area.
+      </div>
+    );
+  }
+
+  if (embedded) {
+    return (
+      <div className="ui-planner-zone-list">
+        {metrics.map((metric) => (
+          <div key={metric.id} className="ui-planner-zone-row">
+            <div className="ui-planner-zone-name">
+              <span className="ui-planner-zone-dot" style={{ backgroundColor: metric.color }} />
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-ink">{metric.name}</div>
+                <div className="text-[11px] text-ink-tertiary">{metric.taskCount} tasks</div>
+              </div>
+            </div>
+            <div className="ui-planner-zone-metrics">
+              <div className="ui-planner-zone-metric">
+                <div className="ui-mono-label">HC</div>
+                <div className="ui-row-value mt-0.5">{round(metric.headcount, 1)}</div>
+              </div>
+              <div className="ui-planner-zone-metric">
+                <div className="ui-mono-label">MH</div>
+                <div className="ui-row-value mt-0.5">{formatManHours(metric.manHours)}</div>
+              </div>
+              <div className="ui-planner-zone-metric">
+                <div className="ui-mono-label">Cycle</div>
+                <div className="ui-row-value mt-0.5">{formatMinutes(metric.cycleMinutes)}</div>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -2902,6 +2993,7 @@ function CrewReadinessCard({
   product,
   tasks,
   compact = false,
+  embedded = false,
 }: {
   kpis: ReturnType<typeof calculateProductKpis>;
   onClearPlanningRecommendations?: () => void;
@@ -2910,6 +3002,7 @@ function CrewReadinessCard({
   product: Product;
   tasks: Task[];
   compact?: boolean;
+  embedded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const period = periodLabel(product.demandPeriod);
@@ -2980,6 +3073,124 @@ function CrewReadinessCard({
       : []),
   ];
 
+  const expandedBody = expanded ? (
+    <>
+      <div className={`mt-4 grid gap-4 ${compact ? "grid-cols-1" : "xl:grid-cols-[250px_minmax(0,1fr)_220px]"}`}>
+        <div className={`space-y-2 ${compact ? "" : "xl:border-r xl:border-line xl:pr-4"}`}>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="ui-mono-label">Rounded Staffing</span>
+            <span className="text-sm font-medium text-ink">{kpis.wholePersonStaffingRequirement} people</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="ui-mono-label">Avg Allocation</span>
+            <span className="text-sm font-medium text-ink">{round(kpis.requiredAverageAllocationPercent, 1)}%</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="ui-mono-label">Labor Budget</span>
+            <span className="text-sm font-medium text-ink">{formatManHours(kpis.targetLaborBudgetManHours)}/{period}</span>
+          </div>
+        </div>
+
+        <div className={`min-w-0 ${compact ? "border-t border-line pt-3" : "xl:border-r xl:border-line xl:px-4"}`}>
+          <div className="mb-2 ui-mono-label">Plan Fit</div>
+          <div className={`grid gap-x-5 gap-y-2 ${compact ? "grid-cols-1" : "sm:grid-cols-4"}`}>
+            {planChecks.map((check) => (
+              <div key={check.label} className="min-w-0">
+                <div className="flex items-center gap-1.5 ui-mono-label">
+                  <span className={`h-1.5 w-1.5 rounded-full ${check.fits ? "bg-accent" : "bg-danger"}`} />
+                  {check.label}
+                </div>
+                <div className={`mt-1 text-sm font-medium ${check.fits ? "text-ink" : "text-danger"}`}>{check.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className={`min-w-0 bg-surface ${compact ? "border-t border-line pt-3" : "xl:pl-1"}`}>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="ui-mono-label">Operators</div>
+            <div className="text-[10px] font-medium text-steel">
+              {visibleWorkerCount}/{kpis.wholePersonStaffingRequirement}
+            </div>
+          </div>
+          {visibleWorkers.length ? (
+            <div className="grid grid-cols-4 gap-x-2 gap-y-2">
+              {visibleWorkers.map((letter, index) => {
+                const allocation = operatorAllocations[letter] ?? 0;
+                return (
+                  <div
+                    key={letter}
+                    className="flex min-w-0 flex-col items-center gap-0.5 bg-surface"
+                    title={`Operator ${letter}: ${allocation}% allocated`}
+                  >
+                    <WorkerIcon colorIndex={index} letter={letter} />
+                    <span className="text-[9px] font-medium leading-none text-steel">{round(allocation, 0)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-[11px] font-semibold text-steel">No staffing requirement yet.</div>
+          )}
+          {kpis.wholePersonStaffingRequirement > WORKER_ICON_LETTERS.length ? (
+            <div className="mt-2 text-[10px] font-semibold text-steel">First {WORKER_ICON_LETTERS.length} icons shown.</div>
+          ) : null}
+        </div>
+      </div>
+
+      {!embedded ? (
+        <PlanningRecommendationsPanel
+          compact={compact}
+          onClear={onClearPlanningRecommendations}
+          recommendations={planningRecommendations}
+          onOpenTaskDetail={onOpenTaskDetail}
+        />
+      ) : null}
+    </>
+  ) : null;
+
+  if (embedded) {
+    return (
+      <div className="ui-planner-crew">
+        <div className="ui-metric-strip ui-planner-crew-metrics">
+          <div className="ui-metric-card">
+            <div className="ui-metric-card-label">Budgeted crew</div>
+            <div className="ui-metric-card-value">{round(kpis.budgetedCrewEquivalent, 2)} FTE</div>
+            <div className="ui-metric-card-meta">
+              {kpis.wholePersonStaffingRequirement} people · {round(kpis.requiredAverageAllocationPercent, 1)}% avg
+            </div>
+          </div>
+          <div className="ui-metric-card">
+            <div className="ui-metric-card-label">Peak manpower</div>
+            <div className="ui-metric-card-value">{round(kpis.peakManpower, 1)}</div>
+            <div className="ui-metric-card-meta">Rounded {kpis.wholePersonStaffingRequirement}</div>
+          </div>
+          <div className="ui-metric-card">
+            <div className="ui-metric-card-label">Planned load</div>
+            <div className="ui-metric-card-value">{round(kpis.plannedLaborLoadFte, 2)} FTE</div>
+            <div className="ui-metric-card-meta">Budget {round(kpis.budgetedCrewEquivalent, 2)} FTE</div>
+          </div>
+          <div className="ui-metric-card">
+            <div className="ui-metric-card-label">Status</div>
+            <div className={`ui-metric-card-value ${feasible ? "" : "text-danger"}`}>{statusLabel}</div>
+            {planningRecommendations.length > 0 ? (
+              <div className="ui-metric-card-meta text-warn-strong">{planningRecommendations.length} open</div>
+            ) : null}
+          </div>
+        </div>
+        {planningRecommendations.length > 0 ? (
+          <PlanningRecommendationsPanel
+            compact
+            embedded
+            onClear={onClearPlanningRecommendations}
+            recommendations={planningRecommendations}
+            onOpenTaskDetail={onOpenTaskDetail}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className={`rounded-md border border-l-4 bg-surface ${expanded ? "p-4" : "p-3"} ${toneClass}`}>
       <div
@@ -3021,90 +3232,20 @@ function CrewReadinessCard({
         </div>
       </div>
 
-      {expanded ? (
-        <>
-          <div className={`mt-4 grid gap-4 ${compact ? "grid-cols-1" : "xl:grid-cols-[250px_minmax(0,1fr)_220px]"}`}>
-            <div className={`space-y-2 ${compact ? "" : "xl:border-r xl:border-line xl:pr-4"}`}>
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="ui-mono-label">Rounded Staffing</span>
-                <span className="text-sm font-medium text-ink">{kpis.wholePersonStaffingRequirement} people</span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="ui-mono-label">Avg Allocation</span>
-                <span className="text-sm font-medium text-ink">{round(kpis.requiredAverageAllocationPercent, 1)}%</span>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="ui-mono-label">Labor Budget</span>
-                <span className="text-sm font-medium text-ink">{formatManHours(kpis.targetLaborBudgetManHours)}/{period}</span>
-              </div>
-            </div>
-
-            <div className={`min-w-0 ${compact ? "border-t border-line pt-3" : "xl:border-r xl:border-line xl:px-4"}`}>
-              <div className="mb-2 ui-mono-label">Plan Fit</div>
-              <div className={`grid gap-x-5 gap-y-2 ${compact ? "grid-cols-1" : "sm:grid-cols-4"}`}>
-                {planChecks.map((check) => (
-                  <div key={check.label} className="min-w-0">
-                    <div className="flex items-center gap-1.5 ui-mono-label">
-                      <span className={`h-1.5 w-1.5 rounded-full ${check.fits ? "bg-accent" : "bg-danger"}`} />
-                      {check.label}
-                    </div>
-                    <div className={`mt-1 text-sm font-medium ${check.fits ? "text-ink" : "text-danger"}`}>{check.value}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className={`min-w-0 bg-surface ${compact ? "border-t border-line pt-3" : "xl:pl-1"}`}>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="ui-mono-label">Operators</div>
-                <div className="text-[10px] font-medium text-steel">
-                  {visibleWorkerCount}/{kpis.wholePersonStaffingRequirement}
-                </div>
-              </div>
-              {visibleWorkers.length ? (
-                <div className="grid grid-cols-4 gap-x-2 gap-y-2">
-                  {visibleWorkers.map((letter, index) => {
-                    const allocation = operatorAllocations[letter] ?? 0;
-                    return (
-                      <div
-                        key={letter}
-                        className="flex min-w-0 flex-col items-center gap-0.5 bg-surface"
-                        title={`Operator ${letter}: ${allocation}% allocated`}
-                      >
-                        <WorkerIcon colorIndex={index} letter={letter} />
-                        <span className="text-[9px] font-medium leading-none text-steel">{round(allocation, 0)}%</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-[11px] font-semibold text-steel">No staffing requirement yet.</div>
-              )}
-              {kpis.wholePersonStaffingRequirement > WORKER_ICON_LETTERS.length ? (
-                <div className="mt-2 text-[10px] font-semibold text-steel">First {WORKER_ICON_LETTERS.length} icons shown.</div>
-              ) : null}
-            </div>
-          </div>
-
-          <PlanningRecommendationsPanel
-            compact={compact}
-            onClear={onClearPlanningRecommendations}
-            recommendations={planningRecommendations}
-            onOpenTaskDetail={onOpenTaskDetail}
-          />
-        </>
-      ) : null}
+      {expandedBody}
     </div>
   );
 }
 
 function PlanningRecommendationsPanel({
   compact = false,
+  embedded = false,
   onClear,
   onOpenTaskDetail,
   recommendations,
 }: {
   compact?: boolean;
+  embedded?: boolean;
   onClear?: () => void;
   onOpenTaskDetail?: (taskId: string) => void;
   recommendations: UnallocatedWorkReview[];
@@ -3113,8 +3254,57 @@ function PlanningRecommendationsPanel({
     return null;
   }
 
-  const visibleRecommendations = recommendations.slice(0, compact ? 2 : 4);
+  const visibleRecommendations = recommendations.slice(0, compact || embedded ? 3 : 4);
   const hiddenCount = recommendations.length - visibleRecommendations.length;
+
+  if (embedded) {
+    return (
+      <div className="ui-planner-recommendations">
+        <div className="ui-planner-readiness-section-head">
+          <div>
+            <div className="ui-planner-readiness-section-title">Open allocations</div>
+            <p className="ui-section-subtitle">
+              {recommendations.length} required task{recommendations.length === 1 ? "" : "s"} still unallocated
+            </p>
+          </div>
+          {onClear ? (
+            <button type="button" onClick={onClear} className="ui-btn-ghost h-8 px-2 text-xs">
+              Clear
+            </button>
+          ) : null}
+        </div>
+
+        <div>
+          {visibleRecommendations.map((recommendation) => (
+            <div key={recommendation.taskId} className="ui-planner-recommendation-row">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-ink" title={recommendation.taskLabel}>
+                  {recommendation.taskLabel}
+                </div>
+                <div className="mt-0.5 text-[13px] leading-snug text-ink-secondary">{recommendation.condition}</div>
+                <div className="mt-0.5 text-[13px] font-medium text-ink">{recommendation.recommendation}</div>
+              </div>
+              {onOpenTaskDetail ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenTaskDetail(recommendation.taskId)}
+                  className="ui-btn-ghost h-8 shrink-0 px-2 text-xs"
+                >
+                  Review
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+
+        {hiddenCount > 0 ? (
+          <p className="mt-2 text-[11px] text-ink-tertiary">
+            {hiddenCount} more in the Smart Allocation audit packet.
+          </p>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-4 border-t border-line pt-3">
@@ -3207,6 +3397,7 @@ function LineReadinessPanel({
   onOpenTaskDetail,
   product,
   compact = false,
+  embedded = false,
 }: {
   allocationRecommendations?: UnallocatedWorkReview[];
   onClearPlanningRecommendations?: () => void;
@@ -3222,19 +3413,28 @@ function LineReadinessPanel({
   onOpenTaskDetail?: (taskId: string) => void;
   product: Product;
   compact?: boolean;
+  embedded?: boolean;
 }) {
-  return (
-    <section className="ui-panel p-5">
-      <div className="mb-5 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="ui-section-title text-base">Line readiness</h2>
-          <div className="ui-section-subtitle">{scenarioName}</div>
+  const content = (
+    <div className={embedded ? "ui-planner-readiness" : "space-y-5"}>
+      {!embedded ? (
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="ui-section-title text-base">Line readiness</h2>
+            <div className="ui-section-subtitle">{scenarioName}</div>
+          </div>
+          <Timer className="text-accent" size={20} />
         </div>
-        <Timer className="text-accent" size={20} />
-      </div>
-      <div className="space-y-5">
+      ) : (
+        <div className="ui-planner-readiness-head">
+          <h2 className="ui-section-title">Line readiness</h2>
+          <p className="ui-section-subtitle">{scenarioName}</p>
+        </div>
+      )}
+
+      {!embedded ? (
         <div>
-          <div className="mb-3 text-xs font-semibold text-ink-secondary">Line summary</div>
+          <div className="mb-3 ui-mono-label">Line summary</div>
           <div className={`grid gap-3 ${compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-4"}`}>
             <StatCard label="Stations" value={`${stationCount}`} meta="High-level tasks" />
             <StatCard label="Tasks" value={`${taskCount}`} meta="Schedulable rows" />
@@ -3252,27 +3452,52 @@ function LineReadinessPanel({
             />
           </div>
         </div>
+      ) : null}
 
-        <div>
-          <div className="mb-3 text-xs font-semibold text-ink-secondary">Crew plan</div>
-          <CrewReadinessCard
-            kpis={kpis}
-            onClearPlanningRecommendations={onClearPlanningRecommendations}
-            onOpenTaskDetail={onOpenTaskDetail}
-            planningRecommendations={allocationRecommendations}
-            product={product}
-            tasks={tasks}
-            compact={compact}
-          />
-        </div>
+      <section className={embedded ? "ui-planner-readiness-section" : undefined}>
+        {embedded ? (
+          <div className="ui-planner-readiness-section-head">
+            <div>
+              <h3 className="ui-planner-readiness-section-title">Crew plan</h3>
+              <p className="ui-section-subtitle">Budget, load, and staffing fit</p>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-3 ui-mono-label">Crew plan</div>
+        )}
+        <CrewReadinessCard
+          kpis={kpis}
+          onClearPlanningRecommendations={onClearPlanningRecommendations}
+          onOpenTaskDetail={onOpenTaskDetail}
+          planningRecommendations={allocationRecommendations}
+          product={product}
+          tasks={tasks}
+          compact={compact || embedded}
+          embedded={embedded}
+        />
+      </section>
 
-        <div>
-          <div className="mb-3 text-xs font-semibold text-ink-secondary">Zone metrics</div>
-          <ZoneMetricsPanel zones={zones} tasks={tasks} compact={compact} />
-        </div>
-      </div>
-    </section>
+      <section className={embedded ? "ui-planner-readiness-section" : undefined}>
+        {embedded ? (
+          <div className="ui-planner-readiness-section-head">
+            <div>
+              <h3 className="ui-planner-readiness-section-title">Zones</h3>
+              <p className="ui-section-subtitle">Headcount, man-hours, and cycle by area</p>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-3 ui-mono-label">Zone metrics</div>
+        )}
+        <ZoneMetricsPanel zones={zones} tasks={tasks} compact={compact || embedded} embedded={embedded} />
+      </section>
+    </div>
   );
+
+  if (embedded) {
+    return content;
+  }
+
+  return <section className="ui-panel p-5">{content}</section>;
 }
 
 function StationBalance({
@@ -3472,12 +3697,16 @@ function DetailDrawer({
   const partReferences = task.partReferences ?? [];
 
   function patchManufacturingSteps(nextSteps: ManufacturingStep[]) {
-    const plannedDurationMinutes = nextSteps.length
-      ? nextSteps.reduce((total, step) => total + Math.max(step.durationMinutes ?? 0, 0), 0)
+    const normalizedSteps = nextSteps
+      .map((step, index) => ({ step, index }))
+      .sort((left, right) => left.step.sequence - right.step.sequence || left.index - right.index)
+      .map(({ step }, index) => ({ ...step, sequence: index + 1 }));
+    const plannedDurationMinutes = normalizedSteps.length
+      ? normalizedSteps.reduce((total, step) => total + Math.max(step.durationMinutes ?? 0, 0), 0)
       : currentTask.plannedDurationMinutes;
 
     onUpdateTask(taskId, {
-      manufacturingSteps: nextSteps,
+      manufacturingSteps: normalizedSteps,
       plannedDurationMinutes,
     });
   }
@@ -4908,6 +5137,7 @@ export function LineWorkspace({
   const isProcedureModule = activeModule === "procedure";
   const isDashboardModule = activeModule === "dashboard";
   const isSettingsModule = activeModule === "settings";
+  const plannerChromeContext = isDashboardModule ? buildPlannerChromeContext(derivedState.product) : undefined;
   const showDetailDrawer = false;
   const showsSchedulingWorkspace =
     !isProcedureModule && !isDashboardModule && activeModule !== "setup" && !isSettingsModule;
@@ -4923,25 +5153,7 @@ export function LineWorkspace({
 
   if (!hasLoadedRemoteState) {
     return (
-      <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink">
-        <TopNav onExport={() => undefined} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} />
-        <div className="ui-workspace-shell" style={{ "--workspace-sidebar-width": sidebarCollapsed ? "0px" : "var(--shell-sidebar)" } as CSSProperties}>
-          <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
-            <Sidebar
-              activeModule={activeModule}
-              settingsSection={settingsSection}
-              onChange={navigateModule}
-              onOpenSettings={openSettings}
-              project={activeProjectContext}
-            />
-          </div>
-          <main className="ui-workspace-content p-3 sm:p-4">
-            <section className="ui-panel p-8">
-              <NothingLoadingBlock title="Loading" body="Reading the saved line plan from Supabase before rendering the workspace." />
-            </section>
-          </main>
-        </div>
-      </div>
+      <AppLoadingShell title="Loading workspace" />
     );
   }
 
@@ -6502,15 +6714,42 @@ export function LineWorkspace({
     />
   );
 
+  const dashboardLineReadinessPanel = (
+    <LineReadinessPanel
+      embedded
+      allocationRecommendations={visibleAllocationRecommendations}
+      onClearPlanningRecommendations={
+        currentAllocationRecommendationKey
+          ? () => setDismissedPlanningRecommendationKey(currentAllocationRecommendationKey)
+          : undefined
+      }
+      scenarioName={derivedState.scenario.name}
+      stationCount={getTopLevelTasks(derivedState.tasks).length}
+      taskCount={derivedState.tasks.length}
+      zones={derivedState.zones}
+      tasks={derivedState.tasks}
+      bottleneckStation={kpis.bottleneckStation}
+      targetVariance={kpis.targetVariance}
+      targetVariancePercent={kpis.targetVariancePercent}
+      kpis={kpis}
+      onOpenTaskDetail={openTaskDetail}
+      product={derivedState.product}
+    />
+  );
+
   return (
-    <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink">
+    <div
+      className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink"
+      style={workspaceGridStyle}
+    >
       <TopNav
         onExport={exportMarkdown}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+        context={plannerChromeContext}
       />
 
-      <div className={workspaceGridClass} style={workspaceGridStyle}>
+      <div className={workspaceGridClass}>
         <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
           <Sidebar
             activeModule={activeModule}
@@ -6547,16 +6786,15 @@ export function LineWorkspace({
           </main>
         ) : (
           <main
-            className={`ui-workspace-content space-y-4 p-3 sm:p-4 ${
-              isDashboardModule || !SIMULATION_ENABLED ? "pb-6" : playbackCollapsed ? "pb-20" : "pb-44"
+            className={`ui-workspace-content ${
+              isDashboardModule
+                ? "p-0 pb-6"
+                : `space-y-4 p-3 sm:p-4 ${SIMULATION_ENABLED ? (playbackCollapsed ? "pb-20" : "pb-44") : "pb-6"}`
             }`}
           >
             {isDashboardModule ? (
               <PlannerDashboardPanel
                 product={derivedState.product}
-                scenarioName={derivedState.scenario.name}
-                project={activeProjectContext}
-                saveState={saveState}
                 saveError={saveError}
                 kpis={kpis}
                 flowDurationMinutes={timelineBounds.durationMinutes}
@@ -6564,9 +6802,8 @@ export function LineWorkspace({
                 taskCount={derivedState.tasks.length}
                 stationCount={getTopLevelTasks(derivedState.tasks).length}
                 planningRecommendationCount={visibleAllocationRecommendations.length}
-                onNavigateModule={navigateModule}
               >
-                {lineReadinessPanel}
+                {dashboardLineReadinessPanel}
               </PlannerDashboardPanel>
             ) : (
               <>

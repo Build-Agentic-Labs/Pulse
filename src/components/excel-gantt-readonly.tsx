@@ -13,7 +13,7 @@ import {
 import { loadPlannerStateFromSupabase } from "@/domain/supabase-planner";
 import type { PlannerState, Task, Zone } from "@/domain/types";
 import { chartPalette } from "@/theme/chart-tokens";
-import { NothingLoadingBlock } from "@/components/nothing-ui";
+import { AppLoadingShell } from "@/components/app-flow-panels";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -238,15 +238,15 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
     };
   }, [derivedState]);
 
+  if (loadState === "loading" && !derivedState) {
+    return (
+      <AppLoadingShell title="Loading workspace" />
+    );
+  }
+
   return (
     <main className="h-[100dvh] overflow-y-auto bg-canvas text-ink">
       <section className="px-5 py-4">
-        {loadState === "loading" ? (
-          <div className="ui-panel p-8">
-            <NothingLoadingBlock title="Loading" body="Reading the saved planner data for Excel." />
-          </div>
-        ) : null}
-
         {loadState === "error" ? (
           <div className="rounded-md border border-danger/30 bg-danger-muted p-5 text-danger">
             <div className="flex items-center gap-2 text-sm font-medium">

@@ -65,10 +65,20 @@ function writeLastProjectId(projectId: string) {
   }
 }
 
+function fallbackProjectContext(projectId: string): PlannerProjectContext {
+  return {
+    projectId,
+    projectName: "",
+    workspaceId: "",
+    workspaceName: "",
+  };
+}
+
 export function AuthProjectGate({ children, projectId, routeKind = "planner" }: AuthProjectGateProps) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [session, setSession] = useState<Session | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const [groups, setGroups] = useState<WorkspaceProjectGroup[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
   const [message, setMessage] = useState("");
@@ -97,7 +107,8 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
       return;
     }
 
-    if (options.showLoading ?? statusRef.current !== "ready") {
+    const shouldShowWorkspaceLoading = options.showLoading ?? (statusRef.current !== "ready" && !projectId);
+    if (shouldShowWorkspaceLoading) {
       setStatus("loading");
     }
     setMessage("");
@@ -123,21 +134,26 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
       if (error) {
         setMessage(error.message);
         setStatus("error");
+        setSessionReady(true);
         return;
       }
 
       setSession(data.session);
+      setSessionReady(true);
       void refreshWorkspaceProjects(data.session);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+      setSessionReady(true);
 
       if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
         return;
       }
 
-      void refreshWorkspaceProjects(nextSession, { showLoading: statusRef.current !== "ready" });
+      void refreshWorkspaceProjects(nextSession, {
+        showLoading: statusRef.current !== "ready" && !projectId,
+      });
     });
 
     return () => {
@@ -204,12 +220,9 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     }
   }
 
-  if (status === "loading") {
+  if (!sessionReady) {
     return (
-      <AppLoadingShell
-        title="Loading workspace"
-        body="Checking your session and loading the projects you can access."
-      />
+      <AppLoadingShell title="Loading workspace" />
     );
   }
 
@@ -235,21 +248,27 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     );
   }
 
-  if (projectId && selectedProject) {
-    return <>{children(selectedProject)}</>;
+  if (projectId) {
+    if (status === "ready" && !selectedProject) {
+      return (
+        <main className="grid min-h-screen place-items-center bg-canvas px-4 text-ink">
+          <section className="w-full max-w-lg ui-panel p-6">
+            <p className="text-xs ui-mono-label tracking-wide text-danger">Project unavailable</p>
+            <h1 className="mt-2 text-2xl font-medium">You do not have access to this project.</h1>
+            <button className="ui-btn-primary mt-5" onClick={() => router.push("/")}>
+              Open planner
+            </button>
+          </section>
+        </main>
+      );
+    }
+
+    return <>{children(selectedProject ?? fallbackProjectContext(projectId))}</>;
   }
 
-  if (projectId && status === "ready") {
+  if (status === "loading") {
     return (
-      <main className="grid min-h-screen place-items-center bg-canvas px-4 text-ink">
-        <section className="w-full max-w-lg ui-panel p-6">
-          <p className="text-xs ui-mono-label tracking-wide text-danger">Project unavailable</p>
-          <h1 className="mt-2 text-2xl font-medium">You do not have access to this project.</h1>
-          <button className="ui-btn-primary mt-5" onClick={() => router.push("/")}>
-            Open planner
-          </button>
-        </section>
-      </main>
+      <AppLoadingShell title="Loading workspace" />
     );
   }
 
@@ -258,9 +277,6 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   }
 
   return (
-    <AppLoadingShell
-      title="Opening project"
-      body="Taking you to your workspace planner."
-    />
+    <AppLoadingShell title="Opening project" />
   );
 }

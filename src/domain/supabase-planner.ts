@@ -266,6 +266,7 @@ function mapManufacturingStepRecord(row: Record<string, unknown>): Manufacturing
   return {
     id: String(row.id),
     sequence: num(row.sequence, 1),
+    name: String(row.name ?? ""),
     instruction: String(row.instruction ?? ""),
     durationMinutes: num(row.durationMinutes ?? row.duration_minutes),
     qualityCheck: maybeText(row.qualityCheck ?? row.quality_check),
@@ -552,11 +553,77 @@ function manufacturingStepRow(taskId: string, step: ManufacturingStep) {
     id: step.id,
     task_id: taskId,
     sequence: step.sequence,
+    name: step.name ?? "",
     instruction: step.instruction,
     duration_minutes: step.durationMinutes ?? 0,
     quality_check: step.qualityCheck ?? null,
     dependency_ids: mergeStepDependencyRefs(step.dependencyIds, step.partReferenceIds),
   };
+}
+
+function normalizeManufacturingStepSequences(steps: ManufacturingStep[]): ManufacturingStep[] {
+  return steps
+    .map((step, index) => ({ step, index }))
+    .sort((left, right) => left.step.sequence - right.step.sequence || left.index - right.index)
+    .map(({ step }, index) => ({ ...step, sequence: index + 1 }));
+}
+
+function manufacturingStepSaveNeedsCollisionSafeResequence(
+  nextSteps: ManufacturingStep[],
+  existingSteps: Array<{ id: unknown; sequence: unknown }>,
+): boolean {
+  const normalizedNext = normalizeManufacturingStepSequences(nextSteps);
+  const existingById = new Map(existingSteps.map((step) => [String(step.id), num(step.sequence)]));
+  const nextIds = new Set(normalizedNext.map((step) => step.id));
+
+  if (new Set(normalizedNext.map((step) => step.sequence)).size !== normalizedNext.length) {
+    return true;
+  }
+
+  for (const step of normalizedNext) {
+    const previousSequence = existingById.get(step.id);
+
+    if (previousSequence === undefined) {
+      const sequenceOccupied = existingSteps.some(
+        (existingStep) =>
+          nextIds.has(String(existingStep.id)) &&
+          num(existingStep.sequence) === step.sequence &&
+          String(existingStep.id) !== step.id,
+      );
+      if (sequenceOccupied) {
+        return true;
+      }
+      continue;
+    }
+
+    if (previousSequence === step.sequence) {
+      continue;
+    }
+
+    const sequenceOccupied = existingSteps.some(
+      (existingStep) =>
+        num(existingStep.sequence) === step.sequence &&
+        String(existingStep.id) !== step.id &&
+        nextIds.has(String(existingStep.id)),
+    );
+    if (sequenceOccupied) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function bumpManufacturingStepSequences(supabase: SupabaseClient, stepIds: string[]) {
+  if (stepIds.length === 0) {
+    return;
+  }
+
+  await Promise.all(
+    stepIds.map((stepId, index) =>
+      throwIfError(supabase.from("manufacturing_steps").update({ sequence: 100000 + index }).eq("id", stepId)),
+    ),
+  );
 }
 
 function mapStepPhotoRecord(row: Record<string, unknown>): StepPhotoAttachment {
@@ -1418,6 +1485,12 @@ export async function saveTasksToSupabase(tasks: Task[], projectId?: string) {
   await Promise.all(tasks.map((task) => syncStepToolsForTask(supabase, task)));
 }
 
+export async function saveTaskRowToSupabase(task: Task, projectId?: string) {
+  const supabase = plannerClient();
+  await assertTaskInProject(supabase, task.id, projectId);
+  await throwIfError(supabase.from("tasks").upsert(taskRow(task)));
+}
+
 export async function saveTaskToSupabase(task: Task, projectId?: string) {
   await saveTasksToSupabase([task], projectId);
 }
@@ -1455,7 +1528,7 @@ export async function saveTaskWithManufacturingStepsToSupabase(task: Task, proje
     await throwIfError(supabase.from("manufacturing_steps").delete().in("id", staleStepIds));
   }
 
-  await syncStepToolsForTask(supabase, task);
+  await syncStepToolsForTask(supabase, task, { allowEmptyWipe: true });
 }
 
 export async function saveTaskAndManufacturingStepToSupabase(task: Task, step: ManufacturingStep, projectId?: string) {
@@ -1463,12 +1536,26 @@ export async function saveTaskAndManufacturingStepToSupabase(task: Task, step: M
   await assertTaskInProject(supabase, task.id, projectId);
   await throwIfError(supabase.from("tasks").upsert(taskRow(task)));
   await throwIfError(supabase.from("manufacturing_steps").upsert(manufacturingStepRow(task.id, step)));
-  await syncStepToolsForTask(supabase, task);
 }
 
 export async function saveManufacturingStepToSupabase(taskId: string, step: ManufacturingStep, projectId?: string) {
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
+  const existingSteps =
+    (await throwIfError(supabase.from("manufacturing_steps").select("id,sequence").eq("task_id", taskId))) ?? [];
+  const existingStep = existingSteps.find((candidate) => String(candidate.id) === step.id);
+  const sequenceChanged = existingStep !== undefined && num(existingStep.sequence) !== step.sequence;
+  const sequenceOccupied = existingSteps.some(
+    (candidate) => String(candidate.id) !== step.id && num(candidate.sequence) === step.sequence,
+  );
+
+  if (!existingStep || sequenceChanged || sequenceOccupied) {
+    await bumpManufacturingStepSequences(
+      supabase,
+      existingSteps.map((candidate) => String(candidate.id)),
+    );
+  }
+
   await throwIfError(supabase.from("manufacturing_steps").upsert(manufacturingStepRow(taskId, step)));
 }
 
@@ -1618,6 +1705,45 @@ export async function removeStepToolFromSupabase(stepId: string, toolName: strin
     await assertTaskInProject(supabase, taskId, projectId);
   }
   await throwIfError(supabase.from("step_tools").delete().eq("id", stepToolId(stepId, toolName)));
+}
+
+export async function syncStepToolsForStepToSupabase(
+  taskId: string,
+  stepId: string,
+  toolNames: string[],
+  projectId?: string,
+) {
+  const cleanedToolNames = toolNames
+    .map((toolName) => toolName.trim())
+    .filter(Boolean)
+    .filter(
+      (tool, index, list) =>
+        list.findIndex((candidate) => candidate.toLocaleLowerCase() === tool.toLocaleLowerCase()) === index,
+    );
+  const nextTools = cleanedToolNames.map((toolName, index) => ({
+    id: stepToolId(stepId, toolName),
+    task_id: taskId,
+    step_id: stepId,
+    tool_name: toolName,
+    sequence: index + 1,
+  }));
+  const nextToolIds = nextTools.map((tool) => tool.id);
+  const supabase = plannerClient();
+  await assertTaskInProject(supabase, taskId, projectId);
+  const existingTools = await throwIfError(
+    supabase.from("step_tools").select("id").eq("task_id", taskId).eq("step_id", stepId),
+  );
+  const staleToolIds = (existingTools ?? [])
+    .map((tool) => String(tool.id))
+    .filter((toolId) => !nextToolIds.includes(toolId));
+
+  if (nextTools.length) {
+    await throwIfError(supabase.from("step_tools").upsert(nextTools));
+  }
+
+  if (staleToolIds.length) {
+    await throwIfError(supabase.from("step_tools").delete().in("id", staleToolIds));
+  }
 }
 
 export async function loadToolLibraryFromSupabase(projectId?: string): Promise<ToolLibraryItem[]> {
@@ -1776,7 +1902,9 @@ function mergeTaskWithServerVersions(localTask: Task, serverTask: Task): Task {
     ...serverTask,
     ...localTask,
     version: serverTask.version,
-    manufacturingSteps: mergedSteps.length > 0 ? mergedSteps : serverTask.manufacturingSteps,
+    manufacturingSteps: normalizeManufacturingStepSequences(
+      mergedSteps.length > 0 ? mergedSteps : (serverTask.manufacturingSteps ?? []),
+    ),
   };
 }
 
@@ -1788,20 +1916,22 @@ export async function saveProcedureTaskUpdateToSupabase(
 ) {
   const supabase = plannerClient();
   await assertTaskInProject(supabase, task.id, projectId);
-  const { custom_fields: _customFields, ...taskProcedurePatch } = taskRow(task);
+  const normalizedSteps = normalizeManufacturingStepSequences(task.manufacturingSteps ?? []);
+  const taskToSave = { ...task, manufacturingSteps: normalizedSteps };
+  const { custom_fields: _customFields, ...taskProcedurePatch } = taskRow(taskToSave);
   let taskUpdate = supabase.from("tasks").update(taskProcedurePatch).eq("id", task.id);
 
-  if (task.version !== undefined) {
-    taskUpdate = taskUpdate.eq("version", task.version);
+  if (taskToSave.version !== undefined) {
+    taskUpdate = taskUpdate.eq("version", taskToSave.version);
   }
 
   const savedTask = await throwIfError(taskUpdate.select("id,version").maybeSingle());
   if (!savedTask) {
-    if (allowVersionRetry && task.version !== undefined) {
-      const latestTask = await loadTaskFromSupabase(task.id, projectId);
+    if (allowVersionRetry && taskToSave.version !== undefined) {
+      const latestTask = await loadTaskFromSupabase(taskToSave.id, projectId);
       if (latestTask) {
         return saveProcedureTaskUpdateToSupabase(
-          mergeTaskWithServerVersions(task, latestTask),
+          mergeTaskWithServerVersions(taskToSave, latestTask),
           _scheduledTasks,
           projectId,
           false,
@@ -1813,46 +1943,37 @@ export async function saveProcedureTaskUpdateToSupabase(
   }
 
   const [existingSteps, existingParts] = await Promise.all([
-    throwIfError(supabase.from("manufacturing_steps").select("id,sequence,version").eq("task_id", task.id)),
-    throwIfError(supabase.from("part_references").select("id").eq("task_id", task.id)),
+    throwIfError(supabase.from("manufacturing_steps").select("id,sequence,version").eq("task_id", taskToSave.id)),
+    throwIfError(supabase.from("part_references").select("id").eq("task_id", taskToSave.id)),
   ]);
   const existingStepById = new Map((existingSteps ?? []).map((step) => [String(step.id), step]));
-  const nextStepIds = (task.manufacturingSteps ?? []).map((step) => step.id);
+  const nextStepIds = normalizedSteps.map((step) => step.id);
   const staleStepIds = (existingSteps ?? [])
     .map((step) => String(step.id))
     .filter((stepId) => !nextStepIds.includes(stepId));
-  const nextPartIds = (task.partReferences ?? []).map((part) => part.id);
+  const nextPartIds = (taskToSave.partReferences ?? []).map((part) => part.id);
   const stalePartIds = (existingParts ?? [])
     .map((part) => String(part.id))
     .filter((partId) => !nextPartIds.includes(partId));
 
-  const existingSequenceByStepId = new Map(
-    (existingSteps ?? []).map((step) => [String(step.id), num(step.sequence)]),
+  const needsCollisionSafeResequence = manufacturingStepSaveNeedsCollisionSafeResequence(
+    normalizedSteps,
+    existingSteps ?? [],
   );
-  const needsCollisionSafeResequence = (task.manufacturingSteps ?? []).some((step) => {
-    const previousSequence = existingSequenceByStepId.get(step.id);
-    if (previousSequence === undefined || previousSequence === step.sequence) {
-      return false;
-    }
-
-    const currentOwner = (existingSteps ?? []).find((existingStep) => num(existingStep.sequence) === step.sequence);
-    return Boolean(currentOwner && String(currentOwner.id) !== step.id);
-  });
 
   if (staleStepIds.length) {
     await throwIfError(supabase.from("manufacturing_steps").delete().in("id", staleStepIds));
   }
 
   if (needsCollisionSafeResequence && existingSteps?.length) {
-    await Promise.all(
-      existingSteps.map((step, index) =>
-        throwIfError(supabase.from("manufacturing_steps").update({ sequence: 100000 + index }).eq("id", step.id)),
-      ),
+    await bumpManufacturingStepSequences(
+      supabase,
+      (existingSteps ?? []).map((step) => String(step.id)),
     );
   }
 
-  for (const step of task.manufacturingSteps ?? []) {
-    const row = manufacturingStepRow(task.id, step);
+  for (const step of normalizedSteps) {
+    const row = manufacturingStepRow(taskToSave.id, step);
     const existingStep = existingStepById.get(step.id);
 
     if (!existingStep || needsCollisionSafeResequence) {
@@ -1868,10 +1989,10 @@ export async function saveProcedureTaskUpdateToSupabase(
     const savedStep = await throwIfError(stepUpdate.select("id,version").maybeSingle());
     if (!savedStep) {
       if (allowVersionRetry && step.version !== undefined) {
-        const latestTask = await loadTaskFromSupabase(task.id, projectId);
+        const latestTask = await loadTaskFromSupabase(taskToSave.id, projectId);
         if (latestTask) {
           return saveProcedureTaskUpdateToSupabase(
-            mergeTaskWithServerVersions(task, latestTask),
+            mergeTaskWithServerVersions(taskToSave, latestTask),
             _scheduledTasks,
             projectId,
             false,
@@ -1883,7 +2004,7 @@ export async function saveProcedureTaskUpdateToSupabase(
     }
   }
 
-  const parts = partReferenceRows([task]);
+  const parts = partReferenceRows([taskToSave]);
   if (parts.length) {
     await throwIfError(supabase.from("part_references").upsert(parts));
   }
@@ -1892,7 +2013,49 @@ export async function saveProcedureTaskUpdateToSupabase(
     await throwIfError(supabase.from("part_references").delete().in("id", stalePartIds));
   }
 
-  return loadTaskFromSupabase(task.id, projectId);
+  return loadTaskFromSupabase(taskToSave.id, projectId);
+}
+
+export async function moveManufacturingStepToTaskInSupabase(
+  sourceTask: Task,
+  targetTask: Task,
+  stepId: string,
+  scheduledTasks: Task[],
+  projectId?: string,
+) {
+  const supabase = plannerClient();
+  await assertTaskInProject(supabase, sourceTask.id, projectId);
+  await assertTaskInProject(supabase, targetTask.id, projectId);
+
+  const movedStep = targetTask.manufacturingSteps?.find((step) => step.id === stepId);
+  if (!movedStep) {
+    throw new Error("Unable to find the manufacturing step to move.");
+  }
+
+  const targetExistingSteps =
+    (await throwIfError(supabase.from("manufacturing_steps").select("id").eq("task_id", targetTask.id))) ?? [];
+
+  if (targetExistingSteps.length > 0) {
+    await bumpManufacturingStepSequences(
+      supabase,
+      targetExistingSteps.map((step) => String(step.id)),
+    );
+  }
+
+  await throwIfError(
+    supabase
+      .from("manufacturing_steps")
+      .update({ task_id: targetTask.id, sequence: 200000 })
+      .eq("id", stepId),
+  );
+
+  await throwIfError(supabase.from("step_tools").update({ task_id: targetTask.id }).eq("step_id", stepId));
+  await throwIfError(
+    supabase.from("step_photos").update({ task_id: targetTask.id }).eq("step_id", stepId).is("deleted_at", null),
+  );
+
+  await saveProcedureTaskUpdateToSupabase(sourceTask, scheduledTasks, projectId);
+  await saveProcedureTaskUpdateToSupabase(targetTask, scheduledTasks, projectId);
 }
 
 export async function loadTaskFromSupabase(taskId: string, projectId?: string): Promise<Task | null> {
@@ -1985,7 +2148,11 @@ function stepToolRowsFromTask(task: Task): StepToolRow[] {
   );
 }
 
-async function syncStepToolsForTask(supabase: ReturnType<typeof plannerClient>, task: Task) {
+async function syncStepToolsForTask(
+  supabase: ReturnType<typeof plannerClient>,
+  task: Task,
+  options: { allowEmptyWipe?: boolean } = {},
+) {
   const nextTools = stepToolRowsFromTask(task);
   const nextToolIds = nextTools.map((tool) => tool.id);
   const existingTools = await throwIfError(supabase.from("step_tools").select("id").eq("task_id", task.id));
@@ -1997,9 +2164,15 @@ async function syncStepToolsForTask(supabase: ReturnType<typeof plannerClient>, 
     await throwIfError(supabase.from("step_tools").upsert(nextTools));
   }
 
-  if (staleToolIds.length) {
-    await throwIfError(supabase.from("step_tools").delete().in("id", staleToolIds));
+  if (!staleToolIds.length) {
+    return;
   }
+
+  if (nextTools.length === 0 && !options.allowEmptyWipe) {
+    return;
+  }
+
+  await throwIfError(supabase.from("step_tools").delete().in("id", staleToolIds));
 }
 
 function stepPhotoRow(taskId: string, stepId: string, photo: StepPhotoAttachment, project?: PlannerProjectContext): StepPhotoRow {

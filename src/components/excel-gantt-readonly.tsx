@@ -176,7 +176,7 @@ function MetricCard({
   );
 }
 
-export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
+export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string; onReady?: () => void }) {
   const [plannerState, setPlannerState] = useState<PlannerState>();
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState("");
@@ -203,6 +203,12 @@ export function ExcelGanttReadonly({ projectId }: { projectId?: string }) {
   useEffect(() => {
     loadPlanner();
   }, [projectId]);
+
+  useEffect(() => {
+    if (loadState !== "loading") {
+      onReady?.();
+    }
+  }, [loadState, onReady]);
 
   const derivedState = useMemo(() => {
     if (!plannerState) {

@@ -8,8 +8,12 @@ import { MobilePhotoPortal } from "./mobile-photo-portal";
 export function PlannerRouteShell({ projectId }: { projectId?: string }) {
   return (
     <AuthProjectGate projectId={projectId} routeKind="planner">
-      {(project) => (
-        <LineWorkspace projectContext={project} projectId={project?.projectId ?? projectId} />
+      {(project, onReady) => (
+        <LineWorkspace
+          projectContext={project}
+          projectId={project?.projectId ?? projectId}
+          onReady={onReady}
+        />
       )}
     </AuthProjectGate>
   );
@@ -18,10 +22,11 @@ export function PlannerRouteShell({ projectId }: { projectId?: string }) {
 export function MobilePhotoRouteShell({ projectId }: { projectId?: string }) {
   return (
     <AuthProjectGate projectId={projectId} routeKind="mobile-photos">
-      {(project) => (
+      {(project, onReady) => (
         <MobilePhotoPortal
           projectContext={project}
           projectId={project?.projectId ?? projectId}
+          onReady={onReady}
         />
       )}
     </AuthProjectGate>
@@ -31,7 +36,12 @@ export function MobilePhotoRouteShell({ projectId }: { projectId?: string }) {
 export function ExcelGanttRouteShell({ projectId }: { projectId?: string }) {
   return (
     <AuthProjectGate projectId={projectId} routeKind="excel/gantt">
-      {(project) => <ExcelGanttReadonly projectId={project?.projectId ?? projectId} />}
+      {(project, onReady) => (
+        <ExcelGanttReadonly
+          projectId={project?.projectId ?? projectId}
+          onReady={onReady}
+        />
+      )}
     </AuthProjectGate>
   );
 }

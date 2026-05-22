@@ -9,9 +9,11 @@ import {
   createProjectWithStarterPlan,
   deleteProjectFromSupabase,
   ensureDefaultWorkspaceMembership,
+  updateProjectInSupabase,
 } from "@/domain/supabase-planner";
 import type { PlannerProjectContext, Project, WorkspaceRole } from "@/domain/types";
 import { ThemedFeedbackLayer, type FeedbackConfirm } from "./themed-feedback";
+import { UiContextMenu } from "./ui-context-menu";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 
@@ -58,6 +60,9 @@ export function SidebarWorkspacePanel({
   const [createError, setCreateError] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
+  const [contextMenu, setContextMenu] = useState<{ project: Project; anchorRect: DOMRect } | null>(null);
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
 
   async function hydrate() {
     try {
@@ -177,6 +182,55 @@ export function SidebarWorkspacePanel({
     }
   }
 
+  async function archiveProject(project: Project) {
+    setIsSubmitting(true);
+    setDeleteError("");
+    try {
+      await updateProjectInSupabase(project.id, { status: "archived" });
+
+      const wasActive = project.id === activeProject?.projectId;
+      const remaining = await hydrate();
+
+      if (wasActive) {
+        const nextProject = remaining[0];
+        router.push(nextProject ? projectPlannerHref(nextProject.id) : "/");
+      }
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Unable to archive project.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function saveProjectRename(projectId: string) {
+    const nextName = renameDraft.trim();
+    if (!nextName) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setDeleteError("");
+    try {
+      await updateProjectInSupabase(projectId, { name: nextName });
+      setRenamingProjectId(null);
+      setRenameDraft("");
+      await hydrate();
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Unable to rename project.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function openProjectMenu(project: Project, anchorRect: DOMRect) {
+    setContextMenu({ project, anchorRect });
+  }
+
+  function startRenameProject(project: Project) {
+    setRenamingProjectId(project.id);
+    setRenameDraft(project.name);
+  }
+
   return (
     <>
       <div className="px-2 py-2">
@@ -221,32 +275,77 @@ export function SidebarWorkspacePanel({
           {status === "ready"
             ? projects.map((project) => {
                 const active = project.id === activeProject?.projectId;
+                const isRenaming = renamingProjectId === project.id;
                 return (
                   <div
                     key={project.id}
                     data-project-row
                     className={`group/project ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
                   >
-                    <Link
-                      href={projectPlannerHref(project.id)}
-                      title={project.name}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-inherit no-underline"
-                    >
-                      <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />
-                      <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                    </Link>
-                    {canManage(role) ? (
+                    {isRenaming ? (
+                      <form
+                        className="flex min-w-0 flex-1 items-center gap-1"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void saveProjectRename(project.id);
+                        }}
+                      >
+                        <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />
+                        <input
+                          className="ui-field-standalone h-7 min-w-0 flex-1 rounded-md px-2 text-[11px] font-normal"
+                          value={renameDraft}
+                          onChange={(event) => setRenameDraft(event.target.value)}
+                          disabled={isSubmitting}
+                          autoFocus
+                        />
+                        <button
+                          type="submit"
+                          className="ui-btn-ghost h-6 w-6 shrink-0 px-0 normal-case tracking-normal disabled:opacity-40"
+                          disabled={isSubmitting || !renameDraft.trim() || renameDraft.trim() === project.name}
+                          title="Save name"
+                          aria-label="Save name"
+                        >
+                          <Check size={12} strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          className="ui-btn-ghost h-6 w-6 shrink-0 px-0 normal-case tracking-normal"
+                          onClick={() => {
+                            setRenamingProjectId(null);
+                            setRenameDraft("");
+                          }}
+                          disabled={isSubmitting}
+                          title="Cancel rename"
+                          aria-label="Cancel rename"
+                        >
+                          <X size={12} strokeWidth={2} />
+                        </button>
+                      </form>
+                    ) : (
+                      <Link
+                        href={projectPlannerHref(project.id)}
+                        title={project.name}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-inherit no-underline"
+                      >
+                        <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />
+                        <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                      </Link>
+                    )}
+                    {canManage(role) && !isRenaming ? (
                       <button
                         type="button"
                         className="inline-flex h-4 w-4 shrink-0 items-center justify-center self-center p-0 text-ink-secondary opacity-0 transition-opacity duration-200 hover:text-ink group-hover/project:opacity-100 disabled:opacity-40"
                         onClick={(event) => {
-                          const row = event.currentTarget.closest("[data-project-row]");
-                          const anchor = (row ?? event.currentTarget).getBoundingClientRect();
-                          requestDeleteProject(project, anchor);
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const anchor = event.currentTarget.getBoundingClientRect();
+                          openProjectMenu(project, anchor);
                         }}
                         disabled={isSubmitting}
-                        title={`Remove ${project.name}`}
-                        aria-label={`Remove ${project.name}`}
+                        title={`${project.name} settings`}
+                        aria-label={`${project.name} settings`}
+                        aria-haspopup="menu"
+                        aria-expanded={contextMenu?.project.id === project.id}
                       >
                         <MoreHorizontal size={14} strokeWidth={1.75} />
                       </button>
@@ -308,6 +407,33 @@ export function SidebarWorkspacePanel({
         }}
         onDismissToast={() => undefined}
       />
+
+      {contextMenu ? (
+        <UiContextMenu
+          anchorRect={contextMenu.anchorRect}
+          onClose={() => setContextMenu(null)}
+          items={[
+            {
+              id: "rename",
+              label: "Rename project",
+              onSelect: () => startRenameProject(contextMenu.project),
+            },
+            {
+              id: "archive",
+              label: "Archive project",
+              disabled: isSubmitting,
+              onSelect: () => void archiveProject(contextMenu.project),
+            },
+            {
+              id: "remove",
+              label: "Remove",
+              danger: true,
+              disabled: isSubmitting,
+              onSelect: () => requestDeleteProject(contextMenu.project, contextMenu.anchorRect),
+            },
+          ]}
+        />
+      ) : null}
     </>
   );
 }

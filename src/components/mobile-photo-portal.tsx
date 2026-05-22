@@ -854,9 +854,11 @@ function withUpdatedTask(state: PlannerState, nextTask: Task, shouldReschedule =
 export function MobilePhotoPortal({
   projectId,
   projectContext,
+  onReady,
 }: {
   projectId?: string;
   projectContext?: PlannerProjectContext;
+  onReady?: () => void;
 }) {
   const [plannerState, setPlannerState] = useState<PlannerState | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState("");
@@ -1050,6 +1052,12 @@ export function MobilePhotoPortal({
   useEffect(() => {
     plannerStateRef.current = plannerState;
   }, [plannerState]);
+
+  useEffect(() => {
+    if (saveState !== "loading") {
+      onReady?.();
+    }
+  }, [saveState, onReady]);
 
   useEffect(() => {
     let active = true;

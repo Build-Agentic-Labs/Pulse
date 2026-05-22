@@ -14,6 +14,8 @@ const mono = Space_Mono({
   subsets: ["latin"],
   variable: "--font-space-mono",
   weight: ["400", "700"],
+  adjustFontFallback: true,
+  preload: true,
 });
 
 const doto = Doto({
@@ -42,6 +44,12 @@ export default function RootLayout({
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <style
+          dangerouslySetInnerHTML={{
+            __html:
+              ".ui-loading-status-shell{height:12px;overflow:hidden;display:flex;align-items:center}.ui-loading-status,.nd-status{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;line-height:12px;letter-spacing:.04em;white-space:nowrap}",
+          }}
+        />
       </head>
       <body className="h-full overflow-hidden font-sans">
         <ThemeProvider>{children}</ThemeProvider>

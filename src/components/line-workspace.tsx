@@ -4524,9 +4524,11 @@ function PlaybackPanel({
 export function LineWorkspace({
   projectId,
   projectContext,
+  onReady,
 }: {
   projectId?: string;
   projectContext?: PlannerProjectContext;
+  onReady?: () => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -4919,6 +4921,12 @@ export function LineWorkspace({
       mounted = false;
     };
   }, [projectId]);
+
+  useEffect(() => {
+    if (hasLoadedRemoteState) {
+      onReady?.();
+    }
+  }, [hasLoadedRemoteState, onReady]);
 
   useEffect(() => {
     if (!hasLoadedRemoteState) {

@@ -13,7 +13,7 @@ import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/type
 type ProjectRouteKind = "planner" | "mobile-photos" | "excel/gantt";
 
 type AuthProjectGateProps = {
-  children: (project?: PlannerProjectContext) => ReactNode;
+  children: (project: PlannerProjectContext | undefined, onReady: () => void) => ReactNode;
   projectId?: string;
   routeKind?: ProjectRouteKind;
 };
@@ -83,11 +83,16 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [childReady, setChildReady] = useState(false);
   const statusRef = useRef(status);
 
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  useEffect(() => {
+    setChildReady(false);
+  }, [projectId]);
 
   const selectedProject = projectId ? buildProjectContext(groups, projectId) : undefined;
   const flatProjects = groups.flatMap((group) =>
@@ -263,7 +268,14 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
       );
     }
 
-    return <>{children(selectedProject ?? fallbackProjectContext(projectId))}</>;
+    return (
+      <>
+        {!childReady && <AppLoadingShell title="Loading workspace" />}
+        <div style={{ display: childReady ? "contents" : "none" }}>
+          {children(selectedProject ?? fallbackProjectContext(projectId), () => setChildReady(true))}
+        </div>
+      </>
+    );
   }
 
   if (status === "loading") {
@@ -273,7 +285,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   }
 
   if (flatProjects.length === 0) {
-    return <>{children(undefined)}</>;
+    return <>{children(undefined, () => {})}</>;
   }
 
   return (

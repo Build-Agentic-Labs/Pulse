@@ -41,7 +41,9 @@ export function NothingLoadingBlock({
     <div className={`flex items-center gap-4 ${compact ? "" : "py-2"}`}>
       <NothingSpinner />
       <div>
-        <NothingStatus>{title.toUpperCase()}</NothingStatus>
+        <div className="ui-loading-status-shell">
+          <NothingStatus className="ui-loading-status">{title.toUpperCase()}</NothingStatus>
+        </div>
         {body ? <p className="nd-caption mt-2">{body}</p> : null}
       </div>
     </div>
@@ -55,7 +57,7 @@ export function NothingLoadingShell({
 }) {
   return (
     <main className="ui-flow-shell">
-      <section className="ui-auth-card">
+      <section className="ui-auth-card ui-auth-card-compact">
         <div className="ui-auth-card-body">
           <NothingLoadingBlock title={title} />
         </div>

@@ -66,7 +66,7 @@ export function AppLoadingShell({
 }) {
   return (
     <FlowShell>
-      <section className="ui-auth-card">
+      <section className="ui-auth-card ui-auth-card-compact">
         <div className="ui-auth-card-body">
           <NothingLoadingBlock title={title} />
         </div>

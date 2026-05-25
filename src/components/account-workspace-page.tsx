@@ -5,6 +5,7 @@ import { Archive, Check, ChevronRight, FolderKanban, LogOut, MailPlus, Moon, Plu
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
+import { ThemedSelect } from "@/components/themed-select";
 import { useTheme } from "@/components/theme-provider";
 import { displayWorkspaceName } from "@/lib/display-names";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
@@ -29,6 +30,13 @@ function canManage(role?: string) {
 function canEdit(role?: string) {
   return role === "owner" || role === "admin" || role === "editor";
 }
+
+const workspaceRoleOptions: Array<{ value: WorkspaceRole; label: string }> = [
+  { value: "viewer", label: "Viewer" },
+  { value: "editor", label: "Editor" },
+  { value: "admin", label: "Admin" },
+  { value: "owner", label: "Owner" },
+];
 
 function projectPlannerHref(projectId: string) {
   return `/projects/${projectId}/planner`;
@@ -326,13 +334,13 @@ export function AccountWorkspacePage() {
               <div className="ui-settings-row-label">Signed in as</div>
               <div>
                 <div className="ui-settings-row-value">{session.user.email}</div>
-                <p className="mt-1 text-[11px] text-ink-tertiary">Project access is controlled by workspace membership.</p>
+                <p className="ui-section-subtitle mt-1 text-ink-tertiary">Project access is controlled by workspace membership.</p>
               </div>
             </div>
           </section>
 
           {message ? (
-            <div className="ui-notice ui-notice-warn px-4 py-3 text-[12px] text-ink-secondary">{message}</div>
+            <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{message}</div>
           ) : null}
 
           {groups.map((group) => {
@@ -347,14 +355,14 @@ export function AccountWorkspacePage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className="text-sm font-medium text-ink">{displayWorkspaceName(group.workspace.name)}</h2>
-                      <p className="mt-1 text-[11px] text-ink-tertiary">
+                      <p className="ui-section-subtitle mt-1 text-ink-tertiary">
                         {group.role} · {group.projects.length} project{group.projects.length === 1 ? "" : "s"}
                       </p>
                     </div>
                     {manageable ? (
                       <button
                         type="button"
-                        className="ui-btn-ghost h-8 gap-1.5 px-3 text-[10px] disabled:opacity-50"
+                        className="ui-btn-ghost h-8 gap-1.5 px-3 disabled:opacity-50"
                         disabled={isSubmitting || workspaceName === group.workspace.name}
                         onClick={() => void saveWorkspaceName(group.workspace.id)}
                       >
@@ -409,14 +417,14 @@ export function AccountWorkspacePage() {
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
-                                className="ui-btn-ghost h-8 px-3 text-[10px] disabled:opacity-50"
+                                className="ui-btn-ghost h-8 px-3 disabled:opacity-50"
                                 disabled={!editable || isSubmitting || projectName === project.name}
                                 onClick={() => void saveProjectName(project.id)}
                               >
                                 Save
                               </button>
                               <Link
-                                className="ui-btn-ghost h-8 gap-1 px-3 text-[10px]"
+                                className="ui-btn-ghost h-8 gap-1 px-3"
                                 href={projectPlannerHref(project.id)}
                               >
                                 Open
@@ -424,7 +432,7 @@ export function AccountWorkspacePage() {
                               </Link>
                               <button
                                 type="button"
-                                className="ui-btn-ghost h-8 gap-1 px-2 text-[10px] disabled:opacity-50"
+                                className="ui-btn-ghost h-8 gap-1 px-2 disabled:opacity-50"
                                 disabled={!manageable || isSubmitting}
                                 onClick={() => void setProjectStatus(project, project.status === "archived" ? "active" : "archived")}
                               >
@@ -464,7 +472,7 @@ export function AccountWorkspacePage() {
                         />
                         <button
                           type="submit"
-                          className="ui-btn-ghost h-10 gap-1.5 px-4 text-[10px] disabled:opacity-50"
+                          className="ui-btn-ghost h-10 gap-1.5 px-4 disabled:opacity-50"
                           disabled={!editable || isSubmitting}
                         >
                           <Plus size={14} />
@@ -483,15 +491,15 @@ export function AccountWorkspacePage() {
                       {workspaceMembers.length ? (
                         workspaceMembers.map((member) => (
                           <div key={member.userId} className="px-3 py-2.5">
-                            <div className="text-[13px] font-medium text-ink">
+                            <div className="ui-section-subtitle font-medium text-ink">
                               {member.fullName ||
                                 (member.userId === session.user.id ? session.user.email : member.userId)}
                             </div>
-                            <div className="mt-0.5 text-[11px] uppercase tracking-wide text-ink-tertiary">{member.role}</div>
+                            <div className="ui-mono-label mt-0.5 text-ink-tertiary">{member.role}</div>
                           </div>
                         ))
                       ) : (
-                        <div className="px-3 py-2.5 text-[12px] text-ink-tertiary">No members visible.</div>
+                        <div className="px-3 py-2.5 ui-section-subtitle text-ink-tertiary">No members visible.</div>
                       )}
                     </div>
 
@@ -512,7 +520,7 @@ export function AccountWorkspacePage() {
                           <label className="block">
                             <span className="ui-field-label">Work email</span>
                             <input
-                              className="ui-field-standalone h-9 px-3 text-[12px]"
+                              className="ui-field-standalone h-9 px-3"
                               type="email"
                               placeholder="name@anacorp.com"
                               value={grantEmailByWorkspaceId[group.workspace.id] ?? ""}
@@ -527,25 +535,22 @@ export function AccountWorkspacePage() {
                           </label>
 
                           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                            <select
-                              className="ui-field-standalone h-9 px-3 text-[12px]"
+                            <ThemedSelect
+                              className="min-w-0"
+                              triggerClassName="h-9 px-3"
                               value={grantRoleByWorkspaceId[group.workspace.id] ?? "editor"}
-                              onChange={(event) =>
+                              options={workspaceRoleOptions}
+                              onChange={(value) =>
                                 setGrantRoleByWorkspaceId((current) => ({
                                   ...current,
-                                  [group.workspace.id]: event.target.value as WorkspaceRole,
+                                  [group.workspace.id]: value as WorkspaceRole,
                                 }))
                               }
                               disabled={isSubmitting}
-                            >
-                              <option value="viewer">Viewer</option>
-                              <option value="editor">Editor</option>
-                              <option value="admin">Admin</option>
-                              <option value="owner">Owner</option>
-                            </select>
+                            />
                             <button
                               type="submit"
-                              className="ui-btn-ghost h-9 gap-1.5 px-3 text-[10px] disabled:opacity-50"
+                              className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-50"
                               disabled={isSubmitting}
                             >
                               <Plus size={13} />
@@ -559,8 +564,8 @@ export function AccountWorkspacePage() {
                             (grantsByWorkspaceId[group.workspace.id] ?? []).map((grant) => (
                               <div key={grant.email} className="flex items-center justify-between gap-2 px-3 py-2.5">
                                 <div className="min-w-0">
-                                  <div className="truncate text-[12px] font-medium text-ink">{grant.email}</div>
-                                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-ink-tertiary">
+                                  <div className="truncate ui-section-subtitle font-medium text-ink">{grant.email}</div>
+                                  <div className="ui-mono-label mt-0.5 text-ink-tertiary">
                                     {grant.role}
                                     {grant.redeemedAt ? " - redeemed" : ""}
                                   </div>
@@ -577,7 +582,7 @@ export function AccountWorkspacePage() {
                               </div>
                             ))
                           ) : (
-                            <div className="px-3 py-2.5 text-[12px] text-ink-tertiary">No grants yet.</div>
+                            <div className="px-3 py-2.5 ui-section-subtitle text-ink-tertiary">No grants yet.</div>
                           )}
                         </div>
                       </div>
@@ -611,7 +616,7 @@ function AccountHeader({
           Pulse
         </Link>
         <span className="hidden text-ink-tertiary sm:inline">/</span>
-        <span className="hidden truncate text-[12px] text-ink-secondary sm:inline">Account</span>
+        <span className="hidden truncate ui-section-subtitle sm:inline">Account</span>
       </div>
 
       <div className="flex items-center gap-0.5 sm:gap-1">

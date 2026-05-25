@@ -117,7 +117,7 @@ function SnapshotRow({ label, value, meta }: { label: string; value: string; met
     <div className="ui-planner-snapshot-row">
       <div className="min-w-0">
         <div className="ui-row-label">{label}</div>
-        {meta ? <div className="mt-0.5 text-[11px] leading-snug text-ink-tertiary">{meta}</div> : null}
+        {meta ? <div className="mt-0.5 ui-metric-card-meta">{meta}</div> : null}
       </div>
       <div className="ui-row-value shrink-0 text-right">{value}</div>
     </div>
@@ -163,7 +163,7 @@ export function PlannerDashboardPanel(props: {
     <div className="ui-planner-dashboard">
       {p.saveError ? (
         <header className="ui-planner-dashboard-header">
-          <p className="text-[11px] font-medium text-danger">{p.saveError}</p>
+          <p className="ui-section-subtitle font-medium text-danger">{p.saveError}</p>
         </header>
       ) : null}
 
@@ -189,7 +189,7 @@ export function PlannerDashboardPanel(props: {
                         ? "Confirm staffing intent"
                         : "Plan looks feasible"}
                 </p>
-                <p className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">
+                <p className="ui-section-subtitle leading-relaxed">
                   {!feasible
                     ? "Adjust setup or scheduling before releasing this plan."
                     : hasCrewPlanExceptions
@@ -199,7 +199,7 @@ export function PlannerDashboardPanel(props: {
                         : "Labor, FTE load, and peak staffing are within budget."}
                 </p>
                 {failedChecks.length > 0 ? (
-                  <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[13px] text-ink-secondary">
+                  <ul className="ui-section-subtitle mt-1.5 list-disc space-y-0.5 pl-4">
                     {failedChecks.map((check) => (
                       <li key={check}>{check}</li>
                     ))}
@@ -219,7 +219,7 @@ export function PlannerDashboardPanel(props: {
       <div className="ui-planner-dashboard-grid">
         <section className="ui-planner-dashboard-main">{p.children}</section>
 
-        <aside className="ui-panel ui-planner-dashboard-aside">
+        <aside className="ui-planner-dashboard-aside">
           <h2 className="ui-section-title">Plan snapshot</h2>
           <div className="mt-3">
             <SnapshotRow label="Demand" value={demandMeta} meta="Active demand period" />

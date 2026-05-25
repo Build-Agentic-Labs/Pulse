@@ -1,27 +1,78 @@
 import type { Metadata } from "next";
-import { Doto, Space_Grotesk, Space_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { ThemeProvider } from "@/components/theme-provider";
 import { themeInitScript } from "@/lib/theme-init";
 import "./globals.css";
 
-const grotesk = Space_Grotesk({
-  subsets: ["latin"],
+const grotesk = localFont({
   variable: "--font-space-grotesk",
-  weight: ["300", "400", "500", "700"],
+  display: "swap",
+  src: [
+    {
+      path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-300-normal.woff2",
+      weight: "300",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-400-normal.woff2",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-500-normal.woff2",
+      weight: "500",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-700-normal.woff2",
+      weight: "700",
+      style: "normal",
+    },
+  ],
 });
 
-const mono = Space_Mono({
-  subsets: ["latin"],
+const mono = localFont({
   variable: "--font-space-mono",
-  weight: ["400", "700"],
-  adjustFontFallback: true,
-  preload: true,
+  display: "swap",
+  src: [
+    {
+      path: "../node_modules/@fontsource/space-mono/files/space-mono-latin-400-normal.woff2",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/space-mono/files/space-mono-latin-700-normal.woff2",
+      weight: "700",
+      style: "normal",
+    },
+  ],
 });
 
-const doto = Doto({
-  subsets: ["latin"],
+const doto = localFont({
   variable: "--font-doto",
-  weight: ["400", "500", "600", "700"],
+  display: "swap",
+  src: [
+    {
+      path: "../node_modules/@fontsource/doto/files/doto-latin-400-normal.woff2",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/doto/files/doto-latin-500-normal.woff2",
+      weight: "500",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/doto/files/doto-latin-600-normal.woff2",
+      weight: "600",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/doto/files/doto-latin-700-normal.woff2",
+      weight: "700",
+      style: "normal",
+    },
+  ],
 });
 
 export const metadata: Metadata = {

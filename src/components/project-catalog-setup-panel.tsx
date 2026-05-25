@@ -1,6 +1,6 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -14,6 +14,7 @@ import { TOOL_TYPE_OPTIONS, type ToolTypeValue } from "@/domain/tool-types";
 import type { Task } from "@/domain/types";
 import { ClearableNumberInput } from "./clearable-number-input";
 import type { FeedbackConfirm } from "./themed-feedback";
+import { ThemedSelect } from "./themed-select";
 
 type ToolDraft = {
   name: string;
@@ -57,6 +58,8 @@ export function ProjectCatalogSetupPanel({
   const [partDrafts, setPartDrafts] = useState<Record<string, PartDraft>>({});
   const [savingToolKey, setSavingToolKey] = useState<string>();
   const [savingPartKey, setSavingPartKey] = useState<string>();
+  const [toolsCollapsed, setToolsCollapsed] = useState(false);
+  const [partsCollapsed, setPartsCollapsed] = useState(false);
 
   useEffect(() => {
     setToolDrafts((current) => {
@@ -186,14 +189,25 @@ export function ProjectCatalogSetupPanel({
   return (
     <div className="ui-procedure-catalog mx-auto max-w-[1500px] space-y-5">
       <section>
-        <div className="mb-3">
-          <h2 className="ui-setup-section-title">Tools</h2>
-          <p className="ui-setup-section-desc">
-            {toolCatalog.length} tool{toolCatalog.length === 1 ? "" : "s"} in this build. IDs and colors stay stable across tasks.
-          </p>
-        </div>
+        <button
+          type="button"
+          className="ui-catalog-collapse-trigger mb-3"
+          onClick={() => setToolsCollapsed((collapsed) => !collapsed)}
+          aria-expanded={!toolsCollapsed}
+        >
+          <span className="min-w-0">
+            <span className="ui-setup-section-title block">Tools</span>
+            <span className="ui-setup-section-desc block">
+              {toolCatalog.length} tool{toolCatalog.length === 1 ? "" : "s"} in this build. IDs and colors stay stable across tasks.
+            </span>
+          </span>
+          <span className="ui-catalog-collapse-meta">
+            {toolCatalog.length}
+            {toolsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          </span>
+        </button>
 
-        {toolCatalog.length === 0 ? (
+        {toolsCollapsed ? null : toolCatalog.length === 0 ? (
           <div className="ui-procedure-empty">Tools added to procedure steps will appear here for cleanup and renaming.</div>
         ) : (
           <div className="ui-procedure-tool-table-wrap">
@@ -217,7 +231,7 @@ export function ProjectCatalogSetupPanel({
 
                   return (
                     <tr key={entry.key} className="ui-procedure-tool-table-row group">
-                      <td className="ui-procedure-tool-table-cell font-mono text-[11px] tabular-nums text-ink-secondary">
+                      <td className="ui-procedure-tool-table-cell ui-mono-label tabular-nums text-ink-secondary">
                         {entry.id}
                       </td>
                       <td className="ui-procedure-tool-table-cell">
@@ -230,23 +244,19 @@ export function ProjectCatalogSetupPanel({
                         />
                       </td>
                       <td className="ui-procedure-tool-table-cell">
-                        <select
-                          className="ui-procedure-step-inline-select w-full min-w-0"
+                        <ThemedSelect
+                          className="w-full min-w-0"
+                          triggerClassName="h-8 rounded-none border-0 border-b bg-transparent px-0 text-xs"
                           value={draft.category}
-                          onChange={(event) => {
-                            const category = event.target.value as ToolTypeValue;
+                          options={TOOL_TYPE_OPTIONS}
+                          onChange={(value) => {
+                            const category = value as ToolTypeValue;
                             const nextDraft = { ...draft, category };
                             updateToolDraft(entry.key, { category });
                             void commitToolDraft(entry, nextDraft);
                           }}
                           aria-label={`Tool type for ${entry.name}`}
-                        >
-                          {TOOL_TYPE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
+                        />
                       </td>
                       <td className="ui-procedure-tool-table-cell">
                         <span className="inline-flex min-w-0 items-center gap-2">
@@ -255,10 +265,10 @@ export function ProjectCatalogSetupPanel({
                             style={{ backgroundColor: entry.color }}
                             aria-hidden="true"
                           />
-                          <span className="truncate text-[11px] text-ink-secondary">{entry.colorLabel}</span>
+                          <span className="ui-section-subtitle truncate">{entry.colorLabel}</span>
                         </span>
                       </td>
-                      <td className="ui-procedure-tool-table-cell text-[11px] text-ink-secondary">
+                      <td className="ui-procedure-tool-table-cell ui-section-subtitle">
                         {entry.stepUsageCount} step{entry.stepUsageCount === 1 ? "" : "s"}
                         <span className="text-ink-tertiary"> · </span>
                         {entry.taskUsageCount} task{entry.taskUsageCount === 1 ? "" : "s"}
@@ -284,14 +294,25 @@ export function ProjectCatalogSetupPanel({
       </section>
 
       <section>
-        <div className="mb-3">
-          <h2 className="ui-setup-section-title">Part References</h2>
-          <p className="ui-setup-section-desc">
-            {partCatalog.length} part reference{partCatalog.length === 1 ? "" : "s"} across all sub-assemblies.
-          </p>
-        </div>
+        <button
+          type="button"
+          className="ui-catalog-collapse-trigger mb-3"
+          onClick={() => setPartsCollapsed((collapsed) => !collapsed)}
+          aria-expanded={!partsCollapsed}
+        >
+          <span className="min-w-0">
+            <span className="ui-setup-section-title block">Part References</span>
+            <span className="ui-setup-section-desc block">
+              {partCatalog.length} part reference{partCatalog.length === 1 ? "" : "s"} across all sub-assemblies.
+            </span>
+          </span>
+          <span className="ui-catalog-collapse-meta">
+            {partCatalog.length}
+            {partsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          </span>
+        </button>
 
-        {partCatalog.length === 0 ? (
+        {partsCollapsed ? null : partCatalog.length === 0 ? (
           <div className="ui-procedure-empty">Part references added in procedure steps will appear here for cleanup.</div>
         ) : (
           <div className="ui-procedure-part-editor">
@@ -307,9 +328,9 @@ export function ProjectCatalogSetupPanel({
               return (
                 <div key={key} className="ui-procedure-part-row group">
                   <div className="ui-procedure-catalog-part-meta">
-                    <span className="text-[11px] text-ink-secondary">{entry.taskLabel}</span>
+                    <span className="ui-section-subtitle">{entry.taskLabel}</span>
                     <div className="flex items-center gap-3">
-                      <span className="text-[11px] tabular-nums text-ink-tertiary">
+                      <span className="ui-metric-card-meta tabular-nums">
                         {entry.linkedStepCount} step{entry.linkedStepCount === 1 ? "" : "s"}
                       </span>
                       <button

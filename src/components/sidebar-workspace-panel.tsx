@@ -18,6 +18,17 @@ import { UiContextMenu } from "./ui-context-menu";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 
+function projectFromContext(project: PlannerProjectContext): Project {
+  return {
+    id: project.projectId,
+    workspaceId: project.workspaceId,
+    name: project.projectName,
+    status: "active",
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
 function canEdit(role?: WorkspaceRole) {
   return role === "owner" || role === "admin" || role === "editor";
 }
@@ -51,10 +62,12 @@ export function SidebarWorkspacePanel({
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [workspaceId, setWorkspaceId] = useState<string>();
-  const [role, setRole] = useState<WorkspaceRole>();
-  const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
+  const [projects, setProjects] = useState<Project[]>(() => (activeProject ? [projectFromContext(activeProject)] : []));
+  const [workspaceId, setWorkspaceId] = useState<string | undefined>(() => activeProject?.workspaceId);
+  const [role, setRole] = useState<WorkspaceRole | undefined>(() => activeProject?.role);
+  const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">(() =>
+    activeProject ? "ready" : "loading",
+  );
   const [isAdding, setIsAdding] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -64,6 +77,22 @@ export function SidebarWorkspacePanel({
   const [contextMenu, setContextMenu] = useState<{ project: Project; anchorRect: DOMRect } | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+
+  useEffect(() => {
+    if (!activeProject) return;
+    const fallbackProject = projectFromContext(activeProject);
+    setWorkspaceId(activeProject.workspaceId);
+    setRole(activeProject.role);
+    setStatus((current) => (current === "loading" ? "ready" : current));
+    setProjects((current) => {
+      if (current.some((project) => project.id === activeProject.projectId)) {
+        return current.map((project) =>
+          project.id === activeProject.projectId ? { ...fallbackProject, ...project, name: activeProject.projectName } : project,
+        );
+      }
+      return [fallbackProject, ...current];
+    });
+  }, [activeProject?.projectId, activeProject?.projectName, activeProject?.workspaceId, activeProject?.role]);
 
   async function hydrate() {
     try {

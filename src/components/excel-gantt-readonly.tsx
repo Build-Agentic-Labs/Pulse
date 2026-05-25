@@ -171,7 +171,7 @@ function MetricCard({
         {label}
       </div>
       <div className="mt-2 text-xl font-medium leading-none text-ink">{value}</div>
-      <div className="mt-1 truncate text-[11px] text-ink-secondary">{meta}</div>
+      <div className="ui-metric-card-meta truncate">{meta}</div>
     </div>
   );
 }
@@ -259,7 +259,7 @@ export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string;
               <AlertTriangle size={16} />
               Unable to load Gantt
             </div>
-            <div className="mt-1 text-xs font-bold">{error}</div>
+            <div className="mt-1 ui-section-subtitle text-danger">{error}</div>
           </div>
         ) : null}
 
@@ -310,20 +310,20 @@ export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string;
             <section className="overflow-hidden ui-panel ">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface-raised px-4 py-3">
                 <div>
-                  <h2 className="text-base font-medium text-ink">Manufacturing Gantt</h2>
-                  <div className="text-xs font-semibold text-steel">
+                  <h2 className="ui-section-title">Manufacturing Gantt</h2>
+                  <div className="ui-section-subtitle">
                     {derivedState.product.name} / {derivedState.scenario.name} / view only
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="text-right text-xs font-bold text-steel">
+                  <div className="text-right ui-mono-label text-ink-secondary">
                     <div>{shortDateTime(new Date(viewModel.bounds.startMs).toISOString())}</div>
                     <div>to {shortDateTime(new Date(viewModel.bounds.finishMs).toISOString())}</div>
                   </div>
                   <button
                     type="button"
                     onClick={loadPlanner}
-                    className="inline-flex h-9 items-center gap-2 ui-panel px-3 text-sm font-medium text-ink transition hover:bg-surface-sunken"
+                    className="ui-btn-ghost h-9 gap-2 px-3"
                   >
                     <RefreshCw size={15} />
                     Refresh
@@ -342,7 +342,7 @@ export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string;
                         const left = `${Math.min((tick / viewModel.bounds.durationMinutes) * 100, 100)}%`;
                         return (
                           <div key={tick} className="absolute top-0 h-full border-l border-line/80" style={{ left }}>
-                            <span className="absolute left-1 top-3 whitespace-nowrap text-[10px] font-medium text-steel">
+                            <span className="absolute left-1 top-3 whitespace-nowrap ui-mono-label text-ink-tertiary">
                               {formatHourOffset(tick)}
                             </span>
                           </div>
@@ -361,7 +361,7 @@ export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string;
                               <span className="h-4 w-4 shrink-0 rounded-sm" style={{ backgroundColor: row.zone.color }} />
                               <div className="min-w-0">
                                 <div className="truncate text-xs ui-mono-label tracking-wide text-ink">{row.zone.name}</div>
-                                <div className="text-[10px] font-bold text-steel">
+                                <div className="text-[10px] ui-mono-label text-ink-secondary">
                                   {row.tasks.length} tasks / {formatMinutes(zoneMinutes)}
                                 </div>
                               </div>
@@ -383,7 +383,7 @@ export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string;
                       const left = `${Math.min((window.startMinute / viewModel.bounds.durationMinutes) * 100, 100)}%`;
                       const width = `${Math.max(((window.finishMinute - window.startMinute) / viewModel.bounds.durationMinutes) * 100, 0.5)}%`;
                       const overTakt = viewModel.kpis.taktMinutes > 0 && row.task.plannedDurationMinutes > viewModel.kpis.taktMinutes;
-                      const fill = overTakt ? "#c33d2e" : row.zone?.color ?? UNZONED_ZONE.color;
+                      const fill = overTakt ? "var(--color-danger)" : row.zone?.color ?? UNZONED_ZONE.color;
 
                       return (
                         <div key={row.id} className="grid min-h-[52px] grid-cols-[360px_minmax(760px,1fr)] border-b border-line bg-surface">
@@ -420,7 +420,7 @@ export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string;
                               </span>
                             </div>
                             <div
-                              className="absolute top-10 h-1 rounded-full bg-black/10"
+                              className="absolute top-10 h-1 rounded-full bg-border/50"
                               style={{
                                 left,
                                 width: `${Math.max((row.task.percentComplete / 100) * Number.parseFloat(width), 0)}%`,

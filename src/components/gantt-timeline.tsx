@@ -1290,9 +1290,9 @@ export function GanttTimeline({
 
   return (
     <>
-    <section className="overflow-hidden border-y border-line bg-surface">
-      <div className="grid min-h-[560px]" style={{ gridTemplateColumns: `${tableColumnWidth}px minmax(0,1fr)` }}>
-        <div className="relative border-r border-line bg-surface-raised">
+    <section className="ui-gantt-timeline">
+      <div className="ui-gantt-timeline-grid" style={{ gridTemplateColumns: `${tableColumnWidth}px minmax(0,1fr)` }}>
+        <div className="ui-gantt-table-pane">
           {tableCollapsed ? (
             <div className="flex h-full min-h-[560px] flex-col items-center gap-3 py-3">
               <button
@@ -1325,7 +1325,7 @@ export function GanttTimeline({
                 <ChevronLeft size={14} />
               </button>
               <div
-                className="grid h-11 items-center gap-2 border-b border-line px-3 text-center text-[11px] font-semibold uppercase tracking-wide text-steel"
+                className="grid h-11 items-center gap-2 border-b border-line pl-3 pr-4 text-center text-[11px] font-semibold uppercase tracking-wide text-steel"
                 style={tableGridStyle}
               >
                 <span className="whitespace-nowrap text-center">Task ID</span>
@@ -1375,7 +1375,7 @@ export function GanttTimeline({
                     }}
                     onDragLeave={() => setDragOverZoneId(null)}
                     onDrop={(event) => dropGroupOnZone(event, row.zone)}
-                    className={`grid h-[54px] w-full items-center gap-2 border-b px-3 text-left text-xs transition ${
+                    className={`grid h-[54px] w-full items-center gap-2 border-b pl-3 pr-4 text-left text-xs transition ${
                       dragOverZoneId === row.zone.id
                         ? "border-accent bg-accent-muted"
                         : activeZoneId === row.zone.id
@@ -1493,7 +1493,7 @@ export function GanttTimeline({
                       setDragOverZoneId(null);
                       setDragOverGroup(null);
                     }}
-                    className={`grid h-[54px] w-full items-center gap-2 border-b border-line px-3 text-left text-xs transition ${
+                    className={`grid h-[54px] w-full items-center gap-2 border-b border-line pl-3 pr-4 text-left text-xs transition ${
                       highlighted
                         ? "bg-accent-muted shadow-inset-accent-start"
                         : draggingGroupId === row.group.id
@@ -1713,7 +1713,7 @@ export function GanttTimeline({
                     data-task-select="true"
                     onClick={() => activateRow(row)}
                     onDoubleClick={() => openRowDetail(row)}
-                    className={`grid h-[54px] w-full items-center gap-2 border-b border-line px-3 text-left text-xs transition ${
+                    className={`grid h-[54px] w-full items-center gap-2 border-b border-line pl-3 pr-4 text-left text-xs transition ${
                       highlighted ? "bg-accent-muted shadow-inset-accent-start" : "bg-surface-raised hover:bg-surface-hover"
                     }`}
                     style={tableGridStyle}
@@ -1807,7 +1807,7 @@ export function GanttTimeline({
                   data-task-select="true"
                   onClick={() => activateRow(row)}
                   onDoubleClick={() => openRowDetail(row)}
-                  className={`grid h-[54px] w-full items-center gap-2 border-b border-line px-3 text-left text-xs transition ${
+                  className={`grid h-[54px] w-full items-center gap-2 border-b border-line pl-3 pr-4 text-left text-xs transition ${
                     highlighted
                       ? "bg-accent-muted shadow-inset-accent-start"
                       : selected
@@ -1958,7 +1958,7 @@ export function GanttTimeline({
           className={
             canvasMaximized
               ? "fixed inset-4 z-50 overflow-hidden ui-panel-muted"
-              : "relative overflow-hidden bg-surface-muted"
+              : "relative overflow-hidden ui-gantt-canvas-pane"
           }
         >
           <div className="absolute right-3 top-3 z-[60]">
@@ -2055,7 +2055,7 @@ export function GanttTimeline({
                 />
               </div>
             ) : null}
-          <svg width={chartWidth} height={chartHeight} role="img" aria-label="Manufacturing Gantt timeline">
+          <svg width={chartWidth} height={chartHeight} role="img" aria-label="Manufacturing Gantt timeline" className="ui-gantt-chart">
             <rect width={chartWidth} height={chartHeight} fill={chartPalette.canvas} />
             <rect
               x={timelineOriginX}
@@ -2070,7 +2070,7 @@ export function GanttTimeline({
               return (
                 <g key={minute}>
                   <line x1={x} x2={x} y1={0} y2={chartHeight} stroke={chartPalette.grid} strokeWidth={1} />
-                  <text x={x + 6} y={25} fill={chartPalette.steel} fontSize={11} fontWeight={700}>
+                  <text x={x + 6} y={25} fill={chartPalette.steel} className="ui-gantt-chart-axis-label">
                     {formatMinutes(minute)}
                   </text>
                 </g>
@@ -2121,8 +2121,7 @@ export function GanttTimeline({
                       x={zoneStartX + 18}
                       y={row.y + 20}
                       fill={visibleRow.zone.stroke}
-                      fontSize={11}
-                      fontWeight={900}
+                      className="ui-gantt-chart-zone-label"
                     >
                       {visibleRow.zone.name || "Untitled zone"}
                     </text>
@@ -2187,8 +2186,7 @@ export function GanttTimeline({
                       x={row.startX + width / 2}
                       y={row.y + 13}
                       fill={tone.text}
-                      fontSize={11}
-                      fontWeight={800}
+                      className="ui-gantt-chart-bar-label"
                       textAnchor="middle"
                       dominantBaseline="middle"
                     >
@@ -2237,8 +2235,7 @@ export function GanttTimeline({
                       x={row.startX + width / 2}
                       y={row.y + 11}
                       fill={taktExceeded ? TAKT_EXCEEDED_TONE.text : chartPalette.graphite}
-                      fontSize={10}
-                      fontWeight={800}
+                      className="ui-gantt-chart-step-label"
                       textAnchor="middle"
                       dominantBaseline="middle"
                     >
@@ -2288,8 +2285,7 @@ export function GanttTimeline({
                       x={canvasMaximized ? centerX : centerX + 18}
                       y={canvasMaximized ? centerY : centerY + 4}
                       fill={canvasMaximized ? tone.text : chartPalette.graphite}
-                      fontSize={11}
-                      fontWeight={700}
+                      className="ui-gantt-chart-bar-label"
                       textAnchor={canvasMaximized ? "middle" : "start"}
                       dominantBaseline={canvasMaximized ? "middle" : undefined}
                     >
@@ -2347,8 +2343,7 @@ export function GanttTimeline({
                     x={canvasMaximized || compactLabel === task.wbs ? row.startX + width / 2 : row.startX + 8}
                     y={canvasMaximized || compactLabel === task.wbs ? row.y + 13 : row.y + 17}
                     fill={tone.text}
-                    fontSize={11}
-                    fontWeight={700}
+                    className="ui-gantt-chart-bar-label"
                     textAnchor={canvasMaximized || compactLabel === task.wbs ? "middle" : "start"}
                     dominantBaseline={canvasMaximized || compactLabel === task.wbs ? "middle" : undefined}
                   >
@@ -2399,9 +2394,8 @@ export function GanttTimeline({
                       x={taktFlagTextX}
                       y={taktFlagTextY}
                       fill={chartPalette.white}
+                      className="ui-gantt-chart-flag-label"
                       textAnchor="middle"
-                      fontSize={11}
-                      fontWeight={800}
                     >
                       Required takt {formatMinutes(taktLimitMinutes)}
                     </text>
@@ -2432,9 +2426,8 @@ export function GanttTimeline({
                   x={playbackFlagTextX}
                   y={21}
                   fill={chartPalette.white}
+                  className="ui-gantt-chart-flag-label"
                   textAnchor="middle"
-                  fontSize={11}
-                  fontWeight={800}
                 >
                   {formatMinutes(currentMinute)}
                 </text>

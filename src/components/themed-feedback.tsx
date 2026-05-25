@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
+import { X } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 
 export type FeedbackTone = "neutral" | "success" | "warning" | "danger";
@@ -35,58 +35,35 @@ export interface FeedbackConfirm {
   onConfirm: () => void;
 }
 
-const toneStyles: Record<FeedbackTone, { border: string; icon: string; label: string }> = {
+const toneStyles: Record<FeedbackTone, { border: string; label: string; text: string }> = {
   neutral: {
     border: "border-line",
-    icon: "bg-steel text-canvas",
     label: "Notice",
+    text: "text-ink-secondary",
   },
   success: {
-    border: "border-accent/35",
-    icon: "bg-accent text-canvas",
+    border: "border-line",
     label: "Complete",
+    text: "text-success",
   },
   warning: {
     border: "border-warn/45",
-    icon: "bg-warn text-canvas",
     label: "Review",
+    text: "text-warn-strong",
   },
   danger: {
     border: "border-danger/35",
-    icon: "bg-danger text-canvas",
     label: "Blocked",
+    text: "text-danger",
   },
 };
-
-function ToneIcon({ tone = "neutral", size = 16 }: { tone?: FeedbackTone; size?: number }) {
-  if (tone === "success") {
-    return <CheckCircle2 size={size} />;
-  }
-
-  if (tone === "danger") {
-    return <XCircle size={size} />;
-  }
-
-  if (tone === "warning") {
-    return <AlertTriangle size={size} />;
-  }
-
-  return <Info size={size} />;
-}
-
 function BodyText({ body, compact = false }: { body?: string; compact?: boolean }) {
   if (!body) {
     return null;
   }
 
   return (
-    <div
-      className={
-        compact
-          ? "mt-1 text-[12px] leading-snug text-ink-secondary"
-          : "mt-2 whitespace-pre-line text-sm font-semibold leading-relaxed text-steel"
-      }
-    >
+    <div className={compact ? "ui-workspace-notice-body" : "ui-workspace-notice-body mt-2 whitespace-pre-line"}>
       {body}
     </div>
   );
@@ -140,17 +117,13 @@ function ConfirmActions({
 
   return (
     <div className="mt-5 flex justify-end gap-2">
-      <button
-        type="button"
-        onClick={onCancelConfirm}
-        className="inline-flex h-10 items-center justify-center ui-panel px-4 text-sm font-bold text-ink transition hover:bg-surface-sunken"
-      >
+      <button type="button" onClick={onCancelConfirm} className="ui-btn-ghost h-10 px-4">
         {confirm.cancelLabel ?? "Cancel"}
       </button>
       <button
         type="button"
         onClick={onConfirm}
-        className="ui-btn-primary inline-flex h-10 items-center justify-center px-4 text-sm transition hover:opacity-90"
+        className={confirm.tone === "danger" ? "ui-btn-destructive h-10 px-4" : "ui-btn-primary h-10 px-4"}
       >
         {confirm.confirmLabel ?? "Continue"}
       </button>
@@ -188,18 +161,15 @@ export function ThemedFeedbackLayer({
               role="status"
             >
               <div className="flex items-start gap-3 p-3">
-                <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded ${style.icon}`}>
-                  <ToneIcon tone={tone} />
-                </div>
                 <div className="min-w-0 flex-1">
                   <div className="ui-mono-label">{style.label}</div>
-                  <div className="mt-0.5 text-sm font-medium text-ink">{toast.title}</div>
-                  {toast.content ?? <BodyText body={toast.body} />}
+                  <div className="ui-section-title mt-1">{toast.title}</div>
+                  {toast.content ?? <BodyText body={toast.body} compact />}
                 </div>
                 <button
                   type="button"
                   onClick={() => onDismissToast(toast.id)}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded border border-transparent text-steel transition hover:border-line hover:bg-surface-sunken hover:text-ink"
+                  className="ui-btn-ghost h-7 w-7 shrink-0 px-0"
                   aria-label="Dismiss notification"
                 >
                   <X size={14} />
@@ -223,33 +193,26 @@ export function ThemedFeedbackLayer({
                   className={`pointer-events-auto flex max-h-[inherit] flex-col overflow-hidden rounded-md border bg-surface  ${style.border}`}
                   role="status"
                 >
-                  <div className="shrink-0 border-b border-line bg-surface-raised p-4">
-                    <div className="flex items-start gap-3">
-                      <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded ${style.icon}`}>
-                        <ToneIcon tone={tone} size={18} />
-                      </div>
+                  <div className="shrink-0 border-b border-line px-4 py-4">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="ui-mono-label">{style.label}</div>
-                        <div className="mt-1 text-lg font-medium tracking-normal text-ink">{toast.title}</div>
+                        <div className="ui-section-title mt-1">{toast.title}</div>
                       </div>
                       <button
                         type="button"
                         onClick={() => onDismissToast(toast.id)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-steel transition hover:border-line hover:bg-surface-sunken hover:text-ink"
+                        className="ui-btn-ghost h-8 w-8 shrink-0 px-0"
                         aria-label="Dismiss notification"
                       >
                         <X size={15} />
                       </button>
                     </div>
                   </div>
-                  <div className="min-h-0 overflow-y-auto p-3 sm:p-4">
+                  <div className="min-h-0 overflow-y-auto p-4">
                     {toast.content ?? <BodyText body={toast.body} />}
-                    <div className="sticky bottom-0 -mx-3 -mb-3 mt-4 flex justify-end border-t border-line bg-surface/95 px-3 py-3 sm:-mx-4 sm:-mb-4 sm:px-4">
-                      <button
-                        type="button"
-                        onClick={() => onDismissToast(toast.id)}
-                        className="ui-btn-primary h-10 px-4 text-sm transition hover:opacity-90"
-                      >
+                    <div className="mt-4 flex justify-end border-t border-line pt-4">
+                      <button type="button" onClick={() => onDismissToast(toast.id)} className="ui-btn-primary h-10 px-4">
                         Dismiss
                       </button>
                     </div>
@@ -290,27 +253,18 @@ export function ThemedFeedbackLayer({
             </div>
           </>
         ) : (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/45 p-4" role="presentation">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
             <div
-              className={`w-full max-w-[460px] overflow-hidden rounded-md border bg-surface  ${toneStyles[confirm.tone ?? "neutral"].border}`}
+              className={`w-full max-w-[460px] overflow-hidden rounded-md border bg-surface ${toneStyles[confirm.tone ?? "neutral"].border}`}
               role="dialog"
               aria-modal="true"
               aria-labelledby="feedback-confirm-title"
             >
-              <div className="border-b border-line bg-surface-raised p-4">
-                <div className="flex items-start gap-3">
-                  <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded ${toneStyles[confirm.tone ?? "neutral"].icon}`}>
-                    <ToneIcon tone={confirm.tone} size={18} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="ui-mono-label">
-                      {toneStyles[confirm.tone ?? "neutral"].label}
-                    </div>
-                    <h2 id="feedback-confirm-title" className="mt-1 text-lg font-medium tracking-normal text-ink">
-                      {confirm.title}
-                    </h2>
-                  </div>
-                </div>
+              <div className="border-b border-line px-4 py-4">
+                <div className="ui-mono-label">{toneStyles[confirm.tone ?? "neutral"].label}</div>
+                <h2 id="feedback-confirm-title" className="ui-section-title mt-2">
+                  {confirm.title}
+                </h2>
               </div>
               <div className="p-4">
                 <BodyText body={confirm.body} />

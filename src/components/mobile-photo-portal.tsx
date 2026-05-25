@@ -64,6 +64,7 @@ import {
 import type { ManufacturingStep, PlannerProjectContext, PlannerState, Task } from "@/domain/types";
 import { AppLoadingShell } from "@/components/app-flow-panels";
 import { NothingSpinner } from "@/components/nothing-ui";
+import { ThemedSelect } from "@/components/themed-select";
 
 const MAX_IMAGE_EDGE = 1280;
 const JPEG_QUALITY = 0.72;
@@ -3125,27 +3126,27 @@ export function MobilePhotoPortal({
               </div>
             ) : null}
             {libraryTools.length > 0 ? (
-              <select
-                className="ui-photo-mobile-field ui-photo-mobile-tool-library-select"
-                defaultValue=""
-                onChange={(event) => {
-                  const tool = event.currentTarget.value;
+              <ThemedSelect
+                className="ui-photo-mobile-tool-library-select"
+                triggerClassName="ui-photo-mobile-field h-11"
+                value=""
+                options={[
+                  { value: "", label: "Library..." },
+                  ...libraryTools.map((tool) => {
+                    const alreadyAdded = selectedToolKeys.has(tool.toLocaleLowerCase());
+                    return {
+                      value: tool,
+                      label: alreadyAdded ? `${tool} - already added` : tool,
+                      disabled: alreadyAdded,
+                    };
+                  }),
+                ]}
+                onChange={(tool) => {
                   if (tool) {
                     onAddTool(tool);
-                    event.currentTarget.value = "";
                   }
                 }}
-              >
-                <option value="">Library…</option>
-                {libraryTools.map((tool) => {
-                  const alreadyAdded = selectedToolKeys.has(tool.toLocaleLowerCase());
-                  return (
-                    <option key={tool} value={tool} disabled={alreadyAdded}>
-                      {alreadyAdded ? `${tool} - already added` : tool}
-                    </option>
-                  );
-                })}
-              </select>
+              />
             ) : null}
           </div>
         ) : null}
@@ -3588,18 +3589,16 @@ export function MobilePhotoPortal({
                   <span className="ui-field-label text-accent">
                     Zone
                   </span>
-                  <select
-                    className="ui-photo-mobile-field h-11"
+                  <ThemedSelect
+                    className="w-full"
+                    triggerClassName="ui-photo-mobile-field h-11"
                     value={newTaskZoneId}
-                    onChange={(event) => setNewTaskZoneId(event.target.value)}
-                  >
-                    <option value="">No zone</option>
-                    {derivedState?.zones.map((zone) => (
-                      <option key={zone.id} value={zone.id}>
-                        {zone.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "", label: "No zone" },
+                      ...(derivedState?.zones.map((zone) => ({ value: zone.id, label: zone.name })) ?? []),
+                    ]}
+                    onChange={setNewTaskZoneId}
+                  />
                 </label>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <button

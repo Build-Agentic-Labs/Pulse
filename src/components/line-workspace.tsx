@@ -117,6 +117,7 @@ import { GanttTimeline } from "./gantt-timeline";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
 import { AppLoadingShell } from "./app-flow-panels";
+import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
 import { SidebarWorkspacePanel } from "./sidebar-workspace-panel";
 import { SidebarUserPanel } from "./sidebar-user-panel";
@@ -124,6 +125,7 @@ import { ProcedureStepToolTable } from "./procedure-step-tool-table";
 import { StepPhotoViewer } from "./step-photo-viewer";
 import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
 import { AppSettingsPanel, settingsSections, type SettingsSection } from "./app-settings-panel";
+import { ThemedSelect } from "./themed-select";
 import { useTheme } from "./theme-provider";
 import {
   projectContextLabel,
@@ -174,6 +176,14 @@ const demandPeriodOptions: Array<{ value: DemandPeriod; label: string }> = [
   { value: "year", label: "Yearly" },
 ];
 
+const productStatusOptions: Array<{ value: ProductStatus; label: string }> = [
+  { value: "draft", label: "Draft" },
+  { value: "review", label: "Review" },
+  { value: "approved", label: "Approved" },
+  { value: "released", label: "Released" },
+  { value: "obsolete", label: "Obsolete" },
+];
+
 const SIDEBAR_WIDTH = 200;
 const WORKSPACE_DRAWER_WIDTH = 260;
 
@@ -185,6 +195,8 @@ const plannerModules = [
   { id: "balance", label: "Balance", icon: BarChart3 },
   { id: "reports", label: "Reports", icon: FileText },
 ];
+
+const comingSoonModuleIds = new Set(["balance", "reports"]);
 
 const SIMULATION_ENABLED = false;
 
@@ -1276,7 +1288,7 @@ function StatusPill({ status }: { status: string }) {
           : "border-line bg-surface-sunken text-steel";
 
   return (
-    <span className={`inline-flex h-6 items-center rounded border px-2 text-[11px] font-bold uppercase ${tone}`}>
+    <span className={`ui-chip ${tone}`}>
       {statusLabel(status)}
     </span>
   );
@@ -1465,23 +1477,24 @@ function StepPartReferenceEditor({
 
         {availableParts.length > 0 ? (
           <div className="pl-[42px]">
-            <select
+            <ThemedSelect
               aria-label={`Link existing part to step ${step.sequence}`}
-              className="ui-field-standalone h-9 w-full px-2 text-xs"
               value=""
-              onChange={(event) => {
-                if (event.target.value) {
-                  onLinkExisting(event.target.value);
+              className="w-full"
+              triggerClassName="h-9 px-2 text-xs"
+              options={[
+                { value: "", label: "Link existing part" },
+                ...availableParts.map((part) => ({
+                  value: part.id,
+                  label: `${part.partNumber}${part.description ? ` - ${part.description}` : ""}`,
+                })),
+              ]}
+              onChange={(value) => {
+                if (value) {
+                  onLinkExisting(value);
                 }
               }}
-            >
-              <option value="">Link existing part</option>
-              {availableParts.map((part) => (
-                <option key={part.id} value={part.id}>
-                  {part.partNumber}{part.description ? ` - ${part.description}` : ""}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         ) : null}
 
@@ -1530,23 +1543,24 @@ function StepPartReferenceEditor({
           Add
         </button>
         {availableParts.length > 0 ? (
-          <select
+          <ThemedSelect
             aria-label={`Link existing part to step ${step.sequence}`}
-            className="ui-procedure-step-inline-select"
             value=""
-            onChange={(event) => {
-              if (event.target.value) {
-                onLinkExisting(event.target.value);
+            className="min-w-36"
+            triggerClassName="h-8 rounded-none border-0 border-b bg-transparent px-0 text-xs"
+            options={[
+              { value: "", label: "Link existing part" },
+              ...availableParts.map((part) => ({
+                value: part.id,
+                label: `${part.partNumber}${part.description ? ` - ${part.description}` : ""}`,
+              })),
+            ]}
+            onChange={(value) => {
+              if (value) {
+                onLinkExisting(value);
               }
             }}
-          >
-            <option value="">Link existing part</option>
-            {availableParts.map((part) => (
-              <option key={part.id} value={part.id}>
-                {part.partNumber}{part.description ? ` - ${part.description}` : ""}
-              </option>
-            ))}
-          </select>
+          />
         ) : null}
       </div>
 
@@ -1609,11 +1623,13 @@ function TopNav({
   sidebarCollapsed,
   onToggleSidebar,
   context,
+  chromeStatus,
 }: {
   onExport: () => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   context?: ReturnType<typeof buildPlannerChromeContext>;
+  chromeStatus?: { message: string; error?: boolean } | null;
 }) {
   const { theme, toggleTheme } = useTheme();
 
@@ -1652,6 +1668,11 @@ function TopNav({
         </div>
 
         <div className="ui-chrome-planner-actions">
+          {chromeStatus ? (
+            <div className="ui-chrome-status max-w-[min(28rem,42vw)]">
+              <NothingStatus error={chromeStatus.error}>{chromeStatus.message}</NothingStatus>
+            </div>
+          ) : null}
           <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
@@ -1687,6 +1708,11 @@ function TopNav({
       <div className="flex min-w-0 flex-1 lg:hidden" />
 
       <div className="flex shrink-0 items-center gap-0.5 sm:gap-1 lg:pr-4">
+        {chromeStatus ? (
+          <div className="ui-chrome-status max-w-[min(24rem,38vw)]">
+            <NothingStatus error={chromeStatus.error}>{chromeStatus.message}</NothingStatus>
+          </div>
+        ) : null}
         <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
@@ -1841,7 +1867,7 @@ function ScrollDownHint({ className = "" }: { className?: string }) {
       } ${className}`}
       aria-hidden="true"
     >
-      <div className="flex h-7 w-7 items-center justify-center rounded-full border border-accent/20 bg-surface-raised/90 text-accent/75 shadow-[0_8px_20px_rgba(23,33,27,0.12)] backdrop-blur">
+      <div className="flex h-7 w-7 items-center justify-center rounded-full border border-line bg-surface-raised text-ink-secondary">
         <ChevronDown size={15} strokeWidth={2.4} />
       </div>
     </div>
@@ -2250,10 +2276,10 @@ function ProcedureWorkspace({
   }
 
   return (
-    <section className="ui-workspace-content flex h-full min-h-0 overflow-hidden">
+    <section className="ui-workspace-content ui-procedure-workspace flex h-full min-h-0 overflow-hidden">
       <aside
         style={procedureGridStyle}
-        className="relative shrink-0 overflow-x-hidden overflow-y-auto"
+        className="ui-procedure-sidebar relative shrink-0 overflow-x-hidden overflow-y-auto"
       >
         <div className="sticky top-0 z-10 bg-surface-raised px-2 pb-2 pt-3">
           <div className="ui-nav-section mb-0 px-0">Procedure tasks</div>
@@ -2307,11 +2333,10 @@ function ProcedureWorkspace({
         </button>
       </aside>
 
-      <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 md:px-6">
+      <main className="ui-procedure-main min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 md:px-6">
         <div className="mx-auto max-w-[1500px] space-y-5">
           <section>
-            <div className="ui-eyebrow">Selected procedure</div>
-            <h1 className="ui-section-title mt-2">{task.name || "Untitled task"}</h1>
+            <h1 className="ui-section-title ui-procedure-title">{task.name || "Untitled task"}</h1>
             <div className="ui-metric-strip mt-4">
               {[
                 ["Zone", zoneById.get(task.zoneId ?? "")?.name ?? "Unzoned"],
@@ -2468,25 +2493,23 @@ function ProcedureWorkspace({
                               Add
                             </button>
                             {toolLibrary.length > 0 ? (
-                              <select
+                              <ThemedSelect
                                 aria-label={`Add saved tool to step ${step.sequence}`}
-                                className="ui-procedure-step-inline-select"
                                 value=""
-                                onChange={(event) => {
-                                  if (event.target.value) {
-                                    addManufacturingStepToolFromLibrary(step.id, event.target.value);
+                                className="min-w-36"
+                                triggerClassName="h-8 rounded-none border-0 border-b bg-transparent px-0 text-xs"
+                                options={[
+                                  { value: "", label: "Tool library" },
+                                  ...toolLibrary
+                                    .filter((tool) => !stepTools.some((stepTool) => stepTool.toLocaleLowerCase() === tool.toLocaleLowerCase()))
+                                    .map((tool) => ({ value: tool, label: tool })),
+                                ]}
+                                onChange={(value) => {
+                                  if (value) {
+                                    addManufacturingStepToolFromLibrary(step.id, value);
                                   }
                                 }}
-                              >
-                                <option value="">Tool library</option>
-                                {toolLibrary
-                                  .filter((tool) => !stepTools.some((stepTool) => stepTool.toLocaleLowerCase() === tool.toLocaleLowerCase()))
-                                  .map((tool) => (
-                                    <option key={tool} value={tool}>
-                                      {tool}
-                                    </option>
-                                  ))}
-                              </select>
+                              />
                             ) : null}
                           </div>
                           <ProcedureStepToolTable
@@ -2666,7 +2689,7 @@ function ProductSetupPanel({
   onProductText: (field: ProductTextField, value: string) => void;
 }) {
   return (
-    <section className="ui-panel ui-product-setup">
+    <section className="ui-product-setup">
       <div className="ui-product-setup-head">
         <div>
           <h2 className="ui-section-title">Product Setup</h2>
@@ -2703,17 +2726,12 @@ function ProductSetupPanel({
             </label>
             <label className="block">
               <span className="ui-field-label">Status</span>
-              <select
-                className="ui-field-standalone"
+              <ThemedSelect
+                className="w-full"
                 value={product.status}
-                onChange={(event) => onProductText("status", event.target.value as ProductStatus)}
-              >
-                <option value="draft">Draft</option>
-                <option value="review">Review</option>
-                <option value="approved">Approved</option>
-                <option value="released">Released</option>
-                <option value="obsolete">Obsolete</option>
-              </select>
+                options={productStatusOptions}
+                onChange={(value) => onProductText("status", value as ProductStatus)}
+              />
             </label>
           </div>
         </SetupFieldGroup>
@@ -2723,7 +2741,7 @@ function ProductSetupPanel({
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
               <label className="block">
                 <span className="ui-field-label">Demand</span>
-                <div className="ui-field-shell">
+                <div className="ui-field-shell ui-field-shell-select-combo">
                   <ClearableNumberInput
                     className="number-input ui-field-control"
                     value={product.demandQuantity}
@@ -2733,17 +2751,13 @@ function ProductSetupPanel({
                     normalize={Math.round}
                     onValueChange={(value) => onProductNumber("demandQuantity", value)}
                   />
-                  <select
-                    className="ui-field-addon w-28"
+                  <ThemedSelect
+                    className="w-28 shrink-0"
+                    triggerClassName="h-10 rounded-none rounded-r-lg border-0 border-l px-2 ui-mono-label"
                     value={product.demandPeriod}
-                    onChange={(event) => onProductText("demandPeriod", event.target.value as DemandPeriod)}
-                  >
-                    {demandPeriodOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={demandPeriodOptions}
+                    onChange={(value) => onProductText("demandPeriod", value as DemandPeriod)}
+                  />
                 </div>
               </label>
               <NumericField
@@ -2856,6 +2870,31 @@ function KpiStrip({ kpis, product }: { kpis: ReturnType<typeof calculateProductK
         meta={kpis.capacityGapManHours >= 0 ? "Available labor ahead" : "Labor short"}
         tone={kpis.capacityGapManHours >= 0 ? "good" : "bad"}
       />
+    </section>
+  );
+}
+
+function ComingSoonModuleView({
+  children,
+  moduleLabel,
+}: {
+  children: ReactNode;
+  moduleLabel: string;
+}) {
+  return (
+    <section className="ui-coming-soon-module" aria-label={`${moduleLabel} coming soon`}>
+      <div className="ui-coming-soon-module-preview" aria-hidden="true">
+        {children}
+      </div>
+      <div className="ui-coming-soon-module-overlay">
+        <div className="ui-coming-soon-module-panel">
+          <div className="ui-mono-label">Coming soon</div>
+          <h2 className="ui-section-title">{moduleLabel}</h2>
+          <p className="ui-section-subtitle">
+            This workspace is not ready yet. The current planner data is preserved.
+          </p>
+        </div>
+      </div>
     </section>
   );
 }
@@ -3194,17 +3233,17 @@ function CrewReadinessCard({
   }
 
   return (
-    <div className={`rounded-md border border-l-4 bg-surface ${expanded ? "p-4" : "p-3"} ${toneClass}`}>
+    <div className={`ui-crew-card rounded-md border border-l-4 bg-surface ${expanded ? "p-3" : "p-3"} ${toneClass}`}>
       <div
         className={`flex flex-wrap items-start justify-between gap-3 ${expanded ? "border-b border-line pb-3" : ""}`}
       >
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-steel">Budgeted Crew</div>
+          <div className="ui-eyebrow">Budgeted Crew</div>
           <div className="mt-1 flex flex-wrap items-end gap-x-2 gap-y-1">
-            <span className="text-3xl font-medium leading-none tracking-normal text-ink">
+            <span className="text-xl font-medium leading-none tracking-normal text-ink">
               {round(kpis.budgetedCrewEquivalent, 2)}
             </span>
-            <span className="pb-0.5 text-sm ui-mono-label text-ink">FTE</span>
+            <span className="pb-0.5 text-xs ui-mono-label text-ink">FTE</span>
             {!expanded ? (
               <span className="pb-0.5 text-[11px] font-medium text-ink-secondary">
                 · {kpis.wholePersonStaffingRequirement} people · {round(kpis.requiredAverageAllocationPercent, 1)}% avg
@@ -3252,11 +3291,17 @@ function PlanningRecommendationsPanel({
   onOpenTaskDetail?: (taskId: string) => void;
   recommendations: UnallocatedWorkReview[];
 }) {
+  const [showAll, setShowAll] = useState(false);
+
   if (recommendations.length === 0) {
     return null;
   }
 
-  const visibleRecommendations = recommendations.slice(0, compact || embedded ? 3 : 4);
+  const visibleRecommendations = embedded
+    ? recommendations.slice(0, 3)
+    : showAll
+      ? recommendations
+      : recommendations.slice(0, 4);
   const hiddenCount = recommendations.length - visibleRecommendations.length;
 
   if (embedded) {
@@ -3309,77 +3354,64 @@ function PlanningRecommendationsPanel({
   }
 
   return (
-    <div className="mt-4 border-t border-line pt-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
+    <div className="ui-planner-recommendations-compact mt-3 border-t border-line pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-[10px] ui-mono-label tracking-wide text-warn-strong">
-            <AlertTriangle size={14} />
+            <AlertTriangle size={13} />
             Planning Recommendations
           </div>
-          <div className="mt-1 text-xs font-bold leading-snug text-steel">
-            Required work that is still unallocated by the current headcount plan.
+          <div className="mt-1 text-[11px] leading-snug text-steel">
+            {recommendations.length} allocation issue{recommendations.length === 1 ? "" : "s"} need review.
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-6 items-center rounded border border-warn/35 bg-accent-muted px-2 text-[10px] ui-mono-label tracking-wide text-warn-strong">
-            {recommendations.length} item(s)
-          </span>
-          {onClear ? (
+        <div className="flex items-center gap-1.5">
+          {hiddenCount > 0 || showAll ? (
             <button
               type="button"
-              onClick={onClear}
-              className="inline-flex h-6 items-center rounded border border-line bg-surface px-2 ui-mono-label outline-none transition hover:border-graphite hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
+              onClick={() => setShowAll((open) => !open)}
+              className="ui-btn-ghost h-7 px-2 text-[10px]"
             >
+              {showAll ? "Show less" : `Show all ${recommendations.length}`}
+            </button>
+          ) : null}
+          {onClear ? (
+            <button type="button" onClick={onClear} className="ui-btn-ghost h-7 px-2 text-[10px]">
               Clear
             </button>
           ) : null}
         </div>
       </div>
 
-      <div className="mt-3 divide-y divide-line border-y border-line">
+      <div className="mt-2 divide-y divide-line border-y border-line">
         {visibleRecommendations.map((recommendation) => (
-          <div
-            key={recommendation.taskId}
-            className="grid gap-3 bg-surface-raised px-2 py-3 text-xs lg:grid-cols-[minmax(160px,0.75fr)_minmax(0,1.4fr)_minmax(150px,0.45fr)] lg:items-center"
-          >
+          <div key={recommendation.taskId} className="grid gap-2 py-2.5 text-xs lg:grid-cols-[minmax(150px,0.7fr)_minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="truncate font-medium text-ink" title={recommendation.taskLabel}>
                 {recommendation.taskLabel}
               </div>
-              <div className="mt-1 inline-flex rounded border border-warn/35 bg-surface px-2 py-0.5 text-[9px] ui-mono-label tracking-wide text-warn-strong">
-                {recommendation.classification}
+              <div className="mt-0.5 text-[10px] ui-mono-label text-warn-strong">{recommendation.classification}</div>
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-[11px] leading-snug text-steel" title={recommendation.condition}>
+                {recommendation.condition}
+              </div>
+              <div className="truncate text-[11px] leading-snug text-ink" title={recommendation.recommendation}>
+                {recommendation.recommendation}
               </div>
             </div>
-
-            <div className="min-w-0">
-              <div className="font-medium leading-snug text-steel">{recommendation.condition}</div>
-              <div className="mt-1 font-semibold leading-snug text-steel">{recommendation.impact}</div>
-              <div className="mt-1 font-bold leading-snug text-ink">{recommendation.recommendation}</div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-              <span className="inline-flex h-7 items-center rounded border border-line bg-surface px-2 text-[10px] ui-mono-label tracking-wide text-ink-secondary">
-                {recommendation.action}
-              </span>
-              {onOpenTaskDetail ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenTaskDetail(recommendation.taskId)}
-                  className="inline-flex h-8 items-center justify-center rounded border border-graphite bg-accent px-3 text-[11px] font-medium text-canvas outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-accent"
-                >
-                  Review task
-                </button>
-              ) : null}
-            </div>
+            {onOpenTaskDetail ? (
+              <button
+                type="button"
+                onClick={() => onOpenTaskDetail(recommendation.taskId)}
+                className="ui-btn-ghost h-7 justify-self-start px-2 text-[10px] lg:justify-self-end"
+              >
+                Review
+              </button>
+            ) : null}
           </div>
         ))}
       </div>
-
-      {hiddenCount > 0 ? (
-        <div className="mt-2 text-[11px] font-bold text-steel">
-          {hiddenCount} more recommendation(s) are included in the Smart Allocation audit packet.
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -3499,7 +3531,7 @@ function LineReadinessPanel({
     return content;
   }
 
-  return <section className="ui-panel p-5">{content}</section>;
+  return <section className="ui-readiness-workspace">{content}</section>;
 }
 
 function StationBalance({
@@ -3918,8 +3950,8 @@ function DetailDrawer({
       <div aria-hidden={collapsed} className={contentClass}>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-steel">Selected Task</div>
-            <h2 className="mt-1 text-lg font-medium leading-tight text-ink">{task.name}</h2>
+            <div className="ui-eyebrow">Selected Task</div>
+            <h2 className="ui-section-title mt-1">{task.name}</h2>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -3948,9 +3980,9 @@ function DetailDrawer({
         </div>
 
         <label className="block">
-          <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">Description</span>
+          <span className="ui-field-label">Description</span>
           <textarea
-            className="min-h-[110px] w-full resize-none rounded border border-line bg-surface px-3 py-2 text-sm text-ink outline-none"
+            className="ui-field-standalone min-h-[110px] resize-none py-2"
             value={task.description ?? ""}
             onChange={(event) => onUpdateTask(task.id, { description: event.target.value })}
           />
@@ -3965,7 +3997,7 @@ function DetailDrawer({
             <button
               type="button"
               onClick={addManufacturingStep}
-              className="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-xs text-canvas hover:opacity-90"
+              className="ui-btn-primary h-8 gap-1 px-3 text-xs"
             >
               <Plus size={14} />
               Step
@@ -3993,7 +4025,7 @@ function DetailDrawer({
                           <span className="shrink-0">Step</span>
                           <ClearableNumberInput
                             aria-label={`Step ${step.sequence} sequence`}
-                            className="number-input h-6 w-8 rounded border border-line bg-surface px-0.5 text-center text-[11px] font-medium text-ink outline-none focus:border-accent"
+                            className="number-input ui-field-standalone h-6 w-8 px-0.5 text-center text-xs"
                             value={step.sequence}
                             min={1}
                             fallbackValue={step.sequence}
@@ -4004,7 +4036,7 @@ function DetailDrawer({
                           <span className="ml-1 shrink-0">Min</span>
                           <ClearableNumberInput
                             aria-label={`Step ${step.sequence} duration minutes`}
-                            className="number-input h-6 w-12 rounded border border-line bg-surface px-0.5 text-center text-[11px] font-medium text-ink outline-none focus:border-accent"
+                            className="number-input ui-field-standalone h-6 w-12 px-0.5 text-center text-xs"
                             value={step.durationMinutes ?? 0}
                             min={0}
                             fallbackValue={step.durationMinutes ?? 0}
@@ -4014,7 +4046,7 @@ function DetailDrawer({
                         </div>
                         <textarea
                           aria-label={`Step ${step.sequence} instruction`}
-                          className="min-h-[86px] w-full resize-none rounded border border-line bg-surface px-2 py-2 text-sm font-semibold leading-snug text-ink outline-none focus:border-accent"
+                          className="ui-field-standalone min-h-[86px] resize-none py-2 text-sm leading-snug"
                           value={step.instruction}
                           onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
                           onKeyDown={(event) =>
@@ -4038,25 +4070,23 @@ function DetailDrawer({
                           <div className="flex items-center justify-between gap-2">
                             <span className="ui-mono-label">Tools</span>
                             {toolLibrary.length > 0 ? (
-                              <select
+                              <ThemedSelect
                                 aria-label={`Add saved tool to step ${step.sequence}`}
-                                className="h-7 max-w-[150px] rounded border border-line bg-surface px-1.5 text-[10px] font-bold text-steel outline-none focus:border-accent"
                                 value=""
-                                onChange={(event) => {
-                                  if (event.target.value) {
-                                    addManufacturingStepToolFromLibrary(step.id, event.target.value);
+                                className="max-w-[150px]"
+                                triggerClassName="h-7 px-1.5 text-[10px]"
+                                options={[
+                                  { value: "", label: "Library" },
+                                  ...toolLibrary
+                                    .filter((tool) => !stepTools.some((stepTool) => stepTool.toLocaleLowerCase() === tool.toLocaleLowerCase()))
+                                    .map((tool) => ({ value: tool, label: tool })),
+                                ]}
+                                onChange={(value) => {
+                                  if (value) {
+                                    addManufacturingStepToolFromLibrary(step.id, value);
                                   }
                                 }}
-                              >
-                                <option value="">Library</option>
-                                {toolLibrary
-                                  .filter((tool) => !stepTools.some((stepTool) => stepTool.toLocaleLowerCase() === tool.toLocaleLowerCase()))
-                                  .map((tool) => (
-                                    <option key={tool} value={tool}>
-                                      {tool}
-                                    </option>
-                                  ))}
-                              </select>
+                              />
                             ) : null}
                           </div>
                           <div className="grid grid-cols-[42px_minmax(0,1fr)_42px] items-center gap-1">
@@ -4198,7 +4228,7 @@ function DetailDrawer({
             <button
               type="button"
               onClick={addPartReference}
-              className="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-xs text-canvas hover:opacity-90"
+              className="ui-btn-primary h-8 gap-1 px-3 text-xs"
             >
               <Plus size={14} />
               Part
@@ -4214,18 +4244,18 @@ function DetailDrawer({
               <div key={part.id} className="rounded border border-line bg-surface-raised p-2">
                 <div className="mb-2 grid grid-cols-[1fr_74px_34px] items-end gap-2">
                   <label className="block">
-                    <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-steel">Part Number</span>
+                    <span className="ui-field-label">Part Number</span>
                     <input
-                      className="h-8 w-full rounded border border-line bg-surface px-2 text-sm font-bold text-ink outline-none"
+                      className="ui-field-standalone h-8 px-2 text-sm"
                       value={part.partNumber}
                       onChange={(event) => updatePartReference(part.id, { partNumber: event.target.value })}
                       placeholder="PN / kit / drawing ref"
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-steel">Qty</span>
+                    <span className="ui-field-label">Qty</span>
                     <ClearableNumberInput
-                      className="number-input h-8 w-full rounded border border-line bg-surface px-2 text-sm font-bold text-ink outline-none"
+                      className="number-input ui-field-standalone h-8 px-2 text-sm"
                       value={part.quantity ?? 0}
                       min={0}
                       fallbackValue={part.quantity ?? 0}
@@ -4244,18 +4274,18 @@ function DetailDrawer({
                   </button>
                 </div>
                 <label className="mb-2 block">
-                  <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-steel">Description</span>
+                  <span className="ui-field-label">Description</span>
                   <input
-                    className="h-8 w-full rounded border border-line bg-surface px-2 text-sm font-semibold text-ink outline-none"
+                    className="ui-field-standalone h-8 px-2 text-sm"
                     value={part.description ?? ""}
                     onChange={(event) => updatePartReference(part.id, { description: event.target.value })}
                     placeholder="What the reference is used for"
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-steel">Disposition / Reference Note</span>
+                  <span className="ui-field-label">Disposition / Reference Note</span>
                   <input
-                    className="h-8 w-full rounded border border-line bg-surface px-2 text-sm font-semibold text-ink outline-none"
+                    className="ui-field-standalone h-8 px-2 text-sm"
                     value={part.disposition ?? ""}
                     onChange={(event) => updatePartReference(part.id, { disposition: event.target.value })}
                     placeholder="Reuse, rework, service part, QC hold, etc."
@@ -4275,7 +4305,7 @@ function DetailDrawer({
             onChange={(value) => onUpdateTask(task.id, { plannedDurationMinutes: value, plannedFinish: addMinutes(task.plannedStart, value) })}
           />
           <div>
-            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-steel">Headcount</div>
+            <div className="ui-field-label">Headcount</div>
             <div className="flex h-10 items-center rounded border border-line bg-surface-sunken px-3 text-lg font-medium text-ink">
               {task.plannedOperators}
             </div>
@@ -4321,9 +4351,9 @@ function DetailDrawer({
         </div>
 
         <label className="block">
-          <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-steel">Safety Notes</span>
+          <span className="ui-field-label">Safety Notes</span>
           <textarea
-            className="min-h-[88px] w-full resize-none rounded border border-line bg-surface px-3 py-2 text-sm text-ink outline-none"
+            className="ui-field-standalone min-h-[88px] resize-none py-2"
             value={task.safetyNotes ?? ""}
             onChange={(event) => onUpdateTask(task.id, { safetyNotes: event.target.value })}
           />
@@ -4473,17 +4503,13 @@ function PlaybackPanel({
             >
               <RotateCcw size={17} />
             </button>
-            <select
-              className="h-10 ui-panel px-2 text-sm font-semibold text-ink outline-none"
-              value={speed}
-              onChange={(event) => onSpeed(safeNumber(event.target.value, speed))}
-            >
-              {playbackSpeeds.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <ThemedSelect
+              className="w-24"
+              triggerClassName="h-10 ui-panel px-2 text-sm font-semibold"
+              value={String(speed)}
+              options={playbackSpeeds.map((option) => ({ value: String(option.value), label: option.label }))}
+              onChange={(value) => onSpeed(safeNumber(value, speed))}
+            />
           </div>
           <div className="text-[11px] font-semibold text-ink-secondary">Simulation time</div>
           <div className="mt-1 text-2xl font-semibold tracking-tight text-ink">{formatMinutes(currentMinute)}</div>
@@ -4579,11 +4605,11 @@ export function LineWorkspace({
   const remoteRefreshTimerRef = useRef<number | null>(null);
   const remoteRefreshAppliedRef = useRef(false);
   const pendingRemoteRefreshRef = useRef(false);
-  const [feedbackToasts, setFeedbackToasts] = useState<FeedbackToast[]>([]);
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
+  const [chromeStatus, setChromeStatus] = useState<{ message: string; error?: boolean } | null>(null);
+  const [workspaceNotice, setWorkspaceNotice] = useState<Omit<FeedbackToast, "id"> | null>(null);
   const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
-  const feedbackToastIdRef = useRef(1);
-  const feedbackToastTimersRef = useRef<Map<number, number>>(new Map());
+  const chromeStatusTimerRef = useRef<number | null>(null);
   const detailDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const derivedState = useMemo<PlannerState>(() => {
@@ -5027,12 +5053,7 @@ export function LineWorkspace({
     };
   }, [dirtyVersion, derivedState, hasLoadedRemoteState]);
 
-  useEffect(() => {
-    return () => {
-      feedbackToastTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-      feedbackToastTimersRef.current.clear();
-    };
-  }, []);
+  useEffect(() => () => clearChromeStatusTimer(), []);
 
   useEffect(() => {
     if (!isResizingDetailDrawer) return;
@@ -5072,23 +5093,34 @@ export function LineWorkspace({
     };
   }, [isResizingDetailDrawer]);
 
-  function dismissFeedbackToast(id: number) {
-    const timer = feedbackToastTimersRef.current.get(id);
-    if (timer) {
-      window.clearTimeout(timer);
-      feedbackToastTimersRef.current.delete(id);
+  function clearChromeStatusTimer() {
+    if (chromeStatusTimerRef.current) {
+      window.clearTimeout(chromeStatusTimerRef.current);
+      chromeStatusTimerRef.current = null;
     }
+  }
 
-    setFeedbackToasts((current) => current.filter((toast) => toast.id !== id));
+  function dismissWorkspaceNotice() {
+    setWorkspaceNotice(null);
   }
 
   function notifyFeedback(message: Omit<FeedbackToast, "id">) {
-    const id = feedbackToastIdRef.current;
-    feedbackToastIdRef.current += 1;
-    setFeedbackToasts((current) => [...current.slice(-2), { ...message, id }]);
+    if (message.content || message.placement === "center") {
+      setWorkspaceNotice(message);
+      return;
+    }
+
+    const statusText = [message.title, message.body].filter(Boolean).join(": ");
+    const error = message.tone === "danger" || message.tone === "warning";
+
+    clearChromeStatusTimer();
+    setChromeStatus({ message: statusText, error });
+
     if (!message.persistent) {
-      const timer = window.setTimeout(() => dismissFeedbackToast(id), message.tone === "danger" || message.tone === "warning" ? 9000 : 5200);
-      feedbackToastTimersRef.current.set(id, timer);
+      chromeStatusTimerRef.current = window.setTimeout(() => {
+        setChromeStatus(null);
+        chromeStatusTimerRef.current = null;
+      }, error ? 9000 : 5200);
     }
   }
 
@@ -5103,18 +5135,14 @@ export function LineWorkspace({
     restoreLabel?: string;
     title: string;
   }) {
-    notifyFeedback({
+    setWorkspaceNotice({
       title,
       tone: "warning",
       persistent: true,
       content: (
-        <div className="mt-2 space-y-3">
-          <div className="text-sm font-semibold leading-relaxed text-steel">{body}</div>
-          <button
-            type="button"
-            onClick={onRestore}
-            className="inline-flex h-8 items-center justify-center rounded border border-accent bg-surface px-3 text-xs ui-mono-label tracking-wide text-accent transition hover:bg-accent-muted"
-          >
+        <div className="space-y-3">
+          <p className="ui-workspace-notice-body">{body}</p>
+          <button type="button" onClick={onRestore} className="ui-btn-secondary h-8 px-3">
             {restoreLabel}
           </button>
         </div>
@@ -5147,10 +5175,11 @@ export function LineWorkspace({
   const isProcedureModule = activeModule === "procedure";
   const isDashboardModule = activeModule === "dashboard";
   const isSettingsModule = activeModule === "settings";
+  const isComingSoonModule = comingSoonModuleIds.has(activeModule);
+  const comingSoonModuleLabel = plannerModules.find((module) => module.id === activeModule)?.label ?? "Workspace";
   const plannerChromeContext = isDashboardModule ? buildPlannerChromeContext(derivedState.product) : undefined;
   const showDetailDrawer = false;
-  const showsSchedulingWorkspace =
-    !isProcedureModule && !isDashboardModule && activeModule !== "setup" && !isSettingsModule;
+  const showsSchedulingWorkspace = activeModule === "gantt";
   const selectedTask = derivedState.tasks.find((task) => task.id === selectedTaskId) ?? derivedState.tasks[0];
   const selectedStation = selectedTask
     ? buildProcessStationForTask(selectedTask, derivedState.tasks, kpis.bottleneckStation?.id)
@@ -5709,19 +5738,17 @@ export function LineWorkspace({
       title: "Manual copy needed",
       content: (
         <div className="space-y-3">
-          <div className="text-sm font-semibold leading-relaxed text-steel">
+          <p className="ui-workspace-notice-body">
             The browser blocked clipboard access. Select the text below and copy it manually.
-          </div>
+          </p>
           <textarea
             readOnly
             value={text}
             onFocus={(event) => event.currentTarget.select()}
-            className="h-[320px] w-full resize-none rounded border border-line bg-surface p-3 font-mono text-[11px] leading-relaxed text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+            className="ui-field-standalone h-[320px] resize-none p-3 font-mono text-xs leading-relaxed"
           />
           {errors.length ? (
-            <div className="rounded border border-line bg-surface-raised px-3 py-2 text-[11px] font-semibold leading-snug text-steel">
-              {errors.join(" ")}
-            </div>
+            <p className="ui-workspace-notice-body text-danger">{errors.join(" ")}</p>
           ) : null}
         </div>
       ),
@@ -6018,7 +6045,7 @@ export function LineWorkspace({
             <button
               type="button"
               onClick={() => void copySmartAllocationReview(reviewText)}
-              className="inline-flex h-9 items-center gap-2 rounded border border-graphite bg-accent px-3 text-xs font-medium text-canvas outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-accent"
+              className="ui-btn-primary h-9 gap-2 px-3 text-xs"
             >
               <Copy size={14} />
               Copy Audit
@@ -6610,12 +6637,12 @@ export function LineWorkspace({
     notifyFeedback({
       title: "Line plan export ready",
       content: (
-        <div className="space-y-2 text-sm font-semibold leading-relaxed text-steel">
-          <div>The download should start automatically.</div>
+        <div className="space-y-2">
+          <p className="ui-workspace-notice-body">The download should start automatically.</p>
           <a
             href={exportFile.url}
             download={exportFile.filename}
-            className="inline-flex h-8 items-center rounded border border-graphite bg-accent px-3 text-xs font-medium text-canvas hover:opacity-90"
+            className="ui-btn-secondary inline-flex h-8 items-center px-3 text-xs"
           >
             Download manually
           </a>
@@ -6636,13 +6663,15 @@ export function LineWorkspace({
       notifyFeedback({
         title: "Station setup document ready",
         content: (
-          <div className="space-y-2 text-sm font-semibold leading-relaxed text-steel">
-            <div>The HTML document should download automatically and can be opened in any browser.</div>
+          <div className="space-y-2">
+            <p className="ui-workspace-notice-body">
+              The HTML document should download automatically and can be opened in any browser.
+            </p>
             <div className="flex flex-wrap gap-2">
               <a
                 href={exportFile.url}
                 download={exportFile.filename}
-                className="inline-flex h-8 items-center rounded border border-graphite bg-accent px-3 text-xs font-medium text-canvas hover:opacity-90"
+                className="ui-btn-secondary inline-flex h-8 items-center px-3 text-xs"
               >
                 Download manually
               </a>
@@ -6650,7 +6679,7 @@ export function LineWorkspace({
                 href={exportFile.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-8 items-center rounded border border-line bg-surface px-3 text-xs font-medium text-ink hover:bg-surface-sunken"
+                className="ui-btn-ghost inline-flex h-8 items-center px-3 text-xs"
               >
                 Open preview
               </a>
@@ -6757,7 +6786,26 @@ export function LineWorkspace({
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         context={plannerChromeContext}
+        chromeStatus={chromeStatus}
       />
+
+      {workspaceNotice ? (
+        <section className="ui-workspace-notice">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <NothingStatus error={workspaceNotice.tone === "danger" || workspaceNotice.tone === "warning"}>
+                {workspaceNotice.title}
+              </NothingStatus>
+              {workspaceNotice.content ?? (
+                workspaceNotice.body ? <p className="ui-workspace-notice-body">{workspaceNotice.body}</p> : null
+              )}
+            </div>
+            <button type="button" onClick={dismissWorkspaceNotice} className="ui-btn-ghost h-8 shrink-0 px-2">
+              Dismiss
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <div className={workspaceGridClass}>
         <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
@@ -6796,7 +6844,7 @@ export function LineWorkspace({
           </main>
         ) : (
           <main
-            className={`ui-workspace-content ${
+            className={`ui-workspace-content ${activeModule === "gantt" ? "ui-gantt-page" : ""} ${
               isDashboardModule
                 ? "p-0 pb-6"
                 : `space-y-4 p-3 sm:p-4 ${SIMULATION_ENABLED ? (playbackCollapsed ? "pb-20" : "pb-44") : "pb-6"}`
@@ -6819,7 +6867,6 @@ export function LineWorkspace({
               <>
                 {activeModule === "setup" ? (
                   <div className="ui-setup-page space-y-4">
-                    <KpiStrip kpis={kpis} product={derivedState.product} />
                     <ProductSetupPanel
                       product={derivedState.product}
                       onProductNumber={updateProductNumber}
@@ -6835,6 +6882,11 @@ export function LineWorkspace({
                       onConfirmAction={requestFeedbackConfirm}
                     />
                   </div>
+                ) : isComingSoonModule ? (
+                  <ComingSoonModuleView moduleLabel={comingSoonModuleLabel}>
+                    <KpiStrip kpis={kpis} product={derivedState.product} />
+                    {lineReadinessPanel}
+                  </ComingSoonModuleView>
                 ) : (
                   <>
                     <KpiStrip kpis={kpis} product={derivedState.product} />
@@ -6844,8 +6896,8 @@ export function LineWorkspace({
 
                 {showsSchedulingWorkspace ? (
               <>
-                <section className="ui-panel overflow-hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-3 py-4 sm:px-4">
+                <section className="ui-gantt-workspace">
+                  <div className="ui-gantt-workspace-head">
                     <div>
                       <h2 className="ui-section-title">Manufacturing Gantt</h2>
                       <p className="ui-section-subtitle">
@@ -6913,15 +6965,6 @@ export function LineWorkspace({
                   />
                 </section>
 
-                {activeModule === "balance" ? (
-                  <StationBalance
-                    stations={derivedState.stations}
-                    taktMinutes={kpis.taktMinutes}
-                    selectedStationId={selectedStationId}
-                    onSelectStation={selectStation}
-                    onUpdateOperators={updateStationOperators}
-                  />
-                ) : null}
               </>
             ) : null}
               </>
@@ -6969,10 +7012,10 @@ export function LineWorkspace({
       ) : null}
       <ThemedFeedbackLayer
         confirm={feedbackConfirm}
-        toasts={feedbackToasts}
+        toasts={[]}
         onCancelConfirm={() => setFeedbackConfirm(undefined)}
         onConfirm={confirmFeedbackAction}
-        onDismissToast={dismissFeedbackToast}
+        onDismissToast={() => {}}
       />
     </div>
   );

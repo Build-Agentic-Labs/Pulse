@@ -46,6 +46,7 @@ import {
   type PhotoTextAnnotation,
 } from "@/domain/photo-annotations";
 import type { StepPhotoAttachment } from "@/domain/step-photos";
+import { ThemedSelect } from "./themed-select";
 
 type AnnotationContextMenu = {
   x: number;
@@ -1390,19 +1391,15 @@ export function StepPhotoViewer({
                   style={{ backgroundColor: activeColor }}
                   aria-hidden="true"
                 />
-                <select
+                <ThemedSelect
                   className="ui-photo-viewer-color-select"
+                  triggerClassName="h-8 px-2 text-xs"
                   value={activeColor}
-                  onChange={(event) => applyColor(event.target.value)}
+                  onChange={applyColor}
+                  options={PHOTO_ANNOTATION_COLORS}
                   aria-label="Annotation color"
-                  tabIndex={toolbarVisibility === "minimized" ? -1 : 0}
-                >
-                  {PHOTO_ANNOTATION_COLORS.map((color) => (
-                    <option key={color.value} value={color.value}>
-                      {color.label}
-                    </option>
-                  ))}
-                </select>
+                  disabled={toolbarVisibility === "minimized"}
+                />
               </label>
               <div className="ui-photo-viewer-size-stepper" aria-label="Annotation size">
                 <button

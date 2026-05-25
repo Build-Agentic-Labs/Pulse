@@ -132,8 +132,8 @@ export function SidebarUserPanel() {
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[11px] font-medium text-ink">{displayName}</div>
-          <div className="truncate text-[10px] text-ink-tertiary">{profile.email}</div>
+          <div className="mt-1 truncate ui-section-subtitle font-medium text-ink">{displayName}</div>
+          <div className="truncate ui-mono-label text-ink-tertiary">{profile.email}</div>
         </div>
         <button
           type="button"

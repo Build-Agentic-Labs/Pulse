@@ -124,6 +124,12 @@ function rateLimitKey(request: Request, userId: string) {
 
 function checkRateLimit(key: string) {
   const now = Date.now();
+  for (const [entryKey, entry] of smartAllocationRateLimits.entries()) {
+    if (entry.resetAt <= now) {
+      smartAllocationRateLimits.delete(entryKey);
+    }
+  }
+
   const current = smartAllocationRateLimits.get(key);
 
   if (!current || current.resetAt <= now) {

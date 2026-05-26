@@ -970,6 +970,11 @@ export function MobilePhotoPortal({
     () => sortManufacturingSteps(selectedTask?.manufacturingSteps ?? []),
     [selectedTask],
   );
+  const realtimeTaskIds = useMemo(
+    () => plannerState?.tasks.map((task) => task.id) ?? [],
+    [plannerState?.tasks],
+  );
+  const realtimeTaskIdsKey = useMemo(() => realtimeTaskIds.join("|"), [realtimeTaskIds]);
   const visibleSelectedTaskSteps = useMemo(
     () =>
       showNewStepForm && newStepId
@@ -1685,7 +1690,7 @@ export function MobilePhotoPortal({
       {
         productId: plannerState.product.id,
         scenarioId: plannerState.scenario.id,
-        taskIds: plannerState.tasks.map((task) => task.id),
+        taskIds: realtimeTaskIds,
       },
     );
 
@@ -1695,7 +1700,7 @@ export function MobilePhotoPortal({
       }
       unsubscribe();
     };
-  }, [plannerState?.product.id, plannerState?.scenario.id, plannerState?.tasks]);
+  }, [plannerState?.product.id, plannerState?.scenario.id, realtimeTaskIdsKey]);
 
   function refreshWriteLock() {
     saveInFlightRef.current =

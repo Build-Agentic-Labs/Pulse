@@ -96,15 +96,21 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     setChildReady(false);
   }, [projectId]);
 
-  const selectedProject = projectId ? buildProjectContext(groups, projectId) : undefined;
-  const flatProjects = groups.flatMap((group) =>
-    group.projects
-      .filter((project) => project.status !== "archived")
-      .map((project) => ({
-        project,
-        workspace: group.workspace,
-        role: group.role,
-      })),
+  const selectedProject = useMemo(
+    () => (projectId ? buildProjectContext(groups, projectId) : undefined),
+    [groups, projectId],
+  );
+  const flatProjects = useMemo(
+    () => groups.flatMap((group) =>
+      group.projects
+        .filter((project) => project.status !== "archived")
+        .map((project) => ({
+          project,
+          workspace: group.workspace,
+          role: group.role,
+        })),
+    ),
+    [groups],
   );
 
   async function refreshWorkspaceProjects(nextSession = session, options: { showLoading?: boolean } = {}) {

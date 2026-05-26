@@ -4708,6 +4708,11 @@ export function LineWorkspace({
     () => buildProjectToolRegistry(derivedState.tasks, toolLibraryItems),
     [derivedState.tasks, toolLibraryItems],
   );
+  const realtimeTaskIds = useMemo(
+    () => derivedState.tasks.map((task) => task.id),
+    [derivedState.tasks],
+  );
+  const realtimeTaskIdsKey = useMemo(() => realtimeTaskIds.join("|"), [realtimeTaskIds]);
 
   useEffect(() => {
     let active = true;
@@ -5102,7 +5107,7 @@ export function LineWorkspace({
       {
         productId: derivedState.product.id,
         scenarioId: derivedState.scenario.id,
-        taskIds: derivedState.tasks.map((task) => task.id),
+        taskIds: realtimeTaskIds,
       },
     );
 
@@ -5124,7 +5129,7 @@ export function LineWorkspace({
       }
       unsubscribe();
     };
-  }, [derivedState.product.id, derivedState.scenario.id, derivedState.tasks, hasLoadedRemoteState]);
+  }, [derivedState.product.id, derivedState.scenario.id, realtimeTaskIdsKey, hasLoadedRemoteState]);
 
   useEffect(() => {
     if (!SIMULATION_ENABLED || !isPlaying) {

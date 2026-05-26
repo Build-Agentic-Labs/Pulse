@@ -2442,12 +2442,13 @@ export async function uploadStepPhotoAttachment(
 }
 
 export async function removeStepPhotoAttachmentObject(photo: StepPhotoAttachment) {
-  if (!photo.storagePath) {
+  const paths = [photo.storagePath, photo.thumbnailStoragePath].filter((value): value is string => Boolean(value));
+  if (!paths.length) {
     return;
   }
 
   const supabase = plannerClient();
-  await throwIfError(supabase.storage.from(stepPhotoBucket).remove([photo.storagePath]));
+  await throwIfError(supabase.storage.from(stepPhotoBucket).remove(paths));
 }
 
 export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtimePayload) => void, scope?: PlannerRealtimeScope) {

@@ -495,6 +495,31 @@ export function StepPhotoViewer({
     setContextMenu(null);
   }, [photo.id]);
 
+  useEffect(() => {
+    if (photos.length <= 1) {
+      return;
+    }
+
+    const currentIndex = photos.findIndex((candidate) => candidate.id === photo.id);
+    if (currentIndex < 0) {
+      return;
+    }
+
+    const adjacentPhotos = [
+      photos[(currentIndex - 1 + photos.length) % photos.length],
+      photos[(currentIndex + 1) % photos.length],
+    ];
+
+    adjacentPhotos.forEach((adjacentPhoto) => {
+      if (!adjacentPhoto?.dataUrl) {
+        return;
+      }
+      const image = new Image();
+      image.decoding = "async";
+      image.src = adjacentPhoto.dataUrl;
+    });
+  }, [photo.id, photos]);
+
   useLayoutEffect(() => {
     if (overlaySize.width <= 0 || overlaySize.height <= 0) {
       return;
@@ -1288,7 +1313,13 @@ export function StepPhotoViewer({
       onClick={onClose}
     >
       <div className="ui-photo-viewer-frame" onClick={(event) => event.stopPropagation()}>
-        <img src={photo.dataUrl} alt={`Step ${stepSequence} photo ${photo.name}`} className="ui-photo-viewer-image" />
+        <img
+          src={photo.dataUrl}
+          alt={`Step ${stepSequence} photo ${photo.name}`}
+          decoding="async"
+          fetchPriority="high"
+          className="ui-photo-viewer-image"
+        />
         <div
           ref={overlayRef}
           className={`ui-photo-viewer-annotation-layer ${activeTool === "select" ? "ui-photo-viewer-annotation-layer-select" : "ui-photo-viewer-annotation-layer-draw"}${dragState?.active ? " ui-photo-viewer-annotation-dragging" : ""}`}

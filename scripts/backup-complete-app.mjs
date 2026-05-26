@@ -80,6 +80,30 @@ async function writeText(relativePath, content) {
   await writeFile(filePath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
 }
 
+function redactEnv(envText) {
+  return envText
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) {
+        return line;
+      }
+
+      const key = line.slice(0, line.indexOf("="));
+      const value = line.slice(line.indexOf("=") + 1);
+      if (!value.trim()) {
+        return line;
+      }
+
+      if (/^(NEXT_PUBLIC_SUPABASE_URL|NEXT_PUBLIC_PHONE_PORTAL_URL|PHONE_PORTAL_URL|OPENAI_MODEL)$/.test(key.trim())) {
+        return line;
+      }
+
+      return `${key}=<redacted>`;
+    })
+    .join("\n");
+}
+
 await mkdir(backupRoot, { recursive: true });
 
 for (const dirName of ROOT_DIRS) {
@@ -92,10 +116,6 @@ for (const fileName of ROOT_FILES) {
     continue;
   }
   await copyTree(fileName, path.join("code", fileName));
-}
-
-if (existsSync(path.join(cwd, ".env.local"))) {
-  await copyTree(".env.local", path.join("local", ".env.local"));
 }
 
 const gitDir = path.join(backupRoot, "git");
@@ -117,9 +137,10 @@ for (const [name, content] of Object.entries(gitFiles)) {
 let envNote = "No .env.local copied.";
 if (existsSync(path.join(cwd, ".env.local"))) {
   const envText = await readFile(path.join(cwd, ".env.local"), "utf8");
+  await writeText("local/.env.local.redacted", redactEnv(envText));
   const hasServiceKey = /^SUPABASE_SERVICE_ROLE_KEY=.+/m.test(envText);
   envNote = hasServiceKey
-    ? "SUPABASE_SERVICE_ROLE_KEY is set. Run `node scripts/backup-flexboost.mjs` for database/storage backup."
+    ? "SUPABASE_SERVICE_ROLE_KEY is set locally but redacted from this backup. Run `node scripts/backup-flexboost.mjs` separately for database/storage backup."
     : "SUPABASE_SERVICE_ROLE_KEY is not set. Code backup only; add the key and run `node scripts/backup-flexboost.mjs` for data.";
 }
 
@@ -133,7 +154,7 @@ const readme = [
   "## Contents",
   "",
   "- `code/`: application source, config, scripts, and Supabase migrations",
-  "- `local/.env.local`: local environment (if present)",
+  "- `local/.env.local.redacted`: local environment shape with secrets redacted (if present)",
   "- `git/`: branch, commit, status, and uncommitted diffs for restore reference",
   "",
   "## Restore code",
@@ -159,7 +180,7 @@ const manifest = {
   },
   copiedRoots: ROOT_DIRS.filter((dirName) => existsSync(path.join(cwd, dirName))),
   copiedRootFiles: ROOT_FILES.filter((fileName) => existsSync(path.join(cwd, fileName))),
-  envLocalCopied: existsSync(path.join(cwd, ".env.local")),
+  envLocalRedacted: existsSync(path.join(cwd, ".env.local")),
 };
 
 await writeText("manifest.json", JSON.stringify(manifest, null, 2));

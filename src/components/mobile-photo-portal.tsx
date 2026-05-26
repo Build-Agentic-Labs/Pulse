@@ -3041,7 +3041,7 @@ export function MobilePhotoPortal({
     if (toolImage?.imageUrl) {
       return (
         <div className="relative aspect-[4/3] overflow-hidden rounded bg-surface">
-          <img src={toolImage.imageUrl} alt={toolName} className="h-full w-full object-cover" />
+          <img src={toolImage.imageUrl} alt={toolName} loading="lazy" decoding="async" className="h-full w-full object-cover" />
         </div>
       );
     }
@@ -3063,7 +3063,7 @@ export function MobilePhotoPortal({
 
     return (
       <div className="relative aspect-[4/3] overflow-hidden rounded bg-surface">
-        <img src={`/tool-images/${toolType}.png`} alt={toolName} className="h-full w-full object-cover" />
+        <img src={`/tool-images/${toolType}.png`} alt={toolName} loading="lazy" decoding="async" className="h-full w-full object-cover" />
       </div>
     );
   }
@@ -3991,8 +3991,10 @@ export function MobilePhotoPortal({
                           {newStepDraftPhotos.map((photo) => (
                             <div key={photo.id} className="ui-photo-mobile-step-photo-card bg-surface-raised">
                               <img
-                                src={photo.dataUrl}
+                                src={photo.thumbnailUrl ?? photo.dataUrl}
                                 alt="New step photo"
+                                loading="lazy"
+                                decoding="async"
                                 className="ui-photo-mobile-step-photo-image"
                               />
                               <div className="ui-photo-mobile-step-photo-meta">
@@ -4306,8 +4308,10 @@ export function MobilePhotoPortal({
                                 onContextMenu={(event) => event.preventDefault()}
                               >
                                 <img
-                                  src={photo.dataUrl}
+                                  src={photo.thumbnailUrl ?? photo.dataUrl}
                                   alt={`${selectedTask.name} step ${step.sequence}`}
+                                  loading="lazy"
+                                  decoding="async"
                                   className="ui-photo-mobile-step-photo-image"
                                 />
                                 {revealedPhotoDeleteId === photo.id ? (

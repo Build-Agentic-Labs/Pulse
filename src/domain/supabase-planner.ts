@@ -28,6 +28,8 @@ import { formatDisplayTitle } from "@/lib/display-names";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const stepPhotoBucket = "step-photos";
+const STEP_PHOTO_THUMBNAIL_EDGE = 320;
+const STORAGE_SIGNED_URL_SECONDS = 60 * 60;
 const realtimePlannerTables = [
   "products",
   "scenarios",
@@ -50,12 +52,21 @@ type PlannerRealtimeScope = {
   taskIds?: string[];
 };
 
+export type PlannerRealtimePayload = {
+  table: (typeof realtimePlannerTables)[number];
+  eventType: "INSERT" | "UPDATE" | "DELETE" | "*";
+  new?: Record<string, unknown>;
+  old?: Record<string, unknown>;
+};
+
 type StepPhotoRow = {
   id: string;
   task_id: string;
   step_id: string;
   storage_path: string;
   public_url: string;
+  thumbnail_url?: string | null;
+  thumbnail_storage_path?: string | null;
   file_name: string;
   mime_type?: string | null;
   size_bytes?: number | null;
@@ -651,8 +662,46 @@ function mapStepPhotoRecord(row: Record<string, unknown>): StepPhotoAttachment {
     width: maybeNum(row.width),
     height: maybeNum(row.height),
     storagePath: maybeText(row.storage_path),
+    thumbnailUrl: maybeText(row.thumbnail_url),
+    thumbnailStoragePath: maybeText(row.thumbnail_storage_path),
     caption: maybeText(row.caption),
   };
+}
+
+async function signedStorageUrl(supabase: SupabaseClient, storagePath?: string | null) {
+  if (!storagePath) {
+    return undefined;
+  }
+
+  const { data, error } = await supabase.storage
+    .from(stepPhotoBucket)
+    .createSignedUrl(storagePath, STORAGE_SIGNED_URL_SECONDS);
+
+  if (error) {
+    return undefined;
+  }
+
+  return data.signedUrl;
+}
+
+async function withSignedStepPhotoRows(supabase: SupabaseClient, rows: StepPhotoRow[] = []) {
+  return Promise.all(
+    rows.map(async (row) => ({
+      ...row,
+      public_url: (await signedStorageUrl(supabase, row.storage_path)) ?? row.public_url,
+      thumbnail_url:
+        (await signedStorageUrl(supabase, row.thumbnail_storage_path)) ?? row.thumbnail_url ?? null,
+    })),
+  );
+}
+
+async function withSignedToolLibraryRows(supabase: SupabaseClient, rows: ToolLibraryRow[] = []) {
+  return Promise.all(
+    rows.map(async (row) => ({
+      ...row,
+      image_url: (await signedStorageUrl(supabase, row.storage_path)) ?? row.image_url ?? null,
+    })),
+  );
 }
 
 function withNormalizedStepAssets(
@@ -769,6 +818,30 @@ function projectScopedStoragePath(
         `${photo.id}.${extension}`,
       ]
     : [taskId, stepId, `${photo.id}.${extension}`];
+
+  return pathSegments.map(safeStorageSegment).join("/");
+}
+
+function projectScopedThumbnailStoragePath(
+  taskId: string,
+  stepId: string,
+  photo: StepPhotoAttachment,
+  project?: PlannerProjectContext,
+) {
+  const pathSegments = project
+    ? [
+        "workspaces",
+        project.workspaceId,
+        "projects",
+        project.projectId,
+        "tasks",
+        taskId,
+        "steps",
+        stepId,
+        "thumbnails",
+        `${photo.id}.webp`,
+      ]
+    : [taskId, stepId, "thumbnails", `${photo.id}.webp`];
 
   return pathSegments.map(safeStorageSegment).join("/");
 }
@@ -1259,7 +1332,8 @@ export async function loadPlannerStateWithProjectFromSupabase(projectId?: string
   const dependencyIdsByTaskId = new Map<string, string[]>();
   const stepsByTaskId = new Map<string, ManufacturingStep[]>();
   const partsByTaskId = new Map<string, PartReference[]>();
-  const photosByTaskId = indexStepPhotos((stepPhotos ?? []) as StepPhotoRow[]);
+  const signedStepPhotos = await withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[]);
+  const photosByTaskId = indexStepPhotos(signedStepPhotos);
   const toolsByTaskId = indexStepTools((stepTools ?? []) as StepToolRow[]);
 
   (dependencies ?? []).forEach((dependency) => {
@@ -1797,7 +1871,8 @@ export async function loadToolLibraryFromSupabase(projectId?: string): Promise<T
   }
 
   const rows = await throwIfError(query);
-  return ((rows ?? []) as ToolLibraryRow[]).map(mapToolLibraryRow);
+  const signedRows = await withSignedToolLibraryRows(supabase, (rows ?? []) as ToolLibraryRow[]);
+  return signedRows.map(mapToolLibraryRow);
 }
 
 export async function uploadToolLibraryImage(
@@ -1827,17 +1902,17 @@ export async function uploadToolLibraryImage(
     }),
   );
 
-  const { data } = supabase.storage.from(stepPhotoBucket).getPublicUrl(storagePath);
   const row = {
     id: toolLibraryId(tool, projectId),
     project_id: projectId ?? null,
     tool_name: tool,
-    image_url: data.publicUrl,
+    image_url: stableStoragePublicUrl(storagePath),
     storage_path: storagePath,
   };
 
   const saved = await throwIfError(supabase.from("tool_library").upsert(row).select("*").single());
-  return mapToolLibraryRow(saved as ToolLibraryRow);
+  const [signedSaved] = await withSignedToolLibraryRows(supabase, [saved as ToolLibraryRow]);
+  return mapToolLibraryRow(signedSaved);
 }
 
 export async function upsertToolLibraryMetadata(input: {
@@ -1881,7 +1956,8 @@ export async function upsertToolLibraryMetadata(input: {
   };
 
   const saved = await throwIfError(supabase.from("tool_library").upsert(row).select("*").single());
-  return mapToolLibraryRow(saved as ToolLibraryRow);
+  const [signedSaved] = await withSignedToolLibraryRows(supabase, [saved as ToolLibraryRow]);
+  return mapToolLibraryRow(signedSaved);
 }
 
 export async function deleteToolLibraryFromSupabase(id: string, projectId?: string) {
@@ -2124,7 +2200,7 @@ export async function loadTaskFromSupabase(taskId: string, projectId?: string): 
 
   return withNormalizedStepAssets(
     mappedTask,
-    indexStepPhotos((stepPhotos ?? []) as StepPhotoRow[]),
+    indexStepPhotos(await withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[])),
     indexStepTools((stepTools ?? []) as StepToolRow[]),
   );
 }
@@ -2150,6 +2226,58 @@ function dataUrlToBlob(dataUrl: string) {
   });
 }
 
+function blobToImage(blob: Blob) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    if (typeof Image === "undefined" || typeof URL === "undefined") {
+      reject(new Error("Photo thumbnails can only be generated in the browser."));
+      return;
+    }
+
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(blob);
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Unable to generate photo thumbnail."));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function createPhotoThumbnailBlob(blob: Blob) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const image = await blobToImage(blob);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  if (!sourceWidth || !sourceHeight) {
+    return null;
+  }
+
+  const scale = Math.min(1, STEP_PHOTO_THUMBNAIL_EDGE / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((thumbnailBlob) => resolve(thumbnailBlob), "image/webp", 0.78);
+  });
+}
+
 function safeStorageSegment(value: string) {
   return value.replace(/[^a-zA-Z0-9._-]/g, "-");
 }
@@ -2161,6 +2289,10 @@ function stepToolId(stepId: string, toolName: string) {
 function toolLibraryId(toolName: string, projectId?: string) {
   const scope = projectId ? safeStorageSegment(projectId) : "global";
   return `tool-library-${scope}-${safeStorageSegment(toolName.trim().toLocaleLowerCase())}`;
+}
+
+function stableStoragePublicUrl(storagePath: string) {
+  return `${supabaseUrl}/storage/v1/object/public/${stepPhotoBucket}/${storagePath}`;
 }
 
 function mapToolLibraryRow(row: ToolLibraryRow): ToolLibraryItem {
@@ -2223,7 +2355,9 @@ function stepPhotoRow(taskId: string, stepId: string, photo: StepPhotoAttachment
     task_id: taskId,
     step_id: stepId,
     storage_path: storagePath,
-    public_url: photo.dataUrl,
+    public_url: stableStoragePublicUrl(storagePath),
+    thumbnail_url: photo.thumbnailStoragePath ? stableStoragePublicUrl(photo.thumbnailStoragePath) : (photo.thumbnailUrl ?? null),
+    thumbnail_storage_path: photo.thumbnailStoragePath ?? null,
     file_name: photo.name || "Step photo",
     mime_type: photo.contentType ?? null,
     size_bytes: photo.sizeBytes ?? null,
@@ -2274,12 +2408,30 @@ export async function uploadStepPhotoAttachment(
     }),
   );
 
-  const { data } = supabase.storage.from(stepPhotoBucket).getPublicUrl(storagePath);
+  const publicUrl = stableStoragePublicUrl(storagePath);
+  const signedUrl = await signedStorageUrl(supabase, storagePath);
+  let thumbnailUrl: string | undefined;
+  let thumbnailStoragePath: string | undefined;
+
+  const thumbnailBlob = await createPhotoThumbnailBlob(blob).catch(() => null);
+  if (thumbnailBlob) {
+    thumbnailStoragePath = projectScopedThumbnailStoragePath(taskId, stepId, photo, project);
+    await throwIfError(
+      supabase.storage.from(stepPhotoBucket).upload(thumbnailStoragePath, thumbnailBlob, {
+        cacheControl: "31536000",
+        contentType: thumbnailBlob.type || "image/webp",
+        upsert: true,
+      }),
+    );
+    thumbnailUrl = await signedStorageUrl(supabase, thumbnailStoragePath);
+  }
 
   const uploadedPhoto = {
     ...photo,
-    dataUrl: data.publicUrl,
+    dataUrl: signedUrl ?? publicUrl,
     storagePath,
+    thumbnailUrl,
+    thumbnailStoragePath,
     contentType: photo.contentType ?? blob.type,
     sizeBytes: blob.size,
   };
@@ -2298,7 +2450,7 @@ export async function removeStepPhotoAttachmentObject(photo: StepPhotoAttachment
   await throwIfError(supabase.storage.from(stepPhotoBucket).remove([photo.storagePath]));
 }
 
-export function subscribePlannerStateChanges(onChange: () => void, scope?: PlannerRealtimeScope) {
+export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtimePayload) => void, scope?: PlannerRealtimeScope) {
   const supabase = plannerClient();
   const channel = supabase.channel(`planner-state-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const taskIds = scope?.taskIds?.filter(Boolean) ?? [];
@@ -2306,7 +2458,14 @@ export function subscribePlannerStateChanges(onChange: () => void, scope?: Plann
   const taskFilter = taskIds.length ? `task_id=in.(${taskIdList})` : undefined;
 
   function listen(table: (typeof realtimePlannerTables)[number], filter?: string) {
-    channel.on("postgres_changes", { event: "*", schema: "public", table, ...(filter ? { filter } : {}) }, onChange);
+    channel.on("postgres_changes", { event: "*", schema: "public", table, ...(filter ? { filter } : {}) }, (payload) => {
+      onChange({
+        table,
+        eventType: payload.eventType as PlannerRealtimePayload["eventType"],
+        new: payload.new as Record<string, unknown> | undefined,
+        old: payload.old as Record<string, unknown> | undefined,
+      });
+    });
   }
 
   listen("products", scope?.productId ? `id=eq.${scope.productId}` : undefined);
@@ -2321,10 +2480,24 @@ export function subscribePlannerStateChanges(onChange: () => void, scope?: Plann
   listen("step_photos", taskFilter);
   listen("step_tools", taskFilter);
   if (scope?.productId) {
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "custom_columns", filter: `product_id=eq.${scope.productId}` }, onChange);
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "custom_columns", filter: `product_id=eq.${scope.productId}` }, (payload) => {
+      onChange({
+        table: "custom_columns",
+        eventType: payload.eventType as PlannerRealtimePayload["eventType"],
+        new: payload.new as Record<string, unknown> | undefined,
+        old: payload.old as Record<string, unknown> | undefined,
+      });
+    });
   }
   if (scope?.scenarioId) {
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "custom_columns", filter: `scenario_id=eq.${scope.scenarioId}` }, onChange);
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "custom_columns", filter: `scenario_id=eq.${scope.scenarioId}` }, (payload) => {
+      onChange({
+        table: "custom_columns",
+        eventType: payload.eventType as PlannerRealtimePayload["eventType"],
+        new: payload.new as Record<string, unknown> | undefined,
+        old: payload.old as Record<string, unknown> | undefined,
+      });
+    });
   }
 
   channel.subscribe();

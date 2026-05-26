@@ -58,6 +58,7 @@ import type { IeSmartAllocationPlan, IeSmartAllocationRequest } from "@/domain/i
 import { getTaskOperatorIds, getTaskOperatorResetPatch, syncTaskOperatorCount } from "@/domain/operator-assignments";
 import { buildMarkdownReport, buildStationSetupDocumentHtml } from "@/domain/report";
 import { initialPlannerState } from "@/domain/seed";
+import { readCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
   getStepPhotoAttachments,
@@ -85,6 +86,7 @@ import {
 import { applyInstructionBullets, resolveBulletEnter } from "@/domain/instruction-bullets";
 import {
   addStepToolToSupabase,
+  createPlannerSupabaseClient,
   deleteToolLibraryFromSupabase,
   loadPlannerStateFromSupabase,
   loadTaskFromSupabase,
@@ -96,6 +98,7 @@ import {
   softDeleteStepPhotoAttachmentFromSupabase,
   subscribePlannerStateChanges,
   uploadStepPhotoAttachment,
+  type PlannerRealtimePayload,
   type SaveState,
   type ToolLibraryItem,
 } from "@/domain/supabase-planner";
@@ -886,9 +889,18 @@ function periodLabel(period: DemandPeriod) {
 type SmartAllocationResult = ReturnType<typeof buildSmartOperatorAssignments>;
 
 async function requestIeSmartAllocationPlan(request: IeSmartAllocationRequest): Promise<IeSmartAllocationPlan> {
+  const supabase = createPlannerSupabaseClient();
+  const { data } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token;
+
+  if (!accessToken) {
+    throw new Error("Sign in before running smart allocation.");
+  }
+
   const response = await fetch("/api/smart-allocation", {
     method: "POST",
     headers: {
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(request),
@@ -1394,8 +1406,10 @@ function StepPhotoAttachmentEditor({
                   title="Open photo"
                 >
                   <img
-                    src={photo.dataUrl}
+                    src={photo.thumbnailUrl ?? photo.dataUrl}
                     alt={`Step ${step.sequence} photo`}
+                    loading="lazy"
+                    decoding="async"
                     className={`${thumbnailClass} rounded border border-line object-cover transition group-hover:border-accent`}
                   />
                 </button>
@@ -4605,6 +4619,8 @@ export function LineWorkspace({
   const remoteRefreshTimerRef = useRef<number | null>(null);
   const remoteRefreshAppliedRef = useRef(false);
   const pendingRemoteRefreshRef = useRef(false);
+  const remoteTaskRefreshTimerRef = useRef<number | null>(null);
+  const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
   const [chromeStatus, setChromeStatus] = useState<{ message: string; error?: boolean } | null>(null);
   const [workspaceNotice, setWorkspaceNotice] = useState<Omit<FeedbackToast, "id"> | null>(null);
@@ -4789,6 +4805,92 @@ export function LineWorkspace({
     );
   }
 
+  function taskIdFromRealtimePayload(payload: PlannerRealtimePayload) {
+    const record = payload.new ?? payload.old;
+    if (!record) {
+      return undefined;
+    }
+
+    if (payload.table === "tasks") {
+      return typeof record.id === "string" ? record.id : undefined;
+    }
+
+    return typeof record.task_id === "string" ? record.task_id : undefined;
+  }
+
+  function canPatchTaskFromRealtimePayload(payload: PlannerRealtimePayload) {
+    return (
+      payload.eventType !== "DELETE" &&
+      (
+        payload.table === "tasks" ||
+        payload.table === "manufacturing_steps" ||
+        payload.table === "part_references" ||
+        payload.table === "actual_events" ||
+        payload.table === "step_photos" ||
+        payload.table === "step_tools"
+      )
+    );
+  }
+
+  function refreshTasksFromSupabase(taskIds: string[]) {
+    if (hasLocalSaveWork()) {
+      pendingRemoteRefreshRef.current = true;
+      return;
+    }
+
+    void Promise.all(taskIds.map((taskId) => loadTaskFromSupabase(taskId, projectId)))
+      .then((latestTasks) => {
+        if (hasLocalSaveWork()) {
+          pendingRemoteRefreshRef.current = true;
+          return;
+        }
+
+        const taskById = new Map(
+          latestTasks
+            .filter((task): task is Task => Boolean(task))
+            .map((task) => [task.id, task]),
+        );
+        if (taskById.size === 0) {
+          return;
+        }
+
+        remoteRefreshAppliedRef.current = true;
+        setPlannerState((current) => {
+          const nextState = {
+            ...current,
+            tasks: current.tasks.map((task) => taskById.get(task.id) ?? task),
+          };
+          void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
+          return nextState;
+        });
+        setSaveError(undefined);
+        setSaveState("saved");
+      })
+      .catch(() => {
+        requestRemotePlannerRefresh();
+      });
+  }
+
+  function requestRemoteTaskRefresh(taskId: string) {
+    if (hasLocalSaveWork()) {
+      pendingRemoteRefreshRef.current = true;
+      return;
+    }
+
+    pendingRemoteTaskIdsRef.current.add(taskId);
+
+    if (remoteTaskRefreshTimerRef.current) {
+      window.clearTimeout(remoteTaskRefreshTimerRef.current);
+    }
+
+    remoteTaskRefreshTimerRef.current = window.setTimeout(() => {
+      remoteTaskRefreshTimerRef.current = null;
+      const taskIds = [...pendingRemoteTaskIdsRef.current];
+      pendingRemoteTaskIdsRef.current.clear();
+      refreshTasksFromSupabase(taskIds);
+    }, 250);
+  }
+
   function refreshPlannerFromSupabase() {
     if (hasLocalSaveWork()) {
       pendingRemoteRefreshRef.current = true;
@@ -4804,6 +4906,7 @@ export function LineWorkspace({
 
         pendingRemoteRefreshRef.current = false;
         remoteRefreshAppliedRef.current = true;
+        void writeCachedPlannerState(projectId, savedState).catch(() => undefined);
         setPlannerState(savedState);
         setSelectedTaskId((currentTaskId) =>
           savedState.tasks.some((task) => task.id === currentTaskId)
@@ -4851,68 +4954,92 @@ export function LineWorkspace({
 
   useEffect(() => {
     let mounted = true;
+    let remoteLoaded = false;
+
+    function applyLoadedPlannerState(savedState: PlannerState, source: "cache" | "remote") {
+      const procedureDraft = readProcedureDraftSnapshot();
+      const workspaceSnapshot = readWorkspaceSnapshot(projectId);
+      const draftTask = procedureDraft
+        ? savedState.tasks.find((task) => task.id === procedureDraft.taskId)
+        : undefined;
+      const mergedDraftTask =
+        draftTask && procedureDraft ? mergeProcedureDraftWithServer(draftTask, procedureDraft.task) : undefined;
+      const hydratedState = mergedDraftTask
+        ? {
+            ...savedState,
+            tasks: savedState.tasks.map((task) => (task.id === mergedDraftTask.id ? mergedDraftTask : task)),
+          }
+        : savedState;
+      const snapshotTask = workspaceSnapshot?.selectedTaskId
+        ? hydratedState.tasks.find((task) => task.id === workspaceSnapshot.selectedTaskId)
+        : undefined;
+      const initialUrlWorkspaceSnapshot = initialUrlWorkspaceSnapshotRef.current;
+      const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
+        ? hydratedState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
+        : undefined;
+      const selectedTask = mergedDraftTask ?? urlTask ?? snapshotTask ?? hydratedState.tasks[0];
+      const snapshotStation = workspaceSnapshot?.selectedStationId
+        ? hydratedState.stations.find((station) => station.id === workspaceSnapshot.selectedStationId)
+        : undefined;
+      const urlStation = initialUrlWorkspaceSnapshot.selectedStationId
+        ? hydratedState.stations.find((station) => station.id === initialUrlWorkspaceSnapshot.selectedStationId)
+        : undefined;
+      const snapshotZone = workspaceSnapshot?.activeZoneId
+        ? hydratedState.zones.find((zone) => zone.id === workspaceSnapshot.activeZoneId)
+        : undefined;
+      const urlZone = initialUrlWorkspaceSnapshot.activeZoneId
+        ? hydratedState.zones.find((zone) => zone.id === initialUrlWorkspaceSnapshot.activeZoneId)
+        : undefined;
+
+      setPlannerState(hydratedState);
+      if (initialUrlWorkspaceSnapshot.activeModule || workspaceSnapshot?.activeModule) {
+        setActiveModule(initialUrlWorkspaceSnapshot.activeModule ?? workspaceSnapshot?.activeModule ?? "dashboard");
+      }
+      setSelectedTaskId(selectedTask?.id ?? "");
+      setSelectedStationId(urlStation?.id ?? snapshotStation?.id ?? selectedTask?.stationId ?? hydratedState.tasks[0]?.stationId ?? "");
+      setActiveZoneId(urlZone?.id ?? snapshotZone?.id);
+      setDetailDrawerCollapsed(workspaceSnapshot?.detailDrawerCollapsed ?? true);
+      setSidebarCollapsed(workspaceSnapshot?.sidebarCollapsed ?? false);
+      setHasLoadedRemoteState(true);
+
+      if (source === "cache") {
+        setSaveState("loading");
+        return;
+      }
+
+      void writeCachedPlannerState(projectId, savedState).catch(() => undefined);
+
+      if (mergedDraftTask && procedureDraft) {
+        setSaveState("draft");
+        window.setTimeout(() => {
+          scheduleProcedureTaskSave(mergedDraftTask, hydratedState.tasks);
+        }, 250);
+        return;
+      }
+
+      clearProcedureDraftSnapshot();
+      setSaveState("saved");
+    }
+
+    void readCachedPlannerState(projectId)
+      .then((cachedState) => {
+        if (!mounted || remoteLoaded || !cachedState) {
+          return;
+        }
+
+        applyLoadedPlannerState(cachedState, "cache");
+      })
+      .catch(() => undefined);
 
     loadPlannerStateFromSupabase(projectId)
       .then((savedState) => {
         if (!mounted) {
           return;
         }
+        remoteLoaded = true;
 
         if (savedState) {
-          const procedureDraft = readProcedureDraftSnapshot();
-          const workspaceSnapshot = readWorkspaceSnapshot(projectId);
-          const draftTask = procedureDraft
-            ? savedState.tasks.find((task) => task.id === procedureDraft.taskId)
-            : undefined;
-          const mergedDraftTask =
-            draftTask && procedureDraft ? mergeProcedureDraftWithServer(draftTask, procedureDraft.task) : undefined;
-          const hydratedState = mergedDraftTask
-            ? {
-                ...savedState,
-                tasks: savedState.tasks.map((task) => (task.id === mergedDraftTask.id ? mergedDraftTask : task)),
-              }
-            : savedState;
-          const snapshotTask = workspaceSnapshot?.selectedTaskId
-            ? hydratedState.tasks.find((task) => task.id === workspaceSnapshot.selectedTaskId)
-            : undefined;
-          const initialUrlWorkspaceSnapshot = initialUrlWorkspaceSnapshotRef.current;
-          const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
-            ? hydratedState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
-            : undefined;
-          const selectedTask = mergedDraftTask ?? urlTask ?? snapshotTask ?? hydratedState.tasks[0];
-          const snapshotStation = workspaceSnapshot?.selectedStationId
-            ? hydratedState.stations.find((station) => station.id === workspaceSnapshot.selectedStationId)
-            : undefined;
-          const urlStation = initialUrlWorkspaceSnapshot.selectedStationId
-            ? hydratedState.stations.find((station) => station.id === initialUrlWorkspaceSnapshot.selectedStationId)
-            : undefined;
-          const snapshotZone = workspaceSnapshot?.activeZoneId
-            ? hydratedState.zones.find((zone) => zone.id === workspaceSnapshot.activeZoneId)
-            : undefined;
-          const urlZone = initialUrlWorkspaceSnapshot.activeZoneId
-            ? hydratedState.zones.find((zone) => zone.id === initialUrlWorkspaceSnapshot.activeZoneId)
-            : undefined;
-
-          setPlannerState(hydratedState);
-          if (initialUrlWorkspaceSnapshot.activeModule || workspaceSnapshot?.activeModule) {
-            setActiveModule(initialUrlWorkspaceSnapshot.activeModule ?? workspaceSnapshot?.activeModule ?? "dashboard");
-          }
-          setSelectedTaskId(selectedTask?.id ?? "");
-          setSelectedStationId(urlStation?.id ?? snapshotStation?.id ?? selectedTask?.stationId ?? hydratedState.tasks[0]?.stationId ?? "");
-          setActiveZoneId(urlZone?.id ?? snapshotZone?.id);
-          setDetailDrawerCollapsed(workspaceSnapshot?.detailDrawerCollapsed ?? true);
-          setSidebarCollapsed(workspaceSnapshot?.sidebarCollapsed ?? false);
-          setHasLoadedRemoteState(true);
-          if (mergedDraftTask && procedureDraft) {
-            setSaveState("draft");
-            window.setTimeout(() => {
-              scheduleProcedureTaskSave(mergedDraftTask, hydratedState.tasks);
-            }, 250);
-            return;
-          }
-
-          clearProcedureDraftSnapshot();
-          setSaveState("saved");
+          applyLoadedPlannerState(savedState, "remote");
           return;
         }
 
@@ -4939,6 +5066,7 @@ export function LineWorkspace({
         if (!mounted) {
           return;
         }
+        remoteLoaded = true;
 
         setSaveError(error instanceof Error ? error.message : "Unable to load database state.");
         setHasLoadedRemoteState(true);
@@ -4962,7 +5090,13 @@ export function LineWorkspace({
     }
 
     const unsubscribe = subscribePlannerStateChanges(
-      () => {
+      (payload) => {
+        const taskId = taskIdFromRealtimePayload(payload);
+        if (taskId && canPatchTaskFromRealtimePayload(payload)) {
+          requestRemoteTaskRefresh(taskId);
+          return;
+        }
+
         requestRemotePlannerRefresh();
       },
       {
@@ -4975,6 +5109,10 @@ export function LineWorkspace({
     return () => {
       if (remoteRefreshTimerRef.current) {
         window.clearTimeout(remoteRefreshTimerRef.current);
+      }
+      if (remoteTaskRefreshTimerRef.current) {
+        window.clearTimeout(remoteTaskRefreshTimerRef.current);
+        remoteTaskRefreshTimerRef.current = null;
       }
       if (procedureSaveTimerRef.current) {
         window.clearTimeout(procedureSaveTimerRef.current);
@@ -5227,12 +5365,14 @@ export function LineWorkspace({
     setSaveState("saving");
 
     let nextState: PlannerState | null = stateToSave;
+    let lastPersistedState: PlannerState | null = null;
 
     while (nextState) {
       queuedSaveStateRef.current = null;
 
       try {
         await savePlannerShellToSupabase(nextState);
+        lastPersistedState = nextState;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to save planner state.";
         setSaveError(message);
@@ -5251,6 +5391,9 @@ export function LineWorkspace({
 
     saveInFlightRef.current = false;
     plannerDirtyRef.current = false;
+    if (lastPersistedState) {
+      void writeCachedPlannerState(projectId, lastPersistedState).catch(() => undefined);
+    }
     setSaveState("saved");
     flushDeferredRemoteRefresh();
   }
@@ -5324,10 +5467,14 @@ export function LineWorkspace({
     clearProcedureDraftSnapshot(lastSavedTaskId);
     if (lastSavedTask) {
       remoteRefreshAppliedRef.current = true;
-      setPlannerState((current) => ({
-        ...current,
-        tasks: current.tasks.map((task) => (task.id === lastSavedTask?.id ? { ...task, ...lastSavedTask } : task)),
-      }));
+      setPlannerState((current) => {
+        const nextState = {
+          ...current,
+          tasks: current.tasks.map((task) => (task.id === lastSavedTask?.id ? { ...task, ...lastSavedTask } : task)),
+        };
+        void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
+        return nextState;
+      });
     }
     setSaveState("saved");
     flushDeferredRemoteRefresh();

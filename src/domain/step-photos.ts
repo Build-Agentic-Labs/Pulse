@@ -15,6 +15,8 @@ export interface StepPhotoAttachment {
   width?: number;
   height?: number;
   storagePath?: string;
+  thumbnailUrl?: string;
+  thumbnailStoragePath?: string;
   caption?: string;
   annotations?: PhotoAnnotationDocument;
 }
@@ -50,6 +52,8 @@ function sanitizePhotoAttachment(value: unknown): StepPhotoAttachment | null {
     width: typeof value.width === "number" ? value.width : undefined,
     height: typeof value.height === "number" ? value.height : undefined,
     storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
+    thumbnailUrl: typeof value.thumbnailUrl === "string" ? value.thumbnailUrl : undefined,
+    thumbnailStoragePath: typeof value.thumbnailStoragePath === "string" ? value.thumbnailStoragePath : undefined,
     caption: typeof value.caption === "string" ? value.caption : undefined,
     annotations: value.annotations ? normalizePhotoAnnotationDocument(value.annotations) : undefined,
   };

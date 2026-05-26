@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { calculateTaskManHours, formatMinutes, getTimelineBounds, round } from "@/domain/calculations";
 import type {
   IeSmartAllocationAssignment,
@@ -13,6 +14,11 @@ import type { Task } from "@/domain/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+const MAX_REQUEST_BYTES = 1_000_000;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 10;
+const smartAllocationRateLimits = new Map<string, { count: number; resetAt: number }>();
 
 const planSchema = {
   type: "object",
@@ -108,6 +114,84 @@ function parseOpenAiText(responseBody: unknown) {
 function finiteNumber(value: unknown) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function rateLimitKey(request: Request, userId: string) {
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  return `${userId}:${forwardedFor || realIp || "unknown"}`;
+}
+
+function checkRateLimit(key: string) {
+  const now = Date.now();
+  const current = smartAllocationRateLimits.get(key);
+
+  if (!current || current.resetAt <= now) {
+    smartAllocationRateLimits.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+
+  if (current.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return false;
+  }
+
+  current.count += 1;
+  return true;
+}
+
+function getBearerToken(request: Request) {
+  const header = request.headers.get("authorization") ?? "";
+  const [scheme, token] = header.split(" ");
+  return scheme?.toLowerCase() === "bearer" && token ? token : "";
+}
+
+async function authorizeSmartAllocationRequest(request: Request, body: IeSmartAllocationRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const token = getBearerToken(request);
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return NextResponse.json({ error: "Supabase auth is not configured." }, { status: 503 });
+  }
+
+  if (!token) {
+    return NextResponse.json({ error: "Sign in before running smart allocation." }, { status: 401 });
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
+
+  if (userError || !userData.user) {
+    return NextResponse.json({ error: "Invalid or expired session." }, { status: 401 });
+  }
+
+  if (!checkRateLimit(rateLimitKey(request, userData.user.id))) {
+    return NextResponse.json({ error: "Smart allocation rate limit exceeded. Try again in a minute." }, { status: 429 });
+  }
+
+  const projectId = body.plannerState?.product?.projectId;
+  if (!projectId) {
+    return NextResponse.json({ error: "Smart allocation requires a project-scoped planner state." }, { status: 400 });
+  }
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .maybeSingle();
+
+  if (projectError) {
+    return NextResponse.json({ error: projectError.message }, { status: 403 });
+  }
+
+  if (!project) {
+    return NextResponse.json({ error: "You do not have access to this project." }, { status: 403 });
+  }
+
+  return null;
 }
 
 function normalizePlan(value: unknown, availableOperatorIds: string[], taskIds: Set<string>): IeSmartAllocationPlan {
@@ -928,6 +1012,22 @@ async function requestIePlan({
 }
 
 export async function POST(request: Request) {
+  let body: IeSmartAllocationRequest;
+  try {
+    const requestText = await request.text();
+    if (requestText.length > MAX_REQUEST_BYTES) {
+      return NextResponse.json({ error: "Smart allocation request is too large." }, { status: 413 });
+    }
+    body = JSON.parse(requestText);
+  } catch {
+    return NextResponse.json({ error: "Invalid smart allocation request." }, { status: 400 });
+  }
+
+  const authFailure = await authorizeSmartAllocationRequest(request, body);
+  if (authFailure) {
+    return authFailure;
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
 
@@ -936,13 +1036,6 @@ export async function POST(request: Request) {
       { error: "Smart Allocation needs OPENAI_API_KEY in the server environment." },
       { status: 503 },
     );
-  }
-
-  let body: IeSmartAllocationRequest;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid smart allocation request." }, { status: 400 });
   }
 
   const taskIds = new Set((body.plannerState?.tasks ?? []).map((task) => task.id));

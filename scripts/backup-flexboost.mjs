@@ -191,6 +191,11 @@ for (const photo of stepPhotos) {
   const fileName = safeFileName(photo.file_name || path.basename(photo.storage_path || photo.id));
   const localRelativePath = path.join("assets", "step-photos", ...String(photo.storage_path).split("/"));
   await downloadStorageObject(photo.storage_path, localRelativePath || path.join("assets", "step-photos", `${photo.id}-${fileName}`), downloads);
+
+  if (photo.thumbnail_storage_path) {
+    const thumbnailRelativePath = path.join("assets", "step-photo-thumbnails", ...String(photo.thumbnail_storage_path).split("/"));
+    await downloadStorageObject(photo.thumbnail_storage_path, thumbnailRelativePath, downloads);
+  }
 }
 
 for (const tool of toolLibraryForProject) {

@@ -4,6 +4,10 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { themeInitScript } from "@/lib/theme-init";
 import "./globals.css";
 
+const supabaseOrigin = process.env.NEXT_PUBLIC_SUPABASE_URL
+  ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
+  : "https://neaadefipcpxxcqszpud.supabase.co";
+
 const grotesk = localFont({
   variable: "--font-space-grotesk",
   display: "swap",
@@ -97,6 +101,8 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <link rel="preconnect" href={supabaseOrigin} crossOrigin="" />
+        <link rel="dns-prefetch" href={supabaseOrigin} />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <style
           dangerouslySetInnerHTML={{

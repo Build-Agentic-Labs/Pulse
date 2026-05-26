@@ -1,7 +1,8 @@
 "use client";
 
 import { Check, ChevronDown } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 export type ThemedSelectOption = {
   value: string;
@@ -35,7 +36,9 @@ export function ThemedSelect({
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
   const selected = useMemo(() => options.find((option) => option.value === value), [options, value]);
   const visibleLabel = selected?.label ?? placeholder ?? options[0]?.label ?? "Select";
 
@@ -45,7 +48,8 @@ export function ThemedSelect({
     }
 
     function handlePointerDown(event: PointerEvent) {
-      if (rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) {
         return;
       }
       setOpen(false);
@@ -65,6 +69,51 @@ export function ThemedSelect({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return undefined;
+    }
+
+    function updateMenuPosition() {
+      const button = buttonRef.current;
+      if (!button) {
+        return;
+      }
+
+      const rect = button.getBoundingClientRect();
+      const width = Math.max(rect.width, 176);
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const viewportOffsetTop = window.visualViewport?.offsetTop ?? 0;
+      const top = rect.bottom + viewportOffsetTop + 6;
+      const maxHeight = Math.max(160, viewportHeight - rect.bottom - 18);
+      const left =
+        menuAlign === "right"
+          ? Math.max(8, rect.right - width)
+          : Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+
+      setMenuStyle({
+        left,
+        top,
+        width,
+        maxHeight: Math.min(288, maxHeight),
+      });
+    }
+
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    window.visualViewport?.addEventListener("resize", updateMenuPosition);
+    window.visualViewport?.addEventListener("scroll", updateMenuPosition);
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+      window.visualViewport?.removeEventListener("resize", updateMenuPosition);
+      window.visualViewport?.removeEventListener("scroll", updateMenuPosition);
+    };
+  }, [menuAlign, open]);
 
   function commit(nextValue: string) {
     onChange(nextValue);
@@ -89,12 +138,14 @@ export function ThemedSelect({
         <ChevronDown size={14} className="ui-themed-select-icon" aria-hidden="true" />
       </button>
 
-      {open ? (
+      {open && typeof document !== "undefined" ? createPortal(
         <div
+          ref={menuRef}
           id={`${id}-menu`}
-          className={`ui-themed-select-menu ${menuAlign === "right" ? "ui-themed-select-menu-right" : ""}`}
+          className={`ui-themed-select-menu ui-themed-select-menu-portal ${menuAlign === "right" ? "ui-themed-select-menu-right" : ""}`}
           role="listbox"
           aria-label={ariaLabel}
+          style={menuStyle ?? undefined}
         >
           {options.map((option) => {
             const selectedOption = option.value === value;
@@ -113,7 +164,8 @@ export function ThemedSelect({
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   );

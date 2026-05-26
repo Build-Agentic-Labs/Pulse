@@ -1227,6 +1227,12 @@ export function MobilePhotoPortal({
     return callback;
   }, []);
 
+  const handleMobileFieldFocus = useCallback((event: FocusEvent<HTMLElement>) => {
+    window.requestAnimationFrame(() => {
+      ensureMobileFieldVisible(event.currentTarget, mobileHeaderHeightRef.current);
+    });
+  }, []);
+
   const handleStepInstructionFocus = useCallback((event: FocusEvent<HTMLTextAreaElement>) => {
     const textarea = event.currentTarget;
     resizeTextareaToContent(textarea);
@@ -3109,6 +3115,7 @@ export function MobilePhotoPortal({
                 <input
                   className="ui-photo-mobile-tool-manual-input"
                   value={manualAdd.value}
+                  onFocus={handleMobileFieldFocus}
                   onChange={(event) => manualAdd.onChange(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
@@ -3580,6 +3587,7 @@ export function MobilePhotoPortal({
                   <input
                     className="ui-photo-mobile-field h-11"
                     value={newTaskName}
+                    onFocus={handleMobileFieldFocus}
                     onChange={(event) => setNewTaskName(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
@@ -3811,6 +3819,7 @@ export function MobilePhotoPortal({
                     aria-label="Task name"
                     className="ui-photo-mobile-task-name-inline"
                     defaultValue={selectedTask.name}
+                    onFocus={handleMobileFieldFocus}
                     onBlur={(event) => {
                       const name = event.currentTarget.value.trim() || "Untitled task";
                       event.currentTarget.value = name;
@@ -3902,6 +3911,7 @@ export function MobilePhotoPortal({
                           type="text"
                           inputMode="numeric"
                           value={newStepDurationText}
+                          onFocus={handleMobileFieldFocus}
                           onChange={(event) => {
                             const value = event.target.value;
                             if (/^\d*\.?\d*$/.test(value)) {
@@ -4021,6 +4031,7 @@ export function MobilePhotoPortal({
                                 <textarea
                                   className="ui-photo-mobile-step-photo-caption"
                                   value={photo.caption ?? ""}
+                                  onFocus={handleMobileFieldFocus}
                                   onChange={(event) => updateNewStepDraftPhotoCaption(photo.id, event.currentTarget.value)}
                                   placeholder="Caption"
                                   rows={1}
@@ -4092,6 +4103,7 @@ export function MobilePhotoPortal({
                             aria-label={`Step ${step.sequence} name`}
                             className="ui-photo-mobile-step-name-inline"
                             defaultValue={manufacturingStepDisplayName(step)}
+                            onFocus={handleMobileFieldFocus}
                             onBlur={(event) => {
                               const name = parseManufacturingStepNameInput(
                                 event.currentTarget.value,
@@ -4119,6 +4131,7 @@ export function MobilePhotoPortal({
                               type="text"
                               inputMode="decimal"
                               defaultValue={String(step.durationMinutes ?? 0)}
+                              onFocus={handleMobileFieldFocus}
                               onChange={(event) => {
                                 const value = event.currentTarget.value;
                                 if (!/^\d*\.?\d*$/.test(value)) {
@@ -4338,6 +4351,7 @@ export function MobilePhotoPortal({
                                 <textarea
                                   className="ui-photo-mobile-step-photo-caption"
                                   defaultValue={photo.caption ?? ""}
+                                  onFocus={handleMobileFieldFocus}
                                   onBlur={(event) => {
                                     void updatePhotoCaption(step.id, photo.id, event.currentTarget.value);
                                   }}

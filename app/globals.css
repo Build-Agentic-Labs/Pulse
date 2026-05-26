@@ -3298,6 +3298,11 @@ body {
     padding: 0.25rem;
   }
 
+  .ui-themed-select-menu-portal {
+    position: fixed;
+    right: auto;
+  }
+
   .ui-themed-select-menu-right {
     right: 0;
     left: auto;
@@ -3350,7 +3355,15 @@ body {
   }
 
   .ui-flow-shell {
-    @apply ui-dot-canvas relative isolate grid min-h-screen place-items-center p-4 text-ink sm:p-6;
+    min-height: 100svh;
+    height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding:
+      max(1rem, env(safe-area-inset-top))
+      1rem
+      max(1rem, env(safe-area-inset-bottom));
+    @apply ui-dot-canvas relative isolate grid place-items-center text-ink sm:p-6;
   }
 
   .ui-flow-shell > * {
@@ -3375,6 +3388,12 @@ body {
 
   .ui-auth-card-body {
     @apply bg-surface-raised px-6 py-6 sm:px-8;
+  }
+
+  @media (max-width: 640px) {
+    .ui-flow-shell .ui-field-standalone {
+      font-size: 16px;
+    }
   }
 
   .ui-auth-brand {

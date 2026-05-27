@@ -146,14 +146,13 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
             </label>
 
             <div className="flex flex-wrap items-center gap-2">
-              <a
-                href={openPortalHref}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={() => window.location.assign(openPortalHref)}
                 className="ui-btn-ghost inline-flex h-8 px-3 text-[10px]"
               >
                 Open portal
-              </a>
+              </button>
               {project?.projectId ? (
                 <span className="text-[10px] font-medium text-steel">
                   Opens `/projects/{project.projectId}/mobile-photos`

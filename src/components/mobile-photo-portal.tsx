@@ -29,6 +29,7 @@ import { applyCalculatedFields, formatMinutes, getTopLevelTasks } from "@/domain
 import { initialPlannerState } from "@/domain/seed";
 import {
   getManufacturingStepCheckSet,
+  getManufacturingStepCheckState,
   manufacturingStepCheckOptions,
   serializeManufacturingStepCheckSet,
 } from "@/domain/manufacturing-step-checks";
@@ -593,6 +594,23 @@ function parseManufacturingStepNameInput(value: string, sequence: number) {
   }
 
   return trimmed;
+}
+
+function manufacturingStepChecklistLabel(value?: string) {
+  if (!value?.trim()) {
+    return "";
+  }
+
+  const state = getManufacturingStepCheckState(value, manufacturingStepCheckOptions);
+  const labels = manufacturingStepCheckOptions
+    .filter((option) => state.selected.has(option.key))
+    .map((option) => {
+      const checkValue = state.values[option.key];
+      const numericValue = checkValue?.value;
+      return numericValue === undefined ? option.label : `${option.label}: ${numericValue}${checkValue.unit ? ` ${checkValue.unit}` : ""}`;
+    });
+
+  return labels.length > 0 ? labels.join(", ") : value;
 }
 
 function getNextTopLevelWbs(tasks: Task[]) {
@@ -4092,6 +4110,7 @@ export function MobilePhotoPortal({
                   const isUploading = uploadCount > 0;
                   const confirmingDelete = confirmDeleteStepId === step.id;
                   const stepCode = stepDisplayCode(selectedTask, step);
+                  const checklistLabel = manufacturingStepChecklistLabel(step.qualityCheck);
 
                   return (
                     <article
@@ -4216,9 +4235,9 @@ export function MobilePhotoPortal({
                             placeholder="Describe the manufacturing step"
                           />
                         </label>
-                          {step.qualityCheck ? (
+                          {checklistLabel ? (
                             <div className="ui-photo-mobile-checklist-tag">
-                              Checklist: {step.qualityCheck}
+                              Checklist: {checklistLabel}
                             </div>
                           ) : null}
                       </div>

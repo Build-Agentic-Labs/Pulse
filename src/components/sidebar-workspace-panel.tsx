@@ -347,6 +347,15 @@ export function SidebarWorkspacePanel({
     setRenameDraft(project.name);
   }
 
+  function navigateToProject(project: Project, active: boolean) {
+    if (active || isSubmitting) {
+      return;
+    }
+
+    announceProjectSwitch(project);
+    router.push(projectPlannerHref(project.id));
+  }
+
   return (
     <>
       <div className="px-2 py-2">
@@ -439,19 +448,16 @@ export function SidebarWorkspacePanel({
                         </button>
                       </form>
                     ) : (
-                      <Link
-                        href={projectPlannerHref(project.id)}
+                      <button
+                        type="button"
                         title={project.name}
-                        className="flex min-w-0 flex-1 items-center gap-2 text-inherit no-underline"
-                        onClick={() => {
-                          if (!active) {
-                            announceProjectSwitch(project);
-                          }
-                        }}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left text-inherit"
+                        onClick={() => navigateToProject(project, active)}
+                        disabled={isSubmitting}
                       >
                         <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />
                         <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                      </Link>
+                      </button>
                     )}
                     {canManage(projectRole) && !isRenaming ? (
                       <button

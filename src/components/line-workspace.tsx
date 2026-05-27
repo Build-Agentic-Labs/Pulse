@@ -5180,7 +5180,7 @@ export function LineWorkspace({
   }, [activeProjectContext?.projectId]);
 
   useEffect(() => {
-    if (!hasLoadedRemoteState) {
+    if (!hasLoadedRemoteState || isProjectSwitching) {
       return;
     }
 
@@ -5199,13 +5199,14 @@ export function LineWorkspace({
     detailDrawerCollapsed,
     sidebarCollapsed,
     hasLoadedRemoteState,
+    isProjectSwitching,
     projectId,
     selectedStationId,
     selectedTaskId,
   ]);
 
   useEffect(() => {
-    if (!hasLoadedRemoteState) {
+    if (!hasLoadedRemoteState || isProjectSwitching) {
       return;
     }
 
@@ -5237,6 +5238,7 @@ export function LineWorkspace({
     activeModule,
     activeZoneId,
     hasLoadedRemoteState,
+    isProjectSwitching,
     pathname,
     plannerQueryString,
     router,

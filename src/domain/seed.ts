@@ -1,5 +1,17 @@
 import { applyCalculatedFields } from "./calculations";
-import type { CustomColumn, Dependency, PlannerState, Product, Scenario, Station, Task, Zone } from "./types";
+import { defaultDocumentTypeCodes } from "./nomenclature";
+import type {
+  CustomColumn,
+  Dependency,
+  DocumentTypeCode,
+  ManufacturingComponent,
+  PlannerState,
+  Product,
+  Scenario,
+  Station,
+  Task,
+  Zone,
+} from "./types";
 
 const BASE_TIME = "2026-05-07T07:00:00.000-07:00";
 const baseMs = Date.parse(BASE_TIME);
@@ -10,6 +22,7 @@ function timeAt(minutes: number) {
 
 const product: Product = {
   id: "prod-sdg125-hybrid",
+  productCode: "FB-V2",
   name: "SDG125-to-Hybrid Generator Conversion",
   sku: "SDG125-HYB",
   family: "Generator Conversion",
@@ -793,6 +806,16 @@ const customColumns: CustomColumn[] = [
 ];
 
 const zones: Zone[] = [];
+const components: ManufacturingComponent[] = [];
+const documentTypes: DocumentTypeCode[] = defaultDocumentTypeCodes.map((documentType, index) => ({
+  id: `document-type-${documentType.code.toLowerCase()}`,
+  productId: product.id,
+  code: documentType.code,
+  name: documentType.name,
+  active: documentType.active,
+  createdAt: product.createdAt,
+  updatedAt: product.updatedAt,
+}));
 
 const calculated = applyCalculatedFields(product, stations, processTasks);
 
@@ -801,6 +824,8 @@ export const initialPlannerState: PlannerState = {
   scenario,
   stations: calculated.stations,
   zones,
+  components,
+  documentTypes,
   tasks: calculated.tasks,
   dependencies,
   actualEvents: [],

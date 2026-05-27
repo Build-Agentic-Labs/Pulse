@@ -10,6 +10,7 @@ import {
   getTimelineBounds,
   round,
 } from "@/domain/calculations";
+import { taskDisplayCode } from "@/domain/nomenclature";
 import { loadPlannerStateFromSupabase } from "@/domain/supabase-planner";
 import type { PlannerState, Task, Zone } from "@/domain/types";
 import { chartPalette } from "@/theme/chart-tokens";
@@ -387,8 +388,8 @@ export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string;
 
                       return (
                         <div key={row.id} className="grid min-h-[52px] grid-cols-[360px_minmax(760px,1fr)] border-b border-line bg-surface">
-                          <div className="grid grid-cols-[46px_minmax(0,1fr)_76px] items-center gap-3 border-r border-line px-4 py-2">
-                            <div className="font-mono text-sm font-medium text-steel">{row.task.wbs}</div>
+                          <div className="grid grid-cols-[112px_minmax(0,1fr)_76px] items-center gap-3 border-r border-line px-4 py-2">
+                            <div className="truncate font-mono text-xs font-medium text-steel">{taskDisplayCode(row.task)}</div>
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium text-ink">{row.task.name}</div>
                             </div>
@@ -407,18 +408,15 @@ export function ExcelGanttReadonly({ projectId, onReady }: { projectId?: string;
                               />
                             ))}
                             <div
-                              className="absolute top-3 flex h-7 min-w-12 items-center overflow-hidden rounded-sm px-2"
+                              className="absolute top-3 h-7 min-w-12 overflow-hidden rounded-sm"
                               style={{
                                 left,
                                 width,
                                 backgroundColor: fill,
                                 color: textColorForFill(fill),
                               }}
-                            >
-                              <span className="truncate text-xs font-medium">
-                                {row.task.wbs} {row.task.name}
-                              </span>
-                            </div>
+                              title={`${taskDisplayCode(row.task)} - ${row.task.name}`}
+                            />
                             <div
                               className="absolute top-10 h-1 rounded-full bg-border/50"
                               style={{

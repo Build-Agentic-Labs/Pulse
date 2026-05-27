@@ -116,6 +116,16 @@ const stations = scenarioIds.length
 const zones = scenarioIds.length
   ? await selectAll("zones", () => supabase.from("zones").select("*").in("scenario_id", scenarioIds).order("sequence"))
   : [];
+const manufacturingComponents = scenarioIds.length
+  ? await selectAll("manufacturing_components", () =>
+      supabase.from("manufacturing_components").select("*").in("scenario_id", scenarioIds).order("sequence"),
+    )
+  : [];
+const documentTypeCodes = productIds.length
+  ? await selectAll("document_type_codes", () =>
+      supabase.from("document_type_codes").select("*").in("product_id", productIds).order("code"),
+    )
+  : [];
 const tasks = scenarioIds.length
   ? await selectAll("tasks", () => supabase.from("tasks").select("*").in("scenario_id", scenarioIds).order("wbs"))
   : [];
@@ -158,6 +168,8 @@ const raw = {
   scenarios,
   stations,
   zones,
+  manufacturing_components: manufacturingComponents,
+  document_type_codes: documentTypeCodes,
   tasks,
   task_dependencies: taskDependencies,
   manufacturing_steps: manufacturingSteps,
@@ -183,6 +195,8 @@ const eventsByTaskId = Map.groupBy(actualEvents, (row) => String(row.task_id));
 const dependenciesBySuccessorId = Map.groupBy(taskDependencies, (row) => String(row.successor_task_id));
 const tasksByScenarioId = Map.groupBy(tasks, (row) => String(row.scenario_id));
 const stationsByScenarioId = Map.groupBy(stations, (row) => String(row.scenario_id));
+const componentsByScenarioId = Map.groupBy(manufacturingComponents, (row) => String(row.scenario_id));
+const documentTypesByProductId = Map.groupBy(documentTypeCodes, (row) => String(row.product_id));
 const zonesByScenarioId = Map.groupBy(zones, (row) => String(row.scenario_id));
 const scenariosByProductId = Map.groupBy(scenarios, (row) => String(row.product_id));
 
@@ -230,10 +244,14 @@ const structured = {
   workspace,
   products: products.map((product) => ({
     ...product,
+    document_type_codes: documentTypesByProductId.get(String(product.id)) ?? [],
     scenarios: (scenariosByProductId.get(String(product.id)) ?? []).map((scenario) => ({
       ...scenario,
       stations: (stationsByScenarioId.get(String(scenario.id)) ?? []).sort((a, b) => sortByNumberThenText(a, b, "sequence")),
       zones: (zonesByScenarioId.get(String(scenario.id)) ?? []).sort((a, b) => sortByNumberThenText(a, b, "sequence")),
+      manufacturing_components: (componentsByScenarioId.get(String(scenario.id)) ?? []).sort((a, b) =>
+        sortByNumberThenText(a, b, "sequence"),
+      ),
       tasks: (tasksByScenarioId.get(String(scenario.id)) ?? []).map((task) => ({
         ...task,
         station: task.station_id ? stationsById.get(String(task.station_id)) ?? null : null,

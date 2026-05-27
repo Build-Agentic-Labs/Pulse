@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { calculatePeakManpower, formatMinutes, getTaskWindow, getTimelineBounds, round } from "@/domain/calculations";
+import { stepDisplayCode, taskDisplayCode, taskDisplayLabel } from "@/domain/nomenclature";
 import { getOperatorAssignmentBlockState } from "@/domain/operator-allocation";
 import { getTaskOperatorIds, getTaskOperatorPatch } from "@/domain/operator-assignments";
 import type { ManufacturingStep, Station, Task, Zone } from "@/domain/types";
@@ -40,6 +41,7 @@ interface GanttTimelineProps {
   showPlaybackMarker: boolean;
   onSelectTask: (taskId: string) => void;
   onOpenTaskDetail: (taskId: string) => void;
+  onOpenProcedureStepName: (taskId: string, stepId: string) => void;
   onUpdateTask: (taskId: string, patch: Partial<Task>) => void;
   onUpdateZone: (zoneId: string, patch: Partial<Zone>) => void;
   onCreateZoneFromTasks: (name: string, taskIds: string[]) => void;
@@ -79,11 +81,11 @@ interface GanttTimelineProps {
 
 const ROW_HEIGHT = 54;
 const HEADER_HEIGHT = 44;
-const TABLE_WIDTH = 940;
+const TABLE_WIDTH = 980;
 const COLLAPSED_TABLE_WIDTH = 52;
 const PIXELS_PER_MINUTE = 0.78;
 const TIMELINE_LEFT_PADDING = 28;
-const TABLE_GRID_TEMPLATE = "56px 320px 54px 54px 58px 184px 44px 26px 26px 26px";
+const TABLE_GRID_TEMPLATE = "116px 280px 54px 54px 58px 184px 44px 26px 26px 26px";
 interface ProcessGroup {
   id: string;
   wbs: string;
@@ -269,6 +271,19 @@ function compareWbsValues(left: string, right: string) {
   }
 
   return 0;
+}
+
+function manufacturingStepLabel(step: ManufacturingStep) {
+  return step.name?.trim() || `Unnamed step ${step.sequence}`;
+}
+
+function frontTruncateStepCode(code: string) {
+  const parts = code.split("-");
+  if (parts.length >= 2) {
+    return `...${parts.slice(-2).join("-")}`;
+  }
+
+  return code;
 }
 
 function compareTasksByWbs(left: Task, right: Task) {
@@ -521,6 +536,7 @@ export function GanttTimeline({
   showPlaybackMarker,
   onSelectTask,
   onOpenTaskDetail,
+  onOpenProcedureStepName,
   onUpdateTask,
   onUpdateZone,
   onCreateZoneFromTasks,
@@ -1271,16 +1287,15 @@ export function GanttTimeline({
     }
 
     if (visibleRow.kind === "group") {
-      return `${visibleRow.group.wbs} ${visibleRow.group.name}`;
+      const primaryTask = visibleRow.group.tasks[0];
+      return primaryTask ? taskDisplayLabel(primaryTask) : visibleRow.group.name;
     }
 
     if (visibleRow.kind === "step") {
-      return `${visibleRow.task.wbs}.${visibleRow.step.sequence} ${
-        visibleRow.step.instruction || `Step ${visibleRow.step.sequence}`
-      }`;
+      return `${stepDisplayCode(visibleRow.task, visibleRow.step) || `Step ${visibleRow.step.sequence}`} ${manufacturingStepLabel(visibleRow.step)}`;
     }
 
-    return `${visibleRow.task.wbs} ${visibleRow.task.name}`;
+    return taskDisplayLabel(visibleRow.task);
   }
 
   function getPredecessorCandidateState(candidate: Task) {
@@ -1363,7 +1378,7 @@ export function GanttTimeline({
                 className="grid h-11 items-center gap-2 border-b border-line pl-3 pr-4 text-center text-[11px] font-semibold uppercase tracking-wide text-steel"
                 style={tableGridStyle}
               >
-                <span className="whitespace-nowrap text-center">Task ID</span>
+                <span className="whitespace-nowrap text-center">Code</span>
                 <span className="text-left">Task</span>
                 <span>Start</span>
                 <span>Hrs</span>
@@ -1545,14 +1560,14 @@ export function GanttTimeline({
                     }`}
                     style={tableGridStyle}
                   >
-                    <span className="flex h-8 w-full items-center justify-center justify-self-center text-center font-mono text-[11px] font-medium text-ink">
-                      {row.group.wbs}
+                    <span className="flex h-8 w-full items-center justify-center justify-self-center truncate text-center font-mono text-[11px] font-medium text-ink">
+                      {primaryTask ? taskDisplayCode(primaryTask) : "Uncoded"}
                     </span>
                     {editableTask ? (
                       editingTaskNameId === editableTask.id || editableTask.name.trim() === "" ? (
                         <div className="min-w-0">
                           <input
-                            aria-label={`${row.group.wbs} task name`}
+                      aria-label={`${taskDisplayCode(editableTask)} task name`}
                             data-task-name-id={editableTask.id}
                             className="h-9 w-full min-w-0 rounded border border-line bg-surface px-2 font-medium text-ink outline-none transition placeholder:text-steel/70"
                             value={editableTask.name}
@@ -1576,7 +1591,7 @@ export function GanttTimeline({
                           className="w-full min-w-0 cursor-text truncate rounded border border-transparent bg-transparent px-2 py-2 text-left font-medium text-ink"
                           title="Double-click to rename"
                         >
-                          {editableTask.name}
+                          {editableTask.name || taskDisplayCode(editableTask)}
                         </button>
                       )
                     ) : (
@@ -1742,6 +1757,10 @@ export function GanttTimeline({
                 const highlighted = dependencyHighlightRowIds.has(row.id);
                 const stepDurationOverTakt = exceedsTaktLimit(durationMinutes, taktLimitMinutes);
                 const stepDurationFlag = stepDurationOverTakt ? taktFlagLabel(durationMinutes, taktLimitMinutes) : undefined;
+                const rowStepCode = stepDisplayCode(row.task, row.step) || `Step ${row.step.sequence}`;
+                const visibleRowStepCode = frontTruncateStepCode(rowStepCode);
+                const rowStepLabel = manufacturingStepLabel(row.step);
+                const hasStepName = Boolean(row.step.name?.trim());
                 return (
                   <div
                     key={row.id}
@@ -1753,14 +1772,29 @@ export function GanttTimeline({
                     }`}
                     style={tableGridStyle}
                   >
-                    <span className="text-center font-mono text-[11px] text-steel">
-                      {row.task.wbs}.{row.step.sequence}
+                    <span className="truncate text-center font-mono text-[11px] text-steel" title={rowStepCode}>
+                      {visibleRowStepCode}
                     </span>
-                    <span className="min-w-0 truncate px-2 font-semibold text-ink">
-                      {row.step.instruction || "New manufacturing step"}
-                    </span>
+                    {hasStepName ? (
+                      <span className="min-w-0 truncate px-2 font-semibold text-ink" title={rowStepLabel}>
+                        {rowStepLabel}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenProcedureStepName(row.task.id, row.step.id);
+                        }}
+                        className="justify-self-start rounded border border-dashed border-accent/40 bg-accent-muted px-2 py-1 text-[11px] font-semibold text-accent hover:border-accent hover:bg-accent-subtle"
+                        aria-label={`Add name for ${rowStepCode}`}
+                        title="Open procedure step name field"
+                      >
+                        Add name
+                      </button>
+                    )}
                     <input
-                      aria-label={`${row.task.wbs}.${row.step.sequence} start link`}
+                      aria-label={`${rowStepCode} start link`}
                       className={`h-9 rounded border px-1 text-center font-mono font-bold outline-none ${
                         linkingRowId === row.id
                           ? "border-accent bg-accent-muted text-accent"
@@ -1803,7 +1837,7 @@ export function GanttTimeline({
                           ? "border-accent bg-accent-muted text-accent hover:bg-accent-subtle"
                           : "border-line bg-surface-sunken text-steel disabled:opacity-50"
                       }`}
-                      aria-label={`${row.task.wbs}.${row.step.sequence} finish ${formatRelativeHours(row.finishMinute)}`}
+                      aria-label={`${rowStepCode} finish ${formatRelativeHours(row.finishMinute)}`}
                     >
                       {formatRelativeHours(row.finishMinute)}
                     </button>
@@ -1851,7 +1885,7 @@ export function GanttTimeline({
                   }`}
                   style={tableGridStyle}
                 >
-                  <span className="text-center font-mono text-[11px] text-steel">{task.wbs}</span>
+                  <span className="text-center font-mono text-[11px] text-steel">{taskDisplayCode(task)}</span>
                   {editingTaskNameId === task.id || task.name.trim() === "" ? (
                     <input
                       aria-label={`${task.wbs} task name`}
@@ -2170,8 +2204,8 @@ export function GanttTimeline({
                 const tone = taktExceeded ? TAKT_EXCEEDED_TONE : groupTone(state);
                 const width = timelineBarWidth(row.startX, row.finishX, 18);
                 const highlighted = dependencyHighlightRowIds.has(visibleRow.id);
-                const compactLabel = visibleRow.group.wbs;
-                const expandedLabel = `${visibleRow.group.wbs} ${truncateTimelineLabel(visibleRow.group.name)}`;
+                const primaryTask = visibleRow.group.tasks[0];
+                const expandedLabel = primaryTask ? taskDisplayLabel(primaryTask) : truncateTimelineLabel(visibleRow.group.name);
 
                 return (
                   <g
@@ -2217,16 +2251,6 @@ export function GanttTimeline({
                         ? ` - over takt (${formatMinutes(visibleRow.group.durationMinutes)} > ${formatMinutes(taktLimitMinutes)})`
                         : ""}
                     </title>
-                    <text
-                      x={row.startX + width / 2}
-                      y={row.y + 13}
-                      fill={tone.text}
-                      className="ui-gantt-chart-bar-label"
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                    >
-                      {compactLabel}
-                    </text>
                   </g>
                 );
               }
@@ -2263,19 +2287,9 @@ export function GanttTimeline({
                       strokeWidth={highlighted ? 3 : 1}
                     />
                     <title>
-                      {visibleRow.step.instruction || `Step ${visibleRow.step.sequence}`} - {formatMinutes(durationMinutes)}
+                      {stepDisplayCode(visibleRow.task, visibleRow.step) || `Step ${visibleRow.step.sequence}`} - {manufacturingStepLabel(visibleRow.step)} - {formatMinutes(durationMinutes)}
                       {taktExceeded ? ` - over takt (${formatMinutes(taktLimitMinutes)})` : ""}
                     </title>
-                    <text
-                      x={row.startX + width / 2}
-                      y={row.y + 11}
-                      fill={taktExceeded ? TAKT_EXCEEDED_TONE.text : chartPalette.graphite}
-                      className="ui-gantt-chart-step-label"
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                    >
-                      {formatMinutes(durationMinutes)}
-                    </text>
                   </g>
                 );
               }
@@ -2287,8 +2301,7 @@ export function GanttTimeline({
               const tone = taktExceeded ? TAKT_EXCEEDED_TONE : taskTone(state, task);
               const width = timelineBarWidth(row.startX, row.finishX, task.rowType === "milestone" ? 18 : 14);
               const highlighted = dependencyHighlightRowIds.has(visibleRow.id);
-              const compactLabel = width > 130 ? truncateTimelineLabel(task.name, 34) : task.wbs;
-              const expandedLabel = `${task.wbs} ${truncateTimelineLabel(task.name)}`;
+              const expandedLabel = taskDisplayLabel(task);
 
               if (task.rowType === "milestone") {
                 const centerX = row.startX + 12;
@@ -2316,16 +2329,7 @@ export function GanttTimeline({
                       stroke={highlighted ? chartPalette.highlight : tone.stroke}
                       strokeWidth={highlighted ? 2.4 : 1.8}
                     />
-                    <text
-                      x={canvasMaximized ? centerX : centerX + 18}
-                      y={canvasMaximized ? centerY : centerY + 4}
-                      fill={canvasMaximized ? tone.text : chartPalette.graphite}
-                      className="ui-gantt-chart-bar-label"
-                      textAnchor={canvasMaximized ? "middle" : "start"}
-                      dominantBaseline={canvasMaximized ? "middle" : undefined}
-                    >
-                      {canvasMaximized ? task.wbs : task.name}
-                    </text>
+                    <title>{expandedLabel}</title>
                   </g>
                 );
               }
@@ -2374,16 +2378,6 @@ export function GanttTimeline({
                       ? ` - over takt (${formatMinutes(task.plannedDurationMinutes)} > ${formatMinutes(taktLimitMinutes)})`
                       : ""}
                   </title>
-                  <text
-                    x={canvasMaximized || compactLabel === task.wbs ? row.startX + width / 2 : row.startX + 8}
-                    y={canvasMaximized || compactLabel === task.wbs ? row.y + 13 : row.y + 17}
-                    fill={tone.text}
-                    className="ui-gantt-chart-bar-label"
-                    textAnchor={canvasMaximized || compactLabel === task.wbs ? "middle" : "start"}
-                    dominantBaseline={canvasMaximized || compactLabel === task.wbs ? "middle" : undefined}
-                  >
-                    {canvasMaximized ? task.wbs : compactLabel}
-                  </text>
                 </g>
               );
             })}
@@ -2490,7 +2484,7 @@ export function GanttTimeline({
           <div className="border-b border-line px-5 py-4">
             <div className="text-[11px] ui-mono-label tracking-wide text-accent">Predecessor Picker</div>
             <h2 id="predecessor-picker-title" className="mt-1 text-xl font-medium text-ink">
-              Predecessors for {predecessorPickerTask.wbs} {predecessorPickerTask.name || "Blank task"}
+              Predecessors for {taskDisplayCode(predecessorPickerTask)} {predecessorPickerTask.name || "Blank task"}
             </h2>
             <p className="mt-1 text-sm font-semibold text-steel">
               This task will start after all selected predecessor tasks are complete.
@@ -2499,9 +2493,9 @@ export function GanttTimeline({
 
           <div className="min-h-0 overflow-auto p-4">
             <div className="min-w-[900px] overflow-hidden ui-panel">
-              <div className="grid grid-cols-[48px_90px_minmax(260px,1fr)_150px_104px_104px] items-center gap-3 border-b border-line bg-surface-sunken px-3 py-3 ui-mono-label">
+              <div className="grid grid-cols-[48px_128px_minmax(260px,1fr)_150px_104px_104px] items-center gap-3 border-b border-line bg-surface-sunken px-3 py-3 ui-mono-label">
                 <span aria-hidden="true" />
-                <span>Task ID</span>
+                <span>Code</span>
                 <span>Task name</span>
                 <span>Zone</span>
                 <span>Finish</span>
@@ -2518,7 +2512,7 @@ export function GanttTimeline({
                   return (
                     <label
                       key={candidate.id}
-                      className={`grid grid-cols-[48px_90px_minmax(260px,1fr)_150px_104px_104px] items-center gap-3 border-b border-line px-3 py-3 text-sm last:border-b-0 ${
+                      className={`grid grid-cols-[48px_128px_minmax(260px,1fr)_150px_104px_104px] items-center gap-3 border-b border-line px-3 py-3 text-sm last:border-b-0 ${
                         invalid ? "cursor-not-allowed bg-danger-muted/45 text-steel" : "cursor-pointer bg-surface hover:bg-accent-muted"
                       }`}
                     >
@@ -2528,9 +2522,9 @@ export function GanttTimeline({
                         checked={selected}
                         disabled={invalid}
                         onChange={() => togglePredecessorDraft(candidate.id)}
-                        aria-label={`Select ${candidate.wbs} as predecessor`}
+                        aria-label={`Select ${taskDisplayCode(candidate)} as predecessor`}
                       />
-                      <span className="font-mono text-xs font-medium text-ink">{candidate.wbs}</span>
+                      <span className="font-mono text-xs font-medium text-ink">{taskDisplayCode(candidate)}</span>
                       <span className="min-w-0 truncate font-bold text-ink" title={candidate.name}>
                         {candidate.name || "Blank task"}
                       </span>

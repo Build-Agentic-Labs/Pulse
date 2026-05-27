@@ -32,6 +32,7 @@ import {
   manufacturingStepCheckOptions,
   serializeManufacturingStepCheckSet,
 } from "@/domain/manufacturing-step-checks";
+import { stepDisplayCode, taskDisplayCode } from "@/domain/nomenclature";
 import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
   getStepPhotoAttachments,
@@ -3696,7 +3697,7 @@ export function MobilePhotoPortal({
                   >
                     <div className="flex items-start gap-3">
                       <div className="ui-photo-mobile-wbs-chip mt-0.5">
-                        {task.wbs}
+                        {taskDisplayCode(task)}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate ui-photo-mobile-body">{task.name}</div>
@@ -3769,7 +3770,7 @@ export function MobilePhotoPortal({
                   <div className="block min-w-0 flex-1 px-3 py-3 text-left">
                     <div className="flex items-start gap-3">
                       <div className="ui-photo-mobile-wbs-chip ui-photo-mobile-wbs-chip-accent mt-0.5">
-                        {draggingTask.wbs}
+                        {taskDisplayCode(draggingTask)}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate ui-photo-mobile-body">{draggingTask.name}</div>
@@ -3815,7 +3816,7 @@ export function MobilePhotoPortal({
                   </span>
                 </div>
                 <div className="ui-photo-mobile-task-header-main">
-                  <span className="ui-photo-mobile-wbs-chip shrink-0">{selectedTask.wbs}</span>
+                  <span className="ui-photo-mobile-wbs-chip shrink-0">{taskDisplayCode(selectedTask)}</span>
                   <input
                     key={selectedTask.id}
                     aria-label="Task name"
@@ -3859,7 +3860,9 @@ export function MobilePhotoPortal({
                   >
                     <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-3">
                       <div>
-                        <div className="ui-photo-mobile-step-kicker">Step {draftStepSequence}</div>
+                        <div className="ui-photo-mobile-step-kicker">
+                          {stepDisplayCode(selectedTask, { sequence: draftStepSequence }) || `Step ${draftStepSequence}`}
+                        </div>
                         <div className="ui-photo-mobile-body">
                           {draftStepSequence === 1 ? "Add manufacturing step" : `Capture step ${draftStepSequence}`}
                         </div>
@@ -4088,6 +4091,7 @@ export function MobilePhotoPortal({
                   const uploadCount = photoUploadCounts[step.id] ?? 0;
                   const isUploading = uploadCount > 0;
                   const confirmingDelete = confirmDeleteStepId === step.id;
+                  const stepCode = stepDisplayCode(selectedTask, step);
 
                   return (
                     <article
@@ -4099,7 +4103,9 @@ export function MobilePhotoPortal({
                       <div className="ui-photo-mobile-step-editor min-w-0 px-3 py-3">
                       <div className="ui-photo-mobile-step-header">
                         <div className="ui-photo-mobile-step-header-title">
-                          <span className="ui-photo-mobile-step-badge">{step.sequence}</span>
+                          <span className="ui-photo-mobile-step-badge" title={stepCode || `Step ${step.sequence}`}>
+                            {stepCode || step.sequence}
+                          </span>
                           <input
                             key={`${step.id}:${step.name ?? ""}`}
                             aria-label={`Step ${step.sequence} name`}

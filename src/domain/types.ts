@@ -75,6 +75,7 @@ export interface PartReference {
 export interface Product {
   id: string;
   projectId?: string;
+  productCode?: string;
   name: string;
   sku?: string;
   family?: string;
@@ -204,7 +205,33 @@ export interface Zone {
   scenarioId: string;
   sequence: number;
   name: string;
+  code?: string;
+  description?: string;
   color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ManufacturingComponent {
+  id: string;
+  scenarioId: string;
+  zoneId?: string;
+  code: string;
+  name: string;
+  description?: string;
+  sequence: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentTypeCode {
+  id: string;
+  projectId?: string;
+  productId?: string;
+  code: string;
+  name: string;
+  active: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -214,6 +241,11 @@ export interface Task {
   scenarioId: string;
   stationId: string;
   zoneId?: string;
+  componentId?: string;
+  taskNumber?: number;
+  manufacturingCode?: string;
+  codeLocked?: boolean;
+  codeGeneratedAt?: string;
   parentTaskId?: string;
   rowType: RowType;
   wbs: string;
@@ -300,6 +332,8 @@ export interface PlannerState {
   scenario: Scenario;
   stations: Station[];
   zones: Zone[];
+  components: ManufacturingComponent[];
+  documentTypes: DocumentTypeCode[];
   tasks: Task[];
   dependencies: Dependency[];
   actualEvents: ActualEvent[];

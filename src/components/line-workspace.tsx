@@ -89,6 +89,15 @@ import {
   type ManufacturingStepCheckDefinition,
   type ManufacturingStepCheckState,
 } from "@/domain/manufacturing-step-checks";
+import {
+  defaultDocumentTypeCodes,
+  generateTaskCode,
+  nextTaskNumberForComponent,
+  normalizeCode,
+  documentDisplayCode,
+  stepDisplayCode,
+  taskDisplayCode,
+} from "@/domain/nomenclature";
 import { applyInstructionBullets, resolveBulletEnter } from "@/domain/instruction-bullets";
 import { moveManufacturingStepBetweenTasks } from "@/domain/move-manufacturing-step";
 import {
@@ -114,7 +123,9 @@ import {
 import type {
   DemandPeriod,
   Dependency,
+  DocumentTypeCode,
   ManufacturingStep,
+  ManufacturingComponent,
   PartReference,
   PlannerProjectContext,
   PlannerState,
@@ -156,7 +167,7 @@ type ProductNumberField =
   | "workWeeksPerMonth"
   | "manualTaktMinutes";
 
-type ProductTextField = "name" | "sku" | "revision" | "ownerName" | "status" | "demandPeriod";
+type ProductTextField = "name" | "productCode" | "sku" | "revision" | "ownerName" | "status" | "demandPeriod";
 
 type StepPartReferenceEditorProps = {
   task: Task;
@@ -801,6 +812,49 @@ function rescheduleTasksByDependencies(tasks: Task[]) {
       plannedFinish: new Date(finishMs).toISOString(),
     };
   });
+}
+
+function applyTaskCode(
+  task: Task,
+  zones: Zone[],
+  components: ManufacturingComponent[],
+  force = false,
+) {
+  if (task.codeLocked && !force) {
+    return task;
+  }
+
+  const manufacturingCode = generateTaskCode(task, zones, components);
+  return {
+    ...task,
+    manufacturingCode: manufacturingCode || undefined,
+    codeGeneratedAt: manufacturingCode ? new Date().toISOString() : undefined,
+  };
+}
+
+function applyTaskCodes(
+  tasks: Task[],
+  zones: Zone[],
+  components: ManufacturingComponent[],
+  force = false,
+) {
+  return tasks.map((task) => applyTaskCode(task, zones, components, force));
+}
+
+function ensureNomenclatureCollections(state: PlannerState): PlannerState {
+  return {
+    ...state,
+    components: state.components ?? [],
+    documentTypes:
+      state.documentTypes ??
+      defaultDocumentTypeCodes.map((documentType) => ({
+        id: `document-type-${documentType.code.toLowerCase()}`,
+        productId: state.product.id,
+        ...documentType,
+        createdAt: state.product.createdAt,
+        updatedAt: state.product.updatedAt,
+      })),
+  };
 }
 
 function getTaskProcessNumber(task: Task) {
@@ -2169,6 +2223,7 @@ function ProcedureWorkspace({
   tasks,
   zones,
   selectedTask,
+  focusedStepId,
   onSelectTask,
   onConfirmAction,
   onStepDeleted,
@@ -2184,6 +2239,7 @@ function ProcedureWorkspace({
   tasks: Task[];
   zones: Zone[];
   selectedTask?: Task;
+  focusedStepId?: string;
   onSelectTask: (taskId: string) => void;
   onConfirmAction: (message: FeedbackConfirm) => void;
   onStepDeleted: (taskSnapshot: Task, step: ManufacturingStep) => void;
@@ -2248,6 +2304,21 @@ function ProcedureWorkspace({
   const procedureGridStyle = {
     width: navigatorWidth,
   } as CSSProperties;
+
+  useEffect(() => {
+    if (!focusedStepId) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLInputElement>(`[data-step-name-id="${focusedStepId}"]`);
+      input?.scrollIntoView({ block: "center", behavior: "smooth" });
+      input?.focus();
+      input?.select();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [focusedStepId, task?.id]);
 
   useEffect(() => {
     if (!isResizingNavigator) {
@@ -2632,7 +2703,9 @@ function ProcedureWorkspace({
                       title={item.name || "Untitled task"}
                       className={`ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
                     >
-                      <span className="w-[38px] shrink-0 font-mono text-[10px] tabular-nums text-ink-tertiary">{item.wbs}</span>
+                      <span className="w-[82px] shrink-0 truncate font-mono text-[10px] tabular-nums text-ink-tertiary">
+                        {taskDisplayCode(item)}
+                      </span>
                       <span className="min-w-0 flex-1 truncate">{item.name || "Untitled task"}</span>
                     </button>
                   );
@@ -2730,6 +2803,7 @@ function ProcedureWorkspace({
                               <span className="ui-procedure-step-title">Step {step.sequence}</span>
                               <input
                                 aria-label={`Step ${step.sequence} name`}
+                                data-step-name-id={step.id}
                                 className="ui-procedure-step-inline-text ui-procedure-step-name-input"
                                 value={step.name ?? ""}
                                 onChange={(event) => updateManufacturingStep(step.id, { name: event.target.value })}
@@ -2774,7 +2848,7 @@ function ProcedureWorkspace({
                                   { value: "", label: "Move" },
                                   ...moveTargetTasks.map((targetTask) => ({
                                     value: targetTask.id,
-                                    label: `${targetTask.wbs} ${targetTask.name || "Untitled task"}`,
+                                    label: `${taskDisplayCode(targetTask)} ${targetTask.name || "Untitled task"}`,
                                   })),
                                 ]}
                                 onChange={(targetTaskId) => {
@@ -2785,8 +2859,8 @@ function ProcedureWorkspace({
                                   const targetTask = moveTargetTasks.find((candidate) => candidate.id === targetTaskId);
                                   onConfirmAction({
                                     title: `Move step ${step.sequence}?`,
-                                    body: `Move this step from ${task.wbs} ${task.name || "Untitled task"} to ${
-                                      targetTask ? `${targetTask.wbs} ${targetTask.name || "Untitled task"}` : "the selected task"
+                                    body: `Move this step from ${taskDisplayCode(task)} ${task.name || "Untitled task"} to ${
+                                      targetTask ? `${taskDisplayCode(targetTask)} ${targetTask.name || "Untitled task"}` : "the selected task"
                                     }. Tools, part links, and photos move with it.`,
                                     tone: "warning",
                                     confirmLabel: "Move Step",
@@ -3101,13 +3175,24 @@ function ProductSetupPanel({
 
       <div className="ui-product-setup-body">
         <SetupFieldGroup title="Product Identity" description="What is being planned">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(150px,0.7fr)_minmax(130px,0.6fr)_minmax(150px,0.7fr)]">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(110px,0.55fr)_minmax(150px,0.7fr)_minmax(130px,0.6fr)_minmax(150px,0.7fr)]">
             <label className="block">
               <span className="ui-field-label">Product</span>
               <input
                 className="ui-field-standalone"
                 value={product.name}
                 onChange={(event) => onProductText("name", event.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="ui-field-label">Product Code</span>
+              <input
+                className="ui-field-standalone font-mono uppercase"
+                value={product.productCode ?? ""}
+                onChange={(event) =>
+                  onProductText("productCode", event.target.value.trim().toUpperCase().replace(/[^A-Z0-9-]+/g, "").slice(0, 20))
+                }
+                placeholder="FB-V2"
               />
             </label>
             <label className="block">
@@ -3317,6 +3402,215 @@ function ProductSetupPanel({
                 )}
               </div>
             ))}
+          </div>
+        </SetupFieldGroup>
+      </div>
+    </section>
+  );
+}
+
+function NomenclatureSetupPanel({
+  product,
+  zones,
+  tasks,
+  components,
+  documentTypes,
+  onProductText,
+  onUpdateZone,
+  onAddComponent,
+  onUpdateComponent,
+  onDeleteComponent,
+  onAddDocumentType,
+  onUpdateDocumentType,
+  onDeleteDocumentType,
+  onAddMissingDefaultDocumentTypes,
+  onRegenerateUnlockedCodes,
+}: {
+  product: Product;
+  zones: Zone[];
+  tasks: Task[];
+  components: ManufacturingComponent[];
+  documentTypes: DocumentTypeCode[];
+  onProductText: (field: ProductTextField, value: string) => void;
+  onUpdateZone: (zoneId: string, patch: Partial<Zone>) => void;
+  onAddComponent: () => void;
+  onUpdateComponent: (componentId: string, patch: Partial<ManufacturingComponent>) => void;
+  onDeleteComponent: (componentId: string) => void;
+  onAddDocumentType: () => void;
+  onUpdateDocumentType: (documentTypeId: string, patch: Partial<DocumentTypeCode>) => void;
+  onDeleteDocumentType: (documentTypeId: string) => void;
+  onAddMissingDefaultDocumentTypes: () => void;
+  onRegenerateUnlockedCodes: () => void;
+}) {
+  const duplicateCodeEntries = Array.from(
+    tasks.reduce((codeMap, task) => {
+      const code = task.manufacturingCode?.trim();
+      if (!code) {
+        return codeMap;
+      }
+
+      codeMap.set(code, [...(codeMap.get(code) ?? []), task]);
+      return codeMap;
+    }, new Map<string, Task[]>()),
+  ).filter(([, codedTasks]) => codedTasks.length > 1);
+  const uncodedTaskCount = tasks.filter((task) => !task.manufacturingCode?.trim()).length;
+
+  return (
+    <section className="ui-product-setup">
+      <div className="ui-product-setup-head">
+        <div>
+          <h2 className="ui-section-title">Nomenclature Setup</h2>
+          <div className="ui-section-subtitle">Map product, zone, component, task, and document codes</div>
+        </div>
+        <button type="button" onClick={onRegenerateUnlockedCodes} className="ui-btn-ghost h-10 gap-2">
+          <RotateCcw size={15} />
+          Regenerate Codes
+        </button>
+      </div>
+
+      <div className="ui-product-setup-body">
+        {duplicateCodeEntries.length || uncodedTaskCount ? (
+          <div className="rounded border border-warn/35 bg-warn-muted px-3 py-2 text-sm font-semibold text-ink">
+            {duplicateCodeEntries.length ? (
+              <div>
+                Duplicate task codes:{" "}
+                {duplicateCodeEntries
+                  .slice(0, 4)
+                  .map(([code, codedTasks]) => `${code} (${codedTasks.length})`)
+                  .join(", ")}
+              </div>
+            ) : null}
+            {uncodedTaskCount ? <div>{uncodedTaskCount} task{uncodedTaskCount === 1 ? "" : "s"} still uncoded.</div> : null}
+          </div>
+        ) : null}
+
+        <SetupFieldGroup title="Product Code" description="Top-level program code used in exports and document paths">
+          <label className="block max-w-xs">
+            <span className="ui-field-label">Product ID</span>
+            <input
+              className="ui-field-standalone font-mono uppercase"
+              value={product.productCode ?? ""}
+              onChange={(event) =>
+                onProductText("productCode", event.target.value.trim().toUpperCase().replace(/[^A-Z0-9-]+/g, "").slice(0, 20))
+              }
+              placeholder="FB-V2"
+            />
+          </label>
+        </SetupFieldGroup>
+
+        <SetupFieldGroup title="Zone Codes" description="Major process zones used as the middle segment of task codes">
+          <div className="overflow-hidden rounded border border-line bg-surface">
+            <div className="grid grid-cols-[90px_minmax(180px,1fr)_minmax(220px,1.4fr)] gap-2 border-b border-line bg-surface-sunken px-3 py-2 ui-mono-label">
+              <span>Code</span>
+              <span>Zone</span>
+              <span>Description</span>
+            </div>
+            {zones.map((zone) => (
+              <div key={zone.id} className="grid grid-cols-[90px_minmax(180px,1fr)_minmax(220px,1.4fr)] gap-2 border-b border-line px-3 py-2 last:border-b-0">
+                <input
+                  className="ui-field-standalone h-8 font-mono uppercase"
+                  value={zone.code ?? ""}
+                  onChange={(event) => onUpdateZone(zone.id, { code: normalizeCode(event.target.value) })}
+                  placeholder="SUB"
+                />
+                <input
+                  className="ui-field-standalone h-8"
+                  value={zone.name}
+                  onChange={(event) => onUpdateZone(zone.id, { name: event.target.value })}
+                />
+                <input
+                  className="ui-field-standalone h-8"
+                  value={zone.description ?? ""}
+                  onChange={(event) => onUpdateZone(zone.id, { description: event.target.value })}
+                  placeholder="Optional description"
+                />
+              </div>
+            ))}
+            {zones.length === 0 ? <div className="px-3 py-3 text-sm font-semibold text-steel">Add zones in the Gantt before assigning zone codes.</div> : null}
+          </div>
+        </SetupFieldGroup>
+
+        <SetupFieldGroup title="Component Codes" description="Reusable system/component codes assigned to tasks">
+          <div className="overflow-hidden rounded border border-line bg-surface">
+            <div className="grid grid-cols-[90px_minmax(180px,1fr)_54px] gap-2 border-b border-line bg-surface-sunken px-3 py-2 ui-mono-label">
+              <span>Code</span>
+              <span>Component</span>
+              <span />
+            </div>
+            {components.map((component) => (
+              <div key={component.id} className="grid grid-cols-[90px_minmax(180px,1fr)_54px] gap-2 border-b border-line px-3 py-2 last:border-b-0">
+                <input
+                  className="ui-field-standalone h-8 font-mono uppercase"
+                  value={component.code}
+                  onChange={(event) => onUpdateComponent(component.id, { code: normalizeCode(event.target.value) })}
+                  placeholder="CLU"
+                />
+                <input
+                  className="ui-field-standalone h-8"
+                  value={component.name}
+                  onChange={(event) => onUpdateComponent(component.id, { name: event.target.value })}
+                  placeholder="Clutch Assembly"
+                />
+                <button
+                  type="button"
+                  onClick={() => onDeleteComponent(component.id)}
+                  className="inline-flex h-8 items-center justify-center rounded border border-line bg-surface text-steel hover:border-danger hover:text-danger"
+                  title="Delete component"
+                  aria-label={`Delete ${component.name || component.code || "component"}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            {components.length === 0 ? <div className="px-3 py-3 text-sm font-semibold text-steel">Add component codes such as CLU, ALT, BAT, or PNL.</div> : null}
+          </div>
+          <button type="button" onClick={onAddComponent} className="ui-btn-ghost mt-3 h-9 gap-2">
+            <Plus size={14} />
+            Component
+          </button>
+        </SetupFieldGroup>
+
+        <SetupFieldGroup title="Document Types" description="Suffix codes for task documents and work instructions">
+          <div className="overflow-hidden rounded border border-line bg-surface">
+            <div className="grid grid-cols-[90px_minmax(180px,1fr)_54px] gap-2 border-b border-line bg-surface-sunken px-3 py-2 ui-mono-label">
+              <span>Code</span>
+              <span>Document Type</span>
+              <span />
+            </div>
+            {documentTypes.map((documentType) => (
+              <div key={documentType.id} className="grid grid-cols-[90px_minmax(180px,1fr)_54px] gap-2 border-b border-line px-3 py-2 last:border-b-0">
+                <input
+                  className="ui-field-standalone h-8 font-mono uppercase"
+                  value={documentType.code}
+                  onChange={(event) => onUpdateDocumentType(documentType.id, { code: normalizeCode(event.target.value) })}
+                  placeholder="WI"
+                />
+                <input
+                  className="ui-field-standalone h-8"
+                  value={documentType.name}
+                  onChange={(event) => onUpdateDocumentType(documentType.id, { name: event.target.value })}
+                  placeholder="Work Instruction"
+                />
+                <button
+                  type="button"
+                  onClick={() => onDeleteDocumentType(documentType.id)}
+                  className="inline-flex h-8 items-center justify-center rounded border border-line bg-surface text-steel hover:border-danger hover:text-danger"
+                  title="Delete document type"
+                  aria-label={`Delete ${documentType.name || documentType.code || "document type"}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={onAddDocumentType} className="ui-btn-ghost h-9 gap-2">
+              <Plus size={14} />
+              Document Type
+            </button>
+            <button type="button" onClick={onAddMissingDefaultDocumentTypes} className="ui-btn-ghost h-9 gap-2">
+              Defaults
+            </button>
           </div>
         </SetupFieldGroup>
       </div>
@@ -4099,6 +4393,9 @@ function StationBalance({
 function DetailDrawer({
   task,
   station,
+  zones,
+  components,
+  tasks,
   collapsed,
   isResizing,
   onConfirmAction,
@@ -4114,6 +4411,9 @@ function DetailDrawer({
 }: {
   task?: Task;
   station?: Station;
+  zones: Zone[];
+  components: ManufacturingComponent[];
+  tasks: Task[];
   collapsed: boolean;
   isResizing: boolean;
   onConfirmAction: (message: FeedbackConfirm) => void;
@@ -4158,7 +4458,7 @@ function DetailDrawer({
         Selected Task
       </div>
       <div className="mt-4 flex h-8 w-8 items-center justify-center rounded border border-line/15 bg-surface/10 text-[11px] font-medium">
-        {task?.wbs ?? "-"}
+        {task ? taskDisplayCode(task) : "-"}
       </div>
     </div>
   );
@@ -4212,6 +4512,7 @@ function DetailDrawer({
   );
   const durationIsStepDerived = manufacturingSteps.length > 0;
   const partReferences = task.partReferences ?? [];
+  const availableComponents = components.filter((component) => component.active || component.id === task.componentId);
 
   function patchManufacturingSteps(nextSteps: ManufacturingStep[]) {
     const normalizedSteps = nextSteps
@@ -4452,6 +4753,72 @@ function DetailDrawer({
 
         <div className="space-y-4">
         <div className="ui-panel p-3">
+          <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Manufacturing Code</div>
+          <div className="mb-3 font-mono text-lg font-bold text-ink">{taskDisplayCode(task)}</div>
+          <div className="mb-3 rounded border border-line bg-surface-sunken px-2 py-1.5 font-mono text-xs font-semibold text-steel">
+            {documentDisplayCode(task) || "Work instruction code pending"}
+          </div>
+          <div className="grid gap-2">
+            <label className="block">
+              <span className="ui-field-label">Zone</span>
+              <ThemedSelect
+                value={task.zoneId ?? ""}
+                options={[
+                  { value: "", label: "Unzoned" },
+                  ...zones.map((zone) => ({ value: zone.id, label: `${zone.code || zone.name} - ${zone.name}` })),
+                ]}
+                onChange={(zoneId) => onUpdateTask(task.id, { zoneId: zoneId || undefined })}
+              />
+            </label>
+            <label className="block">
+              <span className="ui-field-label">Component</span>
+              <ThemedSelect
+                value={task.componentId ?? ""}
+                options={[
+                  { value: "", label: "No component" },
+                  ...availableComponents.map((component) => ({
+                    value: component.id,
+                    label: `${component.code || "CODE"} - ${component.name || "Unnamed component"}`,
+                  })),
+                ]}
+                onChange={(componentId) => {
+                  const nextNumber = componentId ? nextTaskNumberForComponent(tasks, componentId, task.zoneId) : undefined;
+                  onUpdateTask(task.id, { componentId: componentId || undefined, taskNumber: task.taskNumber ?? nextNumber });
+                }}
+              />
+            </label>
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <NumericField
+                label="Task Number"
+                value={task.taskNumber ?? 0}
+                onChange={(value) => onUpdateTask(task.id, { taskNumber: Math.max(0, Math.round(value)) || undefined })}
+              />
+              <label className="flex items-center gap-2 self-end pb-2 text-sm font-semibold text-ink">
+                <input
+                  type="checkbox"
+                  checked={Boolean(task.codeLocked)}
+                  onChange={(event) => onUpdateTask(task.id, { codeLocked: event.target.checked })}
+                />
+                Lock
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onUpdateTask(task.id, {
+                  manufacturingCode: generateTaskCode(task, zones, components) || undefined,
+                  codeGeneratedAt: new Date().toISOString(),
+                  codeLocked: false,
+                })
+              }
+              className="ui-btn-ghost h-8 gap-2"
+            >
+              <RotateCcw size={13} />
+              Regenerate
+            </button>
+          </div>
+        </div>
+        <div className="ui-panel p-3">
           <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Station</div>
           <div className="text-sm font-bold text-ink">{station.sequence}. {station.name}</div>
           <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-semibold text-steel">
@@ -4496,6 +4863,7 @@ function DetailDrawer({
                 {manufacturingSteps.map((step) => {
                   const stepPhotos = getStepPhotoAttachments(currentTask, step.id);
                   const stepTools = getStepToolList(currentTask, step.id);
+                  const generatedStepCode = stepDisplayCode(currentTask, step);
 
                   return (
                     <div
@@ -4504,7 +4872,9 @@ function DetailDrawer({
                     >
                       <div className="min-w-0 space-y-1">
                         <div className="flex items-center gap-1 ui-mono-label">
-                          <span className="shrink-0">Step</span>
+                          <span className="max-w-[150px] shrink-0 truncate" title={generatedStepCode || `Step ${step.sequence}`}>
+                            {generatedStepCode || "Step"}
+                          </span>
                           <ClearableNumberInput
                             aria-label={`Step ${step.sequence} sequence`}
                             className="number-input ui-field-standalone h-6 w-8 px-0.5 text-center text-xs"
@@ -5028,6 +5398,7 @@ export function LineWorkspace({
   const [activeModule, setActiveModule] = useState("dashboard");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [selectedTaskId, setSelectedTaskId] = useState(initialPlannerState.tasks[0]?.id);
+  const [focusedProcedureStepId, setFocusedProcedureStepId] = useState<string | undefined>();
   const [selectedStationId, setSelectedStationId] = useState(initialPlannerState.stations[0]?.id);
   const [activeZoneId, setActiveZoneId] = useState<string>();
   const [currentMinute, setCurrentMinute] = useState(0);
@@ -5441,19 +5812,20 @@ export function LineWorkspace({
     setSaveState("loading");
 
     function applyLoadedPlannerState(savedState: PlannerState, source: "cache" | "remote") {
+      const normalizedSavedState = ensureNomenclatureCollections(savedState);
       const procedureDraft = readProcedureDraftSnapshot();
       const workspaceSnapshot = readWorkspaceSnapshot(projectId);
       const draftTask = procedureDraft
-        ? savedState.tasks.find((task) => task.id === procedureDraft.taskId)
+        ? normalizedSavedState.tasks.find((task) => task.id === procedureDraft.taskId)
         : undefined;
       const mergedDraftTask =
         draftTask && procedureDraft ? mergeProcedureDraftWithServer(draftTask, procedureDraft.task) : undefined;
       const hydratedState = mergedDraftTask
         ? {
-            ...savedState,
-            tasks: savedState.tasks.map((task) => (task.id === mergedDraftTask.id ? mergedDraftTask : task)),
+            ...normalizedSavedState,
+            tasks: normalizedSavedState.tasks.map((task) => (task.id === mergedDraftTask.id ? mergedDraftTask : task)),
           }
-        : savedState;
+        : normalizedSavedState;
       const snapshotTask = workspaceSnapshot?.selectedTaskId
         ? hydratedState.tasks.find((task) => task.id === workspaceSnapshot.selectedTaskId)
         : undefined;
@@ -5495,7 +5867,7 @@ export function LineWorkspace({
 
       finishProjectSwitch();
 
-      void writeCachedPlannerState(projectId, savedState).catch(() => undefined);
+      void writeCachedPlannerState(projectId, normalizedSavedState).catch(() => undefined);
 
       if (mergedDraftTask && procedureDraft) {
         setSaveState("draft");
@@ -6074,6 +6446,129 @@ export function LineWorkspace({
     }));
   }
 
+  function updateNomenclatureZone(zoneId: string, patch: Partial<Zone>) {
+    markDirty();
+    setPlannerState((current) => {
+      const zones = current.zones.map((zone) =>
+        zone.id === zoneId ? { ...zone, ...patch, updatedAt: new Date().toISOString() } : zone,
+      );
+      return {
+        ...current,
+        zones,
+        tasks: applyTaskCodes(current.tasks, zones, current.components),
+      };
+    });
+  }
+
+  function addComponentCode() {
+    markDirty();
+    const now = new Date().toISOString();
+    setPlannerState((current) => {
+      const nextSequence = Math.max(0, ...current.components.map((component) => component.sequence)) + 1;
+      const component: ManufacturingComponent = {
+        id: `component-${Date.now()}`,
+        scenarioId: current.scenario.id,
+        code: "",
+        name: "",
+        sequence: nextSequence,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      return {
+        ...current,
+        components: [...current.components, component],
+      };
+    });
+  }
+
+  function updateComponentCode(componentId: string, patch: Partial<ManufacturingComponent>) {
+    markDirty();
+    setPlannerState((current) => {
+      const components = current.components.map((component) =>
+        component.id === componentId ? { ...component, ...patch, updatedAt: new Date().toISOString() } : component,
+      );
+      return {
+        ...current,
+        components,
+        tasks: applyTaskCodes(current.tasks, current.zones, components),
+      };
+    });
+  }
+
+  function deleteComponentCode(componentId: string) {
+    markDirty();
+    setPlannerState((current) => {
+      const components = current.components.filter((component) => component.id !== componentId);
+      const tasks = current.tasks.map((task) =>
+        task.componentId === componentId
+          ? applyTaskCode({ ...task, componentId: undefined, taskNumber: undefined }, current.zones, components, true)
+          : task,
+      );
+
+      return {
+        ...current,
+        components,
+        tasks,
+      };
+    });
+  }
+
+  function addDocumentTypeCode(defaultType?: Pick<DocumentTypeCode, "code" | "name" | "active">) {
+    markDirty();
+    const now = new Date().toISOString();
+    setPlannerState((current) => {
+      const documentType: DocumentTypeCode = {
+        id: `document-type-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        productId: current.product.id,
+        code: defaultType?.code ?? "",
+        name: defaultType?.name ?? "",
+        active: defaultType?.active ?? true,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      return {
+        ...current,
+        documentTypes: [...current.documentTypes, documentType],
+      };
+    });
+  }
+
+  function addMissingDefaultDocumentTypeCodes() {
+    const existingCodes = new Set(plannerState.documentTypes.map((documentType) => documentType.code));
+    defaultDocumentTypeCodes
+      .filter((documentType) => !existingCodes.has(documentType.code))
+      .forEach((documentType) => addDocumentTypeCode(documentType));
+  }
+
+  function updateDocumentTypeCode(documentTypeId: string, patch: Partial<DocumentTypeCode>) {
+    markDirty();
+    setPlannerState((current) => ({
+      ...current,
+      documentTypes: current.documentTypes.map((documentType) =>
+        documentType.id === documentTypeId ? { ...documentType, ...patch, updatedAt: new Date().toISOString() } : documentType,
+      ),
+    }));
+  }
+
+  function deleteDocumentTypeCode(documentTypeId: string) {
+    markDirty();
+    setPlannerState((current) => ({
+      ...current,
+      documentTypes: current.documentTypes.filter((documentType) => documentType.id !== documentTypeId),
+    }));
+  }
+
+  function regenerateUnlockedManufacturingCodes() {
+    markDirty();
+    setPlannerState((current) => ({
+      ...current,
+      tasks: applyTaskCodes(current.tasks, current.zones, current.components),
+    }));
+  }
+
   function updateProductStepChecks(definitions: ManufacturingStepCheckDefinition[]) {
     markDirty();
     setPlannerState((current) => ({
@@ -6095,7 +6590,16 @@ export function LineWorkspace({
     }
 
     setPlannerState((current) => {
-      const tasks = current.tasks.map((task) => (task.id === taskId ? { ...task, ...patch } : task));
+      const tasks = current.tasks.map((task) => {
+        if (task.id !== taskId) {
+          return task;
+        }
+
+        const patchedTask = { ...task, ...patch };
+        return patch.zoneId !== undefined || patch.componentId !== undefined || patch.taskNumber !== undefined
+          ? applyTaskCode(patchedTask, current.zones, current.components)
+          : patchedTask;
+      });
 
       return {
         ...current,
@@ -6170,7 +6674,7 @@ export function LineWorkspace({
         void writeCachedPlannerState(projectId, { ...previousState, tasks: scheduledTasks }).catch(() => undefined);
         notifyFeedback({
           title: "Step moved",
-          body: `Moved the step to ${nextTargetTask.wbs} ${nextTargetTask.name || "Untitled task"}.`,
+          body: `Moved the step to ${taskDisplayCode(nextTargetTask)} ${nextTargetTask.name || "Untitled task"}.`,
           tone: "success",
         });
       })
@@ -7079,13 +7583,7 @@ export function LineWorkspace({
   }
 
   function updateZone(zoneId: string, patch: Partial<Zone>) {
-    markDirty();
-    setPlannerState((current) => ({
-      ...current,
-      zones: current.zones.map((zone) =>
-        zone.id === zoneId ? { ...zone, ...patch, updatedAt: new Date().toISOString() } : zone,
-      ),
-    }));
+    updateNomenclatureZone(zoneId, patch);
   }
 
   function restorePlannerSnapshot(snapshot: PlannerState, restoreSelection?: { taskId?: string; stationId?: string; zoneId?: string }) {
@@ -7311,6 +7809,11 @@ export function LineWorkspace({
     const lastZoneTask = zoneTasks[zoneTasks.length - 1];
     const lastTask = lastZoneTask ?? currentTasks[currentTasks.length - 1];
     const stationId = zoneId ? stationIdForZone(zoneId) : lastTask?.stationId ?? plannerState.stations[0]?.id ?? "";
+    const defaultComponentId = lastZoneTask?.componentId;
+    const defaultComponent = defaultComponentId
+      ? plannerState.components.find((component) => component.id === defaultComponentId && component.active)
+      : undefined;
+    const taskNumber = nextTaskNumberForComponent(currentTasks, defaultComponent?.id, zoneId);
     const nextWbs = String(
       Math.max(0, ...currentTasks.map((task) => Number.parseInt(task.wbs.split(".")[0] ?? "0", 10)).filter(Number.isFinite)) + 1,
     );
@@ -7320,6 +7823,8 @@ export function LineWorkspace({
       scenarioId: plannerState.scenario.id,
       stationId,
       zoneId,
+      componentId: defaultComponent?.id,
+      taskNumber,
       rowType: "task",
       wbs: nextWbs,
       name: "",
@@ -7340,14 +7845,15 @@ export function LineWorkspace({
       partReferences: [],
       customFields: {},
     };
+    const codedTask = applyTaskCode(newTask, plannerState.zones, plannerState.components, true);
 
     setPlannerState((current) => {
       return {
         ...current,
-        tasks: [...current.tasks, newTask],
+        tasks: [...current.tasks, codedTask],
       };
     });
-    setSelectedTaskId(newTask.id);
+    setSelectedTaskId(codedTask.id);
     setSelectedStationId(stationId);
     setActiveZoneId(zoneId);
   }
@@ -7393,7 +7899,7 @@ export function LineWorkspace({
     setSelectedTaskId(nextSelectedTask?.id ?? "");
     setSelectedStationId(nextSelectedTask?.stationId ?? "");
     notifyRestoreAction({
-      title: deletedTasks.length === 1 ? `Deleted task ${deletedTasks[0].wbs}` : `Deleted ${deletedTasks.length} tasks`,
+      title: deletedTasks.length === 1 ? `Deleted task ${taskDisplayCode(deletedTasks[0])}` : `Deleted ${deletedTasks.length} tasks`,
       body: "Restore will bring back the deleted task data and the previous Gantt dependencies.",
       restoreLabel: deletedTasks.length === 1 ? "Restore Task" : "Restore Tasks",
       onRestore: () =>
@@ -7412,7 +7918,7 @@ export function LineWorkspace({
     }
 
     requestFeedbackConfirm({
-      title: tasksToDelete.length === 1 ? `Delete task ${tasksToDelete[0].wbs}?` : `Delete ${tasksToDelete.length} tasks?`,
+      title: tasksToDelete.length === 1 ? `Delete task ${taskDisplayCode(tasksToDelete[0])}?` : `Delete ${tasksToDelete.length} tasks?`,
       body: "This removes the selected task data, manufacturing steps, and related Gantt dependencies.",
       tone: "danger",
       confirmLabel: tasksToDelete.length === 1 ? "Delete Task" : "Delete Tasks",
@@ -7523,6 +8029,12 @@ export function LineWorkspace({
     if (showDetailDrawer) {
       setDetailDrawerCollapsed(false);
     }
+  }
+
+  function openProcedureStepName(taskId: string, stepId: string) {
+    selectTask(taskId);
+    setFocusedProcedureStepId(stepId);
+    setActiveModule("procedure");
   }
 
   function selectStation(stationId: string) {
@@ -7637,6 +8149,7 @@ export function LineWorkspace({
             tasks={derivedState.tasks}
             zones={derivedState.zones}
             selectedTask={selectedTask}
+            focusedStepId={focusedProcedureStepId}
             onSelectTask={selectTask}
             onConfirmAction={requestFeedbackConfirm}
             onStepDeleted={notifyDeletedStepRestore}
@@ -7687,6 +8200,23 @@ export function LineWorkspace({
                       onProductNumber={updateProductNumber}
                       onProductStepChecks={updateProductStepChecks}
                       onProductText={updateProductText}
+                    />
+                    <NomenclatureSetupPanel
+                      product={derivedState.product}
+                      zones={derivedState.zones}
+                      tasks={derivedState.tasks}
+                      components={derivedState.components}
+                      documentTypes={derivedState.documentTypes}
+                      onProductText={updateProductText}
+                      onUpdateZone={updateZone}
+                      onAddComponent={addComponentCode}
+                      onUpdateComponent={updateComponentCode}
+                      onDeleteComponent={deleteComponentCode}
+                      onAddDocumentType={() => addDocumentTypeCode()}
+                      onUpdateDocumentType={updateDocumentTypeCode}
+                      onDeleteDocumentType={deleteDocumentTypeCode}
+                      onAddMissingDefaultDocumentTypes={addMissingDefaultDocumentTypeCodes}
+                      onRegenerateUnlockedCodes={regenerateUnlockedManufacturingCodes}
                     />
                     <ProjectCatalogSetupPanel
                       tasks={derivedState.tasks}
@@ -7762,6 +8292,7 @@ export function LineWorkspace({
                     showPlaybackMarker={SIMULATION_ENABLED && (isPlaying || currentMinute > 0)}
                     onSelectTask={selectTask}
                     onOpenTaskDetail={openTaskDetail}
+                    onOpenProcedureStepName={openProcedureStepName}
                     onUpdateTask={updateTask}
                     onUpdateZone={updateZone}
                     onCreateZoneFromTasks={createZoneFromTasks}
@@ -7792,6 +8323,9 @@ export function LineWorkspace({
           <DetailDrawer
             task={selectedTask}
             station={selectedStation}
+            zones={derivedState.zones}
+            components={derivedState.components}
+            tasks={derivedState.tasks}
             collapsed={detailDrawerCollapsed}
             isResizing={isResizingDetailDrawer}
             onConfirmAction={requestFeedbackConfirm}

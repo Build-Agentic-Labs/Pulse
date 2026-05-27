@@ -3,7 +3,9 @@ import type {
   ActualEvent,
   CustomColumn,
   Dependency,
+  DocumentTypeCode,
   ManufacturingStep,
+  ManufacturingComponent,
   PartReference,
   PlannerState,
   PlannerProjectContext,
@@ -23,6 +25,7 @@ import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "./step-p
 import { mergeStepDependencyRefs, splitStepDependencyRefs } from "./step-part-references";
 import { STEP_TOOL_LISTS_FIELD, getTaskStepToolListMap } from "./step-tools";
 import { applyCalculatedFields } from "./calculations";
+import { defaultDocumentTypeCodes } from "./nomenclature";
 import { formatDisplayTitle } from "@/lib/display-names";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -37,6 +40,8 @@ const realtimePlannerTables = [
   "zones",
   "tasks",
   "task_dependencies",
+  "manufacturing_components",
+  "document_type_codes",
   "manufacturing_steps",
   "part_references",
   "actual_events",
@@ -165,6 +170,7 @@ function mapProduct(row: Record<string, unknown>): Product {
   return {
     id: String(row.id),
     projectId: maybeText(row.project_id),
+    productCode: maybeText(row.product_code),
     name: String(row.name ?? ""),
     sku: maybeText(row.sku),
     family: maybeText(row.family),
@@ -280,7 +286,37 @@ function mapZone(row: Record<string, unknown>): Zone {
     scenarioId: String(row.scenario_id),
     sequence: num(row.sequence, 1),
     name: formatDisplayTitle(String(row.name ?? "")),
+    code: maybeText(row.code),
+    description: maybeText(row.description),
     color: String(row.color ?? "#15756d"),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapManufacturingComponent(row: Record<string, unknown>): ManufacturingComponent {
+  return {
+    id: String(row.id),
+    scenarioId: String(row.scenario_id),
+    zoneId: maybeText(row.zone_id),
+    code: String(row.code ?? ""),
+    name: String(row.name ?? ""),
+    description: maybeText(row.description),
+    sequence: num(row.sequence, 1),
+    active: row.active !== false,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapDocumentTypeCode(row: Record<string, unknown>): DocumentTypeCode {
+  return {
+    id: String(row.id),
+    projectId: maybeText(row.project_id),
+    productId: maybeText(row.product_id),
+    code: String(row.code ?? ""),
+    name: String(row.name ?? ""),
+    active: row.active !== false,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -330,6 +366,11 @@ function mapTask(row: Record<string, unknown>): Task {
     scenarioId: String(row.scenario_id),
     stationId: String(row.station_id ?? ""),
     zoneId: maybeText(row.zone_id),
+    componentId: maybeText(row.component_id),
+    taskNumber: maybeNum(row.task_number),
+    manufacturingCode: maybeText(row.manufacturing_code),
+    codeLocked: Boolean(row.code_locked),
+    codeGeneratedAt: maybeText(row.code_generated_at),
     parentTaskId: maybeText(row.parent_task_id),
     rowType: String(row.row_type ?? "task") as Task["rowType"],
     wbs: String(row.wbs ?? ""),
@@ -421,6 +462,7 @@ function productRow(product: Product) {
   return {
     id: product.id,
     project_id: product.projectId ?? null,
+    product_code: product.productCode ?? null,
     name: product.name,
     sku: product.sku ?? null,
     family: product.family ?? null,
@@ -500,10 +542,44 @@ function zoneRow(zone: Zone) {
     scenario_id: zone.scenarioId,
     sequence: zone.sequence,
     name: zone.name,
+    code: zone.code ?? null,
+    description: zone.description ?? null,
     color: zone.color,
     created_at: zone.createdAt,
     updated_at: zone.updatedAt,
   };
+}
+
+function manufacturingComponentRow(component: ManufacturingComponent) {
+  return {
+    id: component.id,
+    scenario_id: component.scenarioId,
+    zone_id: component.zoneId ?? null,
+    code: component.code,
+    name: component.name,
+    description: component.description ?? null,
+    sequence: component.sequence,
+    active: component.active,
+    created_at: component.createdAt,
+    updated_at: component.updatedAt,
+  };
+}
+
+function documentTypeCodeRow(documentType: DocumentTypeCode) {
+  return {
+    id: documentType.id,
+    project_id: documentType.projectId ?? null,
+    product_id: documentType.productId ?? null,
+    code: documentType.code,
+    name: documentType.name,
+    active: documentType.active,
+    created_at: documentType.createdAt,
+    updated_at: documentType.updatedAt,
+  };
+}
+
+function documentTypeScopeFilter(product: Pick<Product, "id" | "projectId">) {
+  return product.projectId ? `project_id.eq.${product.projectId},product_id.eq.${product.id}` : `product_id.eq.${product.id}`;
 }
 
 function taskRow(task: Task) {
@@ -512,6 +588,11 @@ function taskRow(task: Task) {
     scenario_id: task.scenarioId,
     station_id: task.stationId || null,
     zone_id: task.zoneId ?? null,
+    component_id: task.componentId ?? null,
+    task_number: task.taskNumber ?? null,
+    manufacturing_code: task.manufacturingCode ?? null,
+    code_locked: Boolean(task.codeLocked),
+    code_generated_at: task.codeGeneratedAt ?? null,
     parent_task_id: task.parentTaskId ?? null,
     row_type: task.rowType,
     wbs: task.wbs,
@@ -943,6 +1024,14 @@ async function insertNewProjectPlannerState(state: PlannerState) {
     await throwIfError(supabase.from("zones").insert(state.zones.map(zoneRow)));
   }
 
+  if (state.components.length) {
+    await throwIfError(supabase.from("manufacturing_components").insert(state.components.map(manufacturingComponentRow)));
+  }
+
+  if (state.documentTypes.length) {
+    await throwIfError(supabase.from("document_type_codes").insert(state.documentTypes.map(documentTypeCodeRow)));
+  }
+
   if (state.tasks.length) {
     await throwIfError(supabase.from("tasks").insert(state.tasks.map(taskRow)));
   }
@@ -1023,6 +1112,16 @@ function createEmptyPlannerStateForProject(projectId: string, projectName: strin
     },
     stations: [],
     zones: [],
+    components: [],
+    documentTypes: defaultDocumentTypeCodes.map((documentType) => ({
+      id: `document-type-${productId}-${documentType.code.toLowerCase()}`,
+      productId,
+      code: documentType.code,
+      name: documentType.name,
+      active: documentType.active,
+      createdAt: now,
+      updatedAt: now,
+    })),
     tasks: [],
     dependencies: [],
     actualEvents: [],
@@ -1333,9 +1432,18 @@ export async function loadPlannerStateWithProjectFromSupabase(projectId?: string
     return null;
   }
 
-  const [stations, zones, taskRows, customColumns] = await Promise.all([
+  const documentTypeFilter = documentTypeScopeFilter({ id: String(product.id), projectId: maybeText(product.project_id) });
+  const [stations, zones, components, documentTypes, taskRows, customColumns] = await Promise.all([
     throwIfError(supabase.from("stations").select("*").eq("scenario_id", scenario.id).order("sequence")),
     throwIfError(supabase.from("zones").select("*").eq("scenario_id", scenario.id).order("sequence")),
+    throwIfError(supabase.from("manufacturing_components").select("*").eq("scenario_id", scenario.id).order("sequence")),
+    throwIfError(
+      supabase
+        .from("document_type_codes")
+        .select("*")
+        .or(documentTypeFilter)
+        .order("created_at"),
+    ),
     throwIfError(supabase.from("tasks").select("*").eq("scenario_id", scenario.id).order("wbs")),
     throwIfError(
       supabase
@@ -1399,6 +1507,8 @@ export async function loadPlannerStateWithProjectFromSupabase(projectId?: string
     scenario: mapScenario(scenario),
     stations: (stations ?? []).map(mapStation),
     zones: (zones ?? []).map(mapZone),
+    components: (components ?? []).map(mapManufacturingComponent),
+    documentTypes: (documentTypes ?? []).map(mapDocumentTypeCode),
     tasks: (taskRows ?? []).map((task) => {
       const mappedTask = mapTask({
         ...task,
@@ -1438,10 +1548,17 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
   }
 
   const supabase = plannerClient();
-  const [existingTasks, existingStations, existingZones, existingCustomColumns] = await Promise.all([
+  const [existingTasks, existingStations, existingZones, existingComponents, existingDocumentTypes, existingCustomColumns] = await Promise.all([
     throwIfError(supabase.from("tasks").select("id").eq("scenario_id", state.scenario.id)),
     throwIfError(supabase.from("stations").select("id").eq("scenario_id", state.scenario.id)),
     throwIfError(supabase.from("zones").select("id").eq("scenario_id", state.scenario.id)),
+    throwIfError(supabase.from("manufacturing_components").select("id").eq("scenario_id", state.scenario.id)),
+    throwIfError(
+      supabase
+        .from("document_type_codes")
+        .select("id")
+        .or(documentTypeScopeFilter(state.product)),
+    ),
     throwIfError(
       supabase
         .from("custom_columns")
@@ -1463,6 +1580,14 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
   const staleZoneIds = (existingZones ?? [])
     .map((zone) => String(zone.id))
     .filter((zoneId) => !nextZoneIds.includes(zoneId));
+  const nextComponentIds = state.components.map((component) => component.id);
+  const staleComponentIds = (existingComponents ?? [])
+    .map((component) => String(component.id))
+    .filter((componentId) => !nextComponentIds.includes(componentId));
+  const nextDocumentTypeIds = state.documentTypes.map((documentType) => documentType.id);
+  const staleDocumentTypeIds = (existingDocumentTypes ?? [])
+    .map((documentType) => String(documentType.id))
+    .filter((documentTypeId) => !nextDocumentTypeIds.includes(documentTypeId));
   const nextCustomColumnIds = state.customColumns.map((column) => column.id);
   const staleCustomColumnIds = (existingCustomColumns ?? [])
     .map((column) => String(column.id))
@@ -1477,6 +1602,14 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
 
   if (state.zones.length) {
     await throwIfError(supabase.from("zones").upsert(state.zones.map(zoneRow)));
+  }
+
+  if (state.components.length) {
+    await throwIfError(supabase.from("manufacturing_components").upsert(state.components.map(manufacturingComponentRow)));
+  }
+
+  if (state.documentTypes.length) {
+    await throwIfError(supabase.from("document_type_codes").upsert(state.documentTypes.map(documentTypeCodeRow)));
   }
 
   await throwIfError(supabase.from("tasks").upsert(state.tasks.map(taskRow)));
@@ -1519,6 +1652,14 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
     await throwIfError(supabase.from("zones").delete().in("id", staleZoneIds));
   }
 
+  if (staleComponentIds.length) {
+    await throwIfError(supabase.from("manufacturing_components").delete().in("id", staleComponentIds));
+  }
+
+  if (staleDocumentTypeIds.length) {
+    await throwIfError(supabase.from("document_type_codes").delete().in("id", staleDocumentTypeIds));
+  }
+
   if (staleStationIds.length) {
     await throwIfError(supabase.from("stations").delete().in("id", staleStationIds));
   }
@@ -1538,10 +1679,17 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
   }
 
   const supabase = plannerClient();
-  const [existingTasks, existingStations, existingZones, existingCustomColumns] = await Promise.all([
+  const [existingTasks, existingStations, existingZones, existingComponents, existingDocumentTypes, existingCustomColumns] = await Promise.all([
     throwIfError(supabase.from("tasks").select("id").eq("scenario_id", state.scenario.id)),
     throwIfError(supabase.from("stations").select("id").eq("scenario_id", state.scenario.id)),
     throwIfError(supabase.from("zones").select("id").eq("scenario_id", state.scenario.id)),
+    throwIfError(supabase.from("manufacturing_components").select("id").eq("scenario_id", state.scenario.id)),
+    throwIfError(
+      supabase
+        .from("document_type_codes")
+        .select("id")
+        .or(documentTypeScopeFilter(state.product)),
+    ),
     throwIfError(
       supabase
         .from("custom_columns")
@@ -1562,6 +1710,14 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
   const staleZoneIds = (existingZones ?? [])
     .map((zone) => String(zone.id))
     .filter((zoneId) => !nextZoneIds.includes(zoneId));
+  const nextComponentIds = state.components.map((component) => component.id);
+  const staleComponentIds = (existingComponents ?? [])
+    .map((component) => String(component.id))
+    .filter((componentId) => !nextComponentIds.includes(componentId));
+  const nextDocumentTypeIds = state.documentTypes.map((documentType) => documentType.id);
+  const staleDocumentTypeIds = (existingDocumentTypes ?? [])
+    .map((documentType) => String(documentType.id))
+    .filter((documentTypeId) => !nextDocumentTypeIds.includes(documentTypeId));
   const nextCustomColumnIds = state.customColumns.map((column) => column.id);
   const staleCustomColumnIds = (existingCustomColumns ?? [])
     .map((column) => String(column.id))
@@ -1576,6 +1732,14 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
 
   if (state.zones.length) {
     await throwIfError(supabase.from("zones").upsert(state.zones.map(zoneRow)));
+  }
+
+  if (state.components.length) {
+    await throwIfError(supabase.from("manufacturing_components").upsert(state.components.map(manufacturingComponentRow)));
+  }
+
+  if (state.documentTypes.length) {
+    await throwIfError(supabase.from("document_type_codes").upsert(state.documentTypes.map(documentTypeCodeRow)));
   }
 
   await throwIfError(supabase.from("tasks").upsert(state.tasks.map(taskRow)));
@@ -1606,6 +1770,14 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
 
   if (staleZoneIds.length) {
     await throwIfError(supabase.from("zones").delete().in("id", staleZoneIds));
+  }
+
+  if (staleComponentIds.length) {
+    await throwIfError(supabase.from("manufacturing_components").delete().in("id", staleComponentIds));
+  }
+
+  if (staleDocumentTypeIds.length) {
+    await throwIfError(supabase.from("document_type_codes").delete().in("id", staleDocumentTypeIds));
   }
 
   if (staleStationIds.length) {
@@ -1726,6 +1898,11 @@ type TaskFieldPatch = Partial<
     | "qcChecklist"
     | "notes"
     | "zoneId"
+    | "componentId"
+    | "taskNumber"
+    | "manufacturingCode"
+    | "codeLocked"
+    | "codeGeneratedAt"
     | "stationId"
     | "wbs"
   >
@@ -1755,6 +1932,11 @@ function taskFieldPatchRow(patch: TaskFieldPatch) {
     ["qcChecklist", "qc_checklist"],
     ["notes", "notes"],
     ["zoneId", "zone_id"],
+    ["componentId", "component_id"],
+    ["taskNumber", "task_number"],
+    ["manufacturingCode", "manufacturing_code"],
+    ["codeLocked", "code_locked"],
+    ["codeGeneratedAt", "code_generated_at"],
     ["stationId", "station_id"],
     ["wbs", "wbs"],
   ];

@@ -602,6 +602,7 @@ function manufacturingStepChecklistLabel(value?: string) {
   }
 
   const state = getManufacturingStepCheckState(value, manufacturingStepCheckOptions);
+  const isStructuredChecklist = value.trim().startsWith("{");
   const labels = manufacturingStepCheckOptions
     .filter((option) => state.selected.has(option.key))
     .map((option) => {
@@ -610,7 +611,7 @@ function manufacturingStepChecklistLabel(value?: string) {
       return numericValue === undefined ? option.label : `${option.label}: ${numericValue}${checkValue.unit ? ` ${checkValue.unit}` : ""}`;
     });
 
-  return labels.length > 0 ? labels.join(", ") : value;
+  return labels.length > 0 ? labels.join(", ") : isStructuredChecklist ? "" : value;
 }
 
 function getNextTopLevelWbs(tasks: Task[]) {

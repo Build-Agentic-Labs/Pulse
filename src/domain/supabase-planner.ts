@@ -672,7 +672,11 @@ function manufacturingStepRow(taskId: string, step: ManufacturingStep) {
 function normalizeManufacturingStepSequences(steps: ManufacturingStep[]): ManufacturingStep[] {
   return steps
     .map((step, index) => ({ step, index }))
-    .sort((left, right) => left.step.sequence - right.step.sequence || left.index - right.index)
+    .sort((left, right) => {
+      const leftSequence = left.step.sequence >= 100000 ? left.index + 1 : left.step.sequence;
+      const rightSequence = right.step.sequence >= 100000 ? right.index + 1 : right.step.sequence;
+      return leftSequence - rightSequence || left.index - right.index;
+    })
     .map(({ step }, index) => ({ ...step, sequence: index + 1 }));
 }
 
@@ -1484,7 +1488,7 @@ export async function loadPlannerStateWithProjectFromSupabase(projectId?: string
     const taskId = String(step.task_id);
     const currentSteps = stepsByTaskId.get(taskId) ?? [];
     currentSteps.push(mapManufacturingStepRecord(step));
-    stepsByTaskId.set(taskId, currentSteps);
+    stepsByTaskId.set(taskId, normalizeManufacturingStepSequences(currentSteps));
   });
 
   (partReferences ?? []).forEach((part) => {
@@ -1857,21 +1861,28 @@ export async function saveManufacturingStepToSupabase(taskId: string, step: Manu
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
   const existingSteps =
-    (await throwIfError(supabase.from("manufacturing_steps").select("id,sequence").eq("task_id", taskId))) ?? [];
-  const existingStep = existingSteps.find((candidate) => String(candidate.id) === step.id);
-  const sequenceChanged = existingStep !== undefined && num(existingStep.sequence) !== step.sequence;
-  const sequenceOccupied = existingSteps.some(
-    (candidate) => String(candidate.id) !== step.id && num(candidate.sequence) === step.sequence,
+    (await throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", taskId).order("sequence"))) ?? [];
+  const existingDomainSteps = existingSteps.map(mapManufacturingStepRecord);
+  const nextSteps = normalizeManufacturingStepSequences(
+    existingDomainSteps.some((candidate) => candidate.id === step.id)
+      ? existingDomainSteps.map((candidate) => (candidate.id === step.id ? { ...candidate, ...step } : candidate))
+      : [...existingDomainSteps, step],
   );
+  const sequenceOccupied =
+    new Set(existingSteps.map((candidate) => num(candidate.sequence))).size !== existingSteps.length ||
+    existingSteps.some((candidate) => {
+      const nextStep = nextSteps.find((item) => item.id === String(candidate.id));
+      return nextStep && num(candidate.sequence) !== nextStep.sequence;
+    });
 
-  if (!existingStep || sequenceChanged || sequenceOccupied) {
+  if (sequenceOccupied) {
     await bumpManufacturingStepSequences(
       supabase,
       existingSteps.map((candidate) => String(candidate.id)),
     );
   }
 
-  await throwIfError(supabase.from("manufacturing_steps").upsert(manufacturingStepRow(taskId, step)));
+  await throwIfError(supabase.from("manufacturing_steps").upsert(nextSteps.map((candidate) => manufacturingStepRow(taskId, candidate))));
 }
 
 type TaskFieldPatch = Partial<
@@ -2405,7 +2416,7 @@ export async function loadTaskFromSupabase(taskId: string, projectId?: string): 
   const mappedTask = mapTask({
     ...task,
     dependency_ids: (dependencies ?? []).map((dependency) => String(dependency.predecessor_task_id)),
-    manufacturing_steps: (manufacturingSteps ?? []).map(mapManufacturingStepRecord),
+    manufacturing_steps: normalizeManufacturingStepSequences((manufacturingSteps ?? []).map(mapManufacturingStepRecord)),
     part_references: (partReferences ?? []).map(mapPartReferenceRecord),
   });
 

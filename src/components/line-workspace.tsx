@@ -90,6 +90,7 @@ import {
   type ManufacturingStepCheckState,
 } from "@/domain/manufacturing-step-checks";
 import { applyInstructionBullets, resolveBulletEnter } from "@/domain/instruction-bullets";
+import { moveManufacturingStepBetweenTasks } from "@/domain/move-manufacturing-step";
 import {
   addStepToolToSupabase,
   createPlannerSupabaseClient,
@@ -97,6 +98,7 @@ import {
   loadPlannerStateFromSupabase,
   loadTaskFromSupabase,
   loadToolLibraryFromSupabase,
+  moveManufacturingStepToTaskInSupabase,
   removeStepToolFromSupabase,
   upsertToolLibraryMetadata,
   savePlannerShellToSupabase,
@@ -2171,6 +2173,7 @@ function ProcedureWorkspace({
   onConfirmAction,
   onStepDeleted,
   onUpdateTask,
+  onMoveStepToTask,
   onUploadStepPhotos,
   onRemoveStepPhoto,
   onAddStepTool,
@@ -2185,6 +2188,7 @@ function ProcedureWorkspace({
   onConfirmAction: (message: FeedbackConfirm) => void;
   onStepDeleted: (taskSnapshot: Task, step: ManufacturingStep) => void;
   onUpdateTask: (taskId: string, patch: Partial<Task>) => void;
+  onMoveStepToTask: (sourceTaskId: string, targetTaskId: string, stepId: string) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onAddStepTool: (taskId: string, stepId: string, toolName: string, sequence?: number) => Promise<void>;
@@ -2228,6 +2232,10 @@ function ProcedureWorkspace({
     [task?.manufacturingSteps],
   );
   const toolLibrary = useMemo(() => buildStepToolLibrary(tasks), [tasks]);
+  const moveTargetTasks = useMemo(
+    () => tasks.filter((candidate) => candidate.rowType === "task" && candidate.id !== task?.id),
+    [task?.id, tasks],
+  );
   const partReferences = task?.partReferences ?? [];
   const manufacturingStepDurationMinutes = manufacturingSteps.reduce(
     (total, step) => total + Math.max(step.durationMinutes ?? 0, 0),
@@ -2718,7 +2726,16 @@ function ProcedureWorkspace({
                       <div>
                         <div className="ui-procedure-step-header mb-1">
                           <div className="ui-procedure-step-header-fields">
-                            <span className="ui-field-label mb-0">Instruction</span>
+                            <label className="ui-procedure-step-title-field">
+                              <span className="ui-procedure-step-title">Step {step.sequence}</span>
+                              <input
+                                aria-label={`Step ${step.sequence} name`}
+                                className="ui-procedure-step-inline-text ui-procedure-step-name-input"
+                                value={step.name ?? ""}
+                                onChange={(event) => updateManufacturingStep(step.id, { name: event.target.value })}
+                                placeholder={`Step ${step.sequence} name`}
+                              />
+                            </label>
                             <label className="ui-procedure-step-inline-field">
                               <span className="ui-field-label mb-0">Seq</span>
                               <ClearableNumberInput
@@ -2746,6 +2763,38 @@ function ProcedureWorkspace({
                             </label>
                           </div>
                           <div className="ui-procedure-step-toolbar">
+                            {moveTargetTasks.length > 0 ? (
+                              <ThemedSelect
+                                ariaLabel={`Move step ${step.sequence} to another task`}
+                                value=""
+                                className="w-[9.5rem]"
+                                triggerClassName="h-7 px-2 text-[10px]"
+                                placeholder="Move"
+                                options={[
+                                  { value: "", label: "Move" },
+                                  ...moveTargetTasks.map((targetTask) => ({
+                                    value: targetTask.id,
+                                    label: `${targetTask.wbs} ${targetTask.name || "Untitled task"}`,
+                                  })),
+                                ]}
+                                onChange={(targetTaskId) => {
+                                  if (!targetTaskId || !task) {
+                                    return;
+                                  }
+
+                                  const targetTask = moveTargetTasks.find((candidate) => candidate.id === targetTaskId);
+                                  onConfirmAction({
+                                    title: `Move step ${step.sequence}?`,
+                                    body: `Move this step from ${task.wbs} ${task.name || "Untitled task"} to ${
+                                      targetTask ? `${targetTask.wbs} ${targetTask.name || "Untitled task"}` : "the selected task"
+                                    }. Tools, part links, and photos move with it.`,
+                                    tone: "warning",
+                                    confirmLabel: "Move Step",
+                                    onConfirm: () => onMoveStepToTask(task.id, targetTaskId, step.id),
+                                  });
+                                }}
+                              />
+                            ) : null}
                             <button
                               type="button"
                               onClick={() =>
@@ -6078,6 +6127,61 @@ export function LineWorkspace({
     });
   }
 
+  function moveProcedureStepToTask(sourceTaskId: string, targetTaskId: string, stepId: string) {
+    const sourceTask = plannerState.tasks.find((task) => task.id === sourceTaskId);
+    const targetTask = plannerState.tasks.find((task) => task.id === targetTaskId);
+    const movedTasks = moveManufacturingStepBetweenTasks(plannerState.tasks, sourceTaskId, targetTaskId, stepId);
+
+    if (!sourceTask || !targetTask || !movedTasks) {
+      notifyFeedback({
+        title: "Step move failed",
+        body: "The source step or target task is no longer available.",
+        tone: "danger",
+      });
+      return;
+    }
+
+    const scheduledTasks = rescheduleTasksByDependencies(movedTasks);
+    const nextSourceTask = scheduledTasks.find((task) => task.id === sourceTaskId);
+    const nextTargetTask = scheduledTasks.find((task) => task.id === targetTaskId);
+
+    if (!nextSourceTask || !nextTargetTask) {
+      notifyFeedback({
+        title: "Step move failed",
+        body: "The moved step could not be prepared for saving.",
+        tone: "danger",
+      });
+      return;
+    }
+
+    const previousState = plannerState;
+    setSaveError(undefined);
+    setSaveState("saving");
+    setPlannerState((current) => ({ ...current, tasks: scheduledTasks }));
+
+    void moveManufacturingStepToTaskInSupabase(nextSourceTask, nextTargetTask, stepId, scheduledTasks, projectId)
+      .then(() => {
+        setSaveState("saved");
+        void writeCachedPlannerState(projectId, { ...previousState, tasks: scheduledTasks }).catch(() => undefined);
+        notifyFeedback({
+          title: "Step moved",
+          body: `Moved the step to ${nextTargetTask.wbs} ${nextTargetTask.name || "Untitled task"}.`,
+          tone: "success",
+        });
+      })
+      .catch((error: unknown) => {
+        setPlannerState(previousState);
+        const message = error instanceof Error ? error.message : "Unable to move the procedure step.";
+        setSaveError(message);
+        setSaveState("error");
+        notifyFeedback({
+          title: "Step move failed",
+          body: message,
+          tone: "danger",
+        });
+      });
+  }
+
   async function persistAddStepTool(taskId: string, stepId: string, toolName: string, sequence = 1) {
     setSaveError(undefined);
     setSaveState("saving");
@@ -7485,6 +7589,7 @@ export function LineWorkspace({
             onConfirmAction={requestFeedbackConfirm}
             onStepDeleted={notifyDeletedStepRestore}
             onUpdateTask={updateProcedureTask}
+            onMoveStepToTask={moveProcedureStepToTask}
             onUploadStepPhotos={uploadStepPhotos}
             onRemoveStepPhoto={removeStepPhoto}
             onAddStepTool={persistAddStepTool}

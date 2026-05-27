@@ -1,4 +1,5 @@
-/** @type {import('next').NextConfig} */
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
+
 const supabaseOrigin = process.env.NEXT_PUBLIC_SUPABASE_URL
   ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
   : "https://neaadefipcpxxcqszpud.supabase.co";
@@ -34,7 +35,9 @@ const securityHeaders = [
   },
 ];
 
-const nextConfig = {
+/** @type {(phase: string) => import('next').NextConfig} */
+const nextConfig = (phase) => ({
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
   async headers() {
     return [
       {
@@ -49,6 +52,6 @@ const nextConfig = {
       },
     ];
   },
-};
+});
 
 export default nextConfig;

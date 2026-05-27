@@ -103,6 +103,7 @@ import {
   upsertToolLibraryMetadata,
   savePlannerShellToSupabase,
   saveProcedureTaskUpdateToSupabase,
+  saveTasksToSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
   subscribePlannerStateChanges,
   uploadStepPhotoAttachment,
@@ -7190,13 +7191,12 @@ export function LineWorkspace({
     targetZoneId: string | undefined,
     placement: "before" | "after",
   ) {
-    markDirty();
     const sourceTaskIdSet = new Set(sourceTaskIds);
     const targetTaskIdSet = new Set(targetTaskIds);
 
-    setPlannerState((current) => {
+    function buildReorderedTasks(currentTasks: Task[]) {
       const grouped = new Map<string, Task[]>();
-      current.tasks.forEach((task) => {
+      currentTasks.forEach((task) => {
         const processNumber = getTaskProcessNumber(task);
         const group = grouped.get(processNumber);
         if (group) {
@@ -7219,7 +7219,7 @@ export function LineWorkspace({
       const targetGroup = groups.find((group) => group.isTarget);
 
       if (!sourceGroup || !targetGroup || sourceGroup.processNumber === targetGroup.processNumber) {
-        return current;
+        return null;
       }
 
       const remainingGroups = groups.filter((group) => group !== sourceGroup);
@@ -7231,7 +7231,7 @@ export function LineWorkspace({
         ...remainingGroups.slice(insertIndex),
       ];
 
-      const tasks = orderedGroups.flatMap((group, groupIndex) => {
+      return orderedGroups.flatMap((group, groupIndex) => {
         const nextProcessNumber = String(groupIndex + 1);
         const movedIntoZone = group === sourceGroup;
 
@@ -7241,19 +7241,67 @@ export function LineWorkspace({
           return {
             ...task,
             zoneId: nextZoneId,
-            stationId: nextZoneId ? stationIdForZone(nextZoneId) : stationIdForUnzoned(task.scenarioId || current.scenario.id),
+            stationId: nextZoneId ? stationIdForZone(nextZoneId) : stationIdForUnzoned(task.scenarioId || plannerState.scenario.id),
             wbs: suffix ? `${nextProcessNumber}.${suffix}` : nextProcessNumber,
           };
         });
       });
+    }
 
-      return {
-        ...current,
-        tasks,
-      };
+    const reorderedTasks = buildReorderedTasks(plannerState.tasks);
+    if (!reorderedTasks) {
+      return;
+    }
+
+    const changedTasks = reorderedTasks.filter((task) => {
+      const currentTask = plannerState.tasks.find((candidate) => candidate.id === task.id);
+      return (
+        !currentTask ||
+        currentTask.wbs !== task.wbs ||
+        currentTask.zoneId !== task.zoneId ||
+        currentTask.stationId !== task.stationId
+      );
     });
 
+    if (changedTasks.length === 0) {
+      return;
+    }
+
+    const nextState: PlannerState = {
+      ...plannerState,
+      tasks: reorderedTasks,
+    };
+
+    saveInFlightRef.current = true;
+    setSaveError(undefined);
+    setSaveState("saving");
+    setPlannerState(nextState);
     setActiveZoneId(targetZoneId);
+
+    void (async () => {
+      try {
+        const token = Date.now().toString(36);
+        await saveTasksToSupabase(
+          changedTasks.map((task, index) => ({ ...task, wbs: `tmp-${token}-${index + 1}` })),
+          projectId,
+        );
+        await saveTasksToSupabase(changedTasks, projectId);
+        await writeCachedPlannerState(projectId, nextState);
+        setSaveState("saved");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to save Gantt order.";
+        setSaveError(message);
+        setSaveState("error");
+        notifyFeedback({
+          title: "Save failed",
+          body: message,
+          tone: "danger",
+        });
+      } finally {
+        saveInFlightRef.current = false;
+        flushDeferredRemoteRefresh();
+      }
+    })();
   }
 
   function addTaskToZone(zoneId?: string) {

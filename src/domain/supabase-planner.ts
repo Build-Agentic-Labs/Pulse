@@ -731,9 +731,16 @@ async function bumpManufacturingStepSequences(supabase: SupabaseClient, stepIds:
     return;
   }
 
+  const currentSteps = await throwIfError(supabase.from("manufacturing_steps").select("id,sequence").in("id", stepIds));
+  const maxSequence = Math.max(
+    100000,
+    ...(currentSteps ?? []).map((step) => num(step.sequence)),
+  );
+  const temporaryBaseSequence = maxSequence + stepIds.length + 1;
+
   await Promise.all(
     stepIds.map((stepId, index) =>
-      throwIfError(supabase.from("manufacturing_steps").update({ sequence: 100000 + index }).eq("id", stepId)),
+      throwIfError(supabase.from("manufacturing_steps").update({ sequence: temporaryBaseSequence + index }).eq("id", stepId)),
     ),
   );
 }
@@ -1831,10 +1838,9 @@ export async function saveTaskWithManufacturingStepsToSupabase(task: Task, proje
     .filter((stepId) => !nextStepIds.includes(stepId));
 
   if (existingSteps?.length) {
-    await Promise.all(
-      existingSteps.map((step, index) =>
-        throwIfError(supabase.from("manufacturing_steps").update({ sequence: 100000 + index }).eq("id", step.id)),
-      ),
+    await bumpManufacturingStepSequences(
+      supabase,
+      existingSteps.map((step) => String(step.id)),
     );
   }
 
@@ -2004,11 +2010,7 @@ export async function upsertProcedureStep(taskId: string, step: ManufacturingSte
 export async function reorderProcedureSteps(taskId: string, orderedStepIds: string[], projectId?: string) {
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
-  await Promise.all(
-    orderedStepIds.map((stepId, index) =>
-      throwIfError(supabase.from("manufacturing_steps").update({ sequence: 100000 + index }).eq("task_id", taskId).eq("id", stepId)),
-    ),
-  );
+  await bumpManufacturingStepSequences(supabase, orderedStepIds);
   await Promise.all(
     orderedStepIds.map((stepId, index) =>
       throwIfError(supabase.from("manufacturing_steps").update({ sequence: index + 1 }).eq("task_id", taskId).eq("id", stepId)),

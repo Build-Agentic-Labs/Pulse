@@ -5420,6 +5420,7 @@ export function LineWorkspace({
   const queuedSaveStateRef = useRef<PlannerState | null>(null);
   const plannerDirtyRef = useRef(false);
   const plannerSaveTimerRef = useRef<number | null>(null);
+  const latestDerivedStateRef = useRef<PlannerState>(plannerState);
   const procedureSaveInFlightRef = useRef(false);
   const queuedProcedureSaveRef = useRef<{ task: Task; tasks: Task[] } | null>(null);
   const pendingProcedureSaveRef = useRef<{ task: Task; tasks: Task[] } | null>(null);
@@ -5461,6 +5462,22 @@ export function LineWorkspace({
       tasks: calculated.tasks,
     };
   }, [plannerState]);
+
+  useEffect(() => {
+    latestDerivedStateRef.current = derivedState;
+  }, [derivedState]);
+
+  useEffect(() => {
+    function handlePageHide() {
+      flushPendingPlannerSave();
+    }
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      flushPendingPlannerSave();
+    };
+  }, []);
 
   const kpis = useMemo(
     () => calculateProductKpis(derivedState.product, derivedState.stations, derivedState.tasks),
@@ -5627,6 +5644,19 @@ export function LineWorkspace({
       Boolean(procedureSaveTimerRef.current) ||
       Boolean(pendingProcedureSaveRef.current)
     );
+  }
+
+  function flushPendingPlannerSave() {
+    if (!plannerDirtyRef.current && !plannerSaveTimerRef.current) {
+      return;
+    }
+
+    if (plannerSaveTimerRef.current) {
+      window.clearTimeout(plannerSaveTimerRef.current);
+      plannerSaveTimerRef.current = null;
+    }
+
+    void persistPlannerState(latestDerivedStateRef.current);
   }
 
   function taskIdFromRealtimePayload(payload: PlannerRealtimePayload) {

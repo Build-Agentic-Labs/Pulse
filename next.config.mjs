@@ -3,6 +3,7 @@ const supabaseOrigin = process.env.NEXT_PUBLIC_SUPABASE_URL
   ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
   : "https://neaadefipcpxxcqszpud.supabase.co";
 const supabaseRealtimeOrigin = supabaseOrigin.replace(/^https:/, "wss:");
+const isDevelopment = process.env.NODE_ENV !== "production";
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
@@ -10,10 +11,10 @@ const securityHeaders = [
       "default-src 'self'",
       "base-uri 'self'",
       "object-src 'none'",
-      "script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com",
+      `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ""} https://appsforoffice.microsoft.com`,
       "style-src 'self' 'unsafe-inline'",
       `img-src 'self' data: blob: ${supabaseOrigin}`,
-      `connect-src 'self' ${supabaseOrigin} ${supabaseRealtimeOrigin}`,
+      `connect-src 'self' ${supabaseOrigin} ${supabaseRealtimeOrigin}${isDevelopment ? " ws://localhost:* ws://127.0.0.1:*" : ""}`,
       "font-src 'self' data:",
       "frame-ancestors 'self' https://*.office.com https://*.officeapps.live.com https://*.microsoft.com",
       "form-action 'self'",

@@ -100,6 +100,7 @@ export interface Product {
   calculatedTaktMinutes: number;
   manualTaktMinutes?: number;
   activeTaktMinutes: number;
+  customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

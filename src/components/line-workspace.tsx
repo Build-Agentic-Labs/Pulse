@@ -79,9 +79,15 @@ import { removeTaskPartReference, updateTaskPartReference, type ProjectPartCatal
 import { buildProjectToolRegistry, type ProjectToolDefinition } from "@/domain/tool-registry";
 import type { ToolTypeValue } from "@/domain/tool-types";
 import {
-  getManufacturingStepCheckSet,
-  manufacturingStepCheckOptions,
-  serializeManufacturingStepCheckSet,
+  PRODUCT_STEP_CHECK_CONFIG_FIELD,
+  defaultManufacturingStepCheckDefinitions,
+  getManufacturingStepCheckDefinitions,
+  getManufacturingStepCheckState,
+  normalizeManufacturingStepCheck,
+  serializeManufacturingStepCheckDefinitions,
+  serializeManufacturingStepCheckState,
+  type ManufacturingStepCheckDefinition,
+  type ManufacturingStepCheckState,
 } from "@/domain/manufacturing-step-checks";
 import { applyInstructionBullets, resolveBulletEnter } from "@/domain/instruction-bullets";
 import {
@@ -215,6 +221,16 @@ const STEP_PHOTO_JPEG_QUALITY = 0.72;
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
 const PROCEDURE_DRAFT_STORAGE_KEY = "buildlogic-line-planner-procedure-draft-v1";
 const WORKSPACE_SNAPSHOT_STORAGE_PREFIX = "buildlogic-line-planner-workspace-v1";
+const PROJECT_SWITCH_EVENT = "pulse:project-switch-start";
+const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
+const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
+const PROJECT_SWITCH_SESSION_MAX_AGE_MS = 15_000;
+const PROJECT_SWITCH_SKELETON_MIN_MS = 650;
+
+type ProjectSwitchTarget = {
+  projectId: string;
+  title: string;
+};
 
 type WorkspaceSnapshot = {
   activeModule: string;
@@ -231,6 +247,71 @@ type ProcedureDraftSnapshot = {
   task: Task;
   savedAt: string;
 };
+
+function recentProjectSwitchStartedAt() {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const startedAt = Number(window.sessionStorage.getItem(PROJECT_SWITCH_SESSION_KEY));
+    return Number.isFinite(startedAt) && Date.now() - startedAt < PROJECT_SWITCH_SESSION_MAX_AGE_MS
+      ? startedAt
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function hasRecentProjectSwitchSession() {
+  return recentProjectSwitchStartedAt() !== undefined;
+}
+
+function readProjectSwitchTarget(): ProjectSwitchTarget | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(PROJECT_SWITCH_TARGET_SESSION_KEY);
+    if (!raw) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<ProjectSwitchTarget>;
+    return typeof parsed.projectId === "string" && typeof parsed.title === "string"
+      ? { projectId: parsed.projectId, title: parsed.title }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function buildProjectSwitchTargetContext(target?: ProjectSwitchTarget): ReturnType<typeof buildPlannerChromeContext> | undefined {
+  if (!target?.title) {
+    return undefined;
+  }
+
+  return {
+    title: target.title,
+    status: "",
+    statusClass: undefined,
+    detail: undefined,
+  };
+}
+
+function clearProjectSwitchSession() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(PROJECT_SWITCH_SESSION_KEY);
+    window.sessionStorage.removeItem(PROJECT_SWITCH_TARGET_SESSION_KEY);
+  } catch {
+    // Ignore storage failures in private browsing.
+  }
+}
 
 function workspaceSnapshotStorageKey(projectId?: string) {
   return `${WORKSPACE_SNAPSHOT_STORAGE_PREFIX}:${projectId || "default"}`;
@@ -697,7 +778,9 @@ function rescheduleTasksByDependencies(tasks: Task[]) {
 
       return Math.max(latestFinish, resolveSchedule(predecessor.id).finishMs);
     }, lineStartMs);
-    const startMs = Math.max(lineStartMs, manualStartMs, dependencyFinishMs);
+    const startMs = task.dependencyIds.length > 0
+      ? Math.max(lineStartMs, dependencyFinishMs)
+      : Math.max(lineStartMs, manualStartMs);
     const finishMs = startMs + Math.max(task.plannedDurationMinutes, 0) * 60_000;
     const schedule = { startMs, finishMs };
     scheduledById.set(taskId, schedule);
@@ -1603,6 +1686,132 @@ function StepPartReferenceEditor({
   );
 }
 
+function ProcedureStepChecksEditor({
+  ariaLabel,
+  definitions,
+  qualityCheck,
+  compact = false,
+  onChange,
+}: {
+  ariaLabel: string;
+  definitions: ManufacturingStepCheckDefinition[];
+  qualityCheck?: string;
+  compact?: boolean;
+  onChange: (qualityCheck: string) => void;
+}) {
+  const checkState = getManufacturingStepCheckState(qualityCheck, definitions);
+  const enabledDefinitions = definitions.filter((definition) => definition.enabled);
+
+  function commit(nextState: ManufacturingStepCheckState) {
+    onChange(serializeManufacturingStepCheckState(nextState, definitions));
+  }
+
+  function toggleCheck(key: string, checked: boolean) {
+    const selected = new Set(checkState.selected);
+    const values = { ...checkState.values };
+
+    if (checked) {
+      selected.add(key);
+    } else {
+      selected.delete(key);
+    }
+
+    commit({ selected, values });
+  }
+
+  function updateCheckValue(definition: ManufacturingStepCheckDefinition, patch: Partial<{ value: number; unit: string }>) {
+    const selected = new Set(checkState.selected);
+    selected.add(definition.key);
+    const currentValue = checkState.values[definition.key] ?? {};
+    commit({
+      selected,
+      values: {
+        ...checkState.values,
+        [definition.key]: {
+          ...currentValue,
+          ...patch,
+        },
+      },
+    });
+  }
+
+  if (enabledDefinitions.length === 0) {
+    return <div className="text-xs text-steel">No checks configured for this project.</div>;
+  }
+
+  return (
+    <div
+      className={compact ? "grid grid-cols-2 gap-1" : "ui-procedure-step-checks"}
+      role="group"
+      aria-label={ariaLabel}
+    >
+      {enabledDefinitions.map((definition) => {
+        const checked = checkState.selected.has(definition.key);
+        const checkValue = checkState.values[definition.key] ?? {};
+
+        if (definition.inputType === "number") {
+          const unitOptions = definition.unitOptions?.length ? definition.unitOptions : ["Nm", "ft-lb"];
+          const activeUnit = checkValue.unit ?? definition.defaultUnit ?? unitOptions[0];
+
+          return (
+            <div
+              key={definition.key}
+              className={`ui-procedure-step-check ${checked ? "ui-procedure-step-check-active" : ""} ${
+                compact ? "min-h-8 flex-wrap justify-start gap-1 px-1.5 py-1" : "gap-2"
+              }`}
+            >
+              <label className="inline-flex min-w-0 items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(event) => toggleCheck(definition.key, event.target.checked)}
+                />
+                <span className="truncate">{definition.label}</span>
+              </label>
+              {checked ? (
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  <ClearableNumberInput
+                    aria-label={`${definition.label} value`}
+                    className="number-input h-7 w-16 rounded border border-line bg-surface px-1.5 text-right text-xs outline-none"
+                    value={checkValue.value ?? 0}
+                    min={0}
+                    fallbackValue={checkValue.value ?? 0}
+                    precision={2}
+                    onValueChange={(value) => updateCheckValue(definition, { value })}
+                  />
+                  <ThemedSelect
+                    aria-label={`${definition.label} unit`}
+                    className="w-20"
+                    triggerClassName="h-7 px-1.5 text-[10px]"
+                    value={activeUnit}
+                    options={unitOptions.map((unit) => ({ value: unit, label: unit }))}
+                    onChange={(unit) => updateCheckValue(definition, { unit })}
+                  />
+                </span>
+              ) : null}
+            </div>
+          );
+        }
+
+        return (
+          <label
+            key={definition.key}
+            className={`ui-procedure-step-check ${checked ? "ui-procedure-step-check-active" : ""}`}
+            title={definition.label}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(event) => toggleCheck(definition.key, event.target.checked)}
+            />
+            <span className="truncate">{definition.label}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -1832,6 +2041,71 @@ function Sidebar({
   );
 }
 
+function WorkspaceSwitchSkeleton() {
+  const metricWidths = ["w-28", "w-24", "w-32", "w-24", "w-28"];
+  const lineClass = "ui-skeleton-line";
+
+  return (
+    <main className="ui-workspace-content p-0 pb-6">
+      <div className="ui-planner-dashboard">
+        <section className="border-b border-line px-6 py-4">
+          <div className={`${lineClass} h-3 w-40`} />
+          <div className={`${lineClass} mt-3 h-2 w-72`} />
+        </section>
+
+        <section className="grid grid-cols-2 gap-6 border-b border-line px-6 py-4 md:grid-cols-5">
+          {metricWidths.map((width, index) => (
+            <div key={index} className="space-y-2">
+              <div className={`${lineClass} h-2 ${width}`} />
+              <div className={`${lineClass} h-5 w-20`} />
+              <div className={`${lineClass} h-2 w-28`} />
+            </div>
+          ))}
+        </section>
+
+        <section className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_240px]">
+          <div className="px-6 py-6">
+            <div className={`${lineClass} h-4 w-32`} />
+            <div className={`${lineClass} mt-2 h-2 w-48`} />
+
+            <div className="mt-8 grid grid-cols-4 gap-5">
+              {[0, 1, 2, 3].map((item) => (
+                <div key={item} className="space-y-2">
+                  <div className={`${lineClass} h-2 w-24`} />
+                  <div className={`${lineClass} h-5 w-12`} />
+                  <div className={`${lineClass} h-2 w-28`} />
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-8 space-y-4">
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="border-t border-line pt-4">
+                  <div className={`${lineClass} h-3 w-48`} />
+                  <div className={`${lineClass} mt-2 h-2 w-80 max-w-full`} />
+                  <div className={`${lineClass} mt-2 h-2 w-[28rem] max-w-full`} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <aside className="border-l border-line px-5 py-6">
+            <div className={`${lineClass} h-4 w-28`} />
+            <div className="mt-6 space-y-4">
+              {[0, 1, 2, 3, 4].map((item) => (
+                <div key={item} className="border-b border-line pb-3">
+                  <div className={`${lineClass} h-2 w-24`} />
+                  <div className={`${lineClass} mt-2 h-3 w-32`} />
+                </div>
+              ))}
+            </div>
+          </aside>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 function ScrollDownHint({ className = "" }: { className?: string }) {
   const hintRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(false);
@@ -1889,6 +2163,7 @@ function ScrollDownHint({ className = "" }: { className?: string }) {
 }
 
 function ProcedureWorkspace({
+  product,
   tasks,
   zones,
   selectedTask,
@@ -1902,6 +2177,7 @@ function ProcedureWorkspace({
   onRemoveStepTool,
   projectToolRegistry,
 }: {
+  product: Product;
   tasks: Task[];
   zones: Zone[];
   selectedTask?: Task;
@@ -1921,6 +2197,7 @@ function ProcedureWorkspace({
   const [navigatorWidth, setNavigatorWidth] = useState(320);
   const [isResizingNavigator, setIsResizingNavigator] = useState(false);
   const navigatorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const stepCheckDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
   const zoneById = useMemo(() => new Map(zones.map((zone) => [zone.id, zone])), [zones]);
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, { id: string; name: string; color: string; sequence: number; tasks: Task[] }>();
@@ -2133,6 +2410,33 @@ function ProcedureWorkspace({
           disposition: "",
         },
       ],
+    });
+  }
+
+  function removePartReference(partId: string) {
+    if (!task) {
+      return;
+    }
+
+    const taskWithoutPart = {
+      ...task,
+      partReferences: partReferences.filter((part) => part.id !== partId),
+    };
+    const nextTask = removePartReferenceFromSteps(taskWithoutPart, partId);
+
+    onUpdateTask(task.id, {
+      manufacturingSteps: nextTask.manufacturingSteps,
+      partReferences: nextTask.partReferences,
+    });
+  }
+
+  function requestRemovePartReference(part: PartReference) {
+    onConfirmAction({
+      title: "Delete part reference?",
+      body: "This removes the part reference from this task and unlinks it from any manufacturing steps.",
+      tone: "danger",
+      confirmLabel: "Delete Part",
+      onConfirm: () => removePartReference(part.id),
     });
   }
 
@@ -2408,7 +2712,6 @@ function ProcedureWorkspace({
                 manufacturingSteps.map((step) => {
                   const stepPhotos = getStepPhotoAttachments(task, step.id);
                   const stepTools = getStepToolList(task, step.id);
-                  const selectedChecks = getManufacturingStepCheckSet(step.qualityCheck);
 
                   return (
                     <div key={step.id} className="ui-procedure-step space-y-3">
@@ -2549,37 +2852,12 @@ function ProcedureWorkspace({
 
                         <div className="ui-procedure-step-detail">
                           <span className="ui-field-label mb-0 block">Checks</span>
-                          <div className="ui-procedure-step-checks" role="group" aria-label={`Step ${step.sequence} checks`}>
-                            {manufacturingStepCheckOptions.map((option) => {
-                              const checked = selectedChecks.has(option.key);
-
-                              return (
-                                <label
-                                  key={option.key}
-                                  className={`ui-procedure-step-check ${checked ? "ui-procedure-step-check-active" : ""}`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={(event) => {
-                                      const nextChecks = new Set(selectedChecks);
-
-                                      if (event.target.checked) {
-                                        nextChecks.add(option.key);
-                                      } else {
-                                        nextChecks.delete(option.key);
-                                      }
-
-                                      updateManufacturingStep(step.id, {
-                                        qualityCheck: serializeManufacturingStepCheckSet(nextChecks),
-                                      });
-                                    }}
-                                  />
-                                  {option.label}
-                                </label>
-                              );
-                            })}
-                          </div>
+                          <ProcedureStepChecksEditor
+                            ariaLabel={`Step ${step.sequence} checks`}
+                            definitions={stepCheckDefinitions}
+                            qualityCheck={step.qualityCheck}
+                            onChange={(qualityCheck) => updateManufacturingStep(step.id, { qualityCheck })}
+                          />
                         </div>
                       </div>
 
@@ -2619,7 +2897,7 @@ function ProcedureWorkspace({
             ) : (
               <div className="ui-procedure-part-editor">
                 {partReferences.map((part) => (
-                  <div key={part.id} className="ui-procedure-part-row">
+                  <div key={part.id} className="ui-procedure-part-row group">
                     <label className="block min-w-0">
                       <span className="ui-field-label">Part Number</span>
                       <input
@@ -2659,6 +2937,15 @@ function ProcedureWorkspace({
                         placeholder="Note"
                       />
                     </label>
+                    <button
+                      type="button"
+                      className="ui-procedure-tool-table-remove mt-5 justify-self-end"
+                      onClick={() => requestRemovePartReference(part)}
+                      aria-label={`Delete part reference ${part.partNumber || "unnamed part"}`}
+                      title="Delete part"
+                    >
+                      <Trash2 size={14} strokeWidth={1.75} />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -2696,12 +2983,61 @@ function SetupFieldGroup({
 function ProductSetupPanel({
   product,
   onProductNumber,
+  onProductStepChecks,
   onProductText,
 }: {
   product: Product;
   onProductNumber: (field: ProductNumberField, value: number) => void;
+  onProductStepChecks: (definitions: ManufacturingStepCheckDefinition[]) => void;
   onProductText: (field: ProductTextField, value: string) => void;
 }) {
+  const checkDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
+  const defaultCheckKeys = new Set(defaultManufacturingStepCheckDefinitions.map((definition) => definition.key));
+
+  function updateCheckDefinition(key: string, patch: Partial<ManufacturingStepCheckDefinition>) {
+    onProductStepChecks(
+      checkDefinitions.map((definition) =>
+        definition.key === key
+          ? {
+              ...definition,
+              ...patch,
+            }
+          : definition,
+      ),
+    );
+  }
+
+  function getUniqueCheckKey(label: string) {
+    const baseKey = normalizeManufacturingStepCheck(label) || "custom_check";
+    const existingKeys = new Set(checkDefinitions.map((definition) => definition.key));
+    let candidate = baseKey;
+    let index = 2;
+
+    while (existingKeys.has(candidate)) {
+      candidate = `${baseKey}_${index}`;
+      index += 1;
+    }
+
+    return candidate;
+  }
+
+  function addCheckDefinition() {
+    const label = "New check";
+    onProductStepChecks([
+      ...checkDefinitions,
+      {
+        key: getUniqueCheckKey(label),
+        label,
+        enabled: true,
+        inputType: "checkbox",
+      },
+    ]);
+  }
+
+  function removeCheckDefinition(key: string) {
+    onProductStepChecks(checkDefinitions.filter((definition) => definition.key !== key));
+  }
+
   return (
     <section className="ui-product-setup">
       <div className="ui-product-setup-head">
@@ -2849,6 +3185,86 @@ function ProductSetupPanel({
               readOnly
               onChange={() => undefined}
             />
+          </div>
+        </SetupFieldGroup>
+
+        <SetupFieldGroup title="Procedure Checks" description="Choose the checks shown on manufacturing steps">
+          <div className="mb-2 flex justify-end">
+            <button type="button" onClick={addCheckDefinition} className="ui-btn-ghost h-8 gap-2 px-2 text-[10px]">
+              <Plus size={13} strokeWidth={1.75} />
+              Check
+            </button>
+          </div>
+          <div className="divide-y divide-line">
+            {checkDefinitions.map((definition) => (
+              <div
+                key={definition.key}
+                className="grid gap-3 py-3 first:pt-0 last:pb-0 md:grid-cols-[minmax(220px,1fr)_180px_120px_28px]"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-accent"
+                    checked={definition.enabled}
+                    onChange={(event) => updateCheckDefinition(definition.key, { enabled: event.target.checked })}
+                  />
+                  <label className="min-w-0 flex-1">
+                    <span className="sr-only">Check name</span>
+                    <input
+                      className="ui-procedure-step-inline-text w-full min-w-0 text-xs"
+                      value={definition.label}
+                      onChange={(event) => updateCheckDefinition(definition.key, { label: event.target.value })}
+                    />
+                    <span className="block truncate text-[10px] text-steel">{definition.key}</span>
+                  </label>
+                </div>
+                <ThemedSelect
+                  aria-label={`${definition.label} check type`}
+                  className="w-full"
+                  triggerClassName="h-9"
+                  value={definition.inputType}
+                  options={[
+                    { value: "checkbox", label: "Checkbox" },
+                    { value: "number", label: "Number + unit" },
+                  ]}
+                  onChange={(value) =>
+                    updateCheckDefinition(definition.key, {
+                      inputType: value === "number" ? "number" : "checkbox",
+                      defaultUnit: value === "number" ? definition.defaultUnit ?? definition.unitOptions?.[0] ?? "Nm" : undefined,
+                      unitOptions: value === "number" ? definition.unitOptions?.length ? definition.unitOptions : ["Nm", "ft-lb"] : undefined,
+                    })
+                  }
+                />
+                {definition.inputType === "number" ? (
+                  <ThemedSelect
+                    aria-label={`${definition.label} default unit`}
+                    className="w-full"
+                    triggerClassName="h-9"
+                    value={definition.defaultUnit ?? definition.unitOptions?.[0] ?? "Nm"}
+                    options={(definition.unitOptions?.length ? definition.unitOptions : ["Nm", "ft-lb"]).map((unit) => ({
+                      value: unit,
+                      label: unit,
+                    }))}
+                    onChange={(unit) => updateCheckDefinition(definition.key, { defaultUnit: unit })}
+                  />
+                ) : (
+                  <span className="hidden md:block" aria-hidden="true" />
+                )}
+                {defaultCheckKeys.has(definition.key) ? (
+                  <span className="hidden md:block" aria-hidden="true" />
+                ) : (
+                  <button
+                    type="button"
+                    className="inline-flex h-8 w-7 items-center justify-center justify-self-end rounded text-ink-tertiary transition hover:bg-danger-muted hover:text-danger"
+                    onClick={() => removeCheckDefinition(definition.key)}
+                    aria-label={`Remove ${definition.label}`}
+                    title={`Remove ${definition.label}`}
+                  >
+                    <Trash2 size={13} strokeWidth={1.8} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </SetupFieldGroup>
       </div>
@@ -3671,6 +4087,7 @@ function DetailDrawer({
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [newStepPartNumbers, setNewStepPartNumbers] = useState<Record<string, string>>({});
   const [stepPhotoUploadCounts, setStepPhotoUploadCounts] = useState<Record<string, number>>({});
+  const stepCheckDefinitions = getManufacturingStepCheckDefinitions();
   const collapsedRail = (
     <div aria-hidden={!collapsed} className={railClass}>
       <button
@@ -4027,7 +4444,6 @@ function DetailDrawer({
                 {manufacturingSteps.map((step) => {
                   const stepPhotos = getStepPhotoAttachments(currentTask, step.id);
                   const stepTools = getStepToolList(currentTask, step.id);
-                  const selectedChecks = getManufacturingStepCheckSet(step.qualityCheck);
 
                   return (
                     <div
@@ -4175,45 +4591,15 @@ function DetailDrawer({
                           />
                         </div>
                         <div
-                          className="grid grid-cols-[minmax(130px,1fr)_82px_48px] gap-1"
-                          role="group"
-                          aria-label={`Step ${step.sequence} checks`}
+                          className="min-w-0"
                         >
-                          {manufacturingStepCheckOptions.map((option) => {
-                            const checked = selectedChecks.has(option.key);
-
-                            return (
-                              <label
-                                key={option.key}
-                                title={option.label}
-                                className={`flex h-7 min-w-0 items-center justify-center gap-1 rounded border px-1.5 text-[10px] font-medium transition ${
-                                  checked
-                                    ? "border-accent/30 bg-accent/10 text-accent"
-                                    : "border-line bg-surface text-steel hover:border-accent"
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="h-3 w-3 shrink-0 accent-accent"
-                                  checked={checked}
-                                  onChange={(event) => {
-                                    const nextChecks = new Set(selectedChecks);
-
-                                    if (event.target.checked) {
-                                      nextChecks.add(option.key);
-                                    } else {
-                                      nextChecks.delete(option.key);
-                                    }
-
-                                    updateManufacturingStep(step.id, {
-                                      qualityCheck: serializeManufacturingStepCheckSet(nextChecks),
-                                    });
-                                  }}
-                                />
-                                <span className="whitespace-nowrap">{option.label}</span>
-                              </label>
-                            );
-                          })}
+                          <ProcedureStepChecksEditor
+                            ariaLabel={`Step ${step.sequence} checks`}
+                            compact
+                            definitions={stepCheckDefinitions}
+                            qualityCheck={step.qualityCheck}
+                            onChange={(qualityCheck) => updateManufacturingStep(step.id, { qualityCheck })}
+                          />
                         </div>
                       </div>
                       <button
@@ -4586,7 +4972,6 @@ export function LineWorkspace({
       activeZoneId: params.get("zone") ?? undefined,
     };
   }, [plannerQueryString]);
-  const initialUrlWorkspaceSnapshotRef = useRef(urlWorkspaceSnapshot);
   const [plannerState, setPlannerState] = useState<PlannerState>(initialPlannerState);
   const [activeModule, setActiveModule] = useState("dashboard");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
@@ -4603,7 +4988,8 @@ export function LineWorkspace({
   const [isResizingDetailDrawer, setIsResizingDetailDrawer] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("loading");
   const [saveError, setSaveError] = useState<string>();
-  const [hasLoadedRemoteState, setHasLoadedRemoteState] = useState(false);
+  const [hasLoadedRemoteState, setHasLoadedRemoteState] = useState(() => hasRecentProjectSwitchSession());
+  const [isProjectSwitching, setIsProjectSwitching] = useState(() => hasRecentProjectSwitchSession());
   const [dirtyVersion, setDirtyVersion] = useState(0);
   const [smartAllocationPending, setSmartAllocationPending] = useState(false);
   const [dismissedPlanningRecommendationKey, setDismissedPlanningRecommendationKey] = useState("");
@@ -4621,6 +5007,14 @@ export function LineWorkspace({
   const pendingRemoteRefreshRef = useRef(false);
   const remoteTaskRefreshTimerRef = useRef<number | null>(null);
   const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
+  const loadedProjectIdRef = useRef<string | undefined>(undefined);
+  const hasLoadedAnyProjectRef = useRef(hasRecentProjectSwitchSession());
+  const projectSwitchStartedAtRef = useRef<number | undefined>(recentProjectSwitchStartedAt());
+  const projectSwitchSkeletonTimerRef = useRef<number | null>(null);
+  const stablePlannerChromeContextRef = useRef<ReturnType<typeof buildPlannerChromeContext> | undefined>(undefined);
+  const [projectSwitchTargetContext, setProjectSwitchTargetContext] = useState(
+    () => buildProjectSwitchTargetContext(readProjectSwitchTarget()),
+  );
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
   const [chromeStatus, setChromeStatus] = useState<{ message: string; error?: boolean } | null>(null);
   const [workspaceNotice, setWorkspaceNotice] = useState<Omit<FeedbackToast, "id"> | null>(null);
@@ -4957,9 +5351,40 @@ export function LineWorkspace({
     requestRemotePlannerRefresh();
   }
 
+  function finishProjectSwitch() {
+    const startedAt = projectSwitchStartedAtRef.current;
+    const elapsed = startedAt ? Date.now() - startedAt : PROJECT_SWITCH_SKELETON_MIN_MS;
+    const remaining = Math.max(PROJECT_SWITCH_SKELETON_MIN_MS - elapsed, 0);
+
+    if (projectSwitchSkeletonTimerRef.current) {
+      window.clearTimeout(projectSwitchSkeletonTimerRef.current);
+      projectSwitchSkeletonTimerRef.current = null;
+    }
+
+    projectSwitchSkeletonTimerRef.current = window.setTimeout(() => {
+      clearProjectSwitchSession();
+      projectSwitchStartedAtRef.current = undefined;
+      projectSwitchSkeletonTimerRef.current = null;
+      setProjectSwitchTargetContext(undefined);
+      setIsProjectSwitching(false);
+    }, remaining);
+  }
+
   useEffect(() => {
     let mounted = true;
     let remoteLoaded = false;
+    const currentProjectId = projectId ?? "";
+    const isSwitchingProject = hasLoadedAnyProjectRef.current && loadedProjectIdRef.current !== currentProjectId;
+
+    if (isSwitchingProject && !projectSwitchStartedAtRef.current) {
+      projectSwitchStartedAtRef.current = Date.now();
+    }
+    if (isSwitchingProject) {
+      setProjectSwitchTargetContext(buildProjectSwitchTargetContext(readProjectSwitchTarget()));
+    }
+    setIsProjectSwitching(isSwitchingProject);
+    setHasLoadedRemoteState((loaded) => (isSwitchingProject && loaded ? true : false));
+    setSaveState("loading");
 
     function applyLoadedPlannerState(savedState: PlannerState, source: "cache" | "remote") {
       const procedureDraft = readProcedureDraftSnapshot();
@@ -4978,7 +5403,7 @@ export function LineWorkspace({
       const snapshotTask = workspaceSnapshot?.selectedTaskId
         ? hydratedState.tasks.find((task) => task.id === workspaceSnapshot.selectedTaskId)
         : undefined;
-      const initialUrlWorkspaceSnapshot = initialUrlWorkspaceSnapshotRef.current;
+      const initialUrlWorkspaceSnapshot = urlWorkspaceSnapshot;
       const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
         ? hydratedState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
         : undefined;
@@ -5005,12 +5430,16 @@ export function LineWorkspace({
       setActiveZoneId(urlZone?.id ?? snapshotZone?.id);
       setDetailDrawerCollapsed(workspaceSnapshot?.detailDrawerCollapsed ?? true);
       setSidebarCollapsed(workspaceSnapshot?.sidebarCollapsed ?? false);
+      loadedProjectIdRef.current = currentProjectId;
+      hasLoadedAnyProjectRef.current = true;
       setHasLoadedRemoteState(true);
 
       if (source === "cache") {
         setSaveState("loading");
         return;
       }
+
+      finishProjectSwitch();
 
       void writeCachedPlannerState(projectId, savedState).catch(() => undefined);
 
@@ -5048,7 +5477,7 @@ export function LineWorkspace({
           return;
         }
 
-        const initialUrlWorkspaceSnapshot = initialUrlWorkspaceSnapshotRef.current;
+        const initialUrlWorkspaceSnapshot = urlWorkspaceSnapshot;
         if (initialUrlWorkspaceSnapshot.activeModule) {
           setActiveModule(initialUrlWorkspaceSnapshot.activeModule);
         }
@@ -5064,6 +5493,9 @@ export function LineWorkspace({
         if (urlStation || urlTask) {
           setSelectedStationId(urlStation?.id ?? urlTask?.stationId ?? "");
         }
+        loadedProjectIdRef.current = currentProjectId;
+        hasLoadedAnyProjectRef.current = true;
+        finishProjectSwitch();
         setHasLoadedRemoteState(true);
         setSaveState("idle");
       })
@@ -5074,6 +5506,7 @@ export function LineWorkspace({
         remoteLoaded = true;
 
         setSaveError(error instanceof Error ? error.message : "Unable to load database state.");
+        finishProjectSwitch();
         setHasLoadedRemoteState(true);
         setSaveState("error");
       });
@@ -5088,6 +5521,24 @@ export function LineWorkspace({
       onReady?.();
     }
   }, [hasLoadedRemoteState, onReady]);
+
+  useEffect(() => {
+    function handleProjectSwitchStart(event: Event) {
+      if (hasLoadedAnyProjectRef.current) {
+        projectSwitchStartedAtRef.current = Date.now();
+        const target = event instanceof CustomEvent
+          ? event.detail as ProjectSwitchTarget | undefined
+          : readProjectSwitchTarget();
+        setProjectSwitchTargetContext(buildProjectSwitchTargetContext(target));
+        setActiveModule("dashboard");
+        setIsProjectSwitching(true);
+        setSaveState("loading");
+      }
+    }
+
+    window.addEventListener(PROJECT_SWITCH_EVENT, handleProjectSwitchStart);
+    return () => window.removeEventListener(PROJECT_SWITCH_EVENT, handleProjectSwitchStart);
+  }, []);
 
   useEffect(() => {
     if (!hasLoadedRemoteState) {
@@ -5118,6 +5569,10 @@ export function LineWorkspace({
       if (remoteTaskRefreshTimerRef.current) {
         window.clearTimeout(remoteTaskRefreshTimerRef.current);
         remoteTaskRefreshTimerRef.current = null;
+      }
+      if (projectSwitchSkeletonTimerRef.current) {
+        window.clearTimeout(projectSwitchSkeletonTimerRef.current);
+        projectSwitchSkeletonTimerRef.current = null;
       }
       if (procedureSaveTimerRef.current) {
         window.clearTimeout(procedureSaveTimerRef.current);
@@ -5318,9 +5773,16 @@ export function LineWorkspace({
   const isProcedureModule = activeModule === "procedure";
   const isDashboardModule = activeModule === "dashboard";
   const isSettingsModule = activeModule === "settings";
+  const sidebarActiveModule = isProjectSwitching ? "dashboard" : activeModule;
   const isComingSoonModule = comingSoonModuleIds.has(activeModule);
   const comingSoonModuleLabel = plannerModules.find((module) => module.id === activeModule)?.label ?? "Workspace";
   const plannerChromeContext = isDashboardModule ? buildPlannerChromeContext(derivedState.product) : undefined;
+  if (!isProjectSwitching && plannerChromeContext) {
+    stablePlannerChromeContextRef.current = plannerChromeContext;
+  }
+  const displayedPlannerChromeContext = isProjectSwitching
+    ? projectSwitchTargetContext ?? stablePlannerChromeContextRef.current ?? plannerChromeContext
+    : plannerChromeContext;
   const showDetailDrawer = false;
   const showsSchedulingWorkspace = activeModule === "gantt";
   const selectedTask = derivedState.tasks.find((task) => task.id === selectedTaskId) ?? derivedState.tasks[0];
@@ -5334,8 +5796,35 @@ export function LineWorkspace({
   } as CSSProperties;
 
   if (!hasLoadedRemoteState) {
+    if (!isProjectSwitching) {
+      return <AppLoadingShell title="Loading workspace" />;
+    }
+
     return (
-      <AppLoadingShell title="Loading workspace" />
+      <div
+        className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink"
+        style={workspaceGridStyle}
+      >
+        <TopNav
+          onExport={() => undefined}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+          context={displayedPlannerChromeContext}
+          chromeStatus={chromeStatus}
+        />
+        <div className={workspaceGridClass}>
+          <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
+            <Sidebar
+              activeModule="dashboard"
+              settingsSection={settingsSection}
+              onChange={() => undefined}
+              onOpenSettings={() => undefined}
+              project={activeProjectContext}
+            />
+          </div>
+          <WorkspaceSwitchSkeleton />
+        </div>
+      </div>
     );
   }
 
@@ -5527,6 +6016,20 @@ export function LineWorkspace({
       product: {
         ...current.product,
         [field]: value,
+      },
+    }));
+  }
+
+  function updateProductStepChecks(definitions: ManufacturingStepCheckDefinition[]) {
+    markDirty();
+    setPlannerState((current) => ({
+      ...current,
+      product: {
+        ...current.product,
+        customFields: {
+          ...(current.product.customFields ?? {}),
+          [PRODUCT_STEP_CHECK_CONFIG_FIELD]: serializeManufacturingStepCheckDefinitions(definitions),
+        },
       },
     }));
   }
@@ -6937,7 +7440,7 @@ export function LineWorkspace({
         onExport={exportMarkdown}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
-        context={plannerChromeContext}
+        context={displayedPlannerChromeContext}
         chromeStatus={chromeStatus}
       />
 
@@ -6962,7 +7465,7 @@ export function LineWorkspace({
       <div className={workspaceGridClass}>
         <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
           <Sidebar
-            activeModule={activeModule}
+            activeModule={sidebarActiveModule}
             settingsSection={settingsSection}
             onChange={navigateModule}
             onOpenSettings={openSettings}
@@ -6970,8 +7473,11 @@ export function LineWorkspace({
           />
         </div>
 
-        {isProcedureModule ? (
+        {isProjectSwitching ? (
+          <WorkspaceSwitchSkeleton />
+        ) : isProcedureModule ? (
           <ProcedureWorkspace
+            product={derivedState.product}
             tasks={derivedState.tasks}
             zones={derivedState.zones}
             selectedTask={selectedTask}
@@ -7022,6 +7528,7 @@ export function LineWorkspace({
                     <ProductSetupPanel
                       product={derivedState.product}
                       onProductNumber={updateProductNumber}
+                      onProductStepChecks={updateProductStepChecks}
                       onProductText={updateProductText}
                     />
                     <ProjectCatalogSetupPanel

@@ -17,6 +17,15 @@ import { ThemedFeedbackLayer, type FeedbackConfirm } from "./themed-feedback";
 import { UiContextMenu } from "./ui-context-menu";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
+const SIDEBAR_PROJECT_CACHE_KEY = "pulse:sidebar-projects-v1";
+const PROJECT_SWITCH_EVENT = "pulse:project-switch-start";
+const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
+const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
+
+type SidebarProjectCache = {
+  projects: Project[];
+  roles: Record<string, WorkspaceRole>;
+};
 
 function projectFromContext(project: PlannerProjectContext): Project {
   return {
@@ -38,7 +47,7 @@ function canManage(role?: WorkspaceRole) {
 }
 
 function projectPlannerHref(projectId: string) {
-  return `/projects/${projectId}/planner`;
+  return `/projects/${projectId}/planner?view=dashboard`;
 }
 
 function clearLastProjectIdIfMatch(projectId: string) {
@@ -55,6 +64,65 @@ function clearLastProjectIdIfMatch(projectId: string) {
   }
 }
 
+function readSidebarProjectCache(): SidebarProjectCache {
+  if (typeof window === "undefined") {
+    return { projects: [], roles: {} };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_PROJECT_CACHE_KEY);
+    if (!raw) {
+      return { projects: [], roles: {} };
+    }
+
+    const parsed = JSON.parse(raw) as Partial<SidebarProjectCache>;
+    return {
+      projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+      roles: parsed.roles && typeof parsed.roles === "object" ? parsed.roles as Record<string, WorkspaceRole> : {},
+    };
+  } catch {
+    return { projects: [], roles: {} };
+  }
+}
+
+function writeSidebarProjectCache(cache: SidebarProjectCache) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(SIDEBAR_PROJECT_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Ignore storage failures in private browsing.
+  }
+}
+
+function mergeProjects(projects: Project[], activeProject?: PlannerProjectContext) {
+  const byId = new Map(projects.map((project) => [project.id, project]));
+  if (activeProject) {
+    const fallback = projectFromContext(activeProject);
+    byId.set(activeProject.projectId, { ...fallback, ...byId.get(activeProject.projectId), name: activeProject.projectName });
+  }
+  return [...byId.values()];
+}
+
+function announceProjectSwitch(project: Project) {
+  if (typeof window !== "undefined") {
+    try {
+      window.sessionStorage.setItem(PROJECT_SWITCH_SESSION_KEY, String(Date.now()));
+      window.sessionStorage.setItem(
+        PROJECT_SWITCH_TARGET_SESSION_KEY,
+        JSON.stringify({ projectId: project.id, title: project.name }),
+      );
+    } catch {
+      // Ignore storage failures in private browsing.
+    }
+    window.dispatchEvent(new CustomEvent(PROJECT_SWITCH_EVENT, {
+      detail: { projectId: project.id, title: project.name },
+    }));
+  }
+}
+
 export function SidebarWorkspacePanel({
   activeProject,
 }: {
@@ -62,9 +130,15 @@ export function SidebarWorkspacePanel({
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
-  const [projects, setProjects] = useState<Project[]>(() => (activeProject ? [projectFromContext(activeProject)] : []));
+  const cachedSidebar = useMemo(readSidebarProjectCache, []);
+  const [projects, setProjects] = useState<Project[]>(() => mergeProjects(cachedSidebar.projects, activeProject));
   const [workspaceId, setWorkspaceId] = useState<string | undefined>(() => activeProject?.workspaceId);
   const [role, setRole] = useState<WorkspaceRole | undefined>(() => activeProject?.role);
+  const [roleByWorkspaceId, setRoleByWorkspaceId] = useState<Record<string, WorkspaceRole>>(() =>
+    activeProject?.workspaceId && activeProject.role
+      ? { ...cachedSidebar.roles, [activeProject.workspaceId]: activeProject.role }
+      : cachedSidebar.roles,
+  );
   const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">(() =>
     activeProject ? "ready" : "loading",
   );
@@ -83,6 +157,9 @@ export function SidebarWorkspacePanel({
     const fallbackProject = projectFromContext(activeProject);
     setWorkspaceId(activeProject.workspaceId);
     setRole(activeProject.role);
+    if (activeProject.role) {
+      setRoleByWorkspaceId((current) => ({ ...current, [activeProject.workspaceId]: activeProject.role as WorkspaceRole }));
+    }
     setStatus((current) => (current === "loading" ? "ready" : current));
     setProjects((current) => {
       if (current.some((project) => project.id === activeProject.projectId)) {
@@ -90,28 +167,37 @@ export function SidebarWorkspacePanel({
           project.id === activeProject.projectId ? { ...fallbackProject, ...project, name: activeProject.projectName } : project,
         );
       }
-      return [fallbackProject, ...current];
+      return mergeProjects(current, activeProject);
     });
   }, [activeProject?.projectId, activeProject?.projectName, activeProject?.workspaceId, activeProject?.role]);
 
   async function hydrate() {
     try {
       const groups = await ensureDefaultWorkspaceMembership();
-      const group =
-        groups.find((entry) => entry.workspace.id === activeProject?.workspaceId) ?? groups[0];
+      const activeGroup = groups.find((entry) => entry.workspace.id === activeProject?.workspaceId) ?? groups[0];
 
-      if (!group) {
+      if (!activeGroup) {
         setProjects([]);
         setWorkspaceId(undefined);
         setRole(undefined);
+        setRoleByWorkspaceId({});
         setStatus("ready");
         return [];
       }
 
-      const nextProjects = group.projects.filter((project) => project.status !== "archived");
-      setWorkspaceId(group.workspace.id);
-      setRole(group.role);
+      const nextProjects = groups.flatMap((group) =>
+        group.projects.filter((project) => project.status !== "archived"),
+      );
+      setWorkspaceId(activeGroup.workspace.id);
+      setRole(activeGroup.role);
+      setRoleByWorkspaceId(
+        Object.fromEntries(groups.map((group) => [group.workspace.id, group.role])),
+      );
       setProjects(nextProjects);
+      writeSidebarProjectCache({
+        projects: nextProjects,
+        roles: Object.fromEntries(groups.map((group) => [group.workspace.id, group.role])),
+      });
       setStatus("ready");
       return nextProjects;
     } catch {
@@ -306,6 +392,7 @@ export function SidebarWorkspacePanel({
             ? projects.map((project) => {
                 const active = project.id === activeProject?.projectId;
                 const isRenaming = renamingProjectId === project.id;
+                const projectRole = roleByWorkspaceId[project.workspaceId] ?? role;
                 return (
                   <div
                     key={project.id}
@@ -356,12 +443,17 @@ export function SidebarWorkspacePanel({
                         href={projectPlannerHref(project.id)}
                         title={project.name}
                         className="flex min-w-0 flex-1 items-center gap-2 text-inherit no-underline"
+                        onClick={() => {
+                          if (!active) {
+                            announceProjectSwitch(project);
+                          }
+                        }}
                       >
                         <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />
                         <span className="min-w-0 flex-1 truncate">{project.name}</span>
                       </Link>
                     )}
-                    {canManage(role) && !isRenaming ? (
+                    {canManage(projectRole) && !isRenaming ? (
                       <button
                         type="button"
                         className="inline-flex h-4 w-4 shrink-0 items-center justify-center self-center p-0 text-ink-secondary opacity-0 transition-opacity duration-200 hover:text-ink group-hover/project:opacity-100 disabled:opacity-40"

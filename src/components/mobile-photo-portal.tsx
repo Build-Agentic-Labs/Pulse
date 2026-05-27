@@ -795,7 +795,9 @@ function rescheduleTasksByDependencies(tasks: Task[]) {
 
       return Math.max(latestFinish, resolveSchedule(predecessor.id).finishMs);
     }, lineStartMs);
-    const startMs = Math.max(lineStartMs, manualStartMs, dependencyFinishMs);
+    const startMs = task.dependencyIds.length > 0
+      ? Math.max(lineStartMs, dependencyFinishMs)
+      : Math.max(lineStartMs, manualStartMs);
     const finishMs = startMs + Math.max(task.plannedDurationMinutes, 0) * 60_000;
     const schedule = { startMs, finishMs };
     scheduledById.set(taskId, schedule);

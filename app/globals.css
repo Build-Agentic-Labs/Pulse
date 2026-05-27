@@ -1977,6 +1977,29 @@ body {
   }
 }
 
+@keyframes ui-skeleton-shimmer {
+  0% {
+    background-position: 160% 0;
+  }
+
+  100% {
+    background-position: -160% 0;
+  }
+}
+
+.ui-skeleton-line {
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--color-surface-muted) 72%, transparent) 0%,
+      color-mix(in srgb, var(--color-ink-secondary) 18%, var(--color-surface-muted)) 42%,
+      color-mix(in srgb, var(--color-surface-muted) 72%, transparent) 78%
+    );
+  background-size: 220% 100%;
+  animation: ui-skeleton-shimmer 1.15s ease-in-out infinite;
+}
+
 .nd-segmented {
   border: 1px solid var(--nd-border-visible);
   border-radius: 999px;
@@ -2526,6 +2549,11 @@ body {
     @apply rounded-xl px-4 py-3.5;
   }
 
+  .ui-procedure-step + .ui-procedure-step {
+    border-top: 1px solid color-mix(in srgb, var(--color-border-strong) 42%, transparent);
+    padding-top: 1rem;
+  }
+
   .ui-workspace-content .ui-procedure-step {
     @apply px-0;
   }
@@ -2709,7 +2737,7 @@ body {
   }
 
   .ui-procedure-part-row {
-    @apply grid gap-x-4 gap-y-2 py-3 first:pt-0 md:grid-cols-[minmax(140px,0.42fr)_56px_minmax(0,1fr)_minmax(0,1fr)];
+    @apply grid gap-x-4 gap-y-2 py-3 first:pt-0 md:grid-cols-[minmax(140px,0.42fr)_56px_minmax(0,1fr)_minmax(0,1fr)_24px];
   }
 
   .ui-procedure-part-editor .ui-procedure-step-inline-value {

@@ -1,7 +1,15 @@
 "use client";
 
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Copy, Link2, Maximize2, Minimize2, Plus, Trash2, Users } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { calculatePeakManpower, formatMinutes, getTaskWindow, getTimelineBounds, round } from "@/domain/calculations";
 import { getOperatorAssignmentBlockState } from "@/domain/operator-allocation";
 import { getTaskOperatorIds, getTaskOperatorPatch } from "@/domain/operator-assignments";
@@ -45,7 +53,14 @@ interface GanttTimelineProps {
     targetZoneId: string | undefined,
     placement: "before" | "after",
   ) => void;
-  onNotify: (message: { title: string; body?: string; tone?: "neutral" | "success" | "warning" | "danger" }) => void;
+  onNotify: (message: {
+    title: string;
+    body?: string;
+    content?: ReactNode;
+    tone?: "neutral" | "success" | "warning" | "danger";
+    placement?: "corner" | "center";
+    persistent?: boolean;
+  }) => void;
   onConfirmAction: (message: {
     title: string;
     body?: string;
@@ -68,7 +83,7 @@ const TABLE_WIDTH = 940;
 const COLLAPSED_TABLE_WIDTH = 52;
 const PIXELS_PER_MINUTE = 0.78;
 const TIMELINE_LEFT_PADDING = 28;
-const TABLE_GRID_TEMPLATE = "56px 392px 54px 54px 58px 112px 44px 26px 26px 26px";
+const TABLE_GRID_TEMPLATE = "56px 320px 54px 54px 58px 184px 44px 26px 26px 26px";
 interface ProcessGroup {
   id: string;
   wbs: string;
@@ -348,7 +363,7 @@ function OperatorAssignmentPicker({
 
   return (
     <div
-      className={`inline-flex max-w-full items-center justify-center gap-0.5 ${isAllocating ? "animate-pulse" : ""}`}
+      className={`flex max-w-full items-center justify-center gap-0.5 overflow-hidden ${isAllocating ? "animate-pulse" : ""}`}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
     >
@@ -398,7 +413,7 @@ function OperatorAssignmentPicker({
 
               onToggleOperator(task, letter);
             }}
-            className={`flex h-6 w-6 items-center justify-center rounded-sm outline-none transition focus-visible:ring-2 focus-visible:ring-accent ${
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-sm outline-none transition focus-visible:ring-2 focus-visible:ring-accent ${
               selected
                 ? "opacity-100"
                 : scheduleBlocked
@@ -1109,10 +1124,12 @@ export function GanttTimeline({
     }
 
     let copied = false;
+    const errors: string[] = [];
 
     try {
       copied = copyTextWithSelection(text);
-    } catch {
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Legacy clipboard copy failed.");
       copied = false;
     }
 
@@ -1120,7 +1137,8 @@ export function GanttTimeline({
       try {
         await navigator.clipboard.writeText(text);
         copied = true;
-      } catch {
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : "Clipboard API copy failed.");
         copied = false;
       }
     }
@@ -1133,9 +1151,26 @@ export function GanttTimeline({
             tone: "success",
           }
         : {
-            title: "Copy blocked",
-            body: "The browser blocked clipboard access. Click inside the app, then try the copy button again.",
+            title: "Manual copy needed",
+            content: (
+              <div className="space-y-3">
+                <p className="ui-workspace-notice-body">
+                  The browser blocked clipboard access. Select the rows below and copy them manually.
+                </p>
+                <textarea
+                  readOnly
+                  value={text}
+                  onFocus={(event) => event.currentTarget.select()}
+                  className="ui-field-standalone h-[280px] resize-none p-3 font-mono text-xs leading-relaxed"
+                />
+                {errors.length ? (
+                  <p className="ui-workspace-notice-body text-danger">{errors.join(" ")}</p>
+                ) : null}
+              </div>
+            ),
             tone: "warning",
+            placement: "center",
+            persistent: true,
           },
     );
   }

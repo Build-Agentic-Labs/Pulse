@@ -21,9 +21,25 @@ type AuthProjectGateProps = {
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 const WORKSPACE_LOADING_TITLE = "Loading workspace";
+const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
+const PROJECT_SWITCH_SESSION_MAX_AGE_MS = 15_000;
+
+function hasRecentProjectSwitchSession() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const startedAt = Number(window.sessionStorage.getItem(PROJECT_SWITCH_SESSION_KEY));
+    return Number.isFinite(startedAt) && Date.now() - startedAt < PROJECT_SWITCH_SESSION_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
 
 function projectHref(projectId: string, routeKind: ProjectRouteKind) {
-  return `/projects/${projectId}/${routeKind}`;
+  const href = `/projects/${projectId}/${routeKind}`;
+  return routeKind === "planner" ? `${href}?view=dashboard` : href;
 }
 
 function buildProjectContext(groups: WorkspaceProjectGroup[], projectId: string): PlannerProjectContext | undefined {
@@ -93,7 +109,9 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   }, [status]);
 
   useEffect(() => {
-    setChildReady(false);
+    if (!projectId) {
+      setChildReady(false);
+    }
   }, [projectId]);
 
   const selectedProject = useMemo(
@@ -236,6 +254,10 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   const isRedirectingToProject =
     !projectId && status === "ready" && flatProjects.length > 0;
 
+  if (projectId && !sessionReady && hasRecentProjectSwitchSession()) {
+    return <>{children(fallbackProjectContext(projectId), () => setChildReady(true))}</>;
+  }
+
   if (!sessionReady) {
     return (
       <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
@@ -281,10 +303,8 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
 
     return (
       <>
-        {!childReady && <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />}
-        <div style={{ display: childReady ? "contents" : "none" }}>
-          {children(selectedProject ?? fallbackProjectContext(projectId), () => setChildReady(true))}
-        </div>
+        {!childReady && status !== "ready" && !hasRecentProjectSwitchSession() ? <AppLoadingShell title={WORKSPACE_LOADING_TITLE} /> : null}
+        {children(selectedProject ?? fallbackProjectContext(projectId), () => setChildReady(true))}
       </>
     );
   }

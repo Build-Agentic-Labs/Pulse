@@ -190,6 +190,7 @@ function mapProduct(row: Record<string, unknown>): Product {
     calculatedTaktMinutes: num(row.calculated_takt_minutes),
     manualTaktMinutes: maybeNum(row.manual_takt_minutes),
     activeTaktMinutes: num(row.active_takt_minutes),
+    customFields: jsonObject(row.custom_fields),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -445,6 +446,7 @@ function productRow(product: Product) {
     calculated_takt_minutes: product.calculatedTaktMinutes,
     manual_takt_minutes: product.manualTaktMinutes ?? null,
     active_takt_minutes: product.activeTaktMinutes,
+    custom_fields: product.customFields ?? {},
     created_at: product.createdAt,
     updated_at: product.updatedAt,
   };
@@ -684,24 +686,51 @@ async function signedStorageUrl(supabase: SupabaseClient, storagePath?: string |
   return data.signedUrl;
 }
 
-async function withSignedStepPhotoRows(supabase: SupabaseClient, rows: StepPhotoRow[] = []) {
-  return Promise.all(
-    rows.map(async (row) => ({
-      ...row,
-      public_url: (await signedStorageUrl(supabase, row.storage_path)) ?? row.public_url,
-      thumbnail_url:
-        (await signedStorageUrl(supabase, row.thumbnail_storage_path)) ?? row.thumbnail_url ?? null,
-    })),
+async function signedStorageUrls(supabase: SupabaseClient, storagePaths: string[]) {
+  const uniquePaths = [...new Set(storagePaths.filter(Boolean))];
+  if (uniquePaths.length === 0) {
+    return new Map<string, string>();
+  }
+
+  const { data, error } = await supabase.storage
+    .from(stepPhotoBucket)
+    .createSignedUrls(uniquePaths, STORAGE_SIGNED_URL_SECONDS);
+
+  if (error || !data) {
+    return new Map<string, string>();
+  }
+
+  return new Map(
+    data
+      .filter((entry) => entry.path && entry.signedUrl)
+      .map((entry) => [String(entry.path), String(entry.signedUrl)]),
   );
 }
 
-async function withSignedToolLibraryRows(supabase: SupabaseClient, rows: ToolLibraryRow[] = []) {
-  return Promise.all(
-    rows.map(async (row) => ({
-      ...row,
-      image_url: (await signedStorageUrl(supabase, row.storage_path)) ?? row.image_url ?? null,
-    })),
+async function withSignedStepPhotoRows(supabase: SupabaseClient, rows: StepPhotoRow[] = []) {
+  const signedUrls = await signedStorageUrls(
+    supabase,
+    rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
   );
+
+  return rows.map((row) => ({
+    ...row,
+    public_url: (row.storage_path ? signedUrls.get(row.storage_path) : undefined) ?? row.public_url,
+    thumbnail_url:
+      (row.thumbnail_storage_path ? signedUrls.get(row.thumbnail_storage_path) : undefined) ?? row.thumbnail_url ?? null,
+  }));
+}
+
+async function withSignedToolLibraryRows(supabase: SupabaseClient, rows: ToolLibraryRow[] = []) {
+  const signedUrls = await signedStorageUrls(
+    supabase,
+    rows.map((row) => row.storage_path).filter((value): value is string => Boolean(value)),
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    image_url: (row.storage_path ? signedUrls.get(row.storage_path) : undefined) ?? row.image_url ?? null,
+  }));
 }
 
 function withNormalizedStepAssets(

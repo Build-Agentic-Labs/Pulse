@@ -1449,8 +1449,7 @@ function StepPhotoAttachmentEditor({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1 ui-mono-label">
-          <ImageIcon size={compact ? 12 : 13} />
+        <div className="ui-field-label mb-0 flex items-center gap-1">
           Photos
           {photos.length > 0 ? <span className="text-steel/70">({photos.length})</span> : null}
         </div>
@@ -2697,7 +2696,7 @@ function ProcedureWorkspace({
             </label>
           </section>
 
-          <section>
+          <section className="ui-procedure-manufacturing-section">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="ui-setup-section-title">Manufacturing Steps</h2>
@@ -2819,21 +2818,46 @@ function ProcedureWorkspace({
                             </button>
                           </div>
                         </div>
-                        <textarea
-                          aria-label={`Step ${step.sequence} instruction`}
-                          className="ui-field-standalone ui-procedure-step-instruction h-auto w-full resize-y"
-                          value={step.instruction}
-                          onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
-                          onKeyDown={(event) =>
-                            handleInstructionBulletKeyDown(event, (instruction) =>
-                              updateManufacturingStep(step.id, { instruction }),
-                            )
-                          }
-                          placeholder="Write the manufacturing instruction for this operation."
+                        <label className="ui-procedure-step-instruction-field block">
+                          <span className="ui-field-label mb-0 block">Instruction</span>
+                          <textarea
+                            aria-label={`Step ${step.sequence} instruction`}
+                            className="ui-field-standalone ui-procedure-step-instruction h-auto w-full resize-y"
+                            value={step.instruction}
+                            onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
+                            onKeyDown={(event) =>
+                              handleInstructionBulletKeyDown(event, (instruction) =>
+                                updateManufacturingStep(step.id, { instruction }),
+                              )
+                            }
+                            placeholder="Write the manufacturing instruction for this operation."
+                          />
+                        </label>
+                      </div>
+
+                      <div className="ui-procedure-step-divider">
+                        <StepPhotoAttachmentEditor
+                          step={step}
+                          photos={stepPhotos}
+                          isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
+                          onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
+                          onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
+                          onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
+                          onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                         />
                       </div>
 
                       <div className="ui-procedure-step-details">
+                        <div className="ui-procedure-step-detail">
+                          <span className="ui-field-label mb-0 block">Checks</span>
+                          <ProcedureStepChecksEditor
+                            ariaLabel={`Step ${step.sequence} checks`}
+                            definitions={stepCheckDefinitions}
+                            qualityCheck={step.qualityCheck}
+                            onChange={(qualityCheck) => updateManufacturingStep(step.id, { qualityCheck })}
+                          />
+                        </div>
+
                         <div className="ui-procedure-step-detail">
                           <span className="ui-field-label mb-0 block">Tools</span>
                           <div className="ui-procedure-step-add-row">
@@ -2898,29 +2922,7 @@ function ProcedureWorkspace({
                           onLinkExisting={(partReferenceId) => linkExistingPartToManufacturingStep(step.id, partReferenceId)}
                           onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
                         />
-
-                        <div className="ui-procedure-step-detail">
-                          <span className="ui-field-label mb-0 block">Checks</span>
-                          <ProcedureStepChecksEditor
-                            ariaLabel={`Step ${step.sequence} checks`}
-                            definitions={stepCheckDefinitions}
-                            qualityCheck={step.qualityCheck}
-                            onChange={(qualityCheck) => updateManufacturingStep(step.id, { qualityCheck })}
-                          />
-                        </div>
                       </div>
-
-                        <div className="ui-procedure-step-divider">
-                          <StepPhotoAttachmentEditor
-                            step={step}
-                            photos={stepPhotos}
-                            isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
-                            onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
-                            onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
-                            onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
-                            onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
-                          />
-                        </div>
                     </div>
                   );
                 })

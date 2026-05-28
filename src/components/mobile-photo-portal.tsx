@@ -565,7 +565,11 @@ function resizeTextareaToContent(textarea: HTMLTextAreaElement, maxHeight = MOBI
   textarea.style.overflowY = scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
-function ensureMobileFieldVisible(element: HTMLElement, headerHeight: number) {
+function ensureMobileFieldVisible(element: HTMLElement | null, headerHeight: number) {
+  if (!element || !element.isConnected) {
+    return;
+  }
+
   const viewport = window.visualViewport;
   const viewportTop = viewport?.offsetTop ?? 0;
   const viewportHeight = viewport?.height ?? window.innerHeight;
@@ -594,24 +598,6 @@ function parseManufacturingStepNameInput(value: string, sequence: number) {
   }
 
   return trimmed;
-}
-
-function manufacturingStepChecklistLabel(value?: string) {
-  if (!value?.trim()) {
-    return "";
-  }
-
-  const state = getManufacturingStepCheckState(value, manufacturingStepCheckOptions);
-  const isStructuredChecklist = value.trim().startsWith("{");
-  const labels = manufacturingStepCheckOptions
-    .filter((option) => state.selected.has(option.key))
-    .map((option) => {
-      const checkValue = state.values[option.key];
-      const numericValue = checkValue?.value;
-      return numericValue === undefined ? option.label : `${option.label}: ${numericValue}${checkValue.unit ? ` ${checkValue.unit}` : ""}`;
-    });
-
-  return labels.length > 0 ? labels.join(", ") : isStructuredChecklist ? "" : value;
 }
 
 function getNextTopLevelWbs(tasks: Task[]) {
@@ -4105,7 +4091,6 @@ export function MobilePhotoPortal({
                   const isUploading = uploadCount > 0;
                   const confirmingDelete = confirmDeleteStepId === step.id;
                   const stepCode = stepDisplayCode(selectedTask, step);
-                  const checklistLabel = manufacturingStepChecklistLabel(step.qualityCheck);
 
                   return (
                     <article
@@ -4232,11 +4217,6 @@ export function MobilePhotoPortal({
                             placeholder="Describe the manufacturing step"
                           />
                         </label>
-                          {checklistLabel ? (
-                            <div className="ui-photo-mobile-checklist-tag">
-                              Checklist: {checklistLabel}
-                            </div>
-                          ) : null}
                       </div>
                       <div className="ui-photo-mobile-section ui-photo-mobile-section-compact">
                         <div className="ui-photo-mobile-section-head">

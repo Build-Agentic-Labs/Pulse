@@ -84,6 +84,7 @@ export const metadata: Metadata = {
   description: "Manufacturing line development planner",
   icons: {
     icon: "/pulse-favicon.png",
+    apple: "/apple-touch-icon.png",
   },
 };
 

@@ -751,13 +751,13 @@ function rebuildDependenciesFromTasks(tasks: Task[], existingDependencies: Depen
   );
 }
 
-function rescheduleTasksByDependencies(tasks: Task[]) {
+function rescheduleTasksByDependencies(tasks: Task[], options: { preserveManualStartTaskIds?: Set<string> } = {}) {
   if (tasks.length === 0) {
     return tasks;
   }
 
-  const baseStartMs = Date.parse(tasks[0].plannedStart);
-  const lineStartMs = Number.isFinite(baseStartMs) ? baseStartMs : Date.now();
+  const taskStartTimes = tasks.map((task) => Date.parse(task.plannedStart)).filter(Number.isFinite);
+  const lineStartMs = taskStartTimes.length ? Math.min(...taskStartTimes) : Date.now();
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const scheduledById = new Map<string, { startMs: number; finishMs: number }>();
   const visiting = new Set<string>();
@@ -793,7 +793,11 @@ function rescheduleTasksByDependencies(tasks: Task[]) {
       return Math.max(latestFinish, resolveSchedule(predecessor.id).finishMs);
     }, lineStartMs);
     const startMs = task.dependencyIds.length > 0
-      ? Math.max(lineStartMs, dependencyFinishMs)
+      ? Math.max(
+        lineStartMs,
+        dependencyFinishMs,
+        options.preserveManualStartTaskIds?.has(task.id) ? manualStartMs : lineStartMs,
+      )
       : Math.max(lineStartMs, manualStartMs);
     const finishMs = startMs + Math.max(task.plannedDurationMinutes, 0) * 60_000;
     const schedule = { startMs, finishMs };
@@ -812,6 +816,33 @@ function rescheduleTasksByDependencies(tasks: Task[]) {
       plannedFinish: new Date(finishMs).toISOString(),
     };
   });
+}
+
+function taskPatchChangesSchedule(patch: Partial<Task>) {
+  return (
+    patch.plannedStart !== undefined ||
+    patch.plannedFinish !== undefined ||
+    patch.plannedDurationMinutes !== undefined
+  );
+}
+
+function enforceStepDerivedDuration(task: Task, patch: Partial<Task>) {
+  if (
+    patch.plannedDurationMinutes === undefined ||
+    patch.manufacturingSteps !== undefined ||
+    (task.manufacturingSteps ?? []).length === 0
+  ) {
+    return patch;
+  }
+
+  const { plannedDurationMinutes: _blockedDuration, ...safePatch } = patch;
+
+  if (patch.plannedStart === undefined) {
+    const { plannedFinish: _blockedFinish, ...safePatchWithoutFinish } = safePatch;
+    return safePatchWithoutFinish;
+  }
+
+  return safePatch;
 }
 
 function applyTaskCode(
@@ -3620,32 +3651,37 @@ function NomenclatureSetupPanel({
 
 function KpiStrip({ kpis, product }: { kpis: ReturnType<typeof calculateProductKpis>; product: Product }) {
   const varianceTone = kpis.targetVariance <= 0 ? "good" : kpis.targetVariancePercent <= 10 ? "warn" : "bad";
-  const taktTone = kpis.plannedCycleMinutes <= kpis.taktMinutes ? "good" : "bad";
+  const taktTone = kpis.taktMinutes <= 0 ? "neutral" : kpis.plannedCycleMinutes <= kpis.taktMinutes ? "good" : "bad";
+  const crewTone = kpis.plannedLaborLoadFte <= kpis.budgetedCrewEquivalent ? "good" : "bad";
+  const balanceTone = kpis.lineBalanceScore >= 85 ? "good" : kpis.lineBalanceScore >= 70 ? "warn" : "bad";
+  const bottleneckTone = kpis.bottleneckStation
+    ? kpis.bottleneckStation.taktStatus === "red"
+      ? "bad"
+      : kpis.bottleneckStation.taktStatus === "yellow"
+        ? "warn"
+        : "neutral"
+    : "neutral";
   const plannedMhMeta = kpis.unassignedTaskCount > 0
-    ? `${formatManHours(kpis.assignedPlannedManHours)} assigned · ${formatManHours(kpis.unassignedPlannedManHours)} unassigned`
+    ? `${formatManHours(kpis.assignedPlannedManHours)} assigned - ${formatManHours(kpis.unassignedPlannedManHours)} unassigned`
     : `Target ${formatManHours(product.targetManHours)}`;
-  const availabilityMeta = `${formatMinutes(kpis.weeklyAvailableMinutes)}/week · ${round(
-    kpis.availableWorkDaysPerMonth,
-    1,
-  )} days/mo`;
+  const requiredCrewValue = kpis.wholePersonStaffingRequirement > 0
+    ? `${kpis.wholePersonStaffingRequirement} people`
+    : "0 people";
+  const requiredCrewMeta = `${round(kpis.budgetedCrewEquivalent, 2)} FTE - ${round(kpis.requiredAverageAllocationPercent, 1)}% avg`;
+  const bottleneckValue = kpis.bottleneckStation?.name ?? "-";
+  const bottleneckMeta = kpis.bottleneckStation
+    ? `Cycle ${formatMinutes(kpis.bottleneckStation.plannedCycleMinutes)}`
+    : "No scheduled work";
+  const balanceMeta = `Variance ${formatManHours(kpis.targetVariance)} vs target`;
 
   return (
     <section className="ui-kpi-strip">
-      <StatCard label="Net Available Time" value={formatMinutes(kpis.availableMinutes)} meta={availabilityMeta} />
       <StatCard label="Required Takt" value={formatMinutes(kpis.taktMinutes)} meta="Active takt" tone={taktTone} />
       <StatCard label="Unit Lead Time" value={formatMinutes(kpis.plannedCycleMinutes)} meta="First task start to final finish" />
       <StatCard label="Planned MH" value={formatManHours(kpis.plannedManHours)} meta={plannedMhMeta} tone={varianceTone} />
-      <StatCard
-        label="Balance"
-        value={`${round(kpis.lineBalanceScore, 1)}%`}
-        meta={kpis.bottleneckStation?.name ?? "No scheduled work"}
-      />
-      <StatCard
-        label="Capacity Gap"
-        value={formatManHours(kpis.capacityGapManHours)}
-        meta={kpis.capacityGapManHours >= 0 ? "Available labor ahead" : "Labor short"}
-        tone={kpis.capacityGapManHours >= 0 ? "good" : "bad"}
-      />
+      <StatCard label="Required Crew" value={requiredCrewValue} meta={requiredCrewMeta} tone={crewTone} />
+      <StatCard label="Bottleneck" value={bottleneckValue} meta={bottleneckMeta} tone={bottleneckTone} />
+      <StatCard label="Line Balance" value={`${round(kpis.lineBalanceScore, 1)}%`} meta={balanceMeta} tone={balanceTone} />
     </section>
   );
 }
@@ -6620,20 +6656,26 @@ export function LineWorkspace({
     }
 
     setPlannerState((current) => {
+      const currentTask = current.tasks.find((task) => task.id === taskId);
+      const safePatch = currentTask ? enforceStepDerivedDuration(currentTask, patch) : patch;
       const tasks = current.tasks.map((task) => {
         if (task.id !== taskId) {
           return task;
         }
 
-        const patchedTask = { ...task, ...patch };
-        return patch.zoneId !== undefined || patch.componentId !== undefined || patch.taskNumber !== undefined
+        const patchedTask = { ...task, ...safePatch };
+        return safePatch.zoneId !== undefined || safePatch.componentId !== undefined || safePatch.taskNumber !== undefined
           ? applyTaskCode(patchedTask, current.zones, current.components)
           : patchedTask;
       });
 
       return {
         ...current,
-        tasks: patch.plannedDurationMinutes === undefined ? tasks : rescheduleTasksByDependencies(tasks),
+        tasks: taskPatchChangesSchedule(safePatch)
+          ? rescheduleTasksByDependencies(tasks, {
+            preserveManualStartTaskIds: safePatch.plannedStart !== undefined ? new Set([taskId]) : undefined,
+          })
+          : tasks,
       };
     });
   }
@@ -6649,10 +6691,14 @@ export function LineWorkspace({
     const isNormalizedAssetPatch = patchKeys.length === 1 && patchKeys[0] === "customFields";
 
     setPlannerState((current) => {
-      const patchedTasks = current.tasks.map((task) => (task.id === taskId ? { ...task, ...patch } : task));
-      const scheduledTasks = patch.plannedDurationMinutes === undefined
-        ? patchedTasks
-        : rescheduleTasksByDependencies(patchedTasks);
+      const currentTask = current.tasks.find((task) => task.id === taskId);
+      const safePatch = currentTask ? enforceStepDerivedDuration(currentTask, patch) : patch;
+      const patchedTasks = current.tasks.map((task) => (task.id === taskId ? { ...task, ...safePatch } : task));
+      const scheduledTasks = taskPatchChangesSchedule(safePatch)
+        ? rescheduleTasksByDependencies(patchedTasks, {
+          preserveManualStartTaskIds: safePatch.plannedStart !== undefined ? new Set([taskId]) : undefined,
+        })
+        : patchedTasks;
       const taskToSave = scheduledTasks.find((task) => task.id === taskId);
 
       if (taskToSave && !isNormalizedAssetPatch) {
@@ -7479,10 +7525,11 @@ export function LineWorkspace({
       const tasks = current.tasks.map((task) =>
         task.id === taskId ? { ...task, dependencyIds: sanitizedDependencyIds } : task,
       );
+      const scheduledTasks = rescheduleTasksByDependencies(tasks);
 
       return {
         ...current,
-        tasks: rescheduleTasksByDependencies(tasks),
+        tasks: scheduledTasks,
         dependencies: [
           ...current.dependencies.filter((dependency) => dependency.successorTaskId !== taskId),
           ...sanitizedDependencyIds.map((predecessorTaskId, index) => {

@@ -777,8 +777,8 @@ function rescheduleTasksByDependencies(tasks: Task[]) {
     return tasks;
   }
 
-  const baseStartMs = Date.parse(tasks[0].plannedStart);
-  const lineStartMs = Number.isFinite(baseStartMs) ? baseStartMs : Date.now();
+  const taskStartTimes = tasks.map((task) => Date.parse(task.plannedStart)).filter(Number.isFinite);
+  const lineStartMs = taskStartTimes.length ? Math.min(...taskStartTimes) : Date.now();
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const scheduledById = new Map<string, { startMs: number; finishMs: number }>();
   const visiting = new Set<string>();

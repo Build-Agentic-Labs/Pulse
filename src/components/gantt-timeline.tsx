@@ -1000,6 +1000,35 @@ export function GanttTimeline({
     return targetTask.id !== sourceTask.id;
   }
 
+  function isLinkedFinishSourceForActiveStart(sourceRow: GanttRow) {
+    const activeStartRowId = linkingRowId ?? Object.keys(startDrafts)[0];
+    const targetRow = activeStartRowId ? visibleRows.find((row) => row.id === activeStartRowId) : undefined;
+    const sourceRef = getRowFinishRef(sourceRow);
+
+    if (!targetRow || !sourceRef) {
+      return false;
+    }
+
+    if (targetRow.kind === "step") {
+      return (targetRow.step.dependencyIds ?? []).includes(sourceRef);
+    }
+
+    const targetTask = getRowStartTask(targetRow);
+    const sourceTask = getRowFinishTask(sourceRow);
+
+    return Boolean(targetTask && sourceTask && targetTask.dependencyIds.includes(sourceTask.id));
+  }
+
+  function finishLinkClass(row: GanttRow) {
+    if (isLinkedFinishSourceForActiveStart(row)) {
+      return "border-accent/70 bg-accent-muted text-accent shadow-[0_0_0_2px_rgba(20,184,166,0.14),0_0_16px_rgba(20,184,166,0.28)]";
+    }
+
+    return canUseFinishAsLinkSource(linkingRowId, row)
+      ? "border-accent bg-accent-muted text-accent hover:bg-accent-subtle"
+      : "border-line bg-surface-sunken text-steel disabled:opacity-50";
+  }
+
   function getStartInputValue(rowId: string, minutes: number) {
     if (linkingRowId === rowId) {
       return "=";
@@ -1675,11 +1704,7 @@ export function GanttTimeline({
                         selectFinishLinkTarget(row);
                       }}
                       disabled={linkingRowId !== null && !canUseFinishAsLinkSource(linkingRowId, row)}
-                      className={`rounded border px-1 py-2 text-center font-mono font-bold outline-none ${
-                        canUseFinishAsLinkSource(linkingRowId, row)
-                          ? "border-accent bg-accent-muted text-accent hover:bg-accent-subtle"
-                          : "border-line bg-surface text-steel disabled:opacity-50"
-                      }`}
+                      className={`rounded border px-1 py-2 text-center font-mono font-bold outline-none transition ${finishLinkClass(row)}`}
                       aria-label={`${row.group.wbs} finish ${formatRelativeHours(row.group.finishMinute)}`}
                     >
                       {formatRelativeHours(row.group.finishMinute)}
@@ -1832,11 +1857,7 @@ export function GanttTimeline({
                         selectFinishLinkTarget(row);
                       }}
                       disabled={linkingRowId !== null && !canUseFinishAsLinkSource(linkingRowId, row)}
-                      className={`rounded border px-1 py-2 text-center font-mono font-bold outline-none ${
-                        canUseFinishAsLinkSource(linkingRowId, row)
-                          ? "border-accent bg-accent-muted text-accent hover:bg-accent-subtle"
-                          : "border-line bg-surface-sunken text-steel disabled:opacity-50"
-                      }`}
+                      className={`rounded border px-1 py-2 text-center font-mono font-bold outline-none transition ${finishLinkClass(row)}`}
                       aria-label={`${rowStepCode} finish ${formatRelativeHours(row.finishMinute)}`}
                     >
                       {formatRelativeHours(row.finishMinute)}
@@ -1958,11 +1979,7 @@ export function GanttTimeline({
                       selectFinishLinkTarget(row);
                     }}
                     disabled={linkingRowId !== null && !canUseFinishAsLinkSource(linkingRowId, row)}
-                    className={`rounded border px-1 py-2 text-center font-mono font-bold outline-none ${
-                      canUseFinishAsLinkSource(linkingRowId, row)
-                        ? "border-accent bg-accent-muted text-accent hover:bg-accent-subtle"
-                        : "border-line bg-surface-sunken text-steel disabled:opacity-50"
-                    }`}
+                    className={`rounded border px-1 py-2 text-center font-mono font-bold outline-none transition ${finishLinkClass(row)}`}
                     aria-label={`${task.wbs} finish ${formatRelativeHours(window.finishMinute)}`}
                   >
                     {formatRelativeHours(window.finishMinute)}

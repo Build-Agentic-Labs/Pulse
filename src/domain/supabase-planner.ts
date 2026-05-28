@@ -919,6 +919,29 @@ async function assertTaskInProject(supabase: ReturnType<typeof plannerClient>, t
   }
 }
 
+async function assertTaskRowInProject(supabase: ReturnType<typeof plannerClient>, task: Task, projectId?: string) {
+  if (!projectId) {
+    return;
+  }
+
+  const existingTask = await throwIfError(supabase.from("tasks").select("scenario_id").eq("id", task.id).maybeSingle());
+  const scenarioId = existingTask?.scenario_id ?? task.scenarioId;
+
+  if (!scenarioId) {
+    throw new Error("Task not found or you do not have access to it.");
+  }
+
+  const scenario = await throwIfError(supabase.from("scenarios").select("product_id").eq("id", scenarioId).maybeSingle());
+  if (!scenario) {
+    throw new Error("Scenario not found for this task.");
+  }
+
+  const product = await throwIfError(supabase.from("products").select("project_id").eq("id", scenario.product_id).maybeSingle());
+  if (!product || String(product.project_id) !== projectId) {
+    throw new Error("This task does not belong to the active project.");
+  }
+}
+
 function projectScopedStoragePath(
   taskId: string,
   stepId: string,
@@ -1806,14 +1829,14 @@ export async function saveTasksToSupabase(tasks: Task[], projectId?: string) {
   }
 
   const supabase = plannerClient();
-  await Promise.all(tasks.map((task) => assertTaskInProject(supabase, task.id, projectId)));
+  await Promise.all(tasks.map((task) => assertTaskRowInProject(supabase, task, projectId)));
   await throwIfError(supabase.from("tasks").upsert(tasks.map(taskRow)));
   await Promise.all(tasks.map((task) => syncStepToolsForTask(supabase, task)));
 }
 
 export async function saveTaskRowToSupabase(task: Task, projectId?: string) {
   const supabase = plannerClient();
-  await assertTaskInProject(supabase, task.id, projectId);
+  await assertTaskRowInProject(supabase, task, projectId);
   await throwIfError(supabase.from("tasks").upsert(taskRow(task)));
 }
 

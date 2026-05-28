@@ -3496,12 +3496,6 @@ export function MobilePhotoPortal({
                   Timer
                 </button>
               ) : null}
-              <a
-                href={projectId ? `/projects/${projectId}/planner` : "/"}
-                className="ui-photo-mobile-header-btn shrink-0"
-              >
-                Planner
-              </a>
             </div>
           </div>
         </div>
@@ -3721,7 +3715,6 @@ export function MobilePhotoPortal({
                       <div className="min-w-0 flex-1">
                         <div className="truncate ui-photo-mobile-body">{task.name}</div>
                         <div className="ui-photo-mobile-meta mt-1 flex flex-wrap items-center gap-2">
-                          <span>{zoneLabel}</span>
                           <span>
                             {stepCount} {stepCount === 1 ? "step" : "steps"}
                           </span>
@@ -3794,7 +3787,6 @@ export function MobilePhotoPortal({
                       <div className="min-w-0 flex-1">
                         <div className="truncate ui-photo-mobile-body">{draggingTask.name}</div>
                         <div className="ui-photo-mobile-meta mt-1 flex flex-wrap items-center gap-2">
-                          <span>{draggingZoneLabel}</span>
                           <span>
                             {draggingStepCount} {draggingStepCount === 1 ? "step" : "steps"}
                           </span>
@@ -3834,8 +3826,10 @@ export function MobilePhotoPortal({
                     {selectedTask.zoneId ? zoneById.get(selectedTask.zoneId) ?? "Process" : "Process"}
                   </span>
                 </div>
+                <div className="ui-photo-mobile-task-code" title={taskDisplayCode(selectedTask)}>
+                  {taskDisplayCode(selectedTask)}
+                </div>
                 <div className="ui-photo-mobile-task-header-main">
-                  <span className="ui-photo-mobile-wbs-chip shrink-0">{taskDisplayCode(selectedTask)}</span>
                   <input
                     key={selectedTask.id}
                     aria-label="Task name"
@@ -4122,10 +4116,11 @@ export function MobilePhotoPortal({
                     >
                       <div className="ui-photo-mobile-step-editor min-w-0 px-3 py-3">
                       <div className="ui-photo-mobile-step-header">
-                        <div className="ui-photo-mobile-step-header-title">
-                          <span className="ui-photo-mobile-step-badge" title={stepCode || `Step ${step.sequence}`}>
-                            {stepCode || step.sequence}
-                          </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="ui-photo-mobile-step-code" title={stepCode || `Step ${step.sequence}`}>
+                            {stepCode || `Step ${step.sequence}`}
+                          </div>
+                          <div className="ui-photo-mobile-step-header-title">
                           <input
                             key={`${step.id}:${step.name ?? ""}`}
                             aria-label={`Step ${step.sequence} name`}
@@ -4149,6 +4144,7 @@ export function MobilePhotoPortal({
                               }
                             }}
                           />
+                          </div>
                         </div>
                         <div className="ui-photo-mobile-step-header-actions">
                           <label className="ui-photo-mobile-step-duration">

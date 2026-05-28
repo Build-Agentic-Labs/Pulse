@@ -33,7 +33,7 @@ import {
   manufacturingStepCheckOptions,
   serializeManufacturingStepCheckSet,
 } from "@/domain/manufacturing-step-checks";
-import { stepDisplayCode, taskDisplayCode } from "@/domain/nomenclature";
+import { generateTaskCode, nextTaskNumberForComponent, stepDisplayCode, taskDisplayCode } from "@/domain/nomenclature";
 import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
   getStepPhotoAttachments,
@@ -878,6 +878,7 @@ export function MobilePhotoPortal({
   const [showNewTaskForm, setShowNewTaskForm] = useState(false);
   const [newTaskName, setNewTaskName] = useState("");
   const [newTaskZoneId, setNewTaskZoneId] = useState("");
+  const [newTaskComponentId, setNewTaskComponentId] = useState("");
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragTargetTaskId, setDragTargetTaskId] = useState<string | null>(null);
   const [dragTargetPlacement, setDragTargetPlacement] = useState<"before" | "after">("after");
@@ -2090,15 +2091,19 @@ export function MobilePhotoPortal({
 
     const currentTasks = plannerState.tasks;
     const zoneId = newTaskZoneId || undefined;
+    const componentId = newTaskComponentId || undefined;
+    const taskNumber = componentId ? nextTaskNumberForComponent(currentTasks, componentId, zoneId) : undefined;
     const zoneTasks = taskRows.filter((task) => (zoneId ? task.zoneId === zoneId : !task.zoneId));
     const contextTask = zoneTasks[zoneTasks.length - 1] ?? taskRows[taskRows.length - 1] ?? selectedTask ?? currentTasks[currentTasks.length - 1];
     const fallbackStart = currentTasks[0]?.plannedStart ?? new Date().toISOString();
     const start = contextTask?.plannedFinish ?? fallbackStart;
-    const newTask: Task = {
+    const taskDraft: Task = {
       id: `task-${Date.now()}`,
       scenarioId: plannerState.scenario.id,
       stationId: zoneId ? stationIdForZone(zoneId) : contextTask?.stationId ?? plannerState.stations[0]?.id ?? "",
       zoneId,
+      componentId,
+      taskNumber,
       rowType: "task",
       wbs: getNextTopLevelWbs(currentTasks),
       name,
@@ -2119,6 +2124,12 @@ export function MobilePhotoPortal({
       partReferences: [],
       customFields: {},
     };
+    const manufacturingCode = generateTaskCode(taskDraft, plannerState.zones, plannerState.components);
+    const newTask: Task = {
+      ...taskDraft,
+      manufacturingCode: manufacturingCode || undefined,
+      codeGeneratedAt: manufacturingCode ? new Date().toISOString() : undefined,
+    };
     const nextState: PlannerState = {
       ...plannerState,
       product: {
@@ -2136,6 +2147,7 @@ export function MobilePhotoPortal({
     setSelectedTaskId(newTask.id);
     setNewTaskName("");
     setNewTaskZoneId("");
+    setNewTaskComponentId("");
     setShowNewTaskForm(false);
     setActiveScreen("detail");
     scrollPortalToTop();
@@ -3566,6 +3578,7 @@ export function MobilePhotoPortal({
                   onClick={() => {
                     setNewTaskName("");
                     setNewTaskZoneId(selectedTask?.zoneId ?? taskRows[taskRows.length - 1]?.zoneId ?? "");
+                    setNewTaskComponentId("");
                     setShowNewTaskForm((current) => !current);
                   }}
                   className="ui-photo-mobile-btn-accent h-8 px-2"
@@ -3615,12 +3628,33 @@ export function MobilePhotoPortal({
                     onChange={setNewTaskZoneId}
                   />
                 </label>
+                <label className="mt-2 block">
+                  <span className="ui-field-label text-accent">
+                    Component
+                  </span>
+                  <ThemedSelect
+                    className="w-full"
+                    triggerClassName="ui-photo-mobile-field h-11"
+                    value={newTaskComponentId}
+                    options={[
+                      { value: "", label: "No component" },
+                      ...(derivedState?.components
+                        .filter((component) => component.active)
+                        .map((component) => ({
+                          value: component.id,
+                          label: `${component.code || "CODE"} - ${component.name || "Unnamed component"}`,
+                        })) ?? []),
+                    ]}
+                    onChange={setNewTaskComponentId}
+                  />
+                </label>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => {
                       setNewTaskName("");
                       setNewTaskZoneId("");
+                      setNewTaskComponentId("");
                       setShowNewTaskForm(false);
                     }}
                     className="ui-photo-mobile-btn-secondary h-10"

@@ -11,10 +11,10 @@ import {
   type ReactNode,
 } from "react";
 import { calculatePeakManpower, formatMinutes, getTaskWindow, getTimelineBounds, round } from "@/domain/calculations";
-import { stepDisplayCode, taskDisplayCode, taskDisplayLabel } from "@/domain/nomenclature";
+import { generateTaskCode, nextTaskNumberForComponent, stepDisplayCode, taskDisplayCode, taskDisplayLabel } from "@/domain/nomenclature";
 import { getOperatorAssignmentBlockState } from "@/domain/operator-allocation";
 import { getTaskOperatorIds, getTaskOperatorPatch } from "@/domain/operator-assignments";
-import type { ManufacturingStep, Station, Task, Zone } from "@/domain/types";
+import type { ManufacturingComponent, ManufacturingStep, Station, Task, Zone } from "@/domain/types";
 import {
   chartPalette,
   groupTone,
@@ -31,6 +31,7 @@ interface GanttTimelineProps {
   tasks: Task[];
   stations: Station[];
   zones: Zone[];
+  components: ManufacturingComponent[];
   activeZoneId?: string;
   selectedTaskId?: string;
   taktMinutes: number;
@@ -526,6 +527,7 @@ export function GanttTimeline({
   tasks,
   stations,
   zones,
+  components,
   activeZoneId,
   selectedTaskId,
   taktMinutes,
@@ -568,6 +570,13 @@ export function GanttTimeline({
   const [startDrafts, setStartDrafts] = useState<Record<string, string>>({});
   const [predecessorPickerTaskId, setPredecessorPickerTaskId] = useState<string | null>(null);
   const [predecessorDraftIds, setPredecessorDraftIds] = useState<Set<string>>(new Set());
+  const [mappingTaskId, setMappingTaskId] = useState<string | null>(null);
+  const [mappingDraft, setMappingDraft] = useState({
+    zoneId: "",
+    componentId: "",
+    taskNumber: "",
+    codeLocked: false,
+  });
   const [unzonedNameDraft, setUnzonedNameDraft] = useState("Unzoned");
   const lastAutoFocusedTaskId = useRef<string | null>(null);
   const bounds = getTimelineBounds(tasks);
@@ -597,6 +606,23 @@ export function GanttTimeline({
   const predecessorCandidates = [...tasks].sort(compareTasksByWbs);
   const stationById = new Map(stations.map((station) => [station.id, station]));
   const predecessorPickerTask = predecessorPickerTaskId ? taskMap.get(predecessorPickerTaskId) : undefined;
+  const mappingTask = mappingTaskId ? taskMap.get(mappingTaskId) : undefined;
+  const mappingTaskNumber = Number.parseInt(mappingDraft.taskNumber, 10);
+  const mappingPreviewCode = mappingTask
+    ? generateTaskCode(
+        {
+          zoneId: mappingDraft.zoneId || undefined,
+          componentId: mappingDraft.componentId || undefined,
+          taskNumber: Number.isFinite(mappingTaskNumber) && mappingTaskNumber > 0 ? mappingTaskNumber : undefined,
+        },
+        zones,
+        components,
+      )
+    : "";
+  const mappingDuplicateTask = mappingPreviewCode
+    ? tasks.find((task) => task.id !== mappingTask?.id && task.manufacturingCode?.trim() === mappingPreviewCode)
+    : undefined;
+  const mappingComponentOptions = components.filter((component) => component.active || component.id === mappingDraft.componentId);
   const processGroups = Array.from(
     tasks
       .reduce((groups, task) => {
@@ -1261,6 +1287,43 @@ export function GanttTimeline({
     setPredecessorDraftIds(new Set());
   }
 
+  function openCodeMapping(task: Task) {
+    setMappingTaskId(task.id);
+    setMappingDraft({
+      zoneId: task.zoneId ?? "",
+      componentId: task.componentId ?? "",
+      taskNumber: task.taskNumber ? String(task.taskNumber) : "",
+      codeLocked: Boolean(task.codeLocked),
+    });
+  }
+
+  function closeCodeMapping() {
+    setMappingTaskId(null);
+  }
+
+  function saveCodeMapping() {
+    if (!mappingTask) {
+      return;
+    }
+
+    const taskNumber = Number.parseInt(mappingDraft.taskNumber, 10);
+    const nextTaskNumber = Number.isFinite(taskNumber) && taskNumber > 0 ? taskNumber : undefined;
+    const patchBase = {
+      zoneId: mappingDraft.zoneId || undefined,
+      componentId: mappingDraft.componentId || undefined,
+      taskNumber: nextTaskNumber,
+      codeLocked: mappingDraft.codeLocked,
+    };
+    const manufacturingCode = generateTaskCode(patchBase, zones, components);
+
+    onUpdateTask(mappingTask.id, {
+      ...patchBase,
+      manufacturingCode: manufacturingCode || undefined,
+      codeGeneratedAt: manufacturingCode ? new Date().toISOString() : undefined,
+    });
+    closeCodeMapping();
+  }
+
   function convertUnzonedToZone(name: string, zone: ZoneGroup) {
     const nextName = name.trim();
     setUnzonedNameDraft(name);
@@ -1589,9 +1652,28 @@ export function GanttTimeline({
                     }`}
                     style={tableGridStyle}
                   >
-                    <span className="flex h-8 w-full items-center justify-center justify-self-center truncate text-center font-mono text-[11px] font-medium text-ink">
-                      {primaryTask ? taskDisplayCode(primaryTask) : "Uncoded"}
-                    </span>
+                    {primaryTask ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openCodeMapping(primaryTask);
+                        }}
+                        className={`flex h-8 w-full items-center justify-center justify-self-center truncate rounded border px-1 text-center font-mono text-[11px] font-medium transition ${
+                          primaryTask.manufacturingCode?.trim()
+                            ? "border-transparent text-ink hover:border-line hover:bg-surface"
+                            : "border-danger/25 bg-danger-muted text-danger hover:border-danger/45"
+                        }`}
+                        title="Map task code"
+                        aria-label={`Map code for ${primaryTask.name || "task"}`}
+                      >
+                        <span className="truncate">{taskDisplayCode(primaryTask)}</span>
+                      </button>
+                    ) : (
+                      <span className="flex h-8 w-full items-center justify-center justify-self-center truncate text-center font-mono text-[11px] font-medium text-steel">
+                        Uncoded
+                      </span>
+                    )}
                     {editableTask ? (
                       editingTaskNameId === editableTask.id || editableTask.name.trim() === "" ? (
                         <div className="min-w-0">
@@ -2485,6 +2567,130 @@ export function GanttTimeline({
         </div>
       </div>
     </section>
+    {mappingTask ? (
+      <div
+        className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/55 px-4 py-6"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-code-mapping-title"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            closeCodeMapping();
+          }
+        }}
+      >
+        <div className="flex w-full max-w-lg flex-col overflow-hidden ui-panel-raised">
+          <div className="border-b border-line px-5 py-4">
+            <div className="text-[11px] ui-mono-label tracking-wide text-accent">Task Code</div>
+            <h2 id="task-code-mapping-title" className="mt-1 truncate text-xl font-medium text-ink">
+              {mappingTask.name || "Blank task"}
+            </h2>
+            <div className="mt-2 rounded border border-line bg-surface-sunken px-3 py-2 font-mono text-sm font-semibold text-ink">
+              {mappingPreviewCode || "Uncoded"}
+            </div>
+            {mappingDuplicateTask ? (
+              <div className="mt-2 rounded border border-danger/25 bg-danger-muted px-3 py-2 text-xs font-semibold text-danger">
+                Duplicate code already used by {mappingDuplicateTask.name || "another task"}.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 p-5">
+            <label className="block">
+              <span className="ui-field-label">Zone</span>
+              <select
+                className="h-10 w-full rounded border border-line bg-surface px-3 text-sm font-semibold text-ink outline-none"
+                value={mappingDraft.zoneId}
+                onChange={(event) => {
+                  const zoneId = event.target.value;
+                  const taskNumber = mappingDraft.componentId
+                    ? nextTaskNumberForComponent(tasks, mappingDraft.componentId, zoneId || undefined)
+                    : undefined;
+                  setMappingDraft((current) => ({
+                    ...current,
+                    zoneId,
+                    taskNumber: current.taskNumber || (taskNumber ? String(taskNumber) : ""),
+                  }));
+                }}
+              >
+                <option value="">Unzoned</option>
+                {zones.map((zone) => (
+                  <option key={zone.id} value={zone.id}>
+                    {zone.code || zone.name} - {zone.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="ui-field-label">Component</span>
+              <select
+                className="h-10 w-full rounded border border-line bg-surface px-3 text-sm font-semibold text-ink outline-none"
+                value={mappingDraft.componentId}
+                onChange={(event) => {
+                  const componentId = event.target.value;
+                  const taskNumber = componentId
+                    ? nextTaskNumberForComponent(tasks, componentId, mappingDraft.zoneId || undefined)
+                    : undefined;
+                  setMappingDraft((current) => ({
+                    ...current,
+                    componentId,
+                    taskNumber: componentId ? String(taskNumber ?? current.taskNumber) : "",
+                  }));
+                }}
+              >
+                <option value="">No component</option>
+                {mappingComponentOptions.map((component) => (
+                  <option key={component.id} value={component.id}>
+                    {component.code || "CODE"} - {component.name || "Unnamed component"}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="ui-field-label">Task Number</span>
+              <input
+                className="h-10 w-full rounded border border-line bg-surface px-3 font-mono text-sm font-semibold text-ink outline-none"
+                type="number"
+                min={0}
+                step={1}
+                value={mappingDraft.taskNumber}
+                onChange={(event) => setMappingDraft((current) => ({ ...current, taskNumber: event.target.value }))}
+                placeholder="10"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <input
+                type="checkbox"
+                checked={mappingDraft.codeLocked}
+                onChange={(event) => setMappingDraft((current) => ({ ...current, codeLocked: event.target.checked }))}
+              />
+              Lock code after save
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-line bg-surface-muted px-5 py-4">
+            <button
+              type="button"
+              onClick={closeCodeMapping}
+              className="inline-flex h-10 min-w-28 items-center justify-center ui-panel px-4 text-sm font-medium text-ink transition hover:bg-surface-sunken"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveCodeMapping}
+              disabled={Boolean(mappingDuplicateTask)}
+              className="inline-flex h-10 min-w-32 items-center justify-center rounded-md border border-accent bg-accent px-4 text-sm font-medium text-canvas transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Save Code
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
     {predecessorPickerTask ? (
       <div
         className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/55 px-4 py-6"

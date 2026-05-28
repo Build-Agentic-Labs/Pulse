@@ -5746,9 +5746,11 @@ export function LineWorkspace({
 
         remoteRefreshAppliedRef.current = true;
         setPlannerState((current) => {
+          const existingTaskIds = new Set(current.tasks.map((task) => task.id));
+          const insertedTasks = [...taskById.values()].filter((task) => !existingTaskIds.has(task.id));
           const nextState = {
             ...current,
-            tasks: current.tasks.map((task) => taskById.get(task.id) ?? task),
+            tasks: [...current.tasks.map((task) => taskById.get(task.id) ?? task), ...insertedTasks],
           };
           void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
           return nextState;
@@ -8359,6 +8361,7 @@ export function LineWorkspace({
                     tasks={derivedState.tasks}
                     stations={derivedState.stations}
                     zones={derivedState.zones}
+                    components={derivedState.components}
                     activeZoneId={activeZoneId}
                     selectedTaskId={selectedTaskId}
                     taktMinutes={kpis.taktMinutes}

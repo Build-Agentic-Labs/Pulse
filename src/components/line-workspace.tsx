@@ -59,6 +59,7 @@ import { buildMarkdownReport, buildStationSetupDocumentHtml } from "@/domain/rep
 import { initialPlannerState } from "@/domain/seed";
 import { readCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import { buildStepPhotoAttachment } from "@/lib/step-photo-image";
+import { buildPlaybackEvents } from "@/domain/playback";
 import {
   buildProcessStationForTask,
   getTaskProcessNumber,
@@ -4537,24 +4538,6 @@ function DetailDrawer({
       </div>
     </aside>
   );
-}
-
-function buildPlaybackEvents(tasks: Task[], timelineStartMs: number, currentMinute: number) {
-  const events = [
-    { time: 0, label: "Product build started" },
-    ...tasks.flatMap((task) => {
-      const window = getTaskWindow(task, timelineStartMs);
-      return [
-        { time: window.startMinute, label: `${task.name} started`, taskId: task.id },
-        { time: window.finishMinute, label: `${task.name} complete`, taskId: task.id },
-      ];
-    }),
-  ];
-
-  return events
-    .filter((event) => event.time <= currentMinute + 0.25)
-    .sort((a, b) => b.time - a.time)
-    .slice(0, 8);
 }
 
 function PlaybackPanel({

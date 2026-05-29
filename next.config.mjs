@@ -38,6 +38,11 @@ const securityHeaders = [
 /** @type {(phase: string) => import('next').NextConfig} */
 const nextConfig = (phase) => ({
   distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
+  // Lint is run as a dedicated gate via `npm run lint`, so it does not block
+  // production builds. `next build` still validates compilation and types.
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   async headers() {
     return [
       {

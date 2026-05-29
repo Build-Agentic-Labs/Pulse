@@ -359,7 +359,7 @@ export function SidebarWorkspacePanel({
   return (
     <>
       <div className="px-2 py-2">
-        <div className="group flex items-center justify-between gap-1">
+        <div className="group flex min-h-8 items-center justify-between gap-1">
           <div className="ui-nav-section mb-0 px-2">Workspace</div>
           {status === "ready" && canEdit(role) ? (
             <button

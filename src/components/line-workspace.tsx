@@ -100,6 +100,15 @@ import {
 import { applyInstructionBullets, resolveBulletEnter } from "@/domain/instruction-bullets";
 import { moveManufacturingStepBetweenTasks } from "@/domain/move-manufacturing-step";
 import {
+  formatManHours,
+  formatRelativeFromBounds,
+  formatSignedMinutes,
+  markdownCell,
+  periodLabel,
+  safeNumber,
+  statusLabel,
+} from "@/domain/formatting";
+import {
   addMinutes,
   rebuildDependenciesFromTasks,
   relinkTasksForDependency,
@@ -965,33 +974,6 @@ function buildProcessStationForTask(task: Task, tasks: Task[], bottleneckStation
   };
 }
 
-function safeNumber(value: string, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function statusLabel(value: string) {
-  return value.replaceAll("_", " ");
-}
-
-function formatManHours(value: number) {
-  return `${round(value, 1)} MH`;
-}
-
-function periodLabel(period: DemandPeriod) {
-  return period === "week"
-    ? "week"
-    : period === "month"
-      ? "month"
-      : period === "year"
-        ? "year"
-        : period === "day"
-          ? "day"
-          : period === "shift"
-            ? "shift"
-            : "period";
-}
-
 type SmartAllocationResult = ReturnType<typeof buildSmartOperatorAssignments>;
 
 async function requestIeSmartAllocationPlan(request: IeSmartAllocationRequest): Promise<IeSmartAllocationPlan> {
@@ -1022,31 +1004,6 @@ async function requestIeSmartAllocationPlan(request: IeSmartAllocationRequest): 
   }
 
   return payload.plan as IeSmartAllocationPlan;
-}
-
-function markdownCell(value: unknown) {
-  return String(value ?? "")
-    .replaceAll("|", "\\|")
-    .replaceAll("\n", " ")
-    .trim();
-}
-
-function formatSignedMinutes(minutes: number) {
-  if (Math.abs(minutes) < 1) {
-    return "0m";
-  }
-
-  const prefix = minutes > 0 ? "+" : "-";
-  return `${prefix}${formatMinutes(Math.abs(minutes))}`;
-}
-
-function formatRelativeFromBounds(iso: string, startMs: number) {
-  const valueMs = Date.parse(iso);
-  if (!Number.isFinite(valueMs)) {
-    return "n/a";
-  }
-
-  return formatMinutes((valueMs - startMs) / 60000);
 }
 
 function issueReviewLabel(issue: SmartAllocationResult["issues"][number]) {

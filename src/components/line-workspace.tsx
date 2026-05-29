@@ -58,6 +58,7 @@ import { getTaskOperatorIds, getTaskOperatorResetPatch, syncTaskOperatorCount } 
 import { buildMarkdownReport, buildStationSetupDocumentHtml } from "@/domain/report";
 import { initialPlannerState } from "@/domain/seed";
 import { readCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
+import { buildStepPhotoAttachment } from "@/lib/step-photo-image";
 import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
   getStepPhotoAttachments,
@@ -291,8 +292,6 @@ const playbackSpeeds = [
   { label: "1h/s", value: 60 },
 ];
 
-const MAX_STEP_PHOTO_EDGE = 1280;
-const STEP_PHOTO_JPEG_QUALITY = 0.72;
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
 const PROCEDURE_SAVE_DEBUG = false;
 const PROCEDURE_DRAFT_STORAGE_KEY = "buildlogic-line-planner-procedure-draft-v1";
@@ -627,83 +626,6 @@ function mergeProcedureDraftWithServer(serverTask: Task, draftTask: Task) {
     },
     serverTask,
   );
-}
-
-function readBlobAsDataUrl(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("Unable to read compressed photo."));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function loadImageFromFile(file: File) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    const objectUrl = URL.createObjectURL(file);
-
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error(`Unable to read ${file.name || "photo"}.`));
-    };
-    image.src = objectUrl;
-  });
-}
-
-function canvasToJpegBlob(canvas: HTMLCanvasElement) {
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) {
-          resolve(blob);
-          return;
-        }
-
-        reject(new Error("Unable to compress photo."));
-      },
-      "image/jpeg",
-      STEP_PHOTO_JPEG_QUALITY,
-    );
-  });
-}
-
-async function buildStepPhotoAttachment(file: File): Promise<StepPhotoAttachment> {
-  if (!file.type.startsWith("image/")) {
-    throw new Error(`${file.name || "Selected file"} is not an image.`);
-  }
-
-  const image = await loadImageFromFile(file);
-  const scale = Math.min(1, MAX_STEP_PHOTO_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
-  const width = Math.max(1, Math.round(image.naturalWidth * scale));
-  const height = Math.max(1, Math.round(image.naturalHeight * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("Unable to prepare photo compression.");
-  }
-
-  context.drawImage(image, 0, 0, width, height);
-  const blob = await canvasToJpegBlob(canvas);
-  const dataUrl = await readBlobAsDataUrl(blob);
-
-  return {
-    id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: file.name || "Step photo.jpg",
-    dataUrl,
-    capturedAt: new Date().toISOString(),
-    contentType: blob.type,
-    sizeBytes: blob.size,
-    width,
-    height,
-  };
 }
 
 function isCustomFieldRecord(value: unknown): value is Record<string, unknown> {

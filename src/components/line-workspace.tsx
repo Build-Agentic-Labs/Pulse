@@ -68,7 +68,14 @@ import {
   stationIdForZone,
 } from "@/domain/task-planning";
 import {
-  STEP_PHOTO_ATTACHMENTS_FIELD,
+  applyTaskCode,
+  applyTaskCodes,
+  enforceStepDerivedDuration,
+  ensureNomenclatureCollections,
+  removeStepScopedCustomFields,
+  taskPatchChangesSchedule,
+} from "@/domain/task-mutations";
+import {
   getStepPhotoAttachments,
   removeStepPhotoAttachment,
   updateStepPhotoAttachment,
@@ -82,7 +89,7 @@ import {
   removePartReferenceFromSteps,
   removeStepPartReference,
 } from "@/domain/step-part-references";
-import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, getStepToolList, removeStepTool, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
+import { addStepTool, buildStepToolLibrary, getStepToolList, removeStepTool, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
 import { removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
 import { buildProjectToolRegistry, type ProjectToolDefinition } from "@/domain/tool-registry";
 import type { ToolTypeValue } from "@/domain/tool-types";
@@ -636,36 +643,6 @@ function mergeProcedureDraftWithServer(serverTask: Task, draftTask: Task) {
   );
 }
 
-function isCustomFieldRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function removeStepScopedCustomFields(task: Task, stepId: string): Task {
-  const nextCustomFields = { ...task.customFields };
-
-  [STEP_PHOTO_ATTACHMENTS_FIELD, STEP_TOOL_LISTS_FIELD].forEach((field) => {
-    const fieldValue = nextCustomFields[field];
-
-    if (!isCustomFieldRecord(fieldValue)) {
-      return;
-    }
-
-    const nextMap = { ...fieldValue };
-    delete nextMap[stepId];
-
-    if (Object.keys(nextMap).length > 0) {
-      nextCustomFields[field] = nextMap;
-    } else {
-      delete nextCustomFields[field];
-    }
-  });
-
-  return {
-    ...task,
-    customFields: nextCustomFields,
-  };
-}
-
 function applyTextareaCursor(textarea: HTMLTextAreaElement, cursorPosition: number) {
   window.requestAnimationFrame(() => {
     textarea.setSelectionRange(cursorPosition, cursorPosition);
@@ -690,76 +667,6 @@ function handleInstructionBulletKeyDown(
   event.preventDefault();
   onValue(nextValue.value);
   applyTextareaCursor(textarea, nextValue.selectionStart);
-}
-
-function taskPatchChangesSchedule(patch: Partial<Task>) {
-  return (
-    patch.plannedStart !== undefined ||
-    patch.plannedFinish !== undefined ||
-    patch.plannedDurationMinutes !== undefined
-  );
-}
-
-function enforceStepDerivedDuration(task: Task, patch: Partial<Task>) {
-  if (
-    patch.plannedDurationMinutes === undefined ||
-    patch.manufacturingSteps !== undefined ||
-    (task.manufacturingSteps ?? []).length === 0
-  ) {
-    return patch;
-  }
-
-  const { plannedDurationMinutes: _blockedDuration, ...safePatch } = patch;
-
-  if (patch.plannedStart === undefined) {
-    const { plannedFinish: _blockedFinish, ...safePatchWithoutFinish } = safePatch;
-    return safePatchWithoutFinish;
-  }
-
-  return safePatch;
-}
-
-function applyTaskCode(
-  task: Task,
-  zones: Zone[],
-  components: ManufacturingComponent[],
-  force = false,
-) {
-  if (task.codeLocked && !force) {
-    return task;
-  }
-
-  const manufacturingCode = generateTaskCode(task, zones, components);
-  return {
-    ...task,
-    manufacturingCode: manufacturingCode || undefined,
-    codeGeneratedAt: manufacturingCode ? new Date().toISOString() : undefined,
-  };
-}
-
-function applyTaskCodes(
-  tasks: Task[],
-  zones: Zone[],
-  components: ManufacturingComponent[],
-  force = false,
-) {
-  return tasks.map((task) => applyTaskCode(task, zones, components, force));
-}
-
-function ensureNomenclatureCollections(state: PlannerState): PlannerState {
-  return {
-    ...state,
-    components: state.components ?? [],
-    documentTypes:
-      state.documentTypes ??
-      defaultDocumentTypeCodes.map((documentType) => ({
-        id: `document-type-${documentType.code.toLowerCase()}`,
-        productId: state.product.id,
-        ...documentType,
-        createdAt: state.product.createdAt,
-        updatedAt: state.product.updatedAt,
-      })),
-  };
 }
 
 type SmartAllocationResult = ReturnType<typeof buildSmartOperatorAssignments>;

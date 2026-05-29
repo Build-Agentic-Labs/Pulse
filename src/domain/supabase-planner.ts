@@ -1430,7 +1430,7 @@ export async function loadPlannerStateWithProjectFromSupabase(projectId?: string
 } | null> {
   const supabase = plannerClient();
   let project: PlannerProjectContext | undefined;
-  let product = projectId
+  const product = projectId
     ? await throwIfError(
         supabase
           .from("products")

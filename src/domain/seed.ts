@@ -807,7 +807,7 @@ const customColumns: CustomColumn[] = [
 
 const zones: Zone[] = [];
 const components: ManufacturingComponent[] = [];
-const documentTypes: DocumentTypeCode[] = defaultDocumentTypeCodes.map((documentType, index) => ({
+const documentTypes: DocumentTypeCode[] = defaultDocumentTypeCodes.map((documentType) => ({
   id: `document-type-${documentType.code.toLowerCase()}`,
   productId: product.id,
   code: documentType.code,

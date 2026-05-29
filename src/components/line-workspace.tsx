@@ -28,7 +28,6 @@ import {
   Moon,
   Timer,
   Trash2,
-  X,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -150,10 +149,6 @@ import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
 import { AppSettingsPanel, settingsSections, type SettingsSection } from "./app-settings-panel";
 import { ThemedSelect } from "./themed-select";
 import { useTheme } from "./theme-provider";
-import {
-  projectContextLabel,
-  shouldShowProductName,
-} from "@/lib/display-names";
 
 type ProductNumberField =
   | "targetManHours"
@@ -259,9 +254,6 @@ const productStatusOptions: Array<{ value: ProductStatus; label: string }> = [
   { value: "released", label: "Released" },
   { value: "obsolete", label: "Obsolete" },
 ];
-
-const SIDEBAR_WIDTH = 200;
-const WORKSPACE_DRAWER_WIDTH = 260;
 
 const plannerModules = [
   { id: "dashboard", label: "Dashboard", icon: Factory },

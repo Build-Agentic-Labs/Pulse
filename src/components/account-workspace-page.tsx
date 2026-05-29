@@ -16,7 +16,6 @@ import {
   ensureDefaultWorkspaceMembership,
   loadWorkspaceAccessGrantsFromSupabase,
   loadWorkspaceMembersFromSupabase,
-  loadWorkspaceProjectGroups,
   upsertWorkspaceAccessGrantInSupabase,
   updateProjectInSupabase,
   updateWorkspaceInSupabase,

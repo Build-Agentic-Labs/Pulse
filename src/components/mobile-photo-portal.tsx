@@ -1,18 +1,14 @@
 "use client";
 
 import {
-  AlertTriangle,
   Camera,
-  CheckCircle2,
   ChevronLeft,
   ClipboardList,
   ImageIcon,
   Menu,
   Plus,
-  RefreshCw,
   Timer,
   Trash2,
-  Wrench,
 } from "lucide-react";
 import {
   Fragment,
@@ -29,7 +25,6 @@ import { applyCalculatedFields, formatMinutes, getTopLevelTasks } from "@/domain
 import { initialPlannerState } from "@/domain/seed";
 import {
   getManufacturingStepCheckSet,
-  getManufacturingStepCheckState,
   manufacturingStepCheckOptions,
   serializeManufacturingStepCheckSet,
 } from "@/domain/manufacturing-step-checks";

@@ -22,7 +22,26 @@ type AuthProjectGateProps = {
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 const WORKSPACE_LOADING_TITLE = "Loading workspace";
 const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
+const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
 const PROJECT_SWITCH_SESSION_MAX_AGE_MS = 15_000;
+
+function readSwitchTargetTitle(projectId: string): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(PROJECT_SWITCH_TARGET_SESSION_KEY);
+    if (!raw) {
+      return "";
+    }
+
+    const parsed = JSON.parse(raw) as { projectId?: string; title?: string };
+    return parsed.projectId === projectId && typeof parsed.title === "string" ? parsed.title : "";
+  } catch {
+    return "";
+  }
+}
 
 function hasRecentProjectSwitchSession() {
   if (typeof window === "undefined") {
@@ -86,7 +105,10 @@ function writeLastProjectId(projectId: string) {
 function fallbackProjectContext(projectId: string): PlannerProjectContext {
   return {
     projectId,
-    projectName: "",
+    // Use the name stashed by announceProjectSwitch so the optimistic render
+    // paints the correct project label on the first frame instead of blank,
+    // which avoids the sidebar "text remount" flash during a workspace switch.
+    projectName: readSwitchTargetTitle(projectId),
     workspaceId: "",
     workspaceName: "",
   };

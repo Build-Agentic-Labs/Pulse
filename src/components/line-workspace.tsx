@@ -169,6 +169,59 @@ type ProductNumberField =
 
 type ProductTextField = "name" | "productCode" | "sku" | "revision" | "ownerName" | "status" | "demandPeriod";
 
+type ProcedureDraftFieldName = "instruction" | "name";
+type ProcedureDraftSaveStatus = "idle" | "dirty" | "saving" | "saved" | "retrying" | "error" | "conflict";
+
+type ProcedureDraftField = {
+  taskId: string;
+  stepId: string;
+  fieldName: ProcedureDraftFieldName;
+  value: string;
+  baseValue: string;
+  baseVersion?: number;
+  baseUpdatedAt?: string;
+  dirty: boolean;
+  active: boolean;
+  localEditSeq: number;
+  lastEditedAt: number;
+  saveStatus: ProcedureDraftSaveStatus;
+  latestSaveId?: string;
+  savingSeq?: number;
+  error?: string;
+};
+
+type ProcedureDraftMap = Record<string, ProcedureDraftField>;
+
+type ProcedureTaskSaveQueueState =
+  | "idle"
+  | "dirty-pending"
+  | "saving"
+  | "saving-with-newer-pending"
+  | "retrying"
+  | "error"
+  | "conflict";
+
+type ProcedureTaskSaveQueue = {
+  state: ProcedureTaskSaveQueueState;
+  inFlight: boolean;
+  inFlightSaveId?: string;
+  inFlightSeq?: number;
+  pending: boolean;
+  pendingTaskSnapshot?: Task;
+  pendingTasksSnapshot?: Task[];
+  pendingDraftSnapshot?: ProcedureDraftMap;
+  latestSeq: number;
+  lastError?: unknown;
+};
+
+type DeferredProcedureServerUpdate = {
+  serverTask: Task;
+  serverVersion?: number;
+  serverUpdatedAt?: string;
+  receivedAt: number;
+  source: "realtime" | "refreshTasks" | "refreshPlanner" | "saveCompletion";
+};
+
 type StepPartReferenceEditorProps = {
   task: Task;
   step: ManufacturingStep;
@@ -233,6 +286,7 @@ const playbackSpeeds = [
 const MAX_STEP_PHOTO_EDGE = 1280;
 const STEP_PHOTO_JPEG_QUALITY = 0.72;
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
+const PROCEDURE_SAVE_DEBUG = false;
 const PROCEDURE_DRAFT_STORAGE_KEY = "buildlogic-line-planner-procedure-draft-v1";
 const WORKSPACE_SNAPSHOT_STORAGE_PREFIX = "buildlogic-line-planner-workspace-v1";
 const PROJECT_SWITCH_EVENT = "pulse:project-switch-start";
@@ -256,11 +310,45 @@ type WorkspaceSnapshot = {
   savedAt: string;
 };
 
-type ProcedureDraftSnapshot = {
+type LegacyProcedureDraftSnapshot = {
   taskId: string;
   task: Task;
   savedAt: string;
 };
+
+type ProcedureFieldDraftSnapshot = {
+  version: 2;
+  fields: ProcedureDraftField[];
+  savedAt: string;
+};
+
+type ProcedureDraftSnapshot = LegacyProcedureDraftSnapshot | ProcedureFieldDraftSnapshot;
+
+function makeProcedureDraftKey(taskId: string, stepId: string, fieldName: ProcedureDraftFieldName) {
+  return `${taskId}:${stepId}:${fieldName}`;
+}
+
+function getProcedureStepFieldValue(step: ManufacturingStep | undefined, fieldName: ProcedureDraftFieldName) {
+  if (!step) {
+    return "";
+  }
+
+  return fieldName === "name" ? step.name ?? "" : step.instruction ?? "";
+}
+
+function procedureDraftLog(event: string, detail: Partial<ProcedureDraftField> & {
+  saveId?: string;
+  saveSeq?: number;
+  serverVersion?: number;
+  serverUpdatedAt?: string;
+  source?: string;
+} = {}) {
+  if (!PROCEDURE_SAVE_DEBUG) {
+    return;
+  }
+
+  console.debug("[procedure-save]", event, detail);
+}
 
 function recentProjectSwitchStartedAt() {
   if (typeof window === "undefined") {
@@ -389,12 +477,37 @@ function readProcedureDraftSnapshot() {
       return undefined;
     }
 
-    const parsed = JSON.parse(rawDraft) as Partial<ProcedureDraftSnapshot>;
-    if (!parsed.taskId || !parsed.task || typeof parsed.task !== "object") {
+    const parsed = JSON.parse(rawDraft) as Partial<LegacyProcedureDraftSnapshot> & Partial<ProcedureFieldDraftSnapshot>;
+    if (parsed.version === 2) {
+      const fields = Array.isArray(parsed.fields)
+        ? parsed.fields.filter((field): field is ProcedureDraftField =>
+            typeof field?.taskId === "string" &&
+            typeof field.stepId === "string" &&
+            (field.fieldName === "instruction" || field.fieldName === "name") &&
+            typeof field.value === "string",
+          )
+        : [];
+
+      return {
+        version: 2,
+        fields: fields.map((field) => ({
+          ...field,
+          baseValue: typeof field.baseValue === "string" ? field.baseValue : "",
+          dirty: field.dirty !== false,
+          active: false,
+          localEditSeq: Number.isFinite(field.localEditSeq) ? field.localEditSeq : 1,
+          lastEditedAt: Number.isFinite(field.lastEditedAt) ? field.lastEditedAt : Date.now(),
+          saveStatus: field.dirty === false ? "saved" : "dirty",
+        })),
+        savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : new Date().toISOString(),
+      } satisfies ProcedureFieldDraftSnapshot;
+    }
+
+    if (!parsed.taskId || !("task" in parsed) || !parsed.task || typeof parsed.task !== "object") {
       return undefined;
     }
 
-    return parsed as ProcedureDraftSnapshot;
+    return parsed as LegacyProcedureDraftSnapshot;
   } catch {
     return undefined;
   }
@@ -418,6 +531,30 @@ function writeProcedureDraftSnapshot(task: Task) {
   }
 }
 
+function writeProcedureFieldDraftSnapshot(drafts: ProcedureDraftMap) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const fields = Object.values(drafts).filter((field) => field.dirty);
+  if (fields.length === 0) {
+    clearProcedureDraftSnapshot();
+    return;
+  }
+
+  const draft: ProcedureFieldDraftSnapshot = {
+    version: 2,
+    fields,
+    savedAt: new Date().toISOString(),
+  };
+
+  try {
+    window.localStorage.setItem(PROCEDURE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    // The in-memory editor state remains the immediate source of truth if local storage is unavailable.
+  }
+}
+
 function clearProcedureDraftSnapshot(taskId?: string) {
   if (typeof window === "undefined") {
     return;
@@ -425,7 +562,20 @@ function clearProcedureDraftSnapshot(taskId?: string) {
 
   if (taskId) {
     const currentDraft = readProcedureDraftSnapshot();
-    if (currentDraft && currentDraft.taskId !== taskId) {
+    if (currentDraft && "version" in currentDraft && currentDraft.version === 2) {
+      const remainingFields = currentDraft.fields.filter((field) => field.taskId !== taskId);
+      if (remainingFields.length > 0) {
+        try {
+          window.localStorage.setItem(
+            PROCEDURE_DRAFT_STORAGE_KEY,
+            JSON.stringify({ version: 2, fields: remainingFields, savedAt: new Date().toISOString() }),
+          );
+        } catch {
+          // Ignore local storage cleanup failures.
+        }
+        return;
+      }
+    } else if (currentDraft && "taskId" in currentDraft && currentDraft.taskId !== taskId) {
       return;
     }
   }
@@ -2259,6 +2409,10 @@ function ProcedureWorkspace({
   onConfirmAction,
   onStepDeleted,
   onUpdateTask,
+  getProcedureFieldValue,
+  onProcedureFieldFocus,
+  onProcedureFieldBlur,
+  onProcedureFieldChange,
   onMoveStepToTask,
   onUploadStepPhotos,
   onRemoveStepPhoto,
@@ -2275,6 +2429,25 @@ function ProcedureWorkspace({
   onConfirmAction: (message: FeedbackConfirm) => void;
   onStepDeleted: (taskSnapshot: Task, step: ManufacturingStep) => void;
   onUpdateTask: (taskId: string, patch: Partial<Task>) => void;
+  getProcedureFieldValue: (
+    taskId: string,
+    stepId: string,
+    fieldName: ProcedureDraftFieldName,
+    fallbackValue: string,
+  ) => string;
+  onProcedureFieldFocus: (
+    taskId: string,
+    stepId: string,
+    fieldName: ProcedureDraftFieldName,
+    fallbackValue: string,
+  ) => void;
+  onProcedureFieldBlur: (taskId: string, stepId: string, fieldName: ProcedureDraftFieldName) => void;
+  onProcedureFieldChange: (
+    taskId: string,
+    stepId: string,
+    fieldName: ProcedureDraftFieldName,
+    value: string,
+  ) => void;
   onMoveStepToTask: (sourceTaskId: string, targetTaskId: string, stepId: string) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
@@ -2836,8 +3009,12 @@ function ProcedureWorkspace({
                                 aria-label={`Step ${step.sequence} name`}
                                 data-step-name-id={step.id}
                                 className="ui-procedure-step-inline-text ui-procedure-step-name-input"
-                                value={step.name ?? ""}
-                                onChange={(event) => updateManufacturingStep(step.id, { name: event.target.value })}
+                                value={getProcedureFieldValue(task.id, step.id, "name", step.name ?? "")}
+                                onFocus={() => onProcedureFieldFocus(task.id, step.id, "name", step.name ?? "")}
+                                onBlur={() => onProcedureFieldBlur(task.id, step.id, "name")}
+                                onChange={(event) =>
+                                  onProcedureFieldChange(task.id, step.id, "name", event.target.value)
+                                }
                                 placeholder={`Step ${step.sequence} name`}
                               />
                             </label>
@@ -2903,7 +3080,14 @@ function ProcedureWorkspace({
                             <button
                               type="button"
                               onClick={() =>
-                                updateManufacturingStep(step.id, { instruction: applyInstructionBullets(step.instruction) })
+                                onProcedureFieldChange(
+                                  task.id,
+                                  step.id,
+                                  "instruction",
+                                  applyInstructionBullets(
+                                    getProcedureFieldValue(task.id, step.id, "instruction", step.instruction),
+                                  ),
+                                )
                               }
                               className="ui-btn-ghost h-7 gap-1 px-2 text-[10px]"
                               title={`Format step ${step.sequence} as bullets`}
@@ -2929,11 +3113,15 @@ function ProcedureWorkspace({
                           <textarea
                             aria-label={`Step ${step.sequence} instruction`}
                             className="ui-field-standalone ui-procedure-step-instruction h-auto w-full resize-y"
-                            value={step.instruction}
-                            onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
+                            value={getProcedureFieldValue(task.id, step.id, "instruction", step.instruction)}
+                            onFocus={() => onProcedureFieldFocus(task.id, step.id, "instruction", step.instruction)}
+                            onBlur={() => onProcedureFieldBlur(task.id, step.id, "instruction")}
+                            onChange={(event) =>
+                              onProcedureFieldChange(task.id, step.id, "instruction", event.target.value)
+                            }
                             onKeyDown={(event) =>
                               handleInstructionBulletKeyDown(event, (instruction) =>
-                                updateManufacturingStep(step.id, { instruction }),
+                                onProcedureFieldChange(task.id, step.id, "instruction", instruction),
                               )
                             }
                             placeholder="Write the manufacturing instruction for this operation."
@@ -4439,6 +4627,10 @@ function DetailDrawer({
   onToggleCollapsed,
   onResizeStart,
   onUpdateTask,
+  getProcedureFieldValue,
+  onProcedureFieldFocus,
+  onProcedureFieldBlur,
+  onProcedureFieldChange,
   onUploadStepPhotos,
   onRemoveStepPhoto,
   onAddStepTool,
@@ -4457,6 +4649,25 @@ function DetailDrawer({
   onToggleCollapsed: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onUpdateTask: (taskId: string, patch: Partial<Task>) => void;
+  getProcedureFieldValue: (
+    taskId: string,
+    stepId: string,
+    fieldName: ProcedureDraftFieldName,
+    fallbackValue: string,
+  ) => string;
+  onProcedureFieldFocus: (
+    taskId: string,
+    stepId: string,
+    fieldName: ProcedureDraftFieldName,
+    fallbackValue: string,
+  ) => void;
+  onProcedureFieldBlur: (taskId: string, stepId: string, fieldName: ProcedureDraftFieldName) => void;
+  onProcedureFieldChange: (
+    taskId: string,
+    stepId: string,
+    fieldName: ProcedureDraftFieldName,
+    value: string,
+  ) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onAddStepTool: (taskId: string, stepId: string, toolName: string, sequence?: number) => Promise<void>;
@@ -4935,18 +5146,31 @@ function DetailDrawer({
                         <textarea
                           aria-label={`Step ${step.sequence} instruction`}
                           className="ui-field-standalone min-h-[86px] resize-none py-2 text-sm leading-snug"
-                          value={step.instruction}
-                          onChange={(event) => updateManufacturingStep(step.id, { instruction: event.target.value })}
+                          value={getProcedureFieldValue(taskId, step.id, "instruction", step.instruction)}
+                          onFocus={() => onProcedureFieldFocus(taskId, step.id, "instruction", step.instruction)}
+                          onBlur={() => onProcedureFieldBlur(taskId, step.id, "instruction")}
+                          onChange={(event) =>
+                            onProcedureFieldChange(taskId, step.id, "instruction", event.target.value)
+                          }
                           onKeyDown={(event) =>
                             handleInstructionBulletKeyDown(event, (instruction) =>
-                              updateManufacturingStep(step.id, { instruction }),
+                              onProcedureFieldChange(taskId, step.id, "instruction", instruction),
                             )
                           }
                           placeholder="Describe the manufacturing step"
                         />
                         <button
                           type="button"
-                          onClick={() => updateManufacturingStep(step.id, { instruction: applyInstructionBullets(step.instruction) })}
+                          onClick={() =>
+                            onProcedureFieldChange(
+                              taskId,
+                              step.id,
+                              "instruction",
+                              applyInstructionBullets(
+                                getProcedureFieldValue(taskId, step.id, "instruction", step.instruction),
+                              ),
+                            )
+                          }
                           className="ui-btn-ghost h-8 gap-1.5 px-2"
                           aria-label={`Format step ${step.sequence} as bullets`}
                           title={`Format step ${step.sequence} as bullets`}
@@ -5420,6 +5644,7 @@ export function LineWorkspace({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const plannerQueryString = searchParams.toString();
+  const hasAutosaveHarnessParam = searchParams.get("autosaveHarness") === "1";
   const urlWorkspaceSnapshot = useMemo<Partial<WorkspaceSnapshot>>(() => {
     const params = new URLSearchParams(plannerQueryString);
     const requestedModule = params.get("view");
@@ -5457,11 +5682,14 @@ export function LineWorkspace({
   const plannerDirtyRef = useRef(false);
   const plannerSaveTimerRef = useRef<number | null>(null);
   const latestDerivedStateRef = useRef<PlannerState>(plannerState);
-  const procedureSaveInFlightRef = useRef(false);
-  const queuedProcedureSaveRef = useRef<{ task: Task; tasks: Task[] } | null>(null);
-  const pendingProcedureSaveRef = useRef<{ task: Task; tasks: Task[] } | null>(null);
-  const procedureSaveTimerRef = useRef<number | null>(null);
-  const procedureRetryTimerRef = useRef<number | null>(null);
+  const procedureDraftsRef = useRef<ProcedureDraftMap>({});
+  const procedureEditSeqRef = useRef(0);
+  const procedureSaveQueuesRef = useRef<Record<string, ProcedureTaskSaveQueue>>({});
+  const procedureSaveTimersRef = useRef<Record<string, number>>({});
+  const procedureRetryTimersRef = useRef<Record<string, number>>({});
+  const deferredProcedureServerUpdatesRef = useRef<Record<string, DeferredProcedureServerUpdate>>({});
+  const autosaveHarnessRanRef = useRef(false);
+  const [, setProcedureDraftVersion] = useState(0);
   const remoteRefreshTimerRef = useRef<number | null>(null);
   const remoteRefreshAppliedRef = useRef(false);
   const pendingRemoteRefreshRef = useRef(false);
@@ -5671,16 +5899,888 @@ export function LineWorkspace({
     selectedTaskId,
   ]);
 
-  function hasLocalSaveWork() {
-    return (
-      saveInFlightRef.current ||
-      plannerDirtyRef.current ||
-      Boolean(plannerSaveTimerRef.current) ||
-      procedureSaveInFlightRef.current ||
-      Boolean(procedureSaveTimerRef.current) ||
-      Boolean(pendingProcedureSaveRef.current)
+  function bumpProcedureDraftVersion() {
+    setProcedureDraftVersion((version) => version + 1);
+  }
+
+  function cloneProcedureDrafts(drafts: ProcedureDraftMap = procedureDraftsRef.current): ProcedureDraftMap {
+    return Object.fromEntries(Object.entries(drafts).map(([key, draft]) => [key, { ...draft }]));
+  }
+
+  function getProcedureFieldDraft(taskId: string, stepId: string, fieldName: ProcedureDraftFieldName) {
+    return procedureDraftsRef.current[makeProcedureDraftKey(taskId, stepId, fieldName)];
+  }
+
+  function getProcedureFieldValue(
+    taskId: string,
+    stepId: string,
+    fieldName: ProcedureDraftFieldName,
+    fallbackValue: string,
+  ) {
+    const draft = getProcedureFieldDraft(taskId, stepId, fieldName);
+    return draft?.active || draft?.dirty ? draft.value : fallbackValue;
+  }
+
+  function getProcedureDraftsForTask(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
+    return Object.values(drafts).filter((draft) => draft.taskId === taskId);
+  }
+
+  function getDirtyProcedureDraftsForTask(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
+    return getProcedureDraftsForTask(taskId, drafts).filter((draft) => draft.dirty);
+  }
+
+  function hasDirtyOrActiveProcedureDrafts(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
+    return getProcedureDraftsForTask(taskId, drafts).some((draft) => draft.dirty || draft.active);
+  }
+
+  function maxProcedureDraftSeq(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
+    return getProcedureDraftsForTask(taskId, drafts).reduce(
+      (maxSeq, draft) => Math.max(maxSeq, draft.localEditSeq),
+      0,
     );
   }
+
+  function getProcedureTaskSaveQueue(taskId: string) {
+    const existing = procedureSaveQueuesRef.current[taskId];
+    if (existing) {
+      return existing;
+    }
+
+    const queue: ProcedureTaskSaveQueue = {
+      state: "idle",
+      inFlight: false,
+      pending: false,
+      latestSeq: 0,
+    };
+    procedureSaveQueuesRef.current[taskId] = queue;
+    return queue;
+  }
+
+  function hasProcedureSaveWork() {
+    return (
+      Object.keys(procedureSaveTimersRef.current).length > 0 ||
+      Object.keys(procedureRetryTimersRef.current).length > 0 ||
+      Object.values(procedureSaveQueuesRef.current).some((queue) => queue.inFlight || queue.pending)
+    );
+  }
+
+  function hasPlannerShellSaveWork() {
+    return saveInFlightRef.current || plannerDirtyRef.current || Boolean(plannerSaveTimerRef.current);
+  }
+
+  function hasLocalSaveWork() {
+    return hasPlannerShellSaveWork() || hasProcedureSaveWork();
+  }
+
+  function generateProcedureSaveId() {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+
+    return `procedure-save-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function applyProcedureDraftsToTask(task: Task, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
+    const taskDrafts = getProcedureDraftsForTask(task.id, drafts).filter((draft) => draft.dirty || draft.active);
+    if (taskDrafts.length === 0) {
+      return task;
+    }
+
+    const draftByStepId = new Map<string, ProcedureDraftField[]>();
+    taskDrafts.forEach((draft) => {
+      const stepDrafts = draftByStepId.get(draft.stepId) ?? [];
+      stepDrafts.push(draft);
+      draftByStepId.set(draft.stepId, stepDrafts);
+    });
+
+    return {
+      ...task,
+      manufacturingSteps: (task.manufacturingSteps ?? []).map((step) => {
+        const stepDrafts = draftByStepId.get(step.id);
+        if (!stepDrafts?.length) {
+          return step;
+        }
+
+        return stepDrafts.reduce<ManufacturingStep>(
+          (nextStep, draft) => ({
+            ...nextStep,
+            [draft.fieldName]: draft.value,
+          }),
+          step,
+        );
+      }),
+    };
+  }
+
+  function updateProcedureDraftSnapshotStorage() {
+    writeProcedureFieldDraftSnapshot(procedureDraftsRef.current);
+  }
+
+  function cleanupCleanProcedureDrafts(taskId?: string) {
+    const nextDrafts = { ...procedureDraftsRef.current };
+    let changed = false;
+
+    Object.entries(nextDrafts).forEach(([key, draft]) => {
+      if (taskId && draft.taskId !== taskId) {
+        return;
+      }
+
+      const queue = procedureSaveQueuesRef.current[draft.taskId];
+      const pendingReferencesDraft =
+        queue?.pendingDraftSnapshot?.[key]?.localEditSeq === draft.localEditSeq ||
+        queue?.pendingDraftSnapshot?.[key]?.value === draft.value;
+
+      if (!draft.dirty && !draft.active && !pendingReferencesDraft && draft.baseValue === draft.value) {
+        delete nextDrafts[key];
+        changed = true;
+      }
+    });
+
+    if (!changed) {
+      return;
+    }
+
+    procedureDraftsRef.current = nextDrafts;
+    updateProcedureDraftSnapshotStorage();
+    bumpProcedureDraftVersion();
+  }
+
+  function markProcedureDraftsForTask(
+    taskId: string,
+    patch: Partial<Pick<ProcedureDraftField, "saveStatus" | "latestSaveId" | "savingSeq" | "error">>,
+    onlyDirty = true,
+  ) {
+    const nextDrafts = { ...procedureDraftsRef.current };
+    let changed = false;
+
+    Object.entries(nextDrafts).forEach(([key, draft]) => {
+      if (draft.taskId !== taskId || (onlyDirty && !draft.dirty)) {
+        return;
+      }
+
+      nextDrafts[key] = { ...draft, ...patch };
+      changed = true;
+    });
+
+    if (changed) {
+      procedureDraftsRef.current = nextDrafts;
+      updateProcedureDraftSnapshotStorage();
+      bumpProcedureDraftVersion();
+    }
+  }
+
+  function markProcedureDraftsForSave(taskId: string, saveId: string, draftSnapshot: ProcedureDraftMap) {
+    const nextDrafts = { ...procedureDraftsRef.current };
+    let changed = false;
+
+    Object.entries(draftSnapshot).forEach(([key, sentDraft]) => {
+      if (sentDraft.taskId !== taskId || !sentDraft.dirty || !nextDrafts[key]) {
+        return;
+      }
+
+      nextDrafts[key] = {
+        ...nextDrafts[key],
+        latestSaveId: saveId,
+        savingSeq: sentDraft.localEditSeq,
+        saveStatus: "saving",
+        error: undefined,
+      };
+      changed = true;
+    });
+
+    if (changed) {
+      procedureDraftsRef.current = nextDrafts;
+      updateProcedureDraftSnapshotStorage();
+      bumpProcedureDraftVersion();
+    }
+  }
+
+  function markProcedureStepDraftsConflict(taskId: string, stepId: string, error: string) {
+    const nextDrafts = { ...procedureDraftsRef.current };
+    let changed = false;
+
+    Object.entries(nextDrafts).forEach(([key, draft]) => {
+      if (draft.taskId !== taskId || draft.stepId !== stepId || (!draft.dirty && !draft.active)) {
+        return;
+      }
+
+      nextDrafts[key] = { ...draft, saveStatus: "conflict", error };
+      changed = true;
+      procedureDraftLog("conflict detected", { ...draft, error });
+    });
+
+    if (changed) {
+      procedureDraftsRef.current = nextDrafts;
+      updateProcedureDraftSnapshotStorage();
+      bumpProcedureDraftVersion();
+    }
+  }
+
+  function mergeServerTaskIntoLocalTask(
+    localTask: Task,
+    serverTask: Task,
+    procedureDrafts: ProcedureDraftMap = procedureDraftsRef.current,
+    sourceMeta?: { source?: string },
+  ) {
+    const protectedDrafts = getProcedureDraftsForTask(localTask.id, procedureDrafts).filter(
+      (draft) => draft.dirty || draft.active,
+    );
+
+    if (protectedDrafts.length === 0) {
+      procedureDraftLog("server update merged", {
+        taskId: serverTask.id,
+        serverVersion: serverTask.version,
+        source: sourceMeta?.source,
+      });
+      return serverTask;
+    }
+
+    const serverStepById = new Map((serverTask.manufacturingSteps ?? []).map((step) => [step.id, step]));
+    const serverStepIds = new Set(serverStepById.keys());
+    const protectedDraftsByStepId = new Map<string, ProcedureDraftField[]>();
+    protectedDrafts.forEach((draft) => {
+      const stepDrafts = protectedDraftsByStepId.get(draft.stepId) ?? [];
+      stepDrafts.push(draft);
+      protectedDraftsByStepId.set(draft.stepId, stepDrafts);
+    });
+
+    const localSteps = localTask.manufacturingSteps ?? [];
+    const mergedLocalSteps = localSteps.map((localStep) => {
+      const serverStep = serverStepById.get(localStep.id);
+      const stepDrafts = protectedDraftsByStepId.get(localStep.id) ?? [];
+
+      if (!serverStep && stepDrafts.length > 0) {
+        markProcedureStepDraftsConflict(localTask.id, localStep.id, "Server deleted this step while it had local edits.");
+        return localStep;
+      }
+
+      const mergedStep = serverStep
+        ? {
+            ...localStep,
+            ...serverStep,
+            sequence: localStep.sequence,
+          }
+        : localStep;
+
+      if (stepDrafts.length === 0) {
+        return mergedStep;
+      }
+
+      return stepDrafts.reduce<ManufacturingStep>(
+        (nextStep, draft) => ({
+          ...nextStep,
+          [draft.fieldName]: draft.value,
+        }),
+        mergedStep,
+      );
+    });
+
+    const localStepIds = new Set(localSteps.map((step) => step.id));
+    const insertedServerSteps = (serverTask.manufacturingSteps ?? []).filter((step) => !localStepIds.has(step.id));
+    const mergedTask = {
+      ...localTask,
+      ...serverTask,
+      manufacturingSteps: [...mergedLocalSteps, ...insertedServerSteps],
+    };
+
+    protectedDrafts.forEach((draft) => {
+      if (!serverStepIds.has(draft.stepId)) {
+        return;
+      }
+
+      procedureDraftLog("merge preserving local field", {
+        ...draft,
+        serverVersion: serverTask.version,
+        source: sourceMeta?.source,
+      });
+    });
+
+    return mergedTask;
+  }
+
+  function isDeferredProcedureUpdateOlderThanLocal(localTask: Task, update: DeferredProcedureServerUpdate) {
+    return (
+      typeof update.serverVersion === "number" &&
+      typeof localTask.version === "number" &&
+      update.serverVersion < localTask.version
+    );
+  }
+
+  function storeDeferredProcedureServerUpdate(update: DeferredProcedureServerUpdate) {
+    const existing = deferredProcedureServerUpdatesRef.current[update.serverTask.id];
+    let shouldReplace = !existing;
+
+    if (existing) {
+      if (typeof update.serverVersion === "number" && typeof existing.serverVersion === "number") {
+        shouldReplace = update.serverVersion >= existing.serverVersion;
+      } else if (update.serverUpdatedAt && existing.serverUpdatedAt) {
+        shouldReplace = update.serverUpdatedAt >= existing.serverUpdatedAt;
+      } else {
+        shouldReplace = update.receivedAt >= existing.receivedAt;
+      }
+    }
+
+    if (!shouldReplace) {
+      procedureDraftLog("deferred update discarded", {
+        taskId: update.serverTask.id,
+        serverVersion: update.serverVersion,
+        serverUpdatedAt: update.serverUpdatedAt,
+        source: update.source,
+      });
+      return;
+    }
+
+    deferredProcedureServerUpdatesRef.current[update.serverTask.id] = update;
+    procedureDraftLog("server update deferred", {
+      taskId: update.serverTask.id,
+      serverVersion: update.serverVersion,
+      serverUpdatedAt: update.serverUpdatedAt,
+      source: update.source,
+    });
+  }
+
+  function applyDeferredProcedureServerUpdate(taskId: string) {
+    const deferredUpdate = deferredProcedureServerUpdatesRef.current[taskId];
+    if (!deferredUpdate || hasDirtyOrActiveProcedureDrafts(taskId)) {
+      return;
+    }
+
+    delete deferredProcedureServerUpdatesRef.current[taskId];
+    setPlannerState((current) => {
+      const localTask = current.tasks.find((task) => task.id === taskId);
+      if (!localTask) {
+        return current;
+      }
+
+      if (isDeferredProcedureUpdateOlderThanLocal(localTask, deferredUpdate)) {
+        procedureDraftLog("deferred update discarded", {
+          taskId,
+          serverVersion: deferredUpdate.serverVersion,
+          serverUpdatedAt: deferredUpdate.serverUpdatedAt,
+          source: deferredUpdate.source,
+        });
+        return current;
+      }
+
+      const nextState = {
+        ...current,
+        tasks: current.tasks.map((task) =>
+          task.id === taskId
+            ? mergeServerTaskIntoLocalTask(task, deferredUpdate.serverTask, procedureDraftsRef.current, {
+                source: deferredUpdate.source,
+              })
+            : task,
+        ),
+      };
+      void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
+      return nextState;
+    });
+  }
+
+  function markProcedureFieldActive(taskId: string, stepId: string, fieldName: ProcedureDraftFieldName, fallbackValue: string) {
+    const key = makeProcedureDraftKey(taskId, stepId, fieldName);
+    const existing = procedureDraftsRef.current[key];
+    const now = Date.now();
+    procedureDraftsRef.current = {
+      ...procedureDraftsRef.current,
+      [key]: existing
+        ? { ...existing, active: true }
+        : {
+            taskId,
+            stepId,
+            fieldName,
+            value: fallbackValue,
+            baseValue: fallbackValue,
+            dirty: false,
+            active: true,
+            localEditSeq: ++procedureEditSeqRef.current,
+            lastEditedAt: now,
+            saveStatus: "idle",
+          },
+    };
+    procedureDraftLog("draft focused", procedureDraftsRef.current[key]);
+    bumpProcedureDraftVersion();
+  }
+
+  function markProcedureFieldInactive(taskId: string, stepId: string, fieldName: ProcedureDraftFieldName) {
+    const key = makeProcedureDraftKey(taskId, stepId, fieldName);
+    const existing = procedureDraftsRef.current[key];
+    if (!existing) {
+      return;
+    }
+
+    procedureDraftsRef.current = {
+      ...procedureDraftsRef.current,
+      [key]: { ...existing, active: false },
+    };
+    procedureDraftLog("draft blurred", procedureDraftsRef.current[key]);
+    cleanupCleanProcedureDrafts(taskId);
+    bumpProcedureDraftVersion();
+    applyDeferredProcedureServerUpdate(taskId);
+  }
+
+  function setProcedureFieldDraft(taskId: string, stepId: string, fieldName: ProcedureDraftFieldName, value: string) {
+    const key = makeProcedureDraftKey(taskId, stepId, fieldName);
+    const currentTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
+    const currentStep = currentTask?.manufacturingSteps?.find((step) => step.id === stepId);
+    const fallbackValue = getProcedureStepFieldValue(currentStep, fieldName);
+    const existing = procedureDraftsRef.current[key];
+    const now = Date.now();
+    const draft: ProcedureDraftField = {
+      taskId,
+      stepId,
+      fieldName,
+      value,
+      baseValue: existing?.baseValue ?? fallbackValue,
+      baseVersion: existing?.baseVersion ?? currentStep?.version,
+      dirty: true,
+      active: true,
+      localEditSeq: ++procedureEditSeqRef.current,
+      lastEditedAt: now,
+      saveStatus: "dirty",
+    };
+
+    procedureDraftsRef.current = {
+      ...procedureDraftsRef.current,
+      [key]: draft,
+    };
+    procedureDraftLog(existing ? "draft edited" : "draft created", draft);
+    updateProcedureDraftSnapshotStorage();
+    bumpProcedureDraftVersion();
+    return draft;
+  }
+
+  function updateProcedureStepField(
+    taskId: string,
+    stepId: string,
+    fieldName: ProcedureDraftFieldName,
+    value: string,
+  ) {
+    setSaveError(undefined);
+    setSaveState((state) => (state === "loading" || state === "saving" ? state : "draft"));
+    setProcedureFieldDraft(taskId, stepId, fieldName, value);
+
+    setPlannerState((current) => {
+      const patchedTasks = current.tasks.map((task) => {
+        if (task.id !== taskId) {
+          return task;
+        }
+
+        return {
+          ...task,
+          manufacturingSteps: (task.manufacturingSteps ?? []).map((step) =>
+            step.id === stepId ? { ...step, [fieldName]: value } : step,
+          ),
+        };
+      });
+      const taskToSave = patchedTasks.find((task) => task.id === taskId);
+
+      if (taskToSave) {
+        scheduleProcedureTaskSave(applyProcedureDraftsToTask(taskToSave), patchedTasks);
+      }
+
+      return {
+        ...current,
+        tasks: patchedTasks,
+      };
+    });
+  }
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development" || typeof window === "undefined") {
+      return undefined;
+    }
+
+    type HarnessTestResult = {
+      name: string;
+      pass: boolean;
+      detail: Record<string, unknown>;
+    };
+    type HarnessWindow = Window & {
+      __PULSE_PROCEDURE_AUTOSAVE_HARNESS__?: {
+        runAll: () => HarnessTestResult[];
+      };
+    };
+
+    function harnessStep(id: string, instruction: string, name = "Harness step", version = 1): ManufacturingStep {
+      return {
+        id,
+        sequence: 1,
+        name,
+        instruction,
+        durationMinutes: 1,
+        qualityCheck: "",
+        version,
+      };
+    }
+
+    function harnessTask(
+      id: string,
+      instruction: string,
+      name = "Harness step",
+      taskVersion = 1,
+      stepVersion = 1,
+      steps?: ManufacturingStep[],
+    ): Task {
+      return {
+        id,
+        scenarioId: "scenario-harness",
+        stationId: "station-harness",
+        zoneId: "zone-harness",
+        rowType: "task",
+        wbs: "1",
+        name: "Harness task",
+        description: "",
+        plannedStart: "0h",
+        plannedFinish: "1h",
+        plannedDurationMinutes: 60,
+        plannedOperators: 1,
+        plannedManHours: 1,
+        status: "not_started",
+        percentComplete: 0,
+        dependencyIds: [],
+        criticalPath: false,
+        bottleneckFlag: false,
+        qualityGate: false,
+        travelerSignoffRequired: false,
+        safetyNotes: "",
+        manufacturingSteps: steps ?? [harnessStep("step-harness", instruction, name, stepVersion)],
+        partReferences: [],
+        customFields: {},
+        version: taskVersion,
+      };
+    }
+
+    function harnessDraft(
+      taskId: string,
+      stepId: string,
+      fieldName: ProcedureDraftFieldName,
+      value: string,
+      seq: number,
+      active = true,
+      dirty = true,
+    ): ProcedureDraftField {
+      return {
+        taskId,
+        stepId,
+        fieldName,
+        value,
+        baseValue: "server-base",
+        baseVersion: 1,
+        dirty,
+        active,
+        localEditSeq: seq,
+        lastEditedAt: Date.now(),
+        saveStatus: dirty ? "dirty" : "saved",
+      };
+    }
+
+    function withSyntheticProcedureState(run: () => HarnessTestResult[]) {
+      const previousDrafts = procedureDraftsRef.current;
+      const previousQueues = procedureSaveQueuesRef.current;
+      const previousDeferred = deferredProcedureServerUpdatesRef.current;
+      const previousStorage = window.localStorage.getItem(PROCEDURE_DRAFT_STORAGE_KEY);
+
+      try {
+        procedureDraftsRef.current = {};
+        procedureSaveQueuesRef.current = {};
+        deferredProcedureServerUpdatesRef.current = {};
+        return run();
+      } finally {
+        procedureDraftsRef.current = previousDrafts;
+        procedureSaveQueuesRef.current = previousQueues;
+        deferredProcedureServerUpdatesRef.current = previousDeferred;
+        if (previousStorage === null) {
+          window.localStorage.removeItem(PROCEDURE_DRAFT_STORAGE_KEY);
+        } else {
+          window.localStorage.setItem(PROCEDURE_DRAFT_STORAGE_KEY, previousStorage);
+        }
+      }
+    }
+
+    function runDelayedSaveResponseSimulation(): HarnessTestResult {
+      const taskId = "task-harness-delayed";
+      const stepId = "step-harness";
+      const key = makeProcedureDraftKey(taskId, stepId, "instruction");
+      const valueA = "typed A";
+      const valueB = "typed B";
+
+      procedureDraftsRef.current = {
+        [key]: harnessDraft(taskId, stepId, "instruction", valueA, 1),
+      };
+      const snapshotA = cloneProcedureDrafts();
+      markProcedureDraftsForSave(taskId, "save-a", snapshotA);
+
+      procedureDraftsRef.current = {
+        ...procedureDraftsRef.current,
+        [key]: harnessDraft(taskId, stepId, "instruction", valueB, 2),
+      };
+
+      const saveAConfirmed = confirmProcedureDraftsFromSave(
+        taskId,
+        "save-a",
+        1,
+        snapshotA,
+        harnessTask(taskId, valueA, "Harness step", 2, 2),
+      );
+      const afterA = procedureDraftsRef.current[key];
+
+      const snapshotB = cloneProcedureDrafts();
+      markProcedureDraftsForSave(taskId, "save-b", snapshotB);
+      const saveBConfirmed = confirmProcedureDraftsFromSave(
+        taskId,
+        "save-b",
+        2,
+        snapshotB,
+        harnessTask(taskId, valueB, "Harness step", 3, 3),
+      );
+      const afterB = procedureDraftsRef.current[key];
+
+      const pass =
+        !saveAConfirmed &&
+        afterA.value === valueB &&
+        afterA.dirty &&
+        saveBConfirmed &&
+        afterB.value === valueB &&
+        !afterB.dirty;
+
+      return {
+        name: "delayed save response",
+        pass,
+        detail: {
+          saveAConfirmed,
+          afterAValue: afterA.value,
+          afterADirty: afterA.dirty,
+          saveBConfirmed,
+          afterBValue: afterB.value,
+          afterBDirty: afterB.dirty,
+        },
+      };
+    }
+
+    function runRealtimeDirtyRefreshSimulation(): HarnessTestResult {
+      const taskId = "task-harness-realtime";
+      const stepId = "step-harness";
+      const key = makeProcedureDraftKey(taskId, stepId, "instruction");
+      const localValue = "local dirty";
+      const oldServerValue = "old server";
+      const newServerValue = "new server";
+      const localTask = harnessTask(taskId, localValue, "Harness step", 4, 4);
+      const oldServerTask = harnessTask(taskId, oldServerValue, "Harness step", 1, 1);
+      const newerServerTask = harnessTask(taskId, newServerValue, "Harness step", 3, 3);
+      const lowerVersionLaterTask = harnessTask(taskId, "lower version later", "Harness step", 2, 2);
+
+      procedureDraftsRef.current = {
+        [key]: harnessDraft(taskId, stepId, "instruction", localValue, 1),
+      };
+
+      storeDeferredProcedureServerUpdate({
+        serverTask: oldServerTask,
+        serverVersion: oldServerTask.version,
+        receivedAt: 100,
+        source: "refreshTasks",
+      });
+      const mergedDirty = mergeServerTaskIntoLocalTask(localTask, oldServerTask, procedureDraftsRef.current, {
+        source: "refreshTasks",
+      });
+      storeDeferredProcedureServerUpdate({
+        serverTask: newerServerTask,
+        serverVersion: newerServerTask.version,
+        receivedAt: 200,
+        source: "realtime",
+      });
+      storeDeferredProcedureServerUpdate({
+        serverTask: lowerVersionLaterTask,
+        serverVersion: lowerVersionLaterTask.version,
+        receivedAt: 300,
+        source: "realtime",
+      });
+
+      const deferred = deferredProcedureServerUpdatesRef.current[taskId];
+      const staleDiscarded = isDeferredProcedureUpdateOlderThanLocal(harnessTask(taskId, localValue, "Harness step", 4, 4), deferred);
+      procedureDraftsRef.current[key] = {
+        ...procedureDraftsRef.current[key],
+        dirty: false,
+        active: false,
+        baseValue: localValue,
+        value: localValue,
+      };
+      const cleanMerge = staleDiscarded
+        ? localTask
+        : mergeServerTaskIntoLocalTask(localTask, deferred.serverTask, procedureDraftsRef.current, { source: "realtime" });
+
+      const pass =
+        mergedDirty.manufacturingSteps?.[0]?.instruction === localValue &&
+        deferred.serverTask.manufacturingSteps?.[0]?.instruction === newServerValue &&
+        staleDiscarded &&
+        cleanMerge.manufacturingSteps?.[0]?.instruction === localValue;
+
+      return {
+        name: "realtime/task refresh while dirty",
+        pass,
+        detail: {
+          mergedDirtyInstruction: mergedDirty.manufacturingSteps?.[0]?.instruction,
+          deferredVersion: deferred.serverVersion,
+          deferredInstruction: deferred.serverTask.manufacturingSteps?.[0]?.instruction,
+          staleDiscarded,
+          cleanMergeInstruction: cleanMerge.manufacturingSteps?.[0]?.instruction,
+        },
+      };
+    }
+
+    function runFullPlannerRefreshSimulation(): HarnessTestResult {
+      const taskId = "task-harness-planner-refresh";
+      const stepId = "step-harness";
+      const key = makeProcedureDraftKey(taskId, stepId, "name");
+      const localValue = "local dirty name";
+      const serverValue = "old server name";
+      const localTask = harnessTask(taskId, "instruction", localValue, 2, 2);
+      const serverTask = harnessTask(taskId, "instruction", serverValue, 1, 1);
+
+      procedureDraftsRef.current = {
+        [key]: harnessDraft(taskId, stepId, "name", localValue, 1),
+      };
+
+      const mergedTask = mergeServerTaskIntoLocalTask(localTask, serverTask, procedureDraftsRef.current, {
+        source: "refreshPlanner",
+      });
+      const pass = mergedTask.manufacturingSteps?.[0]?.name === localValue;
+
+      return {
+        name: "full planner refresh while typing",
+        pass,
+        detail: {
+          mergedName: mergedTask.manufacturingSteps?.[0]?.name,
+          serverName: serverValue,
+        },
+      };
+    }
+
+    function runServerDeletedDirtyStepSimulation(): HarnessTestResult {
+      const taskId = "task-harness-deleted-step";
+      const stepId = "step-harness";
+      const key = makeProcedureDraftKey(taskId, stepId, "instruction");
+      const localValue = "local dirty deleted step";
+      const localTask = harnessTask(taskId, localValue, "Harness step", 2, 2);
+      const serverTask = harnessTask(taskId, "unused", "Harness step", 3, 3, []);
+
+      procedureDraftsRef.current = {
+        [key]: harnessDraft(taskId, stepId, "instruction", localValue, 1),
+      };
+
+      const mergedTask = mergeServerTaskIntoLocalTask(localTask, serverTask, procedureDraftsRef.current, {
+        source: "refreshTasks",
+      });
+      const draft = procedureDraftsRef.current[key];
+      const pass =
+        mergedTask.manufacturingSteps?.some((step) => step.id === stepId && step.instruction === localValue) === true &&
+        draft.saveStatus === "conflict" &&
+        draft.value === localValue;
+
+      return {
+        name: "server-deleted dirty step conflict",
+        pass,
+        detail: {
+          preservedStepCount: mergedTask.manufacturingSteps?.length ?? 0,
+          draftStatus: draft.saveStatus,
+          draftValue: draft.value,
+        },
+      };
+    }
+
+    function runCleanTaskServerUpdateSimulation(): HarnessTestResult {
+      const taskId = "task-harness-clean";
+      const serverValue = "server update accepted";
+      const localTask = harnessTask(taskId, "local clean", "Harness step", 1, 1);
+      const serverTask = harnessTask(taskId, serverValue, "Harness step", 2, 2);
+      procedureDraftsRef.current = {};
+
+      const mergedTask = mergeServerTaskIntoLocalTask(localTask, serverTask, procedureDraftsRef.current, {
+        source: "refreshTasks",
+      });
+      const pass = mergedTask.manufacturingSteps?.[0]?.instruction === serverValue && mergedTask.version === 2;
+
+      return {
+        name: "clean task server update",
+        pass,
+        detail: {
+          mergedInstruction: mergedTask.manufacturingSteps?.[0]?.instruction,
+          mergedVersion: mergedTask.version,
+        },
+      };
+    }
+
+    function runCleanupConfirmationSimulation(): HarnessTestResult {
+      const taskId = "task-harness-cleanup";
+      const stepId = "step-harness";
+      const key = makeProcedureDraftKey(taskId, stepId, "instruction");
+      procedureDraftsRef.current = {
+        [key]: {
+          ...harnessDraft(taskId, stepId, "instruction", "confirmed", 1, false, false),
+          baseValue: "confirmed",
+          saveStatus: "saved",
+        },
+      };
+      cleanupCleanProcedureDrafts(taskId);
+      const removedWhenConfirmed = !procedureDraftsRef.current[key];
+
+      procedureDraftsRef.current = {
+        [key]: {
+          ...harnessDraft(taskId, stepId, "instruction", "not-confirmed", 2, false, false),
+          baseValue: "different-server-value",
+          saveStatus: "saved",
+        },
+      };
+      cleanupCleanProcedureDrafts(taskId);
+      const keptWhenNotConfirmed = Boolean(procedureDraftsRef.current[key]);
+
+      return {
+        name: "cleanup confirmation guard",
+        pass: removedWhenConfirmed && keptWhenNotConfirmed,
+        detail: {
+          removedWhenConfirmed,
+          keptWhenNotConfirmed,
+        },
+      };
+    }
+
+    const harnessWindow = window as HarnessWindow;
+    const shouldRunHarness = hasAutosaveHarnessParam && !autosaveHarnessRanRef.current;
+    const runAllHarnessTests = () =>
+        withSyntheticProcedureState(() => [
+          runDelayedSaveResponseSimulation(),
+          runRealtimeDirtyRefreshSimulation(),
+          runFullPlannerRefreshSimulation(),
+          runServerDeletedDirtyStepSimulation(),
+          runCleanTaskServerUpdateSimulation(),
+          runCleanupConfirmationSimulation(),
+          {
+            name: "updatedAt watch item",
+            pass: true,
+            detail: {
+              status: "Task has no updatedAt field; deferred freshness relies on version first, then serverUpdatedAt if provided, then receivedAt.",
+            },
+          },
+        ]);
+    const handleHarnessRun = () => {
+      document.documentElement.dataset.pulseProcedureAutosaveHarnessResult = JSON.stringify(runAllHarnessTests());
+    };
+    harnessWindow.__PULSE_PROCEDURE_AUTOSAVE_HARNESS__ = {
+      runAll: runAllHarnessTests,
+    };
+    document.documentElement.dataset.pulseProcedureAutosaveHarnessReady = "true";
+    if (shouldRunHarness) {
+      autosaveHarnessRanRef.current = true;
+      handleHarnessRun();
+    }
+
+    return () => {
+      delete harnessWindow.__PULSE_PROCEDURE_AUTOSAVE_HARNESS__;
+      autosaveHarnessRanRef.current = false;
+      delete document.documentElement.dataset.pulseProcedureAutosaveHarnessReady;
+      delete document.documentElement.dataset.pulseProcedureAutosaveHarnessResult;
+    };
+  }, [hasAutosaveHarnessParam]);
 
   function flushPendingPlannerSave() {
     if (!plannerDirtyRef.current && !plannerSaveTimerRef.current) {
@@ -5723,14 +6823,14 @@ export function LineWorkspace({
   }
 
   function refreshTasksFromSupabase(taskIds: string[]) {
-    if (hasLocalSaveWork()) {
+    if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
       return;
     }
 
     void Promise.all(taskIds.map((taskId) => loadTaskFromSupabase(taskId, projectId)))
       .then((latestTasks) => {
-        if (hasLocalSaveWork()) {
+        if (hasPlannerShellSaveWork()) {
           pendingRemoteRefreshRef.current = true;
           return;
         }
@@ -5748,9 +6848,27 @@ export function LineWorkspace({
         setPlannerState((current) => {
           const existingTaskIds = new Set(current.tasks.map((task) => task.id));
           const insertedTasks = [...taskById.values()].filter((task) => !existingTaskIds.has(task.id));
+          const mergedTasks = current.tasks.map((task) => {
+            const serverTask = taskById.get(task.id);
+            if (!serverTask) {
+              return task;
+            }
+
+            if (hasDirtyOrActiveProcedureDrafts(task.id)) {
+              storeDeferredProcedureServerUpdate({
+                serverTask,
+                serverVersion: serverTask.version,
+                receivedAt: Date.now(),
+                source: "refreshTasks",
+              });
+              return mergeServerTaskIntoLocalTask(task, serverTask, procedureDraftsRef.current, { source: "refreshTasks" });
+            }
+
+            return mergeServerTaskIntoLocalTask(task, serverTask, procedureDraftsRef.current, { source: "refreshTasks" });
+          });
           const nextState = {
             ...current,
-            tasks: [...current.tasks.map((task) => taskById.get(task.id) ?? task), ...insertedTasks],
+            tasks: [...mergedTasks, ...insertedTasks],
           };
           void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
           return nextState;
@@ -5764,7 +6882,7 @@ export function LineWorkspace({
   }
 
   function requestRemoteTaskRefresh(taskId: string) {
-    if (hasLocalSaveWork()) {
+    if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
       return;
     }
@@ -5784,22 +6902,57 @@ export function LineWorkspace({
   }
 
   function refreshPlannerFromSupabase() {
-    if (hasLocalSaveWork()) {
+    if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
       return;
     }
 
     void loadPlannerStateFromSupabase(projectId)
       .then((savedState) => {
-        if (!savedState || hasLocalSaveWork()) {
+        if (!savedState || hasPlannerShellSaveWork()) {
           pendingRemoteRefreshRef.current = true;
           return;
         }
 
         pendingRemoteRefreshRef.current = false;
         remoteRefreshAppliedRef.current = true;
-        void writeCachedPlannerState(projectId, savedState).catch(() => undefined);
-        setPlannerState(savedState);
+        setPlannerState((current) => {
+          const localTaskById = new Map(current.tasks.map((task) => [task.id, task]));
+          const savedTaskIds = new Set(savedState.tasks.map((task) => task.id));
+          const mergedTasks = savedState.tasks.map((serverTask) => {
+            const localTask = localTaskById.get(serverTask.id);
+            if (!localTask) {
+              return serverTask;
+            }
+
+            if (hasDirtyOrActiveProcedureDrafts(serverTask.id)) {
+              storeDeferredProcedureServerUpdate({
+                serverTask,
+                serverVersion: serverTask.version,
+                receivedAt: Date.now(),
+                source: "refreshPlanner",
+              });
+              procedureDraftLog("full planner refresh protected a field", {
+                taskId: serverTask.id,
+                serverVersion: serverTask.version,
+                source: "refreshPlanner",
+              });
+            }
+
+            return mergeServerTaskIntoLocalTask(localTask, serverTask, procedureDraftsRef.current, {
+              source: "refreshPlanner",
+            });
+          });
+          const nextState = {
+            ...savedState,
+            tasks: [
+              ...mergedTasks,
+              ...current.tasks.filter((task) => !savedTaskIds.has(task.id) && hasDirtyOrActiveProcedureDrafts(task.id)),
+            ],
+          };
+          void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
+          return nextState;
+        });
         setSelectedTaskId((currentTaskId) =>
           savedState.tasks.some((task) => task.id === currentTaskId)
             ? currentTaskId
@@ -5820,7 +6973,7 @@ export function LineWorkspace({
   }
 
   function requestRemotePlannerRefresh() {
-    if (hasLocalSaveWork()) {
+    if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
       return;
     }
@@ -5883,17 +7036,42 @@ export function LineWorkspace({
       const normalizedSavedState = ensureNomenclatureCollections(savedState);
       const procedureDraft = readProcedureDraftSnapshot();
       const workspaceSnapshot = readWorkspaceSnapshot(projectId);
-      const draftTask = procedureDraft
-        ? normalizedSavedState.tasks.find((task) => task.id === procedureDraft.taskId)
-        : undefined;
-      const mergedDraftTask =
-        draftTask && procedureDraft ? mergeProcedureDraftWithServer(draftTask, procedureDraft.task) : undefined;
-      const hydratedState = mergedDraftTask
-        ? {
+      let recoveredTaskIds: string[] = [];
+      let recoveredTask: Task | undefined;
+      let hydratedState = normalizedSavedState;
+
+      if (procedureDraft && "version" in procedureDraft && procedureDraft.version === 2) {
+        const recoveredDrafts = { ...procedureDraftsRef.current };
+        procedureDraft.fields.forEach((field) => {
+          const key = makeProcedureDraftKey(field.taskId, field.stepId, field.fieldName);
+          recoveredDrafts[key] = {
+            ...field,
+            active: false,
+            dirty: field.dirty !== false,
+            saveStatus: field.dirty === false ? "saved" : "dirty",
+          };
+          procedureEditSeqRef.current = Math.max(procedureEditSeqRef.current, recoveredDrafts[key].localEditSeq);
+          procedureDraftLog("recovery restored a draft", recoveredDrafts[key]);
+        });
+        procedureDraftsRef.current = recoveredDrafts;
+        recoveredTaskIds = [...new Set(procedureDraft.fields.map((field) => field.taskId))];
+        hydratedState = {
+          ...normalizedSavedState,
+          tasks: normalizedSavedState.tasks.map((task) => applyProcedureDraftsToTask(task, recoveredDrafts)),
+        };
+        recoveredTask = hydratedState.tasks.find((task) => recoveredTaskIds.includes(task.id));
+      } else if (procedureDraft && "taskId" in procedureDraft) {
+        const draftTask = normalizedSavedState.tasks.find((task) => task.id === procedureDraft.taskId);
+        const mergedDraftTask = draftTask ? mergeProcedureDraftWithServer(draftTask, procedureDraft.task) : undefined;
+        if (mergedDraftTask) {
+          recoveredTaskIds = [mergedDraftTask.id];
+          recoveredTask = mergedDraftTask;
+          hydratedState = {
             ...normalizedSavedState,
             tasks: normalizedSavedState.tasks.map((task) => (task.id === mergedDraftTask.id ? mergedDraftTask : task)),
-          }
-        : normalizedSavedState;
+          };
+        }
+      }
       const snapshotTask = workspaceSnapshot?.selectedTaskId
         ? hydratedState.tasks.find((task) => task.id === workspaceSnapshot.selectedTaskId)
         : undefined;
@@ -5901,7 +7079,7 @@ export function LineWorkspace({
       const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
         ? hydratedState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
         : undefined;
-      const selectedTask = mergedDraftTask ?? urlTask ?? snapshotTask ?? hydratedState.tasks[0];
+      const selectedTask = recoveredTask ?? urlTask ?? snapshotTask ?? hydratedState.tasks[0];
       const snapshotStation = workspaceSnapshot?.selectedStationId
         ? hydratedState.stations.find((station) => station.id === workspaceSnapshot.selectedStationId)
         : undefined;
@@ -5935,12 +7113,17 @@ export function LineWorkspace({
 
       finishProjectSwitch();
 
-      void writeCachedPlannerState(projectId, normalizedSavedState).catch(() => undefined);
+      void writeCachedPlannerState(projectId, hydratedState).catch(() => undefined);
 
-      if (mergedDraftTask && procedureDraft) {
+      if (recoveredTaskIds.length > 0) {
         setSaveState("draft");
         window.setTimeout(() => {
-          scheduleProcedureTaskSave(mergedDraftTask, hydratedState.tasks);
+          recoveredTaskIds.forEach((taskId) => {
+            const taskToSave = hydratedState.tasks.find((task) => task.id === taskId);
+            if (taskToSave) {
+              scheduleProcedureTaskSave(taskToSave, hydratedState.tasks);
+            }
+          });
         }, 250);
         return;
       }
@@ -6064,17 +7247,13 @@ export function LineWorkspace({
         window.clearTimeout(remoteTaskRefreshTimerRef.current);
         remoteTaskRefreshTimerRef.current = null;
       }
+      Object.values(procedureSaveTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+      procedureSaveTimersRef.current = {};
+      Object.values(procedureRetryTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+      procedureRetryTimersRef.current = {};
       if (projectSwitchSkeletonTimerRef.current) {
         window.clearTimeout(projectSwitchSkeletonTimerRef.current);
         projectSwitchSkeletonTimerRef.current = null;
-      }
-      if (procedureSaveTimerRef.current) {
-        window.clearTimeout(procedureSaveTimerRef.current);
-        procedureSaveTimerRef.current = null;
-      }
-      if (procedureRetryTimerRef.current) {
-        window.clearTimeout(procedureRetryTimerRef.current);
-        procedureRetryTimerRef.current = null;
       }
       unsubscribe();
     };
@@ -6111,7 +7290,7 @@ export function LineWorkspace({
       const clickedDrawer = target.closest("[data-detail-drawer]");
 
       if (!clickedTask && !clickedDrawer) {
-        setDetailDrawerCollapsed(true);
+        setDetailDrawerCollapsed((current) => (current ? current : true));
       }
     }
 
@@ -6386,112 +7565,250 @@ export function LineWorkspace({
     flushDeferredRemoteRefresh();
   }
 
-  async function persistProcedureTaskUpdate(taskToSave: Task, tasksToSave: Task[]) {
-    if (procedureSaveInFlightRef.current) {
-      queuedProcedureSaveRef.current = { task: taskToSave, tasks: tasksToSave };
-      setSaveState("saving");
-      return;
-    }
+  function confirmProcedureDraftsFromSave(
+    taskId: string,
+    saveId: string,
+    saveSeq: number,
+    draftSnapshot: ProcedureDraftMap,
+    savedTask: Task,
+  ) {
+    const nextDrafts = { ...procedureDraftsRef.current };
+    let changed = false;
+    let staleResponse = false;
 
-    procedureSaveInFlightRef.current = true;
-    setSaveError(undefined);
-    setSaveState("saving");
-
-    let nextSave: { task: Task; tasks: Task[] } | null = { task: taskToSave, tasks: tasksToSave };
-    let lastSavedTaskId = taskToSave.id;
-    let lastSavedTask: Task | null = null;
-
-    while (nextSave) {
-      queuedProcedureSaveRef.current = null;
-
-      try {
-        lastSavedTask = await saveProcedureTaskUpdateToSupabase(nextSave.task, nextSave.tasks, projectId);
-        lastSavedTaskId = nextSave.task.id;
-      } catch (error) {
-        const failedSave = nextSave;
-        const message = error instanceof Error ? error.message : "Unable to save procedure task.";
-        writeProcedureDraftSnapshot(failedSave.task);
-        setSaveError(message);
-        setSaveState("retrying");
-        notifyFeedback({
-          title: "Save failed — retrying",
-          body: message,
-          tone: "warning",
-        });
-        procedureSaveInFlightRef.current = false;
-        queuedProcedureSaveRef.current = null;
-        flushDeferredRemoteRefresh();
-
-        if (!procedureRetryTimerRef.current) {
-          procedureRetryTimerRef.current = window.setTimeout(() => {
-            procedureRetryTimerRef.current = null;
-            const latestPendingSave = pendingProcedureSaveRef.current ?? failedSave;
-            pendingProcedureSaveRef.current = null;
-            void loadTaskFromSupabase(latestPendingSave.task.id, projectId)
-              .then((latestTask) => {
-                const taskToRetry = latestTask
-                  ? mergeProcedureDraftWithServer(latestTask, latestPendingSave.task)
-                  : latestPendingSave.task;
-                return persistProcedureTaskUpdate(taskToRetry, latestPendingSave.tasks);
-              })
-              .catch(() => persistProcedureTaskUpdate(latestPendingSave.task, latestPendingSave.tasks));
-          }, 2500);
-        }
+    Object.entries(draftSnapshot).forEach(([key, sentDraft]) => {
+      if (sentDraft.taskId !== taskId || !sentDraft.dirty) {
         return;
       }
 
-      const queuedNextSave = queuedProcedureSaveRef.current as unknown as { task: Task; tasks: Task[] } | null;
-      nextSave = queuedNextSave;
-      if (queuedNextSave && lastSavedTask) {
-        const versionedTask = applyProcedureVersionSnapshot(queuedNextSave.task, lastSavedTask);
-        nextSave = {
-          task: versionedTask,
-          tasks: queuedNextSave.tasks.map((task) => (task.id === versionedTask.id ? versionedTask : task)),
-        };
+      const currentDraft = nextDrafts[key];
+      if (!currentDraft) {
+        return;
       }
+
+      const serverStep = savedTask.manufacturingSteps?.find((step) => step.id === sentDraft.stepId);
+      const serverValue = getProcedureStepFieldValue(serverStep, sentDraft.fieldName);
+      const fieldSaveSeq = sentDraft.localEditSeq;
+      const confirmsExactCurrentDraft =
+        currentDraft.taskId === sentDraft.taskId &&
+        currentDraft.stepId === sentDraft.stepId &&
+        currentDraft.fieldName === sentDraft.fieldName &&
+        currentDraft.localEditSeq === fieldSaveSeq &&
+        currentDraft.value === sentDraft.value &&
+        serverValue === currentDraft.value &&
+        currentDraft.latestSaveId === saveId &&
+        currentDraft.savingSeq === fieldSaveSeq;
+
+      if (!confirmsExactCurrentDraft) {
+        staleResponse = true;
+        nextDrafts[key] = {
+          ...currentDraft,
+          dirty: true,
+          saveStatus: currentDraft.saveStatus === "saving" ? "dirty" : currentDraft.saveStatus,
+        };
+        changed = true;
+        procedureDraftLog("save returned stale", {
+          ...currentDraft,
+          saveId,
+          saveSeq,
+          serverVersion: savedTask.version,
+        });
+        return;
+      }
+
+      nextDrafts[key] = {
+        ...currentDraft,
+        baseValue: serverValue,
+        baseVersion: serverStep?.version,
+        dirty: false,
+        saveStatus: "saved",
+        latestSaveId: undefined,
+        savingSeq: undefined,
+        error: undefined,
+      };
+      changed = true;
+      procedureDraftLog("field marked clean", {
+        ...nextDrafts[key],
+        saveId,
+        saveSeq,
+        serverVersion: savedTask.version,
+      });
+    });
+
+    if (changed) {
+      procedureDraftsRef.current = nextDrafts;
+      updateProcedureDraftSnapshotStorage();
+      bumpProcedureDraftVersion();
     }
 
-    procedureSaveInFlightRef.current = false;
-    clearProcedureDraftSnapshot(lastSavedTaskId);
-    if (lastSavedTask) {
+    return !staleResponse;
+  }
+
+  async function startProcedureTaskSave(taskId: string) {
+    const queue = getProcedureTaskSaveQueue(taskId);
+    if (queue.inFlight || !queue.pendingTaskSnapshot || !queue.pendingTasksSnapshot) {
+      return;
+    }
+
+    const saveId = generateProcedureSaveId();
+    const draftSnapshot = queue.pendingDraftSnapshot ?? cloneProcedureDrafts();
+    const saveSeq = maxProcedureDraftSeq(taskId, draftSnapshot);
+    const taskSnapshot = applyProcedureDraftsToTask(queue.pendingTaskSnapshot, draftSnapshot);
+    const tasksSnapshot = queue.pendingTasksSnapshot.map((task) => (task.id === taskId ? taskSnapshot : task));
+
+    queue.inFlight = true;
+    queue.pending = false;
+    queue.inFlightSaveId = saveId;
+    queue.inFlightSeq = saveSeq;
+    queue.state = "saving";
+    queue.pendingTaskSnapshot = undefined;
+    queue.pendingTasksSnapshot = undefined;
+    queue.pendingDraftSnapshot = undefined;
+    setSaveError(undefined);
+    setSaveState("saving");
+    markProcedureDraftsForSave(taskId, saveId, draftSnapshot);
+    procedureDraftLog("save started", { taskId, saveId, saveSeq });
+
+    let savedTask: Task | null = null;
+
+    try {
+      savedTask = await saveProcedureTaskUpdateToSupabase(taskSnapshot, tasksSnapshot, projectId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to save procedure task.";
+      const isConflict = message.toLowerCase().includes("conflict");
+      queue.inFlight = false;
+      queue.state = isConflict ? "conflict" : "retrying";
+      queue.lastError = error;
+      markProcedureDraftsForTask(taskId, {
+        saveStatus: isConflict ? "conflict" : "retrying",
+        error: message,
+      });
+      updateProcedureDraftSnapshotStorage();
+      setSaveError(message);
+      setSaveState(isConflict ? "error" : "retrying");
+      notifyFeedback({
+        title: isConflict ? "Save conflict" : "Save failed - retrying",
+        body: message,
+        tone: isConflict ? "danger" : "warning",
+      });
+      flushDeferredRemoteRefresh();
+
+      if (!isConflict && !procedureRetryTimersRef.current[taskId]) {
+        procedureRetryTimersRef.current[taskId] = window.setTimeout(() => {
+          delete procedureRetryTimersRef.current[taskId];
+          const latestTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
+          if (!latestTask) {
+            return;
+          }
+
+          const latestTaskSnapshot = applyProcedureDraftsToTask(latestTask);
+          const latestTasksSnapshot = latestDerivedStateRef.current.tasks.map((task) =>
+            task.id === taskId ? latestTaskSnapshot : task,
+          );
+          scheduleProcedureTaskSave(latestTaskSnapshot, latestTasksSnapshot);
+        }, 2500);
+      }
+      return;
+    }
+
+    queue.inFlight = false;
+    queue.inFlightSaveId = undefined;
+    queue.inFlightSeq = undefined;
+
+    let confirmedCurrent = true;
+    if (savedTask) {
+      confirmedCurrent = confirmProcedureDraftsFromSave(taskId, saveId, saveSeq, draftSnapshot, savedTask);
       remoteRefreshAppliedRef.current = true;
       setPlannerState((current) => {
         const nextState = {
           ...current,
-          tasks: current.tasks.map((task) => (task.id === lastSavedTask?.id ? { ...task, ...lastSavedTask } : task)),
+          tasks: current.tasks.map((task) =>
+            task.id === savedTask?.id
+              ? mergeServerTaskIntoLocalTask(task, savedTask, procedureDraftsRef.current, { source: "saveCompletion" })
+              : task,
+          ),
         };
         void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
         return nextState;
       });
+
+      if (confirmedCurrent) {
+        cleanupCleanProcedureDrafts(taskId);
+      }
     }
+
+    const hasNewerPending = !confirmedCurrent || queue.pending || maxProcedureDraftSeq(taskId) > saveSeq;
+    if (hasNewerPending) {
+      if (queue.pending && queue.pendingTaskSnapshot && queue.pendingTasksSnapshot) {
+        queue.state = "saving-with-newer-pending";
+        void startProcedureTaskSave(taskId);
+        return;
+      }
+
+      const latestTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
+      if (latestTask) {
+        const latestTaskSnapshot = applyProcedureDraftsToTask(latestTask);
+        const latestTasksSnapshot = latestDerivedStateRef.current.tasks.map((task) =>
+          task.id === taskId ? latestTaskSnapshot : task,
+        );
+        queue.pending = true;
+        queue.pendingTaskSnapshot = latestTaskSnapshot;
+        queue.pendingTasksSnapshot = latestTasksSnapshot;
+        queue.pendingDraftSnapshot = cloneProcedureDrafts();
+        queue.latestSeq = maxProcedureDraftSeq(taskId);
+        queue.state = "saving-with-newer-pending";
+        void startProcedureTaskSave(taskId);
+        return;
+      }
+    }
+
+    queue.state = "idle";
     setSaveState("saved");
+    applyDeferredProcedureServerUpdate(taskId);
     flushDeferredRemoteRefresh();
   }
 
-  function scheduleProcedureTaskSave(taskToSave: Task, tasksToSave: Task[]) {
-    writeProcedureDraftSnapshot(taskToSave);
-    pendingProcedureSaveRef.current = { task: taskToSave, tasks: tasksToSave };
-
-    if (procedureSaveTimerRef.current) {
-      window.clearTimeout(procedureSaveTimerRef.current);
-    }
-
-    if (procedureRetryTimerRef.current) {
-      window.clearTimeout(procedureRetryTimerRef.current);
-      procedureRetryTimerRef.current = null;
-    }
-
-    procedureSaveTimerRef.current = window.setTimeout(() => {
-      procedureSaveTimerRef.current = null;
-      const nextSave = pendingProcedureSaveRef.current;
-      pendingProcedureSaveRef.current = null;
-
-      if (nextSave) {
-        void persistProcedureTaskUpdate(nextSave.task, nextSave.tasks);
-      }
-    }, PROCEDURE_SAVE_DEBOUNCE_MS);
+  async function persistProcedureTaskUpdate(taskToSave: Task, tasksToSave: Task[]) {
+    const taskId = taskToSave.id;
+    const queue = getProcedureTaskSaveQueue(taskId);
+    queue.pending = true;
+    queue.pendingTaskSnapshot = applyProcedureDraftsToTask(taskToSave);
+    queue.pendingTasksSnapshot = tasksToSave.map((task) => (task.id === taskId ? queue.pendingTaskSnapshot ?? task : task));
+    queue.pendingDraftSnapshot = cloneProcedureDrafts();
+    queue.latestSeq = maxProcedureDraftSeq(taskId);
+    queue.state = queue.inFlight ? "saving-with-newer-pending" : "dirty-pending";
+    procedureDraftLog("save scheduled", { taskId, saveSeq: queue.latestSeq });
+    await startProcedureTaskSave(taskId);
   }
 
+  function scheduleProcedureTaskSave(taskToSave: Task, tasksToSave: Task[]) {
+    const taskId = taskToSave.id;
+    const queue = getProcedureTaskSaveQueue(taskId);
+    const taskSnapshot = applyProcedureDraftsToTask(taskToSave);
+
+    queue.pending = true;
+    queue.pendingTaskSnapshot = taskSnapshot;
+    queue.pendingTasksSnapshot = tasksToSave.map((task) => (task.id === taskId ? taskSnapshot : task));
+    queue.pendingDraftSnapshot = cloneProcedureDrafts();
+    queue.latestSeq = maxProcedureDraftSeq(taskId);
+    queue.state = queue.inFlight ? "saving-with-newer-pending" : "dirty-pending";
+    updateProcedureDraftSnapshotStorage();
+    procedureDraftLog("save scheduled", { taskId, saveSeq: queue.latestSeq });
+
+    if (procedureSaveTimersRef.current[taskId]) {
+      window.clearTimeout(procedureSaveTimersRef.current[taskId]);
+    }
+
+    if (procedureRetryTimersRef.current[taskId]) {
+      window.clearTimeout(procedureRetryTimersRef.current[taskId]);
+      delete procedureRetryTimersRef.current[taskId];
+    }
+
+    procedureSaveTimersRef.current[taskId] = window.setTimeout(() => {
+      delete procedureSaveTimersRef.current[taskId];
+      void persistProcedureTaskUpdate(taskSnapshot, queue.pendingTasksSnapshot ?? tasksToSave);
+    }, PROCEDURE_SAVE_DEBOUNCE_MS);
+  }
   function updateProductNumber(field: ProductNumberField, value: number) {
     markDirty();
     setPlannerState((current) => ({
@@ -8233,6 +9550,10 @@ export function LineWorkspace({
             onConfirmAction={requestFeedbackConfirm}
             onStepDeleted={notifyDeletedStepRestore}
             onUpdateTask={updateProcedureTask}
+            getProcedureFieldValue={getProcedureFieldValue}
+            onProcedureFieldFocus={markProcedureFieldActive}
+            onProcedureFieldBlur={markProcedureFieldInactive}
+            onProcedureFieldChange={updateProcedureStepField}
             onMoveStepToTask={moveProcedureStepToTask}
             onUploadStepPhotos={uploadStepPhotos}
             onRemoveStepPhoto={removeStepPhoto}
@@ -8413,6 +9734,10 @@ export function LineWorkspace({
             onToggleCollapsed={() => setDetailDrawerCollapsed((collapsed) => !collapsed)}
             onResizeStart={startDetailDrawerResize}
             onUpdateTask={updateTask}
+            getProcedureFieldValue={getProcedureFieldValue}
+            onProcedureFieldFocus={markProcedureFieldActive}
+            onProcedureFieldBlur={markProcedureFieldInactive}
+            onProcedureFieldChange={updateProcedureStepField}
             onUploadStepPhotos={uploadStepPhotos}
             onRemoveStepPhoto={removeStepPhoto}
             onAddStepTool={persistAddStepTool}

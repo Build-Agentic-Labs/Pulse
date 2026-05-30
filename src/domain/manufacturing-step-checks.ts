@@ -21,6 +21,10 @@ export interface ManufacturingStepCheckState {
 
 export const PRODUCT_STEP_CHECK_CONFIG_FIELD = "procedureStepChecks";
 
+// The only check allowed to carry a numeric value + unit selector. Every other
+// check is a plain name + checkbox.
+export const UNIT_ENABLED_CHECK_KEY = "torque_required";
+
 export const defaultManufacturingStepCheckDefinitions: ManufacturingStepCheckDefinition[] = [
   { key: "work_instruction", label: "Work instruction", enabled: true, inputType: "checkbox" },
   { key: "self_qc", label: "Self QC", enabled: true, inputType: "checkbox" },
@@ -28,7 +32,7 @@ export const defaultManufacturingStepCheckDefinitions: ManufacturingStepCheckDef
   { key: "critical", label: "Critical", enabled: true, inputType: "checkbox" },
   {
     key: "torque_required",
-    label: "Torque required",
+    label: "Torque Spec",
     enabled: true,
     inputType: "number",
     defaultUnit: "Nm",
@@ -81,22 +85,38 @@ function normalizeDefinition(definition: unknown, fallback?: ManufacturingStepCh
 
 export function getManufacturingStepCheckDefinitions(customFields?: Record<string, unknown>) {
   const rawDefinitions = customFields?.[PRODUCT_STEP_CHECK_CONFIG_FIELD];
-  const configuredDefinitions = Array.isArray(rawDefinitions) ? rawDefinitions : [];
+  // A stored array (even empty) means the user has a saved configuration that is
+  // authoritative. Only when nothing is stored do we seed the built-in defaults.
+  const hasStoredConfig = Array.isArray(rawDefinitions);
   const configuredByKey = new Map(
-    configuredDefinitions
+    (hasStoredConfig ? rawDefinitions : [])
       .map((definition) => normalizeDefinition(definition))
       .filter((definition): definition is ManufacturingStepCheckDefinition => Boolean(definition))
       .map((definition) => [definition.key, definition]),
   );
 
-  const mergedDefinitions = defaultManufacturingStepCheckDefinitions.map((defaultDefinition) =>
-    normalizeDefinition(configuredByKey.get(defaultDefinition.key), defaultDefinition) ?? defaultDefinition,
-  );
-  const customDefinitions = [...configuredByKey.values()].filter(
-    (definition) => !defaultManufacturingStepCheckDefinitions.some((defaultDefinition) => defaultDefinition.key === definition.key),
-  );
+  let definitions: ManufacturingStepCheckDefinition[];
+  if (!hasStoredConfig) {
+    definitions = [...defaultManufacturingStepCheckDefinitions];
+  } else {
+    // Stored config wins: keep only defaults the user hasn't deleted (with any
+    // stored overrides applied), preserving default order, then append customs.
+    const mergedDefaults = defaultManufacturingStepCheckDefinitions
+      .filter((defaultDefinition) => configuredByKey.has(defaultDefinition.key))
+      .map((defaultDefinition) => normalizeDefinition(configuredByKey.get(defaultDefinition.key), defaultDefinition) ?? defaultDefinition);
+    const customDefinitions = [...configuredByKey.values()].filter(
+      (definition) => !defaultManufacturingStepCheckDefinitions.some((defaultDefinition) => defaultDefinition.key === definition.key),
+    );
+    definitions = [...mergedDefaults, ...customDefinitions];
+  }
 
-  return [...mergedDefinitions, ...customDefinitions];
+  // Only the torque spec may be a number+unit check; coerce everything else to a
+  // plain checkbox so no other check shows a unit selector anywhere.
+  return definitions.map((definition) =>
+    definition.key === UNIT_ENABLED_CHECK_KEY || definition.inputType !== "number"
+      ? definition
+      : { ...definition, inputType: "checkbox" as ManufacturingStepCheckInputType, defaultUnit: undefined, unitOptions: undefined },
+  );
 }
 
 export function serializeManufacturingStepCheckDefinitions(definitions: ManufacturingStepCheckDefinition[]) {

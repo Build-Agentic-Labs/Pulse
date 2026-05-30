@@ -35,6 +35,7 @@ function partDraftKey(entry: ProjectPartCatalogEntry) {
 export function ProjectCatalogSetupPanel({
   tasks,
   projectToolRegistry,
+  section = "all",
   onSaveTool,
   onDeleteTool,
   onSavePart,
@@ -43,12 +44,15 @@ export function ProjectCatalogSetupPanel({
 }: {
   tasks: Task[];
   projectToolRegistry: Map<string, ProjectToolDefinition>;
+  section?: "tools" | "parts" | "all";
   onSaveTool: (entry: ProjectToolCatalogEntry, draft: ToolDraft) => Promise<void>;
   onDeleteTool: (entry: ProjectToolCatalogEntry) => Promise<void>;
   onSavePart: (entry: ProjectPartCatalogEntry, draft: PartDraft) => Promise<void>;
   onDeletePart: (entry: ProjectPartCatalogEntry) => Promise<void>;
   onConfirmAction: (message: FeedbackConfirm) => void;
 }) {
+  const showTools = section !== "parts";
+  const showParts = section !== "tools";
   const toolCatalog = useMemo(
     () => buildProjectToolCatalog(tasks, projectToolRegistry),
     [projectToolRegistry, tasks],
@@ -188,6 +192,7 @@ export function ProjectCatalogSetupPanel({
 
   return (
     <div className="ui-procedure-catalog mx-auto max-w-[1500px] space-y-5">
+      {showTools ? (
       <section>
         <button
           type="button"
@@ -292,7 +297,9 @@ export function ProjectCatalogSetupPanel({
           </div>
         )}
       </section>
+      ) : null}
 
+      {showParts ? (
       <section>
         <button
           type="button"
@@ -301,9 +308,9 @@ export function ProjectCatalogSetupPanel({
           aria-expanded={!partsCollapsed}
         >
           <span className="min-w-0">
-            <span className="ui-setup-section-title block">Part References</span>
+            <span className="ui-setup-section-title block">BOM</span>
             <span className="ui-setup-section-desc block">
-              {partCatalog.length} part reference{partCatalog.length === 1 ? "" : "s"} across all sub-assemblies.
+              {partCatalog.length} part{partCatalog.length === 1 ? "" : "s"} across all sub-assemblies.
             </span>
           </span>
           <span className="ui-catalog-collapse-meta">
@@ -313,7 +320,7 @@ export function ProjectCatalogSetupPanel({
         </button>
 
         {partsCollapsed ? null : partCatalog.length === 0 ? (
-          <div className="ui-procedure-empty">Part references added in procedure steps will appear here for cleanup.</div>
+          <div className="ui-procedure-empty">Parts added in procedure steps will appear here for cleanup.</div>
         ) : (
           <div className="ui-procedure-part-editor">
             {partCatalog.map((entry) => {
@@ -395,6 +402,7 @@ export function ProjectCatalogSetupPanel({
           </div>
         )}
       </section>
+      ) : null}
     </div>
   );
 }

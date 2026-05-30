@@ -4,6 +4,8 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  BookOpen,
+  Boxes,
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
@@ -17,6 +19,7 @@ import {
   GitBranch,
   ImageIcon,
   ListChecks,
+  Package,
   Pause,
   Play,
   Plus,
@@ -26,8 +29,10 @@ import {
   SkipForward,
   Sun,
   Moon,
+  Tags,
   Timer,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -96,13 +101,12 @@ import {
   removePartReferenceFromSteps,
   removeStepPartReference,
 } from "@/domain/step-part-references";
-import { addStepTool, buildStepToolLibrary, getStepToolList, removeStepTool, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
+import { addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
 import { removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
 import { buildProjectToolRegistry, type ProjectToolDefinition } from "@/domain/tool-registry";
 import type { ToolTypeValue } from "@/domain/tool-types";
 import {
   PRODUCT_STEP_CHECK_CONFIG_FIELD,
-  defaultManufacturingStepCheckDefinitions,
   getManufacturingStepCheckDefinitions,
   getManufacturingStepCheckState,
   normalizeManufacturingStepCheck,
@@ -296,9 +300,20 @@ const plannerModules = [
   { id: "setup", label: "Setup", icon: ClipboardList },
   { id: "gantt", label: "Gantt", icon: GitBranch },
   { id: "procedure", label: "Procedure", icon: ListChecks },
+  { id: "work-instructions", label: "Work Instructions", icon: BookOpen },
   { id: "balance", label: "Balance", icon: BarChart3 },
   { id: "reports", label: "Reports", icon: FileText },
 ];
+
+const setupSections = [
+  { id: "product", label: "Product", icon: Package },
+  { id: "nomenclature", label: "Document Control", icon: Tags },
+  { id: "procedure-checks", label: "Procedure Checks", icon: ListChecks },
+  { id: "tools", label: "Tools", icon: Wrench },
+  { id: "bom", label: "BOM", icon: Boxes },
+] as const;
+
+type SetupSection = (typeof setupSections)[number]["id"];
 
 const comingSoonModuleIds = new Set(["balance", "reports"]);
 
@@ -1282,17 +1297,22 @@ function TopNav({
 function Sidebar({
   activeModule,
   settingsSection,
+  setupSection,
   onChange,
+  onSetupSectionChange,
   onOpenSettings,
   project,
 }: {
   activeModule: string;
   settingsSection: SettingsSection;
+  setupSection: SetupSection;
   onChange: (moduleId: string) => void;
+  onSetupSectionChange: (section: SetupSection) => void;
   onOpenSettings: (section?: SettingsSection) => void;
   project?: PlannerProjectContext;
 }) {
   const isSettingsModule = activeModule === "settings";
+  const isSetupModule = activeModule === "setup";
 
   return (
     <aside className="ui-nav-sidebar">
@@ -1320,6 +1340,37 @@ function Sidebar({
                     type="button"
                     title={item.label}
                     onClick={() => onOpenSettings(item.id)}
+                    className={`ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
+                  >
+                    <Icon size={15} strokeWidth={1.75} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : isSetupModule ? (
+          <>
+            <button
+              type="button"
+              onClick={() => onChange("dashboard")}
+              className="ui-settings-back"
+              title="Back to planner"
+            >
+              <ChevronLeft size={14} strokeWidth={1.75} />
+              Back to planner
+            </button>
+            <div className="ui-nav-section">Setup</div>
+            <div className="space-y-0.5">
+              {setupSections.map((item) => {
+                const Icon = item.icon;
+                const active = setupSection === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    title={item.label}
+                    onClick={() => onSetupSectionChange(item.id)}
                     className={`ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
                   >
                     <Icon size={15} strokeWidth={1.75} />
@@ -2422,61 +2473,12 @@ function SetupFieldGroup({
 function ProductSetupPanel({
   product,
   onProductNumber,
-  onProductStepChecks,
   onProductText,
 }: {
   product: Product;
   onProductNumber: (field: ProductNumberField, value: number) => void;
-  onProductStepChecks: (definitions: ManufacturingStepCheckDefinition[]) => void;
   onProductText: (field: ProductTextField, value: string) => void;
 }) {
-  const checkDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
-  const defaultCheckKeys = new Set(defaultManufacturingStepCheckDefinitions.map((definition) => definition.key));
-
-  function updateCheckDefinition(key: string, patch: Partial<ManufacturingStepCheckDefinition>) {
-    onProductStepChecks(
-      checkDefinitions.map((definition) =>
-        definition.key === key
-          ? {
-              ...definition,
-              ...patch,
-            }
-          : definition,
-      ),
-    );
-  }
-
-  function getUniqueCheckKey(label: string) {
-    const baseKey = normalizeManufacturingStepCheck(label) || "custom_check";
-    const existingKeys = new Set(checkDefinitions.map((definition) => definition.key));
-    let candidate = baseKey;
-    let index = 2;
-
-    while (existingKeys.has(candidate)) {
-      candidate = `${baseKey}_${index}`;
-      index += 1;
-    }
-
-    return candidate;
-  }
-
-  function addCheckDefinition() {
-    const label = "New check";
-    onProductStepChecks([
-      ...checkDefinitions,
-      {
-        key: getUniqueCheckKey(label),
-        label,
-        enabled: true,
-        inputType: "checkbox",
-      },
-    ]);
-  }
-
-  function removeCheckDefinition(key: string) {
-    onProductStepChecks(checkDefinitions.filter((definition) => definition.key !== key));
-  }
-
   return (
     <section className="ui-product-setup">
       <div className="ui-product-setup-head">
@@ -2638,87 +2640,294 @@ function ProductSetupPanel({
           </div>
         </SetupFieldGroup>
 
-        <SetupFieldGroup title="Procedure Checks" description="Choose the checks shown on manufacturing steps">
-          <div className="mb-2 flex justify-end">
-            <button type="button" onClick={addCheckDefinition} className="ui-btn-ghost h-8 gap-2 px-2 text-[10px]">
-              <Plus size={13} strokeWidth={1.75} />
-              Check
-            </button>
-          </div>
-          <div className="divide-y divide-line">
-            {checkDefinitions.map((definition) => (
-              <div
-                key={definition.key}
-                className="grid gap-3 py-3 first:pt-0 last:pb-0 md:grid-cols-[minmax(220px,1fr)_180px_120px_28px]"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5 accent-accent"
-                    checked={definition.enabled}
-                    onChange={(event) => updateCheckDefinition(definition.key, { enabled: event.target.checked })}
-                  />
-                  <label className="min-w-0 flex-1">
-                    <span className="sr-only">Check name</span>
-                    <input
-                      className="ui-procedure-step-inline-text w-full min-w-0 text-xs"
-                      value={definition.label}
-                      onChange={(event) => updateCheckDefinition(definition.key, { label: event.target.value })}
-                    />
-                    <span className="block truncate text-[10px] text-steel">{definition.key}</span>
-                  </label>
-                </div>
-                <ThemedSelect
-                  aria-label={`${definition.label} check type`}
-                  className="w-full"
-                  triggerClassName="h-9"
-                  value={definition.inputType}
-                  options={[
-                    { value: "checkbox", label: "Checkbox" },
-                    { value: "number", label: "Number + unit" },
-                  ]}
-                  onChange={(value) =>
-                    updateCheckDefinition(definition.key, {
-                      inputType: value === "number" ? "number" : "checkbox",
-                      defaultUnit: value === "number" ? definition.defaultUnit ?? definition.unitOptions?.[0] ?? "Nm" : undefined,
-                      unitOptions: value === "number" ? definition.unitOptions?.length ? definition.unitOptions : ["Nm", "ft-lb"] : undefined,
-                    })
-                  }
-                />
-                {definition.inputType === "number" ? (
-                  <ThemedSelect
-                    aria-label={`${definition.label} default unit`}
-                    className="w-full"
-                    triggerClassName="h-9"
-                    value={definition.defaultUnit ?? definition.unitOptions?.[0] ?? "Nm"}
-                    options={(definition.unitOptions?.length ? definition.unitOptions : ["Nm", "ft-lb"]).map((unit) => ({
-                      value: unit,
-                      label: unit,
-                    }))}
-                    onChange={(unit) => updateCheckDefinition(definition.key, { defaultUnit: unit })}
-                  />
-                ) : (
-                  <span className="hidden md:block" aria-hidden="true" />
-                )}
-                {defaultCheckKeys.has(definition.key) ? (
-                  <span className="hidden md:block" aria-hidden="true" />
-                ) : (
-                  <button
-                    type="button"
-                    className="inline-flex h-8 w-7 items-center justify-center justify-self-end rounded text-ink-tertiary transition hover:bg-danger-muted hover:text-danger"
-                    onClick={() => removeCheckDefinition(definition.key)}
-                    aria-label={`Remove ${definition.label}`}
-                    title={`Remove ${definition.label}`}
-                  >
-                    <Trash2 size={13} strokeWidth={1.8} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </SetupFieldGroup>
       </div>
     </section>
+  );
+}
+
+function ProcedureChecksSetupPanel({
+  product,
+  onProductStepChecks,
+}: {
+  product: Product;
+  onProductStepChecks: (definitions: ManufacturingStepCheckDefinition[]) => void;
+}) {
+  const checkDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
+  const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({});
+
+  function setLabelDraft(key: string, value: string) {
+    setLabelDrafts((current) => ({ ...current, [key]: value }));
+  }
+
+  function commitLabel(definition: ManufacturingStepCheckDefinition) {
+    const draft = labelDrafts[definition.key];
+    setLabelDrafts((current) => {
+      if (!(definition.key in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[definition.key];
+      return next;
+    });
+
+    if (draft === undefined) {
+      return;
+    }
+
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === definition.label) {
+      return;
+    }
+
+    updateCheckDefinition(definition.key, { label: trimmed });
+  }
+
+  function updateCheckDefinition(key: string, patch: Partial<ManufacturingStepCheckDefinition>) {
+    onProductStepChecks(
+      checkDefinitions.map((definition) =>
+        definition.key === key
+          ? {
+              ...definition,
+              ...patch,
+            }
+          : definition,
+      ),
+    );
+  }
+
+  function getUniqueCheckKey(label: string) {
+    const baseKey = normalizeManufacturingStepCheck(label) || "custom_check";
+    const existingKeys = new Set(checkDefinitions.map((definition) => definition.key));
+    let candidate = baseKey;
+    let index = 2;
+
+    while (existingKeys.has(candidate)) {
+      candidate = `${baseKey}_${index}`;
+      index += 1;
+    }
+
+    return candidate;
+  }
+
+  function addCheckDefinition() {
+    const label = "New check";
+    onProductStepChecks([
+      ...checkDefinitions,
+      {
+        key: getUniqueCheckKey(label),
+        label,
+        enabled: true,
+        inputType: "checkbox",
+      },
+    ]);
+  }
+
+  function removeCheckDefinition(key: string) {
+    setLabelDrafts((current) => {
+      if (!(key in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    onProductStepChecks(checkDefinitions.filter((definition) => definition.key !== key));
+  }
+
+  return (
+    <section className="ui-product-setup">
+      <div className="ui-product-setup-head">
+        <div>
+          <h2 className="ui-section-title">Procedure Checks</h2>
+          <div className="ui-section-subtitle">Choose the checks shown on manufacturing steps</div>
+        </div>
+        <button type="button" onClick={addCheckDefinition} className="ui-btn-ghost h-10 gap-2">
+          <Plus size={15} strokeWidth={1.75} />
+          Check
+        </button>
+      </div>
+
+      <div className="ui-product-setup-body">
+        <div className="ui-procedure-checks">
+          {checkDefinitions.map((definition) => (
+            <div
+              key={definition.key}
+              data-enabled={definition.enabled}
+              className="ui-procedure-checks-row flex items-center gap-3"
+            >
+              <input
+                type="checkbox"
+                checked={definition.enabled}
+                onChange={(event) => updateCheckDefinition(definition.key, { enabled: event.target.checked })}
+                aria-label={`Enable ${definition.label}`}
+              />
+              <label className="min-w-0 flex-1">
+                <span className="sr-only">Check name</span>
+                <input
+                  className="ui-procedure-step-inline-text w-full min-w-0 text-xs"
+                  value={labelDrafts[definition.key] ?? definition.label}
+                  onChange={(event) => setLabelDraft(definition.key, event.target.value)}
+                  onBlur={() => commitLabel(definition)}
+                />
+              </label>
+              {definition.inputType === "number" ? (
+                <ThemedSelect
+                  aria-label={`${definition.label} default unit`}
+                  className="w-24 shrink-0"
+                  triggerClassName="h-9"
+                  value={definition.defaultUnit ?? definition.unitOptions?.[0] ?? "Nm"}
+                  options={(definition.unitOptions?.length ? definition.unitOptions : ["Nm", "ft-lb"]).map((unit) => ({
+                    value: unit,
+                    label: unit,
+                  }))}
+                  onChange={(unit) => updateCheckDefinition(definition.key, { defaultUnit: unit })}
+                />
+              ) : null}
+              <button
+                type="button"
+                className="inline-flex h-8 w-7 shrink-0 items-center justify-center rounded text-ink-tertiary transition hover:bg-danger-muted hover:text-danger"
+                onClick={() => removeCheckDefinition(definition.key)}
+                aria-label={`Remove ${definition.label}`}
+                title={`Remove ${definition.label}`}
+              >
+                <Trash2 size={13} strokeWidth={1.8} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function WorkInstructionsPanel({
+  tasks,
+  zones,
+  product,
+  onOpenTask,
+}: {
+  tasks: Task[];
+  zones: Zone[];
+  product: Product;
+  onOpenTask: (taskId: string) => void;
+}) {
+  const parentIds = new Set(tasks.map((task) => task.parentTaskId).filter((id): id is string => Boolean(id)));
+  // One work instruction per leaf work-task (skip summary rows, milestones, holds, etc.).
+  const workTasks = tasks.filter((task) => task.rowType === "task" && !parentIds.has(task.id));
+  const checkDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
+
+  const hasWorkInstruction = (task: Task) => Boolean(task.workInstructionLink || task.sopLink);
+  const hasTools = (task: Task) => countTaskStepTools(task) > 0;
+  const hasChecks = (task: Task) =>
+    (task.manufacturingSteps ?? []).some((step) => getManufacturingStepCheckState(step.qualityCheck, checkDefinitions).selected.size > 0);
+  // Prerequisites for generating a work instruction: it needs tools AND a checklist first.
+  const isReady = (task: Task) => hasTools(task) && hasChecks(task);
+
+  const createdCount = workTasks.filter(hasWorkInstruction).length;
+  const readyCount = workTasks.filter((task) => !hasWorkInstruction(task) && isReady(task)).length;
+  const incompleteCount = workTasks.filter((task) => !hasWorkInstruction(task) && !isReady(task)).length;
+
+  const UNZONED_KEY = "__unzoned__";
+  const zoneById = new Map(zones.map((zone) => [zone.id, zone]));
+  const grouped = new Map<string, Task[]>();
+  workTasks.forEach((task) => {
+    const key = task.zoneId && zoneById.has(task.zoneId) ? task.zoneId : UNZONED_KEY;
+    grouped.set(key, [...(grouped.get(key) ?? []), task]);
+  });
+  const orderedZoneKeys = [
+    ...zones.map((zone) => zone.id).filter((id) => grouped.has(id)),
+    ...(grouped.has(UNZONED_KEY) ? [UNZONED_KEY] : []),
+  ];
+
+  function statusOf(task: Task) {
+    if (hasWorkInstruction(task)) {
+      return { label: "Created", className: "border-accent/30 bg-accent/5 text-ink-secondary" };
+    }
+    if (isReady(task)) {
+      return { label: "Ready", className: "border-accent/50 bg-accent/10 text-ink" };
+    }
+    return { label: "Incomplete", className: "border-line bg-surface-raised text-steel" };
+  }
+
+  return (
+    <div className="mx-auto max-w-[1100px] space-y-6">
+      <header className="space-y-1">
+        <h2 className="ui-section-title">Work Instructions</h2>
+        <p className="ui-section-subtitle">
+          {workTasks.length === 0
+            ? "Add tasks in the Gantt to see the work instructions you need to build."
+            : `${readyCount} of ${workTasks.length} ready to generate · ${incompleteCount} still need tools & checks.`}
+        </p>
+        <p className="text-xs text-ink-tertiary">
+          A work instruction can be generated once its steps have both tools and a checklist assigned.
+        </p>
+      </header>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Needed" value={String(workTasks.length)} meta="one per task" />
+        <StatCard label="Ready" value={String(readyCount)} tone={readyCount > 0 ? "good" : "neutral"} meta="tools + checks done" />
+        <StatCard label="Incomplete" value={String(incompleteCount)} tone={incompleteCount > 0 ? "warn" : "neutral"} meta="missing tools / checks" />
+        <StatCard label="Created" value={String(createdCount)} meta="generated / linked" />
+      </div>
+
+      {workTasks.length === 0 ? null : (
+        <div className="space-y-5">
+          {orderedZoneKeys.map((zoneKey) => {
+            const zone = zoneKey === UNZONED_KEY ? undefined : zoneById.get(zoneKey);
+            const zoneTasks = grouped.get(zoneKey) ?? [];
+            return (
+              <section key={zoneKey} className="space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <h3 className="ui-setup-section-title">{zone ? zone.name : "Unzoned"}</h3>
+                  <span className="ui-section-subtitle">
+                    {zoneTasks.length} task{zoneTasks.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="overflow-hidden rounded-lg border border-line">
+                  {zoneTasks.map((task, index) => {
+                    const status = statusOf(task);
+                    return (
+                      <button
+                        type="button"
+                        key={task.id}
+                        onClick={() => onOpenTask(task.id)}
+                        className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-surface-raised ${
+                          index > 0 ? "border-t border-line" : ""
+                        }`}
+                      >
+                        <span className="ui-mono-label w-32 shrink-0 truncate text-ink-secondary">
+                          {task.manufacturingCode || "Uncoded"}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{task.name}</span>
+                        <span className="flex shrink-0 items-center gap-2 text-ink-tertiary">
+                          <span
+                            title={hasTools(task) ? "Tools assigned" : "No tools assigned"}
+                            className={hasTools(task) ? "text-ink-secondary" : "opacity-30"}
+                          >
+                            <Wrench size={13} strokeWidth={1.75} />
+                          </span>
+                          <span
+                            title={hasChecks(task) ? "Checks assigned" : "No checks assigned"}
+                            className={hasChecks(task) ? "text-ink-secondary" : "opacity-30"}
+                          >
+                            <ListChecks size={13} strokeWidth={1.75} />
+                          </span>
+                        </span>
+                        <span
+                          className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.className}`}
+                        >
+                          {status.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2737,7 +2946,6 @@ function NomenclatureSetupPanel({
   onUpdateDocumentType,
   onDeleteDocumentType,
   onAddMissingDefaultDocumentTypes,
-  onRegenerateUnlockedCodes,
 }: {
   product: Product;
   zones: Zone[];
@@ -2753,7 +2961,6 @@ function NomenclatureSetupPanel({
   onUpdateDocumentType: (documentTypeId: string, patch: Partial<DocumentTypeCode>) => void;
   onDeleteDocumentType: (documentTypeId: string) => void;
   onAddMissingDefaultDocumentTypes: () => void;
-  onRegenerateUnlockedCodes: () => void;
 }) {
   const duplicateCodeEntries = Array.from(
     tasks.reduce((codeMap, task) => {
@@ -2768,20 +2975,83 @@ function NomenclatureSetupPanel({
   ).filter(([, codedTasks]) => codedTasks.length > 1);
   const uncodedTaskCount = tasks.filter((task) => !task.manufacturingCode?.trim()).length;
 
+  const programCode = product.productCode?.trim().toUpperCase() || "FB-V2";
+  const exampleComponent = components.find((component) => component.code?.trim())?.code?.trim().toUpperCase() || "CLU";
+  const exampleZone = zones.find((zone) => zone.code?.trim())?.code?.trim().toUpperCase() || "SUB";
+  const exampleDocType =
+    documentTypes.find((documentType) => documentType.active && documentType.code?.trim())?.code?.trim().toUpperCase() ||
+    documentTypes.find((documentType) => documentType.code?.trim())?.code?.trim().toUpperCase() ||
+    "WI";
+  const exampleDocName =
+    documentTypes.find((documentType) => documentType.code?.trim().toUpperCase() === exampleDocType)?.name?.trim() || "Work Instruction";
+  const nomenclatureSegments = [
+    { value: exampleComponent, label: "Component", means: "Which system / assembly the work is on", source: "Component Codes (below)" },
+    { value: exampleZone, label: "Zone", means: "Major process area — the middle segment", source: "Zone Codes (below)" },
+    { value: "10", label: "Task #", means: "Sequential number for the task", source: "Auto-assigned in the Gantt" },
+    { value: `${exampleDocType}1`, label: "Document", means: `${exampleDocName} + document number`, source: "Document Types (below)" },
+    { value: "S10", label: "Step", means: "Step number inside the document", source: "Procedure tab" },
+  ];
+
   return (
     <section className="ui-product-setup">
       <div className="ui-product-setup-head">
         <div>
-          <h2 className="ui-section-title">Nomenclature Setup</h2>
+          <h2 className="ui-section-title">Document Control</h2>
           <div className="ui-section-subtitle">Map product, zone, component, task, and document codes</div>
         </div>
-        <button type="button" onClick={onRegenerateUnlockedCodes} className="ui-btn-ghost h-10 gap-2">
-          <RotateCcw size={15} />
-          Regenerate Codes
-        </button>
       </div>
 
       <div className="ui-product-setup-body">
+        <div className="ui-nomenclature-legend">
+          <div className="ui-nomenclature-legend-head">
+            <span className="ui-nomenclature-legend-eyebrow">Code anatomy</span>
+            <span className="ui-nomenclature-legend-program">Program · {programCode}</span>
+          </div>
+          <div className="ui-nomenclature-legend-code" aria-hidden="true">
+            {nomenclatureSegments.flatMap((segment, index) => {
+              const token = (
+                <span className="ui-nomenclature-seg" key={segment.label}>
+                  <span className="ui-nomenclature-seg-value">{segment.value}</span>
+                  <span className="ui-nomenclature-seg-label">{segment.label}</span>
+                </span>
+              );
+              return index === 0
+                ? [token]
+                : [
+                    <span className="ui-nomenclature-legend-sep" key={`sep-${segment.label}`}>
+                      –
+                    </span>,
+                    token,
+                  ];
+            })}
+          </div>
+          <dl className="ui-nomenclature-legend-list">
+            {nomenclatureSegments.map((segment, index) => (
+              <div className="ui-nomenclature-legend-item" key={segment.label}>
+                <span className="ui-nomenclature-legend-num">{index + 1}</span>
+                <div className="min-w-0">
+                  <dt className="ui-nomenclature-legend-term">
+                    <span className="ui-nomenclature-legend-chip">{segment.value}</span>
+                    {segment.label}
+                  </dt>
+                  <dd className="ui-nomenclature-legend-desc">
+                    {segment.means}
+                    <span className="ui-nomenclature-legend-source">{segment.source}</span>
+                  </dd>
+                </div>
+              </div>
+            ))}
+          </dl>
+
+          <p className="ui-nomenclature-legend-note">
+            <span className="ui-nomenclature-legend-note-label">Where this code shows up</span>
+            Printed on work instructions, travelers, and QC sheets — and used as the export file path, e.g.{" "}
+            <code className="ui-nomenclature-legend-path">
+              {programCode}/{exampleComponent}-{exampleZone}-10-{exampleDocType}1-S10
+            </code>
+          </p>
+        </div>
+
         {duplicateCodeEntries.length || uncodedTaskCount ? (
           <div className="rounded border border-warn/35 bg-warn-muted px-3 py-2 text-sm font-semibold text-ink">
             {duplicateCodeEntries.length ? (
@@ -4734,6 +5004,7 @@ export function LineWorkspace({
   const [plannerState, setPlannerState] = useState<PlannerState>(initialPlannerState);
   const [activeModule, setActiveModule] = useState("dashboard");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [setupSection, setSetupSection] = useState<SetupSection>("product");
   const [selectedTaskId, setSelectedTaskId] = useState(initialPlannerState.tasks[0]?.id);
   const [focusedProcedureStepId, setFocusedProcedureStepId] = useState<string | undefined>();
   const [selectedStationId, setSelectedStationId] = useState(initialPlannerState.stations[0]?.id);
@@ -6566,7 +6837,9 @@ export function LineWorkspace({
             <Sidebar
               activeModule="dashboard"
               settingsSection={settingsSection}
+              setupSection={setupSection}
               onChange={() => undefined}
+              onSetupSectionChange={() => undefined}
               onOpenSettings={() => undefined}
               project={activeProjectContext}
             />
@@ -7019,14 +7292,6 @@ export function LineWorkspace({
     setPlannerState((current) => ({
       ...current,
       documentTypes: current.documentTypes.filter((documentType) => documentType.id !== documentTypeId),
-    }));
-  }
-
-  function regenerateUnlockedManufacturingCodes() {
-    markDirty();
-    setPlannerState((current) => ({
-      ...current,
-      tasks: applyTaskCodes(current.tasks, current.zones, current.components),
     }));
   }
 
@@ -8607,7 +8872,9 @@ export function LineWorkspace({
           <Sidebar
             activeModule={sidebarActiveModule}
             settingsSection={settingsSection}
+            setupSection={setupSection}
             onChange={navigateModule}
+            onSetupSectionChange={setSetupSection}
             onOpenSettings={openSettings}
             project={activeProjectContext}
           />
@@ -8671,39 +8938,60 @@ export function LineWorkspace({
               <>
                 {activeModule === "setup" ? (
                   <div className="ui-setup-page space-y-4">
-                    <ProductSetupPanel
-                      product={derivedState.product}
-                      onProductNumber={updateProductNumber}
-                      onProductStepChecks={updateProductStepChecks}
-                      onProductText={updateProductText}
-                    />
-                    <NomenclatureSetupPanel
-                      product={derivedState.product}
-                      zones={derivedState.zones}
-                      tasks={derivedState.tasks}
-                      components={derivedState.components}
-                      documentTypes={derivedState.documentTypes}
-                      onProductText={updateProductText}
-                      onUpdateZone={updateZone}
-                      onAddComponent={addComponentCode}
-                      onUpdateComponent={updateComponentCode}
-                      onDeleteComponent={deleteComponentCode}
-                      onAddDocumentType={() => addDocumentTypeCode()}
-                      onUpdateDocumentType={updateDocumentTypeCode}
-                      onDeleteDocumentType={deleteDocumentTypeCode}
-                      onAddMissingDefaultDocumentTypes={addMissingDefaultDocumentTypeCodes}
-                      onRegenerateUnlockedCodes={regenerateUnlockedManufacturingCodes}
-                    />
-                    <ProjectCatalogSetupPanel
-                      tasks={derivedState.tasks}
-                      projectToolRegistry={projectToolRegistry}
-                      onSaveTool={saveCatalogTool}
-                      onDeleteTool={deleteCatalogTool}
-                      onSavePart={saveCatalogPart}
-                      onDeletePart={deleteCatalogPart}
-                      onConfirmAction={requestFeedbackConfirm}
-                    />
+                    {setupSection === "product" ? (
+                      <ProductSetupPanel
+                        product={derivedState.product}
+                        onProductNumber={updateProductNumber}
+                        onProductText={updateProductText}
+                      />
+                    ) : null}
+                    {setupSection === "nomenclature" ? (
+                      <NomenclatureSetupPanel
+                        product={derivedState.product}
+                        zones={derivedState.zones}
+                        tasks={derivedState.tasks}
+                        components={derivedState.components}
+                        documentTypes={derivedState.documentTypes}
+                        onProductText={updateProductText}
+                        onUpdateZone={updateZone}
+                        onAddComponent={addComponentCode}
+                        onUpdateComponent={updateComponentCode}
+                        onDeleteComponent={deleteComponentCode}
+                        onAddDocumentType={() => addDocumentTypeCode()}
+                        onUpdateDocumentType={updateDocumentTypeCode}
+                        onDeleteDocumentType={deleteDocumentTypeCode}
+                        onAddMissingDefaultDocumentTypes={addMissingDefaultDocumentTypeCodes}
+                      />
+                    ) : null}
+                    {setupSection === "tools" || setupSection === "bom" ? (
+                      <ProjectCatalogSetupPanel
+                        tasks={derivedState.tasks}
+                        projectToolRegistry={projectToolRegistry}
+                        section={setupSection === "tools" ? "tools" : "parts"}
+                        onSaveTool={saveCatalogTool}
+                        onDeleteTool={deleteCatalogTool}
+                        onSavePart={saveCatalogPart}
+                        onDeletePart={deleteCatalogPart}
+                        onConfirmAction={requestFeedbackConfirm}
+                      />
+                    ) : null}
+                    {setupSection === "procedure-checks" ? (
+                      <ProcedureChecksSetupPanel
+                        product={derivedState.product}
+                        onProductStepChecks={updateProductStepChecks}
+                      />
+                    ) : null}
                   </div>
+                ) : activeModule === "work-instructions" ? (
+                  <WorkInstructionsPanel
+                    tasks={derivedState.tasks}
+                    zones={derivedState.zones}
+                    product={derivedState.product}
+                    onOpenTask={(taskId) => {
+                      selectTask(taskId);
+                      setActiveModule("procedure");
+                    }}
+                  />
                 ) : isComingSoonModule ? (
                   <ComingSoonModuleView moduleLabel={comingSoonModuleLabel}>
                     <KpiStrip kpis={kpis} product={derivedState.product} />

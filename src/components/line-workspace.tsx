@@ -116,6 +116,13 @@ import {
   type ManufacturingStepCheckState,
 } from "@/domain/manufacturing-step-checks";
 import {
+  PRODUCT_MASTER_BOM_FIELD,
+  getMasterBom,
+  serializeMasterBom,
+  type MasterBom,
+} from "@/domain/master-bom";
+import { BomPartSearch, type BomPartSelection } from "./bom-part-search";
+import {
   defaultDocumentTypeCodes,
   generateTaskCode,
   nextTaskNumberForComponent,
@@ -263,8 +270,10 @@ type StepPartReferenceEditorProps = {
   partReferences: PartReference[];
   draftValue: string;
   compact?: boolean;
+  masterBom?: MasterBom;
   onDraftChange: (value: string) => void;
   onAddDraft: () => void;
+  onAddFromBom: (entry: BomPartSelection) => void;
   onLinkExisting: (partReferenceId: string) => void;
   onRemove: (partReferenceId: string) => void;
 };
@@ -883,11 +892,14 @@ function StepPartReferenceEditor({
   partReferences,
   draftValue,
   compact = false,
+  masterBom,
   onDraftChange,
   onAddDraft,
+  onAddFromBom,
   onLinkExisting,
   onRemove,
 }: StepPartReferenceEditorProps) {
+  const hasMasterBom = Boolean(masterBom && masterBom.rows.length > 0);
   const linkedPartIds = new Set(getStepPartReferenceIds(task, step.id));
   const linkedParts = getStepPartReferences(task, step.id);
   const availableParts = partReferences.filter((part) => part.partNumber.trim() && !linkedPartIds.has(part.id));
@@ -917,6 +929,12 @@ function StepPartReferenceEditor({
             Add
           </button>
         </div>
+
+        {hasMasterBom && masterBom ? (
+          <div className="pl-[42px]">
+            <BomPartSearch masterBom={masterBom} onSelect={onAddFromBom} compact />
+          </div>
+        ) : null}
 
         {availableParts.length > 0 ? (
           <div className="pl-[42px]">
@@ -969,6 +987,11 @@ function StepPartReferenceEditor({
   return (
     <div className="ui-procedure-step-detail">
       <span className="ui-field-label mb-0 block">Parts</span>
+      {hasMasterBom && masterBom ? (
+        <div className="mb-2">
+          <BomPartSearch masterBom={masterBom} onSelect={onAddFromBom} />
+        </div>
+      ) : null}
       <div className="ui-procedure-step-add-row">
         <input
           className="ui-procedure-step-inline-text"
@@ -1642,6 +1665,7 @@ function ProcedureWorkspace({
     [task?.id, tasks],
   );
   const partReferences = task?.partReferences ?? [];
+  const masterBom = getMasterBom(product.customFields);
   const manufacturingStepDurationMinutes = manufacturingSteps.reduce(
     (total, step) => total + Math.max(step.durationMinutes ?? 0, 0),
     0,
@@ -1899,6 +1923,30 @@ function ProcedureWorkspace({
 	      partReferences: nextTask.partReferences,
 	    });
     setNewStepPartNumbers((current) => ({ ...current, [stepId]: "" }));
+  }
+
+  function addStepPartFromBom(stepId: string, entry: BomPartSelection) {
+    if (!task || !entry.partNumber) {
+      return;
+    }
+
+    const existingPart = partReferences.find(
+      (part) => part.partNumber.trim().toLowerCase() === entry.partNumber.trim().toLowerCase(),
+    );
+    const partReference = existingPart ?? {
+      id: `part-${task.id}-${Date.now()}`,
+      partNumber: entry.partNumber,
+      description: entry.description,
+      quantity: entry.quantity,
+      disposition: "",
+    };
+    const taskWithPart = existingPart ? task : { ...task, partReferences: [...partReferences, partReference] };
+    const nextTask = addStepPartReference(taskWithPart, stepId, partReference.id);
+
+    onUpdateTask(task.id, {
+      manufacturingSteps: nextTask.manufacturingSteps,
+      partReferences: nextTask.partReferences,
+    });
   }
 
   function linkExistingPartToManufacturingStep(stepId: string, partReferenceId: string) {
@@ -2354,10 +2402,12 @@ function ProcedureWorkspace({
                           step={step}
                           partReferences={partReferences}
                           draftValue={newStepPartNumbers[step.id] ?? ""}
+                          masterBom={masterBom}
                           onDraftChange={(value) =>
                             setNewStepPartNumbers((current) => ({ ...current, [step.id]: value }))
                           }
                           onAddDraft={() => addManufacturingStepPartReference(step.id)}
+                          onAddFromBom={(entry) => addStepPartFromBom(step.id, entry)}
                           onLinkExisting={(partReferenceId) => linkExistingPartToManufacturingStep(step.id, partReferenceId)}
                           onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
                         />
@@ -4000,6 +4050,7 @@ function DetailDrawer({
   onAddStepTool,
   onRemoveStepTool,
   toolLibrary,
+  masterBom,
 }: {
   task?: Task;
   station?: Station;
@@ -4008,6 +4059,7 @@ function DetailDrawer({
   tasks: Task[];
   collapsed: boolean;
   isResizing: boolean;
+  masterBom?: MasterBom;
   onConfirmAction: (message: FeedbackConfirm) => void;
   onStepDeleted: (taskSnapshot: Task, step: ManufacturingStep) => void;
   onToggleCollapsed: () => void;
@@ -4254,6 +4306,30 @@ function DetailDrawer({
 	      partReferences: nextTask.partReferences,
 	    });
     setNewStepPartNumbers((current) => ({ ...current, [stepId]: "" }));
+  }
+
+  function addStepPartFromBom(stepId: string, entry: BomPartSelection) {
+    if (!entry.partNumber) {
+      return;
+    }
+
+    const existingPart = partReferences.find(
+      (part) => part.partNumber.trim().toLowerCase() === entry.partNumber.trim().toLowerCase(),
+    );
+    const partReference = existingPart ?? {
+      id: `part-${taskId}-${Date.now()}`,
+      partNumber: entry.partNumber,
+      description: entry.description,
+      quantity: entry.quantity,
+      disposition: "",
+    };
+    const taskWithPart = existingPart ? currentTask : { ...currentTask, partReferences: [...partReferences, partReference] };
+    const nextTask = addStepPartReference(taskWithPart, stepId, partReference.id);
+
+    onUpdateTask(taskId, {
+      manufacturingSteps: nextTask.manufacturingSteps,
+      partReferences: nextTask.partReferences,
+    });
   }
 
 	  function linkExistingPartToManufacturingStep(stepId: string, partReferenceId: string) {
@@ -4617,10 +4693,12 @@ function DetailDrawer({
 	                          partReferences={partReferences}
 	                          draftValue={newStepPartNumbers[step.id] ?? ""}
 	                          compact
+	                          masterBom={masterBom}
 	                          onDraftChange={(value) =>
 	                            setNewStepPartNumbers((current) => ({ ...current, [step.id]: value }))
 	                          }
 	                          onAddDraft={() => addManufacturingStepPartReference(step.id)}
+	                          onAddFromBom={(entry) => addStepPartFromBom(step.id, entry)}
 	                          onLinkExisting={(partReferenceId) => linkExistingPartToManufacturingStep(step.id, partReferenceId)}
 	                          onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
 	                        />
@@ -7309,6 +7387,22 @@ export function LineWorkspace({
     }));
   }
 
+  function updateMasterBom(bom: MasterBom | undefined) {
+    markDirty();
+    setPlannerState((current) => {
+      const customFields = { ...(current.product.customFields ?? {}) };
+      if (bom) {
+        customFields[PRODUCT_MASTER_BOM_FIELD] = serializeMasterBom(bom);
+      } else {
+        delete customFields[PRODUCT_MASTER_BOM_FIELD];
+      }
+      return {
+        ...current,
+        product: { ...current.product, customFields },
+      };
+    });
+  }
+
   function updateTask(taskId: string, patch: Partial<Task>) {
     markDirty();
     if (patch.stationId && taskId === selectedTaskId) {
@@ -8968,6 +9062,8 @@ export function LineWorkspace({
                         tasks={derivedState.tasks}
                         projectToolRegistry={projectToolRegistry}
                         section={setupSection === "tools" ? "tools" : "parts"}
+                        masterBom={getMasterBom(derivedState.product.customFields)}
+                        onMasterBomChange={updateMasterBom}
                         onSaveTool={saveCatalogTool}
                         onDeleteTool={deleteCatalogTool}
                         onSavePart={saveCatalogPart}
@@ -9107,6 +9203,7 @@ export function LineWorkspace({
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
             toolLibrary={toolLibrary}
+            masterBom={getMasterBom(derivedState.product.customFields)}
           />
         ) : null}
       </div>

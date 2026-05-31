@@ -1,8 +1,9 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, FileSpreadsheet, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
+import type { MasterBom } from "@/domain/master-bom";
 import {
   buildProjectPartCatalog,
   buildProjectToolCatalog,
@@ -12,6 +13,7 @@ import {
 import type { ProjectToolDefinition } from "@/domain/tool-registry";
 import { TOOL_TYPE_OPTIONS, type ToolTypeValue } from "@/domain/tool-types";
 import type { Task } from "@/domain/types";
+import { parseBomFile } from "@/lib/parse-bom";
 import { ClearableNumberInput } from "./clearable-number-input";
 import type { FeedbackConfirm } from "./themed-feedback";
 import { ThemedSelect } from "./themed-select";
@@ -32,10 +34,149 @@ function partDraftKey(entry: ProjectPartCatalogEntry) {
   return `${entry.taskId}:${entry.part.id}`;
 }
 
+function MasterBomPanel({
+  masterBom,
+  onChange,
+  onConfirmAction,
+}: {
+  masterBom?: MasterBom;
+  onChange: (bom: MasterBom | undefined) => void;
+  onConfirmAction: (message: FeedbackConfirm) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string>();
+
+  async function ingest(file: File) {
+    setError(undefined);
+    setUploading(true);
+    try {
+      const parsed = await parseBomFile(file);
+      if (parsed.columns.length === 0) {
+        setError("No columns found in that file.");
+        return;
+      }
+      onChange(parsed);
+    } catch (parseError) {
+      setError(parseError instanceof Error ? parseError.message : "Could not read that file.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) {
+      return;
+    }
+    if (masterBom) {
+      onConfirmAction({
+        title: "Replace master BOM?",
+        body: `This replaces the current BOM (${masterBom.rows.length} row${masterBom.rows.length === 1 ? "" : "s"}) with “${file.name}”.`,
+        tone: "danger",
+        confirmLabel: "Replace",
+        onConfirm: () => void ingest(file),
+      });
+    } else {
+      void ingest(file);
+    }
+  }
+
+  function requestClear() {
+    onConfirmAction({
+      title: "Remove master BOM?",
+      body: "This clears the uploaded BOM from this product.",
+      tone: "danger",
+      confirmLabel: "Remove",
+      onConfirm: () => onChange(undefined),
+    });
+  }
+
+  const uploadedLabel = masterBom?.uploadedAt ? new Date(masterBom.uploadedAt).toLocaleDateString() : undefined;
+
+  return (
+    <section className="mb-5">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="ui-setup-section-title block">Master BOM</span>
+          <span className="ui-setup-section-desc block">
+            {masterBom
+              ? `${masterBom.fileName ?? "BOM"} · ${masterBom.rows.length} part${masterBom.rows.length === 1 ? "" : "s"}${
+                  uploadedLabel ? ` · uploaded ${uploadedLabel}` : ""
+                }`
+              : "Upload a bill of materials (.xlsx or .csv) to use when assigning parts."}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {masterBom ? (
+            <button type="button" onClick={requestClear} className="ui-btn-ghost h-9 gap-2 px-2 text-xs">
+              <Trash2 size={14} />
+              Clear
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="ui-btn-ghost h-9 gap-2"
+          >
+            <Upload size={15} />
+            {uploading ? "Reading…" : masterBom ? "Replace" : "Upload BOM"}
+          </button>
+        </div>
+      </div>
+
+      <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileSelected} />
+
+      {error ? (
+        <div className="mb-3 rounded border border-danger/40 bg-danger-muted px-3 py-2 text-xs font-semibold text-ink">{error}</div>
+      ) : null}
+
+      {masterBom ? (
+        <div className="overflow-auto rounded-lg border border-line" style={{ maxHeight: "28rem" }}>
+          <table className="w-full border-collapse text-xs">
+            <thead className="sticky top-0 z-10 bg-surface-raised">
+              <tr>
+                {masterBom.columns.map((column) => (
+                  <th
+                    key={column}
+                    className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2 text-left text-ink-secondary"
+                  >
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {masterBom.rows.map((row, index) => (
+                <tr key={index} className="border-b border-line/60 last:border-b-0 hover:bg-surface-raised/50">
+                  {masterBom.columns.map((column) => (
+                    <td key={column} className="max-w-[22rem] truncate px-3 py-1.5 text-ink" title={row[column]}>
+                      {row[column]}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="ui-procedure-empty flex items-center gap-2">
+          <FileSpreadsheet size={15} className="shrink-0 text-ink-tertiary" />
+          No BOM uploaded yet.
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function ProjectCatalogSetupPanel({
   tasks,
   projectToolRegistry,
   section = "all",
+  masterBom,
+  onMasterBomChange,
   onSaveTool,
   onDeleteTool,
   onSavePart,
@@ -45,6 +186,8 @@ export function ProjectCatalogSetupPanel({
   tasks: Task[];
   projectToolRegistry: Map<string, ProjectToolDefinition>;
   section?: "tools" | "parts" | "all";
+  masterBom?: MasterBom;
+  onMasterBomChange?: (bom: MasterBom | undefined) => void;
   onSaveTool: (entry: ProjectToolCatalogEntry, draft: ToolDraft) => Promise<void>;
   onDeleteTool: (entry: ProjectToolCatalogEntry) => Promise<void>;
   onSavePart: (entry: ProjectPartCatalogEntry, draft: PartDraft) => Promise<void>;
@@ -300,6 +443,10 @@ export function ProjectCatalogSetupPanel({
       ) : null}
 
       {showParts ? (
+      <>
+      {onMasterBomChange ? (
+        <MasterBomPanel masterBom={masterBom} onChange={onMasterBomChange} onConfirmAction={onConfirmAction} />
+      ) : null}
       <section>
         <button
           type="button"
@@ -308,9 +455,9 @@ export function ProjectCatalogSetupPanel({
           aria-expanded={!partsCollapsed}
         >
           <span className="min-w-0">
-            <span className="ui-setup-section-title block">BOM</span>
+            <span className="ui-setup-section-title block">Parts in use</span>
             <span className="ui-setup-section-desc block">
-              {partCatalog.length} part{partCatalog.length === 1 ? "" : "s"} across all sub-assemblies.
+              {partCatalog.length} part{partCatalog.length === 1 ? "" : "s"} referenced on tasks.
             </span>
           </span>
           <span className="ui-catalog-collapse-meta">
@@ -402,6 +549,7 @@ export function ProjectCatalogSetupPanel({
           </div>
         )}
       </section>
+      </>
       ) : null}
     </div>
   );

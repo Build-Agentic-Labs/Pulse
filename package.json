@@ -26,6 +26,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "read-excel-file": "^9.0.10",
     "typescript": "^5.7.2",
     "ws": "^8.20.1"
   },

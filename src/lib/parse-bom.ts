@@ -68,7 +68,9 @@ function parseCsv(text: string): RawRow[] {
       continue;
     }
 
-    if (char === '"') {
+    if (char === '"' && field === "") {
+      // A quote only opens a quoted field at the field's start; a bare quote
+      // anywhere else (e.g. an inches mark like 5/8") is a literal character.
       inQuotes = true;
     } else if (char === ",") {
       row.push(field);

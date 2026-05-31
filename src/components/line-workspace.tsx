@@ -96,6 +96,7 @@ import {
 } from "@/domain/step-photos";
 import {
   addStepPartReference,
+  attachPartToStep,
   getStepPartReferenceIds,
   getStepPartReferences,
   removePartReferenceFromSteps,
@@ -121,6 +122,7 @@ import {
   serializeMasterBom,
   type MasterBom,
 } from "@/domain/master-bom";
+import { createAnnotationId } from "@/domain/photo-annotations";
 import { BomPartSearch, type BomPartSelection } from "./bom-part-search";
 import {
   defaultDocumentTypeCodes,
@@ -1665,7 +1667,7 @@ function ProcedureWorkspace({
     [task?.id, tasks],
   );
   const partReferences = task?.partReferences ?? [];
-  const masterBom = getMasterBom(product.customFields);
+  const masterBom = useMemo(() => getMasterBom(product.customFields), [product.customFields]);
   const manufacturingStepDurationMinutes = manufacturingSteps.reduce(
     (total, step) => total + Math.max(step.durationMinutes ?? 0, 0),
     0,
@@ -1897,51 +1899,29 @@ function ProcedureWorkspace({
       return;
     }
 
-    const partNumber = (newStepPartNumbers[stepId] ?? "").trim();
-    if (!partNumber) {
+    const nextTask = attachPartToStep(task, stepId, { partNumber: newStepPartNumbers[stepId] ?? "" }, () =>
+      createAnnotationId("part"),
+    );
+    if (!nextTask) {
       return;
     }
 
-    const existingPart = partReferences.find((part) => part.partNumber.trim().toLowerCase() === partNumber.toLowerCase());
-    const partReference = existingPart ?? {
-      id: `part-${task.id}-${Date.now()}`,
-      partNumber,
-      description: "",
-      quantity: 1,
-      disposition: "",
-    };
-    const taskWithPart = existingPart
-      ? task
-      : {
-          ...task,
-          partReferences: [...partReferences, partReference],
-        };
-    const nextTask = addStepPartReference(taskWithPart, stepId, partReference.id);
-
-	    onUpdateTask(task.id, {
-	      manufacturingSteps: nextTask.manufacturingSteps,
-	      partReferences: nextTask.partReferences,
-	    });
+    onUpdateTask(task.id, {
+      manufacturingSteps: nextTask.manufacturingSteps,
+      partReferences: nextTask.partReferences,
+    });
     setNewStepPartNumbers((current) => ({ ...current, [stepId]: "" }));
   }
 
   function addStepPartFromBom(stepId: string, entry: BomPartSelection) {
-    if (!task || !entry.partNumber) {
+    if (!task) {
       return;
     }
 
-    const existingPart = partReferences.find(
-      (part) => part.partNumber.trim().toLowerCase() === entry.partNumber.trim().toLowerCase(),
-    );
-    const partReference = existingPart ?? {
-      id: `part-${task.id}-${Date.now()}`,
-      partNumber: entry.partNumber,
-      description: entry.description,
-      quantity: entry.quantity,
-      disposition: "",
-    };
-    const taskWithPart = existingPart ? task : { ...task, partReferences: [...partReferences, partReference] };
-    const nextTask = addStepPartReference(taskWithPart, stepId, partReference.id);
+    const nextTask = attachPartToStep(task, stepId, entry, () => createAnnotationId("part"));
+    if (!nextTask) {
+      return;
+    }
 
     onUpdateTask(task.id, {
       manufacturingSteps: nextTask.manufacturingSteps,
@@ -4280,51 +4260,25 @@ function DetailDrawer({
   }
 
   function addManufacturingStepPartReference(stepId: string) {
-    const partNumber = (newStepPartNumbers[stepId] ?? "").trim();
-    if (!partNumber) {
+    const nextTask = attachPartToStep(currentTask, stepId, { partNumber: newStepPartNumbers[stepId] ?? "" }, () =>
+      createAnnotationId("part"),
+    );
+    if (!nextTask) {
       return;
     }
 
-    const existingPart = partReferences.find((part) => part.partNumber.trim().toLowerCase() === partNumber.toLowerCase());
-    const partReference = existingPart ?? {
-      id: `part-${taskId}-${Date.now()}`,
-      partNumber,
-      description: "",
-      quantity: 1,
-      disposition: "",
-    };
-    const taskWithPart = existingPart
-      ? currentTask
-      : {
-          ...currentTask,
-          partReferences: [...partReferences, partReference],
-        };
-    const nextTask = addStepPartReference(taskWithPart, stepId, partReference.id);
-
-	    onUpdateTask(taskId, {
-	      manufacturingSteps: nextTask.manufacturingSteps,
-	      partReferences: nextTask.partReferences,
-	    });
+    onUpdateTask(taskId, {
+      manufacturingSteps: nextTask.manufacturingSteps,
+      partReferences: nextTask.partReferences,
+    });
     setNewStepPartNumbers((current) => ({ ...current, [stepId]: "" }));
   }
 
   function addStepPartFromBom(stepId: string, entry: BomPartSelection) {
-    if (!entry.partNumber) {
+    const nextTask = attachPartToStep(currentTask, stepId, entry, () => createAnnotationId("part"));
+    if (!nextTask) {
       return;
     }
-
-    const existingPart = partReferences.find(
-      (part) => part.partNumber.trim().toLowerCase() === entry.partNumber.trim().toLowerCase(),
-    );
-    const partReference = existingPart ?? {
-      id: `part-${taskId}-${Date.now()}`,
-      partNumber: entry.partNumber,
-      description: entry.description,
-      quantity: entry.quantity,
-      disposition: "",
-    };
-    const taskWithPart = existingPart ? currentTask : { ...currentTask, partReferences: [...partReferences, partReference] };
-    const nextTask = addStepPartReference(taskWithPart, stepId, partReference.id);
 
     onUpdateTask(taskId, {
       manufacturingSteps: nextTask.manufacturingSteps,
@@ -5151,6 +5105,11 @@ export function LineWorkspace({
       tasks: calculated.tasks,
     };
   }, [plannerState]);
+
+  const masterBom = useMemo(
+    () => getMasterBom(derivedState.product.customFields),
+    [derivedState.product.customFields],
+  );
 
   useEffect(() => {
     latestDerivedStateRef.current = derivedState;
@@ -9062,7 +9021,7 @@ export function LineWorkspace({
                         tasks={derivedState.tasks}
                         projectToolRegistry={projectToolRegistry}
                         section={setupSection === "tools" ? "tools" : "parts"}
-                        masterBom={getMasterBom(derivedState.product.customFields)}
+                        masterBom={masterBom}
                         onMasterBomChange={updateMasterBom}
                         onSaveTool={saveCatalogTool}
                         onDeleteTool={deleteCatalogTool}
@@ -9203,7 +9162,7 @@ export function LineWorkspace({
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
             toolLibrary={toolLibrary}
-            masterBom={getMasterBom(derivedState.product.customFields)}
+            masterBom={masterBom}
           />
         ) : null}
       </div>

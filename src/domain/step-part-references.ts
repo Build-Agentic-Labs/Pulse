@@ -75,6 +75,44 @@ export function addStepPartReference(task: Task, stepId: string, partReferenceId
   };
 }
 
+export type StepPartInput = {
+  partNumber: string;
+  description?: string;
+  quantity?: number;
+};
+
+/**
+ * Resolve a part for a step: reuse an existing task part with the same part
+ * number (case-insensitive) or create a new one via `makeId()`, then link it to
+ * the step. Returns the updated task, or null when there is no part number.
+ */
+export function attachPartToStep(
+  task: Task,
+  stepId: string,
+  input: StepPartInput,
+  makeId: () => string,
+): Task | null {
+  const partNumber = input.partNumber.trim();
+  if (!partNumber) {
+    return null;
+  }
+
+  const partReferences = task.partReferences ?? [];
+  const existingPart = partReferences.find(
+    (part) => part.partNumber.trim().toLowerCase() === partNumber.toLowerCase(),
+  );
+  const partReference: PartReference = existingPart ?? {
+    id: makeId(),
+    partNumber,
+    description: input.description ?? "",
+    quantity: input.quantity ?? 1,
+    disposition: "",
+  };
+  const taskWithPart = existingPart ? task : { ...task, partReferences: [...partReferences, partReference] };
+
+  return addStepPartReference(taskWithPart, stepId, partReference.id);
+}
+
 export function removeStepPartReference(task: Task, stepId: string, partReferenceId: string): Task {
   return {
     ...task,

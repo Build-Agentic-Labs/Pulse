@@ -88,9 +88,19 @@ function matchColumn(columns: string[], hints: string[]): string | undefined {
 
 /** Best-guess mapping of upload columns to the core part fields, used by the part picker. */
 export function detectBomFieldColumns(columns: string[]) {
-  return {
-    partNumber: matchColumn(columns, PART_NUMBER_HINTS),
-    description: matchColumn(columns, DESCRIPTION_HINTS),
-    quantity: matchColumn(columns, QUANTITY_HINTS),
+  // Claim in priority order so one column can never be assigned to two fields
+  // (e.g. a header containing both "number" and "qty").
+  const claimed = new Set<string>();
+  const claim = (hints: string[]) => {
+    const match = matchColumn(columns.filter((column) => !claimed.has(column)), hints);
+    if (match) {
+      claimed.add(match);
+    }
+    return match;
   };
+
+  const partNumber = claim(PART_NUMBER_HINTS);
+  const description = claim(DESCRIPTION_HINTS);
+  const quantity = claim(QUANTITY_HINTS);
+  return { partNumber, description, quantity };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import {
@@ -13,7 +13,7 @@ import {
 import { applySampleData } from "@/domain/sop/sample";
 import { exportFileName, exportSopToDocx } from "@/lib/sop/export-docx";
 import { saveSop } from "@/lib/sop/store";
-import { SopChrome } from "./sop-chrome";
+import { SopShell } from "./sop-shell";
 
 type StepId = "document" | "overview" | "procedure" | "annexes" | "approvals";
 
@@ -147,77 +147,74 @@ export function SopEditor({ initial }: { initial: Sop }) {
     }
   }
 
+  const actions = (
+    <>
+      <button
+        type="button"
+        className="ui-btn-ghost h-10 gap-2"
+        onClick={handleLoadSample}
+        title="Fill every step with sample data"
+      >
+        <Sparkles size={15} />
+        <span className="hidden sm:inline">Sample</span>
+      </button>
+      <button
+        type="button"
+        className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"
+        onClick={handleExport}
+        disabled={exporting}
+        title="Export to Word (.docx)"
+      >
+        <Download size={15} />
+        {exporting ? "Exporting…" : "Export"}
+      </button>
+      <button type="button" className="ui-btn-ghost h-10 gap-2" onClick={handleSave}>
+        <Check size={15} />
+        {saved ? "Saved" : "Save"}
+      </button>
+    </>
+  );
+
+  const sidebar = (
+    <>
+      <div className="ui-nav-section">Steps</div>
+      <div className="space-y-0.5">
+        {STEPS.map((entry, index) => {
+          const active = index === stepIndex;
+          const filled = stepFilled(sop, entry.id);
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              className={`ui-nav-item w-full ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
+              onClick={() => setStepIndex(index)}
+            >
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                {active ? (
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                ) : filled ? (
+                  <Check size={13} style={{ color: "var(--color-success)" }} />
+                ) : (
+                  <span className="ui-mono-label text-ink-tertiary">{index + 1}</span>
+                )}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-left">{entry.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+
   return (
-    <div className="sop-editor fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-canvas text-ink">
-      <SopChrome
-        crumb={sop.meta.title || sop.meta.sopNumber || "Untitled"}
-        actions={
-          <>
-            <button
-              type="button"
-              className="ui-btn-ghost h-10 gap-2"
-              onClick={handleLoadSample}
-              title="Fill every step with sample data"
-            >
-              <Sparkles size={15} />
-              <span className="hidden sm:inline">Sample</span>
-            </button>
-            <button
-              type="button"
-              className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"
-              onClick={handleExport}
-              disabled={exporting}
-              title="Export to Word (.docx)"
-            >
-              <Download size={15} />
-              {exporting ? "Exporting…" : "Export"}
-            </button>
-            <button type="button" className="ui-btn-ghost h-10 gap-2" onClick={handleSave}>
-              <Check size={15} />
-              {saved ? "Saved" : "Save"}
-            </button>
-          </>
-        }
-      />
-
-      <main className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Step nav */}
-        <aside className="hidden w-52 shrink-0 flex-col overflow-y-auto border-r border-line p-2 sm:flex">
-          <button type="button" className="ui-btn-ghost mb-2 h-8 gap-1.5 px-2" onClick={() => router.push("/sops")}>
-            <ArrowLeft size={13} />
-            All SOPs
-          </button>
-          <div className="ui-nav-section mb-1 px-2">Steps</div>
-          <nav className="space-y-0.5">
-            {STEPS.map((entry, index) => {
-              const active = index === stepIndex;
-              const filled = stepFilled(sop, entry.id);
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  className={`ui-nav-item w-full ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
-                  onClick={() => setStepIndex(index)}
-                >
-                  <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                    {active ? (
-                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                    ) : filled ? (
-                      <Check size={13} style={{ color: "var(--color-success)" }} />
-                    ) : (
-                      <span className="ui-mono-label text-ink-tertiary">{index + 1}</span>
-                    )}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-left">{entry.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
-
-        {/* Step content */}
-        <div className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4">
-          <div className="mx-auto max-w-4xl space-y-5 pb-16">
+    <SopShell
+      crumb={sop.meta.title || sop.meta.sopNumber || "Untitled"}
+      actions={actions}
+      sidebar={sidebar}
+      back={{ href: "/sops", label: "All SOPs" }}
+    >
+      <div className="sop-editor">
+        <div className="mx-auto max-w-4xl space-y-5 pb-16">
             {sop.source === "converted" && !reviewDismissed ? (
               <div className="ui-notice ui-notice-warn flex items-start gap-3">
                 <Sparkles size={16} className="mt-0.5 shrink-0 text-ink-secondary" />
@@ -436,8 +433,7 @@ export function SopEditor({ initial }: { initial: Sop }) {
             </div>
           </div>
         </div>
-      </main>
-    </div>
+      </SopShell>
   );
 }
 

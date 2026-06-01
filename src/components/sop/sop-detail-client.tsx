@@ -1,12 +1,29 @@
 "use client";
 
+import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Sop } from "@/domain/sop/schema";
 import { getSop } from "@/lib/sop/store";
-import { SopChrome } from "./sop-chrome";
 import { SopEditor } from "./sop-editor";
+import { SopShell } from "./sop-shell";
+
+const browseSidebar = (
+  <>
+    <div className="ui-nav-section">SOPs</div>
+    <div className="space-y-0.5">
+      <Link href="/sops" className="ui-nav-item ui-nav-item-idle">
+        <FileText size={15} strokeWidth={1.75} />
+        <span>All SOPs</span>
+      </Link>
+      <Link href="/sops/new" className="ui-nav-item ui-nav-item-idle">
+        <Plus size={15} strokeWidth={1.75} />
+        <span>New SOP</span>
+      </Link>
+    </div>
+  </>
+);
 
 export function SopDetailClient() {
   const params = useParams<{ sopId: string }>();
@@ -23,17 +40,16 @@ export function SopDetailClient() {
 
   if (state.status === "missing") {
     return (
-      <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-canvas text-ink">
-        <SopChrome />
-        <main className="flex min-h-0 flex-1 items-center justify-center p-4">
+      <SopShell sidebar={browseSidebar} back={{ href: "/", label: "Back to planner" }}>
+        <div className="flex h-full items-center justify-center p-4">
           <div className="text-center">
             <p className="ui-section-subtitle text-ink-tertiary">This SOP could not be found.</p>
             <Link href="/sops" className="ui-btn-ghost mt-3 inline-flex h-9 px-3">
               Back to SOPs
             </Link>
           </div>
-        </main>
-      </div>
+        </div>
+      </SopShell>
     );
   }
 

@@ -12,6 +12,8 @@ import { displayWorkspaceName, projectContextLabel } from "@/lib/display-names";
 
 import { PhonePhotoPortalPanel } from "@/components/phone-photo-portal-panel";
 
+import { WorkspaceMembersSettings } from "@/components/workspace-members-settings";
+
 import type { PlannerProjectContext } from "@/domain/types";
 
 
@@ -58,7 +60,7 @@ function SettingsPage({ title, description, children }: { title: string; descrip
 
 
 
-function SettingsSectionBlock({
+export function SettingsSectionBlock({
 
   title,
 
@@ -94,7 +96,7 @@ function SettingsSectionBlock({
 
 
 
-function SettingsRow({
+export function SettingsRow({
 
   label,
 
@@ -353,6 +355,8 @@ export function AppSettingsPanel({
               </SettingsRow>
 
             </SettingsSectionBlock>
+
+            <WorkspaceMembersSettings project={project} />
 
           </SettingsPage>
 

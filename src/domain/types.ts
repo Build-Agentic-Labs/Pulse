@@ -52,6 +52,20 @@ export type CustomColumnScope = "product" | "scenario" | "station" | "task" | "a
 export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer";
 export type ProjectStatus = "active" | "archived";
 
+// Per-user access level for a workspace (project) or the Org tools area.
+export type AccessLevel = "none" | "view" | "edit";
+
+// Aggregated access for one member, used by the admin Users matrix.
+export interface MemberAccess {
+  userId: string;
+  fullName?: string;
+  role: WorkspaceRole;
+  isSelf: boolean;
+  // projectId -> level (absent = "none")
+  projectLevels: Record<string, AccessLevel>;
+  orgTools: AccessLevel;
+}
+
 export interface ManufacturingStep {
   id: string;
   sequence: number;
@@ -144,6 +158,8 @@ export interface Project {
   description?: string;
   status: ProjectStatus;
   createdBy?: string;
+  // The signed-in user's effective access to this project (when loaded for that user).
+  accessLevel?: AccessLevel;
   createdAt: string;
   updatedAt: string;
 }
@@ -154,11 +170,13 @@ export interface PlannerProjectContext {
   workspaceId: string;
   workspaceName: string;
   role?: WorkspaceRole;
+  accessLevel?: AccessLevel;
 }
 
 export interface WorkspaceProjectGroup {
   workspace: Workspace;
   role: WorkspaceRole;
+  isSuperAdmin?: boolean;
   projects: Project[];
 }
 

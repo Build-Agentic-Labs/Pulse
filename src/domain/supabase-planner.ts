@@ -1,8 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type {
+  AccessLevel,
   ActualEvent,
   CustomColumn,
   Dependency,
+  MemberAccess,
   DocumentTypeCode,
   ManufacturingStep,
   ManufacturingComponent,
@@ -160,6 +162,18 @@ function maybeText(value: unknown) {
 
 function textArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function normalizeAccessLevel(value: unknown): AccessLevel {
+  return value === "edit" || value === "view" ? value : "none";
+}
+
+// PostgREST/Postgres error codes meaning "this table or function isn't in the schema yet"
+// (i.e. a migration hasn't been applied). Callers use this to degrade gracefully.
+const MISSING_RELATION_CODES = ["42P01", "PGRST205", "PGRST202"];
+
+function isMissingRelationError(error: { code?: string } | null): boolean {
+  return Boolean(error && error.code && MISSING_RELATION_CODES.includes(error.code));
 }
 
 function jsonObject(value: unknown) {
@@ -1191,13 +1205,119 @@ async function loadProjectContext(
       )
     : null;
 
+  const superAdmin = await fetchIsSuperAdmin(supabase);
+  const memberRole = member?.role ? (String(member.role) as WorkspaceRole) : undefined;
+  // Workspace managers (and superadmins) see/edit every project they manage.
+  const isManager = superAdmin || memberRole === "owner" || memberRole === "admin";
+
+  let role: WorkspaceRole | undefined;
+  let accessLevel: AccessLevel | undefined;
+
+  if (isManager) {
+    role = memberRole ?? "owner";
+    accessLevel = "edit";
+  } else {
+    const level = userData.user
+      ? await fetchProjectAccessLevel(supabase, String(project.id), userData.user.id)
+      : undefined;
+    if (level === undefined) {
+      // Access model not available yet — fall back to legacy workspace role.
+      role = memberRole;
+    } else {
+      accessLevel = level;
+      // Reuse role-based edit gating: edit -> editor, view -> viewer, none -> no access.
+      role = level === "edit" ? "editor" : level === "view" ? "viewer" : undefined;
+    }
+  }
+
   return {
     projectId: String(project.id),
     projectName: String(project.name ?? ""),
     workspaceId: String(workspace.id),
     workspaceName: String(workspace.name ?? ""),
-    role: member?.role ? (String(member.role) as WorkspaceRole) : undefined,
+    role,
+    accessLevel,
   };
+}
+
+// Whether the signed-in user is a platform superadmin. Returns false (rather than throwing)
+// when the migration has not been applied yet, so the app degrades gracefully.
+export async function fetchIsSuperAdmin(
+  supabase: ReturnType<typeof plannerClient> = plannerClient(),
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("is_super_admin");
+  if (error) {
+    if (error.code === "PGRST202") {
+      return false;
+    }
+    throw error;
+  }
+  return data === true;
+}
+
+// The signed-in user's access level for a single project. Returns undefined when the
+// project_access table doesn't exist yet (pre-migration) so callers can fall back to
+// legacy role-based behavior.
+async function fetchProjectAccessLevel(
+  supabase: ReturnType<typeof plannerClient>,
+  projectId: string,
+  userId: string,
+): Promise<AccessLevel | undefined> {
+  const { data, error } = await supabase
+    .from("project_access")
+    .select("level")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+  return normalizeAccessLevel(data?.level);
+}
+
+// The signed-in user's full project-access map (projectId -> level). Returns undefined when
+// the project_access table doesn't exist yet (pre-migration) so callers skip filtering.
+async function fetchUserProjectAccessMap(
+  supabase: ReturnType<typeof plannerClient>,
+  userId: string,
+): Promise<Map<string, AccessLevel> | undefined> {
+  const { data, error } = await supabase.from("project_access").select("project_id, level").eq("user_id", userId);
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+  return new Map((data ?? []).map((row) => [String(row.project_id), normalizeAccessLevel(row.level)]));
+}
+
+// The signed-in user's Org tools access level ("edit" for superadmins).
+export async function fetchOrgToolAccess(
+  supabase: ReturnType<typeof plannerClient> = plannerClient(),
+): Promise<AccessLevel> {
+  if (await fetchIsSuperAdmin(supabase)) {
+    return "edit";
+  }
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) {
+    return "none";
+  }
+  const { data, error } = await supabase
+    .from("org_tool_access")
+    .select("level")
+    .eq("user_id", userData.user.id)
+    .maybeSingle();
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return "none";
+    }
+    throw error;
+  }
+  const level = data?.level ? String(data.level) : "none";
+  return level === "edit" || level === "view" ? (level as AccessLevel) : "none";
 }
 
 export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProjectGroup[]> {
@@ -1233,8 +1353,42 @@ export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGrou
     throw new Error(userError?.message ?? "Sign in before loading workspaces.");
   }
 
+  const isSuperAdmin = await fetchIsSuperAdmin(supabase);
+
+  // Superadmins see every workspace and project (RLS grants full read access), acting as
+  // owner with no module restrictions, regardless of membership rows.
+  if (isSuperAdmin) {
+    const [workspaces, projects] = await Promise.all([
+      throwIfError(supabase.from("workspaces").select("*").order("created_at")),
+      throwIfError(supabase.from("projects").select("*").order("created_at")),
+    ]);
+
+    const projectsByWorkspaceId = new Map<string, Project[]>();
+    (projects ?? []).forEach((project) => {
+      const mappedProject = mapProject(project);
+      projectsByWorkspaceId.set(mappedProject.workspaceId, [
+        ...(projectsByWorkspaceId.get(mappedProject.workspaceId) ?? []),
+        mappedProject,
+      ]);
+    });
+
+    return (workspaces ?? []).map((workspace) => {
+      const mappedWorkspace = mapWorkspace(workspace);
+      return {
+        workspace: mappedWorkspace,
+        role: "owner" as WorkspaceRole,
+        isSuperAdmin: true,
+        projects: projectsByWorkspaceId.get(mappedWorkspace.id) ?? [],
+      };
+    });
+  }
+
   const memberships = await throwIfError(
-    supabase.from("workspace_members").select("workspace_id, role").eq("user_id", userData.user.id).order("created_at"),
+    supabase
+      .from("workspace_members")
+      .select("workspace_id, role")
+      .eq("user_id", userData.user.id)
+      .order("created_at"),
   );
 
   const workspaceIds = [...new Set((memberships ?? []).map((membership) => String(membership.workspace_id)))];
@@ -1249,7 +1403,7 @@ export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGrou
   ]);
 
   const membershipByWorkspaceId = new Map(
-    (memberships ?? []).map((membership) => [String(membership.workspace_id), String(membership.role) as WorkspaceRole]),
+    (memberships ?? []).map((membership) => [String(membership.workspace_id), membership]),
   );
   const projectsByWorkspaceId = new Map<string, Project[]>();
 
@@ -1261,12 +1415,35 @@ export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGrou
     ]);
   });
 
+  // The user's per-project access. Managers (owner/admin) see every project in workspaces
+  // they manage; other members see only projects they've been granted view/edit on.
+  // undefined map = pre-migration: don't filter (legacy behavior).
+  const accessMap = await fetchUserProjectAccessMap(supabase, userData.user.id);
+
   return (workspaces ?? []).map((workspace) => {
     const mappedWorkspace = mapWorkspace(workspace);
+    const membership = membershipByWorkspaceId.get(mappedWorkspace.id);
+    const role = membership?.role ? (String(membership.role) as WorkspaceRole) : "viewer";
+    const isManager = role === "owner" || role === "admin";
+    const allProjects = projectsByWorkspaceId.get(mappedWorkspace.id) ?? [];
+
+    let visibleProjects: Project[];
+    if (isManager || !accessMap) {
+      visibleProjects = allProjects.map((project) => ({
+        ...project,
+        accessLevel: isManager ? "edit" : project.accessLevel,
+      }));
+    } else {
+      visibleProjects = allProjects
+        .map((project) => ({ ...project, accessLevel: accessMap.get(project.id) ?? "none" }))
+        .filter((project) => project.accessLevel !== "none");
+    }
+
     return {
       workspace: mappedWorkspace,
-      role: membershipByWorkspaceId.get(mappedWorkspace.id) ?? "viewer",
-      projects: projectsByWorkspaceId.get(mappedWorkspace.id) ?? [],
+      role,
+      isSuperAdmin: false,
+      projects: visibleProjects,
     };
   });
 }
@@ -1294,6 +1471,19 @@ export async function createProjectWithStarterPlan(workspaceId: string, name: st
   } catch (error) {
     await supabase.from("projects").delete().eq("id", projectId);
     throw error;
+  }
+
+  // Grant the creator edit access on the new project (no-op if the table doesn't exist yet).
+  if (userData.user) {
+    const { error: accessError } = await supabase
+      .from("project_access")
+      .upsert(
+        { project_id: projectId, user_id: userData.user.id, level: "edit", granted_by: userData.user.id },
+        { onConflict: "project_id,user_id" },
+      );
+    if (accessError && !isMissingRelationError(accessError)) {
+      throw accessError;
+    }
   }
 
   return loadProjectContext(supabase, projectId);
@@ -1352,16 +1542,27 @@ export async function deleteProjectFromSupabase(projectId: string) {
 
 export async function loadWorkspaceMembersFromSupabase(workspaceId: string): Promise<WorkspaceMemberProfile[]> {
   const supabase = plannerClient();
+  // Fetch members and profiles separately and merge in JS. There is no direct foreign key
+  // between workspace_members and profiles (both only reference auth.users), so a PostgREST
+  // embed (`profiles(...)`) fails with PGRST200. Profile names for fellow members are
+  // visible thanks to the "profiles workspace manager read" policy.
   const rows = await throwIfError(
     supabase
       .from("workspace_members")
-      .select("workspace_id,user_id,role,created_at,profiles(full_name,avatar_url)")
+      .select("workspace_id,user_id,role,created_at")
       .eq("workspace_id", workspaceId)
       .order("created_at"),
   );
+  const members = rows ?? [];
 
-  return (rows ?? []).map((row) => {
-    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+  const userIds = [...new Set(members.map((row) => String(row.user_id)))];
+  const profileRows = userIds.length
+    ? await throwIfError(supabase.from("profiles").select("id,full_name,avatar_url").in("id", userIds))
+    : [];
+  const profileById = new Map((profileRows ?? []).map((profile) => [String(profile.id), profile]));
+
+  return members.map((row) => {
+    const profile = profileById.get(String(row.user_id));
     return {
       workspaceId: String(row.workspace_id),
       userId: String(row.user_id),
@@ -1421,6 +1622,82 @@ export async function deleteWorkspaceAccessGrantFromSupabase(workspaceId: string
       .delete()
       .eq("workspace_id", workspaceId)
       .eq("email", email.trim().toLowerCase()),
+  );
+}
+
+// Per-member access matrix for a workspace: each member's role plus their per-project level
+// and Org tools level. Readable by workspace managers and superadmins.
+export async function loadMembersAccessForWorkspace(workspaceId: string): Promise<MemberAccess[]> {
+  const supabase = plannerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const selfId = userData.user?.id;
+
+  // Members and the workspace's project list are independent — fetch them together.
+  const [members, projectRows] = await Promise.all([
+    loadWorkspaceMembersFromSupabase(workspaceId),
+    throwIfError(supabase.from("projects").select("id").eq("workspace_id", workspaceId).order("created_at")),
+  ]);
+  const projectIds = (projectRows ?? []).map((row) => String(row.id));
+  const userIds = members.map((member) => member.userId);
+
+  // project_access and org_tool_access are likewise independent of each other.
+  const [accessRows, orgRows] = await Promise.all([
+    projectIds.length
+      ? throwIfError(supabase.from("project_access").select("project_id, user_id, level").in("project_id", projectIds))
+      : Promise.resolve([]),
+    userIds.length
+      ? throwIfError(supabase.from("org_tool_access").select("user_id, level").in("user_id", userIds))
+      : Promise.resolve([]),
+  ]);
+
+  const levelByUserProject = new Map<string, AccessLevel>();
+  (accessRows ?? []).forEach((row) => {
+    levelByUserProject.set(`${row.user_id}|${row.project_id}`, normalizeAccessLevel(row.level));
+  });
+  const orgByUser = new Map<string, AccessLevel>();
+  (orgRows ?? []).forEach((row) => {
+    orgByUser.set(String(row.user_id), normalizeAccessLevel(row.level));
+  });
+
+  return members.map((member) => {
+    const projectLevels: Record<string, AccessLevel> = {};
+    projectIds.forEach((projectId) => {
+      projectLevels[projectId] = levelByUserProject.get(`${member.userId}|${projectId}`) ?? "none";
+    });
+    return {
+      userId: member.userId,
+      fullName: member.fullName,
+      role: member.role,
+      isSelf: member.userId === selfId,
+      projectLevels,
+      orgTools: orgByUser.get(member.userId) ?? "none",
+    };
+  });
+}
+
+export async function setProjectAccessInSupabase(
+  projectId: string,
+  userId: string,
+  level: AccessLevel,
+): Promise<void> {
+  const supabase = plannerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  await throwIfError(
+    supabase.from("project_access").upsert(
+      { project_id: projectId, user_id: userId, level, granted_by: userData.user?.id ?? null },
+      { onConflict: "project_id,user_id" },
+    ),
+  );
+}
+
+export async function setOrgToolAccessInSupabase(userId: string, level: AccessLevel): Promise<void> {
+  const supabase = plannerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  await throwIfError(
+    supabase.from("org_tool_access").upsert(
+      { user_id: userId, level, granted_by: userData.user?.id ?? null },
+      { onConflict: "user_id" },
+    ),
   );
 }
 

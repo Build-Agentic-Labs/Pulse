@@ -2016,6 +2016,59 @@ body {
   animation: ui-skeleton-shimmer 1.15s ease-in-out infinite;
 }
 
+/* --- SOP conversion overlay -------------------------------------------- */
+@keyframes sop-convert-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sop-convert-row {
+  animation: sop-convert-row-in 460ms var(--ease-ui) both;
+}
+
+@keyframes sop-convert-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(440%);
+  }
+}
+
+.sop-convert-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.sop-convert-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 26%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-ink) 55%, transparent),
+    transparent
+  );
+  animation: sop-convert-sweep 1.25s var(--ease-ui) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sop-convert-row,
+  .sop-convert-bar::after {
+    animation: none;
+  }
+}
+
 .nd-segmented {
   border: 1px solid var(--nd-border-visible);
   border-radius: 999px;
@@ -3529,6 +3582,42 @@ body {
     font-family: var(--type-mono);
     @apply h-10 w-full rounded-lg border border-line bg-transparent px-3 text-sm font-semibold text-ink outline-none;
     box-shadow: inset 0 1px 2px color-mix(in srgb, var(--color-ink) 5%, transparent);
+  }
+
+  /* SOP authoring: lighter, smaller, flatter fields read as a refined document
+     editor rather than the dense planner forms. Scoped so nothing else changes. */
+  .sop-editor .ui-field-standalone {
+    font-family: var(--type-sans); /* document-like, not mono dev-tool */
+    font-weight: 400;
+    font-size: 0.8125rem; /* 13px */
+    height: 2.25rem; /* tighter, uniform field height */
+    border-radius: 0.375rem;
+    border-color: color-mix(in srgb, var(--color-border) 80%, transparent);
+    box-shadow: none; /* drop the sunken inset shadow for a flat, premium look */
+  }
+
+  /* Empty ("unknown") fields get a soft red flag so reviewers can spot gaps.
+     :placeholder-shown covers text inputs/textareas; :required:invalid covers
+     date inputs (which have no text placeholder). */
+  .sop-editor .ui-field-standalone:placeholder-shown,
+  .sop-editor .ui-field-standalone:required:invalid {
+    border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+    background-color: color-mix(in srgb, var(--color-danger) 7%, transparent);
+  }
+
+  .sop-editor .ui-field-standalone:focus {
+    border-color: color-mix(in srgb, var(--color-ink) 38%, transparent);
+    background-color: transparent;
+  }
+
+  /* Softer labels: calm sentence-case sans instead of hard uppercase mono. */
+  .sop-editor .ui-field-label,
+  .sop-editor .ui-mono-label {
+    font-family: var(--type-sans);
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    color: var(--color-ink-tertiary);
   }
 
   .ui-product-setup .ui-field-shell,

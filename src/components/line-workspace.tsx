@@ -34,6 +34,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   useEffect,
@@ -1430,7 +1431,16 @@ function Sidebar({
         )}
       </nav>
 
-      <div className="mt-auto px-2 py-2">
+      <div className="mt-auto space-y-2 px-2 py-2">
+        {/* Org-level tools — cross-department, not scoped to this project/workspace. */}
+        <div>
+          <div className="ui-nav-section">Org</div>
+          <Link href="/sops" className="ui-nav-item ui-nav-item-idle" title="SOPs">
+            <FileText size={15} strokeWidth={1.75} />
+            <span>SOPs</span>
+          </Link>
+        </div>
+
         {!isSettingsModule ? (
           <button
             type="button"

@@ -65,6 +65,10 @@ function writeAll(sops: Sop[]): void {
 /** Build a full, persistable `Sop` from a Claude extraction result. */
 export function sopFromExtraction(extracted: ExtractedSop): Sop {
   const base = createEmptySop(newSopId(), nowIso());
+  // The model output is trusted but not guaranteed; fall back to base values so a
+  // partial/malformed payload can't throw while we build the Sop.
+  const procedure = extracted.procedure ?? base.procedure;
+  const approvals = extracted.approvals ?? [];
   return {
     ...base,
     ...extracted,
@@ -75,8 +79,8 @@ export function sopFromExtraction(extracted: ExtractedSop): Sop {
     updatedAt: base.updatedAt,
     procedure: {
       ...base.procedure,
-      ...extracted.procedure,
-      activities: extracted.procedure.activities.map((activity, index) => ({
+      ...procedure,
+      activities: (procedure.activities ?? []).map((activity, index) => ({
         id: `${base.id}-act-${index}`,
         step: activity.step || index + 1,
         description: activity.description,
@@ -84,6 +88,6 @@ export function sopFromExtraction(extracted: ExtractedSop): Sop {
       })),
     },
     // If the legacy doc had no approval rows, keep the standard template rows.
-    approvals: extracted.approvals.length > 0 ? extracted.approvals : base.approvals,
+    approvals: approvals.length > 0 ? approvals : base.approvals,
   };
 }

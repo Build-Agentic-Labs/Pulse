@@ -24,6 +24,11 @@ export const RASIC_LABELS: Record<RasicCode, string> = {
   C: "Collaboration",
 };
 
+/** "R: Responsible · A: Approval · …" — the legend shown in the editor and export. */
+export function rasicLegend(separator = "  ·  "): string {
+  return RASIC_CODES.map((code) => `${code}: ${RASIC_LABELS[code]}`).join(separator);
+}
+
 // ---------------------------------------------------------------------------
 // Header / document metadata
 // ---------------------------------------------------------------------------

@@ -10,11 +10,11 @@ import { SopEditor } from "./sop-editor";
 
 export function SopDetailClient() {
   const params = useParams<{ sopId: string }>();
-  const [state, setState] = useState<{ status: "loading" | "missing"; sop?: Sop }>({ status: "loading" });
+  const [state, setState] = useState<{ status: "pending" | "loaded" | "missing"; sop?: Sop }>({ status: "pending" });
 
   useEffect(() => {
     const sop = getSop(params.sopId);
-    setState(sop ? { status: "loading", sop } : { status: "missing" });
+    setState(sop ? { status: "loaded", sop } : { status: "missing" });
   }, [params.sopId]);
 
   if (state.sop) {

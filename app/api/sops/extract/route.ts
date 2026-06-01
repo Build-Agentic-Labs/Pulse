@@ -12,6 +12,10 @@ export const dynamic = "force-dynamic";
 // Document parsing + an LLM round-trip can exceed the default serverless window.
 export const maxDuration = 60;
 
+// Cap upload size so a huge file can't OOM the function or blow the time budget
+// during pdf.js / mammoth parsing.
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20 MB
+
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -32,6 +36,13 @@ export async function POST(request: Request) {
 
   if (!file) {
     return Response.json({ error: "No file uploaded." }, { status: 400 });
+  }
+
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return Response.json(
+      { error: `File is too large. The maximum size is ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB.` },
+      { status: 413 },
+    );
   }
 
   let text: string;
@@ -62,6 +73,15 @@ export async function POST(request: Request) {
         },
       ],
     });
+
+    // A truncated response yields partial tool input (invalid JSON / missing
+    // fields), which would crash the client downstream — surface it instead.
+    if (message.stop_reason === "max_tokens") {
+      return Response.json(
+        { error: "This SOP is too long to convert in one pass. Split it into smaller documents and try again." },
+        { status: 502 },
+      );
+    }
 
     const toolUse = message.content.find((block) => block.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {

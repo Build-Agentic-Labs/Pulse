@@ -1,11 +1,11 @@
 "use client";
 
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import {
   RASIC_CODES,
-  RASIC_LABELS,
+  rasicLegend,
   type RasicCode,
   type Sop,
   type SopActivity,
@@ -46,12 +46,61 @@ function stepFilled(sop: Sop, id: StepId): boolean {
   }
 }
 
+/**
+ * Textarea that grows to fit its content so the full body text stays visible.
+ * Pass `maxHeight` (px) to cap the growth and scroll past it — useful in tight
+ * columns where unbounded growth would make a very tall row.
+ */
+function AutoTextarea({
+  value,
+  className = "",
+  maxHeight,
+  ...props
+}: ComponentProps<"textarea"> & { maxHeight?: number }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  function resize() {
+    const el = ref.current;
+    if (!el) return;
+    // border-box + 1px borders: scrollHeight omits the border, so add it back
+    // to avoid clipping the last line.
+    const styles = window.getComputedStyle(el);
+    const border = parseFloat(styles.borderTopWidth) + parseFloat(styles.borderBottomWidth);
+    el.style.height = "auto";
+    const next = el.scrollHeight + border;
+    if (maxHeight && next > maxHeight) {
+      el.style.height = `${maxHeight}px`;
+      el.style.overflowY = "auto";
+    } else {
+      el.style.height = `${next}px`;
+      el.style.overflowY = "hidden";
+    }
+  }
+
+  useLayoutEffect(resize, [value, maxHeight]);
+  useEffect(() => {
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      rows={1}
+      className={`resize-none ${className}`.trim()}
+      {...props}
+    />
+  );
+}
+
 export function SopEditor({ initial }: { initial: Sop }) {
   const router = useRouter();
   const [sop, setSop] = useState<Sop>(initial);
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
+  const [reviewDismissed, setReviewDismissed] = useState(false);
 
   const step = STEPS[stepIndex];
   const isFirst = stepIndex === 0;
@@ -77,6 +126,12 @@ export function SopEditor({ initial }: { initial: Sop }) {
     router.push("/sops");
   }
 
+  async function handleSaveAndExport() {
+    saveSop(sop);
+    setSaved(true);
+    await handleExport();
+  }
+
   async function handleExport() {
     setExporting(true);
     try {
@@ -93,7 +148,7 @@ export function SopEditor({ initial }: { initial: Sop }) {
   }
 
   return (
-    <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-canvas text-ink">
+    <div className="sop-editor fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-canvas text-ink">
       <SopChrome
         crumb={sop.meta.title || sop.meta.sopNumber || "Untitled"}
         actions={
@@ -162,7 +217,30 @@ export function SopEditor({ initial }: { initial: Sop }) {
 
         {/* Step content */}
         <div className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4">
-          <div className="mx-auto max-w-2xl space-y-5 pb-16">
+          <div className="mx-auto max-w-4xl space-y-5 pb-16">
+            {sop.source === "converted" && !reviewDismissed ? (
+              <div className="ui-notice ui-notice-warn flex items-start gap-3">
+                <Sparkles size={16} className="mt-0.5 shrink-0 text-ink-secondary" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-ink">Review your converted SOP</p>
+                  <p className="ui-section-subtitle mt-1 text-ink-secondary">
+                    We mapped your uploaded document into the standard format with AI. It can miss or misplace
+                    details, so step through each section in the left nav, fix anything that looks off, then Save
+                    or Export to Word.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ui-btn-ghost h-7 w-7 shrink-0 px-0 text-ink-tertiary"
+                  onClick={() => setReviewDismissed(true)}
+                  title="Dismiss"
+                  aria-label="Dismiss review notice"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : null}
+
             {/* Compact step indicator on mobile */}
             <div className="ui-mono-label text-ink-tertiary sm:hidden">
               Step {stepIndex + 1} of {STEPS.length} · {step.label}
@@ -191,12 +269,14 @@ export function SopEditor({ initial }: { initial: Sop }) {
                     <input
                       className="ui-field-standalone"
                       value={sop.meta.version}
+                      placeholder="1.0"
                       onChange={(event) => update({ meta: { ...sop.meta, version: event.target.value } })}
                     />
                   </Field>
                   <Field label="Revision date">
                     <input
                       type="date"
+                      required
                       className="ui-field-standalone"
                       value={sop.meta.revisionDate}
                       onChange={(event) => update({ meta: { ...sop.meta, revisionDate: event.target.value } })}
@@ -205,6 +285,7 @@ export function SopEditor({ initial }: { initial: Sop }) {
                   <Field label="Effective date">
                     <input
                       type="date"
+                      required
                       className="ui-field-standalone"
                       value={sop.meta.effectiveDate}
                       onChange={(event) => update({ meta: { ...sop.meta, effectiveDate: event.target.value } })}
@@ -217,7 +298,7 @@ export function SopEditor({ initial }: { initial: Sop }) {
             {step.id === "overview" ? (
               <>
                 <Section title="Purpose">
-                  <textarea
+                  <AutoTextarea
                     className="ui-field-standalone min-h-20 py-2"
                     value={sop.purpose}
                     placeholder="Define the purpose of this process"
@@ -225,7 +306,7 @@ export function SopEditor({ initial }: { initial: Sop }) {
                   />
                 </Section>
                 <Section title="Scope">
-                  <textarea
+                  <AutoTextarea
                     className="ui-field-standalone min-h-20 py-2"
                     value={sop.scope}
                     placeholder="For which products, processes or areas this applies"
@@ -270,7 +351,7 @@ export function SopEditor({ initial }: { initial: Sop }) {
                 </Section>
                 <Section title="Procedure">
                   <Field label="Process flow description">
-                    <textarea
+                    <AutoTextarea
                       className="ui-field-standalone min-h-16 py-2"
                       value={sop.procedure.processFlowDescription}
                       placeholder="Describe the process flow"
@@ -280,7 +361,7 @@ export function SopEditor({ initial }: { initial: Sop }) {
                     />
                   </Field>
                   <p className="ui-mono-label mt-3 text-ink-tertiary">
-                    RASIC — {RASIC_CODES.map((code) => `${code}: ${RASIC_LABELS[code]}`).join("  ·  ")}
+                    RASIC — {rasicLegend()}
                   </p>
                   <RasicMatrixEditor
                     roles={sop.procedure.roles}
@@ -327,10 +408,21 @@ export function SopEditor({ initial }: { initial: Sop }) {
                 Back
               </button>
               {isLast ? (
-                <button type="button" className="ui-btn-ghost h-9 gap-1.5 px-4" onClick={handleFinish}>
-                  <Check size={14} />
-                  Save &amp; finish
-                </button>
+                <div className="flex items-center gap-2">
+                  <button type="button" className="ui-btn-ghost h-9 gap-1.5 px-4" onClick={handleFinish}>
+                    <Check size={14} />
+                    Save &amp; finish
+                  </button>
+                  <button
+                    type="button"
+                    className="ui-btn-primary h-9 gap-1.5 px-4 disabled:opacity-50"
+                    onClick={handleSaveAndExport}
+                    disabled={exporting}
+                  >
+                    <Download size={14} />
+                    {exporting ? "Exporting…" : "Save & export"}
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"
@@ -540,7 +632,7 @@ function RasicMatrixEditor({
           {roles.map((role, index) => (
             <div key={index} className="flex items-center gap-1">
               <input
-                className="ui-field-standalone h-8 w-36 px-2 text-[12px]"
+                className="ui-field-standalone w-36 px-2 text-[12px]"
                 value={role}
                 placeholder="Role"
                 onChange={(event) => setRole(index, event.target.value)}
@@ -563,14 +655,16 @@ function RasicMatrixEditor({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[12px]">
+        <table className="w-full table-fixed border-collapse text-[12px]">
           <thead>
             <tr className="border-b border-line text-left">
               <th className="w-8 py-2 pr-2 ui-mono-label text-ink-tertiary">#</th>
               <th className="py-2 pr-2 ui-mono-label text-ink-tertiary">Activity</th>
               {roles.map((role, index) => (
-                <th key={index} className="px-1 py-2 text-center ui-mono-label text-ink-tertiary">
-                  {role || "—"}
+                <th key={index} className="w-16 px-1 py-2 text-center ui-mono-label text-ink-tertiary">
+                  <span className="block truncate" title={role}>
+                    {role || "—"}
+                  </span>
                 </th>
               ))}
               <th className="w-9" />
@@ -581,8 +675,9 @@ function RasicMatrixEditor({
               <tr key={activity.id} className="border-b border-line align-top">
                 <td className="py-2 pr-2 text-ink-tertiary">{index + 1}</td>
                 <td className="py-2 pr-2">
-                  <textarea
+                  <AutoTextarea
                     className="ui-field-standalone min-h-9 w-full py-1.5"
+                    maxHeight={72}
                     value={activity.description}
                     placeholder="Describe the activity"
                     onChange={(event) => patchActivity(index, { description: event.target.value })}
@@ -591,7 +686,7 @@ function RasicMatrixEditor({
                 {roles.map((role, roleIndex) => (
                   <td key={roleIndex} className="px-1 py-2 text-center">
                     <select
-                      className="ui-field-standalone h-9 w-14 px-1 text-center"
+                      className="ui-field-standalone w-full px-1 text-center"
                       value={activity.assignments[role] ?? ""}
                       onChange={(event) => setCell(index, role, event.target.value)}
                     >
@@ -664,6 +759,7 @@ function ChangeHistoryEditor({
             />
             <input
               type="date"
+              required
               className="ui-field-standalone"
               value={row.createdByDate}
               onChange={(event) => patch(index, "createdByDate", event.target.value)}
@@ -720,6 +816,7 @@ function ApprovalsEditor({
           />
           <input
             type="date"
+            required
             className="ui-field-standalone"
             value={row.date}
             onChange={(event) => patch(index, "date", event.target.value)}

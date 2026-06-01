@@ -26,7 +26,7 @@ import {
   TextRun,
   WidthType,
 } from "docx";
-import { RASIC_CODES, RASIC_LABELS, type Sop } from "@/domain/sop/schema";
+import { rasicLegend, type Sop } from "@/domain/sop/schema";
 
 const INK = "1A1A1A";
 const MUTED = "666666";
@@ -233,7 +233,7 @@ function buildBody(sop: Sop): Array<Paragraph | Table> {
       spacing: { after: 80 },
       children: [
         new TextRun({
-          text: RASIC_CODES.map((code) => `${code}: ${RASIC_LABELS[code]}`).join(".  ") + ".",
+          text: rasicLegend(".  ") + ".",
           italics: true,
           size: 16,
           color: MUTED,

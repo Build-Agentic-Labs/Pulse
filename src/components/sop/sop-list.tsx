@@ -7,6 +7,7 @@ import type { Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
 import { deleteSop, listSops, saveSop, sopFromExtraction } from "@/lib/sop/store";
 import { SopChrome } from "./sop-chrome";
+import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 
 function formatDate(iso: string): string {
   if (!iso) return "";
@@ -18,15 +19,16 @@ export function SopList() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sops, setSops] = useState<Sop[]>([]);
-  const [converting, setConverting] = useState(false);
+  const [convert, setConvert] = useState<{ fileName: string; phase: ConvertPhase } | null>(null);
   const [error, setError] = useState("");
+  const converting = convert !== null;
 
   useEffect(() => {
     setSops(listSops());
   }, []);
 
   async function handleUpload(file: File) {
-    setConverting(true);
+    setConvert({ fileName: file.name, phase: "working" });
     setError("");
     try {
       const body = new FormData();
@@ -38,10 +40,13 @@ export function SopList() {
       }
       const created = sopFromExtraction(payload.sop);
       saveSop(created);
+      // Flip the overlay to its completed state for a beat before opening the editor.
+      setConvert((current) => (current ? { ...current, phase: "done" } : current));
+      await new Promise((resolve) => setTimeout(resolve, 700));
       router.push(`/sops/${created.id}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Conversion failed.");
-      setConverting(false);
+      setConvert(null);
     }
   }
 
@@ -52,6 +57,8 @@ export function SopList() {
 
   return (
     <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-canvas text-ink">
+      {convert ? <SopConvertOverlay fileName={convert.fileName} phase={convert.phase} /> : null}
+
       <SopChrome />
 
       <main className="min-h-0 flex-1 overflow-auto p-3 sm:p-4">

@@ -35,6 +35,39 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const stepPhotoBucket = "step-photos";
 const STEP_PHOTO_THUMBNAIL_EDGE = 320;
 const STORAGE_SIGNED_URL_SECONDS = 60 * 60;
+// Reuse a signed URL across loads until it's within this margin of expiry. The step-photos bucket is
+// private, so every image needs a signed URL -- but objects are immutable (paths embed a unique photo
+// id), so the only reason to re-sign is token expiry. Re-signing on every planner load (egress audit)
+// changed the `?token=` each time, which is the browser's HTTP cache key, so the 1-year cacheControl
+// on the objects never took effect and every realtime-triggered reload re-downloaded every photo.
+// Caching keeps the URL stable, so each image downloads ~once per token lifetime per browser instead.
+const STORAGE_SIGNED_URL_REFRESH_MARGIN_MS = 10 * 60 * 1000;
+
+type CachedSignedUrl = { url: string; expiresAt: number };
+// Keyed by storage path. Module-scoped so it survives the planner reloads a single page session
+// triggers (where the repeated re-signing happened); a hard refresh starts cold, which is fine.
+const signedUrlCache = new Map<string, CachedSignedUrl>();
+
+// Only the browser caches: each user's tab is its own process, so a cached URL can never reach a
+// different user. On the server the module is a shared process, so we always sign fresh there -- a
+// shared cache could otherwise hand one user a URL signed under another user's RLS check.
+function cachedSignedUrl(storagePath: string): string | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  const entry = signedUrlCache.get(storagePath);
+  if (entry && entry.expiresAt - Date.now() > STORAGE_SIGNED_URL_REFRESH_MARGIN_MS) {
+    return entry.url;
+  }
+  return undefined;
+}
+
+function rememberSignedUrl(storagePath: string, url: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  signedUrlCache.set(storagePath, { url, expiresAt: Date.now() + STORAGE_SIGNED_URL_SECONDS * 1000 });
+}
 const realtimePlannerTables = [
   "products",
   "scenarios",
@@ -56,7 +89,11 @@ const realtimePlannerTables = [
 type PlannerRealtimeScope = {
   productId?: string;
   scenarioId?: string;
-  taskIds?: string[];
+  // Membership test for "does this task belong to the scenario I'm showing". Read live at event time
+  // (back it with a ref in the component) so the channel never has to be torn down when the task set
+  // changes. Task-child tables subscribe unfiltered and are narrowed here instead of by a server-side
+  // filter that would rewrite realtime.subscription on every task add/remove/reorder.
+  isTaskInScope?: (taskId: string) => boolean;
 };
 
 export type PlannerRealtimePayload = {
@@ -65,6 +102,68 @@ export type PlannerRealtimePayload = {
   new?: Record<string, unknown>;
   old?: Record<string, unknown>;
 };
+
+// Extract the owning task id from a realtime payload, for the targeted single-task refresh path.
+// Child tables key off `task_id`; the `tasks` table keys off `id`. DELETE payloads still carry these
+// because every planner table is REPLICA IDENTITY FULL, so payload.old holds the full row.
+export function taskIdFromRealtimePayload(payload: PlannerRealtimePayload): string | undefined {
+  const record = payload.new ?? payload.old;
+  if (!record) {
+    return undefined;
+  }
+
+  if (payload.table === "tasks") {
+    return typeof record.id === "string" ? record.id : undefined;
+  }
+
+  return typeof record.task_id === "string" ? record.task_id : undefined;
+}
+
+// Whether a realtime change can be absorbed by re-fetching just the owning task (loadTaskFromSupabase)
+// instead of reloading the whole scenario and re-signing every photo. Child-table rows (steps, parts,
+// events, photos, tools) leave their task intact, so ANY event -- including DELETE -- is patchable.
+// A `tasks` DELETE removes the task and cascades (dependencies, station/product rollups, selection),
+// so that case falls back to a full reload.
+export function canPatchTaskFromRealtimePayload(payload: PlannerRealtimePayload): boolean {
+  switch (payload.table) {
+    case "manufacturing_steps":
+    case "part_references":
+    case "actual_events":
+    case "step_photos":
+    case "step_tools":
+      return true;
+    case "tasks":
+      return payload.eventType !== "DELETE";
+    default:
+      return false;
+  }
+}
+
+// Decide whether a realtime change is relevant to the locally-shown scenario. Structural tables
+// (products/scenarios/stations/zones/custom_columns/tasks) are filtered server-side by product/scenario
+// scope, so they are always in scope here. Task-child tables subscribe unfiltered -- to keep the
+// channel stable across task add/remove -- so they're narrowed to the scenario's tasks at delivery.
+export function isRealtimePayloadInScope(
+  payload: PlannerRealtimePayload,
+  isTaskInScope: (taskId: string) => boolean,
+): boolean {
+  const record = payload.new ?? payload.old;
+  switch (payload.table) {
+    case "manufacturing_steps":
+    case "part_references":
+    case "actual_events":
+    case "step_photos":
+    case "step_tools":
+      return typeof record?.task_id === "string" && isTaskInScope(record.task_id);
+    case "task_dependencies":
+      return (
+        (typeof record?.successor_task_id === "string" && isTaskInScope(record.successor_task_id)) ||
+        (typeof record?.predecessor_task_id === "string" && isTaskInScope(record.predecessor_task_id))
+      );
+    default:
+      return true;
+  }
+}
 
 type StepPhotoRow = {
   id: string;
@@ -807,36 +906,59 @@ async function signedStorageUrl(supabase: SupabaseClient, storagePath?: string |
     return undefined;
   }
 
+  const cached = cachedSignedUrl(storagePath);
+  if (cached) {
+    return cached;
+  }
+
   const { data, error } = await supabase.storage
     .from(stepPhotoBucket)
     .createSignedUrl(storagePath, STORAGE_SIGNED_URL_SECONDS);
 
-  if (error) {
+  if (error || !data?.signedUrl) {
     return undefined;
   }
 
+  rememberSignedUrl(storagePath, data.signedUrl);
   return data.signedUrl;
 }
 
 async function signedStorageUrls(supabase: SupabaseClient, storagePaths: string[]) {
   const uniquePaths = [...new Set(storagePaths.filter(Boolean))];
-  if (uniquePaths.length === 0) {
-    return new Map<string, string>();
+  const resolved = new Map<string, string>();
+  const missing: string[] = [];
+
+  for (const path of uniquePaths) {
+    const cached = cachedSignedUrl(path);
+    if (cached) {
+      resolved.set(path, cached);
+    } else {
+      missing.push(path);
+    }
+  }
+
+  if (missing.length === 0) {
+    return resolved;
   }
 
   const { data, error } = await supabase.storage
     .from(stepPhotoBucket)
-    .createSignedUrls(uniquePaths, STORAGE_SIGNED_URL_SECONDS);
+    .createSignedUrls(missing, STORAGE_SIGNED_URL_SECONDS);
 
   if (error || !data) {
-    return new Map<string, string>();
+    return resolved;
   }
 
-  return new Map(
-    data
-      .filter((entry) => entry.path && entry.signedUrl)
-      .map((entry) => [String(entry.path), String(entry.signedUrl)]),
-  );
+  for (const entry of data) {
+    if (entry.path && entry.signedUrl) {
+      const path = String(entry.path);
+      const url = String(entry.signedUrl);
+      rememberSignedUrl(path, url);
+      resolved.set(path, url);
+    }
+  }
+
+  return resolved;
 }
 
 async function withSignedStepPhotoRows(supabase: SupabaseClient, rows: StepPhotoRow[] = []) {
@@ -3028,13 +3150,21 @@ export async function removeStepPhotoAttachmentObject(photo: StepPhotoAttachment
 export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtimePayload) => void, scope?: PlannerRealtimeScope) {
   const supabase = plannerClient();
   const channel = supabase.channel(`planner-state-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  const taskIds = scope?.taskIds?.filter(Boolean) ?? [];
-  const taskIdList = taskIds.map((taskId) => safeStorageSegment(taskId)).join(",");
-  const taskFilter = taskIds.length ? `task_id=in.(${taskIdList})` : undefined;
+  const isTaskInScope = scope?.isTaskInScope;
+
+  // Task-child tables are subscribed unfiltered (so adding/removing a task never re-subscribes the
+  // channel); drop here any change whose owning task isn't in the shown scenario. Structural tables
+  // are server-filtered by product/scenario scope, so they always pass.
+  function emit(payload: PlannerRealtimePayload) {
+    if (isTaskInScope && !isRealtimePayloadInScope(payload, isTaskInScope)) {
+      return;
+    }
+    onChange(payload);
+  }
 
   function listen(table: (typeof realtimePlannerTables)[number], filter?: string) {
     channel.on("postgres_changes", { event: "*", schema: "public", table, ...(filter ? { filter } : {}) }, (payload) => {
-      onChange({
+      emit({
         table,
         eventType: payload.eventType as PlannerRealtimePayload["eventType"],
         new: payload.new as Record<string, unknown> | undefined,
@@ -3048,15 +3178,18 @@ export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtime
   listen("stations", scope?.scenarioId ? `scenario_id=eq.${scope.scenarioId}` : undefined);
   listen("zones", scope?.scenarioId ? `scenario_id=eq.${scope.scenarioId}` : undefined);
   listen("tasks", scope?.scenarioId ? `scenario_id=eq.${scope.scenarioId}` : undefined);
-  listen("task_dependencies", taskIds.length ? `successor_task_id=in.(${taskIdList})` : undefined);
-  listen("manufacturing_steps", taskFilter);
-  listen("part_references", taskFilter);
-  listen("actual_events", taskFilter);
-  listen("step_photos", taskFilter);
-  listen("step_tools", taskFilter);
+  // No task-id server filter on the child tables: that list changes on every task add/remove, and a
+  // filtered postgres_changes subscription rewrites realtime.subscription each time -- the churn this
+  // change removes. emit() narrows these to the scenario via isTaskInScope instead.
+  listen("task_dependencies");
+  listen("manufacturing_steps");
+  listen("part_references");
+  listen("actual_events");
+  listen("step_photos");
+  listen("step_tools");
   if (scope?.productId) {
     channel.on("postgres_changes", { event: "*", schema: "public", table: "custom_columns", filter: `product_id=eq.${scope.productId}` }, (payload) => {
-      onChange({
+      emit({
         table: "custom_columns",
         eventType: payload.eventType as PlannerRealtimePayload["eventType"],
         new: payload.new as Record<string, unknown> | undefined,
@@ -3066,7 +3199,7 @@ export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtime
   }
   if (scope?.scenarioId) {
     channel.on("postgres_changes", { event: "*", schema: "public", table: "custom_columns", filter: `scenario_id=eq.${scope.scenarioId}` }, (payload) => {
-      onChange({
+      emit({
         table: "custom_columns",
         eventType: payload.eventType as PlannerRealtimePayload["eventType"],
         new: payload.new as Record<string, unknown> | undefined,

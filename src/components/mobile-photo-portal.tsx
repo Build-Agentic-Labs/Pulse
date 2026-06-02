@@ -40,8 +40,10 @@ import {
 import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import {
   addStepToolToSupabase,
+  canPatchTaskFromRealtimePayload,
   loadToolLibraryFromSupabase,
   loadPlannerStateFromSupabase,
+  loadTaskFromSupabase,
   removeStepToolFromSupabase,
   saveManufacturingStepToSupabase,
   savePlannerStateToSupabase,
@@ -53,6 +55,7 @@ import {
   syncStepToolsForStepToSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
   subscribePlannerStateChanges,
+  taskIdFromRealtimePayload,
   updateStepPhotoCaptionInSupabase,
   uploadToolLibraryImage,
   uploadStepPhotoAttachment,
@@ -932,6 +935,8 @@ export function MobilePhotoPortal({
   const plannerStateRef = useRef<PlannerState | null>(null);
   const selectedTaskIdRef = useRef("");
   const remoteRefreshTimerRef = useRef<number | null>(null);
+  const remoteTaskRefreshTimerRef = useRef<number | null>(null);
+  const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
   const pendingRemoteRefreshRef = useRef(false);
   const sessionHydratedRef = useRef(false);
 
@@ -974,11 +979,14 @@ export function MobilePhotoPortal({
     () => sortManufacturingSteps(selectedTask?.manufacturingSteps ?? []),
     [selectedTask],
   );
-  const realtimeTaskIds = useMemo(
-    () => plannerState?.tasks.map((task) => task.id) ?? [],
+  const realtimeTaskIdSet = useMemo(
+    () => new Set(plannerState?.tasks.map((task) => task.id) ?? []),
     [plannerState?.tasks],
   );
-  const realtimeTaskIdsKey = useMemo(() => realtimeTaskIds.join("|"), [realtimeTaskIds]);
+  // Keep the latest set readable from the (deliberately stable) realtime subscription without making
+  // it a dependency -- otherwise the channel would tear down and re-subscribe on every task add/remove.
+  const realtimeTaskIdSetRef = useRef(realtimeTaskIdSet);
+  realtimeTaskIdSetRef.current = realtimeTaskIdSet;
   const visibleSelectedTaskSteps = useMemo(
     () =>
       showNewStepForm && newStepId
@@ -1436,6 +1444,66 @@ export function MobilePhotoPortal({
     }, 350);
   }
 
+  // Targeted counterpart to refreshPlannerFromSupabase: re-fetch only the tasks a realtime change
+  // touched (photos, tools, steps, parts, events) instead of reloading the whole scenario. This is
+  // the hot path on the phone -- operators adding/removing photos -- so keeping it task-scoped avoids
+  // re-downloading and re-signing every photo in the project on each change.
+  function refreshTasksFromSupabase(taskIds: string[]) {
+    if (hasLocalSaveWork()) {
+      pendingRemoteRefreshRef.current = true;
+      return;
+    }
+
+    void Promise.all(taskIds.map((taskId) => loadTaskFromSupabase(taskId, projectId)))
+      .then((latestTasks) => {
+        if (hasLocalSaveWork()) {
+          pendingRemoteRefreshRef.current = true;
+          return;
+        }
+
+        const taskById = new Map(
+          latestTasks.filter((task): task is Task => Boolean(task)).map((task) => [task.id, task]),
+        );
+        if (taskById.size === 0) {
+          return;
+        }
+
+        setPlannerState((current) => {
+          if (!current) {
+            return current;
+          }
+          const existingTaskIds = new Set(current.tasks.map((task) => task.id));
+          const insertedTasks = [...taskById.values()].filter((task) => !existingTaskIds.has(task.id));
+          const mergedTasks = current.tasks.map((task) => taskById.get(task.id) ?? task);
+          return { ...current, tasks: [...mergedTasks, ...insertedTasks] };
+        });
+        setSaveState("saved");
+      })
+      .catch(() => {
+        requestRemotePlannerRefresh();
+      });
+  }
+
+  function requestRemoteTaskRefresh(taskId: string) {
+    if (hasLocalSaveWork()) {
+      pendingRemoteRefreshRef.current = true;
+      return;
+    }
+
+    pendingRemoteTaskIdsRef.current.add(taskId);
+
+    if (remoteTaskRefreshTimerRef.current) {
+      window.clearTimeout(remoteTaskRefreshTimerRef.current);
+    }
+
+    remoteTaskRefreshTimerRef.current = window.setTimeout(() => {
+      remoteTaskRefreshTimerRef.current = null;
+      const taskIds = [...pendingRemoteTaskIdsRef.current];
+      pendingRemoteTaskIdsRef.current.clear();
+      refreshTasksFromSupabase(taskIds);
+    }, 250);
+  }
+
   function flushDeferredRemoteRefresh() {
     if (!pendingRemoteRefreshRef.current || hasLocalSaveWork()) {
       return;
@@ -1694,13 +1762,19 @@ export function MobilePhotoPortal({
     }
 
     const unsubscribe = subscribePlannerStateChanges(
-      () => {
+      (payload) => {
+        const taskId = taskIdFromRealtimePayload(payload);
+        if (taskId && canPatchTaskFromRealtimePayload(payload)) {
+          requestRemoteTaskRefresh(taskId);
+          return;
+        }
+
         requestRemotePlannerRefresh();
       },
       {
         productId: plannerState.product.id,
         scenarioId: plannerState.scenario.id,
-        taskIds: realtimeTaskIds,
+        isTaskInScope: (taskId) => realtimeTaskIdSetRef.current.has(taskId),
       },
     );
 
@@ -1708,9 +1782,13 @@ export function MobilePhotoPortal({
       if (remoteRefreshTimerRef.current) {
         window.clearTimeout(remoteRefreshTimerRef.current);
       }
+      if (remoteTaskRefreshTimerRef.current) {
+        window.clearTimeout(remoteTaskRefreshTimerRef.current);
+        remoteTaskRefreshTimerRef.current = null;
+      }
       unsubscribe();
     };
-  }, [plannerState?.product.id, plannerState?.scenario.id, realtimeTaskIdsKey]);
+  }, [plannerState?.product.id, plannerState?.scenario.id]);
 
   function refreshWriteLock() {
     saveInFlightRef.current =

@@ -153,6 +153,7 @@ import {
 } from "@/domain/task-scheduling";
 import {
   addStepToolToSupabase,
+  canPatchTaskFromRealtimePayload,
   createPlannerSupabaseClient,
   deleteToolLibraryFromSupabase,
   loadPlannerStateFromSupabase,
@@ -166,8 +167,8 @@ import {
   saveTasksToSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
   subscribePlannerStateChanges,
+  taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
-  type PlannerRealtimePayload,
   type SaveState,
   type ToolLibraryItem,
 } from "@/domain/supabase-planner";
@@ -5201,11 +5202,14 @@ export function LineWorkspace({
     () => buildProjectToolRegistry(derivedState.tasks, toolLibraryItems),
     [derivedState.tasks, toolLibraryItems],
   );
-  const realtimeTaskIds = useMemo(
-    () => derivedState.tasks.map((task) => task.id),
+  const realtimeTaskIdSet = useMemo(
+    () => new Set(derivedState.tasks.map((task) => task.id)),
     [derivedState.tasks],
   );
-  const realtimeTaskIdsKey = useMemo(() => realtimeTaskIds.join("|"), [realtimeTaskIds]);
+  // Keep the latest set readable from the (deliberately stable) realtime subscription without making
+  // it a dependency -- otherwise the channel would tear down and re-subscribe on every task add/remove.
+  const realtimeTaskIdSetRef = useRef(realtimeTaskIdSet);
+  realtimeTaskIdSetRef.current = realtimeTaskIdSet;
 
   const [toolLibraryLoaded, setToolLibraryLoaded] = useState(false);
   useEffect(() => {
@@ -6219,33 +6223,6 @@ export function LineWorkspace({
     void persistPlannerState(latestDerivedStateRef.current);
   }
 
-  function taskIdFromRealtimePayload(payload: PlannerRealtimePayload) {
-    const record = payload.new ?? payload.old;
-    if (!record) {
-      return undefined;
-    }
-
-    if (payload.table === "tasks") {
-      return typeof record.id === "string" ? record.id : undefined;
-    }
-
-    return typeof record.task_id === "string" ? record.task_id : undefined;
-  }
-
-  function canPatchTaskFromRealtimePayload(payload: PlannerRealtimePayload) {
-    return (
-      payload.eventType !== "DELETE" &&
-      (
-        payload.table === "tasks" ||
-        payload.table === "manufacturing_steps" ||
-        payload.table === "part_references" ||
-        payload.table === "actual_events" ||
-        payload.table === "step_photos" ||
-        payload.table === "step_tools"
-      )
-    );
-  }
-
   function refreshTasksFromSupabase(taskIds: string[]) {
     if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
@@ -6659,7 +6636,7 @@ export function LineWorkspace({
       {
         productId: derivedState.product.id,
         scenarioId: derivedState.scenario.id,
-        taskIds: realtimeTaskIds,
+        isTaskInScope: (taskId) => realtimeTaskIdSetRef.current.has(taskId),
       },
     );
 
@@ -6681,7 +6658,7 @@ export function LineWorkspace({
       }
       unsubscribe();
     };
-  }, [derivedState.product.id, derivedState.scenario.id, realtimeTaskIdsKey, hasLoadedRemoteState]);
+  }, [derivedState.product.id, derivedState.scenario.id, hasLoadedRemoteState]);
 
   useEffect(() => {
     if (!SIMULATION_ENABLED || !isPlaying) {

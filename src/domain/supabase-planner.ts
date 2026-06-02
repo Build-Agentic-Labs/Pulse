@@ -216,6 +216,11 @@ function mapProduct(row: Record<string, unknown>): Product {
   };
 }
 
+// Exact columns consumed by mapWorkspace/mapProject -- avoids select('*') on the hot
+// sidebar load path (audit #9). Keep in sync with the mappers below.
+const WORKSPACE_COLUMNS = "id, name, owner_id, created_at, updated_at";
+const PROJECT_COLUMNS = "id, workspace_id, name, description, status, created_by, created_at, updated_at";
+
 function mapWorkspace(row: Record<string, unknown>): Workspace {
   return {
     id: String(row.id),
@@ -592,8 +597,25 @@ function documentTypeCodeRow(documentType: DocumentTypeCode) {
   };
 }
 
+// PostgREST `.or()` filters are raw strings where comma, parens, and whitespace are
+// structural. App IDs are UUIDs / safeStorageSegment output and never contain these, so any
+// occurrence means a malformed or hostile value -- reject it rather than let it alter the query.
+function assertSafeOrFilterValue(value: string): string {
+  if (!value || /[(),\s]/.test(value)) {
+    throw new Error(`Unsafe identifier in query filter: ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
 function documentTypeScopeFilter(product: Pick<Product, "id" | "projectId">) {
-  return product.projectId ? `project_id.eq.${product.projectId},product_id.eq.${product.id}` : `product_id.eq.${product.id}`;
+  const productId = assertSafeOrFilterValue(String(product.id));
+  return product.projectId
+    ? `project_id.eq.${assertSafeOrFilterValue(product.projectId)},product_id.eq.${productId}`
+    : `product_id.eq.${productId}`;
+}
+
+function customColumnScopeFilter(productId: string, scenarioId: string): string {
+  return `product_id.eq.${assertSafeOrFilterValue(productId)},scenario_id.eq.${assertSafeOrFilterValue(scenarioId)}`;
 }
 
 function taskRow(task: Task) {
@@ -1359,8 +1381,8 @@ export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGrou
   // owner with no module restrictions, regardless of membership rows.
   if (isSuperAdmin) {
     const [workspaces, projects] = await Promise.all([
-      throwIfError(supabase.from("workspaces").select("*").order("created_at")),
-      throwIfError(supabase.from("projects").select("*").order("created_at")),
+      throwIfError(supabase.from("workspaces").select(WORKSPACE_COLUMNS).order("created_at")),
+      throwIfError(supabase.from("projects").select(PROJECT_COLUMNS).order("created_at")),
     ]);
 
     const projectsByWorkspaceId = new Map<string, Project[]>();
@@ -1398,8 +1420,8 @@ export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGrou
   }
 
   const [workspaces, projects] = await Promise.all([
-    throwIfError(supabase.from("workspaces").select("*").in("id", workspaceIds).order("created_at")),
-    throwIfError(supabase.from("projects").select("*").in("workspace_id", workspaceIds).order("created_at")),
+    throwIfError(supabase.from("workspaces").select(WORKSPACE_COLUMNS).in("id", workspaceIds).order("created_at")),
+    throwIfError(supabase.from("projects").select(PROJECT_COLUMNS).in("workspace_id", workspaceIds).order("created_at")),
   ]);
 
   const membershipByWorkspaceId = new Map(
@@ -1760,7 +1782,7 @@ export async function loadPlannerStateWithProjectFromSupabase(projectId?: string
       supabase
         .from("custom_columns")
         .select("*")
-        .or(`product_id.eq.${product.id},scenario_id.eq.${scenario.id}`)
+        .or(customColumnScopeFilter(String(product.id), String(scenario.id)))
         .order("created_at"),
     ),
   ]);
@@ -1874,7 +1896,7 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
       supabase
         .from("custom_columns")
         .select("id")
-        .or(`product_id.eq.${state.product.id},scenario_id.eq.${state.scenario.id}`),
+        .or(customColumnScopeFilter(String(state.product.id), String(state.scenario.id))),
     ),
   ]);
 
@@ -2005,7 +2027,7 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
       supabase
         .from("custom_columns")
         .select("id")
-        .or(`product_id.eq.${state.product.id},scenario_id.eq.${state.scenario.id}`),
+        .or(customColumnScopeFilter(String(state.product.id), String(state.scenario.id))),
     ),
   ]);
 

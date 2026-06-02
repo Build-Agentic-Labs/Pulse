@@ -111,8 +111,14 @@ async function main() {
       is_super_admin_fn: (await client.query(
         "select exists(select 1 from pg_proc where proname = 'is_super_admin') as ok",
       )).rows[0]?.ok,
+      // Generic presence check -- at least one superadmin exists. Avoids embedding a specific
+      // personal email in the applier (audit #5). Override the expected email via
+      // SUPERADMIN_EMAIL if you want to assert a particular seed in CI.
       superadmin_seeded: (await client.query(
-        "select exists(select 1 from public.platform_admins where email = 'rlopez@anacorp.com') as ok",
+        process.env.SUPERADMIN_EMAIL
+          ? "select exists(select 1 from public.platform_admins where email = $1) as ok"
+          : "select (count(*) > 0) as ok from public.platform_admins",
+        process.env.SUPERADMIN_EMAIL ? [process.env.SUPERADMIN_EMAIL.trim().toLowerCase()] : undefined,
       )).rows[0]?.ok,
       members_modules_column: (await client.query(
         "select exists(select 1 from information_schema.columns where table_name='workspace_members' and column_name='modules') as ok",

@@ -2164,31 +2164,27 @@ export async function saveTaskAndManufacturingStepToSupabase(task: Task, step: M
 }
 
 export async function saveManufacturingStepToSupabase(taskId: string, step: ManufacturingStep, projectId?: string) {
-  const supabase = plannerClient();
-  await assertTaskInProject(supabase, taskId, projectId);
-  const existingSteps =
-    (await throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", taskId).order("sequence"))) ?? [];
-  const existingDomainSteps = existingSteps.map(mapManufacturingStepRecord);
-  const nextSteps = normalizeManufacturingStepSequences(
-    existingDomainSteps.some((candidate) => candidate.id === step.id)
-      ? existingDomainSteps.map((candidate) => (candidate.id === step.id ? { ...candidate, ...step } : candidate))
-      : [...existingDomainSteps, step],
-  );
-  const sequenceOccupied =
-    new Set(existingSteps.map((candidate) => num(candidate.sequence))).size !== existingSteps.length ||
-    existingSteps.some((candidate) => {
-      const nextStep = nextSteps.find((item) => item.id === String(candidate.id));
-      return nextStep && num(candidate.sequence) !== nextStep.sequence;
-    });
-
-  if (sequenceOccupied) {
-    await bumpManufacturingStepSequences(
-      supabase,
-      existingSteps.map((candidate) => String(candidate.id)),
-    );
+  // Merge the incoming step into the task's current step set and persist via the version-checked,
+  // retry-on-conflict procedure path. The previous standalone read-then-upsert had a lost-update
+  // window (audit #12): a concurrent write between the read and the upsert was silently
+  // overwritten. saveProcedureTaskUpdateToSupabase performs per-step version checks and, on a
+  // conflict, reloads the latest server state and re-applies -- so concurrent step edits to the
+  // same task serialize instead of clobbering each other.
+  const task = await loadTaskFromSupabase(taskId, projectId);
+  if (!task) {
+    throw new Error("Task not found or you do not have access to it.");
   }
 
-  await throwIfError(supabase.from("manufacturing_steps").upsert(nextSteps.map((candidate) => manufacturingStepRow(taskId, candidate))));
+  const existingSteps = task.manufacturingSteps ?? [];
+  const mergedSteps = existingSteps.some((candidate) => candidate.id === step.id)
+    ? existingSteps.map((candidate) =>
+        // Apply the edit but keep the freshly-loaded server version so the optimistic check
+        // (and its retry) is anchored to current state, not a stale client value.
+        candidate.id === step.id ? { ...candidate, ...step, version: candidate.version } : candidate,
+      )
+    : [...existingSteps, step];
+
+  await saveProcedureTaskUpdateToSupabase({ ...task, manufacturingSteps: mergedSteps }, [], projectId);
 }
 
 type TaskFieldPatch = Partial<

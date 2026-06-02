@@ -22,7 +22,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { applyCalculatedFields, formatMinutes, getTopLevelTasks } from "@/domain/calculations";
-import { initialPlannerState } from "@/domain/seed";
+import { emptyPlannerState } from "@/domain/empty-planner-state";
 import {
   getManufacturingStepCheckSet,
   manufacturingStepCheckOptions,
@@ -1628,9 +1628,9 @@ export function MobilePhotoPortal({
             return;
           }
 
-          setPlannerState(initialPlannerState);
+          setPlannerState(emptyPlannerState);
           setSelectedTaskId(
-            getTopLevelTasks(initialPlannerState.tasks)
+            getTopLevelTasks(emptyPlannerState.tasks)
               .filter((task) => task.rowType === "task")
               .sort(compareTasksByWbs)[0]?.id ?? "",
           );

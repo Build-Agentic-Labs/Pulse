@@ -62,7 +62,7 @@ import { buildOperatorAssignmentsFromIePlan } from "@/domain/operator-allocation
 import type { IeSmartAllocationPlan, IeSmartAllocationRequest } from "@/domain/ie-smart-allocation";
 import { getTaskOperatorIds, getTaskOperatorResetPatch, syncTaskOperatorCount } from "@/domain/operator-assignments";
 import { buildMarkdownReport, buildStationSetupDocumentHtml } from "@/domain/report";
-import { initialPlannerState } from "@/domain/seed";
+import { emptyPlannerState } from "@/domain/empty-planner-state";
 import { readCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import { buildStepPhotoAttachment } from "@/lib/step-photo-image";
 import { buildPlaybackEvents } from "@/domain/playback";
@@ -5045,13 +5045,13 @@ export function LineWorkspace({
       activeZoneId: params.get("zone") ?? undefined,
     };
   }, [plannerQueryString]);
-  const [plannerState, setPlannerState] = useState<PlannerState>(initialPlannerState);
+  const [plannerState, setPlannerState] = useState<PlannerState>(emptyPlannerState);
   const [activeModule, setActiveModule] = useState("dashboard");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [setupSection, setSetupSection] = useState<SetupSection>("product");
-  const [selectedTaskId, setSelectedTaskId] = useState(initialPlannerState.tasks[0]?.id);
+  const [selectedTaskId, setSelectedTaskId] = useState(emptyPlannerState.tasks[0]?.id);
   const [focusedProcedureStepId, setFocusedProcedureStepId] = useState<string | undefined>();
-  const [selectedStationId, setSelectedStationId] = useState(initialPlannerState.stations[0]?.id);
+  const [selectedStationId, setSelectedStationId] = useState(emptyPlannerState.stations[0]?.id);
   const [activeZoneId, setActiveZoneId] = useState<string>();
   const [currentMinute, setCurrentMinute] = useState(0);
   const [speed, setSpeed] = useState(5);
@@ -6560,10 +6560,10 @@ export function LineWorkspace({
           setActiveModule(initialUrlWorkspaceSnapshot.activeModule);
         }
         const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
-          ? initialPlannerState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
+          ? emptyPlannerState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
           : undefined;
         const urlStation = initialUrlWorkspaceSnapshot.selectedStationId
-          ? initialPlannerState.stations.find((station) => station.id === initialUrlWorkspaceSnapshot.selectedStationId)
+          ? emptyPlannerState.stations.find((station) => station.id === initialUrlWorkspaceSnapshot.selectedStationId)
           : undefined;
         if (urlTask) {
           setSelectedTaskId(urlTask.id);

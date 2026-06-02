@@ -2385,16 +2385,15 @@ export async function syncStepToolsForStepToSupabase(
 }
 
 export async function loadToolLibraryFromSupabase(projectId?: string): Promise<ToolLibraryItem[]> {
-  const supabase = plannerClient();
-  let query = supabase.from("tool_library").select("*").order("tool_name");
-
-  if (projectId) {
-    query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
-  } else {
-    query = query.is("project_id", null);
+  // Tools are project-scoped; with no project context there is no library to load.
+  if (!projectId) {
+    return [];
   }
 
-  const rows = await throwIfError(query);
+  const supabase = plannerClient();
+  const rows = await throwIfError(
+    supabase.from("tool_library").select("*").eq("project_id", projectId).order("tool_name"),
+  );
   const signedRows = await withSignedToolLibraryRows(supabase, (rows ?? []) as ToolLibraryRow[]);
   return signedRows.map(mapToolLibraryRow);
 }
@@ -2409,13 +2408,15 @@ export async function uploadToolLibraryImage(
     throw new Error("Add a tool name before uploading an image.");
   }
 
+  if (!project) {
+    throw new Error("Select a project before adding tools to the library.");
+  }
+
   const supabase = plannerClient();
-  const projectId = project?.projectId;
+  const projectId = project.projectId;
   const blob = await dataUrlToBlob(photo.dataUrl);
   const extension = photo.contentType?.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
-  const pathSegments = project
-    ? ["workspaces", project.workspaceId, "projects", project.projectId, "tool-library", `${toolLibraryId(tool, projectId)}.${extension}`]
-    : ["tool-library", `${toolLibraryId(tool)}.${extension}`];
+  const pathSegments = ["workspaces", project.workspaceId, "projects", project.projectId, "tool-library", `${toolLibraryId(tool, projectId)}.${extension}`];
   const storagePath = pathSegments.map(safeStorageSegment).join("/");
 
   await throwIfError(
@@ -2428,7 +2429,7 @@ export async function uploadToolLibraryImage(
 
   const row = {
     id: toolLibraryId(tool, projectId),
-    project_id: projectId ?? null,
+    project_id: projectId,
     tool_name: tool,
     image_url: stableStoragePublicUrl(storagePath),
     storage_path: storagePath,
@@ -2450,8 +2451,12 @@ export async function upsertToolLibraryMetadata(input: {
     throw new Error("Tool name is required.");
   }
 
-  const supabase = plannerClient();
   const projectId = input.projectId;
+  if (!projectId) {
+    throw new Error("Select a project before saving tools to the library.");
+  }
+
+  const supabase = plannerClient();
   const previousName = input.previousToolName?.trim();
   let existing: ToolLibraryRow | null = null;
 
@@ -2472,7 +2477,7 @@ export async function upsertToolLibraryMetadata(input: {
 
   const row = {
     id: toolLibraryId(toolName, projectId),
-    project_id: projectId ?? null,
+    project_id: projectId,
     tool_name: toolName,
     category: input.category?.trim() || null,
     image_url: existing?.image_url ?? null,
@@ -2485,14 +2490,14 @@ export async function upsertToolLibraryMetadata(input: {
 }
 
 export async function deleteToolLibraryFromSupabase(id: string, projectId?: string) {
-  const supabase = plannerClient();
-  let query = supabase.from("tool_library").delete().eq("id", id);
-
-  if (projectId) {
-    query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
+  if (!projectId) {
+    throw new Error("Select a project before removing tools from the library.");
   }
 
-  await throwIfError(query);
+  const supabase = plannerClient();
+  await throwIfError(
+    supabase.from("tool_library").delete().eq("id", id).eq("project_id", projectId),
+  );
 }
 
 export async function softDeleteStepPhotoAttachmentFromSupabase(photoId: string, taskId?: string, projectId?: string) {

@@ -253,6 +253,34 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     }
   }
 
+  async function handleMicrosoftSignIn() {
+    setIsSubmitting(true);
+    setMessage("");
+
+    try {
+      // Azure (Entra) provider is configured in the Supabase dashboard. The browser
+      // redirects to Microsoft, back to Supabase's /auth/v1/callback, then to redirectTo,
+      // where the global Supabase client picks up the session (detectSessionInUrl) and
+      // onAuthStateChange fires SIGNED_IN. redirectTo must be allowlisted in Supabase
+      // (Authentication -> URL Configuration).
+      const redirectTo = typeof window !== "undefined" ? window.location.origin : undefined;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "azure",
+        options: {
+          scopes: "openid email profile",
+          redirectTo,
+        },
+      });
+      if (error) {
+        throw error;
+      }
+      // Success navigates away to Microsoft; leave isSubmitting set so the button stays busy.
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to start Microsoft sign-in.");
+      setIsSubmitting(false);
+    }
+  }
+
   async function handleCreateAccount(email: string, password: string) {
     setIsSubmitting(true);
     setMessage("");
@@ -294,6 +322,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
         isSubmitting={isSubmitting}
         onSignIn={handleSignIn}
         onCreateAccount={handleCreateAccount}
+        onMicrosoftSignIn={handleMicrosoftSignIn}
       />
     );
   }

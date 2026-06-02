@@ -75,6 +75,17 @@ export function AppLoadingShell({
   );
 }
 
+function MicrosoftLogo() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true" focusable="false">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
+  );
+}
+
 export function AuthFormPanel({
   eyebrow = "Pulse",
   title,
@@ -82,6 +93,7 @@ export function AuthFormPanel({
   isSubmitting,
   onSignIn,
   onCreateAccount,
+  onMicrosoftSignIn,
 }: {
   eyebrow?: string;
   title: string;
@@ -89,6 +101,7 @@ export function AuthFormPanel({
   isSubmitting: boolean;
   onSignIn: (email: string, password: string) => void;
   onCreateAccount: (email: string, password: string) => void;
+  onMicrosoftSignIn?: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -164,6 +177,18 @@ export function AuthFormPanel({
                 <span className="ui-auth-divider-label">Or</span>
                 <span className="ui-auth-divider-line" aria-hidden="true" />
               </div>
+
+              {onMicrosoftSignIn ? (
+                <button
+                  className="ui-btn-ghost font-mono h-11 w-full gap-2.5 disabled:opacity-40"
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => onMicrosoftSignIn()}
+                >
+                  <MicrosoftLogo />
+                  Continue with Microsoft
+                </button>
+              ) : null}
 
               <button
                 className="ui-btn-ghost font-mono h-11 w-full disabled:opacity-40"

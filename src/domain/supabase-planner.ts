@@ -607,15 +607,19 @@ function assertSafeOrFilterValue(value: string): string {
   return value;
 }
 
+// Build a PostgREST `.or()` disjunction from column/value pairs, validating every value.
+function buildOrFilter(...pairs: ReadonlyArray<readonly [column: string, value: string]>): string {
+  return pairs.map(([column, value]) => `${column}.eq.${assertSafeOrFilterValue(value)}`).join(",");
+}
+
 function documentTypeScopeFilter(product: Pick<Product, "id" | "projectId">) {
-  const productId = assertSafeOrFilterValue(String(product.id));
   return product.projectId
-    ? `project_id.eq.${assertSafeOrFilterValue(product.projectId)},product_id.eq.${productId}`
-    : `product_id.eq.${productId}`;
+    ? buildOrFilter(["project_id", product.projectId], ["product_id", String(product.id)])
+    : buildOrFilter(["product_id", String(product.id)]);
 }
 
 function customColumnScopeFilter(productId: string, scenarioId: string): string {
-  return `product_id.eq.${assertSafeOrFilterValue(productId)},scenario_id.eq.${assertSafeOrFilterValue(scenarioId)}`;
+  return buildOrFilter(["product_id", productId], ["scenario_id", scenarioId]);
 }
 
 function taskRow(task: Task) {
@@ -2406,6 +2410,14 @@ export async function syncStepToolsForStepToSupabase(
   }
 }
 
+// Tools are project-scoped; every tool-library mutation requires a project context.
+function requireToolLibraryProjectId(projectId: string | undefined, action: string): string {
+  if (!projectId) {
+    throw new Error(`Select a project before ${action} the library.`);
+  }
+  return projectId;
+}
+
 export async function loadToolLibraryFromSupabase(projectId?: string): Promise<ToolLibraryItem[]> {
   // Tools are project-scoped; with no project context there is no library to load.
   if (!projectId) {
@@ -2473,10 +2485,7 @@ export async function upsertToolLibraryMetadata(input: {
     throw new Error("Tool name is required.");
   }
 
-  const projectId = input.projectId;
-  if (!projectId) {
-    throw new Error("Select a project before saving tools to the library.");
-  }
+  const projectId = requireToolLibraryProjectId(input.projectId, "saving tools to");
 
   const supabase = plannerClient();
   const previousName = input.previousToolName?.trim();
@@ -2512,13 +2521,10 @@ export async function upsertToolLibraryMetadata(input: {
 }
 
 export async function deleteToolLibraryFromSupabase(id: string, projectId?: string) {
-  if (!projectId) {
-    throw new Error("Select a project before removing tools from the library.");
-  }
-
+  const ensuredProjectId = requireToolLibraryProjectId(projectId, "removing tools from");
   const supabase = plannerClient();
   await throwIfError(
-    supabase.from("tool_library").delete().eq("id", id).eq("project_id", projectId),
+    supabase.from("tool_library").delete().eq("id", id).eq("project_id", ensuredProjectId),
   );
 }
 

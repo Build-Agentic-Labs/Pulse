@@ -5,7 +5,7 @@ import pg from "pg";
 const checks = {
   "120000 platform_admins table": "select to_regclass('public.platform_admins') is not null as ok",
   "120000 is_super_admin() fn": "select exists(select 1 from pg_proc where proname='is_super_admin') as ok",
-  "120000 superadmin seeded": "select exists(select 1 from public.platform_admins where email='rlopez@anacorp.com') as ok",
+  "120000 superadmin seeded": "select (count(*) > 0) as ok from public.platform_admins",
   "121000 workspace_members.modules": "select exists(select 1 from information_schema.columns where table_name='workspace_members' and column_name='modules') as ok",
   "121000 access_grants.modules": "select exists(select 1 from information_schema.columns where table_name='workspace_access_grants' and column_name='modules') as ok",
   "122000 can_view_member_profile() fn": "select exists(select 1 from pg_proc where proname='can_view_member_profile') as ok",

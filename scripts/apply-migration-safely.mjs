@@ -15,7 +15,7 @@
 //   node --env-file=.env.local scripts/apply-migration-safely.mjs <migration1.sql> [migration2.sql ...]
 //   node --env-file=.env.local scripts/apply-migration-safely.mjs --smoke "has_project_access('x','view'::access_level)" 20260601125000_*.sql
 
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 

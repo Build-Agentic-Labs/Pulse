@@ -15,7 +15,6 @@ describe("canPatchTaskFromRealtimePayload", () => {
   const childTables = [
     "manufacturing_steps",
     "part_references",
-    "actual_events",
     "step_photos",
     "step_tools",
   ] as const;
@@ -25,6 +24,12 @@ describe("canPatchTaskFromRealtimePayload", () => {
       for (const eventType of ["INSERT", "UPDATE", "DELETE"] as const) {
         expect(canPatchTaskFromRealtimePayload({ table, eventType })).toBe(true);
       }
+    }
+  });
+
+  it("does not patch actual_events -- they live in PlannerState.actualEvents, not the Task, so a task refresh can't reconcile them", () => {
+    for (const eventType of ["INSERT", "UPDATE", "DELETE"] as const) {
+      expect(canPatchTaskFromRealtimePayload({ table: "actual_events", eventType })).toBe(false);
     }
   });
 
@@ -92,19 +97,22 @@ describe("isRealtimePayloadInScope", () => {
     ).toBe(false);
   });
 
-  it("keeps a dependency change if either endpoint is in scope", () => {
+  it("keeps a dependency change only when the successor is in scope (mirrors the successor-keyed load query)", () => {
+    // successor in scope -> relevant, regardless of predecessor.
     expect(
       isRealtimePayloadInScope(
         { table: "task_dependencies", eventType: "INSERT", new: { successor_task_id: "task-1", predecessor_task_id: "task-9" } },
         isTaskInScope,
       ),
     ).toBe(true);
+    // successor out of scope -> not relevant even if the predecessor is in scope; a predecessor-only
+    // change can't be reflected by the successor-keyed reload, so it must not force one.
     expect(
       isRealtimePayloadInScope(
         { table: "task_dependencies", eventType: "INSERT", new: { successor_task_id: "task-8", predecessor_task_id: "task-2" } },
         isTaskInScope,
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isRealtimePayloadInScope(
         { table: "task_dependencies", eventType: "INSERT", new: { successor_task_id: "task-8", predecessor_task_id: "task-9" } },

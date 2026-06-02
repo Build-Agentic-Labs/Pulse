@@ -44,8 +44,9 @@ const STORAGE_SIGNED_URL_SECONDS = 60 * 60;
 const STORAGE_SIGNED_URL_REFRESH_MARGIN_MS = 10 * 60 * 1000;
 
 type CachedSignedUrl = { url: string; expiresAt: number };
-// Keyed by storage path. Module-scoped so it survives the planner reloads a single page session
-// triggers (where the repeated re-signing happened); a hard refresh starts cold, which is fine.
+// Keyed by storage path; only ever holds immutable paths (callers opt in via `cache: true` -- see
+// signedStorageUrl). Module-scoped so it survives the planner reloads a single page session triggers
+// (where the repeated re-signing happened); a hard refresh starts cold, which is fine.
 const signedUrlCache = new Map<string, CachedSignedUrl>();
 
 // Only the browser caches: each user's tab is its own process, so a cached URL can never reach a
@@ -120,15 +121,17 @@ export function taskIdFromRealtimePayload(payload: PlannerRealtimePayload): stri
 }
 
 // Whether a realtime change can be absorbed by re-fetching just the owning task (loadTaskFromSupabase)
-// instead of reloading the whole scenario and re-signing every photo. Child-table rows (steps, parts,
-// events, photos, tools) leave their task intact, so ANY event -- including DELETE -- is patchable.
-// A `tasks` DELETE removes the task and cascades (dependencies, station/product rollups, selection),
-// so that case falls back to a full reload.
+// instead of reloading the whole scenario and re-signing every photo. Rows that live ON the task
+// (steps, parts, photos, tools) leave their task intact, so ANY event -- including DELETE -- is
+// patchable. NOTE: actual_events is deliberately NOT patchable -- those rows load into the top-level
+// PlannerState.actualEvents array, not the Task, so loadTaskFromSupabase can't reconcile them; they
+// must full-reload (a stale actualEvents can otherwise be re-persisted on save). A `tasks` DELETE
+// removes the task and cascades (dependencies, rollups, selection), so it also falls back to a full
+// reload.
 export function canPatchTaskFromRealtimePayload(payload: PlannerRealtimePayload): boolean {
   switch (payload.table) {
     case "manufacturing_steps":
     case "part_references":
-    case "actual_events":
     case "step_photos":
     case "step_tools":
       return true;
@@ -143,6 +146,8 @@ export function canPatchTaskFromRealtimePayload(payload: PlannerRealtimePayload)
 // (products/scenarios/stations/zones/custom_columns/tasks) are filtered server-side by product/scenario
 // scope, so they are always in scope here. Task-child tables subscribe unfiltered -- to keep the
 // channel stable across task add/remove -- so they're narrowed to the scenario's tasks at delivery.
+// This is a relevance filter, not an authorization boundary: RLS still gates the actual row reads
+// (loadTaskFromSupabase / loadPlannerStateFromSupabase), so a missed narrowing leaks no data.
 export function isRealtimePayloadInScope(
   payload: PlannerRealtimePayload,
   isTaskInScope: (taskId: string) => boolean,
@@ -156,10 +161,10 @@ export function isRealtimePayloadInScope(
     case "step_tools":
       return typeof record?.task_id === "string" && isTaskInScope(record.task_id);
     case "task_dependencies":
-      return (
-        (typeof record?.successor_task_id === "string" && isTaskInScope(record.successor_task_id)) ||
-        (typeof record?.predecessor_task_id === "string" && isTaskInScope(record.predecessor_task_id))
-      );
+      // Dependencies load by successor_task_id (loadTaskFromSupabase / loadProjectPlannerData), so a
+      // change is only relevant when the successor is in scope -- this mirrors the server filter this
+      // narrowing replaced. A predecessor-only match would force a full reload that can't reflect it.
+      return typeof record?.successor_task_id === "string" && isTaskInScope(record.successor_task_id);
     default:
       return true;
   }
@@ -901,14 +906,24 @@ function mapStepPhotoRecord(row: Record<string, unknown>): StepPhotoAttachment {
   };
 }
 
-async function signedStorageUrl(supabase: SupabaseClient, storagePath?: string | null) {
+// Pass `cache: true` ONLY for immutable storage paths -- step-photo paths embed a unique photo id, so
+// the bytes at a path never change and a reused signed URL is always correct. Tool-library images are
+// keyed by tool name and re-uploaded with upsert (same path, new bytes), so caching their URL would
+// serve the stale image after a replace; they must use the default (uncached) path.
+async function signedStorageUrl(
+  supabase: SupabaseClient,
+  storagePath?: string | null,
+  { cache = false }: { cache?: boolean } = {},
+) {
   if (!storagePath) {
     return undefined;
   }
 
-  const cached = cachedSignedUrl(storagePath);
-  if (cached) {
-    return cached;
+  if (cache) {
+    const hit = cachedSignedUrl(storagePath);
+    if (hit) {
+      return hit;
+    }
   }
 
   const { data, error } = await supabase.storage
@@ -919,19 +934,25 @@ async function signedStorageUrl(supabase: SupabaseClient, storagePath?: string |
     return undefined;
   }
 
-  rememberSignedUrl(storagePath, data.signedUrl);
+  if (cache) {
+    rememberSignedUrl(storagePath, data.signedUrl);
+  }
   return data.signedUrl;
 }
 
-async function signedStorageUrls(supabase: SupabaseClient, storagePaths: string[]) {
+async function signedStorageUrls(
+  supabase: SupabaseClient,
+  storagePaths: string[],
+  { cache = false }: { cache?: boolean } = {},
+) {
   const uniquePaths = [...new Set(storagePaths.filter(Boolean))];
   const resolved = new Map<string, string>();
   const missing: string[] = [];
 
   for (const path of uniquePaths) {
-    const cached = cachedSignedUrl(path);
-    if (cached) {
-      resolved.set(path, cached);
+    const hit = cache ? cachedSignedUrl(path) : undefined;
+    if (hit) {
+      resolved.set(path, hit);
     } else {
       missing.push(path);
     }
@@ -953,7 +974,9 @@ async function signedStorageUrls(supabase: SupabaseClient, storagePaths: string[
     if (entry.path && entry.signedUrl) {
       const path = String(entry.path);
       const url = String(entry.signedUrl);
-      rememberSignedUrl(path, url);
+      if (cache) {
+        rememberSignedUrl(path, url);
+      }
       resolved.set(path, url);
     }
   }
@@ -965,6 +988,7 @@ async function withSignedStepPhotoRows(supabase: SupabaseClient, rows: StepPhoto
   const signedUrls = await signedStorageUrls(
     supabase,
     rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
+    { cache: true },
   );
 
   return rows.map((row) => ({
@@ -3105,7 +3129,7 @@ export async function uploadStepPhotoAttachment(
   );
 
   const publicUrl = stableStoragePublicUrl(storagePath);
-  const signedUrl = await signedStorageUrl(supabase, storagePath);
+  const signedUrl = await signedStorageUrl(supabase, storagePath, { cache: true });
   let thumbnailUrl: string | undefined;
   let thumbnailStoragePath: string | undefined;
 
@@ -3119,7 +3143,7 @@ export async function uploadStepPhotoAttachment(
         upsert: true,
       }),
     );
-    thumbnailUrl = await signedStorageUrl(supabase, thumbnailStoragePath);
+    thumbnailUrl = await signedStorageUrl(supabase, thumbnailStoragePath, { cache: true });
   }
 
   const uploadedPhoto = {
@@ -3188,24 +3212,10 @@ export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtime
   listen("step_photos");
   listen("step_tools");
   if (scope?.productId) {
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "custom_columns", filter: `product_id=eq.${scope.productId}` }, (payload) => {
-      emit({
-        table: "custom_columns",
-        eventType: payload.eventType as PlannerRealtimePayload["eventType"],
-        new: payload.new as Record<string, unknown> | undefined,
-        old: payload.old as Record<string, unknown> | undefined,
-      });
-    });
+    listen("custom_columns", `product_id=eq.${scope.productId}`);
   }
   if (scope?.scenarioId) {
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "custom_columns", filter: `scenario_id=eq.${scope.scenarioId}` }, (payload) => {
-      emit({
-        table: "custom_columns",
-        eventType: payload.eventType as PlannerRealtimePayload["eventType"],
-        new: payload.new as Record<string, unknown> | undefined,
-        old: payload.old as Record<string, unknown> | undefined,
-      });
-    });
+    listen("custom_columns", `scenario_id=eq.${scope.scenarioId}`);
   }
 
   channel.subscribe();

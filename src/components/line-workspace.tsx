@@ -6648,6 +6648,9 @@ export function LineWorkspace({
         window.clearTimeout(remoteTaskRefreshTimerRef.current);
         remoteTaskRefreshTimerRef.current = null;
       }
+      // Drop any task ids still queued for the scenario we're leaving -- otherwise a same-project
+      // scenario switch would refresh them into (and contaminate) the next scenario's task list.
+      pendingRemoteTaskIdsRef.current.clear();
       Object.values(procedureSaveTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
       procedureSaveTimersRef.current = {};
       Object.values(procedureRetryTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));

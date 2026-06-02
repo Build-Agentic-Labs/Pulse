@@ -1448,6 +1448,8 @@ export function MobilePhotoPortal({
   // touched (photos, tools, steps, parts, events) instead of reloading the whole scenario. This is
   // the hot path on the phone -- operators adding/removing photos -- so keeping it task-scoped avoids
   // re-downloading and re-signing every photo in the project on each change.
+  // Mirrors line-workspace.tsx's refreshTasksFromSupabase; this copy uses a simpler wholesale task
+  // replace (no procedure-draft merge). Keep the fetch/insert scaffold in sync.
   function refreshTasksFromSupabase(taskIds: string[]) {
     if (hasLocalSaveWork()) {
       pendingRemoteRefreshRef.current = true;
@@ -1484,6 +1486,8 @@ export function MobilePhotoPortal({
       });
   }
 
+  // Identical to line-workspace.tsx's requestRemoteTaskRefresh (250ms debounce + per-task-id coalesce)
+  // apart from the save-work guard -- keep the two in sync.
   function requestRemoteTaskRefresh(taskId: string) {
     if (hasLocalSaveWork()) {
       pendingRemoteRefreshRef.current = true;
@@ -1786,6 +1790,9 @@ export function MobilePhotoPortal({
         window.clearTimeout(remoteTaskRefreshTimerRef.current);
         remoteTaskRefreshTimerRef.current = null;
       }
+      // Drop task ids queued for the scenario we're leaving so a same-project scenario switch can't
+      // refresh them into the next scenario's task list.
+      pendingRemoteTaskIdsRef.current.clear();
       unsubscribe();
     };
   }, [plannerState?.product.id, plannerState?.scenario.id]);

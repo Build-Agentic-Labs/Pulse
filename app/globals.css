@@ -3016,6 +3016,24 @@ body {
     @apply inline-flex h-6 w-6 items-center justify-center text-ink-tertiary opacity-0 transition duration-200 ease-ui hover:text-danger group-hover:opacity-100 focus-visible:opacity-100;
   }
 
+  .ui-procedure-tool-table-group {
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  }
+
+  .ui-procedure-tool-table-group:first-of-type {
+    border-top: 0;
+  }
+
+  .ui-procedure-tool-table-subhead-cell {
+    font-family: var(--type-mono);
+    font-size: var(--type-label);
+    @apply pb-1.5 pt-3 text-left uppercase tracking-[0.1em] text-ink-secondary;
+  }
+
+  .ui-procedure-tool-table-subhead-count {
+    @apply ml-2 inline-flex items-center rounded-full bg-surface-muted px-1.5 text-[10px] font-medium normal-case tracking-normal text-ink-tertiary;
+  }
+
   .ui-procedure-step-checks {
     @apply flex flex-wrap gap-1;
   }

@@ -7,9 +7,12 @@ import type { MasterBom } from "@/domain/master-bom";
 import {
   buildProjectPartCatalog,
   buildProjectToolCatalog,
+  groupToolCatalogByType,
   type ProjectPartCatalogEntry,
   type ProjectToolCatalogEntry,
 } from "@/domain/project-catalog";
+import type { ToolLibraryItem } from "@/domain/supabase-planner";
+import { formatToolName } from "@/domain/tool-name-format";
 import type { ProjectToolDefinition } from "@/domain/tool-registry";
 import { TOOL_TYPE_OPTIONS, type ToolTypeValue } from "@/domain/tool-types";
 import type { Task } from "@/domain/types";
@@ -174,6 +177,7 @@ function MasterBomPanel({
 export function ProjectCatalogSetupPanel({
   tasks,
   projectToolRegistry,
+  toolLibraryItems = [],
   section = "all",
   masterBom,
   onMasterBomChange,
@@ -185,6 +189,7 @@ export function ProjectCatalogSetupPanel({
 }: {
   tasks: Task[];
   projectToolRegistry: Map<string, ProjectToolDefinition>;
+  toolLibraryItems?: ToolLibraryItem[];
   section?: "tools" | "parts" | "all";
   masterBom?: MasterBom;
   onMasterBomChange?: (bom: MasterBom | undefined) => void;
@@ -197,9 +202,10 @@ export function ProjectCatalogSetupPanel({
   const showTools = section !== "parts";
   const showParts = section !== "tools";
   const toolCatalog = useMemo(
-    () => buildProjectToolCatalog(tasks, projectToolRegistry),
-    [projectToolRegistry, tasks],
+    () => buildProjectToolCatalog(tasks, projectToolRegistry, toolLibraryItems),
+    [projectToolRegistry, tasks, toolLibraryItems],
   );
+  const toolGroups = useMemo(() => groupToolCatalogByType(toolCatalog), [toolCatalog]);
   const partCatalog = useMemo(() => buildProjectPartCatalog(tasks), [tasks]);
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>({});
   const [partDrafts, setPartDrafts] = useState<Record<string, PartDraft>>({});
@@ -262,7 +268,7 @@ export function ProjectCatalogSetupPanel({
   }
 
   function toolDraftChanged(entry: ProjectToolCatalogEntry, draft: ToolDraft) {
-    return draft.name.trim() !== entry.name || draft.category !== entry.category;
+    return formatToolName(draft.name) !== entry.name || draft.category !== entry.category;
   }
 
   function partDraftChanged(entry: ProjectPartCatalogEntry, draft: PartDraft) {
@@ -276,16 +282,33 @@ export function ProjectCatalogSetupPanel({
 
   async function commitToolDraft(entry: ProjectToolCatalogEntry, draft?: ToolDraft) {
     const nextDraft = draft ?? toolDrafts[entry.key];
-    if (!nextDraft || !toolDraftChanged(entry, nextDraft) || savingToolKey === entry.key) {
+    if (!nextDraft || savingToolKey === entry.key) {
+      return;
+    }
+
+    const formattedName = formatToolName(nextDraft.name);
+
+    // Reject a blank edit: revert the field to the current name and stop.
+    if (!formattedName) {
+      updateToolDraft(entry.key, { name: entry.name });
+      return;
+    }
+
+    if (!toolDraftChanged(entry, nextDraft)) {
+      // No semantic change — still snap the field to its canonical form.
+      if (nextDraft.name !== formattedName) {
+        updateToolDraft(entry.key, { name: formattedName });
+      }
       return;
     }
 
     setSavingToolKey(entry.key);
     try {
       await onSaveTool(entry, {
-        name: nextDraft.name.trim(),
+        name: formattedName,
         category: nextDraft.category,
       });
+      updateToolDraft(entry.key, { name: formattedName });
     } finally {
       setSavingToolKey(undefined);
     }
@@ -333,6 +356,71 @@ export function ProjectCatalogSetupPanel({
     });
   }
 
+  function renderToolRow(entry: ProjectToolCatalogEntry) {
+    const draft = toolDrafts[entry.key] ?? {
+      name: entry.name,
+      category: entry.category,
+    };
+
+    return (
+      <tr key={entry.key} className="ui-procedure-tool-table-row group">
+        <td className="ui-procedure-tool-table-cell ui-mono-label tabular-nums text-ink-secondary">
+          {entry.id}
+        </td>
+        <td className="ui-procedure-tool-table-cell">
+          <input
+            className="ui-procedure-step-inline-text w-full min-w-0"
+            value={draft.name}
+            onChange={(event) => updateToolDraft(entry.key, { name: event.target.value })}
+            onBlur={() => void commitToolDraft(entry)}
+            aria-label={`Tool name for ${entry.id}`}
+          />
+        </td>
+        <td className="ui-procedure-tool-table-cell">
+          <ThemedSelect
+            className="w-full min-w-0"
+            triggerClassName="h-8 rounded-none border-0 border-b bg-transparent px-0 text-xs"
+            value={draft.category}
+            options={TOOL_TYPE_OPTIONS}
+            onChange={(value) => {
+              const category = value as ToolTypeValue;
+              const nextDraft = { ...draft, category };
+              updateToolDraft(entry.key, { category });
+              void commitToolDraft(entry, nextDraft);
+            }}
+            aria-label={`Tool type for ${entry.name}`}
+          />
+        </td>
+        <td className="ui-procedure-tool-table-cell">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full border border-line/70"
+              style={{ backgroundColor: entry.color }}
+              aria-hidden="true"
+            />
+            <span className="ui-section-subtitle truncate">{entry.colorLabel}</span>
+          </span>
+        </td>
+        <td className="ui-procedure-tool-table-cell ui-section-subtitle">
+          {entry.stepUsageCount} step{entry.stepUsageCount === 1 ? "" : "s"}
+          <span className="text-ink-tertiary"> · </span>
+          {entry.taskUsageCount} task{entry.taskUsageCount === 1 ? "" : "s"}
+        </td>
+        <td className="ui-procedure-tool-table-cell text-right">
+          <button
+            type="button"
+            onClick={() => requestDeleteTool(entry)}
+            className="ui-procedure-tool-table-remove"
+            aria-label={`Remove ${entry.name}`}
+            title={`Remove ${entry.name}`}
+          >
+            <Trash2 size={10} />
+          </button>
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <div className="ui-procedure-catalog mx-auto max-w-[1500px] space-y-5">
       {showTools ? (
@@ -346,7 +434,7 @@ export function ProjectCatalogSetupPanel({
           <span className="min-w-0">
             <span className="ui-setup-section-title block">Tools</span>
             <span className="ui-setup-section-desc block">
-              {toolCatalog.length} tool{toolCatalog.length === 1 ? "" : "s"} in this build. IDs and colors stay stable across tasks.
+              {toolCatalog.length} tool{toolCatalog.length === 1 ? "" : "s"} in this build, grouped by type. IDs and colors stay stable across tasks.
             </span>
           </span>
           <span className="ui-catalog-collapse-meta">
@@ -370,72 +458,17 @@ export function ProjectCatalogSetupPanel({
                   <th className="ui-procedure-tool-table-head w-8" aria-hidden="true" />
                 </tr>
               </thead>
-              <tbody>
-                {toolCatalog.map((entry) => {
-                  const draft = toolDrafts[entry.key] ?? {
-                    name: entry.name,
-                    category: entry.category,
-                  };
-
-                  return (
-                    <tr key={entry.key} className="ui-procedure-tool-table-row group">
-                      <td className="ui-procedure-tool-table-cell ui-mono-label tabular-nums text-ink-secondary">
-                        {entry.id}
-                      </td>
-                      <td className="ui-procedure-tool-table-cell">
-                        <input
-                          className="ui-procedure-step-inline-text w-full min-w-0"
-                          value={draft.name}
-                          onChange={(event) => updateToolDraft(entry.key, { name: event.target.value })}
-                          onBlur={() => void commitToolDraft(entry)}
-                          aria-label={`Tool name for ${entry.id}`}
-                        />
-                      </td>
-                      <td className="ui-procedure-tool-table-cell">
-                        <ThemedSelect
-                          className="w-full min-w-0"
-                          triggerClassName="h-8 rounded-none border-0 border-b bg-transparent px-0 text-xs"
-                          value={draft.category}
-                          options={TOOL_TYPE_OPTIONS}
-                          onChange={(value) => {
-                            const category = value as ToolTypeValue;
-                            const nextDraft = { ...draft, category };
-                            updateToolDraft(entry.key, { category });
-                            void commitToolDraft(entry, nextDraft);
-                          }}
-                          aria-label={`Tool type for ${entry.name}`}
-                        />
-                      </td>
-                      <td className="ui-procedure-tool-table-cell">
-                        <span className="inline-flex min-w-0 items-center gap-2">
-                          <span
-                            className="h-2.5 w-2.5 shrink-0 rounded-full border border-line/70"
-                            style={{ backgroundColor: entry.color }}
-                            aria-hidden="true"
-                          />
-                          <span className="ui-section-subtitle truncate">{entry.colorLabel}</span>
-                        </span>
-                      </td>
-                      <td className="ui-procedure-tool-table-cell ui-section-subtitle">
-                        {entry.stepUsageCount} step{entry.stepUsageCount === 1 ? "" : "s"}
-                        <span className="text-ink-tertiary"> · </span>
-                        {entry.taskUsageCount} task{entry.taskUsageCount === 1 ? "" : "s"}
-                      </td>
-                      <td className="ui-procedure-tool-table-cell text-right">
-                        <button
-                          type="button"
-                          onClick={() => requestDeleteTool(entry)}
-                          className="ui-procedure-tool-table-remove"
-                          aria-label={`Remove ${entry.name}`}
-                          title={`Remove ${entry.name}`}
-                        >
-                          <Trash2 size={10} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+              {toolGroups.map((group) => (
+                <tbody key={group.type} className="ui-procedure-tool-table-group">
+                  <tr className="ui-procedure-tool-table-subhead">
+                    <th scope="colgroup" colSpan={6} className="ui-procedure-tool-table-subhead-cell">
+                      {group.label}
+                      <span className="ui-procedure-tool-table-subhead-count">{group.count}</span>
+                    </th>
+                  </tr>
+                  {group.entries.map((entry) => renderToolRow(entry))}
+                </tbody>
+              ))}
             </table>
           </div>
         )}

@@ -1,3 +1,4 @@
+import { canonicalToolKey, formatToolName } from "./tool-name-format";
 import type { Task } from "./types";
 
 export const STEP_TOOL_LISTS_FIELD = "stepToolLists";
@@ -51,9 +52,9 @@ export function buildStepToolLibrary(tasks: Pick<Task, "customFields">[]) {
   tasks.forEach((task) => {
     Object.values(getTaskStepToolListMap(task)).forEach((tools) => {
       tools.forEach((tool) => {
-        const key = tool.toLocaleLowerCase();
+        const key = canonicalToolKey(tool);
         if (!toolsByKey.has(key)) {
-          toolsByKey.set(key, tool);
+          toolsByKey.set(key, formatToolName(tool));
         }
       });
     });
@@ -91,7 +92,8 @@ function writeStepToolListMap(task: Task, map: StepToolListMap): Task {
 }
 
 export function addStepTool(task: Task, stepId: string, toolName: string): Task {
-  const nextTool = cleanToolName(toolName);
+  // Format on commit so new tools are stored clean (no manual cleanup needed).
+  const nextTool = formatToolName(toolName);
   if (!nextTool) {
     return task;
   }
@@ -119,10 +121,12 @@ function dedupeToolNames(tools: string[]) {
 }
 
 export function renameToolInTasks(tasks: Task[], fromName: string, toName: string): Task[] {
-  const fromKey = fromName.trim().toLocaleLowerCase();
+  // Match occurrences by the canonical key so a clean display name still finds a
+  // messy stored spelling (different whitespace/case) and rewrites it in place.
+  const fromKey = canonicalToolKey(fromName);
   const nextName = cleanToolName(toName);
 
-  if (!fromKey || !nextName || fromKey === nextName.toLocaleLowerCase()) {
+  if (!fromKey || !nextName) {
     return tasks;
   }
 
@@ -134,7 +138,7 @@ export function renameToolInTasks(tasks: Task[], fromName: string, toName: strin
       Object.entries(map).map(([stepId, tools]) => {
         const nextTools = dedupeToolNames(
           tools.map((tool) => {
-            if (tool.toLocaleLowerCase() !== fromKey) {
+            if (canonicalToolKey(tool) !== fromKey || tool === nextName) {
               return tool;
             }
 
@@ -152,7 +156,7 @@ export function renameToolInTasks(tasks: Task[], fromName: string, toName: strin
 }
 
 export function removeToolFromAllTasks(tasks: Task[], toolName: string): Task[] {
-  const targetKey = toolName.trim().toLocaleLowerCase();
+  const targetKey = canonicalToolKey(toolName);
 
   if (!targetKey) {
     return tasks;
@@ -165,7 +169,7 @@ export function removeToolFromAllTasks(tasks: Task[], toolName: string): Task[] 
     const nextMap = Object.fromEntries(
       Object.entries(map).map(([stepId, tools]) => {
         const nextTools = tools.filter((tool) => {
-          if (tool.toLocaleLowerCase() === targetKey) {
+          if (canonicalToolKey(tool) === targetKey) {
             changed = true;
             return false;
           }

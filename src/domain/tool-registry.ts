@@ -1,5 +1,6 @@
 import { buildStepToolLibrary } from "@/domain/step-tools";
 import type { ToolLibraryItem } from "@/domain/supabase-planner";
+import { canonicalToolKey } from "@/domain/tool-name-format";
 import type { Task } from "@/domain/types";
 
 export type ProjectToolDefinition = {
@@ -25,26 +26,22 @@ function formatToolId(sequence: number) {
   return `T${String(sequence).padStart(2, "0")}`;
 }
 
-function normalizeToolName(toolName: string) {
-  return toolName.trim().toLocaleLowerCase();
-}
-
 export function buildProjectToolRegistry(
   tasks: Task[],
   libraryItems: ToolLibraryItem[] = [],
 ): Map<string, ProjectToolDefinition> {
   const libraryByName = new Map(
-    libraryItems.map((item) => [normalizeToolName(item.toolName), item] as const),
+    libraryItems.map((item) => [canonicalToolKey(item.toolName), item] as const),
   );
   const toolNames = buildStepToolLibrary(tasks);
 
   return new Map(
     toolNames.map((name, index) => {
       const palette = TOOL_COLOR_PALETTE[index % TOOL_COLOR_PALETTE.length];
-      const libraryItem = libraryByName.get(normalizeToolName(name));
+      const libraryItem = libraryByName.get(canonicalToolKey(name));
 
       return [
-        normalizeToolName(name),
+        canonicalToolKey(name),
         {
           id: formatToolId(index + 1),
           name,
@@ -62,7 +59,7 @@ export function listProjectToolDefinitions(registry: Map<string, ProjectToolDefi
 }
 
 export function resolveProjectTool(toolName: string, registry: Map<string, ProjectToolDefinition>): ProjectToolDefinition {
-  const known = registry.get(normalizeToolName(toolName));
+  const known = registry.get(canonicalToolKey(toolName));
   if (known) {
     return known;
   }

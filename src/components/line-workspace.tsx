@@ -104,8 +104,9 @@ import {
   removeStepPartReference,
 } from "@/domain/step-part-references";
 import { addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
-import { removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
+import { buildProjectToolCatalog, planToolNameTidy, removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
 import { buildProjectToolRegistry, type ProjectToolDefinition } from "@/domain/tool-registry";
+import { canonicalToolKey, formatToolName } from "@/domain/tool-name-format";
 import type { ToolTypeValue } from "@/domain/tool-types";
 import {
   PRODUCT_STEP_CHECK_CONFIG_FIELD,
@@ -5206,18 +5207,22 @@ export function LineWorkspace({
   );
   const realtimeTaskIdsKey = useMemo(() => realtimeTaskIds.join("|"), [realtimeTaskIds]);
 
+  const [toolLibraryLoaded, setToolLibraryLoaded] = useState(false);
   useEffect(() => {
     let active = true;
+    setToolLibraryLoaded(false);
 
     loadToolLibraryFromSupabase(activeProjectContext?.projectId)
       .then((tools) => {
         if (active) {
           setToolLibraryItems(tools);
+          setToolLibraryLoaded(true);
         }
       })
       .catch(() => {
         if (active) {
           setToolLibraryItems([]);
+          setToolLibraryLoaded(true);
         }
       });
 
@@ -5225,6 +5230,31 @@ export function LineWorkspace({
       active = false;
     };
   }, [activeProjectContext?.projectId]);
+
+  // Auto-clean existing tool names once per project (replaces the manual Tidy
+  // button). Ref-guarded so it runs once and never loops on its own task write.
+  // Waits for the tool library to load so library rows are migrated too (not
+  // just the task strings) — otherwise a fast task load would tidy with an empty
+  // library and leave the DB rows messy.
+  const autoTidiedProjectRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!projectId || !hasLoadedRemoteState || isProjectSwitching || !toolLibraryLoaded) {
+      return;
+    }
+    if (autoTidiedProjectRef.current === projectId || derivedState.tasks.length === 0) {
+      return;
+    }
+    // Evaluate once per project after load; mark checked regardless so a fully
+    // clean project doesn't rebuild the catalog on every later task edit.
+    autoTidiedProjectRef.current = projectId;
+    const plan = planToolNameTidy(
+      buildProjectToolCatalog(derivedState.tasks, projectToolRegistry, toolLibraryItems),
+    );
+    if (plan.length > 0) {
+      void tidyCatalogToolNames(plan);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, hasLoadedRemoteState, isProjectSwitching, toolLibraryLoaded, derivedState.tasks, projectToolRegistry, toolLibraryItems]);
 
   useEffect(() => {
     if (!hasLoadedRemoteState || isProjectSwitching) {
@@ -7519,7 +7549,7 @@ export function LineWorkspace({
     }
   }
 
-  async function applyProjectTasksUpdate(nextTasks: Task[]) {
+  async function applyProjectTasksUpdate(nextTasks: Task[], options?: { silent?: boolean }) {
     setSaveError(undefined);
     setSaveState("saving");
 
@@ -7536,11 +7566,13 @@ export function LineWorkspace({
     try {
       await savePlannerShellToSupabase(nextState);
       setSaveState("saved");
-      notifyFeedback({
-        title: "Build catalog updated",
-        body: "Tool assignments were saved across the project.",
-        tone: "success",
-      });
+      if (!options?.silent) {
+        notifyFeedback({
+          title: "Build catalog updated",
+          body: "Tool assignments were saved across the project.",
+          tone: "success",
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to save build catalog changes.";
       setSaveError(message);
@@ -7558,18 +7590,36 @@ export function LineWorkspace({
     entry: ProjectToolCatalogEntry,
     draft: { name: string; category: ToolTypeValue },
   ) {
-    const nameChanged = draft.name.trim().toLocaleLowerCase() !== entry.name.toLocaleLowerCase();
+    const formattedName = formatToolName(draft.name);
+    if (!formattedName) {
+      notifyFeedback({
+        title: "Tool name required",
+        body: "Enter a tool name before saving.",
+        tone: "danger",
+      });
+      return;
+    }
+
+    const nameChanged = canonicalToolKey(formattedName) !== entry.key;
 
     if (nameChanged) {
-      const nextTasks = renameToolInTasks(derivedState.tasks, entry.name, draft.name);
+      // Match the raw stored occurrence by canonical key, rewriting it in place.
+      const nextTasks = renameToolInTasks(derivedState.tasks, entry.rawName, formattedName);
       await applyProjectTasksUpdate(nextTasks);
     }
 
+    // Target the real library row by canonical key, so a messy stored name still
+    // migrates (and its category survives — the upsert wipes category otherwise).
+    const existingItem = toolLibraryItems.find(
+      (item) => canonicalToolKey(item.toolName) === entry.key,
+    );
+
     await upsertToolLibraryMetadata({
-      toolName: draft.name,
+      toolName: formattedName,
       category: draft.category,
       projectId,
-      previousToolName: nameChanged ? entry.name : undefined,
+      previousToolName:
+        existingItem && existingItem.toolName.trim() !== formattedName ? existingItem.toolName : undefined,
     });
 
     const tools = await loadToolLibraryFromSupabase(projectId);
@@ -7578,14 +7628,69 @@ export function LineWorkspace({
     if (!nameChanged) {
       notifyFeedback({
         title: "Tool updated",
-        body: `${draft.name} type saved.`,
+        body: `${formattedName} type saved.`,
         tone: "success",
       });
     }
   }
 
+  async function tidyCatalogToolNames(plan: Array<{ from: string; to: string }>) {
+    if (plan.length === 0) {
+      return;
+    }
+
+    try {
+      // 1. Rewrite every stored occurrence in one project write. Silent: the
+      //    "Tool names cleaned up" toast below is the user-facing signal.
+      const nextTasks = plan.reduce(
+        (tasks, rename) => renameToolInTasks(tasks, rename.from, rename.to),
+        derivedState.tasks,
+      );
+      await applyProjectTasksUpdate(nextTasks, { silent: true });
+
+      // 2. Migrate library rows that exist (preserving category); collect failures.
+      let metadataFailures = 0;
+      for (const rename of plan) {
+        const key = canonicalToolKey(rename.from);
+        const existingItem = toolLibraryItems.find((item) => canonicalToolKey(item.toolName) === key);
+        if (!existingItem || existingItem.toolName.trim() === rename.to) {
+          continue;
+        }
+        try {
+          await upsertToolLibraryMetadata({
+            toolName: rename.to,
+            category: existingItem.category,
+            projectId,
+            previousToolName: existingItem.toolName,
+          });
+        } catch {
+          metadataFailures += 1;
+        }
+      }
+
+      const failureNote = metadataFailures > 0 ? `, ${metadataFailures} could not be saved` : "";
+      notifyFeedback({
+        title: "Tool names cleaned up",
+        body: `Cleaned up ${plan.length} tool name${plan.length === 1 ? "" : "s"}${failureNote}.`,
+        tone: metadataFailures > 0 ? "warning" : "neutral",
+      });
+    } catch {
+      // applyProjectTasksUpdate already surfaced an error toast; abandon the
+      // tidy (no partial task write — the shell save is atomic) without
+      // rejecting, since this runs fire-and-forget from the load effect.
+    } finally {
+      // Always reflect whatever persisted, even on partial failure.
+      try {
+        const tools = await loadToolLibraryFromSupabase(projectId);
+        setToolLibraryItems(tools);
+      } catch {
+        // Reload failure is non-fatal; the next load will reconcile.
+      }
+    }
+  }
+
   async function deleteCatalogTool(entry: ProjectToolCatalogEntry) {
-    const nextTasks = removeToolFromAllTasks(derivedState.tasks, entry.name);
+    const nextTasks = removeToolFromAllTasks(derivedState.tasks, entry.rawName);
     await applyProjectTasksUpdate(nextTasks);
 
     if (entry.libraryId) {
@@ -9030,6 +9135,7 @@ export function LineWorkspace({
                       <ProjectCatalogSetupPanel
                         tasks={derivedState.tasks}
                         projectToolRegistry={projectToolRegistry}
+                        toolLibraryItems={toolLibraryItems}
                         section={setupSection === "tools" ? "tools" : "parts"}
                         masterBom={masterBom}
                         onMasterBomChange={updateMasterBom}

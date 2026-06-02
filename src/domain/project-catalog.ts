@@ -1,12 +1,15 @@
 import { removePartReferenceFromSteps } from "@/domain/step-part-references";
-import { buildStepToolLibrary, getTaskStepToolListMap } from "@/domain/step-tools";
+import { getTaskStepToolListMap } from "@/domain/step-tools";
 import type { ToolLibraryItem } from "@/domain/supabase-planner";
+import { canonicalToolKey, formatToolName } from "@/domain/tool-name-format";
 import { resolveProjectTool, type ProjectToolDefinition } from "@/domain/tool-registry";
-import { resolveToolType, type ToolTypeValue } from "@/domain/tool-types";
+import { resolveToolType, TOOL_TYPE_OPTIONS, type ToolTypeValue } from "@/domain/tool-types";
 import type { PartReference, Task } from "@/domain/types";
 
 export type ProjectToolCatalogEntry = {
   key: string;
+  /** The representative raw stored name — used as the rename `from` and by Tidy. */
+  rawName: string;
   id: string;
   name: string;
   color: string;
@@ -17,16 +20,19 @@ export type ProjectToolCatalogEntry = {
   taskUsageCount: number;
 };
 
+export type ProjectToolCatalogGroup = {
+  type: ToolTypeValue;
+  label: string;
+  count: number;
+  entries: ProjectToolCatalogEntry[];
+};
+
 export type ProjectPartCatalogEntry = {
   taskId: string;
   taskLabel: string;
   part: PartReference;
   linkedStepCount: number;
 };
-
-function normalizeToolName(toolName: string) {
-  return toolName.trim().toLocaleLowerCase();
-}
 
 function normalizePartNumber(partNumber: string) {
   return partNumber.trim().toLocaleLowerCase();
@@ -38,14 +44,21 @@ export function buildProjectToolCatalog(
   libraryItems: ToolLibraryItem[] = [],
 ): ProjectToolCatalogEntry[] {
   const libraryByName = new Map(
-    libraryItems.map((item) => [normalizeToolName(item.toolName), item] as const),
+    libraryItems.map((item) => [canonicalToolKey(item.toolName), item] as const),
   );
+
+  // First-seen raw spelling and usage, both keyed by the canonical key so a
+  // messy stored name and its formatted display form never diverge.
+  const rawByKey = new Map<string, string>();
   const usageByKey = new Map<string, { stepUsageCount: number; taskIds: Set<string> }>();
 
   tasks.forEach((task) => {
     Object.values(getTaskStepToolListMap(task)).forEach((tools) => {
       tools.forEach((toolName) => {
-        const key = normalizeToolName(toolName);
+        const key = canonicalToolKey(toolName);
+        if (!rawByKey.has(key)) {
+          rawByKey.set(key, toolName);
+        }
         const usage = usageByKey.get(key) ?? { stepUsageCount: 0, taskIds: new Set<string>() };
         usage.stepUsageCount += 1;
         usage.taskIds.add(task.id);
@@ -54,16 +67,15 @@ export function buildProjectToolCatalog(
     });
   });
 
-  const toolNames = buildStepToolLibrary(tasks);
-
-  return toolNames.map((name) => {
-    const key = normalizeToolName(name);
-    const registryTool = resolveProjectTool(name, registry);
+  const entries = [...rawByKey.entries()].map(([key, rawName]) => {
+    const name = formatToolName(rawName);
+    const registryTool = resolveProjectTool(rawName, registry);
     const libraryItem = libraryByName.get(key);
     const usage = usageByKey.get(key) ?? { stepUsageCount: 0, taskIds: new Set<string>() };
 
     return {
       key,
+      rawName,
       id: registryTool.id,
       name,
       color: registryTool.color,
@@ -74,6 +86,60 @@ export function buildProjectToolCatalog(
       taskUsageCount: usage.taskIds.size,
     } satisfies ProjectToolCatalogEntry;
   });
+
+  return entries.sort((left, right) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+  );
+}
+
+export function groupToolCatalogByType(entries: ProjectToolCatalogEntry[]): ProjectToolCatalogGroup[] {
+  const byType = new Map<ToolTypeValue, ProjectToolCatalogEntry[]>();
+
+  entries.forEach((entry) => {
+    const list = byType.get(entry.category) ?? [];
+    list.push(entry);
+    byType.set(entry.category, list);
+  });
+
+  return TOOL_TYPE_OPTIONS.filter((option) => byType.has(option.value)).map((option) => {
+    const groupEntries = [...(byType.get(option.value) ?? [])].sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+    );
+
+    return {
+      type: option.value,
+      label: option.label,
+      count: groupEntries.length,
+      entries: groupEntries,
+    };
+  });
+}
+
+/**
+ * Renames needed to converge stored tool names to their clean form. Keyed off
+ * the RAW stored name (not the already-formatted display name) so the plan is
+ * not silently empty. Each catalog entry is unique by canonical key, so no two
+ * entries can target the same clean name; the `seenTargets` guard is defensive.
+ */
+export function planToolNameTidy(entries: ProjectToolCatalogEntry[]): Array<{ from: string; to: string }> {
+  const seenTargets = new Set<string>();
+  const plan: Array<{ from: string; to: string }> = [];
+
+  entries.forEach((entry) => {
+    const to = formatToolName(entry.rawName);
+    if (to === entry.rawName) {
+      return;
+    }
+
+    const targetKey = canonicalToolKey(to);
+    if (seenTargets.has(targetKey)) {
+      return;
+    }
+    seenTargets.add(targetKey);
+    plan.push({ from: entry.rawName, to });
+  });
+
+  return plan;
 }
 
 export function buildProjectPartCatalog(tasks: Task[]): ProjectPartCatalogEntry[] {

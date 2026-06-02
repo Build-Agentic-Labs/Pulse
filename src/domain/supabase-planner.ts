@@ -2108,7 +2108,7 @@ export async function saveTasksToSupabase(tasks: Task[], projectId?: string) {
   const supabase = plannerClient();
   await Promise.all(tasks.map((task) => assertTaskRowInProject(supabase, task, projectId)));
   await throwIfError(supabase.from("tasks").upsert(tasks.map(taskRow)));
-  await Promise.all(tasks.map((task) => syncStepToolsForTask(supabase, task)));
+  await syncStepToolsForTasks(supabase, tasks);
 }
 
 export async function saveTaskRowToSupabase(task: Task, projectId?: string) {
@@ -2863,6 +2863,39 @@ function stepToolRowsFromTask(task: Task): StepToolRow[] {
       sequence: index + 1,
     })),
   );
+}
+
+// Batched equivalent of calling syncStepToolsForTask per task: one existence read, one upsert,
+// one stale-delete across the whole task set (was 2-3 queries PER task). Preserves the default
+// allowEmptyWipe=false semantics -- a task that ends up with no tools keeps its existing tools
+// (only tasks that contribute at least one tool have their stale rows removed).
+async function syncStepToolsForTasks(supabase: ReturnType<typeof plannerClient>, tasks: Task[]) {
+  if (tasks.length === 0) {
+    return;
+  }
+
+  const taskIds = tasks.map((task) => task.id);
+  const nextToolsByTask = new Map(tasks.map((task) => [task.id, stepToolRowsFromTask(task)] as const));
+  const nextTools = [...nextToolsByTask.values()].flat();
+  const nextToolIds = new Set(nextTools.map((tool) => tool.id));
+  const wipeableTaskIds = new Set(
+    [...nextToolsByTask].filter(([, tools]) => tools.length > 0).map(([id]) => id),
+  );
+
+  const existingTools = await throwIfError(
+    supabase.from("step_tools").select("id, task_id").in("task_id", taskIds),
+  );
+  const staleToolIds = (existingTools ?? [])
+    .filter((tool) => !nextToolIds.has(String(tool.id)) && wipeableTaskIds.has(String(tool.task_id)))
+    .map((tool) => String(tool.id));
+
+  if (nextTools.length) {
+    await throwIfError(supabase.from("step_tools").upsert(nextTools));
+  }
+
+  if (staleToolIds.length) {
+    await throwIfError(supabase.from("step_tools").delete().in("id", staleToolIds));
+  }
 }
 
 async function syncStepToolsForTask(

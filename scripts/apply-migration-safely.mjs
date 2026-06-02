@@ -21,15 +21,15 @@ import pg from "pg";
 
 const MIGRATIONS_DIR = path.join(process.cwd(), "supabase", "migrations");
 
-function assertNonDestructive(sql, label) {
-  const forbidden = [
-    /\bdrop\s+table\b/i,
-    /\btruncate\b/i,
-    /\bdelete\s+from\b/i,
-    /\bdrop\s+schema\b/i,
-    /\balter\s+table\b[\s\S]+?\bdrop\s+column\b/i,
-  ];
-  for (const pattern of forbidden) {
+function assertNonDestructive(sql, label, { allowDml = false } = {}) {
+  // Structural drops are always refused -- these are irreversible schema/data loss.
+  const structural = [/\bdrop\s+table\b/i, /\bdrop\s+schema\b/i, /\balter\s+table\b[\s\S]+?\bdrop\s+column\b/i];
+  // DML text checks catch destructive migration STATEMENTS. They false-positive on CREATE
+  // FUNCTION bodies that legitimately contain delete/truncate (parameterized, RLS-gated, and
+  // not executed at apply time). --allow-dml skips these; the row-count invariant below still
+  // proves zero rows changed when the migration is applied.
+  const dml = allowDml ? [] : [/\btruncate\b/i, /\bdelete\s+from\b/i];
+  for (const pattern of [...structural, ...dml]) {
     if (pattern.test(sql)) {
       throw new Error(`Refusing to run ${label}: matched unsafe pattern ${pattern}`);
     }
@@ -76,9 +76,12 @@ async function main() {
   const argv = process.argv.slice(2);
   const smokeExprs = [];
   const files = [];
+  let allowDml = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--smoke") {
       smokeExprs.push(argv[++i]);
+    } else if (argv[i] === "--allow-dml") {
+      allowDml = true;
     } else {
       files.push(argv[i]);
     }
@@ -98,7 +101,7 @@ async function main() {
   for (const file of files) {
     const base = path.basename(file);
     const sql = await readFile(path.join(MIGRATIONS_DIR, base), "utf8");
-    assertNonDestructive(sql, base);
+    assertNonDestructive(sql, base, { allowDml });
     migrations.push({ file: base, sql, checks: derivePostChecks(sql) });
   }
 

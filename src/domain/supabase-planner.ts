@@ -938,23 +938,16 @@ function partReferenceRows(tasks: Task[]) {
   );
 }
 
+// Project-membership assertions are advisory UX guards -- the real enforcement is RLS, which
+// gates every write on has_project_access(). These resolve a task/scenario's project in ONE
+// round-trip via the SECURITY DEFINER resolver functions (was 3 sequential queries each).
 async function assertTaskInProject(supabase: ReturnType<typeof plannerClient>, taskId: string, projectId?: string) {
   if (!projectId) {
     return;
   }
 
-  const task = await throwIfError(supabase.from("tasks").select("scenario_id").eq("id", taskId).maybeSingle());
-  if (!task) {
-    throw new Error("Task not found or you do not have access to it.");
-  }
-
-  const scenario = await throwIfError(supabase.from("scenarios").select("product_id").eq("id", task.scenario_id).maybeSingle());
-  if (!scenario) {
-    throw new Error("Scenario not found for this task.");
-  }
-
-  const product = await throwIfError(supabase.from("products").select("project_id").eq("id", scenario.product_id).maybeSingle());
-  if (!product || String(product.project_id) !== projectId) {
+  const resolvedProjectId = await throwIfError(supabase.rpc("task_project_id", { target_task_id: taskId }));
+  if (!resolvedProjectId || String(resolvedProjectId) !== projectId) {
     throw new Error("This task does not belong to the active project.");
   }
 }
@@ -964,20 +957,12 @@ async function assertTaskRowInProject(supabase: ReturnType<typeof plannerClient>
     return;
   }
 
-  const existingTask = await throwIfError(supabase.from("tasks").select("scenario_id").eq("id", task.id).maybeSingle());
-  const scenarioId = existingTask?.scenario_id ?? task.scenarioId;
-
-  if (!scenarioId) {
-    throw new Error("Task not found or you do not have access to it.");
-  }
-
-  const scenario = await throwIfError(supabase.from("scenarios").select("product_id").eq("id", scenarioId).maybeSingle());
-  if (!scenario) {
-    throw new Error("Scenario not found for this task.");
-  }
-
-  const product = await throwIfError(supabase.from("products").select("project_id").eq("id", scenario.product_id).maybeSingle());
-  if (!product || String(product.project_id) !== projectId) {
+  // A task's project is determined by its scenario; this works for both new (not-yet-saved)
+  // and existing tasks. RLS still independently blocks any cross-project write.
+  const resolvedProjectId = await throwIfError(
+    supabase.rpc("scenario_project_id", { target_scenario_id: task.scenarioId }),
+  );
+  if (!resolvedProjectId || String(resolvedProjectId) !== projectId) {
     throw new Error("This task does not belong to the active project.");
   }
 }
@@ -1951,31 +1936,20 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
 
   await throwIfError(supabase.from("tasks").upsert(state.tasks.map(taskRow)));
 
-  if (taskIds.length) {
-    await throwIfError(supabase.from("task_dependencies").delete().in("successor_task_id", taskIds));
-    await throwIfError(supabase.from("task_dependencies").delete().in("predecessor_task_id", taskIds));
-    await throwIfError(supabase.from("manufacturing_steps").delete().in("task_id", taskIds));
-    await throwIfError(supabase.from("part_references").delete().in("task_id", taskIds));
-    await throwIfError(supabase.from("actual_events").delete().in("task_id", taskIds));
-  }
-
-  if (state.dependencies.length) {
-    await throwIfError(supabase.from("task_dependencies").insert(state.dependencies.map(dependencyRow)));
-  }
-
-  const steps = manufacturingStepRows(state.tasks);
-  if (steps.length) {
-    await throwIfError(supabase.from("manufacturing_steps").insert(steps));
-  }
-
-  const parts = partReferenceRows(state.tasks);
-  if (parts.length) {
-    await throwIfError(supabase.from("part_references").insert(parts));
-  }
-
-  if (state.actualEvents.length) {
-    await throwIfError(supabase.from("actual_events").insert(state.actualEvents.map(actualEventRow)));
-  }
+  // Atomically replace every child row for these tasks in a single server-side transaction.
+  // Previously this was 5 deletes followed by 4 inserts as separate requests -- a failure in
+  // the gap permanently lost steps/parts/events. The RPC deletes + re-inserts in one
+  // transaction, so the children are never missing and the UNIQUE(task_id, sequence) constraint
+  // on steps is never transiently violated.
+  await throwIfError(
+    supabase.rpc("replace_task_children", {
+      p_task_ids: taskIds,
+      p_dependencies: state.dependencies.map(dependencyRow),
+      p_steps: manufacturingStepRows(state.tasks),
+      p_parts: partReferenceRows(state.tasks),
+      p_actual_events: state.actualEvents.map(actualEventRow),
+    }),
+  );
 
   if (state.customColumns.length) {
     await throwIfError(supabase.from("custom_columns").upsert(state.customColumns.map(customColumnRow)));
@@ -2334,13 +2308,16 @@ export async function upsertProcedureStep(taskId: string, step: ManufacturingSte
 }
 
 export async function reorderProcedureSteps(taskId: string, orderedStepIds: string[], projectId?: string) {
+  if (orderedStepIds.length === 0) {
+    return;
+  }
+
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
-  await bumpManufacturingStepSequences(supabase, orderedStepIds);
-  await Promise.all(
-    orderedStepIds.map((stepId, index) =>
-      throwIfError(supabase.from("manufacturing_steps").update({ sequence: index + 1 }).eq("task_id", taskId).eq("id", stepId)),
-    ),
+  // Atomic, single round-trip: the RPC does the two-phase sequence swap server-side inside one
+  // transaction, so a partial failure can no longer leave steps with duplicate sequences.
+  await throwIfError(
+    supabase.rpc("reorder_manufacturing_steps", { p_task_id: taskId, p_step_ids: orderedStepIds }),
   );
 }
 
@@ -2553,10 +2530,10 @@ export async function updateStepPhotoCaptionInSupabase(photoId: string, caption:
 export async function deletePlannerTask(taskId: string, projectId?: string) {
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
-  await Promise.all([
-    throwIfError(supabase.from("task_dependencies").delete().eq("predecessor_task_id", taskId)),
-    throwIfError(supabase.from("task_dependencies").delete().eq("successor_task_id", taskId)),
-  ]);
+  // task_dependencies (both endpoints), manufacturing_steps, part_references, actual_events and
+  // step_tools all FK to tasks ON DELETE CASCADE, so deleting the task atomically removes them.
+  // The previous manual dependency deletes were redundant and opened a split-brain window
+  // (edges gone, task still present) if the task delete then failed.
   await throwIfError(supabase.from("tasks").delete().eq("id", taskId));
 }
 

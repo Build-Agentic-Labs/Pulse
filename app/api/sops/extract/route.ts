@@ -5,16 +5,41 @@ import {
   SOP_SYSTEM_PROMPT,
   type ExtractedSop,
 } from "@/domain/sop/extraction";
-import { extractUploadText } from "@/lib/sop/parse-document";
+import { prepareSopUpload, type PreparedSopUpload } from "@/lib/sop/parse-document";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Document parsing + an LLM round-trip can exceed the default serverless window.
+// Document reading + an LLM round-trip can exceed the default serverless window.
 export const maxDuration = 60;
 
-// Cap upload size so a huge file can't OOM the function or blow the time budget
-// during pdf.js / mammoth parsing.
+// Cap upload size so a huge file can't OOM the function or blow the time budget.
+// docx is parsed in-process by mammoth; a PDF is base64-encoded and sent to Claude,
+// so this also keeps the request body well under the API's document limit.
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20 MB
+
+const SOP_INSTRUCTION = "Convert this legacy SOP into the standardized schema.";
+
+// Build the Claude user-turn content for the upload. The PDF rides as a document block
+// (Claude reads/OCRs it); docx text is sent inline. Either way this sits AFTER the cached
+// system + tool prefix, so it doesn't invalidate the prompt cache.
+function buildUserContent(upload: PreparedSopUpload): Anthropic.ContentBlockParam[] {
+  if (upload.kind === "pdf") {
+    return [
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: upload.base64 },
+      },
+      { type: "text", text: SOP_INSTRUCTION },
+    ];
+  }
+
+  return [
+    {
+      type: "text",
+      text: `${SOP_INSTRUCTION}\n\n<sop_document>\n${upload.text}\n</sop_document>`,
+    },
+  ];
+}
 
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -45,9 +70,9 @@ export async function POST(request: Request) {
     );
   }
 
-  let text: string;
+  let upload: PreparedSopUpload;
   try {
-    ({ text } = await extractUploadText(file));
+    upload = await prepareSopUpload(file);
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Failed to read the uploaded file." },
@@ -66,12 +91,7 @@ export async function POST(request: Request) {
       system: [{ type: "text", text: SOP_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       tools: [SOP_EXTRACTION_TOOL as unknown as Anthropic.Tool],
       tool_choice: { type: "tool", name: SOP_EXTRACTION_TOOL.name },
-      messages: [
-        {
-          role: "user",
-          content: `Convert this legacy SOP into the standardized schema:\n\n<sop_document>\n${text}\n</sop_document>`,
-        },
-      ],
+      messages: [{ role: "user", content: buildUserContent(upload) }],
     });
 
     // A truncated response yields partial tool input (invalid JSON / missing

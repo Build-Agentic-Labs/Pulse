@@ -6495,8 +6495,19 @@ export function LineWorkspace({
         : undefined;
 
       setPlannerState(hydratedState);
-      if (initialUrlWorkspaceSnapshot.activeModule || workspaceSnapshot?.activeModule) {
-        setActiveModule(initialUrlWorkspaceSnapshot.activeModule ?? workspaceSnapshot?.activeModule ?? "dashboard");
+      // Restore the view that was active when this load started -- but only if the
+      // user has not navigated away since. The remote load can resolve seconds
+      // later; without this guard it yanks the user back to the view they were on
+      // at (re)load time. The live URL is kept in sync with the active view by the
+      // view-sync effect, so a mismatch means the user has since navigated.
+      const capturedView = initialUrlWorkspaceSnapshot.activeModule ?? workspaceSnapshot?.activeModule;
+      if (capturedView) {
+        const currentUrlView =
+          typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("view") : null;
+        const userNavigatedAway = !!currentUrlView && currentUrlView !== capturedView;
+        if (!userNavigatedAway) {
+          setActiveModule(capturedView);
+        }
       }
       setSelectedTaskId(selectedTask?.id ?? "");
       setSelectedStationId(urlStation?.id ?? snapshotStation?.id ?? selectedTask?.stationId ?? hydratedState.tasks[0]?.stationId ?? "");

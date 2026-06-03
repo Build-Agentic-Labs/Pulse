@@ -27,6 +27,7 @@ import {
   Settings,
   SkipBack,
   SkipForward,
+  SlidersHorizontal,
   Sun,
   Moon,
   Tags,
@@ -1581,6 +1582,58 @@ function ScrollDownHint({ className = "" }: { className?: string }) {
   );
 }
 
+type ProcedureSectionKey = "photos" | "checks" | "tools" | "parts";
+
+// Sections that can be temporarily hidden on every step to declutter the page
+// while authoring instructions. The step header + instruction are never hidden.
+const PROCEDURE_STEP_SECTIONS: { key: ProcedureSectionKey; label: string; Icon: typeof Wrench }[] = [
+  { key: "photos", label: "Photos", Icon: ImageIcon },
+  { key: "checks", label: "Checks", Icon: ListChecks },
+  { key: "tools", label: "Tools", Icon: Wrench },
+  { key: "parts", label: "Parts", Icon: Package },
+];
+
+// The hidden-section filter is a personal authoring preference, kept in
+// localStorage so it persists across refreshes for this user on this device.
+const PROCEDURE_HIDDEN_SECTIONS_STORAGE_KEY = "pulse:procedure-hidden-sections";
+
+function readHiddenStepSections(): Set<ProcedureSectionKey> {
+  if (typeof window === "undefined") {
+    return new Set();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PROCEDURE_HIDDEN_SECTIONS_STORAGE_KEY);
+    if (!raw) {
+      return new Set();
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    const validKeys = new Set(PROCEDURE_STEP_SECTIONS.map((section) => section.key));
+    const keys = Array.isArray(parsed)
+      ? parsed.filter(
+          (value): value is ProcedureSectionKey =>
+            typeof value === "string" && validKeys.has(value as ProcedureSectionKey),
+        )
+      : [];
+    return new Set(keys);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeHiddenStepSections(sections: Set<ProcedureSectionKey>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(PROCEDURE_HIDDEN_SECTIONS_STORAGE_KEY, JSON.stringify([...sections]));
+  } catch {
+    // Ignore storage failures (private browsing, quota).
+  }
+}
+
 function ProcedureWorkspace({
   product,
   tasks,
@@ -1643,6 +1696,61 @@ function ProcedureWorkspace({
   const [navigatorWidth, setNavigatorWidth] = useState(320);
   const [isResizingNavigator, setIsResizingNavigator] = useState(false);
   const navigatorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  // Continuous-scroll: when the user scrolls to the bottom of a task, advance to
+  // the next task. Cooldown prevents a double-advance; pending flag scrolls the
+  // newly selected task back to the top.
+  const procedureMainRef = useRef<HTMLElement | null>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
+  const autoAdvanceCooldownRef = useRef(false);
+  const pendingScrollTopRef = useRef(false);
+  // Which step sections are hidden. View-only filter; persisted per user via
+  // localStorage and never touches saved project data.
+  const [hiddenStepSections, setHiddenStepSections] = useState<Set<ProcedureSectionKey>>(() =>
+    readHiddenStepSections(),
+  );
+  const [isSectionFilterOpen, setIsSectionFilterOpen] = useState(false);
+  const sectionFilterRef = useRef<HTMLDivElement | null>(null);
+  const showPhotos = !hiddenStepSections.has("photos");
+  const showChecks = !hiddenStepSections.has("checks");
+  const showTools = !hiddenStepSections.has("tools");
+  const showParts = !hiddenStepSections.has("parts");
+  const showStepDetails = showChecks || showTools || showParts;
+  function toggleStepSection(key: ProcedureSectionKey) {
+    setHiddenStepSections((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      writeHiddenStepSections(next);
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!isSectionFilterOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (sectionFilterRef.current && !sectionFilterRef.current.contains(event.target as Node)) {
+        setIsSectionFilterOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsSectionFilterOpen(false);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isSectionFilterOpen]);
   const stepCheckDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
   const zoneById = useMemo(() => new Map(zones.map((zone) => [zone.id, zone])), [zones]);
   const groupedTasks = useMemo(() => {
@@ -1679,6 +1787,17 @@ function ProcedureWorkspace({
     [task?.id, tasks],
   );
   const partReferences = task?.partReferences ?? [];
+  const orderedNavigatorTasks = useMemo(
+    () => groupedTasks.flatMap((group) => group.tasks),
+    [groupedTasks],
+  );
+  const nextNavigatorTask = useMemo(() => {
+    if (!task) {
+      return undefined;
+    }
+    const index = orderedNavigatorTasks.findIndex((candidate) => candidate.id === task.id);
+    return index >= 0 ? orderedNavigatorTasks[index + 1] : undefined;
+  }, [orderedNavigatorTasks, task]);
   const masterBom = useMemo(() => getMasterBom(product.customFields), [product.customFields]);
   const manufacturingStepDurationMinutes = manufacturingSteps.reduce(
     (total, step) => total + Math.max(step.durationMinutes ?? 0, 0),
@@ -1706,6 +1825,52 @@ function ProcedureWorkspace({
 
     return () => window.cancelAnimationFrame(frameId);
   }, [focusedStepId, task?.id]);
+
+  function goToTask(taskId: string) {
+    pendingScrollTopRef.current = true;
+    onSelectTask(taskId);
+  }
+
+  // When the selected task changes via auto-advance or the footer button, reset
+  // the scroll position to the top of the new task and release the cooldown.
+  useEffect(() => {
+    if (pendingScrollTopRef.current) {
+      if (procedureMainRef.current) {
+        procedureMainRef.current.scrollTop = 0;
+      }
+      pendingScrollTopRef.current = false;
+    }
+    autoAdvanceCooldownRef.current = false;
+  }, [task?.id]);
+
+  // Advance to the next task when the bottom of the pane scrolls into view.
+  // A sentinel + IntersectionObserver is far more reliable than scroll-position
+  // math, which often lands a few pixels short of the bottom and never fires.
+  useEffect(() => {
+    const root = procedureMainRef.current;
+    const sentinel = bottomSentinelRef.current;
+    if (!root || !sentinel || !nextNavigatorTask) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting || autoAdvanceCooldownRef.current) {
+          return;
+        }
+        // Don't auto-skip tasks too short to scroll -- the footer button covers those.
+        if (root.scrollHeight - root.clientHeight <= 40) {
+          return;
+        }
+        autoAdvanceCooldownRef.current = true;
+        goToTask(nextNavigatorTask.id);
+      },
+      { root, rootMargin: "0px", threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [nextNavigatorTask, task?.id]);
 
   useEffect(() => {
     if (!isResizingNavigator) {
@@ -2121,10 +2286,60 @@ function ProcedureWorkspace({
         </button>
       </aside>
 
-      <main className="ui-procedure-main min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 md:px-6">
+      <main
+        ref={procedureMainRef}
+        className="ui-procedure-main min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 md:px-6"
+      >
         <div className="mx-auto max-w-[1500px] space-y-5">
           <section>
-            <h1 className="ui-section-title ui-procedure-title">{task.name || "Untitled task"}</h1>
+            <div className="flex items-start justify-between gap-3">
+              <h1 className="ui-section-title ui-procedure-title">{task.name || "Untitled task"}</h1>
+              <div className="relative shrink-0" ref={sectionFilterRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsSectionFilterOpen((open) => !open)}
+                  aria-haspopup="true"
+                  aria-expanded={isSectionFilterOpen}
+                  title="Show or hide step sections"
+                  className="ui-btn-ghost h-9 gap-2 px-3"
+                >
+                  <SlidersHorizontal size={14} strokeWidth={1.75} />
+                  Filter
+                  {hiddenStepSections.size > 0 ? (
+                    <span className="ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
+                      {hiddenStepSections.size}
+                    </span>
+                  ) : null}
+                </button>
+                {isSectionFilterOpen ? (
+                  <div className="absolute right-0 z-30 mt-2 w-56 rounded-lg border border-line bg-surface-raised p-3 shadow-lg">
+                    <div className="ui-field-label mb-2">Show on every step</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {PROCEDURE_STEP_SECTIONS.map(({ key, label, Icon }) => {
+                        const shown = !hiddenStepSections.has(key);
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => toggleStepSection(key)}
+                            aria-pressed={shown}
+                            title={shown ? `Hide ${label} on every step` : `Show ${label} on every step`}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
+                              shown
+                                ? "border-accent/40 bg-accent/10 text-ink"
+                                : "border-line bg-surface-raised text-steel opacity-70"
+                            }`}
+                          >
+                            <Icon size={12} strokeWidth={1.75} />
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
             <div className="ui-metric-strip mt-4">
               {[
                 ["Zone", zoneById.get(task.zoneId ?? "")?.name ?? "Unzoned"],
@@ -2314,19 +2529,23 @@ function ProcedureWorkspace({
                         </label>
                       </div>
 
-                      <div className="ui-procedure-step-divider">
-                        <StepPhotoAttachmentEditor
-                          step={step}
-                          photos={stepPhotos}
-                          isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
-                          onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
-                          onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
-                          onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
-                          onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
-                        />
-                      </div>
+                      {showPhotos ? (
+                        <div className="ui-procedure-step-divider">
+                          <StepPhotoAttachmentEditor
+                            step={step}
+                            photos={stepPhotos}
+                            isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
+                            onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
+                            onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
+                            onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
+                            onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
+                          />
+                        </div>
+                      ) : null}
 
+                      {showStepDetails ? (
                       <div className="ui-procedure-step-details">
+                        {showChecks ? (
                         <div className="ui-procedure-step-detail">
                           <span className="ui-field-label mb-0 block">Checks</span>
                           <ProcedureStepChecksEditor
@@ -2336,7 +2555,9 @@ function ProcedureWorkspace({
                             onChange={(qualityCheck) => updateManufacturingStep(step.id, { qualityCheck })}
                           />
                         </div>
+                        ) : null}
 
+                        {showTools ? (
                         <div className="ui-procedure-step-detail">
                           <span className="ui-field-label mb-0 block">Tools</span>
                           <div className="ui-procedure-step-add-row">
@@ -2388,7 +2609,9 @@ function ProcedureWorkspace({
                             removeAriaLabel={(toolName) => `Remove ${toolName} from step ${step.sequence}`}
                           />
                         </div>
+                        ) : null}
 
+                        {showParts ? (
                         <StepPartReferenceEditor
                           task={task}
                           step={step}
@@ -2403,7 +2626,9 @@ function ProcedureWorkspace({
                           onLinkExisting={(partReferenceId) => linkExistingPartToManufacturingStep(step.id, partReferenceId)}
                           onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
                         />
+                        ) : null}
                       </div>
+                      ) : null}
                     </div>
                   );
                 })
@@ -2411,6 +2636,7 @@ function ProcedureWorkspace({
             </div>
           </section>
 
+          {showParts ? (
           <section>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -2483,8 +2709,28 @@ function ProcedureWorkspace({
               </div>
             )}
           </section>
+          ) : null}
+
+          {nextNavigatorTask ? (
+            <div className="flex flex-col items-center gap-1 border-t border-line/60 pt-4">
+              <span className="text-[11px] text-ink-tertiary">Scroll to the bottom to continue, or jump ahead</span>
+              <button
+                type="button"
+                onClick={() => goToTask(nextNavigatorTask.id)}
+                className="ui-btn-ghost h-9 gap-2 px-3"
+                title={`Go to ${taskDisplayCode(nextNavigatorTask)} ${nextNavigatorTask.name || "Untitled task"}`}
+              >
+                <span>Next task</span>
+                <span className="max-w-[260px] truncate text-ink-tertiary">
+                  {taskDisplayCode(nextNavigatorTask)} · {nextNavigatorTask.name || "Untitled task"}
+                </span>
+                <ChevronDown size={14} strokeWidth={1.75} />
+              </button>
+            </div>
+          ) : null}
         </div>
         <ScrollDownHint />
+        <div ref={bottomSentinelRef} aria-hidden="true" className="h-px w-full" />
       </main>
     </section>
   );

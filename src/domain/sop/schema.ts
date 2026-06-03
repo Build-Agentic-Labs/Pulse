@@ -57,12 +57,24 @@ export interface SopDefinition {
   definition: string;
 }
 
-/** One activity row of the Procedure's RASIC matrix. */
+/** Flowchart shape of a process step: terminator (start/end pill), process (rectangle), decision (diamond). */
+export type SopShape = "terminator" | "process" | "decision";
+
+/** One step (row) of the Procedure process map: input -> process step -> output, plus RASIC. */
 export interface SopActivity {
   id: string;
   /** 1-based display order. */
   step: number;
+  /** Flowchart shape; defaults to "process". */
+  shape?: SopShape;
+  /** Input(s) to this step — left column of the process map. */
+  input?: string;
+  /** Short action label shown in the flowchart box. */
   description: string;
+  /** Fuller explanation rendered in the written procedure list under the diagram (box stays short). */
+  detail?: string;
+  /** Output(s) of this step — right column of the process map. */
+  output?: string;
   /** Role name -> responsibility code. Keys come from `SopProcedure.roles`. */
   assignments: Record<string, RasicCode>;
 }

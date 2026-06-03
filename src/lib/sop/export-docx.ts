@@ -24,9 +24,11 @@ import {
   TableCell,
   TableRow,
   TextRun,
+  VerticalAlign,
   WidthType,
 } from "docx";
 import { rasicLegend, type Sop } from "@/domain/sop/schema";
+import { renderProcedureFlowImages } from "./procedure-flow-image";
 
 const INK = "1A1A1A";
 const MUTED = "666666";
@@ -42,9 +44,12 @@ function formatDate(iso: string): string {
   return `${mm}/${dd}/${date.getFullYear()}`;
 }
 
-function sectionHeading(text: string): Paragraph {
+function sectionHeading(text: string, opts: { pageBreakBefore?: boolean } = {}): Paragraph {
   return new Paragraph({
     spacing: { before: 240, after: 80 },
+    // Keep a heading with the content that follows so it never orphans at the foot of a page.
+    keepNext: true,
+    pageBreakBefore: opts.pageBreakBefore,
     children: [new TextRun({ text, bold: true, size: 24, color: INK, font: FONT })],
   });
 }
@@ -81,11 +86,18 @@ const CELL_BORDER = {
   right: { style: BorderStyle.SINGLE, size: 4, color: LINE },
 };
 
-function tableCell(children: Paragraph[], widthPct: number, opts: { shaded?: boolean } = {}): TableCell {
+const NO_BORDER = {
+  top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+  bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+  left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+  right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+};
+
+function tableCell(children: Paragraph[], widthPct: number, opts: { shaded?: boolean; bordered?: boolean } = {}): TableCell {
   return new TableCell({
     width: { size: widthPct, type: WidthType.PERCENTAGE },
     margins: { top: 40, bottom: 40, left: 80, right: 80 },
-    borders: CELL_BORDER,
+    borders: opts.bordered === false ? NO_BORDER : CELL_BORDER,
     shading: opts.shaded ? { fill: "F0F0F0" } : undefined,
     children,
   });
@@ -112,6 +124,178 @@ function dataTable(headers: string[], rows: string[][], widths: number[]): Table
   });
 }
 
+/** Box border for a Process-step paragraph, so each step reads as a flowchart node. */
+const STEP_BOX_BORDER = {
+  top: { style: BorderStyle.SINGLE, size: 6, color: INK, space: 4 },
+  bottom: { style: BorderStyle.SINGLE, size: 6, color: INK, space: 4 },
+  left: { style: BorderStyle.SINGLE, size: 6, color: INK, space: 8 },
+  right: { style: BorderStyle.SINGLE, size: 6, color: INK, space: 8 },
+};
+
+/**
+ * Fallback Procedure flowchart, used when the process map can't be rasterized to an image
+ * (e.g. server-side, no <canvas>): a center column of boxed steps joined by down-arrows, with
+ * Input / Output / RASIC text aligned beside each step. The table is borderless (no spreadsheet
+ * grid) and only the steps are boxed, so it reads as a flowchart, not a table.
+ */
+function procedureFlowBoxed(sop: Sop): Array<Paragraph | Table> {
+  const roles = sop.procedure.roles;
+  const widths = [22, 32, 22, 24];
+
+  const labelCell = (text: string, widthPct: number) =>
+    tableCell(
+      [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text, bold: true, size: 16, color: MUTED, font: FONT })],
+        }),
+      ],
+      widthPct,
+      { bordered: false },
+    );
+
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: [
+      labelCell("Input", widths[0]),
+      labelCell("Process step", widths[1]),
+      labelCell("Output", widths[2]),
+      labelCell("RASIC", widths[3]),
+    ],
+  });
+
+  const bodyRows = sop.procedure.activities.map((activity, index) => {
+    const isLast = index === sop.procedure.activities.length - 1;
+    const stepCell: Paragraph[] = [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        border: STEP_BOX_BORDER,
+        spacing: { before: 24, after: 24 },
+        children: [
+          new TextRun({
+            text: activity.description || "—",
+            size: 18,
+            color: activity.description ? INK : MUTED,
+            font: FONT,
+          }),
+        ],
+      }),
+    ];
+    if (!isLast) {
+      stepCell.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 8, after: 8 },
+          children: [new TextRun({ text: "↓", size: 18, color: MUTED, font: FONT })],
+        }),
+      );
+    }
+    const rasic = roles
+      .filter((role) => activity.assignments[role])
+      .map((role) => cellText(`${activity.assignments[role]}: ${role}`));
+    return new TableRow({
+      children: [
+        tableCell([cellText(activity.input ?? "")], widths[0], { bordered: false }),
+        tableCell(stepCell, widths[1], { bordered: false }),
+        tableCell([cellText(activity.output ?? "")], widths[2], { bordered: false }),
+        tableCell(rasic.length ? rasic : [cellText("")], widths[3], { bordered: false }),
+      ],
+    });
+  });
+
+  return [
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: {
+        ...NO_BORDER,
+        insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+        insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      },
+      rows: [headerRow, ...bodyRows],
+    }),
+  ];
+}
+
+/**
+ * The Procedure flowchart for export. Renders the process map as an embedded PNG so the real
+ * flowchart shapes (terminator pill / process rectangle / decision diamond) appear in Word —
+ * which can't draw them natively. Falls back to the boxed-paragraph flowchart when the image
+ * can't be rasterized (server-side render, no <canvas>, or a tainted canvas).
+ */
+/**
+ * Written procedure under the diagram: a numbered list of the action steps with their full
+ * `detail` text. Flowchart boxes stay short; the detail lives here. Rendered only when at least
+ * one step carries detail, so it never just echoes short boxes. Terminators are flow markers, not
+ * procedure steps, so they're excluded.
+ */
+function procedureStepsList(sop: Sop): Paragraph[] {
+  const steps = sop.procedure.activities.filter((a) => (a.shape ?? "process") !== "terminator");
+  if (!steps.some((a) => a.detail?.trim())) return [];
+
+  const blocks: Paragraph[] = [
+    new Paragraph({
+      // Start the written procedure on its own page, after the full flow diagram.
+      pageBreakBefore: true,
+      keepNext: true,
+      spacing: { after: 40 },
+      children: [new TextRun({ text: "Procedure steps", bold: true, size: 24, color: INK, font: FONT })],
+    }),
+  ];
+  steps.forEach((activity, index) => {
+    const detail = activity.detail?.trim();
+    blocks.push(
+      new Paragraph({
+        keepNext: Boolean(detail), // keep the step title with its detail line
+        spacing: { before: 60, after: detail ? 20 : 60 },
+        children: [
+          new TextRun({ text: `${index + 1}. `, bold: true, size: 18, color: INK, font: FONT }),
+          new TextRun({ text: activity.description || "—", bold: true, size: 18, color: INK, font: FONT }),
+        ],
+      }),
+    );
+    if (detail) {
+      blocks.push(
+        new Paragraph({
+          indent: { left: 260 },
+          spacing: { after: 60 },
+          children: [new TextRun({ text: detail, size: 18, color: INK, font: FONT })],
+        }),
+      );
+    }
+  });
+  return blocks;
+}
+
+async function procedureBlocks(sop: Sop): Promise<Array<Paragraph | Table>> {
+  const images = await renderProcedureFlowImages(sop);
+  // Each flow page starts on a fresh page (page break before), so it has the full body height and
+  // never overlaps the footer; a tall flow spans several pages, each repeating the column headers.
+  const diagram: Array<Paragraph | Table> = images.length
+    ? images.map(
+        (img) =>
+          new Paragraph({
+            pageBreakBefore: true,
+            spacing: { after: 80 },
+            children: [
+              new ImageRun({
+                type: "png",
+                data: img.data,
+                transformation: { width: img.width, height: img.height },
+              }),
+            ],
+          }),
+      )
+    : procedureFlowBoxed(sop);
+  // RASIC legend captioned directly under the diagram; the written steps then start a new page.
+  const legend = new Paragraph({
+    spacing: { before: 80, after: 80 },
+    children: [
+      new TextRun({ text: `${rasicLegend(".  ")}.`, italics: true, size: 16, color: MUTED, font: FONT }),
+    ],
+  });
+  return [...diagram, legend, ...procedureStepsList(sop)];
+}
+
 async function loadLogo(): Promise<Uint8Array | null> {
   try {
     const response = await fetch("/sop/ana-logo.png");
@@ -124,50 +308,65 @@ async function loadLogo(): Promise<Uint8Array | null> {
 
 function buildHeader(sop: Sop, logo: Uint8Array | null): Header {
   const logoChildren = logo
-    ? [new ImageRun({ type: "png", data: logo, transformation: { width: 130, height: 36 } })]
-    : [new TextRun({ text: "ANA INC.", bold: true, size: 24, color: INK, font: FONT })];
+    ? [new ImageRun({ type: "png", data: logo, transformation: { width: 150, height: 42 } })]
+    : [new TextRun({ text: "ANA INC.", bold: true, size: 28, color: INK, font: FONT })];
 
-  const infoLines = [
-    `${sop.meta.sopNumber || "SOP-QA-00X"}: ${sop.meta.title || ""}`.trim(),
-    `Version: ${sop.meta.version || "1.0"}`,
-    `Revision date: ${formatDate(sop.meta.revisionDate) || "MM/DD/YY"}`,
-    `Effective date: ${formatDate(sop.meta.effectiveDate) || "MM/DD/YY"}`,
-  ];
+  const title = `${sop.meta.sopNumber || "SOP-QA-00X"}: ${sop.meta.title || ""}`.trim();
+
+  // Fully-bordered header box matching the company template: a tall logo + title cell on the
+  // left, and three stacked info cells (version / revision / effective) on the right. Every
+  // edge is a single border at both the table and cell level, so the box always renders whole.
+  const border = { style: BorderStyle.SINGLE, size: 6, color: MUTED };
+  const gridBorders = {
+    top: border,
+    bottom: border,
+    left: border,
+    right: border,
+    insideHorizontal: border,
+    insideVertical: border,
+  };
+
+  const infoCell = (text: string) =>
+    new TableCell({
+      width: { size: 25, type: WidthType.PERCENTAGE },
+      verticalAlign: VerticalAlign.CENTER,
+      borders: gridBorders,
+      margins: { top: 30, bottom: 30, left: 100, right: 60 },
+      children: [new Paragraph({ children: [new TextRun({ text, size: 16, color: INK, font: FONT })] })],
+    });
+
+  const logoCell = new TableCell({
+    width: { size: 75, type: WidthType.PERCENTAGE },
+    rowSpan: 3,
+    verticalAlign: VerticalAlign.CENTER,
+    borders: gridBorders,
+    margins: { top: 80, bottom: 80, left: 80, right: 80 },
+    children: [
+      new Paragraph({ alignment: AlignmentType.CENTER, children: logoChildren }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 60 },
+        children: [new TextRun({ text: title, bold: true, size: 22, color: INK, font: FONT })],
+      }),
+    ],
+  });
 
   return new Header({
     children: [
       new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
-        borders: {
-          top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-          bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-          left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-          right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-          insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-          insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-        },
+        borders: gridBorders,
         rows: [
+          new TableRow({ children: [logoCell, infoCell(`Version: ${sop.meta.version || "1.0"}`)] }),
           new TableRow({
-            children: [
-              new TableCell({
-                width: { size: 40, type: WidthType.PERCENTAGE },
-                borders: { ...CELL_BORDER, top: CELL_BORDER.top, left: CELL_BORDER.left },
-                children: [new Paragraph({ children: logoChildren })],
-              }),
-              new TableCell({
-                width: { size: 60, type: WidthType.PERCENTAGE },
-                children: infoLines.map(
-                  (line) =>
-                    new Paragraph({
-                      alignment: AlignmentType.RIGHT,
-                      children: [new TextRun({ text: line, size: 16, color: MUTED, font: FONT })],
-                    }),
-                ),
-              }),
-            ],
+            children: [infoCell(`Revision date: ${formatDate(sop.meta.revisionDate) || "MM/DD/YY"}`)],
+          }),
+          new TableRow({
+            children: [infoCell(`Effective date: ${formatDate(sop.meta.effectiveDate) || "MM/DD/YY"}`)],
           }),
         ],
       }),
+      new Paragraph({ spacing: { before: 0, after: 0 }, children: [] }),
     ],
   });
 }
@@ -201,7 +400,7 @@ function buildFooter(): Footer {
   });
 }
 
-function buildBody(sop: Sop): Array<Paragraph | Table> {
+async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
   const blocks: Array<Paragraph | Table> = [];
 
   blocks.push(sectionHeading("Purpose"), bodyText(sop.purpose));
@@ -228,34 +427,12 @@ function buildBody(sop: Sop): Array<Paragraph | Table> {
   if (sop.procedure.processFlowDescription) {
     blocks.push(bodyText(sop.procedure.processFlowDescription));
   }
-  blocks.push(
-    new Paragraph({
-      spacing: { after: 80 },
-      children: [
-        new TextRun({
-          text: rasicLegend(".  ") + ".",
-          italics: true,
-          size: 16,
-          color: MUTED,
-          font: FONT,
-        }),
-      ],
-    }),
-  );
   if (sop.procedure.activities.length) {
-    const roles = sop.procedure.roles;
-    const headers = ["#", "Activity", ...roles];
-    const remaining = Math.max(20, 70 - roles.length * 8);
-    const widths = [6, remaining, ...roles.map(() => (100 - 6 - remaining) / Math.max(1, roles.length))];
-    const rows = sop.procedure.activities.map((activity, index) => [
-      String(index + 1),
-      activity.description,
-      ...roles.map((role) => activity.assignments[role] ?? ""),
-    ]);
-    blocks.push(dataTable(headers, rows, widths));
+    blocks.push(...(await procedureBlocks(sop)));
   }
 
-  blocks.push(sectionHeading("Annexes & Forms"));
+  // Back matter (forms + history + approvals) starts on its own page, grouped together.
+  blocks.push(sectionHeading("Annexes & Forms", { pageBreakBefore: true }));
   if (sop.annexes.length) {
     sop.annexes.forEach((annex) => {
       blocks.push(
@@ -312,7 +489,7 @@ export async function exportSopToDocx(sop: Sop): Promise<Blob> {
         properties: { page: { margin: { top: 1440, bottom: 1080, left: 1080, right: 1080 } } },
         headers: { default: buildHeader(sop, logo) },
         footers: { default: buildFooter() },
-        children: buildBody(sop),
+        children: await buildBody(sop),
       },
     ],
   });

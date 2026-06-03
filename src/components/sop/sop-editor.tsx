@@ -2,18 +2,14 @@
 
 import { Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import {
-  RASIC_CODES,
-  rasicLegend,
-  type RasicCode,
-  type Sop,
-  type SopActivity,
-} from "@/domain/sop/schema";
+import { useState, type ReactNode } from "react";
+import { rasicLegend, type Sop } from "@/domain/sop/schema";
 import { applySampleData } from "@/domain/sop/sample";
 import { exportFileName, exportSopToDocx } from "@/lib/sop/export-docx";
 import { saveSop } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
+import { AutoTextarea } from "./auto-textarea";
+import { ProcessFlowchart } from "./process-flowchart";
 
 type StepId = "document" | "overview" | "procedure" | "annexes" | "approvals";
 
@@ -44,54 +40,6 @@ function stepFilled(sop: Sop, id: StepId): boolean {
     case "approvals":
       return sop.approvals.some((row) => row.name || row.position || row.date);
   }
-}
-
-/**
- * Textarea that grows to fit its content so the full body text stays visible.
- * Pass `maxHeight` (px) to cap the growth and scroll past it — useful in tight
- * columns where unbounded growth would make a very tall row.
- */
-function AutoTextarea({
-  value,
-  className = "",
-  maxHeight,
-  ...props
-}: ComponentProps<"textarea"> & { maxHeight?: number }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  function resize() {
-    const el = ref.current;
-    if (!el) return;
-    // border-box + 1px borders: scrollHeight omits the border, so add it back
-    // to avoid clipping the last line.
-    const styles = window.getComputedStyle(el);
-    const border = parseFloat(styles.borderTopWidth) + parseFloat(styles.borderBottomWidth);
-    el.style.height = "auto";
-    const next = el.scrollHeight + border;
-    if (maxHeight && next > maxHeight) {
-      el.style.height = `${maxHeight}px`;
-      el.style.overflowY = "auto";
-    } else {
-      el.style.height = `${next}px`;
-      el.style.overflowY = "hidden";
-    }
-  }
-
-  useLayoutEffect(resize, [value, maxHeight]);
-  useEffect(() => {
-    window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
-  }, []);
-
-  return (
-    <textarea
-      ref={ref}
-      value={value}
-      rows={1}
-      className={`resize-none ${className}`.trim()}
-      {...props}
-    />
-  );
 }
 
 export function SopEditor({ initial }: { initial: Sop }) {
@@ -360,7 +308,7 @@ export function SopEditor({ initial }: { initial: Sop }) {
                   <p className="ui-mono-label mt-3 text-ink-tertiary">
                     RASIC — {rasicLegend()}
                   </p>
-                  <RasicMatrixEditor
+                  <ProcessFlowchart
                     roles={sop.procedure.roles}
                     activities={sop.procedure.activities}
                     onChange={(roles, activities) => update({ procedure: { ...sop.procedure, roles, activities } })}
@@ -561,152 +509,6 @@ function PairListEditor<K extends string, V extends string>({
         label="Add"
         onClick={() => onChange([...rows, { [keyName]: "", [valueName]: "" } as PairRow<K, V>])}
       />
-    </div>
-  );
-}
-
-function RasicMatrixEditor({
-  roles,
-  activities,
-  onChange,
-}: {
-  roles: string[];
-  activities: SopActivity[];
-  onChange: (roles: string[], activities: SopActivity[]) => void;
-}) {
-  function setRole(index: number, value: string) {
-    onChange(
-      roles.map((role, i) => (i === index ? value : role)),
-      activities,
-    );
-  }
-
-  function addRole() {
-    onChange([...roles, ""], activities);
-  }
-
-  function removeRole(index: number) {
-    const removed = roles[index];
-    const nextActivities = activities.map((activity) => {
-      const { [removed]: _drop, ...rest } = activity.assignments;
-      return { ...activity, assignments: rest };
-    });
-    onChange(
-      roles.filter((_, i) => i !== index),
-      nextActivities,
-    );
-  }
-
-  function addActivity() {
-    const id = `act-${Date.now().toString(36)}-${activities.length}`;
-    onChange(roles, [...activities, { id, step: activities.length + 1, description: "", assignments: {} }]);
-  }
-
-  function patchActivity(index: number, patch: Partial<SopActivity>) {
-    onChange(
-      roles,
-      activities.map((activity, i) => (i === index ? { ...activity, ...patch } : activity)),
-    );
-  }
-
-  function setCell(index: number, role: string, code: string) {
-    const activity = activities[index];
-    const assignments = { ...activity.assignments };
-    if (code) {
-      assignments[role] = code as RasicCode;
-    } else {
-      delete assignments[role];
-    }
-    patchActivity(index, { assignments });
-  }
-
-  return (
-    <div className="mt-3 space-y-3">
-      <div>
-        <span className="ui-field-label">Roles (matrix columns)</span>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {roles.map((role, index) => (
-            <div key={index} className="flex items-center gap-1">
-              <input
-                className="ui-field-standalone w-36 px-2 text-[12px]"
-                value={role}
-                placeholder="Role"
-                onChange={(event) => setRole(index, event.target.value)}
-              />
-              <button
-                type="button"
-                className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
-                title="Remove role"
-                onClick={() => removeRole(index)}
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
-          ))}
-          <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-3" onClick={addRole}>
-            <Plus size={12} />
-            Role
-          </button>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full table-fixed border-collapse text-[12px]">
-          <thead>
-            <tr className="border-b border-line text-left">
-              <th className="w-8 py-2 pr-2 ui-mono-label text-ink-tertiary">#</th>
-              <th className="py-2 pr-2 ui-mono-label text-ink-tertiary">Activity</th>
-              {roles.map((role, index) => (
-                <th key={index} className="w-16 px-1 py-2 text-center ui-mono-label text-ink-tertiary">
-                  <span className="block truncate" title={role}>
-                    {role || "—"}
-                  </span>
-                </th>
-              ))}
-              <th className="w-9" />
-            </tr>
-          </thead>
-          <tbody>
-            {activities.map((activity, index) => (
-              <tr key={activity.id} className="border-b border-line align-top">
-                <td className="py-2 pr-2 text-ink-tertiary">{index + 1}</td>
-                <td className="py-2 pr-2">
-                  <AutoTextarea
-                    className="ui-field-standalone min-h-9 w-full py-1.5"
-                    maxHeight={72}
-                    value={activity.description}
-                    placeholder="Describe the activity"
-                    onChange={(event) => patchActivity(index, { description: event.target.value })}
-                  />
-                </td>
-                {roles.map((role, roleIndex) => (
-                  <td key={roleIndex} className="px-1 py-2 text-center">
-                    <select
-                      className="ui-field-standalone w-full px-1 text-center"
-                      value={activity.assignments[role] ?? ""}
-                      onChange={(event) => setCell(index, role, event.target.value)}
-                    >
-                      <option value="">–</option>
-                      {RASIC_CODES.map((code) => (
-                        <option key={code} value={code}>
-                          {code}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                ))}
-                <td className="py-2">
-                  <RowDeleteButton
-                    title="Remove activity"
-                    onClick={() => onChange(roles, activities.filter((_, i) => i !== index))}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <AddButton label="Add activity" onClick={addActivity} />
     </div>
   );
 }

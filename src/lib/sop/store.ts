@@ -83,7 +83,11 @@ export function sopFromExtraction(extracted: ExtractedSop): Sop {
       activities: (procedure.activities ?? []).map((activity, index) => ({
         id: `${base.id}-act-${index}`,
         step: activity.step || index + 1,
+        shape: activity.shape,
+        input: activity.input ?? "",
         description: activity.description,
+        detail: activity.detail ?? "",
+        output: activity.output ?? "",
         assignments: activity.assignments ?? {},
       })),
     },

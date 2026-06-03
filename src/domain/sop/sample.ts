@@ -8,14 +8,66 @@ import type { Sop } from "./schema";
 
 const ROLES = ["Quality", "PJ Mgr / Operations", "HoD"];
 
-const ACTIVITIES: Array<{ description: string; assignments: Record<string, "R" | "A" | "S" | "I" | "C"> }> = [
-  { description: "Definition of process map for Management, Operations and Support.", assignments: { Quality: "R", "PJ Mgr / Operations": "S" } },
-  { description: "Build the ISO 9001-compliant L1 process list.", assignments: { Quality: "R", "PJ Mgr / Operations": "S" } },
-  { description: "List the processes of each department (Process map L2).", assignments: { Quality: "R", "PJ Mgr / Operations": "S", HoD: "S" } },
-  { description: "Describe the process using the standard SOP template; use addenda for Work Instructions.", assignments: { Quality: "R", HoD: "S" } },
-  { description: "Confirm structure and content are aligned with ISO 9001 requirements.", assignments: { Quality: "R" } },
-  { description: "Obtain signatures from the approval list (SOP approval and release).", assignments: { Quality: "R", HoD: "A" } },
-  { description: "Document control: archive, inform, and ensure availability to all interested parties.", assignments: { Quality: "R", HoD: "I" } },
+const ACTIVITIES: Array<{
+  input: string;
+  description: string;
+  detail?: string;
+  output: string;
+  shape?: "terminator" | "process" | "decision";
+  assignments: Record<string, "R" | "A" | "S" | "I" | "C">;
+}> = [
+  { input: "", description: "QMS plan", output: "", shape: "terminator", assignments: {} },
+  {
+    input: "ISO 9001 requirements",
+    description: "Define the L1 process map",
+    detail: "Define the Level 1 process map covering the Management, Operations, and Support processes, aligned to ISO 9001.",
+    output: "ISO 9001-compliant L1 process map",
+    assignments: { Quality: "R", "PJ Mgr / Operations": "S" },
+  },
+  {
+    input: "L1 process map",
+    description: "Build the L1 process list",
+    detail: "Build the ISO 9001-compliant Level 1 process list from the approved process map.",
+    output: "ISO 9001-compliant process list",
+    assignments: { Quality: "R", "PJ Mgr / Operations": "S" },
+  },
+  {
+    input: "Departmental processes",
+    description: "List each department's processes",
+    detail: "List the processes of each department to produce the Level 2 process map.",
+    output: "Process map L2",
+    assignments: { Quality: "R", HoD: "S" },
+  },
+  {
+    input: "SOP template",
+    description: "Draft the SOP from the template",
+    detail: "Describe the process using the standard SOP template; use addenda for Work Instructions.",
+    output: "Process draft",
+    assignments: { Quality: "R", HoD: "S" },
+  },
+  {
+    input: "SOP proposal",
+    description: "ISO 9001 compliant?",
+    detail: "Confirm the SOP's structure and content are aligned with ISO 9001 requirements.",
+    output: "Compliance decision",
+    shape: "decision",
+    assignments: { Quality: "R" },
+  },
+  {
+    input: "Compliant SOP",
+    description: "Obtain approval signatures",
+    detail: "Obtain signatures from the approval list for SOP approval and release.",
+    output: "Approved SOP",
+    assignments: { HoD: "A", Quality: "S" },
+  },
+  {
+    input: "Approved SOP",
+    description: "Place SOP under document control",
+    detail: "Document control: archive, inform, and ensure availability to all interested parties.",
+    output: "Officially released SOP",
+    assignments: { Quality: "R", HoD: "I" },
+  },
+  { input: "", description: "QMS documented", output: "", shape: "terminator", assignments: {} },
 ];
 
 /** Return a copy of `sop` with every section populated with realistic sample data. */
@@ -54,7 +106,11 @@ export function applySampleData(sop: Sop): Sop {
       activities: ACTIVITIES.map((activity, index) => ({
         id: `${sop.id}-sample-${index}`,
         step: index + 1,
+        shape: activity.shape,
+        input: activity.input,
         description: activity.description,
+        detail: activity.detail,
+        output: activity.output,
         assignments: activity.assignments,
       })),
     },

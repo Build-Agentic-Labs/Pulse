@@ -194,6 +194,16 @@ export interface Scenario {
   updatedAt: string;
 }
 
+// Lightweight scenario row for the scenario switcher tabs — no heavy planner data.
+export interface ScenarioSummary {
+  id: string;
+  name: string;
+  targetOutput: number;
+  targetOutputPeriod: string;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface Station {
   id: string;
   scenarioId: string;

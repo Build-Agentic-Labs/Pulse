@@ -1,5 +1,5 @@
 import { getStoredTaskOperatorIds } from "./operator-assignments";
-import type { Product, ProductKpis, Station, TaktStatus, Task } from "./types";
+import type { DemandPeriod, Product, ProductKpis, Scenario, Station, TaktStatus, Task } from "./types";
 
 export const DEFAULT_TAKT_TOLERANCE = 0.1;
 
@@ -59,16 +59,21 @@ export function calculateYearlyAvailableMinutes(product: Product) {
   return calculateMonthlyAvailableMinutes(product) * 12;
 }
 
-export function calculateAvailabilityMinutesForDemandPeriod(product: Product) {
-  if (product.demandPeriod === "week") {
+// `period` defaults to the product's own demand period (so existing callers are unchanged); pass an
+// explicit period to compute availability for a scenario whose target period differs from the product.
+export function calculateAvailabilityMinutesForDemandPeriod(
+  product: Product,
+  period: DemandPeriod = product.demandPeriod,
+) {
+  if (period === "week") {
     return calculateWeeklyAvailableMinutes(product);
   }
 
-  if (product.demandPeriod === "month") {
+  if (period === "month") {
     return calculateMonthlyAvailableMinutes(product);
   }
 
-  if (product.demandPeriod === "year") {
+  if (period === "year") {
     return calculateYearlyAvailableMinutes(product);
   }
 
@@ -90,6 +95,40 @@ export function calculateTaktMinutes(product: Product) {
   }
 
   return availableMinutes / product.demandQuantity;
+}
+
+const RECOGNIZED_DEMAND_PERIODS: ReadonlySet<DemandPeriod> = new Set([
+  "shift",
+  "day",
+  "week",
+  "month",
+  "year",
+  "custom",
+]);
+
+// Takt for a non-main (projection) scenario: cadence is driven by the scenario's own
+// targetOutput/targetOutputPeriod. If that target is missing, zero, negative, non-finite, or the
+// period is unrecognized, fall back to the product-level takt so the Gantt never renders a broken
+// (NaN/Infinity/0) cadence. The Main scenario is handled by the caller, which uses the product takt
+// directly so its behavior is byte-identical to before this feature.
+export function calculateActiveTaktMinutes(
+  product: Product,
+  scenario: Pick<Scenario, "targetOutput" | "targetOutputPeriod">,
+): number {
+  const target = scenario.targetOutput;
+  const period = scenario.targetOutputPeriod;
+  const periodIsValid = typeof period === "string" && RECOGNIZED_DEMAND_PERIODS.has(period as DemandPeriod);
+
+  if (typeof target !== "number" || !Number.isFinite(target) || target <= 0 || !periodIsValid) {
+    return calculateTaktMinutes(product);
+  }
+
+  const availableMinutes = calculateAvailabilityMinutesForDemandPeriod(product, period as DemandPeriod);
+  if (!Number.isFinite(availableMinutes) || availableMinutes <= 0) {
+    return calculateTaktMinutes(product);
+  }
+
+  return availableMinutes / target;
 }
 
 export function calculateTaskManHours(task: Pick<Task, "plannedDurationMinutes" | "plannedOperators">) {

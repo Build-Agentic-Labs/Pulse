@@ -49,6 +49,7 @@ import {
 } from "react";
 import {
   applyCalculatedFields,
+  calculateActiveTaktMinutes,
   calculateAvailabilityMinutesForDemandPeriod,
   calculatePeakManpower,
   calculateTaskManHours,
@@ -158,6 +159,7 @@ import {
   createPlannerSupabaseClient,
   deleteToolLibraryFromSupabase,
   loadPlannerStateFromSupabase,
+  loadScenariosForProduct,
   loadTaskFromSupabase,
   loadToolLibraryFromSupabase,
   moveManufacturingStepToTaskInSupabase,
@@ -183,12 +185,14 @@ import type {
   PlannerState,
   Product,
   ProductStatus,
+  ScenarioSummary,
   Station,
   Task,
   Zone,
 } from "@/domain/types";
 import { ClearableNumberInput } from "./clearable-number-input";
 import { GanttTimeline } from "./gantt-timeline";
+import { ScenarioTabs } from "./scenario-tabs";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
 import { AppLoadingShell } from "./app-flow-panels";
@@ -5292,6 +5296,11 @@ export function LineWorkspace({
     };
   }, [plannerQueryString]);
   const [plannerState, setPlannerState] = useState<PlannerState>(emptyPlannerState);
+  // Scenario switcher: lightweight list for the tabs + an in-flight flag for the reload-on-switch.
+  // The "active" scenario is always derivedState.scenario.id (the currently loaded one), so we don't
+  // track a separate id that could drift out of sync with the loaded planner state.
+  const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
+  const [isSwitchingScenario, setIsSwitchingScenario] = useState(false);
   const [activeModule, setActiveModule] = useState("dashboard");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [setupSection, setSetupSection] = useState<SetupSection>("product");
@@ -5308,6 +5317,8 @@ export function LineWorkspace({
   const [detailDrawerWidth, setDetailDrawerWidth] = useState(360);
   const [isResizingDetailDrawer, setIsResizingDetailDrawer] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("loading");
+  // Mirror of saveState readable synchronously inside async flows (e.g. save-before-scenario-switch).
+  const saveStateRef = useRef<SaveState>("loading");
   const [saveError, setSaveError] = useState<string>();
   const [hasLoadedRemoteState, setHasLoadedRemoteState] = useState(() => hasRecentProjectSwitchSession());
   const [isProjectSwitching, setIsProjectSwitching] = useState(() => hasRecentProjectSwitchSession());
@@ -5374,6 +5385,32 @@ export function LineWorkspace({
   }, [derivedState]);
 
   useEffect(() => {
+    saveStateRef.current = saveState;
+  }, [saveState]);
+
+  // Load the lightweight scenario list for the switcher tabs once a real project is loaded.
+  useEffect(() => {
+    if (!hasLoadedRemoteState) {
+      return;
+    }
+    const productId = derivedState.product.id;
+    if (!productId || productId === emptyPlannerState.product.id) {
+      return;
+    }
+    let cancelled = false;
+    void loadScenariosForProduct(productId)
+      .then((list) => {
+        if (!cancelled) {
+          setScenarios(list);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [derivedState.product.id, hasLoadedRemoteState]);
+
+  useEffect(() => {
     function handlePageHide() {
       flushPendingPlannerSave();
     }
@@ -5388,6 +5425,26 @@ export function LineWorkspace({
   const kpis = useMemo(
     () => calculateProductKpis(derivedState.product, derivedState.stations, derivedState.tasks),
     [derivedState.product, derivedState.stations, derivedState.tasks],
+  );
+
+  // Main Plan = the earliest-created scenario; it always uses the canonical product-level takt so its
+  // Gantt flagging is byte-identical to before this feature. Until the scenario list loads we also
+  // treat the active scenario as Main (safe product fallback).
+  const isMainScenario = useMemo(() => {
+    if (scenarios.length === 0) {
+      return true;
+    }
+    return derivedState.scenario.id === scenarios[0]?.id;
+  }, [scenarios, derivedState.scenario.id]);
+
+  // Takt that drives the Gantt's over-takt flagging. Non-main (projection) scenarios use their own
+  // target (with a safe product-level fallback when missing/zero/invalid); Main uses the product takt.
+  const activeTaktMinutes = useMemo(
+    () =>
+      isMainScenario
+        ? kpis.taktMinutes
+        : calculateActiveTaktMinutes(derivedState.product, derivedState.scenario),
+    [isMainScenario, kpis.taktMinutes, derivedState.product, derivedState.scenario],
   );
 
   const timelineBounds = useMemo(() => getTimelineBounds(derivedState.tasks), [derivedState.tasks]);
@@ -6467,6 +6524,75 @@ export function LineWorkspace({
     }
 
     void persistPlannerState(latestDerivedStateRef.current);
+  }
+
+  // Wait for every local save path (planner-shell autosave + per-field procedure saves) to drain.
+  // Returns false if a save errored or it didn't settle in time -- the caller must NOT switch then.
+  async function waitForLocalSavesToSettle(timeoutMs = 12000): Promise<boolean> {
+    const startedAt = Date.now();
+    while (hasLocalSaveWork()) {
+      if (saveStateRef.current === "error" || saveStateRef.current === "conflict") {
+        return false;
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        return false;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+    // Settled with no outstanding work; a lingering error/conflict means the last save did not land.
+    return saveStateRef.current !== "error" && saveStateRef.current !== "conflict";
+  }
+
+  // Apply a freshly-loaded scenario for a switch. We only reach here AFTER a successful save, so any
+  // procedure drafts from the previous scenario are stale and must be dropped (never carried across).
+  function applyScenarioSwitch(loaded: PlannerState) {
+    const normalized = ensureNomenclatureCollections(loaded);
+    procedureDraftsRef.current = {};
+    setProcedureDraftVersion((version) => version + 1);
+    plannerDirtyRef.current = false;
+    setPlannerState(normalized);
+    setSelectedTaskId(normalized.tasks[0]?.id);
+    setSelectedStationId(normalized.stations[0]?.id ?? "");
+    setActiveZoneId(undefined);
+    setFocusedProcedureStepId(undefined);
+  }
+
+  // Switch the Gantt to another scenario. Hard rule (spec §4.2 / §7.4): save first; if the save fails
+  // or doesn't settle, ABORT -- show the error and stay on the current scenario. Never switch on a
+  // failed/partial save. Realtime re-subscribes automatically via the derivedState.scenario.id effect.
+  async function switchScenario(targetScenarioId: string) {
+    if (isSwitchingScenario || targetScenarioId === derivedState.scenario.id) {
+      return;
+    }
+
+    flushPendingPlannerSave();
+    const saved = await waitForLocalSavesToSettle();
+    if (!saved) {
+      notifyFeedback({
+        title: "Can't switch scenarios",
+        body: "Your changes couldn't be saved, so the scenario was not switched. Resolve the save error and try again.",
+        tone: "warning",
+      });
+      return;
+    }
+
+    setIsSwitchingScenario(true);
+    setSaveState("loading");
+    try {
+      const loaded = await loadPlannerStateFromSupabase(projectId, targetScenarioId);
+      if (!loaded) {
+        throw new Error("That scenario could not be loaded.");
+      }
+      applyScenarioSwitch(loaded);
+      setSaveState("saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load that scenario.";
+      setSaveError(message);
+      setSaveState("error");
+      notifyFeedback({ title: "Scenario load failed", body: message, tone: "danger" });
+    } finally {
+      setIsSwitchingScenario(false);
+    }
   }
 
   function refreshTasksFromSupabase(taskIds: string[]) {
@@ -9450,6 +9576,12 @@ export function LineWorkspace({
                       ) : null}
                     </div>
                   </div>
+                  <ScenarioTabs
+                    scenarios={scenarios}
+                    activeScenarioId={derivedState.scenario.id}
+                    isSwitching={isSwitchingScenario}
+                    onSwitch={(scenarioId) => void switchScenario(scenarioId)}
+                  />
                   <GanttTimeline
                     tasks={derivedState.tasks}
                     stations={derivedState.stations}
@@ -9457,7 +9589,7 @@ export function LineWorkspace({
                     components={derivedState.components}
                     activeZoneId={activeZoneId}
                     selectedTaskId={selectedTaskId}
-                    taktMinutes={kpis.taktMinutes}
+                    taktMinutes={activeTaktMinutes}
                     availableOperatorLetters={availableOperatorLetters}
                     operatorCapacityMinutes={operatorCapacityMinutes}
                     demandQuantity={derivedState.product.demandQuantity}

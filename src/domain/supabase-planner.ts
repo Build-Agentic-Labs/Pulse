@@ -14,6 +14,7 @@ import type {
   Product,
   Project,
   Scenario,
+  ScenarioSummary,
   Station,
   Task,
   Workspace,
@@ -374,6 +375,18 @@ function mapScenario(row: Record<string, unknown>): Scenario {
     notes: maybeText(row.notes),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+  };
+}
+
+// Pure mapper for the lightweight scenario-tab rows. Exported for unit testing.
+export function mapScenarioSummary(row: Record<string, unknown>): ScenarioSummary {
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ""),
+    targetOutput: num(row.target_output, 1),
+    targetOutputPeriod: String(row.target_output_period ?? "day"),
+    notes: maybeText(row.notes),
+    createdAt: String(row.created_at),
   };
 }
 
@@ -1858,7 +1871,10 @@ export async function setOrgToolAccessInSupabase(userId: string, level: AccessLe
   );
 }
 
-export async function loadPlannerStateWithProjectFromSupabase(projectId?: string): Promise<{
+export async function loadPlannerStateWithProjectFromSupabase(
+  projectId?: string,
+  scenarioId?: string,
+): Promise<{
   state: PlannerState;
   project: PlannerProjectContext;
 } | null> {
@@ -1886,14 +1902,24 @@ export async function loadPlannerStateWithProjectFromSupabase(projectId?: string
     project = await loadProjectContext(supabase, String(projectId ?? product.project_id));
   }
 
+  // When a scenarioId is given, load that specific scenario (scoped to this product so a caller can
+  // never pull another product's scenario). Otherwise fall back to the earliest = "Main" scenario,
+  // which preserves the original single-scenario behavior.
   const scenario = await throwIfError(
-    supabase
-      .from("scenarios")
-      .select("*")
-      .eq("product_id", product.id)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle(),
+    scenarioId
+      ? supabase
+          .from("scenarios")
+          .select("*")
+          .eq("product_id", product.id)
+          .eq("id", scenarioId)
+          .maybeSingle()
+      : supabase
+          .from("scenarios")
+          .select("*")
+          .eq("product_id", product.id)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle(),
   );
 
   if (!scenario) {
@@ -2001,9 +2027,25 @@ export async function loadPlannerStateWithProjectFromSupabase(projectId?: string
   return { state, project: projectContext };
 }
 
-export async function loadPlannerStateFromSupabase(projectId?: string): Promise<PlannerState | null> {
-  const loaded = await loadPlannerStateWithProjectFromSupabase(projectId);
+export async function loadPlannerStateFromSupabase(
+  projectId?: string,
+  scenarioId?: string,
+): Promise<PlannerState | null> {
+  const loaded = await loadPlannerStateWithProjectFromSupabase(projectId, scenarioId);
   return loaded?.state ?? null;
+}
+
+// Lightweight list of a product's scenarios for the switcher tabs (earliest first = "Main").
+export async function loadScenariosForProduct(productId: string): Promise<ScenarioSummary[]> {
+  const supabase = plannerClient();
+  const rows = await throwIfError(
+    supabase
+      .from("scenarios")
+      .select("id,name,target_output,target_output_period,notes,created_at")
+      .eq("product_id", productId)
+      .order("created_at", { ascending: true }),
+  );
+  return ((rows ?? []) as Record<string, unknown>[]).map(mapScenarioSummary);
 }
 
 export async function savePlannerStateToSupabase(state: PlannerState) {

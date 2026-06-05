@@ -2084,6 +2084,13 @@ export async function renameScenario(scenarioId: string, name: string): Promise<
   await throwIfError(supabase.from("scenarios").update({ name }).eq("id", scenarioId));
 }
 
+// Delete a scenario via the guarded RPC (refuses the Main/earliest scenario and the only scenario).
+// Children cascade. The UI also hides delete for Main; this is the DB-level half of that guard.
+export async function deleteScenario(scenarioId: string): Promise<void> {
+  const supabase = plannerClient();
+  await throwIfError(supabase.rpc("delete_scenario", { p_scenario_id: scenarioId }));
+}
+
 export async function savePlannerStateToSupabase(state: PlannerState) {
   if (state.tasks.length === 0) {
     throw new Error("Refusing to save an empty Gantt. Add at least one task before saving.");

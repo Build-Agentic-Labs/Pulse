@@ -158,6 +158,7 @@ import {
   canPatchTaskFromRealtimePayload,
   createPlannerSupabaseClient,
   deleteToolLibraryFromSupabase,
+  deleteScenario,
   duplicateScenario,
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
@@ -6583,6 +6584,41 @@ export function LineWorkspace({
   // Switch the Gantt to another scenario. Hard rule (spec §4.2 / §7.4): save first; if the save fails
   // or doesn't settle, ABORT -- show the error and stay on the current scenario. Never switch on a
   // failed/partial save. Realtime re-subscribes automatically via the derivedState.scenario.id effect.
+  // Flush + await all local saves before a scenario action; on failure show a warning and return false.
+  async function ensureSavedBeforeScenarioAction(failTitle: string, failBody: string): Promise<boolean> {
+    flushPendingPlannerSave();
+    const saved = await waitForLocalSavesToSettle();
+    if (!saved) {
+      notifyFeedback({ title: failTitle, body: failBody, tone: "warning" });
+      return false;
+    }
+    return true;
+  }
+
+  // Load a scenario into the active view: instant from the in-memory cache, else load once and cache
+  // it. Throws if it can't be loaded. The caller owns the surrounding save-state / busy messaging.
+  async function loadScenarioIntoView(scenarioId: string) {
+    const cached = scenarioCacheRef.current.get(scenarioId);
+    if (cached) {
+      applyScenarioSwitch(cached);
+      return;
+    }
+    setSaveState("loading");
+    const loaded = await loadPlannerStateFromSupabase(projectId, scenarioId);
+    if (!loaded) {
+      throw new Error("That scenario could not be loaded.");
+    }
+    scenarioCacheRef.current.set(scenarioId, loaded);
+    applyScenarioSwitch(loaded);
+  }
+
+  // Reload the scenario tab list for the current product and return it.
+  async function refreshScenarioList(): Promise<ScenarioSummary[]> {
+    const list = await loadScenariosForProduct(derivedState.product.id);
+    setScenarios(list);
+    return list;
+  }
+
   async function switchScenario(targetScenarioId: string) {
     if (isSwitchingScenario || targetScenarioId === derivedState.scenario.id) {
       return;
@@ -6592,34 +6628,14 @@ export function LineWorkspace({
     setSwitchTargetId(targetScenarioId);
     setIsSwitchingScenario(true);
     try {
-      flushPendingPlannerSave();
-      const saved = await waitForLocalSavesToSettle();
-      if (!saved) {
-        notifyFeedback({
-          title: "Can't switch scenarios",
-          body: "Your changes couldn't be saved, so the scenario was not switched. Resolve the save error and try again.",
-          tone: "warning",
-        });
+      const ok = await ensureSavedBeforeScenarioAction(
+        "Can't switch scenarios",
+        "Your changes couldn't be saved, so the scenario was not switched. Resolve the save error and try again.",
+      );
+      if (!ok) {
         return;
       }
-
-      // Instant path: if we've already loaded this scenario, restore it from memory -- no DB reload,
-      // no photo re-signing. The cache mirror effect keeps it current with any edits.
-      const cached = scenarioCacheRef.current.get(targetScenarioId);
-      if (cached) {
-        applyScenarioSwitch(cached);
-        setSaveState("saved");
-        return;
-      }
-
-      // First visit to this scenario: load it once, then cache it for instant future switches.
-      setSaveState("loading");
-      const loaded = await loadPlannerStateFromSupabase(projectId, targetScenarioId);
-      if (!loaded) {
-        throw new Error("That scenario could not be loaded.");
-      }
-      scenarioCacheRef.current.set(targetScenarioId, loaded);
-      applyScenarioSwitch(loaded);
+      await loadScenarioIntoView(targetScenarioId);
       setSaveState("saved");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to load that scenario.";
@@ -6632,26 +6648,84 @@ export function LineWorkspace({
     }
   }
 
-  // Rename a (non-main) scenario. Optimistically updates local state, then persists.
+  // Rename a (non-main) scenario. Optimistically updates local state, then persists; reverts on failure.
   async function renameScenarioById(scenarioId: string, name: string) {
     const trimmed = name.trim();
     if (!trimmed || scenarioId === scenarios[0]?.id) {
       return;
     }
-    setScenarios((current) =>
-      current.map((scenario) => (scenario.id === scenarioId ? { ...scenario, name: trimmed } : scenario)),
-    );
-    if (scenarioId === latestDerivedStateRef.current.scenario.id) {
-      setPlannerState((current) => ({ ...current, scenario: { ...current.scenario, name: trimmed } }));
-    }
+    const previousName = scenarios.find((scenario) => scenario.id === scenarioId)?.name;
+    const applyName = (value: string) => {
+      setScenarios((current) =>
+        current.map((scenario) => (scenario.id === scenarioId ? { ...scenario, name: value } : scenario)),
+      );
+      if (scenarioId === latestDerivedStateRef.current.scenario.id) {
+        setPlannerState((current) => ({ ...current, scenario: { ...current.scenario, name: value } }));
+      }
+    };
+    applyName(trimmed);
     try {
       await renameScenario(scenarioId, trimmed);
     } catch (error) {
+      if (previousName !== undefined) {
+        applyName(previousName);
+      }
       notifyFeedback({
         title: "Couldn't rename scenario",
         body: error instanceof Error ? error.message : "The scenario could not be renamed.",
         tone: "danger",
       });
+    }
+  }
+
+  // Confirm, then delete a (non-main) projection scenario.
+  function requestDeleteScenario(scenarioId: string) {
+    const scenario = scenarios.find((entry) => entry.id === scenarioId);
+    if (!scenario || scenarioId === scenarios[0]?.id) {
+      return;
+    }
+    setFeedbackConfirm({
+      title: `Delete "${scenario.name || "this scenario"}"?`,
+      body: "This permanently removes this projection and its Gantt. Main Plan and other scenarios are unaffected. This can't be undone.",
+      tone: "danger",
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      onConfirm: () => {
+        setFeedbackConfirm(undefined);
+        void deleteScenarioById(scenarioId);
+      },
+    });
+  }
+
+  async function deleteScenarioById(scenarioId: string) {
+    if (isSwitchingScenario || scenarioId === scenarios[0]?.id) {
+      return;
+    }
+    const wasActive = scenarioId === latestDerivedStateRef.current.scenario.id;
+    setIsSwitchingScenario(true);
+    setSaveState("loading");
+    try {
+      await deleteScenario(scenarioId);
+      scenarioCacheRef.current.delete(scenarioId);
+      const list = await refreshScenarioList();
+
+      // If the deleted scenario was the one on screen, fall back to Main (instant from cache).
+      if (wasActive && list[0]?.id) {
+        await loadScenarioIntoView(list[0].id);
+      }
+      setSaveState("saved");
+      notifyFeedback({
+        title: "Scenario deleted",
+        body: "The projection was removed. Main Plan is unaffected.",
+        tone: "success",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to delete the scenario.";
+      setSaveError(message);
+      setSaveState("error");
+      notifyFeedback({ title: "Delete failed", body: message, tone: "danger" });
+    } finally {
+      setIsSwitchingScenario(false);
     }
   }
 
@@ -6661,14 +6735,11 @@ export function LineWorkspace({
       return;
     }
     // The RPC copies from the DB, so flush local edits first (same guard as switching).
-    flushPendingPlannerSave();
-    const saved = await waitForLocalSavesToSettle();
-    if (!saved) {
-      notifyFeedback({
-        title: "Can't duplicate yet",
-        body: "Your changes couldn't be saved, so the scenario was not duplicated. Resolve the save error and try again.",
-        tone: "warning",
-      });
+    const ok = await ensureSavedBeforeScenarioAction(
+      "Can't duplicate yet",
+      "Your changes couldn't be saved, so the scenario was not duplicated. Resolve the save error and try again.",
+    );
+    if (!ok) {
       return;
     }
 
@@ -6677,13 +6748,8 @@ export function LineWorkspace({
     try {
       const sourceLabel = isMainScenario ? "Main Plan" : derivedState.scenario.name || "Scenario";
       const newId = await duplicateScenario(derivedState.scenario.id, `${sourceLabel} copy`);
-      const list = await loadScenariosForProduct(derivedState.product.id);
-      setScenarios(list);
-      const loaded = await loadPlannerStateFromSupabase(projectId, newId);
-      if (!loaded) {
-        throw new Error("The duplicated scenario could not be loaded.");
-      }
-      applyScenarioSwitch(loaded);
+      await refreshScenarioList();
+      await loadScenarioIntoView(newId);
       setSaveState("saved");
       notifyFeedback({
         title: "Scenario duplicated",
@@ -6703,20 +6769,27 @@ export function LineWorkspace({
   // Edit a (non-main) scenario's projection target. Optimistically updates local state so the active
   // scenario's takt re-flags the Gantt immediately, then persists.
   async function editScenarioTarget(scenarioId: string, targetOutput: number, targetOutputPeriod: string) {
-    setScenarios((current) =>
-      current.map((scenario) =>
-        scenario.id === scenarioId ? { ...scenario, targetOutput, targetOutputPeriod } : scenario,
-      ),
-    );
-    if (scenarioId === latestDerivedStateRef.current.scenario.id) {
-      setPlannerState((current) => ({
-        ...current,
-        scenario: { ...current.scenario, targetOutput, targetOutputPeriod },
-      }));
-    }
+    const previous = scenarios.find((scenario) => scenario.id === scenarioId);
+    const applyTarget = (units: number, period: string) => {
+      setScenarios((current) =>
+        current.map((scenario) =>
+          scenario.id === scenarioId ? { ...scenario, targetOutput: units, targetOutputPeriod: period } : scenario,
+        ),
+      );
+      if (scenarioId === latestDerivedStateRef.current.scenario.id) {
+        setPlannerState((current) => ({
+          ...current,
+          scenario: { ...current.scenario, targetOutput: units, targetOutputPeriod: period },
+        }));
+      }
+    };
+    applyTarget(targetOutput, targetOutputPeriod);
     try {
       await updateScenarioTarget(scenarioId, targetOutput, targetOutputPeriod);
     } catch (error) {
+      if (previous) {
+        applyTarget(previous.targetOutput, previous.targetOutputPeriod);
+      }
       notifyFeedback({
         title: "Couldn't save target",
         body: error instanceof Error ? error.message : "The scenario target could not be saved.",
@@ -9717,6 +9790,7 @@ export function LineWorkspace({
                     onSwitch={(scenarioId) => void switchScenario(scenarioId)}
                     onDuplicate={() => void duplicateActiveScenario()}
                     onRename={(scenarioId, name) => void renameScenarioById(scenarioId, name)}
+                    onDelete={(scenarioId) => requestDeleteScenario(scenarioId)}
                     onEditTarget={(scenarioId, targetOutput, targetOutputPeriod) =>
                       void editScenarioTarget(scenarioId, targetOutput, targetOutputPeriod)
                     }

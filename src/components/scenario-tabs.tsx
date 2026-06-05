@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, X } from "lucide-react";
 
 import type { ScenarioSummary } from "@/domain/types";
 
@@ -15,6 +15,7 @@ interface ScenarioTabsProps {
   onSwitch: (scenarioId: string) => void;
   onDuplicate: () => void;
   onRename: (scenarioId: string, name: string) => void;
+  onDelete: (scenarioId: string) => void;
   onEditTarget: (scenarioId: string, targetOutput: number, targetOutputPeriod: string) => void;
 }
 
@@ -33,6 +34,7 @@ export function ScenarioTabs({
   onSwitch,
   onDuplicate,
   onRename,
+  onDelete,
   onEditTarget,
 }: ScenarioTabsProps) {
   const mainId = scenarios[0]?.id;
@@ -125,29 +127,47 @@ export function ScenarioTabs({
         }
 
         return (
-          <button
+          <div
             key={scenario.id}
-            type="button"
-            role="tab"
-            aria-selected={isActive}
-            disabled={isSwitching}
-            title={isMain ? "Master plan" : scenario.notes || "Double-click to rename"}
-            onClick={() => onSwitch(scenario.id)}
-            onDoubleClick={() => {
-              if (!isMain) {
-                startRename(scenario);
-              }
-            }}
             className={[
-              "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 font-medium transition-colors",
-              isActive
-                ? "border-accent text-ink"
-                : "border-transparent text-ink-tertiary hover:text-ink-secondary disabled:opacity-60",
+              "-mb-px flex items-center border-b-2 transition-colors",
+              isActive ? "border-accent" : "border-transparent",
             ].join(" ")}
           >
-            <span>{isMain ? "Main Plan" : scenario.name || "Untitled"}</span>
-            {isPending ? <Loader2 size={13} className="animate-spin text-accent" /> : null}
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              disabled={isSwitching}
+              title={isMain ? "Master plan" : scenario.notes || "Double-click to rename"}
+              onClick={() => onSwitch(scenario.id)}
+              onDoubleClick={() => {
+                if (!isMain) {
+                  startRename(scenario);
+                }
+              }}
+              className={[
+                "flex items-center gap-1.5 py-2.5 pl-3 font-medium transition-colors",
+                isMain ? "pr-3" : "pr-1.5",
+                isActive ? "text-ink" : "text-ink-tertiary hover:text-ink-secondary disabled:opacity-60",
+              ].join(" ")}
+            >
+              <span>{isMain ? "Main Plan" : scenario.name || "Untitled"}</span>
+              {isPending ? <Loader2 size={13} className="animate-spin text-accent" /> : null}
+            </button>
+            {!isMain ? (
+              <button
+                type="button"
+                disabled={isSwitching}
+                title="Delete this projection"
+                aria-label={`Delete ${scenario.name || "scenario"}`}
+                onClick={() => onDelete(scenario.id)}
+                className="mr-1 rounded p-0.5 text-ink-tertiary transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+              >
+                <X size={13} />
+              </button>
+            ) : null}
+          </div>
         );
       })}
 

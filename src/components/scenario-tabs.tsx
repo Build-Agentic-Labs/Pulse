@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, Plus } from "lucide-react";
 
 import type { ScenarioSummary } from "@/domain/types";
 
@@ -8,56 +9,75 @@ interface ScenarioTabsProps {
   scenarios: ScenarioSummary[];
   // The currently-loaded scenario id (always derivedState.scenario.id in the workspace).
   activeScenarioId: string;
+  // The scenario being switched to (set immediately on click for instant tab feedback).
+  pendingScenarioId?: string;
   isSwitching?: boolean;
   onSwitch: (scenarioId: string) => void;
   onDuplicate: () => void;
+  onRename: (scenarioId: string, name: string) => void;
   onEditTarget: (scenarioId: string, targetOutput: number, targetOutputPeriod: string) => void;
 }
-
-const PERIOD_ABBREV: Record<string, string> = {
-  shift: "shift",
-  day: "day",
-  week: "wk",
-  month: "mo",
-  year: "yr",
-  custom: "custom",
-};
 
 // Periods offered by the target editor (the availability model handles these; 'custom' is omitted).
 const TARGET_PERIODS = ["shift", "day", "week", "month", "year"] as const;
 
-function targetLabel(scenario: ScenarioSummary): string {
-  const period = PERIOD_ABBREV[scenario.targetOutputPeriod] ?? scenario.targetOutputPeriod;
-  return `${scenario.targetOutput}/${period}`;
-}
-
-// Scenario switcher tab strip shown above the Gantt. The earliest-created scenario (scenarios[0],
-// ordered created_at asc by the loader) is the canonical "Main Plan"; every other scenario is an
-// independent high-level projection copy. Supports switching, duplicating the active scenario, and
-// editing a projection scenario's target (units + period), which drives its Gantt takt flagging.
+// Scenario switcher shown above the Gantt. The earliest-created scenario (scenarios[0], ordered
+// created_at asc by the loader) is the canonical "Main Plan"; every other scenario is an independent
+// high-level projection. Switch (click), duplicate (+ Duplicate), rename a projection (double-click),
+// and set a projection's target (units + period, which drives its Gantt takt). Main can't be renamed.
 export function ScenarioTabs({
   scenarios,
   activeScenarioId,
+  pendingScenarioId,
   isSwitching = false,
   onSwitch,
   onDuplicate,
+  onRename,
   onEditTarget,
 }: ScenarioTabsProps) {
   const mainId = scenarios[0]?.id;
+  // While switching, highlight the target tab immediately (don't wait for the reload to finish).
+  const highlightId = isSwitching && pendingScenarioId ? pendingScenarioId : activeScenarioId;
   const active = scenarios.find((scenario) => scenario.id === activeScenarioId);
   const activeIsMain = active ? active.id === mainId : true;
+
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const renameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (renamingId) {
+      renameRef.current?.focus();
+      renameRef.current?.select();
+    }
+  }, [renamingId]);
+
   const activeId = active?.id;
   const activeTarget = active?.targetOutput;
-
-  // Local, editable copy of the active scenario's target units (committed on blur / Enter). Resets
-  // when the active scenario changes (switch) or its target changes (after a commit).
-  const [units, setUnits] = useState<string>(activeTarget !== undefined ? String(activeTarget) : "");
+  const [units, setUnits] = useState(activeTarget !== undefined ? String(activeTarget) : "");
   useEffect(() => {
     setUnits(activeTarget !== undefined ? String(activeTarget) : "");
   }, [activeId, activeTarget]);
 
   if (scenarios.length === 0) {
     return null;
+  }
+
+  function startRename(scenario: ScenarioSummary) {
+    setRenamingId(scenario.id);
+    setDraftName(scenario.name);
+  }
+
+  function commitRename() {
+    const id = renamingId;
+    setRenamingId(null);
+    if (!id) {
+      return;
+    }
+    const current = scenarios.find((scenario) => scenario.id === id);
+    const name = draftName.trim();
+    if (current && name && name !== current.name) {
+      onRename(id, name);
+    }
   }
 
   function commitUnits() {
@@ -76,12 +96,33 @@ export function ScenarioTabs({
     <div
       role="tablist"
       aria-label="Scenarios"
-      className="flex items-center gap-1.5 border-b border-line bg-surface px-3 py-1.5 text-sm"
+      className="flex items-stretch gap-1 border-b border-line bg-surface px-3 text-sm"
     >
       {scenarios.map((scenario) => {
         const isMain = scenario.id === mainId;
-        const isActive = scenario.id === activeScenarioId;
-        const label = isMain ? "Main Plan" : scenario.name || "Untitled scenario";
+        const isActive = scenario.id === highlightId;
+        const isPending = isSwitching && pendingScenarioId === scenario.id;
+
+        if (renamingId === scenario.id) {
+          return (
+            <input
+              key={scenario.id}
+              ref={renameRef}
+              value={draftName}
+              onChange={(event) => setDraftName(event.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  commitRename();
+                } else if (event.key === "Escape") {
+                  setRenamingId(null);
+                }
+              }}
+              aria-label="Rename scenario"
+              className="my-1.5 w-44 self-center rounded border border-accent bg-surface px-2 py-0.5 text-ink"
+            />
+          );
+        }
 
         return (
           <button
@@ -89,23 +130,23 @@ export function ScenarioTabs({
             type="button"
             role="tab"
             aria-selected={isActive}
-            disabled={isActive || isSwitching}
-            title={!isMain && scenario.notes ? scenario.notes : undefined}
+            disabled={isSwitching}
+            title={isMain ? "Master plan" : scenario.notes || "Double-click to rename"}
             onClick={() => onSwitch(scenario.id)}
+            onDoubleClick={() => {
+              if (!isMain) {
+                startRename(scenario);
+              }
+            }}
             className={[
-              "flex items-center gap-1.5 rounded-md border px-3 py-1 transition-colors",
+              "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 font-medium transition-colors",
               isActive
-                ? "border-accent bg-accent-muted text-ink"
-                : "border-line bg-surface text-ink-secondary hover:bg-surface-hover disabled:opacity-60",
+                ? "border-accent text-ink"
+                : "border-transparent text-ink-tertiary hover:text-ink-secondary disabled:opacity-60",
             ].join(" ")}
           >
-            <span className="font-medium">{label}</span>
-            {!isMain ? (
-              <span className="rounded bg-accent-subtle px-1 text-[10px] uppercase tracking-wide text-accent">
-                Projection
-              </span>
-            ) : null}
-            {!isMain ? <span className="text-xs text-ink-tertiary">{targetLabel(scenario)}</span> : null}
+            <span>{isMain ? "Main Plan" : scenario.name || "Untitled"}</span>
+            {isPending ? <Loader2 size={13} className="animate-spin text-accent" /> : null}
           </button>
         );
       })}
@@ -114,25 +155,20 @@ export function ScenarioTabs({
         type="button"
         onClick={onDuplicate}
         disabled={isSwitching}
-        title="Duplicate the active scenario into a new high-level projection"
-        className="flex items-center gap-1 rounded-md border border-dashed border-line px-2.5 py-1 text-ink-secondary hover:bg-surface-hover disabled:opacity-60"
+        title="Duplicate the active scenario into a new projection"
+        className="my-1.5 ml-1 flex items-center gap-1 self-center rounded-md px-2 py-1 text-ink-tertiary transition-colors hover:bg-surface-hover hover:text-ink-secondary disabled:opacity-60"
       >
-        + Duplicate
+        <Plus size={14} />
+        Duplicate
       </button>
 
-      {isSwitching ? (
-        <span className="text-xs text-ink-tertiary" aria-live="polite">
-          Working…
-        </span>
-      ) : null}
-
-      {/* Target editor (right-aligned). Main shows the product-derived takt source, read-only. */}
-      <div className="ml-auto flex items-center gap-1.5 text-xs text-ink-secondary">
+      {/* Target editor (right). Main is read-only (takt comes from product-level demand). */}
+      <div className="ml-auto flex items-center gap-1.5 self-center text-xs text-ink-tertiary">
         {activeIsMain ? (
-          <span title="Main Plan uses the product-level demand for takt">Target: from product</span>
+          <span title="Main Plan uses the product-level demand for takt">Takt from product demand</span>
         ) : active ? (
           <>
-            <span>Target</span>
+            <span className="text-ink-secondary">Target</span>
             <input
               type="number"
               min={1}
@@ -146,7 +182,7 @@ export function ScenarioTabs({
                 }
               }}
               aria-label="Target units"
-              className="w-16 rounded border border-line bg-surface px-1.5 py-0.5 text-right text-ink"
+              className="w-14 rounded border border-line bg-surface px-1.5 py-0.5 text-right text-ink"
             />
             <span>/</span>
             <select
@@ -158,11 +194,11 @@ export function ScenarioTabs({
                 onEditTarget(active.id, safeUnits, event.target.value);
               }}
               aria-label="Target period"
-              className="rounded border border-line bg-surface px-1.5 py-0.5 text-ink"
+              className="rounded border border-line bg-surface px-1 py-0.5 text-ink"
             >
               {TARGET_PERIODS.map((period) => (
                 <option key={period} value={period}>
-                  {PERIOD_ABBREV[period] ?? period}
+                  {period}
                 </option>
               ))}
             </select>

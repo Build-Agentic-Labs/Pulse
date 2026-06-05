@@ -2078,6 +2078,12 @@ export async function updateScenarioTarget(
   );
 }
 
+// Rename a scenario (used for projection tabs; the UI prevents renaming Main).
+export async function renameScenario(scenarioId: string, name: string): Promise<void> {
+  const supabase = plannerClient();
+  await throwIfError(supabase.from("scenarios").update({ name }).eq("id", scenarioId));
+}
+
 export async function savePlannerStateToSupabase(state: PlannerState) {
   if (state.tasks.length === 0) {
     throw new Error("Refusing to save an empty Gantt. Add at least one task before saving.");

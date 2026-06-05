@@ -162,6 +162,7 @@ import {
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
   loadTaskFromSupabase,
+  renameScenario,
   updateScenarioTarget,
   loadToolLibraryFromSupabase,
   moveManufacturingStepToTaskInSupabase,
@@ -5303,6 +5304,13 @@ export function LineWorkspace({
   // track a separate id that could drift out of sync with the loaded planner state.
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
   const [isSwitchingScenario, setIsSwitchingScenario] = useState(false);
+  // The scenario id being switched to, set immediately on click so the target tab highlights right
+  // away (instant feedback) even while the reload is in flight.
+  const [switchTargetId, setSwitchTargetId] = useState<string | undefined>();
+  // In-memory cache of loaded scenarios, keyed by scenario id, for INSTANT switching (no DB reload).
+  // The active scenario's latest state is mirrored here continuously (see the effect below), so the
+  // cache always matches what's saved; switching to a cached scenario is a pure in-memory setState.
+  const scenarioCacheRef = useRef<Map<string, PlannerState>>(new Map());
   const [activeModule, setActiveModule] = useState("dashboard");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [setupSection, setSetupSection] = useState<SetupSection>("product");
@@ -5389,6 +5397,19 @@ export function LineWorkspace({
   useEffect(() => {
     saveStateRef.current = saveState;
   }, [saveState]);
+
+  // Drop the scenario cache when the project changes (a different project = different scenarios).
+  useEffect(() => {
+    scenarioCacheRef.current.clear();
+  }, [projectId]);
+
+  // Keep the active scenario's latest state mirrored in the cache so a later switch back is instant
+  // and reflects any edits made while it was active.
+  useEffect(() => {
+    if (hasLoadedRemoteState && derivedState.scenario.id !== emptyPlannerState.scenario.id) {
+      scenarioCacheRef.current.set(derivedState.scenario.id, derivedState);
+    }
+  }, [derivedState, hasLoadedRemoteState]);
 
   // Load the lightweight scenario list for the switcher tabs once a real project is loaded.
   useEffect(() => {
@@ -6567,24 +6588,37 @@ export function LineWorkspace({
       return;
     }
 
-    flushPendingPlannerSave();
-    const saved = await waitForLocalSavesToSettle();
-    if (!saved) {
-      notifyFeedback({
-        title: "Can't switch scenarios",
-        body: "Your changes couldn't be saved, so the scenario was not switched. Resolve the save error and try again.",
-        tone: "warning",
-      });
-      return;
-    }
-
+    // Highlight the target tab immediately (instant feedback) for the whole save+load duration.
+    setSwitchTargetId(targetScenarioId);
     setIsSwitchingScenario(true);
-    setSaveState("loading");
     try {
+      flushPendingPlannerSave();
+      const saved = await waitForLocalSavesToSettle();
+      if (!saved) {
+        notifyFeedback({
+          title: "Can't switch scenarios",
+          body: "Your changes couldn't be saved, so the scenario was not switched. Resolve the save error and try again.",
+          tone: "warning",
+        });
+        return;
+      }
+
+      // Instant path: if we've already loaded this scenario, restore it from memory -- no DB reload,
+      // no photo re-signing. The cache mirror effect keeps it current with any edits.
+      const cached = scenarioCacheRef.current.get(targetScenarioId);
+      if (cached) {
+        applyScenarioSwitch(cached);
+        setSaveState("saved");
+        return;
+      }
+
+      // First visit to this scenario: load it once, then cache it for instant future switches.
+      setSaveState("loading");
       const loaded = await loadPlannerStateFromSupabase(projectId, targetScenarioId);
       if (!loaded) {
         throw new Error("That scenario could not be loaded.");
       }
+      scenarioCacheRef.current.set(targetScenarioId, loaded);
       applyScenarioSwitch(loaded);
       setSaveState("saved");
     } catch (error) {
@@ -6594,6 +6628,30 @@ export function LineWorkspace({
       notifyFeedback({ title: "Scenario load failed", body: message, tone: "danger" });
     } finally {
       setIsSwitchingScenario(false);
+      setSwitchTargetId(undefined);
+    }
+  }
+
+  // Rename a (non-main) scenario. Optimistically updates local state, then persists.
+  async function renameScenarioById(scenarioId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || scenarioId === scenarios[0]?.id) {
+      return;
+    }
+    setScenarios((current) =>
+      current.map((scenario) => (scenario.id === scenarioId ? { ...scenario, name: trimmed } : scenario)),
+    );
+    if (scenarioId === latestDerivedStateRef.current.scenario.id) {
+      setPlannerState((current) => ({ ...current, scenario: { ...current.scenario, name: trimmed } }));
+    }
+    try {
+      await renameScenario(scenarioId, trimmed);
+    } catch (error) {
+      notifyFeedback({
+        title: "Couldn't rename scenario",
+        body: error instanceof Error ? error.message : "The scenario could not be renamed.",
+        tone: "danger",
+      });
     }
   }
 
@@ -6752,7 +6810,10 @@ export function LineWorkspace({
       return;
     }
 
-    void loadPlannerStateFromSupabase(projectId)
+    // Refresh the ACTIVE scenario, not the product's default. Without the scenario id this reloads the
+    // earliest (Main) scenario and overwrites whichever projection is open -- the "switch bounces back
+    // to Main" bug. The active scenario id is read live from the derived-state ref.
+    void loadPlannerStateFromSupabase(projectId, latestDerivedStateRef.current.scenario.id)
       .then((savedState) => {
         if (!savedState || hasPlannerShellSaveWork()) {
           pendingRemoteRefreshRef.current = true;
@@ -9651,9 +9712,11 @@ export function LineWorkspace({
                   <ScenarioTabs
                     scenarios={scenarios}
                     activeScenarioId={derivedState.scenario.id}
+                    pendingScenarioId={switchTargetId}
                     isSwitching={isSwitchingScenario}
                     onSwitch={(scenarioId) => void switchScenario(scenarioId)}
                     onDuplicate={() => void duplicateActiveScenario()}
+                    onRename={(scenarioId, name) => void renameScenarioById(scenarioId, name)}
                     onEditTarget={(scenarioId, targetOutput, targetOutputPeriod) =>
                       void editScenarioTarget(scenarioId, targetOutput, targetOutputPeriod)
                     }

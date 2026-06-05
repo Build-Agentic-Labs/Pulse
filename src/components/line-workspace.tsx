@@ -158,9 +158,11 @@ import {
   canPatchTaskFromRealtimePayload,
   createPlannerSupabaseClient,
   deleteToolLibraryFromSupabase,
+  duplicateScenario,
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
   loadTaskFromSupabase,
+  updateScenarioTarget,
   loadToolLibraryFromSupabase,
   moveManufacturingStepToTaskInSupabase,
   removeStepToolFromSupabase,
@@ -6595,6 +6597,76 @@ export function LineWorkspace({
     }
   }
 
+  // Duplicate the active scenario into a new independent high-level projection, then switch to it.
+  async function duplicateActiveScenario() {
+    if (isSwitchingScenario) {
+      return;
+    }
+    // The RPC copies from the DB, so flush local edits first (same guard as switching).
+    flushPendingPlannerSave();
+    const saved = await waitForLocalSavesToSettle();
+    if (!saved) {
+      notifyFeedback({
+        title: "Can't duplicate yet",
+        body: "Your changes couldn't be saved, so the scenario was not duplicated. Resolve the save error and try again.",
+        tone: "warning",
+      });
+      return;
+    }
+
+    setIsSwitchingScenario(true);
+    setSaveState("loading");
+    try {
+      const sourceLabel = isMainScenario ? "Main Plan" : derivedState.scenario.name || "Scenario";
+      const newId = await duplicateScenario(derivedState.scenario.id, `${sourceLabel} copy`);
+      const list = await loadScenariosForProduct(derivedState.product.id);
+      setScenarios(list);
+      const loaded = await loadPlannerStateFromSupabase(projectId, newId);
+      if (!loaded) {
+        throw new Error("The duplicated scenario could not be loaded.");
+      }
+      applyScenarioSwitch(loaded);
+      setSaveState("saved");
+      notifyFeedback({
+        title: "Scenario duplicated",
+        body: `Created "${sourceLabel} copy" as an independent projection (high-level Gantt, no progress).`,
+        tone: "success",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to duplicate the scenario.";
+      setSaveError(message);
+      setSaveState("error");
+      notifyFeedback({ title: "Duplicate failed", body: message, tone: "danger" });
+    } finally {
+      setIsSwitchingScenario(false);
+    }
+  }
+
+  // Edit a (non-main) scenario's projection target. Optimistically updates local state so the active
+  // scenario's takt re-flags the Gantt immediately, then persists.
+  async function editScenarioTarget(scenarioId: string, targetOutput: number, targetOutputPeriod: string) {
+    setScenarios((current) =>
+      current.map((scenario) =>
+        scenario.id === scenarioId ? { ...scenario, targetOutput, targetOutputPeriod } : scenario,
+      ),
+    );
+    if (scenarioId === latestDerivedStateRef.current.scenario.id) {
+      setPlannerState((current) => ({
+        ...current,
+        scenario: { ...current.scenario, targetOutput, targetOutputPeriod },
+      }));
+    }
+    try {
+      await updateScenarioTarget(scenarioId, targetOutput, targetOutputPeriod);
+    } catch (error) {
+      notifyFeedback({
+        title: "Couldn't save target",
+        body: error instanceof Error ? error.message : "The scenario target could not be saved.",
+        tone: "danger",
+      });
+    }
+  }
+
   function refreshTasksFromSupabase(taskIds: string[]) {
     if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
@@ -9581,6 +9653,10 @@ export function LineWorkspace({
                     activeScenarioId={derivedState.scenario.id}
                     isSwitching={isSwitchingScenario}
                     onSwitch={(scenarioId) => void switchScenario(scenarioId)}
+                    onDuplicate={() => void duplicateActiveScenario()}
+                    onEditTarget={(scenarioId, targetOutput, targetOutputPeriod) =>
+                      void editScenarioTarget(scenarioId, targetOutput, targetOutputPeriod)
+                    }
                   />
                   <GanttTimeline
                     tasks={derivedState.tasks}

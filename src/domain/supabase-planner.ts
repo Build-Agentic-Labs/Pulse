@@ -2048,6 +2048,36 @@ export async function loadScenariosForProduct(productId: string): Promise<Scenar
   return ((rows ?? []) as Record<string, unknown>[]).map(mapScenarioSummary);
 }
 
+// Deep-copy a scenario into a new independent "projection" scenario (high-level Gantt only -- stations,
+// zones, components, tasks with planned time + manpower, dependencies; no procedures/tools/photos/parts)
+// via the duplicate_scenario RPC. Returns the new scenario id.
+export async function duplicateScenario(sourceScenarioId: string, newName: string): Promise<string> {
+  const supabase = plannerClient();
+  const newId = await throwIfError(
+    supabase.rpc("duplicate_scenario", {
+      p_source_scenario_id: sourceScenarioId,
+      p_new_name: newName,
+    }),
+  );
+  return String(newId);
+}
+
+// Update a scenario's projection target (units + period). This drives the active-scenario takt for
+// non-main scenarios (see calculateActiveTaktMinutes).
+export async function updateScenarioTarget(
+  scenarioId: string,
+  targetOutput: number,
+  targetOutputPeriod: string,
+): Promise<void> {
+  const supabase = plannerClient();
+  await throwIfError(
+    supabase
+      .from("scenarios")
+      .update({ target_output: targetOutput, target_output_period: targetOutputPeriod })
+      .eq("id", scenarioId),
+  );
+}
+
 export async function savePlannerStateToSupabase(state: PlannerState) {
   if (state.tasks.length === 0) {
     throw new Error("Refusing to save an empty Gantt. Add at least one task before saving.");

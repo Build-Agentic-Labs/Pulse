@@ -1704,13 +1704,6 @@ function ProcedureWorkspace({
   const [navigatorWidth, setNavigatorWidth] = useState(320);
   const [isResizingNavigator, setIsResizingNavigator] = useState(false);
   const navigatorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  // Continuous-scroll: when the user scrolls to the bottom of a task, advance to
-  // the next task. Cooldown prevents a double-advance; pending flag scrolls the
-  // newly selected task back to the top.
-  const procedureMainRef = useRef<HTMLElement | null>(null);
-  const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
-  const autoAdvanceCooldownRef = useRef(false);
-  const pendingScrollTopRef = useRef(false);
   // Which step sections are hidden. View-only filter; persisted per user via
   // localStorage and never touches saved project data.
   const [hiddenStepSections, setHiddenStepSections] = useState<Set<ProcedureSectionKey>>(() =>
@@ -1795,17 +1788,6 @@ function ProcedureWorkspace({
     [task?.id, tasks],
   );
   const partReferences = task?.partReferences ?? [];
-  const orderedNavigatorTasks = useMemo(
-    () => groupedTasks.flatMap((group) => group.tasks),
-    [groupedTasks],
-  );
-  const nextNavigatorTask = useMemo(() => {
-    if (!task) {
-      return undefined;
-    }
-    const index = orderedNavigatorTasks.findIndex((candidate) => candidate.id === task.id);
-    return index >= 0 ? orderedNavigatorTasks[index + 1] : undefined;
-  }, [orderedNavigatorTasks, task]);
   const masterBom = useMemo(() => getMasterBom(product.customFields), [product.customFields]);
   const manufacturingStepDurationMinutes = manufacturingSteps.reduce(
     (total, step) => total + Math.max(step.durationMinutes ?? 0, 0),
@@ -1833,52 +1815,6 @@ function ProcedureWorkspace({
 
     return () => window.cancelAnimationFrame(frameId);
   }, [focusedStepId, task?.id]);
-
-  function goToTask(taskId: string) {
-    pendingScrollTopRef.current = true;
-    onSelectTask(taskId);
-  }
-
-  // When the selected task changes via auto-advance or the footer button, reset
-  // the scroll position to the top of the new task and release the cooldown.
-  useEffect(() => {
-    if (pendingScrollTopRef.current) {
-      if (procedureMainRef.current) {
-        procedureMainRef.current.scrollTop = 0;
-      }
-      pendingScrollTopRef.current = false;
-    }
-    autoAdvanceCooldownRef.current = false;
-  }, [task?.id]);
-
-  // Advance to the next task when the bottom of the pane scrolls into view.
-  // A sentinel + IntersectionObserver is far more reliable than scroll-position
-  // math, which often lands a few pixels short of the bottom and never fires.
-  useEffect(() => {
-    const root = procedureMainRef.current;
-    const sentinel = bottomSentinelRef.current;
-    if (!root || !sentinel || !nextNavigatorTask) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        if (!entry?.isIntersecting || autoAdvanceCooldownRef.current) {
-          return;
-        }
-        // Don't auto-skip tasks too short to scroll -- the footer button covers those.
-        if (root.scrollHeight - root.clientHeight <= 40) {
-          return;
-        }
-        autoAdvanceCooldownRef.current = true;
-        goToTask(nextNavigatorTask.id);
-      },
-      { root, rootMargin: "0px", threshold: 0 },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [nextNavigatorTask, task?.id]);
 
   useEffect(() => {
     if (!isResizingNavigator) {
@@ -2295,7 +2231,6 @@ function ProcedureWorkspace({
       </aside>
 
       <main
-        ref={procedureMainRef}
         className="ui-procedure-main min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 md:px-6"
       >
         <div className="mx-auto max-w-[1500px] space-y-5">
@@ -2718,27 +2653,8 @@ function ProcedureWorkspace({
             )}
           </section>
           ) : null}
-
-          {nextNavigatorTask ? (
-            <div className="flex flex-col items-center gap-1 border-t border-line/60 pt-4">
-              <span className="text-[11px] text-ink-tertiary">Scroll to the bottom to continue, or jump ahead</span>
-              <button
-                type="button"
-                onClick={() => goToTask(nextNavigatorTask.id)}
-                className="ui-btn-ghost h-9 gap-2 px-3"
-                title={`Go to ${taskDisplayCode(nextNavigatorTask)} ${nextNavigatorTask.name || "Untitled task"}`}
-              >
-                <span>Next task</span>
-                <span className="max-w-[260px] truncate text-ink-tertiary">
-                  {taskDisplayCode(nextNavigatorTask)} · {nextNavigatorTask.name || "Untitled task"}
-                </span>
-                <ChevronDown size={14} strokeWidth={1.75} />
-              </button>
-            </div>
-          ) : null}
         </div>
         <ScrollDownHint />
-        <div ref={bottomSentinelRef} aria-hidden="true" className="h-px w-full" />
       </main>
     </section>
   );

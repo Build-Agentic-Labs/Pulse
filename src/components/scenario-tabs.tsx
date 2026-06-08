@@ -95,100 +95,99 @@ export function ScenarioTabs({
   }
 
   return (
-    <div
-      role="tablist"
-      aria-label="Scenarios"
-      className="flex items-stretch gap-1 border-b border-line bg-surface px-3 text-sm"
-    >
-      {scenarios.map((scenario) => {
-        const isMain = scenario.id === mainId;
-        const isActive = scenario.id === highlightId;
-        const isPending = isSwitching && pendingScenarioId === scenario.id;
+    <div className="ui-scenario-tabs">
+      <div role="tablist" aria-label="Scenarios" className="ui-scenario-tabs-strip">
+        {scenarios.map((scenario) => {
+          const isMain = scenario.id === mainId;
+          const isActive = scenario.id === highlightId;
+          const isPending = isSwitching && pendingScenarioId === scenario.id;
 
-        if (renamingId === scenario.id) {
+          if (renamingId === scenario.id) {
+            return (
+              <div key={scenario.id} className="ui-scenario-tab ui-scenario-tab-active">
+                <input
+                  ref={renameRef}
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      commitRename();
+                    } else if (event.key === "Escape") {
+                      setRenamingId(null);
+                    }
+                  }}
+                  aria-label="Rename scenario"
+                  className="ui-scenario-tab-rename"
+                />
+              </div>
+            );
+          }
+
           return (
-            <input
+            <div
               key={scenario.id}
-              ref={renameRef}
-              value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  commitRename();
-                } else if (event.key === "Escape") {
-                  setRenamingId(null);
-                }
-              }}
-              aria-label="Rename scenario"
-              className="my-1.5 w-44 self-center rounded border border-accent bg-surface px-2 py-0.5 text-ink"
-            />
-          );
-        }
-
-        return (
-          <div
-            key={scenario.id}
-            className={[
-              "-mb-px flex items-center border-b-2 transition-colors",
-              isActive ? "border-accent" : "border-transparent",
-            ].join(" ")}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              disabled={isSwitching}
-              title={isMain ? "Master plan" : scenario.notes || "Double-click to rename"}
-              onClick={() => onSwitch(scenario.id)}
-              onDoubleClick={() => {
-                if (!isMain) {
-                  startRename(scenario);
-                }
-              }}
               className={[
-                "flex items-center gap-1.5 py-2.5 pl-3 font-medium transition-colors",
-                isMain ? "pr-3" : "pr-1.5",
-                isActive ? "text-ink" : "text-ink-tertiary hover:text-ink-secondary disabled:opacity-60",
-              ].join(" ")}
+                "ui-scenario-tab",
+                isActive ? "ui-scenario-tab-active" : "ui-scenario-tab-idle",
+                isMain ? "ui-scenario-tab-main" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
             >
-              <span>{isMain ? "Main Plan" : scenario.name || "Untitled"}</span>
-              {isPending ? <Loader2 size={13} className="animate-spin text-accent" /> : null}
-            </button>
-            {!isMain ? (
               <button
                 type="button"
+                role="tab"
+                aria-selected={isActive}
                 disabled={isSwitching}
-                title="Delete this projection"
-                aria-label={`Delete ${scenario.name || "scenario"}`}
-                onClick={() => onDelete(scenario.id)}
-                className="mr-1 rounded p-0.5 text-ink-tertiary transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+                title={isMain ? "Master plan" : scenario.notes || "Double-click to rename"}
+                onClick={() => onSwitch(scenario.id)}
+                onDoubleClick={() => {
+                  if (!isMain) {
+                    startRename(scenario);
+                  }
+                }}
+                className="ui-scenario-tab-btn"
               >
-                <X size={13} />
+                <span>{isMain ? "Main Plan" : scenario.name || "Untitled"}</span>
+                {isPending ? <Loader2 size={12} className="shrink-0 animate-spin" /> : null}
               </button>
-            ) : null}
-          </div>
-        );
-      })}
+              {!isMain ? (
+                <button
+                  type="button"
+                  disabled={isSwitching}
+                  title="Delete this projection"
+                  aria-label={`Delete ${scenario.name || "scenario"}`}
+                  onClick={() => onDelete(scenario.id)}
+                  className="ui-scenario-tab-close"
+                >
+                  <X size={11} />
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
 
       <button
         type="button"
         onClick={onDuplicate}
         disabled={isSwitching}
         title="Duplicate the active scenario into a new projection"
-        className="my-1.5 ml-1 flex items-center gap-1 self-center rounded-md px-2 py-1 text-ink-tertiary transition-colors hover:bg-surface-hover hover:text-ink-secondary disabled:opacity-60"
+        aria-label="Duplicate scenario"
+        className="ui-scenario-tabs-add"
       >
         <Plus size={14} />
-        Duplicate
       </button>
 
-      {/* Target editor (right). Main is read-only (takt comes from product-level demand). */}
-      <div className="ml-auto flex items-center gap-1.5 self-center text-xs text-ink-tertiary">
+      <div className="ui-scenario-tabs-target">
         {activeIsMain ? (
-          <span title="Main Plan uses the product-level demand for takt">Takt from product demand</span>
+          <span className="ui-scenario-tabs-target-note" title="Main Plan uses the product-level demand for takt">
+            Takt from product demand
+          </span>
         ) : active ? (
-          <>
-            <span className="text-ink-secondary">Target</span>
+          <div className="ui-scenario-tabs-target-fields">
+            <span className="ui-scenario-tabs-target-label">Target</span>
             <input
               type="number"
               min={1}
@@ -202,9 +201,9 @@ export function ScenarioTabs({
                 }
               }}
               aria-label="Target units"
-              className="w-14 rounded border border-line bg-surface px-1.5 py-0.5 text-right text-ink"
+              className="ui-scenario-tabs-target-input"
             />
-            <span>/</span>
+            <span className="ui-scenario-tabs-target-divider">/</span>
             <select
               value={active.targetOutputPeriod}
               disabled={isSwitching}
@@ -214,7 +213,7 @@ export function ScenarioTabs({
                 onEditTarget(active.id, safeUnits, event.target.value);
               }}
               aria-label="Target period"
-              className="rounded border border-line bg-surface px-1 py-0.5 text-ink"
+              className="ui-scenario-tabs-target-select"
             >
               {TARGET_PERIODS.map((period) => (
                 <option key={period} value={period}>
@@ -222,7 +221,7 @@ export function ScenarioTabs({
                 </option>
               ))}
             </select>
-          </>
+          </div>
         ) : null}
       </div>
     </div>

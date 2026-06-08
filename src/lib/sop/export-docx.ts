@@ -222,50 +222,6 @@ function procedureFlowBoxed(sop: Sop): Array<Paragraph | Table> {
  * which can't draw them natively. Falls back to the boxed-paragraph flowchart when the image
  * can't be rasterized (server-side render, no <canvas>, or a tainted canvas).
  */
-/**
- * Written procedure under the diagram: a numbered list of the action steps with their full
- * `detail` text. Flowchart boxes stay short; the detail lives here. Rendered only when at least
- * one step carries detail, so it never just echoes short boxes. Terminators are flow markers, not
- * procedure steps, so they're excluded.
- */
-function procedureStepsList(sop: Sop): Paragraph[] {
-  const steps = sop.procedure.activities.filter((a) => (a.shape ?? "process") !== "terminator");
-  if (!steps.some((a) => a.detail?.trim())) return [];
-
-  const blocks: Paragraph[] = [
-    new Paragraph({
-      // Start the written procedure on its own page, after the full flow diagram.
-      pageBreakBefore: true,
-      keepNext: true,
-      spacing: { after: 40 },
-      children: [new TextRun({ text: "Procedure steps", bold: true, size: 24, color: INK, font: FONT })],
-    }),
-  ];
-  steps.forEach((activity, index) => {
-    const detail = activity.detail?.trim();
-    blocks.push(
-      new Paragraph({
-        keepNext: Boolean(detail), // keep the step title with its detail line
-        spacing: { before: 60, after: detail ? 20 : 60 },
-        children: [
-          new TextRun({ text: `${index + 1}. `, bold: true, size: 18, color: INK, font: FONT }),
-          new TextRun({ text: activity.description || "—", bold: true, size: 18, color: INK, font: FONT }),
-        ],
-      }),
-    );
-    if (detail) {
-      blocks.push(
-        new Paragraph({
-          indent: { left: 260 },
-          spacing: { after: 60 },
-          children: [new TextRun({ text: detail, size: 18, color: INK, font: FONT })],
-        }),
-      );
-    }
-  });
-  return blocks;
-}
-
 async function procedureBlocks(sop: Sop): Promise<Array<Paragraph | Table>> {
   const images = await renderProcedureFlowImages(sop);
   // Each flow page starts on a fresh page (page break before), so it has the full body height and
@@ -286,14 +242,14 @@ async function procedureBlocks(sop: Sop): Promise<Array<Paragraph | Table>> {
           }),
       )
     : procedureFlowBoxed(sop);
-  // RASIC legend captioned directly under the diagram; the written steps then start a new page.
+  // RASIC legend captioned directly under the diagram.
   const legend = new Paragraph({
     spacing: { before: 80, after: 80 },
     children: [
       new TextRun({ text: `${rasicLegend(".  ")}.`, italics: true, size: 16, color: MUTED, font: FONT }),
     ],
   });
-  return [...diagram, legend, ...procedureStepsList(sop)];
+  return [...diagram, legend];
 }
 
 async function loadLogo(): Promise<Uint8Array | null> {

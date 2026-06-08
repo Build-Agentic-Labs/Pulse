@@ -119,7 +119,7 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
       <h3 className="ui-settings-section-title">Phone photo portal</h3>
       <p className="ui-settings-section-desc">
         {project?.projectId
-          ? `Open or scan the portal for ${project.projectName}. It loads manufacturing steps from this project only.`
+          ? `Open or scan the portal for ${project.projectName}. It loads manufacturing steps from this workspace only.`
           : "Scan the QR code on a phone to capture step photos in the procedure editor."}
       </p>
 

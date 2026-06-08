@@ -18,7 +18,7 @@ export function SopNewClient() {
       <SopShell sidebar={<div className="ui-nav-section">SOPs</div>} back={{ href: "/sops", label: "All SOPs" }}>
         <div className="flex h-full items-center justify-center p-4">
           <div className="text-center">
-            <p className="ui-section-subtitle text-ink-tertiary">Create or select a workspace before adding a SOP.</p>
+            <p className="ui-section-subtitle text-ink-tertiary">Create or select an organization before adding a SOP.</p>
             <Link href="/sops" className="ui-btn-ghost mt-3 inline-flex h-9 px-3">
               Back to SOPs
             </Link>

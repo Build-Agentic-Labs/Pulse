@@ -201,7 +201,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
 
   if (status === "forbidden") {
     return (
-      <Block title="Members" description="Only workspace managers can manage members and access.">
+      <Block title="Members" description="Only organization managers can manage members and access.">
         <div className="p-3.5 ui-settings-group-row-value">
           Signed in as <strong>{signedInEmail || "unknown"}</strong> (detected access: {detectedRole}). This account
           can&apos;t manage members. Sign in as an owner/admin or superadmin.

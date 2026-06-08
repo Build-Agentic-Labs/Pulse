@@ -75,7 +75,7 @@ export function SopEditor({
   // gate on the boolean so a failed save never silently drops the user's work.
   async function persist(): Promise<boolean> {
     if (!canEdit || !workspaceId) {
-      setSaveError(workspaceId ? "You do not have permission to save this SOP." : "Select a workspace before saving.");
+      setSaveError(workspaceId ? "You do not have permission to save this SOP." : "Select an organization before saving.");
       setSaveStatus("error");
       return false;
     }

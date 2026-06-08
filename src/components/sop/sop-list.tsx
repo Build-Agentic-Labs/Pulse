@@ -208,7 +208,7 @@ export function SopList() {
         {editable && pendingImport.length > 0 ? (
           <div className="ui-notice ui-notice-warn flex flex-wrap items-center gap-3 px-4 py-3">
             <p className="ui-section-subtitle min-w-0 flex-1 text-ink-secondary">
-              Import {pendingImport.length} local SOP{pendingImport.length === 1 ? "" : "s"} into this workspace?
+              Import {pendingImport.length} local SOP{pendingImport.length === 1 ? "" : "s"} into this organization?
             </p>
             <button
               type="button"

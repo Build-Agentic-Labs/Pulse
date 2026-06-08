@@ -1107,7 +1107,7 @@ async function assertTaskInProject(supabase: ReturnType<typeof plannerClient>, t
 
   const resolvedProjectId = await throwIfError(supabase.rpc("task_project_id", { target_task_id: taskId }));
   if (!resolvedProjectId || String(resolvedProjectId) !== projectId) {
-    throw new Error("This task does not belong to the active project.");
+    throw new Error("This task does not belong to the active workspace.");
   }
 }
 
@@ -1122,7 +1122,7 @@ async function assertTaskRowInProject(supabase: ReturnType<typeof plannerClient>
     supabase.rpc("scenario_project_id", { target_scenario_id: task.scenarioId }),
   );
   if (!resolvedProjectId || String(resolvedProjectId) !== projectId) {
-    throw new Error("This task does not belong to the active project.");
+    throw new Error("This task does not belong to the active workspace.");
   }
 }
 
@@ -1226,7 +1226,7 @@ function newScopedId(prefix: string) {
 
 async function insertNewProjectPlannerState(state: PlannerState) {
   if (!state.product.projectId) {
-    throw new Error("Project id is required to seed planner data.");
+    throw new Error("Workspace id is required to seed planner data.");
   }
 
   const supabase = plannerClient();
@@ -1354,13 +1354,13 @@ async function loadProjectContext(
   const project = await throwIfError(supabase.from("projects").select("*").eq("id", projectId).maybeSingle());
 
   if (!project) {
-    throw new Error("Project not found or you do not have access to it.");
+    throw new Error("Workspace not found or you do not have access to it.");
   }
 
   const workspace = await throwIfError(supabase.from("workspaces").select("*").eq("id", project.workspace_id).maybeSingle());
 
   if (!workspace) {
-    throw new Error("Workspace not found or you do not have access to it.");
+    throw new Error("Organization not found or you do not have access to it.");
   }
 
   const { data: userData } = await supabase.auth.getUser();
@@ -1495,7 +1495,7 @@ export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProje
   const { data: userData, error: userError } = await supabase.auth.getUser();
 
   if (userError || !userData.user) {
-    throw new Error(userError?.message ?? "Sign in before loading workspaces.");
+    throw new Error(userError?.message ?? "Sign in before loading organizations.");
   }
 
   await throwIfError(
@@ -1520,7 +1520,7 @@ export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGrou
   const { data: userData, error: userError } = await supabase.auth.getUser();
 
   if (userError || !userData.user) {
-    throw new Error(userError?.message ?? "Sign in before loading workspaces.");
+    throw new Error(userError?.message ?? "Sign in before loading organizations.");
   }
 
   const isSuperAdmin = await fetchIsSuperAdmin(supabase);
@@ -1662,11 +1662,35 @@ export async function createProjectWithStarterPlan(workspaceId: string, name: st
 export async function updateWorkspaceInSupabase(workspaceId: string, patch: { name?: string }) {
   const name = patch.name?.trim();
   if (!name) {
-    throw new Error("Workspace name is required.");
+    throw new Error("Organization name is required.");
   }
 
   const supabase = plannerClient();
   await throwIfError(supabase.from("workspaces").update({ name }).eq("id", workspaceId));
+}
+
+/**
+ * Resolve display names for a set of user ids via the profiles table. Managers can read
+ * fellow profiles (the "profiles workspace manager read" policy), so this powers the
+ * "Created by …" label on each workspace. Returns userId -> full name (absent if unknown).
+ */
+export async function loadProfileNamesByIds(userIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (!ids.length) {
+    return new Map();
+  }
+
+  const supabase = plannerClient();
+  const rows = await throwIfError(supabase.from("profiles").select("id,full_name").in("id", ids));
+
+  const names = new Map<string, string>();
+  (rows ?? []).forEach((row) => {
+    const name = maybeText(row.full_name);
+    if (name) {
+      names.set(String(row.id), name);
+    }
+  });
+  return names;
 }
 
 export async function updateProjectInSupabase(
@@ -1682,7 +1706,7 @@ export async function updateProjectInSupabase(
   if (patch.name !== undefined) {
     const name = patch.name.trim();
     if (!name) {
-      throw new Error("Project name is required.");
+      throw new Error("Workspace name is required.");
     }
     row.name = name;
   }
@@ -1992,7 +2016,7 @@ export async function loadPlannerStateWithProjectFromSupabase(
   const projectContext = project ?? (mappedProduct.projectId ? await loadProjectContext(supabase, mappedProduct.projectId) : undefined);
 
   if (!projectContext) {
-    throw new Error("This product is not assigned to a project yet.");
+    throw new Error("This product is not assigned to a workspace yet.");
   }
 
   const state: PlannerState = {
@@ -2097,7 +2121,7 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
   }
 
   if (!state.product.projectId) {
-    throw new Error("Select a project before saving planner data.");
+    throw new Error("Select a workspace before saving planner data.");
   }
 
   const supabase = plannerClient();
@@ -2217,7 +2241,7 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
   }
 
   if (!state.product.projectId) {
-    throw new Error("Select a project before saving planner data.");
+    throw new Error("Select a workspace before saving planner data.");
   }
 
   const supabase = plannerClient();
@@ -2617,7 +2641,7 @@ export async function syncStepToolsForStepToSupabase(
 // Tools are project-scoped; every tool-library mutation requires a project context.
 function requireToolLibraryProjectId(projectId: string | undefined, action: string): string {
   if (!projectId) {
-    throw new Error(`Select a project before ${action} the library.`);
+    throw new Error(`Select a workspace before ${action} the library.`);
   }
   return projectId;
 }
@@ -2647,7 +2671,7 @@ export async function uploadToolLibraryImage(
   }
 
   if (!project) {
-    throw new Error("Select a project before adding tools to the library.");
+    throw new Error("Select a workspace before adding tools to the library.");
   }
 
   const supabase = plannerClient();

@@ -180,7 +180,7 @@ async function authorizeSmartAllocationRequest(request: Request, body: IeSmartAl
 
   const projectId = body.plannerState?.product?.projectId;
   if (!projectId) {
-    return NextResponse.json({ error: "Smart allocation requires a project-scoped planner state." }, { status: 400 });
+    return NextResponse.json({ error: "Smart allocation requires a workspace-scoped planner state." }, { status: 400 });
   }
 
   const { data: project, error: projectError } = await supabase
@@ -194,7 +194,7 @@ async function authorizeSmartAllocationRequest(request: Request, body: IeSmartAl
   }
 
   if (!project) {
-    return NextResponse.json({ error: "You do not have access to this project." }, { status: 403 });
+    return NextResponse.json({ error: "You do not have access to this workspace." }, { status: 403 });
   }
 
   return null;

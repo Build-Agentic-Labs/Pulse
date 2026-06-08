@@ -118,7 +118,7 @@ export function AuthFormPanel({
       <section className="ui-auth-card">
         <header className="ui-auth-card-header">
           <div className="ui-auth-brand font-display">{eyebrow}</div>
-          <p className="ui-eyebrow mt-3">Workspace access</p>
+          <p className="ui-eyebrow mt-3">Organization access</p>
           <h1 className="ui-section-title mt-2">{title}</h1>
           <p className="ui-section-subtitle mt-1">Sign in with your email or create a new account.</p>
         </header>

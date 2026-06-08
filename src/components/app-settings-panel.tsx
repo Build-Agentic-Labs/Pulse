@@ -14,6 +14,8 @@ import { PhonePhotoPortalPanel } from "@/components/phone-photo-portal-panel";
 
 import { WorkspaceMembersSettings } from "@/components/workspace-members-settings";
 
+import { WorkspaceListSettings } from "@/components/workspace-list-settings";
+
 import type { PlannerProjectContext } from "@/domain/types";
 
 
@@ -24,7 +26,7 @@ const settingsSections = [
 
   { id: "appearance", label: "Appearance", icon: Palette },
 
-  { id: "workspace", label: "Workspace", icon: FolderKanban },
+  { id: "workspace", label: "Organization", icon: FolderKanban },
 
 ] as const;
 
@@ -234,17 +236,17 @@ export function AppSettingsPanel({
 
         {activeSection === "general" ? (
 
-          <SettingsPage title="General" description="Account, workspace access, and mobile photo capture.">
+          <SettingsPage title="General" description="Account, organization access, and mobile photo capture.">
 
-            <SettingsSectionBlock title="Workspace access">
+            <SettingsSectionBlock title="Organization access">
 
-              <SettingsRow label="Project">
+              <SettingsRow label="Workspace">
 
                 <span className="ui-settings-group-row-value">{project?.projectName ?? "None selected"}</span>
 
               </SettingsRow>
 
-              <SettingsRow label="Workspace">
+              <SettingsRow label="Organization">
 
                 <span className="ui-settings-group-row-value">
 
@@ -276,7 +278,7 @@ export function AppSettingsPanel({
 
           <SettingsPage title="Appearance" description="Theme preference for the Pulse interface.">
 
-            <SettingsSectionBlock title="Theme" description="Choose light or dark mode for the workspace shell.">
+            <SettingsSectionBlock title="Theme" description="Choose light or dark mode for the Pulse interface.">
 
               <div className="p-3.5">
 
@@ -340,21 +342,23 @@ export function AppSettingsPanel({
 
         {activeSection === "workspace" ? (
 
-          <SettingsPage title="Workspace" description="Rename workspaces and projects, archive folders, and manage members.">
+          <SettingsPage title="Organization" description="Rename organizations and workspaces, archive folders, and manage members.">
 
-            <SettingsSectionBlock title="Current workspace">
+            <SettingsSectionBlock title="Current organization">
 
-              <SettingsRow label="Active project">
+              <SettingsRow label="Active workspace">
 
                 <span className="ui-settings-group-row-value">
 
-                  {project ? projectContextLabel(project.projectName, project.workspaceName) : "No project selected"}
+                  {project ? projectContextLabel(project.projectName, project.workspaceName) : "No workspace selected"}
 
                 </span>
 
               </SettingsRow>
 
             </SettingsSectionBlock>
+
+            <WorkspaceListSettings />
 
             <WorkspaceMembersSettings project={project} />
 

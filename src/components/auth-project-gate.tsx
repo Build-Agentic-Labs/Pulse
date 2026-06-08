@@ -20,7 +20,7 @@ type AuthProjectGateProps = {
 };
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
-const WORKSPACE_LOADING_TITLE = "Loading workspace";
+const WORKSPACE_LOADING_TITLE = "Loading organization";
 const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
 const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
 const PROJECT_SWITCH_SESSION_MAX_AGE_MS = 15_000;
@@ -171,7 +171,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
       setGroups(nextGroups);
       setStatus("ready");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load workspace projects.");
+      setMessage(error instanceof Error ? error.message : "Unable to load organization workspaces.");
       setStatus("error");
     }
   }
@@ -317,7 +317,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   if (!session || status === "auth") {
     return (
       <AuthFormPanel
-        title="Sign in to your workspace"
+        title="Sign in to your organization"
         message={message}
         isSubmitting={isSubmitting}
         onSignIn={handleSignIn}
@@ -330,8 +330,8 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   if (status === "error") {
     return (
       <ErrorRecoveryPanel
-        title="Workspace failed to load"
-        body={message || "The app could not load your workspace projects. Retry keeps you on this screen and reloads access."}
+        title="Organization failed to load"
+        body={message || "The app could not load your organization workspaces. Retry keeps you on this screen and reloads access."}
         onRetry={() => void refreshWorkspaceProjects(session, { showLoading: true })}
       />
     );
@@ -342,8 +342,8 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
       return (
         <main className="grid min-h-screen place-items-center bg-canvas px-4 text-ink">
           <section className="w-full max-w-lg ui-panel p-6">
-            <p className="text-xs ui-mono-label tracking-wide text-danger">Project unavailable</p>
-            <h1 className="mt-2 text-2xl font-medium">You do not have access to this project.</h1>
+            <p className="text-xs ui-mono-label tracking-wide text-danger">Workspace unavailable</p>
+            <h1 className="mt-2 text-2xl font-medium">You do not have access to this workspace.</h1>
             <button className="ui-btn-primary mt-5" onClick={() => router.push("/")}>
               Open planner
             </button>

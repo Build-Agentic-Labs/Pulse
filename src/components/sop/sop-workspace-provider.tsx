@@ -126,7 +126,7 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
       });
       setStatus("ready");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load workspaces.");
+      setMessage(error instanceof Error ? error.message : "Unable to load organizations.");
       setStatus("error");
     }
   }
@@ -233,7 +233,7 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
   if (!session || status === "auth") {
     return (
       <AuthFormPanel
-        title="Sign in to your workspace"
+        title="Sign in to your organization"
         message={message}
         isSubmitting={isSubmitting}
         onSignIn={handleSignIn}
@@ -247,7 +247,7 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
     return (
       <ErrorRecoveryPanel
         title="SOPs failed to load"
-        body={message || "Your workspaces could not be loaded. Retry keeps you here and reloads access."}
+        body={message || "Your organizations could not be loaded. Retry keeps you here and reloads access."}
         onRetry={() => void refreshWorkspaces(session, { showLoading: true })}
       />
     );
@@ -269,7 +269,7 @@ export function SopWorkspaceSwitcher() {
 
   return (
     <div className="px-2 pb-2 pt-1">
-      <span className="ui-field-label">Workspace</span>
+      <span className="ui-field-label">Organization</span>
       <select
         className="ui-field-standalone mt-1 w-full"
         value={workspaceId ?? ""}

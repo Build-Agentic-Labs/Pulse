@@ -1623,7 +1623,7 @@ export function MobilePhotoPortal({
 
         if (!savedState) {
           if (projectId) {
-            setErrorMessage("Unable to load this project's line plan. Confirm you are signed in and have access.");
+            setErrorMessage("Unable to load this workspace's line plan. Confirm you are signed in and have access.");
             setSaveState("error");
             return;
           }

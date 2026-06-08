@@ -1119,7 +1119,7 @@ function ProcedureStepChecksEditor({
   }
 
   if (enabledDefinitions.length === 0) {
-    return <div className="text-xs text-steel">No checks configured for this project.</div>;
+    return <div className="text-xs text-steel">No checks configured for this workspace.</div>;
   }
 
   return (
@@ -8054,7 +8054,7 @@ export function LineWorkspace({
       if (!options?.silent) {
         notifyFeedback({
           title: "Build catalog updated",
-          body: "Tool assignments were saved across the project.",
+          body: "Tool assignments were saved across the workspace.",
           tone: "success",
         });
       }

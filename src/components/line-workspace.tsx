@@ -3416,7 +3416,8 @@ function NomenclatureSetupPanel({
 function KpiStrip({ kpis, product }: { kpis: ReturnType<typeof calculateProductKpis>; product: Product }) {
   const varianceTone = kpis.targetVariance <= 0 ? "good" : kpis.targetVariancePercent <= 10 ? "warn" : "bad";
   const taktTone = kpis.taktMinutes <= 0 ? "neutral" : kpis.plannedCycleMinutes <= kpis.taktMinutes ? "good" : "bad";
-  const crewTone = kpis.plannedLaborLoadFte <= kpis.budgetedCrewEquivalent ? "good" : "bad";
+  const unitCycleMinutes = kpis.bottleneckStation?.plannedCycleMinutes ?? 0;
+  const unitCycleTone = kpis.taktMinutes <= 0 ? "neutral" : unitCycleMinutes <= kpis.taktMinutes ? "good" : "bad";
   const balanceTone = kpis.lineBalanceScore >= 85 ? "good" : kpis.lineBalanceScore >= 70 ? "warn" : "bad";
   const bottleneckTone = kpis.bottleneckStation
     ? kpis.bottleneckStation.taktStatus === "red"
@@ -3428,10 +3429,9 @@ function KpiStrip({ kpis, product }: { kpis: ReturnType<typeof calculateProductK
   const plannedMhMeta = kpis.unassignedTaskCount > 0
     ? `${formatManHours(kpis.assignedPlannedManHours)} assigned - ${formatManHours(kpis.unassignedPlannedManHours)} unassigned`
     : `Target ${formatManHours(product.targetManHours)}`;
-  const requiredCrewValue = kpis.wholePersonStaffingRequirement > 0
-    ? `${kpis.wholePersonStaffingRequirement} people`
-    : "0 people";
-  const requiredCrewMeta = `${round(kpis.budgetedCrewEquivalent, 2)} FTE - ${round(kpis.requiredAverageAllocationPercent, 1)}% avg`;
+  const unitCycleMeta = kpis.bottleneckStation
+    ? `${kpis.bottleneckStation.name} is the bottleneck`
+    : "No scheduled work";
   const bottleneckValue = kpis.bottleneckStation?.name ?? "-";
   const bottleneckMeta = kpis.bottleneckStation
     ? `Cycle ${formatMinutes(kpis.bottleneckStation.plannedCycleMinutes)}`
@@ -3443,7 +3443,7 @@ function KpiStrip({ kpis, product }: { kpis: ReturnType<typeof calculateProductK
       <StatCard label="Required Takt" value={formatMinutes(kpis.taktMinutes)} meta="Active takt" tone={taktTone} />
       <StatCard label="Unit Lead Time" value={formatMinutes(kpis.plannedCycleMinutes)} meta="First task start to final finish" />
       <StatCard label="Planned MH" value={formatManHours(kpis.plannedManHours)} meta={plannedMhMeta} tone={varianceTone} />
-      <StatCard label="Required Crew" value={requiredCrewValue} meta={requiredCrewMeta} tone={crewTone} />
+      <StatCard label="Unit Cycle Time" value={formatMinutes(unitCycleMinutes)} meta={unitCycleMeta} tone={unitCycleTone} />
       <StatCard label="Bottleneck" value={bottleneckValue} meta={bottleneckMeta} tone={bottleneckTone} />
       <StatCard label="Line Balance" value={`${round(kpis.lineBalanceScore, 1)}%`} meta={balanceMeta} tone={balanceTone} />
     </section>

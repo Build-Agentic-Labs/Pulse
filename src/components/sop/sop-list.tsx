@@ -3,12 +3,13 @@
 import { FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
-import { deleteSop, listSops, saveSop, sopFromExtraction } from "@/lib/sop/store";
+import { deleteSop, listSops, readLegacyLocalSops, saveSop, sopFromExtraction } from "@/lib/sop/store";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { SopShell } from "./sop-shell";
+import { canEdit, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 function formatDate(iso: string): string {
   if (!iso) return "";
@@ -16,19 +17,81 @@ function formatDate(iso: string): string {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
 }
 
+function importDoneKey(workspaceId: string): string {
+  return `pulse:sops:import-done:${workspaceId}`;
+}
+
+function isImportDone(workspaceId: string): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(importDoneKey(workspaceId)) === "1";
+  } catch {
+    return true;
+  }
+}
+
+function markImportDone(workspaceId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(importDoneKey(workspaceId), "1");
+  } catch {
+    // Ignore storage failures in private browsing.
+  }
+}
+
 export function SopList() {
   const router = useRouter();
+  const { workspaceId, role } = useSopWorkspace();
+  const editable = canEdit(role);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sops, setSops] = useState<Sop[]>([]);
+  const [listStatus, setListStatus] = useState<"loading" | "ready" | "error">("loading");
   const [convert, setConvert] = useState<{ fileName: string; phase: ConvertPhase } | null>(null);
   const [error, setError] = useState("");
+  const [pendingImport, setPendingImport] = useState<Sop[]>([]);
+  const [importing, setImporting] = useState(false);
   const converting = convert !== null;
 
+  const refreshList = useCallback(async () => {
+    if (!workspaceId) {
+      setSops([]);
+      setListStatus("ready");
+      return [] as Sop[];
+    }
+    setListStatus("loading");
+    setError("");
+    try {
+      const next = await listSops(workspaceId);
+      setSops(next);
+      setListStatus("ready");
+      return next;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load SOPs.");
+      setListStatus("error");
+      return [] as Sop[];
+    }
+  }, [workspaceId]);
+
+  // Load the workspace's SOPs, then surface any legacy localStorage SOPs not yet in this
+  // workspace as a one-time import offer (id-deduped; skipped once dismissed/imported).
   useEffect(() => {
-    setSops(listSops());
-  }, []);
+    let active = true;
+    void refreshList().then((loaded) => {
+      if (!active || !workspaceId) return;
+      if (!editable || isImportDone(workspaceId)) {
+        setPendingImport([]);
+        return;
+      }
+      const existingIds = new Set(loaded.map((sop) => sop.id));
+      setPendingImport(readLegacyLocalSops().filter((sop) => !existingIds.has(sop.id)));
+    });
+    return () => {
+      active = false;
+    };
+  }, [refreshList, workspaceId, editable]);
 
   async function handleUpload(file: File) {
+    if (!workspaceId) return;
     setConvert({ fileName: file.name, phase: "working" });
     setError("");
     try {
@@ -40,7 +103,7 @@ export function SopList() {
         throw new Error(payload.error || "Conversion failed.");
       }
       const created = sopFromExtraction(payload.sop);
-      saveSop(created);
+      await saveSop(created, workspaceId);
       // Flip the overlay to its completed state for a beat before opening the editor.
       setConvert((current) => (current ? { ...current, phase: "done" } : current));
       await new Promise((resolve) => setTimeout(resolve, 700));
@@ -51,9 +114,41 @@ export function SopList() {
     }
   }
 
-  function handleDelete(id: string) {
-    deleteSop(id);
-    setSops(listSops());
+  async function handleDelete(id: string) {
+    if (!workspaceId) return;
+    const previous = sops;
+    setSops((current) => current.filter((sop) => sop.id !== id));
+    try {
+      await deleteSop(id);
+    } catch (caught) {
+      setSops(previous);
+      setError(caught instanceof Error ? caught.message : "Could not delete SOP.");
+    }
+  }
+
+  async function handleImport() {
+    if (!workspaceId || pendingImport.length === 0) return;
+    setImporting(true);
+    setError("");
+    try {
+      for (const sop of pendingImport) {
+        await saveSop(sop, workspaceId);
+      }
+      markImportDone(workspaceId);
+      setPendingImport([]);
+      await refreshList();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function handleDismissImport() {
+    if (workspaceId) {
+      markImportDone(workspaceId);
+    }
+    setPendingImport([]);
   }
 
   const sidebar = (
@@ -64,20 +159,25 @@ export function SopList() {
           <FileText size={15} strokeWidth={1.75} />
           <span>All SOPs</span>
         </Link>
-        <Link href="/sops/new" className="ui-nav-item ui-nav-item-idle">
-          <Plus size={15} strokeWidth={1.75} />
-          <span>New SOP</span>
-        </Link>
-        <button
-          type="button"
-          className="ui-nav-item ui-nav-item-idle w-full disabled:opacity-50"
-          disabled={converting}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {converting ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} strokeWidth={1.75} />}
-          <span>{converting ? "Converting…" : "Convert old SOP"}</span>
-        </button>
+        {editable ? (
+          <>
+            <Link href="/sops/new" className="ui-nav-item ui-nav-item-idle">
+              <Plus size={15} strokeWidth={1.75} />
+              <span>New SOP</span>
+            </Link>
+            <button
+              type="button"
+              className="ui-nav-item ui-nav-item-idle w-full disabled:opacity-50"
+              disabled={converting || !workspaceId}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {converting ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} strokeWidth={1.75} />}
+              <span>{converting ? "Converting…" : "Convert old SOP"}</span>
+            </button>
+          </>
+        ) : null}
       </div>
+      <SopWorkspaceSwitcher />
     </>
   );
 
@@ -105,12 +205,43 @@ export function SopList() {
 
         {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
+        {editable && pendingImport.length > 0 ? (
+          <div className="ui-notice ui-notice-warn flex flex-wrap items-center gap-3 px-4 py-3">
+            <p className="ui-section-subtitle min-w-0 flex-1 text-ink-secondary">
+              Import {pendingImport.length} local SOP{pendingImport.length === 1 ? "" : "s"} into this workspace?
+            </p>
+            <button
+              type="button"
+              className="ui-btn-primary h-8 gap-1.5 px-3 disabled:opacity-50"
+              onClick={() => void handleImport()}
+              disabled={importing}
+            >
+              {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              {importing ? "Importing…" : "Import"}
+            </button>
+            <button type="button" className="ui-btn-ghost h-8 px-3" onClick={handleDismissImport} disabled={importing}>
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         <section className="ui-panel divide-y divide-line overflow-hidden">
-          {sops.length === 0 ? (
+          {listStatus === "loading" ? (
+            <div className="flex items-center justify-center px-4 py-10">
+              <Loader2 size={18} className="animate-spin text-ink-tertiary" />
+            </div>
+          ) : listStatus === "error" ? (
+            <div className="px-4 py-10 text-center">
+              <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load SOPs."}</p>
+              <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
+                Retry
+              </button>
+            </div>
+          ) : sops.length === 0 ? (
             <div className="px-4 py-10 text-center">
               <FileText size={20} className="mx-auto text-ink-tertiary" />
               <p className="mt-2 ui-section-subtitle text-ink-tertiary">
-                No SOPs yet. Create one or convert an existing .docx / .pdf.
+                No SOPs yet. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
               </p>
             </div>
           ) : (
@@ -135,24 +266,26 @@ export function SopList() {
                 {formatDate(sop.updatedAt) ? (
                   <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
                 ) : null}
-                <span
-                  role="button"
-                  tabIndex={0}
-                  className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger"
-                  title="Delete SOP"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleDelete(sop.id);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
+                {editable ? (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger"
+                    title="Delete SOP"
+                    onClick={(event) => {
                       event.stopPropagation();
-                      handleDelete(sop.id);
-                    }
-                  }}
-                >
-                  <Trash2 size={13} />
-                </span>
+                      void handleDelete(sop.id);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.stopPropagation();
+                        void handleDelete(sop.id);
+                      }
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </span>
+                ) : null}
               </button>
             ))
           )}

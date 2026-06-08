@@ -1,4 +1,5 @@
 import { SopList } from "@/components/sop/sop-list";
+import { SopWorkspaceProvider } from "@/components/sop/sop-workspace-provider";
 
 export const metadata = {
   title: "SOPs | Pulse",
@@ -6,5 +7,9 @@ export const metadata = {
 };
 
 export default function SopsPage() {
-  return <SopList />;
+  return (
+    <SopWorkspaceProvider>
+      <SopList />
+    </SopWorkspaceProvider>
+  );
 }

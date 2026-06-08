@@ -42,10 +42,21 @@ function stepFilled(sop: Sop, id: StepId): boolean {
   }
 }
 
-export function SopEditor({ initial }: { initial: Sop }) {
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+export function SopEditor({
+  initial,
+  workspaceId,
+  canEdit = true,
+}: {
+  initial: Sop;
+  workspaceId?: string;
+  canEdit?: boolean;
+}) {
   const router = useRouter();
   const [sop, setSop] = useState<Sop>(initial);
-  const [saved, setSaved] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [reviewDismissed, setReviewDismissed] = useState(false);
@@ -53,31 +64,54 @@ export function SopEditor({ initial }: { initial: Sop }) {
   const step = STEPS[stepIndex];
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === STEPS.length - 1;
+  const saveDisabled = !canEdit || !workspaceId || saveStatus === "saving";
 
   function update(patch: Partial<Sop>) {
     setSop((current) => ({ ...current, ...patch }));
-    setSaved(false);
+    setSaveStatus("idle");
+  }
+
+  // Persist the current SOP, returning whether it succeeded. Callers that navigate or export
+  // gate on the boolean so a failed save never silently drops the user's work.
+  async function persist(): Promise<boolean> {
+    if (!canEdit || !workspaceId) {
+      setSaveError(workspaceId ? "You do not have permission to save this SOP." : "Select a workspace before saving.");
+      setSaveStatus("error");
+      return false;
+    }
+    setSaveStatus("saving");
+    setSaveError("");
+    try {
+      const next = await saveSop(sop, workspaceId);
+      setSop(next);
+      setSaveStatus("saved");
+      return true;
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Save failed.");
+      setSaveStatus("error");
+      return false;
+    }
   }
 
   function handleSave() {
-    saveSop(sop);
-    setSaved(true);
+    void persist();
   }
 
   function handleLoadSample() {
     setSop((current) => applySampleData(current));
-    setSaved(false);
+    setSaveStatus("idle");
   }
 
-  function handleFinish() {
-    saveSop(sop);
-    router.push("/sops");
+  async function handleFinish() {
+    if (await persist()) {
+      router.push("/sops");
+    }
   }
 
   async function handleSaveAndExport() {
-    saveSop(sop);
-    setSaved(true);
-    await handleExport();
+    if (await persist()) {
+      await handleExport();
+    }
   }
 
   async function handleExport() {
@@ -116,10 +150,23 @@ export function SopEditor({ initial }: { initial: Sop }) {
         <Download size={15} />
         {exporting ? "Exporting…" : "Export"}
       </button>
-      <button type="button" className="ui-btn-ghost h-10 gap-2" onClick={handleSave}>
-        <Check size={15} />
-        {saved ? "Saved" : "Save"}
-      </button>
+      {canEdit ? (
+        <button
+          type="button"
+          className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"
+          onClick={handleSave}
+          disabled={saveDisabled}
+        >
+          <Check size={15} />
+          {saveStatus === "saving"
+            ? "Saving…"
+            : saveStatus === "saved"
+              ? "Saved"
+              : saveStatus === "error"
+                ? "Retry save"
+                : "Save"}
+        </button>
+      ) : null}
     </>
   );
 
@@ -184,6 +231,10 @@ export function SopEditor({ initial }: { initial: Sop }) {
                   <X size={14} />
                 </button>
               </div>
+            ) : null}
+
+            {saveStatus === "error" && saveError ? (
+              <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{saveError}</div>
             ) : null}
 
             {/* Compact step indicator on mobile */}
@@ -354,18 +405,25 @@ export function SopEditor({ initial }: { initial: Sop }) {
               </button>
               {isLast ? (
                 <div className="flex items-center gap-2">
-                  <button type="button" className="ui-btn-ghost h-9 gap-1.5 px-4" onClick={handleFinish}>
-                    <Check size={14} />
-                    Save &amp; finish
-                  </button>
+                  {canEdit ? (
+                    <button
+                      type="button"
+                      className="ui-btn-ghost h-9 gap-1.5 px-4 disabled:opacity-50"
+                      onClick={handleFinish}
+                      disabled={saveDisabled}
+                    >
+                      <Check size={14} />
+                      {saveStatus === "saving" ? "Saving…" : "Save & finish"}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="ui-btn-primary h-9 gap-1.5 px-4 disabled:opacity-50"
-                    onClick={handleSaveAndExport}
-                    disabled={exporting}
+                    onClick={canEdit ? handleSaveAndExport : handleExport}
+                    disabled={exporting || (canEdit && saveStatus === "saving")}
                   >
                     <Download size={14} />
-                    {exporting ? "Exporting…" : "Save & export"}
+                    {exporting ? "Exporting…" : canEdit ? "Save & export" : "Export"}
                   </button>
                 </div>
               ) : (

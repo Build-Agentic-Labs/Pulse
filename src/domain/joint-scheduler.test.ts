@@ -186,9 +186,10 @@ describe("optimizeLine — balanced (default)", () => {
     expectNoDoubleBooking(result);
   });
 
-  it("goes lean / zero-idle when extra operators would only add idle", () => {
+  it("the lead/idle weight dial controls the operating point", () => {
     // Diamond: critical path start→l1→end = 150; total work 210. A 2nd operator shaves lead time
-    // but adds 90 idle, which at idle-weight 0.55 isn't worth it → balanced picks 1 op, 0 idle.
+    // to 150 but adds 90 idle. Idle-weighted → go lean (1 op, 0 idle, 210 lead); lead-weighted →
+    // go fast (shorter lead, accept idle). The dial decides.
     const tasks = [
       makeTask("start", { dur: 30 }),
       makeTask("l1", { dur: 90, deps: ["start"] }),
@@ -197,10 +198,13 @@ describe("optimizeLine — balanced (default)", () => {
       makeTask("end", { dur: 30, deps: ["l1", "l3"] }),
     ];
 
-    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS);
+    const lean = optimizeLine(tasks, CONSTRAINTS, "balanced", { lead: 0.45, idle: 0.55 });
+    expect(lean.metrics.idleMinutes).toBe(0);
+    expect(lean.metrics.operatorsUsed).toBe(1);
+    expectNoDoubleBooking(lean.tasks);
 
-    expect(metrics.idleMinutes).toBe(0);
-    expect(metrics.operatorsUsed).toBe(1);
-    expectNoDoubleBooking(result);
+    const fast = optimizeLine(tasks, CONSTRAINTS, "balanced", { lead: 0.6, idle: 0.4 });
+    expect(fast.metrics.leadTimeMinutes).toBeLessThan(lean.metrics.leadTimeMinutes);
+    expectNoDoubleBooking(fast.tasks);
   });
 });

@@ -59,14 +59,16 @@ export type OptimizeLineStrategy = "idle-first" | "idle-first-cp" | "lead-time" 
  * ABSOLUTE ratios so the pick is stable regardless of which crew sizes are in the candidate set:
  *   leadTerm = leadTime / shortestLead − 1   (0 = shortest possible lead time; 0.5 = 50% longer)
  *   idleTerm = idleMinutes / workMinutes      (0 = no idle; 0.25 = idle is a quarter of the work)
- * Idle is weighted a touch higher than lead time per the user's priority. (Man-hours of productive
- * work are fixed, so they don't discriminate; the paid-labor bill is captured by idleTerm.)
+ * Lead time is weighted higher than idle so the schedule stays short wherever a trade exists;
+ * raise the idle weight to chase zero idle harder (at the cost of a longer lead time). (Man-hours
+ * of productive work are fixed, so they don't discriminate; the paid-labor bill is captured by
+ * idleTerm.)
  */
 export interface RubricWeights {
   lead: number;
   idle: number;
 }
-export const DEFAULT_RUBRIC_WEIGHTS: RubricWeights = { lead: 0.45, idle: 0.55 };
+export const DEFAULT_RUBRIC_WEIGHTS: RubricWeights = { lead: 0.6, idle: 0.4 };
 
 interface Interval {
   startMs: number;
@@ -486,7 +488,9 @@ function scheduleBalanced(
 
   const candidates: Array<{ crew: number; result: OptimizeLineResult; lead: number; idle: number }> = [];
   for (let crew = minCrew; crew <= maxCrew; crew += 1) {
-    const result = scheduleIdleFirst(tasks, constraints, false, crew);
+    // Critical-path priority: start the chain that gates the most downstream work first, so the
+    // makespan at each crew size is as short as the dependencies allow.
+    const result = scheduleIdleFirst(tasks, constraints, true, crew);
     candidates.push({
       crew,
       result,
@@ -519,12 +523,13 @@ export function optimizeLine(
   tasks: Task[],
   constraints: OptimizeLineConstraints,
   strategy: OptimizeLineStrategy = "balanced",
+  weights: RubricWeights = DEFAULT_RUBRIC_WEIGHTS,
 ): OptimizeLineResult {
   if (strategy === "lead-time") {
     return scheduleLeadTime(tasks, constraints);
   }
   if (strategy === "balanced") {
-    return scheduleBalanced(tasks, constraints);
+    return scheduleBalanced(tasks, constraints, weights);
   }
   return scheduleIdleFirst(tasks, constraints, strategy === "idle-first-cp");
 }

@@ -82,7 +82,7 @@ const STRATEGIES: OptimizeLineStrategy[] = ["idle-first", "lead-time", "balanced
 
 // Rubric weights (lower composite = better). ABSOLUTE ratios so scores are stable + comparable:
 //   leadTerm = leadTime / shortestLead − 1   idleTerm = idle / productiveWork
-const WEIGHTS = { lead: 0.45, idle: 0.55 };
+const WEIGHTS = { lead: 0.6, idle: 0.4 };
 
 interface Kpis {
   strategy: OptimizeLineStrategy;
@@ -146,3 +146,18 @@ console.log("Overall mean composite (lower = better balance across all plans):")
   .sort((a, b) => a.mean - b.mean)
   .forEach((row, i) => console.log(`  ${i === 0 ? "►" : " "} ${row.s.padEnd(11)} ${row.mean.toFixed(3)}`));
 console.log("");
+
+// Weight-sensitivity: how the balanced pick shifts as the idle weight rises (lead weight = 1 − idle).
+// Lower idle weight = favor shorter lead time.
+console.log("Weight sensitivity (balanced) — lead/idle/ops as the idle weight changes:\n");
+const IDLE_WEIGHTS = [0.3, 0.45, 0.55, 0.7, 0.85];
+for (const plan of PLANS) {
+  console.log(`■ ${plan.name}`);
+  for (const idleWeight of IDLE_WEIGHTS) {
+    const { metrics } = optimizeLine(plan.tasks, plan.constraints, "balanced", { lead: 1 - idleWeight, idle: idleWeight });
+    console.log(
+      `  idle w=${idleWeight.toFixed(2)}  lead ${fmt(metrics.leadTimeMinutes)}  idle ${fmt(metrics.idleMinutes)}  ops ${fmt(metrics.operatorsUsed, 4)}`,
+    );
+  }
+  console.log("");
+}

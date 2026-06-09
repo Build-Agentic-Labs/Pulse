@@ -198,6 +198,7 @@ import type {
 } from "@/domain/types";
 import { ClearableNumberInput } from "./clearable-number-input";
 import { GanttTimeline } from "./gantt-timeline";
+import { OperatorUtilizationPanel } from "./operator-utilization-panel";
 import { ScenarioTabs } from "./scenario-tabs";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
@@ -9826,6 +9827,10 @@ export function LineWorkspace({
                     onSetTaskDependencies={setTaskDependencies}
                     onLinkTaskStartToFinish={linkTaskStartToFinish}
                     onDeleteTasks={deleteTasks}
+                  />
+                  <OperatorUtilizationPanel
+                    tasks={derivedState.tasks}
+                    availableOperatorIds={availableOperatorLetters}
                   />
                 </section>
 

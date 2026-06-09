@@ -885,6 +885,93 @@ export function buildSmartOperatorAssignments({
   };
 }
 
+export interface OperatorIdleStat {
+  operatorId: string;
+  /** Sum of assigned task durations for one unit's flow (work content). */
+  busyMinutes: number;
+  /** Time the operator is on the clock but not working while the line runs (makespan - busy). */
+  idleMinutes: number;
+  utilizationPercent: number;
+  assignedTaskCount: number;
+}
+
+export interface OperatorIdleAnalysis {
+  /** Operators carrying at least one task, busiest first. */
+  operators: OperatorIdleStat[];
+  /** Line lead time: earliest start to latest finish across allocatable work. */
+  makespanMinutes: number;
+  operatorsUsed: number;
+  totalWorkMinutes: number;
+  totalIdleMinutes: number;
+  /** Σ work ÷ (operators × makespan) — the line-balancing efficiency. */
+  efficiencyPercent: number;
+  /** 100 − efficiency: idle as a share of available operator time. */
+  balanceDelayPercent: number;
+}
+
+/**
+ * Labor idle / utilization analysis over a scheduled task set, modeled on one unit's flow:
+ * the line runs for the makespan, each used operator is on the clock that whole time, so their
+ * idle (waiting) time = makespan − the work they actually do. Aggregated, that is the classic
+ * line-balancing efficiency and balance delay. Tasks running in parallel within an operator are
+ * not expected (one operator per task in v1); a task with multiple operators counts its duration
+ * toward each assigned operator's busy time.
+ */
+export function computeOperatorIdleAnalysis(tasks: Task[], availableOperatorIds: string[]): OperatorIdleAnalysis {
+  const allocatable = getAllocatableOperatorTasks(tasks);
+
+  let minStartMs = Number.POSITIVE_INFINITY;
+  let maxFinishMs = Number.NEGATIVE_INFINITY;
+  for (const task of allocatable) {
+    const window = getTaskWindowMs(task);
+    if (!window) {
+      continue;
+    }
+    minStartMs = Math.min(minStartMs, window.startMs);
+    maxFinishMs = Math.max(maxFinishMs, window.finishMs);
+  }
+  const makespanMinutes = Number.isFinite(minStartMs) && Number.isFinite(maxFinishMs)
+    ? Math.max(0, (maxFinishMs - minStartMs) / 60_000)
+    : 0;
+
+  const busyByOperator = new Map<string, { busyMinutes: number; assignedTaskCount: number }>();
+  for (const task of allocatable) {
+    const duration = Math.max(task.plannedDurationMinutes, 0);
+    for (const operatorId of getTaskOperatorIds(task, availableOperatorIds)) {
+      const current = busyByOperator.get(operatorId) ?? { busyMinutes: 0, assignedTaskCount: 0 };
+      current.busyMinutes += duration;
+      current.assignedTaskCount += 1;
+      busyByOperator.set(operatorId, current);
+    }
+  }
+
+  const operators: OperatorIdleStat[] = [...busyByOperator.entries()]
+    .map(([operatorId, value]) => ({
+      operatorId,
+      busyMinutes: value.busyMinutes,
+      idleMinutes: Math.max(0, makespanMinutes - value.busyMinutes),
+      utilizationPercent: makespanMinutes > 0 ? (value.busyMinutes / makespanMinutes) * 100 : 0,
+      assignedTaskCount: value.assignedTaskCount,
+    }))
+    .sort((left, right) => right.busyMinutes - left.busyMinutes || left.operatorId.localeCompare(right.operatorId));
+
+  const operatorsUsed = operators.length;
+  const totalWorkMinutes = operators.reduce((total, operator) => total + operator.busyMinutes, 0);
+  const availableMinutes = operatorsUsed * makespanMinutes;
+  const totalIdleMinutes = Math.max(0, availableMinutes - totalWorkMinutes);
+  const efficiencyPercent = availableMinutes > 0 ? (totalWorkMinutes / availableMinutes) * 100 : 0;
+
+  return {
+    operators,
+    makespanMinutes,
+    operatorsUsed,
+    totalWorkMinutes,
+    totalIdleMinutes,
+    efficiencyPercent,
+    balanceDelayPercent: availableMinutes > 0 ? 100 - efficiencyPercent : 0,
+  };
+}
+
 export function buildOperatorAssignmentsFromIePlan({
   assignments,
   availableOperatorIds,

@@ -153,6 +153,7 @@ import {
   sanitizeDependencyIds,
   taskDependencyRefBelongsTo,
 } from "@/domain/task-scheduling";
+import { optimizeLine as runLineOptimization } from "@/domain/joint-scheduler";
 import {
   addStepToolToSupabase,
   canPatchTaskFromRealtimePayload,
@@ -170,6 +171,7 @@ import {
   removeStepToolFromSupabase,
   upsertToolLibraryMetadata,
   savePlannerShellToSupabase,
+  savePlannerStateToSupabase,
   saveProcedureTaskUpdateToSupabase,
   saveTasksToSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
@@ -8415,6 +8417,87 @@ export function LineWorkspace({
     });
   }
 
+  // "Optimize line": deterministically schedule dependent work as early as possible (shortest lead
+  // time) and balance the crew with the fewest operators, leveling only within free float so the
+  // finish never slips. The proposal is written into a fresh duplicated scenario (sandbox) so the
+  // source plan is never touched. Replaces the old in-place IE headcount allocation on this button;
+  // smartAllocateHeadcount is kept dormant for the later LLM-strategist phase.
+  async function optimizeLineIntoScenario() {
+    if (smartAllocationPending || isSwitchingScenario) {
+      return;
+    }
+    const ok = await ensureSavedBeforeScenarioAction(
+      "Can't optimize yet",
+      "Your changes couldn't be saved, so the line wasn't optimized. Resolve the save error and try again.",
+    );
+    if (!ok) {
+      return;
+    }
+
+    setSmartAllocationPending(true);
+    setIsSwitchingScenario(true);
+    setSaveState("loading");
+    try {
+      const sourceLabel = isMainScenario ? "Main Plan" : derivedState.scenario.name || "Scenario";
+      const newId = await duplicateScenario(derivedState.scenario.id, `⚡ Optimized (${sourceLabel})`);
+      const loaded = await loadPlannerStateFromSupabase(projectId, newId);
+      if (!loaded) {
+        throw new Error("The optimized scenario could not be loaded after duplication.");
+      }
+
+      const operatorCapacityMinutes = calculateAvailabilityMinutesForDemandPeriod(loaded.product);
+      const { tasks: optimizedTasks, metrics } = runLineOptimization(loaded.tasks, {
+        availableOperatorIds: availableOperatorLetters,
+        demandQuantity: loaded.product.demandQuantity,
+        operatorCapacityMinutes,
+      });
+
+      const planningContext = normalizeTaskPlanningContext(
+        optimizedTasks,
+        loaded.zones,
+        loaded.stations,
+        loaded.scenario.id,
+      );
+      const calculated = applyCalculatedFields(
+        loaded.product,
+        planningContext.stations,
+        planningContext.tasks.map(syncTaskOperatorCount),
+      );
+      const optimizedState = {
+        ...loaded,
+        product: calculated.product,
+        stations: calculated.stations,
+        tasks: calculated.tasks,
+      };
+
+      await savePlannerStateToSupabase(optimizedState);
+      scenarioCacheRef.current.set(newId, optimizedState);
+      await refreshScenarioList();
+      await loadScenarioIntoView(newId);
+      setSaveState("saved");
+
+      const summaryBits = [
+        `lead time ${formatMinutes(metrics.leadTimeMinutes)}`,
+        `${metrics.operatorsUsed} operator${metrics.operatorsUsed === 1 ? "" : "s"}`,
+        metrics.delayedTaskCount > 0 ? `${metrics.delayedTaskCount} task(s) leveled within slack` : "",
+        metrics.unassignedTaskCount > 0 ? `${metrics.unassignedTaskCount} unassigned (review)` : "",
+      ].filter(Boolean).join(" · ");
+      notifyFeedback({
+        title: "Line optimized into a new scenario",
+        body: `Scheduled dependent work as early as possible and balanced the crew — ${summaryBits}. Your source plan is unchanged.`,
+        tone: metrics.unassignedTaskCount > 0 ? "warning" : "success",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to optimize the line.";
+      setSaveError(message);
+      setSaveState("error");
+      notifyFeedback({ title: "Optimize failed", body: message, tone: "danger" });
+    } finally {
+      setSmartAllocationPending(false);
+      setIsSwitchingScenario(false);
+    }
+  }
+
   async function smartAllocateHeadcount() {
     if (smartAllocationPending) {
       return;
@@ -9738,7 +9821,7 @@ export function LineWorkspace({
                     onNotify={notifyFeedback}
                     onConfirmAction={requestFeedbackConfirm}
                     smartAllocationPending={smartAllocationPending}
-                    onSmartAllocate={() => void smartAllocateHeadcount()}
+                    onSmartAllocate={() => void optimizeLineIntoScenario()}
                     onResetHeadcount={resetTaskHeadcount}
                     onSetTaskDependencies={setTaskDependencies}
                     onLinkTaskStartToFinish={linkTaskStartToFinish}

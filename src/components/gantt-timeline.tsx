@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Copy, Link2, Maximize2, Minimize2, Plus, Trash2, Users } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Copy, Link2, Maximize2, Minimize2, Plus, Sparkles, Trash2 } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -1491,11 +1491,11 @@ export function GanttTimeline({
                     }}
                     onDoubleClick={(event) => event.stopPropagation()}
                     disabled={smartAllocationPending}
-                    aria-label="Smart allocate headcount"
-                    title={smartAllocationPending ? "Allocating headcount" : "Smart allocate headcount"}
+                    aria-label="Optimize line"
+                    title={smartAllocationPending ? "Optimizing line…" : "Optimize line — schedule & staff into a new scenario"}
                     className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-ink-tertiary transition hover:border-line hover:bg-surface-muted hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60"
                   >
-                    <Users size={12} strokeWidth={2} />
+                    <Sparkles size={12} strokeWidth={2} />
                   </button>
                 </span>
                 <span>MH</span>

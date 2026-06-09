@@ -74,7 +74,7 @@ describe("optimizeLine", () => {
       makeTask("t3", { deps: ["t2"] }),
     ];
 
-    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS);
+    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS, "lead-time");
     const byId = new Map(result.map((task) => [task.id, task]));
 
     // Dependencies respected: each starts no earlier than its predecessor finishes.
@@ -90,7 +90,7 @@ describe("optimizeLine", () => {
   it("gives each concurrent independent task its own operator", () => {
     const tasks = [makeTask("a"), makeTask("b"), makeTask("c")];
 
-    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS);
+    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS, "lead-time");
 
     // Three tasks all start at the line start and overlap → three operators.
     expect(metrics.operatorsUsed).toBe(3);
@@ -110,7 +110,7 @@ describe("optimizeLine", () => {
       makeTask("t3", { deps: ["t1"] }),
     ];
 
-    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS);
+    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS, "lead-time");
 
     // Leveling never pushes the finish past the critical-path length.
     expect(metrics.leadTimeMinutes).toBe(120);
@@ -126,5 +126,48 @@ describe("optimizeLine", () => {
 
     expect(metrics.operatorsUsed).toBe(0);
     expect(metrics.unassignedTaskCount).toBe(2);
+  });
+});
+
+describe("optimizeLine — idle-first (default)", () => {
+  it("collapses to the leanest crew with zero idle when capacity is ample", () => {
+    // 3 independent 60-min tasks; capacity is huge, so the capacity floor is 1 operator.
+    const tasks = [makeTask("a"), makeTask("b"), makeTask("c")];
+
+    const { metrics } = optimizeLine(tasks, CONSTRAINTS); // default strategy = idle-first
+
+    // One operator runs all three back-to-back: zero idle, lead time = total work.
+    expect(metrics.operatorsUsed).toBe(1);
+    expect(metrics.idleMinutes).toBe(0);
+    expect(metrics.leadTimeMinutes).toBe(180);
+    expect(metrics.unassignedTaskCount).toBe(0);
+  });
+
+  it("opens exactly the capacity-floor crew and keeps idle at zero", () => {
+    // 3 independent 60-min tasks; capacity 60/period, demand 1 → period work 180 → floor 3 operators.
+    const tasks = [makeTask("a"), makeTask("b"), makeTask("c")];
+
+    const { tasks: result, metrics } = optimizeLine(tasks, {
+      availableOperatorIds: ["A", "B", "C", "D"],
+      demandQuantity: 1,
+      operatorCapacityMinutes: 60,
+    });
+
+    expect(metrics.operatorsUsed).toBe(3);
+    expect(metrics.idleMinutes).toBe(0); // 3 operators × 60 makespan − 180 work
+    expect(metrics.leadTimeMinutes).toBe(60);
+    expect(metrics.unassignedTaskCount).toBe(0);
+    expectNoDoubleBooking(result);
+  });
+
+  it("respects dependencies even while packing the lean crew", () => {
+    const tasks = [makeTask("t1"), makeTask("t2", { deps: ["t1"] }), makeTask("t3", { deps: ["t2"] })];
+
+    const { tasks: result } = optimizeLine(tasks, CONSTRAINTS);
+    const byId = new Map(result.map((task) => [task.id, task]));
+
+    expect(startMs(byId.get("t2")!)).toBeGreaterThanOrEqual(finishMs(byId.get("t1")!));
+    expect(startMs(byId.get("t3")!)).toBeGreaterThanOrEqual(finishMs(byId.get("t2")!));
+    expectNoDoubleBooking(result);
   });
 });

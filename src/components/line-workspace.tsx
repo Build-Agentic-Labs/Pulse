@@ -8478,14 +8478,14 @@ export function LineWorkspace({
       setSaveState("saved");
 
       const summaryBits = [
-        `lead time ${formatMinutes(metrics.leadTimeMinutes)}`,
         `${metrics.operatorsUsed} operator${metrics.operatorsUsed === 1 ? "" : "s"}`,
-        metrics.delayedTaskCount > 0 ? `${metrics.delayedTaskCount} task(s) leveled within slack` : "",
+        `${formatMinutes(metrics.idleMinutes)} idle`,
+        `lead time ${formatMinutes(metrics.leadTimeMinutes)}`,
         metrics.unassignedTaskCount > 0 ? `${metrics.unassignedTaskCount} unassigned (review)` : "",
       ].filter(Boolean).join(" · ");
       notifyFeedback({
         title: "Line optimized into a new scenario",
-        body: `Scheduled dependent work as early as possible and balanced the crew — ${summaryBits}. Your source plan is unchanged.`,
+        body: `Packed the leanest crew that meets demand and scheduled it densely to minimize idle — ${summaryBits}. Your source plan is unchanged.`,
         tone: metrics.unassignedTaskCount > 0 ? "warning" : "success",
       });
     } catch (error) {

@@ -1,17 +1,19 @@
 import { calculatePlannedCycleMinutes } from "./calculations";
-import { isAllocatableOperatorTask } from "./operator-allocation";
+import { computeOperatorIdleAnalysis, isAllocatableOperatorTask } from "./operator-allocation";
 import { getTaskOperatorPatch, getTaskOperatorResetPatch } from "./operator-assignments";
 import { addMinutes, computeCriticalPath, rescheduleTasksByDependencies } from "./task-scheduling";
 import type { Task } from "./types";
 
 /**
- * Deterministic joint scheduler + crew-leveler ("Optimize line", Phase 1).
+ * Deterministic joint scheduler + crew-leveler ("Optimize line").
  *
- * Given a task set with dependencies and a pool of operators, it (A) pulls every task to the
- * earliest start its dependencies allow (shortest lead time), (B) derives critical-path float,
- * then (C) staffs the work with the FEWEST operators, balanced among those used, only delaying a
- * task within its FREE float to reuse an existing operator instead of opening a new one. Free
- * float is slack that delays no successor, so leveling never lengthens the project finish.
+ * Two strategies (see OptimizeLineStrategy):
+ * - "idle-first" (default): minimize operator idle. Total idle = crew × makespan − work, so it uses
+ *   the leanest crew that still meets demand (the capacity floor) and list-schedules it densely
+ *   (each task to the operator free earliest after its deps finish). Lead time is free.
+ * - "lead-time": shortest lead time. Pull every task to its earliest dependency-feasible start,
+ *   derive critical-path float, then staff with the fewest operators, leveling non-critical work
+ *   only within FREE float (slack that delays no successor) so the finish never slips.
  *
  * Pure + deterministic: no Supabase, no network, no Date.now() in the scheduling math (the line
  * start is taken from the tasks). The LLM is intentionally not involved (it steers later phases).
@@ -39,6 +41,13 @@ export interface OptimizeLineResult {
   tasks: Task[];
   metrics: OptimizeLineMetrics;
 }
+
+/**
+ * - "idle-first" (default): leanest crew (the capacity-floor headcount that still meets demand),
+ *   list-scheduled densely so operators run back-to-back — drives idle toward zero, lead time free.
+ * - "lead-time": ASAP schedule (shortest lead time) + level non-critical work within free float.
+ */
+export type OptimizeLineStrategy = "idle-first" | "lead-time";
 
 interface Interval {
   startMs: number;
@@ -83,7 +92,7 @@ function earliestFreeStart(operator: OperatorState, esMs: number, durationMs: nu
   return candidate <= maxStartMs ? candidate : undefined;
 }
 
-export function optimizeLine(tasks: Task[], constraints: OptimizeLineConstraints): OptimizeLineResult {
+function scheduleLeadTime(tasks: Task[], constraints: OptimizeLineConstraints): OptimizeLineResult {
   const { availableOperatorIds, demandQuantity, operatorCapacityMinutes } = constraints;
   const periodDemand = Math.max(demandQuantity, 0);
   const capacity = operatorCapacityMinutes;
@@ -252,4 +261,152 @@ export function optimizeLine(tasks: Task[], constraints: OptimizeLineConstraints
       delayedTaskCount,
     },
   };
+}
+
+/**
+ * Idle-first staffing: minimize operator idle by using the leanest crew that still meets demand
+ * (the capacity floor) and list-scheduling tasks densely — each task goes to the operator that can
+ * start it earliest once its dependencies finish, so operators run back-to-back. Lead time is
+ * whatever that lean crew needs (not minimized). Total idle = crew × makespan − work, which this
+ * drives toward zero by shrinking the crew and packing it.
+ */
+function scheduleIdleFirst(tasks: Task[], constraints: OptimizeLineConstraints): OptimizeLineResult {
+  const { availableOperatorIds, demandQuantity, operatorCapacityMinutes } = constraints;
+  const periodDemand = Math.max(demandQuantity, 0);
+  const allocatable = tasks.filter((task) => isAllocatableOperatorTask(task, tasks));
+  const allocatableIds = new Set(allocatable.map((task) => task.id));
+  const startTimes = tasks.map((task) => Date.parse(task.plannedStart)).filter(Number.isFinite);
+  const lineStartMs = startTimes.length ? Math.min(...startTimes) : 0;
+
+  // Leanest crew that still fits the demand-period workload, capped by the available pool.
+  const totalWorkMinutes = allocatable.reduce((total, task) => total + Math.max(task.plannedDurationMinutes, 0), 0);
+  const totalPeriodMinutes = totalWorkMinutes * periodDemand;
+  const capacityFloor = operatorCapacityMinutes > 0
+    ? Math.max(1, Math.ceil(totalPeriodMinutes / operatorCapacityMinutes))
+    : availableOperatorIds.length;
+  const crewSize = Math.min(Math.max(capacityFloor, availableOperatorIds.length > 0 ? 1 : 0), availableOperatorIds.length);
+  const pool = availableOperatorIds.slice(0, crewSize);
+
+  const assignment = new Map<string, { operatorId: string; startMs: number; finishMs: number }>();
+
+  if (pool.length > 0) {
+    const finishMsById = new Map<string, number>();
+    const operatorFreeMs = new Map(pool.map((operatorId) => [operatorId, lineStartMs]));
+    const operatorPeriodMinutes = new Map(pool.map((operatorId) => [operatorId, 0]));
+    const scheduled = new Set<string>();
+
+    // Earliest the task can start: after every allocatable predecessor finishes; undefined if a
+    // predecessor isn't scheduled yet (so the task isn't ready).
+    function readyTime(task: Task): number | undefined {
+      let readyMs = lineStartMs;
+      for (const dependencyId of task.dependencyIds) {
+        if (!allocatableIds.has(dependencyId)) {
+          continue;
+        }
+        const finish = finishMsById.get(dependencyId);
+        if (finish === undefined) {
+          return undefined;
+        }
+        readyMs = Math.max(readyMs, finish);
+      }
+      return readyMs;
+    }
+
+    let guard = allocatable.length + 1;
+    while (scheduled.size < allocatable.length && guard > 0) {
+      guard -= 1;
+      const ready = allocatable
+        .filter((task) => !scheduled.has(task.id))
+        .map((task) => ({ task, readyMs: readyTime(task) }))
+        .filter((entry): entry is { task: Task; readyMs: number } => entry.readyMs !== undefined)
+        .sort((left, right) => {
+          if (left.readyMs !== right.readyMs) {
+            return left.readyMs - right.readyMs;
+          }
+          const leftDuration = Math.max(left.task.plannedDurationMinutes, 0);
+          const rightDuration = Math.max(right.task.plannedDurationMinutes, 0);
+          if (leftDuration !== rightDuration) {
+            return rightDuration - leftDuration; // longest first packs better
+          }
+          return Number.parseFloat(left.task.wbs) - Number.parseFloat(right.task.wbs);
+        });
+
+      if (ready.length === 0) {
+        break; // remaining tasks have unresolved dependencies (cycle / external) — leave unassigned
+      }
+
+      const { task, readyMs } = ready[0];
+      const durationMinutes = Math.max(task.plannedDurationMinutes, 0);
+      const durationMs = durationMinutes * 60_000;
+      const periodMinutes = durationMinutes * periodDemand;
+
+      const candidates = pool.map((operatorId) => {
+        const current = operatorPeriodMinutes.get(operatorId) ?? 0;
+        return {
+          operatorId,
+          startMs: Math.max(readyMs, operatorFreeMs.get(operatorId) ?? lineStartMs),
+          periodMinutes: current,
+          capacityOk: operatorCapacityMinutes > 0 ? current + periodMinutes <= operatorCapacityMinutes : periodMinutes === 0,
+        };
+      });
+      const eligible = candidates.filter((candidate) => candidate.capacityOk);
+      const pickFrom = eligible.length ? eligible : candidates; // never strand a task on capacity alone
+      pickFrom.sort((left, right) =>
+        left.startMs - right.startMs ||
+        left.periodMinutes - right.periodMinutes ||
+        left.operatorId.localeCompare(right.operatorId),
+      );
+
+      const chosen = pickFrom[0];
+      const finishMs = chosen.startMs + durationMs;
+      assignment.set(task.id, { operatorId: chosen.operatorId, startMs: chosen.startMs, finishMs });
+      operatorFreeMs.set(chosen.operatorId, finishMs);
+      operatorPeriodMinutes.set(chosen.operatorId, chosen.periodMinutes + periodMinutes);
+      finishMsById.set(task.id, finishMs);
+      scheduled.add(task.id);
+    }
+  }
+
+  const nextTasks = tasks.map((task) => {
+    if (!allocatableIds.has(task.id)) {
+      return { ...task, ...getTaskOperatorResetPatch(task) };
+    }
+    const placed = assignment.get(task.id);
+    const durationMinutes = Math.max(task.plannedDurationMinutes, 0);
+    const dated = placed
+      ? {
+          ...task,
+          plannedStart: new Date(placed.startMs).toISOString(),
+          plannedFinish: addMinutes(new Date(placed.startMs).toISOString(), durationMinutes),
+        }
+      : task;
+    const operatorPatch = getTaskOperatorPatch(dated, placed ? [placed.operatorId] : [], availableOperatorIds);
+    return { ...dated, ...operatorPatch };
+  });
+
+  const analysis = computeOperatorIdleAnalysis(nextTasks, availableOperatorIds);
+  const loads = analysis.operators.map((operator) => operator.busyMinutes);
+  const loadSpreadMinutes = loads.length ? Math.max(...loads) - Math.min(...loads) : 0;
+  const unassignedTaskCount = allocatable.filter((task) => !assignment.has(task.id)).length;
+
+  return {
+    tasks: nextTasks,
+    metrics: {
+      leadTimeMinutes: analysis.makespanMinutes,
+      operatorsUsed: analysis.operatorsUsed,
+      loadSpreadMinutes,
+      idleMinutes: analysis.totalIdleMinutes,
+      unassignedTaskCount,
+      allocatableTaskCount: allocatable.length,
+      delayedTaskCount: 0,
+    },
+  };
+}
+
+export function optimizeLine(
+  tasks: Task[],
+  constraints: OptimizeLineConstraints,
+  strategy: OptimizeLineStrategy = "idle-first",
+): OptimizeLineResult {
+  return strategy === "lead-time" ? scheduleLeadTime(tasks, constraints) : scheduleIdleFirst(tasks, constraints);
 }

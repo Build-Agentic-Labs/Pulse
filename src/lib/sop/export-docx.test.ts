@@ -21,16 +21,14 @@ describe("exportSopToDocx — Procedure flowchart", () => {
     expect(xml).toContain("ISO 9001 requirements");
     expect(xml).toContain("Officially released SOP");
 
-    // The written "Procedure steps" list (short box + full detail below the diagram) renders.
-    expect(xml).toContain("Procedure steps");
-    expect(xml).toContain("aligned to ISO 9001");
+    // The written "Procedure steps" list was intentionally dropped — the flowchart is the procedure.
+    expect(xml).not.toContain("Procedure steps");
 
-    // Procedure steps and the back matter each begin on a fresh page (no crowding / orphaning).
+    // Back matter still begins on a fresh page (no crowding / orphaning).
     const paraBefore = (marker: string) => {
       const head = xml.slice(0, xml.indexOf(marker));
       return head.slice(head.lastIndexOf("<w:p>"));
     };
-    expect(paraBefore("Procedure steps")).toContain("pageBreakBefore");
     expect(paraBefore("Annexes")).toContain("pageBreakBefore");
   });
 });

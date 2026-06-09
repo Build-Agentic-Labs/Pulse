@@ -8485,7 +8485,7 @@ export function LineWorkspace({
       ].filter(Boolean).join(" · ");
       notifyFeedback({
         title: "Line optimized into a new scenario",
-        body: `Packed the leanest crew that meets demand and scheduled it densely to minimize idle — ${summaryBits}. Your source plan is unchanged.`,
+        body: `Balanced the line for the best mix of lead time and idle — ${summaryBits}. Your source plan is unchanged.`,
         tone: metrics.unassignedTaskCount > 0 ? "warning" : "success",
       });
     } catch (error) {

@@ -43,11 +43,30 @@ export interface OptimizeLineResult {
 }
 
 /**
- * - "idle-first" (default): leanest crew (the capacity-floor headcount that still meets demand),
+ * - "idle-first": leanest crew (the capacity-floor headcount that still meets demand),
  *   list-scheduled densely so operators run back-to-back — drives idle toward zero, lead time free.
+ * - "idle-first-cp": same, but ready tasks are prioritized by critical-path urgency (least float
+ *   first) so the chain that gates the most downstream work starts at hour zero — trims lead time.
  * - "lead-time": ASAP schedule (shortest lead time) + level non-critical work within free float.
+ * - "balanced" (DEFAULT, recommended): sweep crew size from the capacity floor up to the pool,
+ *   score each on the lead-time/idle rubric, and return the best operating point — short lead time
+ *   when idle is free, the lean crew when idle truly trades against lead time.
  */
-export type OptimizeLineStrategy = "idle-first" | "lead-time";
+export type OptimizeLineStrategy = "idle-first" | "idle-first-cp" | "lead-time" | "balanced";
+
+/**
+ * Rubric weights for the balanced crew-size sweep (lower composite = better). The two terms are
+ * ABSOLUTE ratios so the pick is stable regardless of which crew sizes are in the candidate set:
+ *   leadTerm = leadTime / shortestLead − 1   (0 = shortest possible lead time; 0.5 = 50% longer)
+ *   idleTerm = idleMinutes / workMinutes      (0 = no idle; 0.25 = idle is a quarter of the work)
+ * Idle is weighted a touch higher than lead time per the user's priority. (Man-hours of productive
+ * work are fixed, so they don't discriminate; the paid-labor bill is captured by idleTerm.)
+ */
+export interface RubricWeights {
+  lead: number;
+  idle: number;
+}
+export const DEFAULT_RUBRIC_WEIGHTS: RubricWeights = { lead: 0.45, idle: 0.55 };
 
 interface Interval {
   startMs: number;
@@ -270,7 +289,12 @@ function scheduleLeadTime(tasks: Task[], constraints: OptimizeLineConstraints): 
  * whatever that lean crew needs (not minimized). Total idle = crew × makespan − work, which this
  * drives toward zero by shrinking the crew and packing it.
  */
-function scheduleIdleFirst(tasks: Task[], constraints: OptimizeLineConstraints): OptimizeLineResult {
+function scheduleIdleFirst(
+  tasks: Task[],
+  constraints: OptimizeLineConstraints,
+  criticalPathPriority = false,
+  targetCrew?: number,
+): OptimizeLineResult {
   const { availableOperatorIds, demandQuantity, operatorCapacityMinutes } = constraints;
   const periodDemand = Math.max(demandQuantity, 0);
   const allocatable = tasks.filter((task) => isAllocatableOperatorTask(task, tasks));
@@ -278,13 +302,35 @@ function scheduleIdleFirst(tasks: Task[], constraints: OptimizeLineConstraints):
   const startTimes = tasks.map((task) => Date.parse(task.plannedStart)).filter(Number.isFinite);
   const lineStartMs = startTimes.length ? Math.min(...startTimes) : 0;
 
+  // Critical-path urgency (least total float first): start the chain that gates the most
+  // downstream work at hour zero. Float comes from an ASAP pass over the dependency graph.
+  const floatByTaskId = criticalPathPriority
+    ? computeCriticalPath(
+        rescheduleTasksByDependencies(
+          tasks.map((task) => {
+            const lineStartIso = new Date(lineStartMs).toISOString();
+            return {
+              ...task,
+              plannedStart: lineStartIso,
+              plannedFinish: addMinutes(lineStartIso, Math.max(task.plannedDurationMinutes, 0)),
+            };
+          }),
+        ),
+      )
+    : undefined;
+
   // Leanest crew that still fits the demand-period workload, capped by the available pool.
   const totalWorkMinutes = allocatable.reduce((total, task) => total + Math.max(task.plannedDurationMinutes, 0), 0);
   const totalPeriodMinutes = totalWorkMinutes * periodDemand;
   const capacityFloor = operatorCapacityMinutes > 0
     ? Math.max(1, Math.ceil(totalPeriodMinutes / operatorCapacityMinutes))
     : availableOperatorIds.length;
-  const crewSize = Math.min(Math.max(capacityFloor, availableOperatorIds.length > 0 ? 1 : 0), availableOperatorIds.length);
+  const minCrew = availableOperatorIds.length > 0 ? 1 : 0;
+  // Default crew = capacity floor; a target (from the balanced sweep) overrides it but never drops
+  // below the capacity floor, so capacity is always respected.
+  const crewSize = targetCrew !== undefined
+    ? Math.min(Math.max(targetCrew, Math.max(capacityFloor, minCrew)), availableOperatorIds.length)
+    : Math.min(Math.max(capacityFloor, minCrew), availableOperatorIds.length);
   const pool = availableOperatorIds.slice(0, crewSize);
 
   const assignment = new Map<string, { operatorId: string; startMs: number; finishMs: number }>();
@@ -322,6 +368,13 @@ function scheduleIdleFirst(tasks: Task[], constraints: OptimizeLineConstraints):
         .sort((left, right) => {
           if (left.readyMs !== right.readyMs) {
             return left.readyMs - right.readyMs;
+          }
+          if (floatByTaskId) {
+            const leftFloat = floatByTaskId.get(left.task.id)?.totalFloatMinutes ?? 0;
+            const rightFloat = floatByTaskId.get(right.task.id)?.totalFloatMinutes ?? 0;
+            if (leftFloat !== rightFloat) {
+              return leftFloat - rightFloat; // least float = most critical = first
+            }
           }
           const leftDuration = Math.max(left.task.plannedDurationMinutes, 0);
           const rightDuration = Math.max(right.task.plannedDurationMinutes, 0);
@@ -403,10 +456,75 @@ function scheduleIdleFirst(tasks: Task[], constraints: OptimizeLineConstraints):
   };
 }
 
+/**
+ * Balanced strategy: sweep the crew size from the capacity floor up to the available pool, schedule
+ * densely at each size, score lead-time / idle / labor on the rubric, and keep the best operating
+ * point. Picks short lead time when extra operators add no idle (free parallelism), and the lean
+ * crew when more operators would only add idle.
+ */
+function scheduleBalanced(
+  tasks: Task[],
+  constraints: OptimizeLineConstraints,
+  weights: RubricWeights = DEFAULT_RUBRIC_WEIGHTS,
+): OptimizeLineResult {
+  const { availableOperatorIds, demandQuantity, operatorCapacityMinutes } = constraints;
+  const periodDemand = Math.max(demandQuantity, 0);
+  const allocatable = tasks.filter((task) => isAllocatableOperatorTask(task, tasks));
+
+  const totalWorkMinutes = allocatable.reduce((total, task) => total + Math.max(task.plannedDurationMinutes, 0), 0);
+  const totalPeriodMinutes = totalWorkMinutes * periodDemand;
+  const capacityFloor = operatorCapacityMinutes > 0
+    ? Math.max(1, Math.ceil(totalPeriodMinutes / operatorCapacityMinutes))
+    : availableOperatorIds.length;
+  const minCrew = Math.min(Math.max(capacityFloor, availableOperatorIds.length > 0 ? 1 : 0), availableOperatorIds.length);
+  // No point staffing more operators than there are tasks to run in parallel.
+  const maxCrew = Math.min(availableOperatorIds.length, Math.max(minCrew, allocatable.length));
+
+  if (minCrew === 0) {
+    return scheduleIdleFirst(tasks, constraints);
+  }
+
+  const candidates: Array<{ crew: number; result: OptimizeLineResult; lead: number; idle: number }> = [];
+  for (let crew = minCrew; crew <= maxCrew; crew += 1) {
+    const result = scheduleIdleFirst(tasks, constraints, false, crew);
+    candidates.push({
+      crew,
+      result,
+      lead: result.metrics.leadTimeMinutes,
+      idle: result.metrics.idleMinutes,
+    });
+  }
+
+  // Absolute reference points: the shortest lead any crew achieves, and the productive work content.
+  const shortestLead = Math.min(...candidates.map((candidate) => candidate.lead)) || 1;
+  const workMinutes = totalWorkMinutes || 1;
+
+  let best = candidates[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const leadTerm = candidate.lead / shortestLead - 1;
+    const idleTerm = candidate.idle / workMinutes;
+    const score = weights.lead * leadTerm + weights.idle * idleTerm;
+    // Tie-break toward the leaner crew (fewer operators) for an equal balance.
+    if (score < bestScore - 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && candidate.crew < best.crew)) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+
+  return best.result;
+}
+
 export function optimizeLine(
   tasks: Task[],
   constraints: OptimizeLineConstraints,
-  strategy: OptimizeLineStrategy = "idle-first",
+  strategy: OptimizeLineStrategy = "balanced",
 ): OptimizeLineResult {
-  return strategy === "lead-time" ? scheduleLeadTime(tasks, constraints) : scheduleIdleFirst(tasks, constraints);
+  if (strategy === "lead-time") {
+    return scheduleLeadTime(tasks, constraints);
+  }
+  if (strategy === "balanced") {
+    return scheduleBalanced(tasks, constraints);
+  }
+  return scheduleIdleFirst(tasks, constraints, strategy === "idle-first-cp");
 }

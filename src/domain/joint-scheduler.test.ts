@@ -129,12 +129,12 @@ describe("optimizeLine", () => {
   });
 });
 
-describe("optimizeLine — idle-first (default)", () => {
+describe("optimizeLine — idle-first strategy", () => {
   it("collapses to the leanest crew with zero idle when capacity is ample", () => {
     // 3 independent 60-min tasks; capacity is huge, so the capacity floor is 1 operator.
     const tasks = [makeTask("a"), makeTask("b"), makeTask("c")];
 
-    const { metrics } = optimizeLine(tasks, CONSTRAINTS); // default strategy = idle-first
+    const { metrics } = optimizeLine(tasks, CONSTRAINTS, "idle-first");
 
     // One operator runs all three back-to-back: zero idle, lead time = total work.
     expect(metrics.operatorsUsed).toBe(1);
@@ -151,7 +151,7 @@ describe("optimizeLine — idle-first (default)", () => {
       availableOperatorIds: ["A", "B", "C", "D"],
       demandQuantity: 1,
       operatorCapacityMinutes: 60,
-    });
+    }, "idle-first");
 
     expect(metrics.operatorsUsed).toBe(3);
     expect(metrics.idleMinutes).toBe(0); // 3 operators × 60 makespan − 180 work
@@ -163,11 +163,44 @@ describe("optimizeLine — idle-first (default)", () => {
   it("respects dependencies even while packing the lean crew", () => {
     const tasks = [makeTask("t1"), makeTask("t2", { deps: ["t1"] }), makeTask("t3", { deps: ["t2"] })];
 
-    const { tasks: result } = optimizeLine(tasks, CONSTRAINTS);
+    const { tasks: result } = optimizeLine(tasks, CONSTRAINTS, "idle-first");
     const byId = new Map(result.map((task) => [task.id, task]));
 
     expect(startMs(byId.get("t2")!)).toBeGreaterThanOrEqual(finishMs(byId.get("t1")!));
     expect(startMs(byId.get("t3")!)).toBeGreaterThanOrEqual(finishMs(byId.get("t2")!));
+    expectNoDoubleBooking(result);
+  });
+});
+
+describe("optimizeLine — balanced (default)", () => {
+  it("uses full parallelism for a short lead time when extra operators add no idle", () => {
+    // 3 independent 60-min tasks, ample capacity: every crew size gives 0 idle, so the shortest
+    // lead time wins → all 3 operators in parallel (not the lean 1-operator/180-min idle-first pick).
+    const tasks = [makeTask("a"), makeTask("b"), makeTask("c")];
+
+    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS); // default = balanced
+
+    expect(metrics.operatorsUsed).toBe(3);
+    expect(metrics.leadTimeMinutes).toBe(60);
+    expect(metrics.idleMinutes).toBe(0);
+    expectNoDoubleBooking(result);
+  });
+
+  it("goes lean / zero-idle when extra operators would only add idle", () => {
+    // Diamond: critical path start→l1→end = 150; total work 210. A 2nd operator shaves lead time
+    // but adds 90 idle, which at idle-weight 0.55 isn't worth it → balanced picks 1 op, 0 idle.
+    const tasks = [
+      makeTask("start", { dur: 30 }),
+      makeTask("l1", { dur: 90, deps: ["start"] }),
+      makeTask("l2", { dur: 30, deps: ["start"] }),
+      makeTask("l3", { dur: 30, deps: ["l2"] }),
+      makeTask("end", { dur: 30, deps: ["l1", "l3"] }),
+    ];
+
+    const { tasks: result, metrics } = optimizeLine(tasks, CONSTRAINTS);
+
+    expect(metrics.idleMinutes).toBe(0);
+    expect(metrics.operatorsUsed).toBe(1);
     expectNoDoubleBooking(result);
   });
 });

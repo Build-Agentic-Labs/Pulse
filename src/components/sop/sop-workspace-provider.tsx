@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership } from "@/domain/supabase-planner";
 import type { WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
+import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 const WORKSPACE_STORAGE_KEY = "pulse:sops:workspace-id";
@@ -196,6 +197,11 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
   }
 
   async function handleCreateAccount(email: string, password: string) {
+    if (!isAllowedSignupEmail(email)) {
+      setMessage(SIGNUP_DOMAIN_MESSAGE);
+      return;
+    }
+
     setIsSubmitting(true);
     setMessage("");
     try {

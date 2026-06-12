@@ -9,6 +9,7 @@ import {
   ensureDefaultWorkspaceMembership,
 } from "@/domain/supabase-planner";
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
+import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 type ProjectRouteKind = "planner" | "mobile-photos" | "excel/gantt";
@@ -282,6 +283,11 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   }
 
   async function handleCreateAccount(email: string, password: string) {
+    if (!isAllowedSignupEmail(email)) {
+      setMessage(SIGNUP_DOMAIN_MESSAGE);
+      return;
+    }
+
     setIsSubmitting(true);
     setMessage("");
 

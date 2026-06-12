@@ -1,7 +1,7 @@
 "use client";
 
-import QRCodeGenerator from "qrcode";
 import { useEffect, useMemo, useState } from "react";
+import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import type { PlannerProjectContext } from "@/domain/types";
 
 function projectPortalPath(projectId?: string) {
@@ -55,26 +55,33 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
 
     const phonePortalApiUrl = `/api/phone-portal-url?projectId=${encodeURIComponent(projectId)}`;
 
-    fetch(phonePortalApiUrl, { cache: "no-store" })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error("Unable to resolve phone portal URL.");
-        }
+    const resolvePortalUrl = async () => {
+      const supabase = createPlannerSupabaseClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error("Sign in before resolving the phone portal URL.");
+      }
 
-        return response.json() as Promise<{ url?: string }>;
-      })
-      .then((payload) => {
-        if (!mounted) {
-          return;
-        }
-
-        setPhonePortalUrl(ensureProjectPortalUrl(payload.url ?? fallbackPortalUrl(projectId), projectId));
-      })
-      .catch(() => {
-        if (mounted) {
-          setPhonePortalUrl(fallbackPortalUrl(projectId));
-        }
+      const response = await fetch(phonePortalApiUrl, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
+      if (!response.ok) {
+        throw new Error("Unable to resolve phone portal URL.");
+      }
+
+      const payload = (await response.json()) as { url?: string };
+      if (mounted) {
+        setPhonePortalUrl(ensureProjectPortalUrl(payload.url ?? fallbackPortalUrl(projectId), projectId));
+      }
+    };
+
+    resolvePortalUrl().catch(() => {
+      if (mounted) {
+        setPhonePortalUrl(fallbackPortalUrl(projectId));
+      }
+    });
 
     return () => {
       mounted = false;
@@ -89,15 +96,20 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
       };
     }
 
-    QRCodeGenerator.toDataURL(phonePortalUrl, {
-      errorCorrectionLevel: "M",
-      margin: 1,
-      width: 200,
-      color: {
-        dark: "#000000",
-        light: "#ffffff",
-      },
-    })
+    // qrcode is only needed once this settings panel is open — load it on demand
+    // instead of shipping it in the main client bundle.
+    import("qrcode")
+      .then((qrcodeModule) =>
+        qrcodeModule.default.toDataURL(phonePortalUrl, {
+          errorCorrectionLevel: "M",
+          margin: 1,
+          width: 200,
+          color: {
+            dark: "#000000",
+            light: "#ffffff",
+          },
+        }),
+      )
       .then((dataUrl) => {
         if (mounted) {
           setPhonePortalQrDataUrl(dataUrl);

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { rasicLegend, type Sop } from "@/domain/sop/schema";
 import { applySampleData } from "@/domain/sop/sample";
-import { exportFileName, exportSopToDocx } from "@/lib/sop/export-docx";
 import { saveSop } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
@@ -117,6 +116,9 @@ export function SopEditor({
   async function handleExport() {
     setExporting(true);
     try {
+      // The docx library is heavy and only needed for export — pull it in on demand
+      // so it stays out of the editor's initial bundle.
+      const { exportFileName, exportSopToDocx } = await import("@/lib/sop/export-docx");
       const blob = await exportSopToDocx(sop);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");

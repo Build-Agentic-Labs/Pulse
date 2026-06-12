@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
+import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { deleteSop, listSops, readLegacyLocalSops, saveSop, sopFromExtraction } from "@/lib/sop/store";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { SopShell } from "./sop-shell";
@@ -95,9 +96,20 @@ export function SopList() {
     setConvert({ fileName: file.name, phase: "working" });
     setError("");
     try {
+      const supabase = createPlannerSupabaseClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error("Sign in before converting SOPs.");
+      }
+
       const body = new FormData();
       body.append("file", file);
-      const response = await fetch("/api/sops/extract", { method: "POST", body });
+      const response = await fetch("/api/sops/extract", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body,
+      });
       const payload = (await response.json()) as { sop?: ExtractedSop; error?: string };
       if (!response.ok || !payload.sop) {
         throw new Error(payload.error || "Conversion failed.");

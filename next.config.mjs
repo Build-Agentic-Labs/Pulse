@@ -26,6 +26,11 @@ const securityHeaders = [
     value: "nosniff",
   },
   {
+    // Browsers ignore HSTS over plain http, so local dev is unaffected.
+    key: "Strict-Transport-Security",
+    value: "max-age=63072000; includeSubDomains",
+  },
+  {
     key: "Referrer-Policy",
     value: "strict-origin-when-cross-origin",
   },

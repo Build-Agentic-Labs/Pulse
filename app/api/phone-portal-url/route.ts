@@ -1,5 +1,6 @@
 import { networkInterfaces } from "node:os";
 import { NextResponse } from "next/server";
+import { requireApiUser } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,14 @@ function splitHost(host: string) {
   };
 }
 
-export function GET(request: Request) {
+export async function GET(request: Request) {
+  // The response enumerates the host's LAN interfaces — sign-in required so that
+  // network topology is only visible to workspace users, not anonymous callers.
+  const auth = await requireApiUser(request);
+  if (auth.failure) {
+    return auth.failure;
+  }
+
   const requestUrlObject = new URL(request.url);
   const projectId = requestUrlObject.searchParams.get("projectId")?.trim() || undefined;
   const publicPortalUrl =

@@ -6,6 +6,7 @@ import {
   type ExtractedSop,
 } from "@/domain/sop/extraction";
 import { prepareSopUpload, type PreparedSopUpload } from "@/lib/sop/parse-document";
+import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,9 @@ export const maxDuration = 60;
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20 MB
 
 const SOP_INSTRUCTION = "Convert this legacy SOP into the standardized schema.";
+
+// Each conversion is a full LLM round-trip (up to 20 MB of PDF); cap per-user throughput.
+const checkExtractionRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 5 });
 
 // Build the Claude user-turn content for the upload. The PDF rides as a document block
 // (Claude reads/OCRs it); docx text is sent inline. Either way this sits AFTER the cached
@@ -42,6 +46,18 @@ function buildUserContent(upload: PreparedSopUpload): Anthropic.ContentBlockPara
 }
 
 export async function POST(request: Request) {
+  const auth = await requireApiUser(request);
+  if (auth.failure) {
+    return auth.failure;
+  }
+
+  if (!checkExtractionRateLimit(auth.userId)) {
+    return Response.json(
+      { error: "Too many conversions at once. Wait a minute and try again." },
+      { status: 429 },
+    );
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return Response.json(

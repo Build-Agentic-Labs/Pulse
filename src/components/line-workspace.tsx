@@ -63,7 +63,8 @@ import {
 import { buildOperatorAssignmentsFromIePlan } from "@/domain/operator-allocation";
 import type { IeSmartAllocationPlan, IeSmartAllocationRequest } from "@/domain/ie-smart-allocation";
 import { getTaskOperatorIds, getTaskOperatorResetPatch, syncTaskOperatorCount } from "@/domain/operator-assignments";
-import { buildMarkdownReport, buildStationSetupDocumentHtml } from "@/domain/report";
+import { RollingText } from "@/components/rolling-text";
+import { buildStationSetupDocumentHtml } from "@/domain/report";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
 import { readCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import { buildStepPhotoAttachment } from "@/lib/step-photo-image";
@@ -1228,13 +1229,11 @@ function StatCard({
 }
 
 function TopNav({
-  onExport,
   sidebarCollapsed,
   onToggleSidebar,
   context,
   chromeStatus,
 }: {
-  onExport: () => void;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   context?: ReturnType<typeof buildPlannerChromeContext>;
@@ -1260,11 +1259,13 @@ function TopNav({
               className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
             />
           </button>
-          <div className="ui-brand-compact shrink-0">Pulse</div>
+          <div className="ui-brand-compact shrink-0">
+            <RollingText text="Pulse" rollOnMount />
+          </div>
         </div>
 
         <div className="ui-chrome-planner-context min-w-0">
-          <span className="ui-chrome-context-title truncate">{context.title}</span>
+          <RollingText text={context.title} className="ui-chrome-context-title truncate" />
           <span className="ui-chrome-context-meta hidden min-w-0 truncate sm:inline">
             <span className={context.statusClass}>{context.status}</span>
             {context.detail ? (
@@ -1284,10 +1285,6 @@ function TopNav({
           ) : null}
           <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-          <button type="button" onClick={onExport} className="ui-btn-ghost h-10 gap-2">
-            <Download size={16} />
-            Export
           </button>
         </div>
       </header>
@@ -1324,10 +1321,6 @@ function TopNav({
         ) : null}
         <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-        <button type="button" onClick={onExport} className="ui-btn-ghost h-10 gap-2">
-          <Download size={16} />
-          Export
         </button>
       </div>
     </header>
@@ -1464,9 +1457,8 @@ function Sidebar({
             <Settings size={15} strokeWidth={1.75} />
             Settings
           </button>
-        ) : (
-          <SidebarUserPanel />
-        )}
+        ) : null}
+        <SidebarUserPanel />
       </div>
     </aside>
   );
@@ -7391,7 +7383,6 @@ export function LineWorkspace({
         style={workspaceGridStyle}
       >
         <TopNav
-          onExport={() => undefined}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
           context={displayedPlannerChromeContext}
@@ -9418,31 +9409,6 @@ export function LineWorkspace({
     return { filename, url };
   }
 
-  function exportMarkdown() {
-    const markdown = buildMarkdownReport(derivedState);
-    const exportFile = downloadTextFile(
-      markdown,
-      `${derivedState.product.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-line-plan.md`,
-      "text/markdown;charset=utf-8",
-    );
-    notifyFeedback({
-      title: "Line plan export ready",
-      content: (
-        <div className="space-y-2">
-          <p className="ui-workspace-notice-body">The download should start automatically.</p>
-          <a
-            href={exportFile.url}
-            download={exportFile.filename}
-            className="ui-btn-secondary inline-flex h-8 items-center px-3 text-xs"
-          >
-            Download manually
-          </a>
-        </div>
-      ),
-      tone: "success",
-    });
-  }
-
   function exportGanttDocument() {
     try {
       const documentHtml = buildStationSetupDocumentHtml(derivedState);
@@ -9579,7 +9545,6 @@ export function LineWorkspace({
       style={workspaceGridStyle}
     >
       <TopNav
-        onExport={exportMarkdown}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         context={displayedPlannerChromeContext}

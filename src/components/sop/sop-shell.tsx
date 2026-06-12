@@ -3,6 +3,7 @@
 import { ChevronLeft, Moon, Sun } from "lucide-react";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
+import { RollingText } from "@/components/rolling-text";
 import { SidebarUserPanel } from "@/components/sidebar-user-panel";
 import { useTheme } from "@/components/theme-provider";
 
@@ -47,7 +48,7 @@ export function SopShell({
             />
           </button>
           <Link href="/" className="ui-brand-compact shrink-0">
-            Pulse
+            <RollingText text="Pulse" rollOnMount />
           </Link>
           {crumb ? (
             <span className="hidden min-w-0 truncate ui-section-subtitle text-ink-secondary sm:inline">{crumb}</span>

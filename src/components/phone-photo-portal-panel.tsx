@@ -35,6 +35,10 @@ function ensureProjectPortalUrl(url: string, projectId?: string) {
 export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectContext }) {
   const [phonePortalUrl, setPhonePortalUrl] = useState("");
   const [phonePortalQrDataUrl, setPhonePortalQrDataUrl] = useState("");
+  // The QR is built only from the settled URL. The first effect seeds the input
+  // field with a provisional fallback, but we don't encode that — otherwise the
+  // QR flickers from a localhost/origin code to the resolved one on every open.
+  const [isUrlResolved, setIsUrlResolved] = useState(false);
   const openPortalHref = useMemo(
     () => (project?.projectId ? projectPortalPath(project.projectId) : phonePortalUrl || "/mobile-photos"),
     [phonePortalUrl, project?.projectId],
@@ -44,13 +48,19 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
     let mounted = true;
     const projectId = project?.projectId;
 
+    // New resolve cycle: hold the QR until we have the final URL.
+    setIsUrlResolved(false);
+
     if (!projectId) {
       setPhonePortalUrl(fallbackPortalUrl());
+      setIsUrlResolved(true);
       return () => {
         mounted = false;
       };
     }
 
+    // Seed the input field immediately so it isn't blank, but leave the QR
+    // gated until the API (or its fallback) settles the real URL.
     setPhonePortalUrl(fallbackPortalUrl(projectId));
 
     const phonePortalApiUrl = `/api/phone-portal-url?projectId=${encodeURIComponent(projectId)}`;
@@ -74,12 +84,14 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
       const payload = (await response.json()) as { url?: string };
       if (mounted) {
         setPhonePortalUrl(ensureProjectPortalUrl(payload.url ?? fallbackPortalUrl(projectId), projectId));
+        setIsUrlResolved(true);
       }
     };
 
     resolvePortalUrl().catch(() => {
       if (mounted) {
         setPhonePortalUrl(fallbackPortalUrl(projectId));
+        setIsUrlResolved(true);
       }
     });
 
@@ -88,9 +100,12 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
     };
   }, [project?.projectId]);
 
-  useEffect(() => {    let mounted = true;
+  useEffect(() => {
+    let mounted = true;
 
-    if (!phonePortalUrl) {
+    // Wait for the settled URL before encoding — prevents the provisional
+    // fallback from producing a throwaway QR that's immediately replaced.
+    if (!phonePortalUrl || !isUrlResolved) {
       return () => {
         mounted = false;
       };
@@ -124,7 +139,7 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
     return () => {
       mounted = false;
     };
-  }, [phonePortalUrl]);
+  }, [phonePortalUrl, isUrlResolved]);
 
   return (
     <section className="ui-settings-section">

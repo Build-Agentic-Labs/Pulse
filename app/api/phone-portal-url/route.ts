@@ -11,6 +11,19 @@ interface PortalUrlCandidate {
 
 const DEFAULT_PUBLIC_PHONE_PORTAL_URL = "https://pulse.agenticlabs.studio/mobile-photos";
 
+// Pick the first env value that is actually set to a non-empty string, else the
+// hardcoded default. `??` alone would let an env var set to "" slip through and
+// fall back to a LAN IP / per-deployment host, which is what made the QR drift.
+function firstConfiguredUrl(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return DEFAULT_PUBLIC_PHONE_PORTAL_URL;
+}
+
 function portalPath(projectId?: string) {
   return projectId ? `/projects/${projectId}/mobile-photos` : "/mobile-photos";
 }
@@ -76,20 +89,21 @@ export async function GET(request: Request) {
 
   const requestUrlObject = new URL(request.url);
   const projectId = requestUrlObject.searchParams.get("projectId")?.trim() || undefined;
-  const publicPortalUrl =
-    process.env.PHONE_PORTAL_URL ?? process.env.NEXT_PUBLIC_PHONE_PORTAL_URL ?? DEFAULT_PUBLIC_PHONE_PORTAL_URL;
+  const publicPortalUrl = firstConfiguredUrl(
+    process.env.PHONE_PORTAL_URL,
+    process.env.NEXT_PUBLIC_PHONE_PORTAL_URL,
+  );
   const incomingHost = request.headers.get("host") ?? "127.0.0.1:3001";
   const forwardedProto = request.headers.get("x-forwarded-proto");
   const protocol = forwardedProto ?? (incomingHost.includes("localhost") || incomingHost.includes("127.0.0.1") ? "http" : "https");
   const { hostname, port } = splitHost(incomingHost);
-  const localHostnames = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
   const localCandidates = findLocalIpv4Candidates(protocol, port, projectId);
   const requestUrl = `${protocol}://${hostname}${port ? `:${port}` : ""}${portalPath(projectId)}`;
-  const primaryUrl = publicPortalUrl
-    ? normalizePortalUrl(publicPortalUrl, projectId)
-    : localHostnames.has(hostname)
-      ? localCandidates[0]?.url ?? requestUrl
-      : requestUrl;
+  // publicPortalUrl is always a non-empty string (env override or the hardcoded
+  // default), so the primary URL is stable across deploys and networks — it never
+  // falls back to a LAN IP or a per-deployment request host. The LAN candidates
+  // below stay in the response as informational alternatives only.
+  const primaryUrl = normalizePortalUrl(publicPortalUrl, projectId);
   const candidates = [
     { label: "Public", url: normalizePortalUrl(publicPortalUrl, projectId) },
     ...localCandidates,

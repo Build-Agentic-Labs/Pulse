@@ -355,6 +355,15 @@ const playbackSpeeds = [
 
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
 const PROCEDURE_SAVE_DEBUG = false;
+
+// Top-level free-text task fields a user types into directly (Task Description, Safety Notes, and the
+// task name). Unlike manufacturing-step fields these are NOT tracked by the per-step procedure-draft
+// system, so a stale server echo from our own in-flight save — or a remote refresh that lands between
+// keystrokes — would otherwise overwrite characters the user just typed. mergeServerTaskIntoLocalTask
+// preserves the local value for these when it can only be unsaved local typing.
+const LOCAL_EDITED_TASK_TEXT_FIELDS = ["name", "description", "safetyNotes"] as const satisfies ReadonlyArray<
+  keyof Task
+>;
 const PROCEDURE_DRAFT_STORAGE_KEY = "buildlogic-line-planner-procedure-draft-v1";
 const WORKSPACE_SNAPSHOT_STORAGE_PREFIX = "buildlogic-line-planner-workspace-v1";
 const PROJECT_SWITCH_EVENT = "pulse:project-switch-start";
@@ -5630,6 +5639,50 @@ export function LineWorkspace({
     );
   }
 
+  // Whether a specific task has unconfirmed local edits (a debounced/retrying save pending, or a save
+  // in flight). Used to decide whether a remote refresh may safely overwrite the task's top-level
+  // free-text fields, or whether the user is actively editing and the local value must be kept.
+  function hasPendingProcedureSaveWork(taskId: string) {
+    const queue = procedureSaveQueuesRef.current[taskId];
+    return Boolean(
+      procedureSaveTimersRef.current[taskId] ||
+        procedureRetryTimersRef.current[taskId] ||
+        (queue && (queue.inFlight || queue.pending)),
+    );
+  }
+
+  // Rebase any in-progress local edits to the top-level free-text fields back onto a freshly merged
+  // server task, so an autosave echo or remote refresh can't wipe text the user just typed.
+  //
+  // A save completion echoes back exactly what we sent, so any field where the local value now differs
+  // is necessarily a keystroke made after that save started — local always wins. For remote refreshes
+  // we only keep the local value while a save for this task is still pending/in flight (the user is
+  // actively editing); otherwise the server value is authoritative.
+  function preserveLocalEditedTaskText(localTask: Task, mergedTask: Task, sourceMeta?: { source?: string }): Task {
+    const isSaveCompletion = sourceMeta?.source === "saveCompletion";
+    if (!isSaveCompletion && !hasPendingProcedureSaveWork(localTask.id)) {
+      return mergedTask;
+    }
+
+    const preserved: Partial<Record<keyof Task, unknown>> = {};
+    for (const field of LOCAL_EDITED_TASK_TEXT_FIELDS) {
+      const localValue = localTask[field];
+      if (localValue !== undefined && localValue !== mergedTask[field]) {
+        preserved[field] = localValue;
+      }
+    }
+
+    if (Object.keys(preserved).length === 0) {
+      return mergedTask;
+    }
+
+    procedureDraftLog("merge preserving local task text", {
+      taskId: localTask.id,
+      source: sourceMeta?.source,
+    });
+    return { ...mergedTask, ...preserved } as Task;
+  }
+
   function hasPlannerShellSaveWork() {
     return saveInFlightRef.current || plannerDirtyRef.current || Boolean(plannerSaveTimerRef.current);
   }
@@ -5798,7 +5851,7 @@ export function LineWorkspace({
         serverVersion: serverTask.version,
         source: sourceMeta?.source,
       });
-      return serverTask;
+      return preserveLocalEditedTaskText(localTask, serverTask, sourceMeta);
     }
 
     const serverStepById = new Map((serverTask.manufacturingSteps ?? []).map((step) => [step.id, step]));
@@ -5861,7 +5914,7 @@ export function LineWorkspace({
       });
     });
 
-    return mergedTask;
+    return preserveLocalEditedTaskText(localTask, mergedTask, sourceMeta);
   }
 
   function isDeferredProcedureUpdateOlderThanLocal(localTask: Task, update: DeferredProcedureServerUpdate) {

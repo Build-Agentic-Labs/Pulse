@@ -25,6 +25,7 @@ import type {
   Zone,
 } from "./types";
 import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "./step-photos";
+import { EXPLODED_VIEWS_FIELD, normalizeComponents, type ExplodedView } from "./step-exploded-views";
 import { mergeStepDependencyRefs, splitStepDependencyRefs } from "./step-part-references";
 import { STEP_TOOL_LISTS_FIELD, getTaskStepToolListMap } from "./step-tools";
 import { applyCalculatedFields } from "./calculations";
@@ -84,6 +85,7 @@ const realtimePlannerTables = [
   "actual_events",
   "custom_columns",
   "step_photos",
+  "step_exploded_views",
   "step_tools",
   "tool_library",
 ] as const;
@@ -134,6 +136,7 @@ export function canPatchTaskFromRealtimePayload(payload: PlannerRealtimePayload)
     case "manufacturing_steps":
     case "part_references":
     case "step_photos":
+    case "step_exploded_views":
     case "step_tools":
       return true;
     case "tasks":
@@ -159,6 +162,7 @@ export function isRealtimePayloadInScope(
     case "part_references":
     case "actual_events":
     case "step_photos":
+    case "step_exploded_views":
     case "step_tools":
       return typeof record?.task_id === "string" && isTaskInScope(record.task_id);
     case "task_dependencies":
@@ -185,6 +189,30 @@ type StepPhotoRow = {
   width?: number | null;
   height?: number | null;
   caption?: string | null;
+  captured_at?: string | null;
+  uploaded_by?: string | null;
+  deleted_at?: string | null;
+  created_at?: string | null;
+};
+
+type StepExplodedViewRow = {
+  id: string;
+  task_id: string;
+  step_id?: string | null;
+  storage_path: string;
+  public_url: string;
+  thumbnail_url?: string | null;
+  thumbnail_storage_path?: string | null;
+  file_name: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  caption?: string | null;
+  solidworks_file_path?: string | null;
+  config_name?: string | null;
+  frame_number?: number | null;
+  components?: string[] | null;
   captured_at?: string | null;
   uploaded_by?: string | null;
   deleted_at?: string | null;
@@ -792,6 +820,7 @@ function taskRow(task: Task) {
 function customFieldsRow(customFields: Task["customFields"]) {
   const nextCustomFields = { ...(customFields ?? {}) };
   delete nextCustomFields[STEP_PHOTO_ATTACHMENTS_FIELD];
+  delete nextCustomFields[EXPLODED_VIEWS_FIELD];
   delete nextCustomFields[STEP_TOOL_LISTS_FIELD];
   return nextCustomFields;
 }
@@ -919,6 +948,27 @@ function mapStepPhotoRecord(row: Record<string, unknown>): StepPhotoAttachment {
   };
 }
 
+function mapStepExplodedViewRecord(row: Record<string, unknown>): ExplodedView {
+  return {
+    id: String(row.id),
+    name: String(row.file_name ?? "Exploded view"),
+    dataUrl: String(row.public_url ?? ""),
+    capturedAt: String(row.captured_at ?? row.created_at ?? new Date().toISOString()),
+    contentType: maybeText(row.mime_type),
+    sizeBytes: maybeNum(row.size_bytes),
+    width: maybeNum(row.width),
+    height: maybeNum(row.height),
+    storagePath: maybeText(row.storage_path),
+    thumbnailUrl: maybeText(row.thumbnail_url),
+    thumbnailStoragePath: maybeText(row.thumbnail_storage_path),
+    caption: maybeText(row.caption),
+    solidworksFilePath: maybeText(row.solidworks_file_path),
+    explodeConfigName: maybeText(row.config_name),
+    frameNumber: maybeNum(row.frame_number),
+    components: normalizeComponents(row.components),
+  };
+}
+
 // Pass `cache: true` ONLY for immutable storage paths -- step-photo paths embed a unique photo id, so
 // the bytes at a path never change and a reused signed URL is always correct. Tool-library images are
 // keyed by tool name and re-uploaded with upsert (same path, new bytes), so caching their URL would
@@ -1012,6 +1062,21 @@ async function withSignedStepPhotoRows(supabase: SupabaseClient, rows: StepPhoto
   }));
 }
 
+async function withSignedExplodedViewRows(supabase: SupabaseClient, rows: StepExplodedViewRow[] = []) {
+  const signedUrls = await signedStorageUrls(
+    supabase,
+    rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
+    { cache: true },
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    public_url: (row.storage_path ? signedUrls.get(row.storage_path) : undefined) ?? row.public_url,
+    thumbnail_url:
+      (row.thumbnail_storage_path ? signedUrls.get(row.thumbnail_storage_path) : undefined) ?? row.thumbnail_url ?? null,
+  }));
+}
+
 async function withSignedToolLibraryRows(supabase: SupabaseClient, rows: ToolLibraryRow[] = []) {
   const signedUrls = await signedStorageUrls(
     supabase,
@@ -1028,11 +1093,13 @@ function withNormalizedStepAssets(
   task: Task,
   photosByTaskId: Map<string, Map<string, StepPhotoAttachment[]>>,
   toolsByTaskId: Map<string, Map<string, string[]>>,
+  explodedViewsByTaskId: Map<string, ExplodedView[]> = new Map(),
 ): Task {
   const photoMap = photosByTaskId.get(task.id);
   const toolMap = toolsByTaskId.get(task.id);
+  const explodedViews = explodedViewsByTaskId.get(task.id);
 
-  if (!photoMap && !toolMap) {
+  if (!photoMap && !toolMap && !explodedViews) {
     return task;
   }
 
@@ -1044,6 +1111,10 @@ function withNormalizedStepAssets(
 
   if (toolMap) {
     customFields[STEP_TOOL_LISTS_FIELD] = Object.fromEntries(toolMap);
+  }
+
+  if (explodedViews) {
+    customFields[EXPLODED_VIEWS_FIELD] = explodedViews;
   }
 
   return {
@@ -1066,6 +1137,23 @@ function indexStepPhotos(rows: StepPhotoRow[] = []) {
     });
 
   return photosByTaskId;
+}
+
+// Task-level: collect every exploded view for a task into one flat list (step_id is unused).
+function indexExplodedViews(rows: StepExplodedViewRow[] = []) {
+  const explodedViewsByTaskId = new Map<string, ExplodedView[]>();
+
+  rows
+    .filter((row) => !row.deleted_at)
+    .forEach((row) => {
+      const taskId = String(row.task_id);
+      explodedViewsByTaskId.set(taskId, [
+        ...(explodedViewsByTaskId.get(taskId) ?? []),
+        mapStepExplodedViewRecord(row as unknown as Record<string, unknown>),
+      ]);
+    });
+
+  return explodedViewsByTaskId;
 }
 
 function indexStepTools(rows: StepToolRow[] = []) {
@@ -1126,6 +1214,35 @@ async function assertTaskRowInProject(supabase: ReturnType<typeof plannerClient>
   }
 }
 
+// Shared layout for every step-scoped storage asset (photos, thumbnails, exploded views). When a
+// project context is present the path is workspace/project scoped; otherwise it falls back to a flat
+// task/step path. `subdir` inserts an extra segment (e.g. "thumbnails", "exploded") before the file.
+function buildStepAssetStoragePath(
+  taskId: string,
+  stepId: string,
+  fileName: string,
+  project?: PlannerProjectContext,
+  subdir?: string,
+) {
+  const tail = subdir ? [subdir, fileName] : [fileName];
+  const pathSegments = project
+    ? ["workspaces", project.workspaceId, "projects", project.projectId, "tasks", taskId, "steps", stepId, ...tail]
+    : [taskId, stepId, ...tail];
+
+  return pathSegments.map(safeStorageSegment).join("/");
+}
+
+// Task-scoped variant (no step segment) for task-level assets like exploded views. Still produces a
+// `workspaces/<ws>/projects/<proj>/tasks/<task>/…` path that satisfies the step-photos storage policy.
+function buildTaskAssetStoragePath(taskId: string, fileName: string, project?: PlannerProjectContext, subdir?: string) {
+  const tail = subdir ? [subdir, fileName] : [fileName];
+  const pathSegments = project
+    ? ["workspaces", project.workspaceId, "projects", project.projectId, "tasks", taskId, ...tail]
+    : [taskId, ...tail];
+
+  return pathSegments.map(safeStorageSegment).join("/");
+}
+
 function projectScopedStoragePath(
   taskId: string,
   stepId: string,
@@ -1133,21 +1250,7 @@ function projectScopedStoragePath(
   project?: PlannerProjectContext,
   extension = "jpg",
 ) {
-  const pathSegments = project
-    ? [
-        "workspaces",
-        project.workspaceId,
-        "projects",
-        project.projectId,
-        "tasks",
-        taskId,
-        "steps",
-        stepId,
-        `${photo.id}.${extension}`,
-      ]
-    : [taskId, stepId, `${photo.id}.${extension}`];
-
-  return pathSegments.map(safeStorageSegment).join("/");
+  return buildStepAssetStoragePath(taskId, stepId, `${photo.id}.${extension}`, project);
 }
 
 function projectScopedThumbnailStoragePath(
@@ -1156,22 +1259,7 @@ function projectScopedThumbnailStoragePath(
   photo: StepPhotoAttachment,
   project?: PlannerProjectContext,
 ) {
-  const pathSegments = project
-    ? [
-        "workspaces",
-        project.workspaceId,
-        "projects",
-        project.projectId,
-        "tasks",
-        taskId,
-        "steps",
-        stepId,
-        "thumbnails",
-        `${photo.id}.webp`,
-      ]
-    : [taskId, stepId, "thumbnails", `${photo.id}.webp`];
-
-  return pathSegments.map(safeStorageSegment).join("/");
+  return buildStepAssetStoragePath(taskId, stepId, `${photo.id}.webp`, project, "thumbnails");
 }
 
 function actualEventRow(event: ActualEvent) {
@@ -1973,7 +2061,7 @@ export async function loadPlannerStateWithProjectFromSupabase(
   ]);
 
   const taskIds = (taskRows ?? []).map((task) => String(task.id));
-  const [dependencies, manufacturingSteps, partReferences, actualEvents, stepPhotos, stepTools] = taskIds.length
+  const [dependencies, manufacturingSteps, partReferences, actualEvents, stepPhotos, stepTools, explodedViews] = taskIds.length
     ? await Promise.all([
         throwIfError(supabase.from("task_dependencies").select("*").in("successor_task_id", taskIds)),
         throwIfError(supabase.from("manufacturing_steps").select("*").in("task_id", taskIds).order("sequence")),
@@ -1981,15 +2069,20 @@ export async function loadPlannerStateWithProjectFromSupabase(
         throwIfError(supabase.from("actual_events").select("*").in("task_id", taskIds).order("timestamp")),
         throwIfError(supabase.from("step_photos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at")),
         throwIfError(supabase.from("step_tools").select("*").in("task_id", taskIds).order("sequence")),
+        throwIfError(supabase.from("step_exploded_views").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at")),
       ])
-    : [[], [], [], [], [], []];
+    : [[], [], [], [], [], [], []];
   const scenarioTaskIds = new Set(taskIds);
   const dependencyIdsByTaskId = new Map<string, string[]>();
   const stepsByTaskId = new Map<string, ManufacturingStep[]>();
   const partsByTaskId = new Map<string, PartReference[]>();
-  const signedStepPhotos = await withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[]);
+  const [signedStepPhotos, signedExplodedViews] = await Promise.all([
+    withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[]),
+    withSignedExplodedViewRows(supabase, (explodedViews ?? []) as StepExplodedViewRow[]),
+  ]);
   const photosByTaskId = indexStepPhotos(signedStepPhotos);
   const toolsByTaskId = indexStepTools((stepTools ?? []) as StepToolRow[]);
+  const explodedViewsByTaskId = indexExplodedViews(signedExplodedViews);
 
   (dependencies ?? []).forEach((dependency) => {
     const successorTaskId = String(dependency.successor_task_id);
@@ -2035,7 +2128,7 @@ export async function loadPlannerStateWithProjectFromSupabase(
         part_references: partsByTaskId.get(String(task.id)) ?? [],
       });
 
-      return withNormalizedStepAssets(mappedTask, photosByTaskId, toolsByTaskId);
+      return withNormalizedStepAssets(mappedTask, photosByTaskId, toolsByTaskId, explodedViewsByTaskId);
     }),
     dependencies: (dependencies ?? [])
       .filter(
@@ -2954,9 +3047,70 @@ export async function moveManufacturingStepToTaskInSupabase(
   await throwIfError(
     supabase.from("step_photos").update({ task_id: targetTask.id }).eq("step_id", stepId).is("deleted_at", null),
   );
+  // Exploded views are task-level (step_id is null), so a step move does not carry them.
 
   await saveProcedureTaskUpdateToSupabase(sourceTask, scheduledTasks, projectId);
   await saveProcedureTaskUpdateToSupabase(targetTask, scheduledTasks, projectId);
+}
+
+export type ProjectTaskTarget = {
+  id: string;
+  name: string;
+  code: string | null;
+  scenarioName: string;
+};
+
+// Lightweight picker feed for the SolidWorks plugin: every task across ALL of a project's products
+// and scenarios (exploded views attach at the task level, so the picker is Project → Task and must
+// not be limited to the Main scenario). Returns only the ids/names the picker needs — no full planner
+// state, photos, or signed URLs. Milestone/inspection marker rows are excluded.
+//
+// Requires a CALLER-SCOPED client (the user's bearer token): products/scenarios/tasks are gated by
+// real RLS, so the anon server client would read nothing.
+export async function loadProjectTaskTargetsFromSupabase(
+  projectId: string,
+  supabase: SupabaseClient,
+): Promise<ProjectTaskTarget[]> {
+  const products = await throwIfError(supabase.from("products").select("id").eq("project_id", projectId));
+  const productIds = (products ?? []).map((product) => String(product.id));
+  if (!productIds.length) {
+    return [];
+  }
+
+  const scenarios = await throwIfError(supabase.from("scenarios").select("id,name").in("product_id", productIds));
+  const scenarioNameById = new Map((scenarios ?? []).map((scenario) => [String(scenario.id), String(scenario.name ?? "")]));
+  const scenarioIds = [...scenarioNameById.keys()];
+  if (!scenarioIds.length) {
+    return [];
+  }
+
+  // PostgREST caps a single response at ~1000 rows; page through so a large project (many duplicated
+  // scenarios) never silently drops tasks from the picker.
+  const tasks: Array<Record<string, unknown>> = [];
+  for (let from = 0; ; from += 1000) {
+    const page = ((await throwIfError(
+      supabase
+        .from("tasks")
+        .select("id,name,manufacturing_code,scenario_id,row_type")
+        .in("scenario_id", scenarioIds)
+        .order("wbs")
+        .range(from, from + 999),
+    )) ?? []) as Array<Record<string, unknown>>;
+    tasks.push(...page);
+    if (page.length < 1000) {
+      break;
+    }
+  }
+
+  const NON_WORK_ROWS = new Set(["milestone", "inspection"]);
+  return tasks
+    .filter((task) => !NON_WORK_ROWS.has(String(task.row_type ?? "task")))
+    .map((task) => ({
+      id: String(task.id),
+      name: String(task.name ?? ""),
+      code: maybeText(task.manufacturing_code) ?? null,
+      scenarioName: scenarioNameById.get(String(task.scenario_id)) ?? "",
+    }));
 }
 
 export async function loadTaskFromSupabase(taskId: string, projectId?: string): Promise<Task | null> {
@@ -2968,12 +3122,13 @@ export async function loadTaskFromSupabase(taskId: string, projectId?: string): 
     return null;
   }
 
-  const [dependencies, manufacturingSteps, partReferences, stepPhotos, stepTools] = await Promise.all([
+  const [dependencies, manufacturingSteps, partReferences, stepPhotos, stepTools, explodedViews] = await Promise.all([
     throwIfError(supabase.from("task_dependencies").select("*").eq("successor_task_id", taskId)),
     throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", taskId).order("sequence")),
     throwIfError(supabase.from("part_references").select("*").eq("task_id", taskId).order("created_at")),
     throwIfError(supabase.from("step_photos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
     throwIfError(supabase.from("step_tools").select("*").eq("task_id", taskId).order("sequence")),
+    throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
   ]);
 
   const mappedTask = mapTask({
@@ -2983,10 +3138,16 @@ export async function loadTaskFromSupabase(taskId: string, projectId?: string): 
     part_references: (partReferences ?? []).map(mapPartReferenceRecord),
   });
 
+  const [signedStepPhotos, signedExplodedViews] = await Promise.all([
+    withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[]),
+    withSignedExplodedViewRows(supabase, (explodedViews ?? []) as StepExplodedViewRow[]),
+  ]);
+
   return withNormalizedStepAssets(
     mappedTask,
-    indexStepPhotos(await withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[])),
+    indexStepPhotos(signedStepPhotos),
     indexStepTools((stepTools ?? []) as StepToolRow[]),
+    indexExplodedViews(signedExplodedViews),
   );
 }
 
@@ -3280,6 +3441,91 @@ export async function removeStepPhotoAttachmentObject(photo: StepPhotoAttachment
   await throwIfError(supabase.storage.from(stepPhotoBucket).remove(paths));
 }
 
+export type ExplodedViewUploadInput = {
+  taskId: string;
+  bytes: Blob | ArrayBuffer;
+  projectId?: string;
+  fileName?: string;
+  contentType?: string;
+  caption?: string;
+  solidworksFilePath?: string;
+  explodeConfigName?: string;
+  frameNumber?: number;
+  components?: string[];
+  width?: number;
+  height?: number;
+  project?: PlannerProjectContext;
+};
+
+// Server-side ingest for a SolidWorks exploded view: upload the rendered image, insert the
+// step_exploded_views row (the source of truth that the load path hydrates into customFields),
+// and return the view with a signed URL. RLS independently gates the write to the task's project.
+// Requires a CALLER-SCOPED client (the user's bearer token): the step-photos storage bucket and the
+// step_exploded_views table are gated by authenticated, project-scoped RLS. input.project must carry
+// the real workspaceId/projectId so the storage path is workspace-scoped (the storage policy requires
+// a `workspaces/<ws>/projects/<proj>/…` name).
+export async function saveExplodedViewToSupabase(
+  input: ExplodedViewUploadInput,
+  supabase: SupabaseClient,
+): Promise<ExplodedView> {
+  await assertTaskInProject(supabase, input.taskId, input.project?.projectId ?? input.projectId);
+
+  const id = newScopedId("view");
+  const contentType = input.contentType || (input.bytes instanceof Blob ? input.bytes.type : "") || "image/png";
+  const extension = contentType.split("/")[1]?.replace("jpeg", "jpg") || "png";
+  // Reuse the step-photos bucket (see migration note) under a task-scoped `exploded/` segment.
+  const storagePath = buildTaskAssetStoragePath(
+    input.taskId,
+    `${id}.${safeStorageSegment(extension)}`,
+    input.project,
+    "exploded",
+  );
+  const blob = input.bytes instanceof Blob ? input.bytes : new Blob([input.bytes], { type: contentType });
+
+  await throwIfError(
+    supabase.storage.from(stepPhotoBucket).upload(storagePath, blob, {
+      cacheControl: "31536000",
+      contentType,
+      upsert: true,
+    }),
+  );
+
+  const publicUrl = stableStoragePublicUrl(storagePath);
+  const signedUrl = await signedStorageUrl(supabase, storagePath, { cache: true });
+  const components = normalizeComponents(input.components);
+
+  const row: StepExplodedViewRow = {
+    id,
+    task_id: input.taskId,
+    step_id: null,
+    storage_path: storagePath,
+    public_url: publicUrl,
+    thumbnail_url: null,
+    thumbnail_storage_path: null,
+    file_name: input.fileName?.trim() || "Exploded view",
+    mime_type: contentType,
+    size_bytes: blob.size,
+    width: input.width ?? null,
+    height: input.height ?? null,
+    caption: input.caption?.trim() ? input.caption.trim() : null,
+    solidworks_file_path: input.solidworksFilePath?.trim() || null,
+    config_name: input.explodeConfigName?.trim() || null,
+    frame_number: input.frameNumber ?? null,
+    components: components ?? null,
+    captured_at: new Date().toISOString(),
+    uploaded_by: null,
+    deleted_at: null,
+  };
+
+  await throwIfError(supabase.from("step_exploded_views").insert(row));
+
+  // Derive the returned view from the same row the load path maps, swapping in the signed URL.
+  return {
+    ...mapStepExplodedViewRecord(row as unknown as Record<string, unknown>),
+    dataUrl: signedUrl ?? publicUrl,
+  };
+}
+
 export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtimePayload) => void, scope?: PlannerRealtimeScope) {
   const supabase = plannerClient();
   const channel = supabase.channel(`planner-state-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -3319,6 +3565,7 @@ export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtime
   listen("part_references");
   listen("actual_events");
   listen("step_photos");
+  listen("step_exploded_views");
   listen("step_tools");
   if (scope?.productId) {
     listen("custom_columns", `product_id=eq.${scope.productId}`);

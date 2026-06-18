@@ -98,6 +98,7 @@ import {
   upsertStepPhotoAttachments,
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
+import { getTaskExplodedViews } from "@/domain/step-exploded-views";
 import {
   addStepPartReference,
   attachPartToStep,
@@ -210,6 +211,7 @@ import { SidebarWorkspacePanel } from "./sidebar-workspace-panel";
 import { SidebarUserPanel } from "./sidebar-user-panel";
 import { ProcedureStepToolTable } from "./procedure-step-tool-table";
 import { StepPhotoViewer } from "./step-photo-viewer";
+import { StepExplodedViewGallery } from "./step-exploded-view-gallery";
 import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
 import { AppSettingsPanel, settingsSections, type SettingsSection } from "./app-settings-panel";
 import { ThemedSelect } from "./themed-select";
@@ -2297,6 +2299,7 @@ function ProcedureWorkspace({
                 <StatCard key={label} label={label} value={value} />
               ))}
             </div>
+            <StepExplodedViewGallery views={getTaskExplodedViews(task)} />
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
@@ -4579,6 +4582,7 @@ function DetailDrawer({
         </div>
 
         <div className="space-y-4">
+        <StepExplodedViewGallery views={getTaskExplodedViews(task)} />
         <div className="ui-panel p-3">
           <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Manufacturing Code</div>
           <div className="mb-3 font-mono text-lg font-bold text-ink">{taskDisplayCode(task)}</div>

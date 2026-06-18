@@ -6,13 +6,27 @@
  * (LLM spend, host network details).
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 export function getBearerToken(request: Request) {
   const header = request.headers.get("authorization") ?? "";
   const [scheme, token] = header.split(" ");
   return scheme?.toLowerCase() === "bearer" && token ? token : "";
+}
+
+/**
+ * A Supabase client that acts AS the caller by forwarding their bearer token, so RLS scopes every
+ * read/write to what that user (or service account) may actually see. Use this in API routes that
+ * need user-scoped data — the shared planner client is an anon singleton with no session.
+ */
+export function callerScopedSupabase(token: string): SupabaseClient {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
 }
 
 export type ApiUserResult = { userId: string; failure: null } | { userId: null; failure: NextResponse };

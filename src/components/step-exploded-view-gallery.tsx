@@ -1,17 +1,36 @@
 "use client";
 
-import { Box, X } from "lucide-react";
+import { Box, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { ExplodedView } from "@/domain/step-exploded-views";
 
 /**
- * Read-only display of the SolidWorks exploded views attached to a procedure task. Views are created
- * by the SolidWorks plugin (via the ingest API), so this gallery only shows them — a thumbnail grid
- * that opens a lightbox on click. Sits in the task header next to the task metrics.
+ * Display of the SolidWorks exploded views attached to a procedure task — a thumbnail grid that opens
+ * a lightbox on click. Views are created by the SolidWorks plugin; when `onDelete` is provided each
+ * one gets a delete control (the planner passes a handler; read-only surfaces omit it). Sits in the
+ * task header next to the task metrics.
  */
-export function StepExplodedViewGallery({ views }: { views: ExplodedView[] }) {
+export function StepExplodedViewGallery({
+  views,
+  onDelete,
+}: {
+  views: ExplodedView[];
+  onDelete?: (view: ExplodedView) => void;
+}) {
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  function confirmDelete(view: ExplodedView) {
+    if (!onDelete) {
+      return;
+    }
+    if (window.confirm(`Delete "${view.caption?.trim() || view.name}"? This can't be undone.`)) {
+      if (activeId === view.id) {
+        setActiveId(null);
+      }
+      onDelete(view);
+    }
+  }
 
   // Escape closes the lightbox, matching the step-photo viewer's dialog behavior.
   useEffect(() => {
@@ -41,23 +60,35 @@ export function StepExplodedViewGallery({ views }: { views: ExplodedView[] }) {
       </div>
       <div className="flex flex-wrap gap-2">
         {views.map((view) => (
-          <button
-            key={view.id}
-            type="button"
-            onClick={() => setActiveId(view.id)}
-            className="group relative h-20 w-20 overflow-hidden rounded border border-line bg-surface-sunken"
-            title={explodedViewTitle(view)}
-            aria-label={`Open ${view.name}`}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={view.thumbnailUrl || view.dataUrl}
-              alt={view.name}
-              loading="lazy"
-              decoding="async"
-              className="h-full w-full object-cover"
-            />
-          </button>
+          <div key={view.id} className="group relative h-20 w-20">
+            <button
+              type="button"
+              onClick={() => setActiveId(view.id)}
+              className="h-full w-full overflow-hidden rounded border border-line bg-surface-sunken"
+              title={explodedViewTitle(view)}
+              aria-label={`Open ${view.name}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={view.thumbnailUrl || view.dataUrl}
+                alt={view.name}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover"
+              />
+            </button>
+            {onDelete ? (
+              <button
+                type="button"
+                onClick={() => confirmDelete(view)}
+                className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition group-hover:opacity-100 hover:bg-danger"
+                title="Delete exploded view"
+                aria-label={`Delete ${view.name}`}
+              >
+                <Trash2 size={12} />
+              </button>
+            ) : null}
+          </div>
         ))}
       </div>
 
@@ -69,14 +100,30 @@ export function StepExplodedViewGallery({ views }: { views: ExplodedView[] }) {
           aria-label={active.name}
           onClick={() => setActiveId(null)}
         >
-          <button
-            type="button"
-            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-surface text-ink"
-            onClick={() => setActiveId(null)}
-            aria-label="Close exploded view"
-          >
-            <X size={18} />
-          </button>
+          <div className="absolute right-4 top-4 flex items-center gap-2">
+            {onDelete ? (
+              <button
+                type="button"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-danger hover:bg-danger hover:text-white"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  confirmDelete(active);
+                }}
+                aria-label="Delete exploded view"
+                title="Delete exploded view"
+              >
+                <Trash2 size={16} />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-ink"
+              onClick={() => setActiveId(null)}
+              aria-label="Close exploded view"
+            >
+              <X size={18} />
+            </button>
+          </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={active.dataUrl}

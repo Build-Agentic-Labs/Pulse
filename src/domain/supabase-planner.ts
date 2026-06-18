@@ -2857,6 +2857,30 @@ export async function softDeleteStepPhotoAttachmentFromSupabase(photoId: string,
   await throwIfError(supabase.from("step_photos").update({ deleted_at: new Date().toISOString() }).eq("id", photoId));
 }
 
+export async function softDeleteExplodedViewFromSupabase(viewId: string, taskId?: string, projectId?: string) {
+  const supabase = plannerClient();
+  if (taskId) {
+    await assertTaskInProject(supabase, taskId, projectId);
+  }
+  await throwIfError(
+    supabase.from("step_exploded_views").update({ deleted_at: new Date().toISOString() }).eq("id", viewId),
+  );
+}
+
+// Best-effort removal of the stored image. The bucket's DELETE policy is owner/admin-only, so for a
+// plain editor this no-ops (the row is already soft-deleted, which is what hides the view).
+export async function removeExplodedViewObject(view: Pick<ExplodedView, "storagePath">) {
+  if (!view.storagePath) {
+    return;
+  }
+  const supabase = plannerClient();
+  try {
+    await throwIfError(supabase.storage.from(stepPhotoBucket).remove([view.storagePath]));
+  } catch {
+    /* row soft-delete already hid the view; storage cleanup is non-essential */
+  }
+}
+
 export async function updateStepPhotoCaptionInSupabase(photoId: string, caption: string, taskId?: string, projectId?: string) {
   const supabase = plannerClient();
   if (taskId) {

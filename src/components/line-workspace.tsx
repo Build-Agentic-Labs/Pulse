@@ -98,7 +98,7 @@ import {
   upsertStepPhotoAttachments,
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
-import { getTaskExplodedViews } from "@/domain/step-exploded-views";
+import { getTaskExplodedViews, removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
 import {
   addStepPartReference,
   attachPartToStep,
@@ -176,7 +176,9 @@ import {
   savePlannerStateToSupabase,
   saveProcedureTaskUpdateToSupabase,
   saveTasksToSupabase,
+  softDeleteExplodedViewFromSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
+  removeExplodedViewObject,
   subscribePlannerStateChanges,
   taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
@@ -1665,6 +1667,7 @@ function ProcedureWorkspace({
   onMoveStepToTask,
   onUploadStepPhotos,
   onRemoveStepPhoto,
+  onDeleteExplodedView,
   onAddStepTool,
   onRemoveStepTool,
   projectToolRegistry,
@@ -1700,6 +1703,7 @@ function ProcedureWorkspace({
   onMoveStepToTask: (sourceTaskId: string, targetTaskId: string, stepId: string) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
+  onDeleteExplodedView: (taskId: string, view: ExplodedView) => void;
   onAddStepTool: (taskId: string, stepId: string, toolName: string, sequence?: number) => Promise<void>;
   onRemoveStepTool: (stepId: string, toolName: string) => Promise<void>;
   projectToolRegistry: Map<string, ProjectToolDefinition>;
@@ -2299,7 +2303,10 @@ function ProcedureWorkspace({
                 <StatCard key={label} label={label} value={value} />
               ))}
             </div>
-            <StepExplodedViewGallery views={getTaskExplodedViews(task)} />
+            <StepExplodedViewGallery
+              views={getTaskExplodedViews(task)}
+              onDelete={(view) => onDeleteExplodedView(task.id, view)}
+            />
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
@@ -4216,6 +4223,7 @@ function DetailDrawer({
   onProcedureFieldChange,
   onUploadStepPhotos,
   onRemoveStepPhoto,
+  onDeleteExplodedView,
   onAddStepTool,
   onRemoveStepTool,
   toolLibrary,
@@ -4255,6 +4263,7 @@ function DetailDrawer({
   ) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
+  onDeleteExplodedView: (taskId: string, view: ExplodedView) => void;
   onAddStepTool: (taskId: string, stepId: string, toolName: string, sequence?: number) => Promise<void>;
   onRemoveStepTool: (stepId: string, toolName: string) => Promise<void>;
   toolLibrary: string[];
@@ -4582,7 +4591,10 @@ function DetailDrawer({
         </div>
 
         <div className="space-y-4">
-        <StepExplodedViewGallery views={getTaskExplodedViews(task)} />
+        <StepExplodedViewGallery
+          views={getTaskExplodedViews(task)}
+          onDelete={(view) => onDeleteExplodedView(task.id, view)}
+        />
         <div className="ui-panel p-3">
           <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Manufacturing Code</div>
           <div className="mb-3 font-mono text-lg font-bold text-ink">{taskDisplayCode(task)}</div>
@@ -8320,6 +8332,25 @@ export function LineWorkspace({
     }
   }
 
+  async function deleteExplodedView(taskId: string, view: ExplodedView) {
+    // Exploded views live in customFields (not persisted on task save), so the soft-delete on the
+    // step_exploded_views row is the source of truth; update local state immediately for responsiveness.
+    setPlannerState((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) => (task.id === taskId ? removeTaskExplodedView(task, view.id) : task)),
+    }));
+    try {
+      await softDeleteExplodedViewFromSupabase(view.id, taskId, projectId);
+      void removeExplodedViewObject(view);
+    } catch (error) {
+      notifyFeedback({
+        title: "Couldn't delete exploded view",
+        body: error instanceof Error ? error.message : "Please try again.",
+        tone: "danger",
+      });
+    }
+  }
+
   async function removeStepPhoto(taskId: string, stepId: string, photoId: string) {
     let removedPhoto: StepPhotoAttachment | undefined;
     saveInFlightRef.current = true;
@@ -9659,6 +9690,7 @@ export function LineWorkspace({
             onMoveStepToTask={moveProcedureStepToTask}
             onUploadStepPhotos={uploadStepPhotos}
             onRemoveStepPhoto={removeStepPhoto}
+            onDeleteExplodedView={deleteExplodedView}
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
             projectToolRegistry={projectToolRegistry}
@@ -9883,6 +9915,7 @@ export function LineWorkspace({
             onProcedureFieldChange={updateProcedureStepField}
             onUploadStepPhotos={uploadStepPhotos}
             onRemoveStepPhoto={removeStepPhoto}
+            onDeleteExplodedView={deleteExplodedView}
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
             toolLibrary={toolLibrary}

@@ -99,6 +99,7 @@ import {
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
 import { getTaskExplodedViews, removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
+import { getTaskVideos, removeTaskVideo, type TaskVideo } from "@/domain/task-videos";
 import {
   addStepPartReference,
   attachPartToStep,
@@ -178,7 +179,9 @@ import {
   saveTasksToSupabase,
   softDeleteExplodedViewFromSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
+  softDeleteTaskVideoFromSupabase,
   removeExplodedViewObject,
+  removeTaskVideoObject,
   subscribePlannerStateChanges,
   taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
@@ -214,6 +217,7 @@ import { SidebarUserPanel } from "./sidebar-user-panel";
 import { ProcedureStepToolTable } from "./procedure-step-tool-table";
 import { StepPhotoViewer } from "./step-photo-viewer";
 import { StepExplodedViewGallery } from "./step-exploded-view-gallery";
+import { TaskVideoGallery } from "./task-video-gallery";
 import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
 import { AppSettingsPanel, settingsSections, type SettingsSection } from "./app-settings-panel";
 import { ThemedSelect } from "./themed-select";
@@ -1668,6 +1672,7 @@ function ProcedureWorkspace({
   onUploadStepPhotos,
   onRemoveStepPhoto,
   onDeleteExplodedView,
+  onDeleteTaskVideo,
   onAddStepTool,
   onRemoveStepTool,
   projectToolRegistry,
@@ -1704,6 +1709,7 @@ function ProcedureWorkspace({
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onDeleteExplodedView: (taskId: string, view: ExplodedView) => void;
+  onDeleteTaskVideo: (taskId: string, video: TaskVideo) => void;
   onAddStepTool: (taskId: string, stepId: string, toolName: string, sequence?: number) => Promise<void>;
   onRemoveStepTool: (stepId: string, toolName: string) => Promise<void>;
   projectToolRegistry: Map<string, ProjectToolDefinition>;
@@ -2307,6 +2313,7 @@ function ProcedureWorkspace({
               views={getTaskExplodedViews(task)}
               onDelete={(view) => onDeleteExplodedView(task.id, view)}
             />
+            <TaskVideoGallery videos={getTaskVideos(task)} onDelete={(video) => onDeleteTaskVideo(task.id, video)} />
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
@@ -4224,6 +4231,7 @@ function DetailDrawer({
   onUploadStepPhotos,
   onRemoveStepPhoto,
   onDeleteExplodedView,
+  onDeleteTaskVideo,
   onAddStepTool,
   onRemoveStepTool,
   toolLibrary,
@@ -4264,6 +4272,7 @@ function DetailDrawer({
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onDeleteExplodedView: (taskId: string, view: ExplodedView) => void;
+  onDeleteTaskVideo: (taskId: string, video: TaskVideo) => void;
   onAddStepTool: (taskId: string, stepId: string, toolName: string, sequence?: number) => Promise<void>;
   onRemoveStepTool: (stepId: string, toolName: string) => Promise<void>;
   toolLibrary: string[];
@@ -4595,6 +4604,7 @@ function DetailDrawer({
           views={getTaskExplodedViews(task)}
           onDelete={(view) => onDeleteExplodedView(task.id, view)}
         />
+        <TaskVideoGallery videos={getTaskVideos(task)} onDelete={(video) => onDeleteTaskVideo(task.id, video)} />
         <div className="ui-panel p-3">
           <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Manufacturing Code</div>
           <div className="mb-3 font-mono text-lg font-bold text-ink">{taskDisplayCode(task)}</div>
@@ -8332,6 +8342,23 @@ export function LineWorkspace({
     }
   }
 
+  async function deleteTaskVideo(taskId: string, video: TaskVideo) {
+    setPlannerState((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) => (task.id === taskId ? removeTaskVideo(task, video.id) : task)),
+    }));
+    try {
+      await softDeleteTaskVideoFromSupabase(video.id, taskId, projectId);
+      void removeTaskVideoObject(video);
+    } catch (error) {
+      notifyFeedback({
+        title: "Couldn't delete build animation",
+        body: error instanceof Error ? error.message : "Please try again.",
+        tone: "danger",
+      });
+    }
+  }
+
   async function deleteExplodedView(taskId: string, view: ExplodedView) {
     // Exploded views live in customFields (not persisted on task save), so the soft-delete on the
     // step_exploded_views row is the source of truth; update local state immediately for responsiveness.
@@ -9691,6 +9718,7 @@ export function LineWorkspace({
             onUploadStepPhotos={uploadStepPhotos}
             onRemoveStepPhoto={removeStepPhoto}
             onDeleteExplodedView={deleteExplodedView}
+            onDeleteTaskVideo={deleteTaskVideo}
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
             projectToolRegistry={projectToolRegistry}
@@ -9916,6 +9944,7 @@ export function LineWorkspace({
             onUploadStepPhotos={uploadStepPhotos}
             onRemoveStepPhoto={removeStepPhoto}
             onDeleteExplodedView={deleteExplodedView}
+            onDeleteTaskVideo={deleteTaskVideo}
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
             toolLibrary={toolLibrary}

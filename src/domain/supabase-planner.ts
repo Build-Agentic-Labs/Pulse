@@ -26,6 +26,7 @@ import type {
 } from "./types";
 import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "./step-photos";
 import { EXPLODED_VIEWS_FIELD, normalizeComponents, type ExplodedView } from "./step-exploded-views";
+import { TASK_VIDEOS_FIELD, type TaskVideo } from "./task-videos";
 import { mergeStepDependencyRefs, splitStepDependencyRefs } from "./step-part-references";
 import { STEP_TOOL_LISTS_FIELD, getTaskStepToolListMap } from "./step-tools";
 import { applyCalculatedFields } from "./calculations";
@@ -35,6 +36,7 @@ import { formatDisplayTitle } from "@/lib/display-names";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const stepPhotoBucket = "step-photos";
+const taskVideoBucket = "task-videos";
 const STEP_PHOTO_THUMBNAIL_EDGE = 320;
 const STORAGE_SIGNED_URL_SECONDS = 60 * 60;
 // Reuse a signed URL across loads until it's within this margin of expiry. The step-photos bucket is
@@ -86,6 +88,7 @@ const realtimePlannerTables = [
   "custom_columns",
   "step_photos",
   "step_exploded_views",
+  "task_videos",
   "step_tools",
   "tool_library",
 ] as const;
@@ -137,6 +140,7 @@ export function canPatchTaskFromRealtimePayload(payload: PlannerRealtimePayload)
     case "part_references":
     case "step_photos":
     case "step_exploded_views":
+    case "task_videos":
     case "step_tools":
       return true;
     case "tasks":
@@ -163,6 +167,7 @@ export function isRealtimePayloadInScope(
     case "actual_events":
     case "step_photos":
     case "step_exploded_views":
+    case "task_videos":
     case "step_tools":
       return typeof record?.task_id === "string" && isTaskInScope(record.task_id);
     case "task_dependencies":
@@ -821,6 +826,7 @@ function customFieldsRow(customFields: Task["customFields"]) {
   const nextCustomFields = { ...(customFields ?? {}) };
   delete nextCustomFields[STEP_PHOTO_ATTACHMENTS_FIELD];
   delete nextCustomFields[EXPLODED_VIEWS_FIELD];
+  delete nextCustomFields[TASK_VIDEOS_FIELD];
   delete nextCustomFields[STEP_TOOL_LISTS_FIELD];
   return nextCustomFields;
 }
@@ -945,6 +951,46 @@ function mapStepPhotoRecord(row: Record<string, unknown>): StepPhotoAttachment {
     thumbnailUrl: maybeText(row.thumbnail_url),
     thumbnailStoragePath: maybeText(row.thumbnail_storage_path),
     caption: maybeText(row.caption),
+  };
+}
+
+type TaskVideoRow = {
+  id: string;
+  task_id: string;
+  storage_path: string;
+  public_url: string;
+  thumbnail_url?: string | null;
+  thumbnail_storage_path?: string | null;
+  file_name: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  duration_seconds?: number | null;
+  width?: number | null;
+  height?: number | null;
+  caption?: string | null;
+  solidworks_file_path?: string | null;
+  captured_at?: string | null;
+  uploaded_by?: string | null;
+  deleted_at?: string | null;
+  created_at?: string | null;
+};
+
+function mapTaskVideoRecord(row: Record<string, unknown>): TaskVideo {
+  return {
+    id: String(row.id),
+    name: String(row.file_name ?? "Build animation"),
+    videoUrl: String(row.public_url ?? ""),
+    capturedAt: String(row.captured_at ?? row.created_at ?? new Date().toISOString()),
+    contentType: maybeText(row.mime_type),
+    sizeBytes: maybeNum(row.size_bytes),
+    durationSeconds: maybeNum(row.duration_seconds),
+    width: maybeNum(row.width),
+    height: maybeNum(row.height),
+    storagePath: maybeText(row.storage_path),
+    thumbnailUrl: maybeText(row.thumbnail_url),
+    thumbnailStoragePath: maybeText(row.thumbnail_storage_path),
+    caption: maybeText(row.caption),
+    solidworksFilePath: maybeText(row.solidworks_file_path),
   };
 }
 
@@ -1077,6 +1123,31 @@ async function withSignedExplodedViewRows(supabase: SupabaseClient, rows: StepEx
   }));
 }
 
+// Videos live in their own bucket, so sign against it directly (the shared helpers target step-photos).
+async function withSignedTaskVideoRows(supabase: SupabaseClient, rows: TaskVideoRow[] = []) {
+  const paths = [
+    ...new Set(
+      rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
+    ),
+  ];
+  const signed = new Map<string, string>();
+  if (paths.length > 0) {
+    const { data } = await supabase.storage.from(taskVideoBucket).createSignedUrls(paths, STORAGE_SIGNED_URL_SECONDS);
+    (data ?? []).forEach((entry) => {
+      if (entry.path && entry.signedUrl) {
+        signed.set(String(entry.path), String(entry.signedUrl));
+      }
+    });
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    public_url: (row.storage_path ? signed.get(row.storage_path) : undefined) ?? row.public_url,
+    thumbnail_url:
+      (row.thumbnail_storage_path ? signed.get(row.thumbnail_storage_path) : undefined) ?? row.thumbnail_url ?? null,
+  }));
+}
+
 async function withSignedToolLibraryRows(supabase: SupabaseClient, rows: ToolLibraryRow[] = []) {
   const signedUrls = await signedStorageUrls(
     supabase,
@@ -1094,12 +1165,14 @@ function withNormalizedStepAssets(
   photosByTaskId: Map<string, Map<string, StepPhotoAttachment[]>>,
   toolsByTaskId: Map<string, Map<string, string[]>>,
   explodedViewsByTaskId: Map<string, ExplodedView[]> = new Map(),
+  videosByTaskId: Map<string, TaskVideo[]> = new Map(),
 ): Task {
   const photoMap = photosByTaskId.get(task.id);
   const toolMap = toolsByTaskId.get(task.id);
   const explodedViews = explodedViewsByTaskId.get(task.id);
+  const videos = videosByTaskId.get(task.id);
 
-  if (!photoMap && !toolMap && !explodedViews) {
+  if (!photoMap && !toolMap && !explodedViews && !videos) {
     return task;
   }
 
@@ -1115,6 +1188,10 @@ function withNormalizedStepAssets(
 
   if (explodedViews) {
     customFields[EXPLODED_VIEWS_FIELD] = explodedViews;
+  }
+
+  if (videos) {
+    customFields[TASK_VIDEOS_FIELD] = videos;
   }
 
   return {
@@ -1154,6 +1231,22 @@ function indexExplodedViews(rows: StepExplodedViewRow[] = []) {
     });
 
   return explodedViewsByTaskId;
+}
+
+function indexTaskVideos(rows: TaskVideoRow[] = []) {
+  const videosByTaskId = new Map<string, TaskVideo[]>();
+
+  rows
+    .filter((row) => !row.deleted_at)
+    .forEach((row) => {
+      const taskId = String(row.task_id);
+      videosByTaskId.set(taskId, [
+        ...(videosByTaskId.get(taskId) ?? []),
+        mapTaskVideoRecord(row as unknown as Record<string, unknown>),
+      ]);
+    });
+
+  return videosByTaskId;
 }
 
 function indexStepTools(rows: StepToolRow[] = []) {
@@ -2061,7 +2154,7 @@ export async function loadPlannerStateWithProjectFromSupabase(
   ]);
 
   const taskIds = (taskRows ?? []).map((task) => String(task.id));
-  const [dependencies, manufacturingSteps, partReferences, actualEvents, stepPhotos, stepTools, explodedViews] = taskIds.length
+  const [dependencies, manufacturingSteps, partReferences, actualEvents, stepPhotos, stepTools, explodedViews, taskVideos] = taskIds.length
     ? await Promise.all([
         throwIfError(supabase.from("task_dependencies").select("*").in("successor_task_id", taskIds)),
         throwIfError(supabase.from("manufacturing_steps").select("*").in("task_id", taskIds).order("sequence")),
@@ -2070,19 +2163,22 @@ export async function loadPlannerStateWithProjectFromSupabase(
         throwIfError(supabase.from("step_photos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at")),
         throwIfError(supabase.from("step_tools").select("*").in("task_id", taskIds).order("sequence")),
         throwIfError(supabase.from("step_exploded_views").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at")),
+        throwIfError(supabase.from("task_videos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at")),
       ])
-    : [[], [], [], [], [], [], []];
+    : [[], [], [], [], [], [], [], []];
   const scenarioTaskIds = new Set(taskIds);
   const dependencyIdsByTaskId = new Map<string, string[]>();
   const stepsByTaskId = new Map<string, ManufacturingStep[]>();
   const partsByTaskId = new Map<string, PartReference[]>();
-  const [signedStepPhotos, signedExplodedViews] = await Promise.all([
+  const [signedStepPhotos, signedExplodedViews, signedTaskVideos] = await Promise.all([
     withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[]),
     withSignedExplodedViewRows(supabase, (explodedViews ?? []) as StepExplodedViewRow[]),
+    withSignedTaskVideoRows(supabase, (taskVideos ?? []) as TaskVideoRow[]),
   ]);
   const photosByTaskId = indexStepPhotos(signedStepPhotos);
   const toolsByTaskId = indexStepTools((stepTools ?? []) as StepToolRow[]);
   const explodedViewsByTaskId = indexExplodedViews(signedExplodedViews);
+  const videosByTaskId = indexTaskVideos(signedTaskVideos);
 
   (dependencies ?? []).forEach((dependency) => {
     const successorTaskId = String(dependency.successor_task_id);
@@ -2128,7 +2224,7 @@ export async function loadPlannerStateWithProjectFromSupabase(
         part_references: partsByTaskId.get(String(task.id)) ?? [],
       });
 
-      return withNormalizedStepAssets(mappedTask, photosByTaskId, toolsByTaskId, explodedViewsByTaskId);
+      return withNormalizedStepAssets(mappedTask, photosByTaskId, toolsByTaskId, explodedViewsByTaskId, videosByTaskId);
     }),
     dependencies: (dependencies ?? [])
       .filter(
@@ -3182,13 +3278,14 @@ export async function loadTaskFromSupabase(taskId: string, projectId?: string): 
     return null;
   }
 
-  const [dependencies, manufacturingSteps, partReferences, stepPhotos, stepTools, explodedViews] = await Promise.all([
+  const [dependencies, manufacturingSteps, partReferences, stepPhotos, stepTools, explodedViews, taskVideos] = await Promise.all([
     throwIfError(supabase.from("task_dependencies").select("*").eq("successor_task_id", taskId)),
     throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", taskId).order("sequence")),
     throwIfError(supabase.from("part_references").select("*").eq("task_id", taskId).order("created_at")),
     throwIfError(supabase.from("step_photos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
     throwIfError(supabase.from("step_tools").select("*").eq("task_id", taskId).order("sequence")),
     throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
+    throwIfError(supabase.from("task_videos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
   ]);
 
   const mappedTask = mapTask({
@@ -3198,9 +3295,10 @@ export async function loadTaskFromSupabase(taskId: string, projectId?: string): 
     part_references: (partReferences ?? []).map(mapPartReferenceRecord),
   });
 
-  const [signedStepPhotos, signedExplodedViews] = await Promise.all([
+  const [signedStepPhotos, signedExplodedViews, signedTaskVideos] = await Promise.all([
     withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[]),
     withSignedExplodedViewRows(supabase, (explodedViews ?? []) as StepExplodedViewRow[]),
+    withSignedTaskVideoRows(supabase, (taskVideos ?? []) as TaskVideoRow[]),
   ]);
 
   return withNormalizedStepAssets(
@@ -3208,6 +3306,7 @@ export async function loadTaskFromSupabase(taskId: string, projectId?: string): 
     indexStepPhotos(signedStepPhotos),
     indexStepTools((stepTools ?? []) as StepToolRow[]),
     indexExplodedViews(signedExplodedViews),
+    indexTaskVideos(signedTaskVideos),
   );
 }
 
@@ -3586,6 +3685,92 @@ export async function saveExplodedViewToSupabase(
   };
 }
 
+export type TaskVideoUploadInput = {
+  taskId: string;
+  bytes: Blob | ArrayBuffer;
+  projectId?: string;
+  fileName?: string;
+  contentType?: string;
+  caption?: string;
+  solidworksFilePath?: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  project?: PlannerProjectContext;
+};
+
+// Server-side ingest for a SolidWorks build animation: upload the video to the task-videos bucket
+// (workspace-scoped path) and insert the task_videos row. Requires a CALLER-SCOPED client — the bucket
+// and table are gated by authenticated, project-scoped RLS.
+export async function saveTaskVideoToSupabase(input: TaskVideoUploadInput, supabase: SupabaseClient): Promise<TaskVideo> {
+  await assertTaskInProject(supabase, input.taskId, input.project?.projectId ?? input.projectId);
+
+  const id = newScopedId("video");
+  const contentType = input.contentType || (input.bytes instanceof Blob ? input.bytes.type : "") || "video/mp4";
+  const extension = contentType.includes("webm") ? "webm" : "mp4";
+  const storagePath = buildTaskAssetStoragePath(input.taskId, `${id}.${extension}`, input.project, "videos");
+  const blob = input.bytes instanceof Blob ? input.bytes : new Blob([input.bytes], { type: contentType });
+
+  await throwIfError(
+    supabase.storage.from(taskVideoBucket).upload(storagePath, blob, {
+      cacheControl: "31536000",
+      contentType,
+      upsert: true,
+    }),
+  );
+
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/${taskVideoBucket}/${storagePath}`;
+  const { data: signed } = await supabase.storage.from(taskVideoBucket).createSignedUrl(storagePath, STORAGE_SIGNED_URL_SECONDS);
+
+  const row: TaskVideoRow = {
+    id,
+    task_id: input.taskId,
+    storage_path: storagePath,
+    public_url: publicUrl,
+    thumbnail_url: null,
+    thumbnail_storage_path: null,
+    file_name: input.fileName?.trim() || "Build animation",
+    mime_type: contentType,
+    size_bytes: blob.size,
+    duration_seconds: input.durationSeconds ?? null,
+    width: input.width ?? null,
+    height: input.height ?? null,
+    caption: input.caption?.trim() ? input.caption.trim() : null,
+    solidworks_file_path: input.solidworksFilePath?.trim() || null,
+    captured_at: new Date().toISOString(),
+    uploaded_by: null,
+    deleted_at: null,
+  };
+
+  await throwIfError(supabase.from("task_videos").insert(row));
+
+  return {
+    ...mapTaskVideoRecord(row as unknown as Record<string, unknown>),
+    videoUrl: signed?.signedUrl ?? publicUrl,
+  };
+}
+
+export async function softDeleteTaskVideoFromSupabase(videoId: string, taskId?: string, projectId?: string) {
+  const supabase = plannerClient();
+  if (taskId) {
+    await assertTaskInProject(supabase, taskId, projectId);
+  }
+  await throwIfError(supabase.from("task_videos").update({ deleted_at: new Date().toISOString() }).eq("id", videoId));
+}
+
+// Best-effort storage removal (bucket DELETE policy is owner/admin-only; the row soft-delete hides it).
+export async function removeTaskVideoObject(video: Pick<TaskVideo, "storagePath">) {
+  if (!video.storagePath) {
+    return;
+  }
+  const supabase = plannerClient();
+  try {
+    await throwIfError(supabase.storage.from(taskVideoBucket).remove([video.storagePath]));
+  } catch {
+    /* non-essential */
+  }
+}
+
 export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtimePayload) => void, scope?: PlannerRealtimeScope) {
   const supabase = plannerClient();
   const channel = supabase.channel(`planner-state-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -3626,6 +3811,7 @@ export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtime
   listen("actual_events");
   listen("step_photos");
   listen("step_exploded_views");
+  listen("task_videos");
   listen("step_tools");
   if (scope?.productId) {
     listen("custom_columns", `product_id=eq.${scope.productId}`);

@@ -38,6 +38,7 @@ import {
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
 import { getTaskExplodedViews } from "@/domain/step-exploded-views";
+import { getTaskVideos } from "@/domain/task-videos";
 import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import {
   addStepToolToSupabase,
@@ -66,6 +67,7 @@ import type { ManufacturingStep, PlannerProjectContext, PlannerState, Task } fro
 import { AppLoadingShell } from "@/components/app-flow-panels";
 import { NothingSpinner } from "@/components/nothing-ui";
 import { StepExplodedViewGallery } from "@/components/step-exploded-view-gallery";
+import { TaskVideoGallery } from "@/components/task-video-gallery";
 import { ThemedSelect } from "@/components/themed-select";
 
 const MAX_IMAGE_EDGE = 1280;
@@ -4200,6 +4202,7 @@ export function MobilePhotoPortal({
                 ) : null}
 
                 {selectedTask ? <StepExplodedViewGallery views={getTaskExplodedViews(selectedTask)} /> : null}
+                {selectedTask ? <TaskVideoGallery videos={getTaskVideos(selectedTask)} /> : null}
 
                 {visibleSelectedTaskSteps.map((step) => {
                   const photos = getStepPhotoAttachments(selectedTask, step.id);

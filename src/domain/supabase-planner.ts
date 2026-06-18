@@ -3058,6 +3058,8 @@ export type ProjectTaskTarget = {
   name: string;
   code: string | null;
   scenarioName: string;
+  zoneName: string | null;
+  zoneCode: string | null;
 };
 
 // Lightweight picker feed for the SolidWorks plugin: the tasks of each product's MAIN scenario only
@@ -3097,14 +3099,25 @@ export async function loadProjectTaskTargetsFromSupabase(
     return [];
   }
 
-  // PostgREST caps a single response at ~1000 rows; page through so a large project (many duplicated
-  // scenarios) never silently drops tasks from the picker.
+  // Zones of the Main scenarios, so the picker can group tasks by zone (and order by zone sequence).
+  const zones = await throwIfError(
+    supabase.from("zones").select("id,name,code,sequence").in("scenario_id", scenarioIds),
+  );
+  const zoneById = new Map(
+    (zones ?? []).map((zone) => [
+      String(zone.id),
+      { name: String(zone.name ?? ""), code: maybeText(zone.code) ?? null, sequence: num(zone.sequence, 0) },
+    ]),
+  );
+
+  // PostgREST caps a single response at ~1000 rows; page through so a large project never silently
+  // drops tasks from the picker.
   const tasks: Array<Record<string, unknown>> = [];
   for (let from = 0; ; from += 1000) {
     const page = ((await throwIfError(
       supabase
         .from("tasks")
-        .select("id,name,manufacturing_code,scenario_id,row_type")
+        .select("id,name,manufacturing_code,scenario_id,row_type,zone_id")
         .in("scenario_id", scenarioIds)
         .order("wbs")
         .range(from, from + 999),
@@ -3116,14 +3129,24 @@ export async function loadProjectTaskTargetsFromSupabase(
   }
 
   const NON_WORK_ROWS = new Set(["milestone", "inspection"]);
+  const UNZONED_SEQUENCE = Number.MAX_SAFE_INTEGER;
   return tasks
     .filter((task) => !NON_WORK_ROWS.has(String(task.row_type ?? "task")))
-    .map((task) => ({
-      id: String(task.id),
-      name: String(task.name ?? ""),
-      code: maybeText(task.manufacturing_code) ?? null,
-      scenarioName: scenarioNameById.get(String(task.scenario_id)) ?? "",
-    }));
+    .map((task) => {
+      const zone = task.zone_id ? zoneById.get(String(task.zone_id)) : undefined;
+      return {
+        id: String(task.id),
+        name: String(task.name ?? ""),
+        code: maybeText(task.manufacturing_code) ?? null,
+        scenarioName: scenarioNameById.get(String(task.scenario_id)) ?? "",
+        zoneName: zone?.name ?? null,
+        zoneCode: zone?.code ?? null,
+        zoneSequence: zone?.sequence ?? UNZONED_SEQUENCE,
+      };
+    })
+    // Group by zone (stable sort keeps the within-zone wbs order from the query above).
+    .sort((left, right) => left.zoneSequence - right.zoneSequence)
+    .map(({ zoneSequence: _zoneSequence, ...target }) => target);
 }
 
 export async function loadTaskFromSupabase(taskId: string, projectId?: string): Promise<Task | null> {

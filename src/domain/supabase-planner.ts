@@ -3060,10 +3060,12 @@ export type ProjectTaskTarget = {
   scenarioName: string;
 };
 
-// Lightweight picker feed for the SolidWorks plugin: every task across ALL of a project's products
-// and scenarios (exploded views attach at the task level, so the picker is Project → Task and must
-// not be limited to the Main scenario). Returns only the ids/names the picker needs — no full planner
-// state, photos, or signed URLs. Milestone/inspection marker rows are excluded.
+// Lightweight picker feed for the SolidWorks plugin: the tasks of each product's MAIN scenario only
+// (exploded views attach at the task level, and we don't want the duplicated "Optimized"/Gantt
+// scenarios cluttering the picker with the same task many times). "Main" is the earliest-created
+// scenario per product — the same convention the planner uses for its default load. Returns only the
+// ids/names the picker needs — no full planner state, photos, or signed URLs. Milestone/inspection
+// marker rows are excluded.
 //
 // Requires a CALLER-SCOPED client (the user's bearer token): products/scenarios/tasks are gated by
 // real RLS, so the anon server client would read nothing.
@@ -3077,9 +3079,20 @@ export async function loadProjectTaskTargetsFromSupabase(
     return [];
   }
 
-  const scenarios = await throwIfError(supabase.from("scenarios").select("id,name").in("product_id", productIds));
-  const scenarioNameById = new Map((scenarios ?? []).map((scenario) => [String(scenario.id), String(scenario.name ?? "")]));
-  const scenarioIds = [...scenarioNameById.keys()];
+  // Earliest-created scenario per product is the canonical "Main" plan; ignore the rest.
+  const scenarios = await throwIfError(
+    supabase.from("scenarios").select("id,name,product_id").in("product_id", productIds).order("created_at", { ascending: true }),
+  );
+  const mainScenarioIdByProduct = new Map<string, string>();
+  const scenarioNameById = new Map<string, string>();
+  (scenarios ?? []).forEach((scenario) => {
+    const productId = String(scenario.product_id);
+    scenarioNameById.set(String(scenario.id), String(scenario.name ?? ""));
+    if (!mainScenarioIdByProduct.has(productId)) {
+      mainScenarioIdByProduct.set(productId, String(scenario.id)); // first in created_at order = Main
+    }
+  });
+  const scenarioIds = [...mainScenarioIdByProduct.values()];
   if (!scenarioIds.length) {
     return [];
   }

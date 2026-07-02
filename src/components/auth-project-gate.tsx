@@ -21,6 +21,7 @@ type AuthProjectGateProps = {
 };
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
+const WORKSPACE_GROUPS_CACHE_KEY = "pulse:workspace-groups-cache-v1";
 const WORKSPACE_LOADING_TITLE = "Loading organization";
 const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
 const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
@@ -103,6 +104,69 @@ function writeLastProjectId(projectId: string) {
   }
 }
 
+// True when supabase-js has a persisted session in this browser (its storage key is
+// sb-<project-ref>-auth-token). Painting cached workspace data before the async session
+// resolve is gated on this so a signed-out browser never flashes another user's cache.
+function hasLocalSupabaseSession() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key && key.startsWith("sb-") && key.includes("auth-token")) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function readWorkspaceGroupsCache(): WorkspaceProjectGroup[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_GROUPS_CACHE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as WorkspaceProjectGroup[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeWorkspaceGroupsCache(groups: WorkspaceProjectGroup[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(WORKSPACE_GROUPS_CACHE_KEY, JSON.stringify(groups));
+  } catch {
+    // Ignore storage failures in private browsing.
+  }
+}
+
+function clearWorkspaceGroupsCache() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(WORKSPACE_GROUPS_CACHE_KEY);
+  } catch {
+    // Ignore storage failures in private browsing.
+  }
+}
+
 function fallbackProjectContext(projectId: string): PlannerProjectContext {
   return {
     projectId,
@@ -158,6 +222,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     if (!nextSession) {
       setGroups([]);
       setStatus("auth");
+      clearWorkspaceGroupsCache();
       return;
     }
 
@@ -170,12 +235,28 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     try {
       const nextGroups = await ensureDefaultWorkspaceMembership();
       setGroups(nextGroups);
+      writeWorkspaceGroupsCache(nextGroups);
       setStatus("ready");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load organization workspaces.");
       setStatus("error");
     }
   }
+
+  // Cache-then-revalidate (same pattern as the sidebar's project cache): paint the last
+  // known workspace groups immediately while the session resolve + fresh load below run.
+  // Runs before the session effect so the cached paint lands on the first client frame.
+  useEffect(() => {
+    if (!hasLocalSupabaseSession()) {
+      return;
+    }
+
+    const cached = readWorkspaceGroupsCache();
+    if (cached.length > 0) {
+      setGroups((current) => (current.length > 0 ? current : cached));
+      setStatus((current) => (current === "loading" ? "ready" : current));
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -314,13 +395,18 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     return <>{children(fallbackProjectContext(projectId), () => setChildReady(true))}</>;
   }
 
-  if (!sessionReady) {
+  // While the session is still resolving, cached groups (guarded on a persisted local
+  // session) are good enough to paint with — the resolve lands right after and either
+  // confirms via the background refresh or drops to the auth panel.
+  const hasCachedPaint = status === "ready" && groups.length > 0;
+
+  if (!sessionReady && !hasCachedPaint) {
     return (
       <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
     );
   }
 
-  if (!session || status === "auth") {
+  if ((sessionReady && !session) || status === "auth") {
     return (
       <AuthFormPanel
         title="Sign in to your organization"

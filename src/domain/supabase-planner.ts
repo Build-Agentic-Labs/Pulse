@@ -1688,40 +1688,89 @@ export async function fetchOrgToolAccess(
   return level === "edit" || level === "view" ? (level as AccessLevel) : "none";
 }
 
+// The profile upsert + grant redemption only need to run once per signed-in user per tab:
+// both are idempotent, and a full page reload re-runs them. Repeat mounts (auth gate,
+// sidebar, SOP provider, client-side navigations) skip the two write round-trips.
+const bootstrappedMembershipUserIds = new Set<string>();
+// Those same consumers mount together, so concurrent callers share one in-flight load
+// instead of issuing duplicate query chains. The promise is cleared on settle: later
+// calls (e.g. sidebar refresh after creating a project) still fetch fresh data.
+let inflightMembershipLoad: Promise<WorkspaceProjectGroup[]> | null = null;
+
 export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProjectGroup[]> {
-  const supabase = plannerClient();
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-
-  if (userError || !userData.user) {
-    throw new Error(userError?.message ?? "Sign in before loading organizations.");
+  if (inflightMembershipLoad) {
+    return inflightMembershipLoad;
   }
 
-  await throwIfError(
-    supabase.from("profiles").upsert({
-      id: userData.user.id,
-      full_name: userData.user.user_metadata?.full_name ?? userData.user.email ?? "Pulse User",
-      avatar_url: userData.user.user_metadata?.avatar_url ?? null,
-    }),
-  );
+  const load = (async () => {
+    const supabase = plannerClient();
+    const { data: userData, error: userError } = await supabase.auth.getUser();
 
-  const { error: redeemError } = await supabase.rpc("redeem_workspace_access_grants");
+    if (userError || !userData.user) {
+      throw new Error(userError?.message ?? "Sign in before loading organizations.");
+    }
 
-  if (redeemError && redeemError.code !== "PGRST202") {
-    throw redeemError;
-  }
+    const user = userData.user;
+    if (!bootstrappedMembershipUserIds.has(user.id)) {
+      // The two writes are independent of each other, but grant redemption must land
+      // before memberships are read -- it can mint the membership rows a new user's
+      // first load depends on -- so both complete before loadWorkspaceProjectGroups.
+      const [, redeemResult] = await Promise.all([
+        throwIfError(
+          supabase.from("profiles").upsert({
+            id: user.id,
+            full_name: user.user_metadata?.full_name ?? user.email ?? "Pulse User",
+            avatar_url: user.user_metadata?.avatar_url ?? null,
+          }),
+        ),
+        supabase.rpc("redeem_workspace_access_grants"),
+      ]);
 
-  return loadWorkspaceProjectGroups();
+      if (redeemResult.error && redeemResult.error.code !== "PGRST202") {
+        throw redeemResult.error;
+      }
+
+      bootstrappedMembershipUserIds.add(user.id);
+    }
+
+    return loadWorkspaceProjectGroups(user.id);
+  })();
+
+  inflightMembershipLoad = load.finally(() => {
+    inflightMembershipLoad = null;
+  });
+
+  return inflightMembershipLoad;
 }
 
-export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGroup[]> {
+export async function loadWorkspaceProjectGroups(knownUserId?: string): Promise<WorkspaceProjectGroup[]> {
   const supabase = plannerClient();
-  const { data: userData, error: userError } = await supabase.auth.getUser();
+  let userId = knownUserId;
 
-  if (userError || !userData.user) {
-    throw new Error(userError?.message ?? "Sign in before loading organizations.");
+  if (!userId) {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !userData.user) {
+      throw new Error(userError?.message ?? "Sign in before loading organizations.");
+    }
+
+    userId = userData.user.id;
   }
 
-  const isSuperAdmin = await fetchIsSuperAdmin(supabase);
+  // The role probe, membership read, and per-project access map only need the user id, so
+  // they run together; the extra queries on the (rare) superadmin path are far cheaper
+  // than serializing every load behind the probe.
+  const [isSuperAdmin, memberships, accessMap] = await Promise.all([
+    fetchIsSuperAdmin(supabase),
+    throwIfError(
+      supabase
+        .from("workspace_members")
+        .select("workspace_id, role")
+        .eq("user_id", userId)
+        .order("created_at"),
+    ),
+    fetchUserProjectAccessMap(supabase, userId),
+  ]);
 
   // Superadmins see every workspace and project (RLS grants full read access), acting as
   // owner with no module restrictions, regardless of membership rows.
@@ -1751,14 +1800,6 @@ export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGrou
     });
   }
 
-  const memberships = await throwIfError(
-    supabase
-      .from("workspace_members")
-      .select("workspace_id, role")
-      .eq("user_id", userData.user.id)
-      .order("created_at"),
-  );
-
   const workspaceIds = [...new Set((memberships ?? []).map((membership) => String(membership.workspace_id)))];
 
   if (!workspaceIds.length) {
@@ -1783,11 +1824,9 @@ export async function loadWorkspaceProjectGroups(): Promise<WorkspaceProjectGrou
     ]);
   });
 
-  // The user's per-project access. Managers (owner/admin) see every project in workspaces
-  // they manage; other members see only projects they've been granted view/edit on.
-  // undefined map = pre-migration: don't filter (legacy behavior).
-  const accessMap = await fetchUserProjectAccessMap(supabase, userData.user.id);
-
+  // accessMap (fetched above): the user's per-project access. Managers (owner/admin) see
+  // every project in workspaces they manage; other members see only projects they've been
+  // granted view/edit on. undefined map = pre-migration: don't filter (legacy behavior).
   return (workspaces ?? []).map((workspace) => {
     const mappedWorkspace = mapWorkspace(workspace);
     const membership = membershipByWorkspaceId.get(mappedWorkspace.id);

@@ -14,6 +14,8 @@ import { AutoTextarea } from "./auto-textarea";
 type Props = {
   roles: string[];
   activities: SopActivity[];
+  /** Read-only mode: inputs are disabled and structural controls (add/move/delete) are hidden. */
+  disabled?: boolean;
   onChange: (roles: string[], activities: SopActivity[]) => void;
 };
 
@@ -42,7 +44,7 @@ function renumber(activities: SopActivity[]): SopActivity[] {
  * pill / process rectangle / decision diamond). A Table view keeps the dense RASIC matrix
  * for fast bulk responsibility entry. Both edit the same `(roles, activities)`.
  */
-export function ProcessFlowchart({ roles, activities, onChange }: Props) {
+export function ProcessFlowchart({ roles, activities, disabled = false, onChange }: Props) {
   const [view, setView] = useState<"map" | "table">("map");
 
   // --- roles (RASIC functions) ---
@@ -123,22 +125,27 @@ export function ProcessFlowchart({ roles, activities, onChange }: Props) {
                 className="ui-field-standalone w-36 px-2 text-[12px]"
                 value={role}
                 placeholder="Role"
+                disabled={disabled}
                 onChange={(event) => setRole(index, event.target.value)}
               />
-              <button
-                type="button"
-                className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
-                title="Remove role"
-                onClick={() => removeRole(index)}
-              >
-                <Trash2 size={12} />
-              </button>
+              {disabled ? null : (
+                <button
+                  type="button"
+                  className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
+                  title="Remove role"
+                  onClick={() => removeRole(index)}
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
             </div>
           ))}
-          <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-3" onClick={addRole}>
-            <Plus size={12} />
-            Role
-          </button>
+          {disabled ? null : (
+            <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-3" onClick={addRole}>
+              <Plus size={12} />
+              Role
+            </button>
+          )}
         </div>
       </div>
 
@@ -156,6 +163,7 @@ export function ProcessFlowchart({ roles, activities, onChange }: Props) {
         <MapView
           roles={roles}
           activities={activities}
+          disabled={disabled}
           onPatch={patchActivity}
           onCycle={cycleCell}
           onShape={cycleShape}
@@ -166,16 +174,19 @@ export function ProcessFlowchart({ roles, activities, onChange }: Props) {
         <MatrixView
           roles={roles}
           activities={activities}
+          disabled={disabled}
           onDescription={(index, value) => patchActivity(index, { description: value })}
           onSetCell={setCell}
           onRemove={removeActivity}
         />
       )}
 
-      <button type="button" className="ui-btn-ghost mt-2 h-8 gap-1.5 px-3" onClick={addActivity}>
-        <Plus size={13} />
-        Add step
-      </button>
+      {disabled ? null : (
+        <button type="button" className="ui-btn-ghost mt-2 h-8 gap-1.5 px-3" onClick={addActivity}>
+          <Plus size={13} />
+          Add step
+        </button>
+      )}
     </div>
   );
 }
@@ -222,6 +233,7 @@ function StepNode({ shape, children }: { shape: SopShape; children: ReactNode })
 function MapView({
   roles,
   activities,
+  disabled,
   onPatch,
   onCycle,
   onShape,
@@ -230,6 +242,7 @@ function MapView({
 }: {
   roles: string[];
   activities: SopActivity[];
+  disabled: boolean;
   onPatch: (index: number, patch: Partial<SopActivity>) => void;
   onCycle: (index: number, role: string) => void;
   onShape: (index: number) => void;
@@ -380,12 +393,14 @@ function MapView({
 function MatrixView({
   roles,
   activities,
+  disabled,
   onDescription,
   onSetCell,
   onRemove,
 }: {
   roles: string[];
   activities: SopActivity[];
+  disabled: boolean;
   onDescription: (index: number, value: string) => void;
   onSetCell: (index: number, role: string, code: string) => void;
   onRemove: (index: number) => void;
@@ -417,6 +432,7 @@ function MatrixView({
                   maxHeight={72}
                   value={activity.description}
                   placeholder="Describe the activity"
+                  disabled={disabled}
                   onChange={(event) => onDescription(index, event.target.value)}
                 />
               </td>
@@ -425,6 +441,7 @@ function MatrixView({
                   <select
                     className="ui-field-standalone w-full px-1 text-center"
                     value={activity.assignments[role] ?? ""}
+                    disabled={disabled}
                     onChange={(event) => onSetCell(index, role, event.target.value)}
                   >
                     <option value="">–</option>
@@ -437,14 +454,16 @@ function MatrixView({
                 </td>
               ))}
               <td className="py-2">
-                <button
-                  type="button"
-                  className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary hover:text-danger"
-                  title="Remove activity"
-                  onClick={() => onRemove(index)}
-                >
-                  <Trash2 size={13} />
-                </button>
+                {disabled ? null : (
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary hover:text-danger"
+                    title="Remove activity"
+                    onClick={() => onRemove(index)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </td>
             </tr>
           ))}

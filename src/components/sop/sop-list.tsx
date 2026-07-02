@@ -3,11 +3,18 @@
 import { FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Sop } from "@/domain/sop/schema";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SOP_STATUS_LABELS, type Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
-import { deleteSop, listSops, readLegacyLocalSops, saveSop, sopFromExtraction } from "@/lib/sop/store";
+import {
+  deleteSop,
+  listSops,
+  readLegacyLocalSops,
+  saveSop,
+  sopFromExtraction,
+  type SopListItem,
+} from "@/lib/sop/store";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { SopShell } from "./sop-shell";
 import { canEdit, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
@@ -45,10 +52,11 @@ export function SopList() {
   const { workspaceId, role } = useSopWorkspace();
   const editable = canEdit(role);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [sops, setSops] = useState<Sop[]>([]);
+  const [sops, setSops] = useState<SopListItem[]>([]);
   const [listStatus, setListStatus] = useState<"loading" | "ready" | "error">("loading");
   const [convert, setConvert] = useState<{ fileName: string; phase: ConvertPhase } | null>(null);
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
   const [pendingImport, setPendingImport] = useState<Sop[]>([]);
   const [importing, setImporting] = useState(false);
   const converting = convert !== null;
@@ -57,7 +65,7 @@ export function SopList() {
     if (!workspaceId) {
       setSops([]);
       setListStatus("ready");
-      return [] as Sop[];
+      return [] as SopListItem[];
     }
     setListStatus("loading");
     setError("");
@@ -69,9 +77,19 @@ export function SopList() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load SOPs.");
       setListStatus("error");
-      return [] as Sop[];
+      return [] as SopListItem[];
     }
   }, [workspaceId]);
+
+  const visibleSops = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) {
+      return sops;
+    }
+    return sops.filter(
+      (sop) => sop.title.toLowerCase().includes(needle) || sop.sopNumber.toLowerCase().includes(needle),
+    );
+  }, [sops, query]);
 
   // Load the workspace's SOPs, then surface any legacy localStorage SOPs not yet in this
   // workspace as a one-time import offer (id-deduped; skipped once dismissed/imported).
@@ -126,12 +144,18 @@ export function SopList() {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(sop: SopListItem) {
     if (!workspaceId) return;
+    const label = sop.title || sop.sopNumber || "this SOP";
+    // Soft delete under the hood (deleted_at), but it still leaves the list immediately --
+    // confirm so a misclick on the row's trash icon can't silently remove a document.
+    if (!window.confirm(`Delete "${label}"? It will be removed from the SOP list.`)) {
+      return;
+    }
     const previous = sops;
-    setSops((current) => current.filter((sop) => sop.id !== id));
+    setSops((current) => current.filter((entry) => entry.id !== sop.id));
     try {
-      await deleteSop(id);
+      await deleteSop(sop.id);
     } catch (caught) {
       setSops(previous);
       setError(caught instanceof Error ? caught.message : "Could not delete SOP.");
@@ -217,6 +241,16 @@ export function SopList() {
 
         {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
+        {listStatus === "ready" && sops.length > 0 ? (
+          <input
+            type="search"
+            className="ui-field-standalone w-full"
+            placeholder="Search by SOP number or title"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        ) : null}
+
         {editable && pendingImport.length > 0 ? (
           <div className="ui-notice ui-notice-warn flex flex-wrap items-center gap-3 px-4 py-3">
             <p className="ui-section-subtitle min-w-0 flex-1 text-ink-secondary">
@@ -256,8 +290,12 @@ export function SopList() {
                 No SOPs yet. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
               </p>
             </div>
+          ) : visibleSops.length === 0 ? (
+            <div className="px-4 py-10 text-center">
+              <p className="ui-section-subtitle text-ink-tertiary">No SOPs match &ldquo;{query.trim()}&rdquo;.</p>
+            </div>
           ) : (
-            sops.map((sop) => (
+            visibleSops.map((sop) => (
               <button
                 key={sop.id}
                 type="button"
@@ -267,14 +305,25 @@ export function SopList() {
                 <FileText size={15} className="shrink-0 text-ink-tertiary" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-ink">
-                    {sop.meta.title || sop.meta.sopNumber || "Untitled SOP"}
+                    {sop.title || sop.sopNumber || "Untitled SOP"}
                   </div>
                   <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
-                    {[sop.meta.sopNumber, `v${sop.meta.version}`, sop.source === "converted" ? "converted" : "authored"]
+                    {[sop.sopNumber, sop.version ? `v${sop.version}` : "", sop.source === "converted" ? "converted" : "authored"]
                       .filter(Boolean)
                       .join(" · ")}
                   </div>
                 </div>
+                <span
+                  className={`ui-mono-label shrink-0 rounded-full border border-line px-2 py-0.5 ${
+                    sop.status === "approved"
+                      ? "text-accent"
+                      : sop.status === "obsolete"
+                        ? "text-danger"
+                        : "text-ink-tertiary"
+                  }`}
+                >
+                  {SOP_STATUS_LABELS[sop.status]}
+                </span>
                 {formatDate(sop.updatedAt) ? (
                   <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
                 ) : null}
@@ -286,12 +335,12 @@ export function SopList() {
                     title="Delete SOP"
                     onClick={(event) => {
                       event.stopPropagation();
-                      void handleDelete(sop.id);
+                      void handleDelete(sop);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.stopPropagation();
-                        void handleDelete(sop.id);
+                        void handleDelete(sop);
                       }
                     }}
                   >

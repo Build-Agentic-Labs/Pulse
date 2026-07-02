@@ -2,10 +2,10 @@
 
 import { Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
-import { rasicLegend, type Sop } from "@/domain/sop/schema";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { rasicLegend, SOP_STATUS_LABELS, SOP_STATUSES, type Sop, type SopStatus } from "@/domain/sop/schema";
 import { applySampleData } from "@/domain/sop/sample";
-import { saveSop } from "@/lib/sop/store";
+import { saveSop, SopConflictError } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
 import { ProcessFlowchart } from "./process-flowchart";
@@ -43,14 +43,34 @@ function stepFilled(sop: Sop, id: StepId): boolean {
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+/** Debounce for autosave: persist this long after the last edit settles. */
+const AUTOSAVE_DELAY_MS = 2000;
+
+/** The changeHistory row auto-appended when a save carries a status transition. */
+function statusChangeEntry(sop: Sop, from: SopStatus): Sop["changeHistory"][number] {
+  return {
+    version: sop.meta.version,
+    changes: `Status changed from ${SOP_STATUS_LABELS[from]} to ${SOP_STATUS_LABELS[sop.status]}.`,
+    createdByName: "",
+    createdByPosition: "",
+    createdByDate: new Date().toISOString().slice(0, 10),
+  };
+}
+
 export function SopEditor({
   initial,
   workspaceId,
   canEdit = true,
+  canApprove = false,
+  isNew = false,
 }: {
   initial: Sop;
   workspaceId?: string;
   canEdit?: boolean;
+  /** Workspace managers only: allows transitions to `approved` / `obsolete`. */
+  canApprove?: boolean;
+  /** True when the SOP has never been persisted (autosave stays off until the first save). */
+  isNew?: boolean;
 }) {
   const router = useRouter();
   const [sop, setSop] = useState<Sop>(initial);
@@ -59,6 +79,19 @@ export function SopEditor({
   const [exporting, setExporting] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [reviewDismissed, setReviewDismissed] = useState(false);
+  // Edits since the last successful save -- drives the leave guards and autosave.
+  const [dirty, setDirty] = useState(false);
+  // A save lost the concurrency check: freeze autosave so we never loop against the conflict.
+  const [conflicted, setConflicted] = useState(false);
+  // Optimistic-concurrency token: the updated_at loaded with the SOP (undefined until the
+  // first insert), refreshed from every save response so consecutive saves keep working.
+  const [persistedUpdatedAt, setPersistedUpdatedAt] = useState<string | undefined>(
+    isNew ? undefined : initial.updatedAt,
+  );
+  // Bumped on every user edit so a save that raced with typing doesn't clobber newer edits.
+  const editVersionRef = useRef(0);
+  // The status as last persisted -- a save that changes it auto-appends a changeHistory row.
+  const lastSavedStatusRef = useRef<SopStatus>(initial.status);
 
   const step = STEPS[stepIndex];
   const isFirst = stepIndex === 0;
@@ -67,6 +100,8 @@ export function SopEditor({
 
   function update(patch: Partial<Sop>) {
     setSop((current) => ({ ...current, ...patch }));
+    editVersionRef.current += 1;
+    setDirty(true);
     setSaveStatus("idle");
   }
 
@@ -78,14 +113,37 @@ export function SopEditor({
       setSaveStatus("error");
       return false;
     }
+    const statusChanged = sop.status !== lastSavedStatusRef.current;
+    const historyEntry = statusChanged ? statusChangeEntry(sop, lastSavedStatusRef.current) : undefined;
+    const toSave: Sop = historyEntry ? { ...sop, changeHistory: [...sop.changeHistory, historyEntry] } : sop;
+    const editVersion = editVersionRef.current;
     setSaveStatus("saving");
     setSaveError("");
     try {
-      const next = await saveSop(sop, workspaceId);
-      setSop(next);
-      setSaveStatus("saved");
+      const next = await saveSop(toSave, workspaceId, { expectedUpdatedAt: persistedUpdatedAt });
+      setPersistedUpdatedAt(next.updatedAt);
+      lastSavedStatusRef.current = next.status;
+      if (editVersionRef.current === editVersion) {
+        // Nothing changed while the save was in flight -- adopt the server copy wholesale.
+        setSop(next);
+        setDirty(false);
+        setSaveStatus("saved");
+      } else {
+        // Edits landed mid-save: keep them (still dirty, so autosave picks them up) and only
+        // fold in the server timestamp plus the auto-appended history row.
+        setSop((current) => ({
+          ...current,
+          updatedAt: next.updatedAt,
+          changeHistory: historyEntry ? [...current.changeHistory, historyEntry] : current.changeHistory,
+        }));
+        setSaveStatus("idle");
+      }
       return true;
     } catch (error) {
+      if (error instanceof SopConflictError) {
+        // Never retry into a conflict -- the user copies their changes and reloads.
+        setConflicted(true);
+      }
       setSaveError(error instanceof Error ? error.message : "Save failed.");
       setSaveStatus("error");
       return false;
@@ -98,7 +156,42 @@ export function SopEditor({
 
   function handleLoadSample() {
     setSop((current) => applySampleData(current));
+    editVersionRef.current += 1;
+    setDirty(true);
     setSaveStatus("idle");
+  }
+
+  // Warn on tab close / hard navigation while there are unsaved edits.
+  useEffect(() => {
+    if (!dirty) return;
+    function warnBeforeLeaving(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [dirty]);
+
+  // Debounced autosave, only for SOPs that already exist server-side (never auto-create a
+  // row) and only while a fresh edit is pending -- a failed save waits for the next edit
+  // instead of retrying in a loop, and a conflict stops autosave entirely.
+  const autosaveArmed =
+    canEdit && Boolean(workspaceId) && dirty && !conflicted && Boolean(persistedUpdatedAt) && saveStatus === "idle";
+  useEffect(() => {
+    if (!autosaveArmed) return;
+    const timer = window.setTimeout(() => {
+      void persist();
+    }, AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+    // `persist` is recreated per render with the latest sop; re-arming on `sop` restarts
+    // the debounce after every edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autosaveArmed, sop]);
+
+  // Confirm in-app exits (shell back link / brand link) while edits are unsaved.
+  function confirmLeave(): boolean {
+    if (!dirty) return true;
+    return window.confirm("You have unsaved changes. Leave without saving?");
   }
 
   async function handleFinish() {
@@ -133,15 +226,17 @@ export function SopEditor({
 
   const actions = (
     <>
-      <button
-        type="button"
-        className="ui-btn-ghost h-10 gap-2"
-        onClick={handleLoadSample}
-        title="Fill every step with sample data"
-      >
-        <Sparkles size={15} />
-        <span className="hidden sm:inline">Sample</span>
-      </button>
+      {canEdit ? (
+        <button
+          type="button"
+          className="ui-btn-ghost h-10 gap-2"
+          onClick={handleLoadSample}
+          title="Fill every step with sample data"
+        >
+          <Sparkles size={15} />
+          <span className="hidden sm:inline">Sample</span>
+        </button>
+      ) : null}
       <button
         type="button"
         className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"
@@ -158,6 +253,7 @@ export function SopEditor({
           className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"
           onClick={handleSave}
           disabled={saveDisabled}
+          title={dirty ? "Unsaved changes" : undefined}
         >
           <Check size={15} />
           {saveStatus === "saving"
@@ -166,7 +262,9 @@ export function SopEditor({
               ? "Saved"
               : saveStatus === "error"
                 ? "Retry save"
-                : "Save"}
+                : dirty
+                  ? "Save*"
+                  : "Save"}
         </button>
       ) : null}
     </>
@@ -209,6 +307,7 @@ export function SopEditor({
       actions={actions}
       sidebar={sidebar}
       back={{ href: "/sops", label: "All SOPs" }}
+      confirmLeave={confirmLeave}
     >
       <div className="sop-editor">
         <div className="mx-auto max-w-4xl space-y-5 pb-16">
@@ -252,6 +351,7 @@ export function SopEditor({
                       className="ui-field-standalone"
                       value={sop.meta.sopNumber}
                       placeholder="SOP-QA-001"
+                      disabled={!canEdit}
                       onChange={(event) => update({ meta: { ...sop.meta, sopNumber: event.target.value } })}
                     />
                   </Field>
@@ -260,6 +360,7 @@ export function SopEditor({
                       className="ui-field-standalone"
                       value={sop.meta.title}
                       placeholder="QMS"
+                      disabled={!canEdit}
                       onChange={(event) => update({ meta: { ...sop.meta, title: event.target.value } })}
                     />
                   </Field>
@@ -268,8 +369,31 @@ export function SopEditor({
                       className="ui-field-standalone"
                       value={sop.meta.version}
                       placeholder="1.0"
+                      disabled={!canEdit}
                       onChange={(event) => update({ meta: { ...sop.meta, version: event.target.value } })}
                     />
+                  </Field>
+                  <Field label="Status">
+                    <select
+                      className="ui-field-standalone"
+                      value={sop.status}
+                      disabled={!canEdit}
+                      onChange={(event) => update({ status: event.target.value as SopStatus })}
+                    >
+                      {SOP_STATUSES.map((status) => (
+                        <option
+                          key={status}
+                          value={status}
+                          // Approval-gated states are picked by workspace managers only; the
+                          // current value stays selectable so the control never lies.
+                          disabled={
+                            !canApprove && (status === "approved" || status === "obsolete") && status !== sop.status
+                          }
+                        >
+                          {SOP_STATUS_LABELS[status]}
+                        </option>
+                      ))}
+                    </select>
                   </Field>
                   <Field label="Revision date">
                     <input
@@ -277,6 +401,7 @@ export function SopEditor({
                       required
                       className="ui-field-standalone"
                       value={sop.meta.revisionDate}
+                      disabled={!canEdit}
                       onChange={(event) => update({ meta: { ...sop.meta, revisionDate: event.target.value } })}
                     />
                   </Field>
@@ -286,6 +411,7 @@ export function SopEditor({
                       required
                       className="ui-field-standalone"
                       value={sop.meta.effectiveDate}
+                      disabled={!canEdit}
                       onChange={(event) => update({ meta: { ...sop.meta, effectiveDate: event.target.value } })}
                     />
                   </Field>
@@ -300,6 +426,7 @@ export function SopEditor({
                     className="ui-field-standalone min-h-20 py-2"
                     value={sop.purpose}
                     placeholder="Define the purpose of this process"
+                    disabled={!canEdit}
                     onChange={(event) => update({ purpose: event.target.value })}
                   />
                 </Section>
@@ -308,6 +435,7 @@ export function SopEditor({
                     className="ui-field-standalone min-h-20 py-2"
                     value={sop.scope}
                     placeholder="For which products, processes or areas this applies"
+                    disabled={!canEdit}
                     onChange={(event) => update({ scope: event.target.value })}
                   />
                 </Section>
@@ -318,6 +446,7 @@ export function SopEditor({
                     valueLabel="Definition"
                     keyName="term"
                     valueName="definition"
+                    disabled={!canEdit}
                     onChange={(definitions) => update({ definitions })}
                   />
                 </Section>
@@ -325,6 +454,7 @@ export function SopEditor({
                   <StringListEditor
                     items={sop.references}
                     placeholder="e.g. ISO 9001:2015"
+                    disabled={!canEdit}
                     onChange={(references) => update({ references })}
                   />
                 </Section>
@@ -337,6 +467,7 @@ export function SopEditor({
                   <StringListEditor
                     items={sop.responsiblePersons}
                     placeholder="Function / role"
+                    disabled={!canEdit}
                     onChange={(responsiblePersons) => update({ responsiblePersons })}
                   />
                 </Section>
@@ -344,6 +475,7 @@ export function SopEditor({
                   <StringListEditor
                     items={sop.measurements}
                     placeholder="e.g. % of released SOPs"
+                    disabled={!canEdit}
                     onChange={(measurements) => update({ measurements })}
                   />
                 </Section>
@@ -353,6 +485,7 @@ export function SopEditor({
                       className="ui-field-standalone min-h-16 py-2"
                       value={sop.procedure.processFlowDescription}
                       placeholder="Describe the process flow"
+                      disabled={!canEdit}
                       onChange={(event) =>
                         update({ procedure: { ...sop.procedure, processFlowDescription: event.target.value } })
                       }
@@ -364,6 +497,7 @@ export function SopEditor({
                   <ProcessFlowchart
                     roles={sop.procedure.roles}
                     activities={sop.procedure.activities}
+                    disabled={!canEdit}
                     onChange={(roles, activities) => update({ procedure: { ...sop.procedure, roles, activities } })}
                   />
                 </Section>
@@ -379,18 +513,23 @@ export function SopEditor({
                     valueLabel="Description"
                     keyName="label"
                     valueName="description"
+                    disabled={!canEdit}
                     onChange={(annexes) => update({ annexes })}
                   />
                 </Section>
                 <Section title="Change history">
-                  <ChangeHistoryEditor rows={sop.changeHistory} onChange={(changeHistory) => update({ changeHistory })} />
+                  <ChangeHistoryEditor
+                    rows={sop.changeHistory}
+                    disabled={!canEdit}
+                    onChange={(changeHistory) => update({ changeHistory })}
+                  />
                 </Section>
               </>
             ) : null}
 
             {step.id === "approvals" ? (
               <Section title="Change approvals">
-                <ApprovalsEditor rows={sop.approvals} onChange={(approvals) => update({ approvals })} />
+                <ApprovalsEditor rows={sop.approvals} disabled={!canEdit} onChange={(approvals) => update({ approvals })} />
               </Section>
             ) : null}
 
@@ -496,10 +635,12 @@ function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
 function StringListEditor({
   items,
   placeholder,
+  disabled = false,
   onChange,
 }: {
   items: string[];
   placeholder: string;
+  disabled?: boolean;
   onChange: (items: string[]) => void;
 }) {
   return (
@@ -510,16 +651,19 @@ function StringListEditor({
             className="ui-field-standalone min-w-0 flex-1"
             value={item}
             placeholder={placeholder}
+            disabled={disabled}
             onChange={(event) => {
               const next = [...items];
               next[index] = event.target.value;
               onChange(next);
             }}
           />
-          <RowDeleteButton title="Remove" onClick={() => onChange(items.filter((_, i) => i !== index))} />
+          {disabled ? null : (
+            <RowDeleteButton title="Remove" onClick={() => onChange(items.filter((_, i) => i !== index))} />
+          )}
         </div>
       ))}
-      <AddButton label="Add" onClick={() => onChange([...items, ""])} />
+      {disabled ? null : <AddButton label="Add" onClick={() => onChange([...items, ""])} />}
     </div>
   );
 }
@@ -532,6 +676,7 @@ function PairListEditor<K extends string, V extends string>({
   valueLabel,
   keyName,
   valueName,
+  disabled = false,
   onChange,
 }: {
   rows: Array<PairRow<K, V>>;
@@ -539,6 +684,7 @@ function PairListEditor<K extends string, V extends string>({
   valueLabel: string;
   keyName: K;
   valueName: V;
+  disabled?: boolean;
   onChange: (rows: Array<PairRow<K, V>>) => void;
 }) {
   function patch(index: number, field: K | V, value: string) {
@@ -554,30 +700,38 @@ function PairListEditor<K extends string, V extends string>({
             className="ui-field-standalone min-w-0"
             value={row[keyName]}
             placeholder={keyLabel}
+            disabled={disabled}
             onChange={(event) => patch(index, keyName, event.target.value)}
           />
           <input
             className="ui-field-standalone min-w-0"
             value={row[valueName]}
             placeholder={valueLabel}
+            disabled={disabled}
             onChange={(event) => patch(index, valueName, event.target.value)}
           />
-          <RowDeleteButton title="Remove" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+          {disabled ? null : (
+            <RowDeleteButton title="Remove" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+          )}
         </div>
       ))}
-      <AddButton
-        label="Add"
-        onClick={() => onChange([...rows, { [keyName]: "", [valueName]: "" } as PairRow<K, V>])}
-      />
+      {disabled ? null : (
+        <AddButton
+          label="Add"
+          onClick={() => onChange([...rows, { [keyName]: "", [valueName]: "" } as PairRow<K, V>])}
+        />
+      )}
     </div>
   );
 }
 
 function ChangeHistoryEditor({
   rows,
+  disabled = false,
   onChange,
 }: {
   rows: Sop["changeHistory"];
+  disabled?: boolean;
   onChange: (rows: Sop["changeHistory"]) => void;
 }) {
   function patch(index: number, field: keyof Sop["changeHistory"][number], value: string) {
@@ -593,12 +747,14 @@ function ChangeHistoryEditor({
               className="ui-field-standalone"
               value={row.version}
               placeholder="Version"
+              disabled={disabled}
               onChange={(event) => patch(index, "version", event.target.value)}
             />
             <input
               className="ui-field-standalone"
               value={row.changes}
               placeholder="Description of changes"
+              disabled={disabled}
               onChange={(event) => patch(index, "changes", event.target.value)}
             />
           </div>
@@ -607,12 +763,14 @@ function ChangeHistoryEditor({
               className="ui-field-standalone"
               value={row.createdByName}
               placeholder="Created by"
+              disabled={disabled}
               onChange={(event) => patch(index, "createdByName", event.target.value)}
             />
             <input
               className="ui-field-standalone"
               value={row.createdByPosition}
               placeholder="Position"
+              disabled={disabled}
               onChange={(event) => patch(index, "createdByPosition", event.target.value)}
             />
             <input
@@ -620,30 +778,37 @@ function ChangeHistoryEditor({
               required
               className="ui-field-standalone"
               value={row.createdByDate}
+              disabled={disabled}
               onChange={(event) => patch(index, "createdByDate", event.target.value)}
             />
-            <RowDeleteButton title="Remove entry" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+            {disabled ? null : (
+              <RowDeleteButton title="Remove entry" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+            )}
           </div>
         </div>
       ))}
-      <AddButton
-        label="Add entry"
-        onClick={() =>
-          onChange([
-            ...rows,
-            { version: "", changes: "", createdByName: "", createdByPosition: "", createdByDate: "" },
-          ])
-        }
-      />
+      {disabled ? null : (
+        <AddButton
+          label="Add entry"
+          onClick={() =>
+            onChange([
+              ...rows,
+              { version: "", changes: "", createdByName: "", createdByPosition: "", createdByDate: "" },
+            ])
+          }
+        />
+      )}
     </div>
   );
 }
 
 function ApprovalsEditor({
   rows,
+  disabled = false,
   onChange,
 }: {
   rows: Sop["approvals"];
+  disabled?: boolean;
   onChange: (rows: Sop["approvals"]) => void;
 }) {
   function patch(index: number, field: keyof Sop["approvals"][number], value: string) {
@@ -658,18 +823,21 @@ function ApprovalsEditor({
             className="ui-field-standalone"
             value={row.role}
             placeholder="Role"
+            disabled={disabled}
             onChange={(event) => patch(index, "role", event.target.value)}
           />
           <input
             className="ui-field-standalone"
             value={row.name}
             placeholder="Name"
+            disabled={disabled}
             onChange={(event) => patch(index, "name", event.target.value)}
           />
           <input
             className="ui-field-standalone"
             value={row.position}
             placeholder="Position"
+            disabled={disabled}
             onChange={(event) => patch(index, "position", event.target.value)}
           />
           <input
@@ -677,12 +845,20 @@ function ApprovalsEditor({
             required
             className="ui-field-standalone"
             value={row.date}
+            disabled={disabled}
             onChange={(event) => patch(index, "date", event.target.value)}
           />
-          <RowDeleteButton title="Remove row" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+          {disabled ? null : (
+            <RowDeleteButton title="Remove row" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+          )}
         </div>
       ))}
-      <AddButton label="Add approver" onClick={() => onChange([...rows, { role: "", name: "", position: "", date: "" }])} />
+      {disabled ? null : (
+        <AddButton
+          label="Add approver"
+          onClick={() => onChange([...rows, { role: "", name: "", position: "", date: "" }])}
+        />
+      )}
     </div>
   );
 }

@@ -30,6 +30,20 @@ export function rasicLegend(separator = "  ·  "): string {
 }
 
 // ---------------------------------------------------------------------------
+// Lifecycle status
+// ---------------------------------------------------------------------------
+
+export const SOP_STATUSES = ["draft", "in_review", "approved", "obsolete"] as const;
+export type SopStatus = (typeof SOP_STATUSES)[number];
+
+export const SOP_STATUS_LABELS: Record<SopStatus, string> = {
+  draft: "Draft",
+  in_review: "In review",
+  approved: "Approved",
+  obsolete: "Obsolete",
+};
+
+// ---------------------------------------------------------------------------
 // Header / document metadata
 // ---------------------------------------------------------------------------
 
@@ -152,6 +166,12 @@ export interface Sop {
 
   /** Provenance: was this hand-authored or converted from a legacy file? */
   source: "authored" | "converted";
+  /**
+   * Lifecycle state. Persisted as the promoted `sops.status` column (like the header
+   * fields), NOT inside the jsonb document -- the store strips it on save and overlays
+   * the column on load.
+   */
+  status: SopStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -172,6 +192,7 @@ export function createEmptySop(id: string, now: string): Sop {
     changeHistory: [],
     approvals: DEFAULT_APPROVAL_ROLES.map((role) => ({ role, name: "", position: "", date: "" })),
     source: "authored",
+    status: "draft",
     createdAt: now,
     updatedAt: now,
   };

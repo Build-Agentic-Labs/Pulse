@@ -2,7 +2,7 @@
 
 import { ChevronLeft, Moon, Sun } from "lucide-react";
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { RollingText } from "@/components/rolling-text";
 import { SidebarUserPanel } from "@/components/sidebar-user-panel";
 import { useTheme } from "@/components/theme-provider";
@@ -18,16 +18,28 @@ export function SopShell({
   back,
   crumb,
   actions,
+  confirmLeave,
   children,
 }: {
   sidebar: ReactNode;
   back?: { href: string; label: string };
   crumb?: string;
   actions?: ReactNode;
+  /**
+   * Guard for the shell's own exit links (brand + back). Return false to cancel the
+   * navigation — used by the editor to confirm leaving with unsaved changes.
+   */
+  confirmLeave?: () => boolean;
   children: ReactNode;
 }) {
   const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+
+  function guardNavigation(event: MouseEvent<HTMLAnchorElement>) {
+    if (confirmLeave && !confirmLeave()) {
+      event.preventDefault();
+    }
+  }
 
   return (
     <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink">
@@ -47,7 +59,7 @@ export function SopShell({
               className={`transition-transform duration-300 ease-ui ${collapsed ? "rotate-180" : ""}`}
             />
           </button>
-          <Link href="/" className="ui-brand-compact shrink-0">
+          <Link href="/" className="ui-brand-compact shrink-0" onClick={guardNavigation}>
             <RollingText text="Pulse" rollOnMount />
           </Link>
           {crumb ? (
@@ -70,7 +82,7 @@ export function SopShell({
         >
           <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-2">
             {back ? (
-              <Link href={back.href} className="ui-settings-back" title={back.label}>
+              <Link href={back.href} className="ui-settings-back" title={back.label} onClick={guardNavigation}>
                 <ChevronLeft size={14} strokeWidth={1.75} />
                 {back.label}
               </Link>

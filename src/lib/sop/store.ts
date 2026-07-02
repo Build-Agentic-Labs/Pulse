@@ -8,19 +8,46 @@
  * rather than being baked into `Sop`.
  */
 
-import { createEmptySop, type Sop } from "@/domain/sop/schema";
+import { createEmptySop, type Sop, type SopStatus } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 
 const STORAGE_KEY = "pulse:sops:v1";
 
 // Exact columns consumed by the mappers below -- avoid select('*'), matching the planner store.
-const SOP_COLUMNS = "id, workspace_id, sop_number, title, version, source, document, created_at, updated_at";
+const SOP_COLUMNS = "id, workspace_id, sop_number, title, version, source, status, document, created_at, updated_at";
+
+// Slim projection for the list surface: promoted columns only, never the full jsonb document.
+const SOP_LIST_COLUMNS = "id, sop_number, title, version, source, status, updated_at";
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
   workspaceId: string;
   sop: Sop;
+}
+
+/** One row of the SOP list -- the promoted columns, cheap to fetch for every SOP at once. */
+export interface SopListItem {
+  id: string;
+  sopNumber: string;
+  title: string;
+  version: string;
+  source: Sop["source"];
+  status: SopStatus;
+  updatedAt: string;
+}
+
+/**
+ * Thrown when a save loses the optimistic-concurrency check: the row changed (or was
+ * deleted) since the caller loaded it. Callers match on `instanceof` or `code`.
+ */
+export class SopConflictError extends Error {
+  readonly code = "SOP_CONFLICT";
+
+  constructor() {
+    super("This SOP was changed by someone else since you opened it — copy your changes and reload.");
+    this.name = "SopConflictError";
+  }
 }
 
 function nowIso(): string {
@@ -34,76 +61,140 @@ export function newSopId(): string {
   return `sop_${Date.now().toString(36)}`;
 }
 
-async function throwIfError<T>(operation: PromiseLike<{ data: T; error: { message: string } | null }>) {
+async function throwIfError<T>(operation: PromiseLike<{ data: T; error: { message: string; code?: string } | null }>) {
   const { data, error } = await operation;
   if (error) {
+    // 23505 = Postgres unique violation. Aside from the primary key, the only unique
+    // constraint on `sops` is the per-workspace SOP-number index, so translate it into
+    // an actionable message instead of the raw constraint name.
+    if (error.code === "23505" && !error.message.includes("pkey")) {
+      throw new Error("An SOP with this number already exists in this workspace.");
+    }
     throw new Error(error.message);
   }
   return data;
 }
 
-// The jsonb `document` is canonical for the body; the row's own id/created_at/updated_at are
-// overlaid on top so the columns stay authoritative for those three fields.
+// The jsonb `document` is canonical for the body; the row's own id/status/created_at/updated_at
+// are overlaid on top so the columns stay authoritative for those four fields.
 function mapSop(row: Record<string, unknown>): Sop {
   const document = (row.document ?? {}) as Sop;
   return {
     ...document,
     id: String(row.id),
+    status: (row.status as SopStatus | null) ?? "draft",
     createdAt: String(row.created_at ?? document.createdAt ?? ""),
     updatedAt: String(row.updated_at ?? document.updatedAt ?? ""),
   };
 }
 
-export async function listSops(workspaceId: string): Promise<Sop[]> {
+function mapSopListItem(row: Record<string, unknown>): SopListItem {
+  return {
+    id: String(row.id),
+    sopNumber: String(row.sop_number ?? ""),
+    title: String(row.title ?? ""),
+    version: String(row.version ?? ""),
+    source: row.source === "converted" ? "converted" : "authored",
+    status: (row.status as SopStatus | null) ?? "draft",
+    updatedAt: String(row.updated_at ?? ""),
+  };
+}
+
+export async function listSops(workspaceId: string): Promise<SopListItem[]> {
   const supabase = createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase
       .from("sops")
-      .select(SOP_COLUMNS)
+      .select(SOP_LIST_COLUMNS)
       .eq("workspace_id", workspaceId)
+      .is("deleted_at", null)
       .order("updated_at", { ascending: false }),
   );
-  return (rows ?? []).map(mapSop);
+  return (rows ?? []).map(mapSopListItem);
 }
 
 export async function getSop(id: string): Promise<SopRecord | undefined> {
   const supabase = createPlannerSupabaseClient();
   // RLS scopes access: a SOP in a workspace the user can't read returns no row -> undefined.
-  const row = await throwIfError(supabase.from("sops").select(SOP_COLUMNS).eq("id", id).maybeSingle());
+  // Soft-deleted SOPs are treated as missing everywhere.
+  const row = await throwIfError(
+    supabase.from("sops").select(SOP_COLUMNS).eq("id", id).is("deleted_at", null).maybeSingle(),
+  );
   if (!row) {
     return undefined;
   }
   return { workspaceId: String(row.workspace_id), sop: mapSop(row) };
 }
 
-export async function saveSop(sop: Sop, workspaceId: string): Promise<Sop> {
+export interface SaveSopOptions {
+  /**
+   * Optimistic-concurrency token for SOPs that already exist server-side: the `updatedAt`
+   * loaded when the editor opened (or returned by the previous save). Present -> guarded
+   * UPDATE that throws `SopConflictError` if the row moved; absent -> plain INSERT.
+   */
+  expectedUpdatedAt?: string;
+}
+
+export async function saveSop(sop: Sop, workspaceId: string, options: SaveSopOptions = {}): Promise<Sop> {
   const supabase = createPlannerSupabaseClient();
   const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id ?? null;
   const next: Sop = { ...sop, updatedAt: nowIso() };
 
-  // created_at is omitted so updates never rewrite it (default now() on insert; the
-  // sops_set_updated_at trigger maintains updated_at server-side either way).
+  // `status` lives in its own column (promoted, like the header fields) and is stripped
+  // from the jsonb document so the column stays the single source of truth for it.
+  const { status, ...documentBody } = next;
+
+  // created_at/updated_at are omitted so the DB stays authoritative (default now() on
+  // insert; the sops_set_updated_at trigger maintains updated_at on every write).
   const row = {
-    id: next.id,
-    workspace_id: workspaceId,
     sop_number: next.meta.sopNumber || null,
     title: next.meta.title || null,
     version: next.meta.version || null,
     source: next.source,
-    document: next,
-    created_by: userData.user?.id ?? null,
-    updated_at: next.updatedAt,
+    status,
+    document: documentBody,
+    updated_by: userId,
   };
 
-  const saved = await throwIfError(
-    supabase.from("sops").upsert(row, { onConflict: "id" }).select(SOP_COLUMNS).single(),
+  if (options.expectedUpdatedAt) {
+    // Optimistic concurrency: only touch the row if it still carries the updated_at the
+    // caller loaded. Zero rows back means someone else saved (or deleted) it since ->
+    // conflict; never silently overwrite their work.
+    const updated = await throwIfError(
+      supabase
+        .from("sops")
+        .update(row)
+        .eq("id", next.id)
+        .eq("updated_at", options.expectedUpdatedAt)
+        .is("deleted_at", null)
+        .select(SOP_COLUMNS)
+        .maybeSingle(),
+    );
+    if (!updated) {
+      throw new SopConflictError();
+    }
+    return mapSop(updated as Record<string, unknown>);
+  }
+
+  // First save: a plain INSERT so created_by is written exactly once and never rewritten.
+  const inserted = await throwIfError(
+    supabase
+      .from("sops")
+      .insert({ ...row, id: next.id, workspace_id: workspaceId, created_by: userId })
+      .select(SOP_COLUMNS)
+      .single(),
   );
-  return mapSop(saved as Record<string, unknown>);
+  return mapSop(inserted as Record<string, unknown>);
 }
 
+/**
+ * Soft delete: the row is kept (deleted_at set, which also frees the SOP number for reuse
+ * via the partial unique index) and filtered out of every read path above.
+ */
 export async function deleteSop(id: string): Promise<void> {
   const supabase = createPlannerSupabaseClient();
-  await throwIfError(supabase.from("sops").delete().eq("id", id));
+  await throwIfError(supabase.from("sops").update({ deleted_at: nowIso() }).eq("id", id).is("deleted_at", null));
 }
 
 /**
@@ -136,6 +227,7 @@ export function sopFromExtraction(extracted: ExtractedSop): Sop {
     // Keep app-managed fields from the base; never let the model set them.
     id: base.id,
     source: "converted",
+    status: base.status,
     createdAt: base.createdAt,
     updatedAt: base.updatedAt,
     procedure: {

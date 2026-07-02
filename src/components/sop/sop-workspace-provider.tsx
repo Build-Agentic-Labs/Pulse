@@ -16,6 +16,11 @@ export function canEdit(role?: WorkspaceRole): boolean {
   return role === "owner" || role === "admin" || role === "editor";
 }
 
+/** Workspace managers: the only roles allowed to move a SOP to `approved` or `obsolete`. */
+export function canManage(role?: WorkspaceRole): boolean {
+  return role === "owner" || role === "admin";
+}
+
 type SopWorkspaceContextValue = {
   status: "loading" | "ready";
   workspaceId?: string;

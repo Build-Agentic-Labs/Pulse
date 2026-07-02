@@ -6,7 +6,7 @@ import {
   type ExtractedSop,
 } from "@/domain/sop/extraction";
 import { prepareSopUpload, type PreparedSopUpload } from "@/lib/sop/parse-document";
-import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
+import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,6 +55,29 @@ export async function POST(request: Request) {
     return Response.json(
       { error: "Too many conversions at once. Wait a minute and try again." },
       { status: 429 },
+    );
+  }
+
+  // Converting a SOP only makes sense for users who can save one. sops writes are gated
+  // on org-tools 'edit' at the database (has_org_tool_access, 20260701121000); mirror
+  // that gate here so users without it can't spend LLM tokens. All three lookups run as
+  // the caller (RLS-scoped) and a failed lookup denies — this fails closed.
+  const callerSupabase = callerScopedSupabase(getBearerToken(request));
+  const [orgAccess, managerMembership, superAdmin] = await Promise.all([
+    callerSupabase.from("org_tool_access").select("level").eq("user_id", auth.userId).maybeSingle(),
+    callerSupabase
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("user_id", auth.userId)
+      .in("role", ["owner", "admin"])
+      .limit(1),
+    callerSupabase.rpc("is_super_admin"),
+  ]);
+  const isManager = (managerMembership.data?.length ?? 0) > 0 || superAdmin.data === true;
+  if (!isManager && orgAccess.data?.level !== "edit") {
+    return Response.json(
+      { error: "You need Org tools edit access to convert SOPs." },
+      { status: 403 },
     );
   }
 

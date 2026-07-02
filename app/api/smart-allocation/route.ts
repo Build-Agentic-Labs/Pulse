@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createApiRateLimiter } from "@/lib/api-auth";
 import { calculateTaskManHours, formatMinutes, getTimelineBounds, round } from "@/domain/calculations";
 import type {
   IeSmartAllocationAssignment,
@@ -16,9 +17,10 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const MAX_REQUEST_BYTES = 1_000_000;
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = 10;
-const smartAllocationRateLimits = new Map<string, { count: number; resetAt: number }>();
+// Shared per-user limiter, keyed on the authenticated user id ALONE. The previous key mixed in
+// x-forwarded-for/x-real-ip, which are client-controlled headers -- a caller could rotate them to
+// mint fresh buckets and sidestep the limit.
+const checkSmartAllocationRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 
 const planSchema = {
   type: "object",
@@ -116,35 +118,6 @@ function finiteNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function rateLimitKey(request: Request, userId: string) {
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const realIp = request.headers.get("x-real-ip")?.trim();
-  return `${userId}:${forwardedFor || realIp || "unknown"}`;
-}
-
-function checkRateLimit(key: string) {
-  const now = Date.now();
-  for (const [entryKey, entry] of smartAllocationRateLimits.entries()) {
-    if (entry.resetAt <= now) {
-      smartAllocationRateLimits.delete(entryKey);
-    }
-  }
-
-  const current = smartAllocationRateLimits.get(key);
-
-  if (!current || current.resetAt <= now) {
-    smartAllocationRateLimits.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return true;
-  }
-
-  if (current.count >= RATE_LIMIT_MAX_REQUESTS) {
-    return false;
-  }
-
-  current.count += 1;
-  return true;
-}
-
 function getBearerToken(request: Request) {
   const header = request.headers.get("authorization") ?? "";
   const [scheme, token] = header.split(" ");
@@ -174,7 +147,7 @@ async function authorizeSmartAllocationRequest(request: Request, body: IeSmartAl
     return NextResponse.json({ error: "Invalid or expired session." }, { status: 401 });
   }
 
-  if (!checkRateLimit(rateLimitKey(request, userData.user.id))) {
+  if (!checkSmartAllocationRateLimit(userData.user.id)) {
     return NextResponse.json({ error: "Smart allocation rate limit exceeded. Try again in a minute." }, { status: 429 });
   }
 

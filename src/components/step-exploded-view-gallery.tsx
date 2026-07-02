@@ -1,9 +1,10 @@
 "use client";
 
 import { Box, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ExplodedView } from "@/domain/step-exploded-views";
+import { refreshSignedMediaUrl } from "@/domain/supabase-planner";
 
 /**
  * Display of the SolidWorks exploded views attached to a procedure task — a thumbnail grid that opens
@@ -19,6 +20,36 @@ export function StepExplodedViewGallery({
   onDelete?: (view: ExplodedView) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Signed URLs expire after an hour, so an idle tab's <img> starts 4xx-ing. On the first load
+  // error per object we re-sign once and swap in the fresh URL; a second failure (or a failed
+  // re-sign, tracked as null) falls back to the placeholder tile instead of a broken image.
+  const [signedUrlOverrides, setSignedUrlOverrides] = useState<Record<string, string | null>>({});
+  const refreshedPathsRef = useRef(new Set<string>());
+
+  async function handleImageError(storagePath?: string) {
+    if (!storagePath) {
+      return;
+    }
+    if (refreshedPathsRef.current.has(storagePath)) {
+      setSignedUrlOverrides((current) =>
+        current[storagePath] === null ? current : { ...current, [storagePath]: null },
+      );
+      return;
+    }
+    refreshedPathsRef.current.add(storagePath);
+    const freshUrl = await refreshSignedMediaUrl(storagePath, "photo");
+    setSignedUrlOverrides((current) => ({ ...current, [storagePath]: freshUrl ?? null }));
+  }
+
+  function resolveImageSource(storagePath: string | undefined, fallbackUrl: string) {
+    if (storagePath) {
+      const override = signedUrlOverrides[storagePath];
+      if (override !== undefined) {
+        return override ?? "";
+      }
+    }
+    return fallbackUrl;
+  }
 
   function confirmDelete(view: ExplodedView) {
     if (!onDelete) {
@@ -59,7 +90,10 @@ export function StepExplodedViewGallery({
         <span className="ui-field-label mb-0 block">Exploded views · {views.length}</span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {views.map((view) => (
+        {views.map((view) => {
+          const thumbnailPath = view.thumbnailUrl ? view.thumbnailStoragePath : view.storagePath;
+          const thumbnailSrc = resolveImageSource(thumbnailPath, view.thumbnailUrl || view.dataUrl);
+          return (
           <div key={view.id} className="group relative h-20 w-20">
             <button
               type="button"
@@ -68,14 +102,21 @@ export function StepExplodedViewGallery({
               title={explodedViewTitle(view)}
               aria-label={`Open ${view.name}`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={view.thumbnailUrl || view.dataUrl}
-                alt={view.name}
-                loading="lazy"
-                decoding="async"
-                className="h-full w-full object-cover"
-              />
+              {thumbnailSrc ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={thumbnailSrc}
+                  alt={view.name}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                  onError={() => void handleImageError(thumbnailPath)}
+                />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center text-ink-tertiary" aria-hidden="true">
+                  <Box size={18} strokeWidth={1.5} />
+                </span>
+              )}
             </button>
             {onDelete ? (
               <button
@@ -89,7 +130,8 @@ export function StepExplodedViewGallery({
               </button>
             ) : null}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {active ? (
@@ -124,14 +166,24 @@ export function StepExplodedViewGallery({
               <X size={18} />
             </button>
           </div>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={active.dataUrl}
-            alt={active.name}
-            decoding="async"
-            className="max-h-[80vh] max-w-[90vw] object-contain"
-            onClick={(event) => event.stopPropagation()}
-          />
+          {resolveImageSource(active.storagePath, active.dataUrl) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={resolveImageSource(active.storagePath, active.dataUrl)}
+              alt={active.name}
+              decoding="async"
+              className="max-h-[80vh] max-w-[90vw] object-contain"
+              onClick={(event) => event.stopPropagation()}
+              onError={() => void handleImageError(active.storagePath)}
+            />
+          ) : (
+            <div
+              className="flex h-64 w-full max-w-[90vw] items-center justify-center rounded bg-surface-sunken text-ink-tertiary"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Box size={32} strokeWidth={1.5} aria-hidden="true" />
+            </div>
+          )}
           <div
             className="mt-3 max-w-[90vw] text-center text-sm text-canvas"
             onClick={(event) => event.stopPropagation()}

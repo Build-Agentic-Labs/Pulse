@@ -46,6 +46,7 @@ import {
   type PhotoTextAnnotation,
 } from "@/domain/photo-annotations";
 import type { StepPhotoAttachment } from "@/domain/step-photos";
+import { refreshSignedMediaUrl } from "@/domain/supabase-planner";
 import { ThemedSelect } from "./themed-select";
 
 type AnnotationContextMenu = {
@@ -355,6 +356,36 @@ export function StepPhotoViewer({
   const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
   const [contextMenu, setContextMenu] = useState<AnnotationContextMenu | null>(null);
   const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("minimized");
+  // Signed URLs expire after an hour, so an idle tab's <img> starts 4xx-ing. On the first load
+  // error per object we re-sign once and swap in the fresh URL; a second failure (or a failed
+  // re-sign, tracked as null) falls back to a placeholder instead of a broken image.
+  const [signedUrlOverrides, setSignedUrlOverrides] = useState<Record<string, string | null>>({});
+  const refreshedPathsRef = useRef(new Set<string>());
+
+  async function handlePhotoError(storagePath?: string) {
+    if (!storagePath) {
+      return;
+    }
+    if (refreshedPathsRef.current.has(storagePath)) {
+      setSignedUrlOverrides((current) =>
+        current[storagePath] === null ? current : { ...current, [storagePath]: null },
+      );
+      return;
+    }
+    refreshedPathsRef.current.add(storagePath);
+    const freshUrl = await refreshSignedMediaUrl(storagePath, "photo");
+    setSignedUrlOverrides((current) => ({ ...current, [storagePath]: freshUrl ?? null }));
+  }
+
+  function resolvePhotoSource(storagePath: string | undefined, fallbackUrl: string) {
+    if (storagePath) {
+      const override = signedUrlOverrides[storagePath];
+      if (override !== undefined) {
+        return override ?? "";
+      }
+    }
+    return fallbackUrl;
+  }
 
   const selectedAnnotation = useMemo(
     () => annotations.find((item) => item.id === selectedId) ?? null,
@@ -1313,13 +1344,20 @@ export function StepPhotoViewer({
       onClick={onClose}
     >
       <div className="ui-photo-viewer-frame" onClick={(event) => event.stopPropagation()}>
-        <img
-          src={photo.dataUrl}
-          alt={`Step ${stepSequence} photo ${photo.name}`}
-          decoding="async"
-          fetchPriority="high"
-          className="ui-photo-viewer-image"
-        />
+        {resolvePhotoSource(photo.storagePath, photo.dataUrl) ? (
+          <img
+            src={resolvePhotoSource(photo.storagePath, photo.dataUrl)}
+            alt={`Step ${stepSequence} photo ${photo.name}`}
+            decoding="async"
+            fetchPriority="high"
+            className="ui-photo-viewer-image"
+            onError={() => void handlePhotoError(photo.storagePath)}
+          />
+        ) : (
+          <div className="ui-photo-viewer-image flex min-h-64 items-center justify-center text-sm text-ink-tertiary">
+            Photo unavailable
+          </div>
+        )}
         <div
           ref={overlayRef}
           className={`ui-photo-viewer-annotation-layer ${activeTool === "select" ? "ui-photo-viewer-annotation-layer-select" : "ui-photo-viewer-annotation-layer-draw"}${dragState?.active ? " ui-photo-viewer-annotation-dragging" : ""}`}

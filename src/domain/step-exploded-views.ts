@@ -50,16 +50,20 @@ function sanitizeExplodedView(value: unknown): ExplodedView | null {
 
   const id = typeof value.id === "string" ? value.id : "";
   const dataUrl = typeof value.dataUrl === "string" ? value.dataUrl : "";
+  const storagePath = typeof value.storagePath === "string" ? value.storagePath : undefined;
+  const hasRenderableUrl = dataUrl.startsWith("data:image/") || /^https?:\/\//.test(dataUrl);
 
-  // Require an id and either an inline image data URL or an http(s) URL.
-  if (!id || (!dataUrl.startsWith("data:image/") && !/^https?:\/\//.test(dataUrl))) {
+  // Require an id, plus either a renderable URL (inline data URL or http(s)) or a storage path a
+  // fresh signed URL can be minted from. Signing can fail on load (private bucket); keeping the
+  // view with an empty dataUrl lets the gallery show a placeholder instead of dropping it.
+  if (!id || (!hasRenderableUrl && !storagePath)) {
     return null;
   }
 
   return {
     id,
     name: typeof value.name === "string" && value.name.trim() ? value.name : "Exploded view",
-    dataUrl,
+    dataUrl: hasRenderableUrl ? dataUrl : "",
     capturedAt:
       typeof value.capturedAt === "string" && value.capturedAt.trim()
         ? value.capturedAt
@@ -68,7 +72,7 @@ function sanitizeExplodedView(value: unknown): ExplodedView | null {
     sizeBytes: typeof value.sizeBytes === "number" ? value.sizeBytes : undefined,
     width: typeof value.width === "number" ? value.width : undefined,
     height: typeof value.height === "number" ? value.height : undefined,
-    storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
+    storagePath,
     thumbnailUrl: typeof value.thumbnailUrl === "string" ? value.thumbnailUrl : undefined,
     thumbnailStoragePath: typeof value.thumbnailStoragePath === "string" ? value.thumbnailStoragePath : undefined,
     caption: typeof value.caption === "string" ? value.caption : undefined,

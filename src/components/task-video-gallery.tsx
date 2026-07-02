@@ -1,9 +1,10 @@
 "use client";
 
 import { Film, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { TaskVideo } from "@/domain/task-videos";
+import { refreshSignedMediaUrl } from "@/domain/supabase-planner";
 
 /**
  * Build-animation videos attached to a task. A row of poster tiles that open a lightbox video player;
@@ -18,6 +19,36 @@ export function TaskVideoGallery({
   onDelete?: (video: TaskVideo) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Signed URLs expire after an hour, so an idle tab's <video>/<img> starts 4xx-ing. On the first
+  // load error per object we re-sign once and swap in the fresh URL; a second failure (or a failed
+  // re-sign, tracked as null) falls back to the placeholder instead of a broken player.
+  const [signedUrlOverrides, setSignedUrlOverrides] = useState<Record<string, string | null>>({});
+  const refreshedPathsRef = useRef(new Set<string>());
+
+  async function handleMediaError(storagePath?: string) {
+    if (!storagePath) {
+      return;
+    }
+    if (refreshedPathsRef.current.has(storagePath)) {
+      setSignedUrlOverrides((current) =>
+        current[storagePath] === null ? current : { ...current, [storagePath]: null },
+      );
+      return;
+    }
+    refreshedPathsRef.current.add(storagePath);
+    const freshUrl = await refreshSignedMediaUrl(storagePath, "video");
+    setSignedUrlOverrides((current) => ({ ...current, [storagePath]: freshUrl ?? null }));
+  }
+
+  function resolveMediaSource(storagePath: string | undefined, fallbackUrl: string) {
+    if (storagePath) {
+      const override = signedUrlOverrides[storagePath];
+      if (override !== undefined) {
+        return override ?? "";
+      }
+    }
+    return fallbackUrl;
+  }
 
   useEffect(() => {
     if (!activeId) {
@@ -66,9 +97,16 @@ export function TaskVideoGallery({
               title={video.caption?.trim() || video.name}
               aria-label={`Play ${video.name}`}
             >
-              {video.thumbnailUrl ? (
+              {video.thumbnailUrl && resolveMediaSource(video.thumbnailStoragePath, video.thumbnailUrl) ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={video.thumbnailUrl} alt={video.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                <img
+                  src={resolveMediaSource(video.thumbnailStoragePath, video.thumbnailUrl)}
+                  alt={video.name}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                  onError={() => void handleMediaError(video.thumbnailStoragePath)}
+                />
               ) : null}
               <span className="absolute flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-black">
                 <Film size={15} />
@@ -121,16 +159,26 @@ export function TaskVideoGallery({
               <X size={18} />
             </button>
           </div>
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video
-            src={active.videoUrl}
-            poster={active.thumbnailUrl}
-            controls
-            autoPlay
-            loop
-            className="max-h-[80vh] max-w-[90vw] rounded bg-black"
-            onClick={(event) => event.stopPropagation()}
-          />
+          {resolveMediaSource(active.storagePath, active.videoUrl) ? (
+            // eslint-disable-next-line jsx-a11y/media-has-caption
+            <video
+              src={resolveMediaSource(active.storagePath, active.videoUrl)}
+              poster={active.thumbnailUrl}
+              controls
+              autoPlay
+              loop
+              className="max-h-[80vh] max-w-[90vw] rounded bg-black"
+              onClick={(event) => event.stopPropagation()}
+              onError={() => void handleMediaError(active.storagePath)}
+            />
+          ) : (
+            <div
+              className="flex h-64 w-full max-w-[90vw] items-center justify-center rounded bg-black text-white/70"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Film size={32} strokeWidth={1.5} aria-hidden="true" />
+            </div>
+          )}
           <div
             className="mt-3 max-w-[90vw] text-center text-sm text-canvas"
             onClick={(event) => event.stopPropagation()}

@@ -33,16 +33,21 @@ function sanitizeVideo(value: unknown): TaskVideo | null {
 
   const id = typeof value.id === "string" ? value.id : "";
   const videoUrl = typeof value.videoUrl === "string" ? value.videoUrl : "";
+  const storagePath = typeof value.storagePath === "string" ? value.storagePath : undefined;
+  const hasRenderableUrl = /^https?:\/\//.test(videoUrl);
 
-  // Require an id and an http(s) URL (videos are streamed from Storage, never inlined).
-  if (!id || !/^https?:\/\//.test(videoUrl)) {
+  // Require an id, plus either an http(s) URL (videos are streamed from Storage, never inlined) or
+  // a storage path a fresh signed URL can be minted from. Signing can fail on load (private
+  // bucket); keeping the video with an empty videoUrl lets the gallery show a placeholder instead
+  // of dropping it.
+  if (!id || (!hasRenderableUrl && !storagePath)) {
     return null;
   }
 
   return {
     id,
     name: typeof value.name === "string" && value.name.trim() ? value.name : "Build animation",
-    videoUrl,
+    videoUrl: hasRenderableUrl ? videoUrl : "",
     capturedAt:
       typeof value.capturedAt === "string" && value.capturedAt.trim()
         ? value.capturedAt
@@ -52,7 +57,7 @@ function sanitizeVideo(value: unknown): TaskVideo | null {
     durationSeconds: typeof value.durationSeconds === "number" ? value.durationSeconds : undefined,
     width: typeof value.width === "number" ? value.width : undefined,
     height: typeof value.height === "number" ? value.height : undefined,
-    storagePath: typeof value.storagePath === "string" ? value.storagePath : undefined,
+    storagePath,
     thumbnailUrl: typeof value.thumbnailUrl === "string" ? value.thumbnailUrl : undefined,
     thumbnailStoragePath: typeof value.thumbnailStoragePath === "string" ? value.thumbnailStoragePath : undefined,
     caption: typeof value.caption === "string" ? value.caption : undefined,

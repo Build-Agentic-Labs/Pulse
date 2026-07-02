@@ -10,9 +10,10 @@ integration is **two halves** that meet at a small HTTP contract:
 ```
 SolidWorks plugin (C# add-in, on the engineer's PC)        Pulse (Vercel + Supabase)
   uses the SolidWorks API:                                    app/api/solidworks/*
-   open assembly → read BOM/tree/custom props                   ├ GET  targets        (picker feed)
-   → auto-build explode → engineer tweaks → render PNG          └ POST exploded-view  (ingest)
-  "Send to Pulse" panel: login → pick Project→Task ───HTTP──► Storage + step_exploded_views + UI
+   open assembly → read BOM/tree/custom props                   ├ GET  targets          (picker feed)
+   → auto-build explode → engineer tweaks → render PNG          ├ POST exploded-view    (image ingest)
+   → (optional) motion study → render MP4/WebM                  └ POST build-animation  (video ingest)
+  "Send to Pulse" panel: login → pick Project→Task ───HTTP──► Storage + step_exploded_views/task_videos + UI
 ```
 
 ---
@@ -24,9 +25,10 @@ SolidWorks plugin (C# add-in, on the engineer's PC)        Pulse (Vercel + Supab
 | Domain model + helpers | `src/domain/step-exploded-views.ts` (`ExplodedView`, `getTaskExplodedViews`/add/upsert/remove, `normalizeComponents`) |
 | DB table + realtime | `supabase/migrations/20260617120000_step_exploded_views.sql` (table, reuses the `step-photos` bucket), `20260617130000_step_exploded_views_rls.sql` (authenticated per-project RLS, mirrors `step_photos`), `20260617140000_step_exploded_views_task_level.sql` (`step_id` nullable) |
 | Data-layer wiring | `src/domain/supabase-planner.ts` — row mapper, signing, indexing by task, hydration into `task.customFields["taskExplodedViews"]` on both loaders, realtime registration, `saveExplodedViewToSupabase` |
-| Ingest endpoint | `app/api/solidworks/exploded-view/route.ts` |
+| Ingest endpoint (images) | `app/api/solidworks/exploded-view/route.ts` |
+| Ingest endpoint (videos) | `app/api/solidworks/build-animation/route.ts` (task-level build animations → `task-videos` bucket + `task_videos` table) |
 | Picker feed | `app/api/solidworks/targets/route.ts` |
-| Viewer | `src/components/step-exploded-view-gallery.tsx`, shown in the planner procedure editors (`line-workspace.tsx`) and the operator mobile portal (`mobile-photo-portal.tsx`) |
+| Viewer | `src/components/step-exploded-view-gallery.tsx` and `src/components/task-video-gallery.tsx`, shown in the planner procedure editors (`line-workspace.tsx`) and the operator mobile portal (`mobile-photo-portal.tsx`) |
 
 Exploded views attach at the **task level** (one gallery per procedure task, shown in the task header
 next to the Operators metric), not per step. They are stored as a flat array in
@@ -74,8 +76,30 @@ A project's tasks (across all scenarios) for the Task picker; milestone/inspecti
   `taskId` and `projectId` are required (`projectId` scopes the storage path and the RLS access check).
 
 Response `{ "explodedView": { id, name, dataUrl, caption, solidworksFilePath, explodeConfigName,
-frameNumber, components, … } }`. Errors: `400` bad form, `403` wrong project, `413` too large,
-`415` bad type, `429` rate-limited.
+frameNumber, components, … } }` — `dataUrl` is a signed URL (the bucket is private). Errors: `400`
+bad form, `403` wrong project, `413` too large, `415` bad type, `429` rate-limited. Free-text
+metadata (`fileName`, `caption`, `solidworksFilePath`, `explodeConfigName`) is truncated to 500
+chars; `frameNumber` must be a non-negative number.
+
+### `POST /api/solidworks/build-animation`
+Task-level build animations (motion-study videos), same shape as the exploded-view ingest.
+`multipart/form-data` with two fields:
+- `file` — the rendered video (`video/mp4|webm`, ≤ 200 MB).
+- `meta` — JSON:
+  ```json
+  {
+    "projectId": "…", "taskId": "…",
+    "fileName": "Build animation 1", "caption": "…",
+    "solidworksFilePath": "C:/vault/ASM-1000.SLDASM",
+    "durationSeconds": 42.5
+  }
+  ```
+  `taskId` and `projectId` are required (`projectId` scopes the storage path and the RLS access check).
+
+Response `{ "video": { id, name, videoUrl, caption, solidworksFilePath, durationSeconds, … } }` —
+`videoUrl` is a signed URL (the bucket is private). Errors: `400` bad form, `403` wrong project,
+`413` too large, `415` bad type, `429` rate-limited. Free-text metadata (`fileName`, `caption`,
+`solidworksFilePath`) is truncated to 500 chars; `durationSeconds` must be a non-negative number.
 
 ---
 

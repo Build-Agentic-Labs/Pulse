@@ -1093,7 +1093,19 @@ async function signedStorageUrls(
   return resolved;
 }
 
-async function withSignedStepPhotoRows(supabase: SupabaseClient, rows: StepPhotoRow[] = []) {
+// A media row prepared for rendering: its URL columns are replaced by signed URLs, or left absent
+// when signing failed. The buckets are PRIVATE, so the stored public_url/thumbnail_url values (kept
+// only because the columns are NOT NULL) can never load -- falling back to them would render a
+// permanently-broken image, while an absent URL lets components show a placeholder and retry.
+type SignedMediaRow<T> = Omit<T, "public_url" | "thumbnail_url"> & {
+  public_url?: string;
+  thumbnail_url?: string | null;
+};
+
+async function withSignedStepPhotoRows(
+  supabase: SupabaseClient,
+  rows: StepPhotoRow[] = [],
+): Promise<SignedMediaRow<StepPhotoRow>[]> {
   const signedUrls = await signedStorageUrls(
     supabase,
     rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
@@ -1102,13 +1114,15 @@ async function withSignedStepPhotoRows(supabase: SupabaseClient, rows: StepPhoto
 
   return rows.map((row) => ({
     ...row,
-    public_url: (row.storage_path ? signedUrls.get(row.storage_path) : undefined) ?? row.public_url,
-    thumbnail_url:
-      (row.thumbnail_storage_path ? signedUrls.get(row.thumbnail_storage_path) : undefined) ?? row.thumbnail_url ?? null,
+    public_url: row.storage_path ? signedUrls.get(row.storage_path) : undefined,
+    thumbnail_url: (row.thumbnail_storage_path ? signedUrls.get(row.thumbnail_storage_path) : undefined) ?? null,
   }));
 }
 
-async function withSignedExplodedViewRows(supabase: SupabaseClient, rows: StepExplodedViewRow[] = []) {
+async function withSignedExplodedViewRows(
+  supabase: SupabaseClient,
+  rows: StepExplodedViewRow[] = [],
+): Promise<SignedMediaRow<StepExplodedViewRow>[]> {
   const signedUrls = await signedStorageUrls(
     supabase,
     rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
@@ -1117,14 +1131,16 @@ async function withSignedExplodedViewRows(supabase: SupabaseClient, rows: StepEx
 
   return rows.map((row) => ({
     ...row,
-    public_url: (row.storage_path ? signedUrls.get(row.storage_path) : undefined) ?? row.public_url,
-    thumbnail_url:
-      (row.thumbnail_storage_path ? signedUrls.get(row.thumbnail_storage_path) : undefined) ?? row.thumbnail_url ?? null,
+    public_url: row.storage_path ? signedUrls.get(row.storage_path) : undefined,
+    thumbnail_url: (row.thumbnail_storage_path ? signedUrls.get(row.thumbnail_storage_path) : undefined) ?? null,
   }));
 }
 
 // Videos live in their own bucket, so sign against it directly (the shared helpers target step-photos).
-async function withSignedTaskVideoRows(supabase: SupabaseClient, rows: TaskVideoRow[] = []) {
+async function withSignedTaskVideoRows(
+  supabase: SupabaseClient,
+  rows: TaskVideoRow[] = [],
+): Promise<SignedMediaRow<TaskVideoRow>[]> {
   const paths = [
     ...new Set(
       rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
@@ -1142,9 +1158,8 @@ async function withSignedTaskVideoRows(supabase: SupabaseClient, rows: TaskVideo
 
   return rows.map((row) => ({
     ...row,
-    public_url: (row.storage_path ? signed.get(row.storage_path) : undefined) ?? row.public_url,
-    thumbnail_url:
-      (row.thumbnail_storage_path ? signed.get(row.thumbnail_storage_path) : undefined) ?? row.thumbnail_url ?? null,
+    public_url: row.storage_path ? signed.get(row.storage_path) : undefined,
+    thumbnail_url: (row.thumbnail_storage_path ? signed.get(row.thumbnail_storage_path) : undefined) ?? null,
   }));
 }
 
@@ -1154,9 +1169,11 @@ async function withSignedToolLibraryRows(supabase: SupabaseClient, rows: ToolLib
     rows.map((row) => row.storage_path).filter((value): value is string => Boolean(value)),
   );
 
+  // Same private-bucket rule as the step assets: the stored image_url is a fabricated public URL
+  // that can never load, so an unsigned path yields an absent image, not a broken one.
   return rows.map((row) => ({
     ...row,
-    image_url: (row.storage_path ? signedUrls.get(row.storage_path) : undefined) ?? row.image_url ?? null,
+    image_url: (row.storage_path ? signedUrls.get(row.storage_path) : undefined) ?? null,
   }));
 }
 
@@ -1200,7 +1217,7 @@ function withNormalizedStepAssets(
   };
 }
 
-function indexStepPhotos(rows: StepPhotoRow[] = []) {
+function indexStepPhotos(rows: SignedMediaRow<StepPhotoRow>[] = []) {
   const photosByTaskId = new Map<string, Map<string, StepPhotoAttachment[]>>();
 
   rows
@@ -1217,7 +1234,7 @@ function indexStepPhotos(rows: StepPhotoRow[] = []) {
 }
 
 // Task-level: collect every exploded view for a task into one flat list (step_id is unused).
-function indexExplodedViews(rows: StepExplodedViewRow[] = []) {
+function indexExplodedViews(rows: SignedMediaRow<StepExplodedViewRow>[] = []) {
   const explodedViewsByTaskId = new Map<string, ExplodedView[]>();
 
   rows
@@ -1233,7 +1250,7 @@ function indexExplodedViews(rows: StepExplodedViewRow[] = []) {
   return explodedViewsByTaskId;
 }
 
-function indexTaskVideos(rows: TaskVideoRow[] = []) {
+function indexTaskVideos(rows: SignedMediaRow<TaskVideoRow>[] = []) {
   const videosByTaskId = new Map<string, TaskVideo[]>();
 
   rows
@@ -2937,12 +2954,52 @@ export async function upsertToolLibraryMetadata(input: {
   return mapToolLibraryRow(signedSaved);
 }
 
+type StorageObjectPathRow = { storage_path?: string | null; thumbnail_storage_path?: string | null };
+
+function storageObjectPaths(rows: StorageObjectPathRow[]): string[] {
+  return [
+    ...new Set(
+      rows
+        .flatMap((row) => [row.storage_path, row.thumbnail_storage_path])
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+}
+
+// Best-effort Storage object removal. The bucket DELETE policies allow anyone with per-project
+// 'edit' access, so this normally succeeds; failures are logged (never thrown) so storage cleanup
+// can never block or roll back the row-level operation it accompanies.
+async function removeStorageObjects(supabase: SupabaseClient, bucket: string, paths: string[]) {
+  if (paths.length === 0) {
+    return;
+  }
+
+  try {
+    await throwIfError(supabase.storage.from(bucket).remove(paths));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`Failed to remove ${paths.length} object(s) from the ${bucket} bucket: ${detail}`);
+  }
+}
+
 export async function deleteToolLibraryFromSupabase(id: string, projectId?: string) {
   const ensuredProjectId = requireToolLibraryProjectId(projectId, "removing tools from");
   const supabase = plannerClient();
+  // Read the storage path before the row delete so the object can be cleaned up afterwards.
+  const existing = (await throwIfError(
+    supabase
+      .from("tool_library")
+      .select("storage_path")
+      .eq("id", id)
+      .eq("project_id", ensuredProjectId)
+      .maybeSingle(),
+  )) as Pick<ToolLibraryRow, "storage_path"> | null;
   await throwIfError(
     supabase.from("tool_library").delete().eq("id", id).eq("project_id", ensuredProjectId),
   );
+  if (existing?.storage_path) {
+    await removeStorageObjects(supabase, stepPhotoBucket, [existing.storage_path]);
+  }
 }
 
 export async function softDeleteStepPhotoAttachmentFromSupabase(photoId: string, taskId?: string, projectId?: string) {
@@ -2963,18 +3020,13 @@ export async function softDeleteExplodedViewFromSupabase(viewId: string, taskId?
   );
 }
 
-// Best-effort removal of the stored image. The bucket's DELETE policy is owner/admin-only, so for a
-// plain editor this no-ops (the row is already soft-deleted, which is what hides the view).
+// Best-effort removal of the stored image (the row soft-delete is what hides the view; a Storage
+// failure is logged inside removeStorageObjects but never surfaced).
 export async function removeExplodedViewObject(view: Pick<ExplodedView, "storagePath">) {
   if (!view.storagePath) {
     return;
   }
-  const supabase = plannerClient();
-  try {
-    await throwIfError(supabase.storage.from(stepPhotoBucket).remove([view.storagePath]));
-  } catch {
-    /* row soft-delete already hid the view; storage cleanup is non-essential */
-  }
+  await removeStorageObjects(plannerClient(), stepPhotoBucket, [view.storagePath]);
 }
 
 export async function updateStepPhotoCaptionInSupabase(photoId: string, caption: string, taskId?: string, projectId?: string) {
@@ -2994,11 +3046,28 @@ export async function updateStepPhotoCaptionInSupabase(photoId: string, caption:
 export async function deletePlannerTask(taskId: string, projectId?: string) {
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
+  // Snapshot the task's storage object paths BEFORE the row delete: the FK cascade removes the
+  // step_photos/step_exploded_views/task_videos rows, after which the paths are unrecoverable and
+  // the objects would be orphaned in Storage. Soft-deleted rows are included on purpose -- the
+  // cascade removes them too, so their objects would otherwise orphan as well.
+  const [photoRows, explodedViewRows, videoRows] = await Promise.all([
+    throwIfError(supabase.from("step_photos").select("storage_path,thumbnail_storage_path").eq("task_id", taskId)),
+    throwIfError(supabase.from("step_exploded_views").select("storage_path,thumbnail_storage_path").eq("task_id", taskId)),
+    throwIfError(supabase.from("task_videos").select("storage_path,thumbnail_storage_path").eq("task_id", taskId)),
+  ]);
   // task_dependencies (both endpoints), manufacturing_steps, part_references, actual_events and
   // step_tools all FK to tasks ON DELETE CASCADE, so deleting the task atomically removes them.
   // The previous manual dependency deletes were redundant and opened a split-brain window
   // (edges gone, task still present) if the task delete then failed.
   await throwIfError(supabase.from("tasks").delete().eq("id", taskId));
+  // Best-effort storage cleanup once the delete has committed (photos and exploded views share the
+  // step-photos bucket; videos live in their own). Failures are logged, not thrown.
+  await removeStorageObjects(
+    supabase,
+    stepPhotoBucket,
+    storageObjectPaths([...((photoRows ?? []) as StorageObjectPathRow[]), ...((explodedViewRows ?? []) as StorageObjectPathRow[])]),
+  );
+  await removeStorageObjects(supabase, taskVideoBucket, storageObjectPaths((videoRows ?? []) as StorageObjectPathRow[]));
 }
 
 function mergeTaskWithServerVersions(localTask: Task, serverTask: Task): Task {
@@ -3407,8 +3476,54 @@ function toolLibraryId(toolName: string, projectId?: string) {
   return `tool-library-${scope}-${safeStorageSegment(toolName.trim().toLocaleLowerCase())}`;
 }
 
+// The value stored in the NOT NULL public_url/thumbnail_url/image_url columns. The buckets are
+// PRIVATE, so this URL can never actually load -- it is written only to satisfy the schema and is
+// never trusted on the read path (rendering always uses signed URLs; see SignedMediaRow).
 function stableStoragePublicUrl(storagePath: string) {
   return `${supabaseUrl}/storage/v1/object/public/${stepPhotoBucket}/${storagePath}`;
+}
+
+// Re-sign a storage object URL after the browser reports a load failure -- typically an expired
+// signed URL in a tab that sat idle past STORAGE_SIGNED_URL_SECONDS. Replaces the cached entry for
+// photo paths (videos are never cached; see withSignedTaskVideoRows) so subsequent renders reuse
+// the fresh URL. Returns undefined when re-signing fails, letting callers fall back to a placeholder.
+export async function refreshSignedMediaUrl(storagePath: string, kind: "photo" | "video"): Promise<string | undefined> {
+  if (!storagePath) {
+    return undefined;
+  }
+
+  const supabase = plannerClient();
+  const bucket = kind === "video" ? taskVideoBucket : stepPhotoBucket;
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(storagePath, STORAGE_SIGNED_URL_SECONDS);
+
+  if (error || !data?.signedUrl) {
+    console.warn(
+      `Failed to refresh the signed URL for ${bucket}/${storagePath}: ${error?.message ?? "no URL returned"}`,
+    );
+    return undefined;
+  }
+
+  if (kind === "photo") {
+    rememberSignedUrl(storagePath, data.signedUrl);
+  }
+  return data.signedUrl;
+}
+
+// Best-effort current-user lookup for attribution columns (uploaded_by). Reads the locally cached
+// session; failures are logged and treated as "unknown user" -- attribution never blocks a save.
+async function currentUserIdForAttribution(supabase: SupabaseClient): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      console.warn(`Could not resolve the current user for upload attribution: ${error.message}`);
+      return null;
+    }
+    return data.session?.user?.id ?? null;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`Could not resolve the current user for upload attribution: ${detail}`);
+    return null;
+  }
 }
 
 function mapToolLibraryRow(row: ToolLibraryRow): ToolLibraryItem {
@@ -3496,7 +3611,13 @@ async function syncStepToolsForTask(
   await throwIfError(supabase.from("step_tools").delete().in("id", staleToolIds));
 }
 
-function stepPhotoRow(taskId: string, stepId: string, photo: StepPhotoAttachment, project?: PlannerProjectContext): StepPhotoRow {
+function stepPhotoRow(
+  taskId: string,
+  stepId: string,
+  photo: StepPhotoAttachment,
+  project?: PlannerProjectContext,
+  uploadedBy: string | null = null,
+): StepPhotoRow {
   const storagePath = photo.storagePath || projectScopedStoragePath(taskId, stepId, photo, project);
 
   return {
@@ -3514,7 +3635,7 @@ function stepPhotoRow(taskId: string, stepId: string, photo: StepPhotoAttachment
     height: photo.height ?? null,
     caption: photo.caption?.trim() ? photo.caption.trim() : null,
     captured_at: photo.capturedAt,
-    uploaded_by: null,
+    uploaded_by: uploadedBy,
     deleted_at: null,
   };
 }
@@ -3527,7 +3648,8 @@ async function saveStepPhotoMetadataToSupabase(
 ) {
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, project?.projectId);
-  await throwIfError(supabase.from("step_photos").upsert(stepPhotoRow(taskId, stepId, photo, project)));
+  const uploadedBy = await currentUserIdForAttribution(supabase);
+  await throwIfError(supabase.from("step_photos").upsert(stepPhotoRow(taskId, stepId, photo, project, uploadedBy)));
 }
 
 export async function uploadStepPhotoAttachment(
@@ -3557,7 +3679,6 @@ export async function uploadStepPhotoAttachment(
     }),
   );
 
-  const publicUrl = stableStoragePublicUrl(storagePath);
   const signedUrl = await signedStorageUrl(supabase, storagePath, { cache: true });
   let thumbnailUrl: string | undefined;
   let thumbnailStoragePath: string | undefined;
@@ -3577,7 +3698,7 @@ export async function uploadStepPhotoAttachment(
 
   const uploadedPhoto = {
     ...photo,
-    dataUrl: signedUrl ?? publicUrl,
+    dataUrl: signedUrl ?? "",
     storagePath,
     thumbnailUrl,
     thumbnailStoragePath,
@@ -3586,6 +3707,12 @@ export async function uploadStepPhotoAttachment(
   };
 
   await saveStepPhotoMetadataToSupabase(taskId, stepId, uploadedPhoto, project);
+
+  // The bucket is private, so the fabricated public URL can never load -- returning it would hand
+  // the caller a permanently-broken image. The row is saved (a reload re-signs it), so fail loudly.
+  if (!signedUrl) {
+    throw new Error("The photo was saved, but a signed URL could not be created for it. Reload to retry.");
+  }
 
   return uploadedPhoto;
 }
@@ -3614,6 +3741,8 @@ export type ExplodedViewUploadInput = {
   width?: number;
   height?: number;
   project?: PlannerProjectContext;
+  // Authenticated uploader (auth user id) for the uploaded_by attribution column.
+  uploadedBy?: string;
 };
 
 // Server-side ingest for a SolidWorks exploded view: upload the rendered image, insert the
@@ -3672,16 +3801,22 @@ export async function saveExplodedViewToSupabase(
     frame_number: input.frameNumber ?? null,
     components: components ?? null,
     captured_at: new Date().toISOString(),
-    uploaded_by: null,
+    uploaded_by: input.uploadedBy ?? null,
     deleted_at: null,
   };
 
   await throwIfError(supabase.from("step_exploded_views").insert(row));
 
+  // The bucket is private, so the fabricated public URL can never load -- returning it would hand
+  // the caller a permanently-broken image. The row is saved (a reload re-signs it), so fail loudly.
+  if (!signedUrl) {
+    throw new Error("The exploded view was saved, but a signed URL could not be created for it. Reload to retry.");
+  }
+
   // Derive the returned view from the same row the load path maps, swapping in the signed URL.
   return {
     ...mapStepExplodedViewRecord(row as unknown as Record<string, unknown>),
-    dataUrl: signedUrl ?? publicUrl,
+    dataUrl: signedUrl,
   };
 }
 
@@ -3697,6 +3832,8 @@ export type TaskVideoUploadInput = {
   width?: number;
   height?: number;
   project?: PlannerProjectContext;
+  // Authenticated uploader (auth user id) for the uploaded_by attribution column.
+  uploadedBy?: string;
 };
 
 // Server-side ingest for a SolidWorks build animation: upload the video to the task-videos bucket
@@ -3738,15 +3875,21 @@ export async function saveTaskVideoToSupabase(input: TaskVideoUploadInput, supab
     caption: input.caption?.trim() ? input.caption.trim() : null,
     solidworks_file_path: input.solidworksFilePath?.trim() || null,
     captured_at: new Date().toISOString(),
-    uploaded_by: null,
+    uploaded_by: input.uploadedBy ?? null,
     deleted_at: null,
   };
 
   await throwIfError(supabase.from("task_videos").insert(row));
 
+  // Same private-bucket rule as exploded views: the fabricated public URL can never load, so an
+  // unsigned video is an explicit error rather than a permanently-broken player.
+  if (!signed?.signedUrl) {
+    throw new Error("The build animation was saved, but a signed URL could not be created for it. Reload to retry.");
+  }
+
   return {
     ...mapTaskVideoRecord(row as unknown as Record<string, unknown>),
-    videoUrl: signed?.signedUrl ?? publicUrl,
+    videoUrl: signed.signedUrl,
   };
 }
 
@@ -3758,17 +3901,13 @@ export async function softDeleteTaskVideoFromSupabase(videoId: string, taskId?: 
   await throwIfError(supabase.from("task_videos").update({ deleted_at: new Date().toISOString() }).eq("id", videoId));
 }
 
-// Best-effort storage removal (bucket DELETE policy is owner/admin-only; the row soft-delete hides it).
+// Best-effort removal of the stored video (the row soft-delete is what hides it; a Storage failure
+// is logged inside removeStorageObjects but never surfaced).
 export async function removeTaskVideoObject(video: Pick<TaskVideo, "storagePath">) {
   if (!video.storagePath) {
     return;
   }
-  const supabase = plannerClient();
-  try {
-    await throwIfError(supabase.storage.from(taskVideoBucket).remove([video.storagePath]));
-  } catch {
-    /* non-essential */
-  }
+  await removeStorageObjects(plannerClient(), taskVideoBucket, [video.storagePath]);
 }
 
 export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtimePayload) => void, scope?: PlannerRealtimeScope) {

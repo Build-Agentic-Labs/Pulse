@@ -12,6 +12,17 @@ type PlannerStateCacheRecord = {
   schemaVersion: number;
   savedAt: string;
   state: PlannerState;
+  // Which scenario the snapshot holds, and which scenario was the product's Main (default-loaded)
+  // scenario when it was written. Both are missing on records written before these fields existed;
+  // readers must treat that as "unknown scenario".
+  scenarioId?: string;
+  mainScenarioId?: string;
+};
+
+export type CachedPlannerSnapshot = {
+  state: PlannerState;
+  scenarioId?: string;
+  mainScenarioId?: string;
 };
 
 function canUseIndexedDb() {
@@ -66,7 +77,7 @@ export async function readCachedPlannerState(projectId?: string) {
 
   const database = await openPlannerCacheDb();
 
-  return new Promise<PlannerState | null>((resolve, reject) => {
+  return new Promise<CachedPlannerSnapshot | null>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readonly");
     const request = transaction.objectStore(STORE_NAME).get(projectId);
     request.onsuccess = () => {
@@ -75,13 +86,21 @@ export async function readCachedPlannerState(projectId?: string) {
         resolve(null);
         return;
       }
-      resolve(record.state);
+      resolve({
+        state: record.state,
+        scenarioId: record.scenarioId,
+        mainScenarioId: record.mainScenarioId,
+      });
     };
     request.onerror = () => reject(request.error ?? new Error("Unable to read planner cache."));
   });
 }
 
-export async function writeCachedPlannerState(projectId: string | undefined, state: PlannerState) {
+export async function writeCachedPlannerState(
+  projectId: string | undefined,
+  state: PlannerState,
+  mainScenarioId?: string,
+) {
   if (!projectId || !canUseIndexedDb()) {
     return;
   }
@@ -95,6 +114,8 @@ export async function writeCachedPlannerState(projectId: string | undefined, sta
       schemaVersion: SNAPSHOT_SCHEMA_VERSION,
       savedAt: new Date().toISOString(),
       state,
+      scenarioId: state.scenario.id,
+      mainScenarioId,
     } satisfies PlannerStateCacheRecord);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error ?? new Error("Unable to write planner cache."));

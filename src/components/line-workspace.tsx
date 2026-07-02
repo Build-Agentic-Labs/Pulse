@@ -364,15 +364,26 @@ const playbackSpeeds = [
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
 const PROCEDURE_SAVE_DEBUG = false;
 
-// Top-level free-text task fields a user types into directly (Task Description, Safety Notes, and the
-// task name). Unlike manufacturing-step fields these are NOT tracked by the per-step procedure-draft
-// system, so a stale server echo from our own in-flight save — or a remote refresh that lands between
-// keystrokes — would otherwise overwrite characters the user just typed. mergeServerTaskIntoLocalTask
-// preserves the local value for these when it can only be unsaved local typing.
-const LOCAL_EDITED_TASK_TEXT_FIELDS = ["name", "description", "safetyNotes"] as const satisfies ReadonlyArray<
-  keyof Task
->;
-const PROCEDURE_DRAFT_STORAGE_KEY = "buildlogic-line-planner-procedure-draft-v1";
+// Top-level free-text task fields a user types into directly (task name, Task Description, Safety
+// Notes, QC checklist, general notes, and the reference-link/material inputs). Unlike
+// manufacturing-step fields these are NOT tracked by the per-step procedure-draft system, so a stale
+// server echo from our own in-flight save — or a remote refresh that lands between keystrokes —
+// would otherwise overwrite characters the user just typed. mergeServerTaskIntoLocalTask preserves
+// the local value for these when it can only be unsaved local typing. customFields (custom Gantt
+// column cells) get the same treatment via a dedicated object-aware guard in
+// preserveLocalEditedTaskText, since this list is string-only.
+const LOCAL_EDITED_TASK_TEXT_FIELDS = [
+  "name",
+  "description",
+  "safetyNotes",
+  "notes",
+  "qcChecklist",
+  "sopLink",
+  "workInstructionLink",
+  "drawingLink",
+  "materialKit",
+] as const satisfies ReadonlyArray<keyof Task>;
+const PROCEDURE_DRAFT_STORAGE_KEY_PREFIX = "buildlogic-line-planner-procedure-draft-v1";
 const WORKSPACE_SNAPSHOT_STORAGE_PREFIX = "buildlogic-line-planner-workspace-v1";
 const PROJECT_SWITCH_EVENT = "pulse:project-switch-start";
 const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
@@ -504,6 +515,13 @@ function workspaceSnapshotStorageKey(projectId?: string) {
   return `${WORKSPACE_SNAPSHOT_STORAGE_PREFIX}:${projectId || "default"}`;
 }
 
+// Procedure drafts are per-project. A single global key let drafts recovered on one project leak
+// into (or be cleared by) another; drafts written under the old un-scoped key cannot be attributed
+// to a project safely, so they are intentionally ignored.
+function procedureDraftStorageKey(projectId?: string) {
+  return `${PROCEDURE_DRAFT_STORAGE_KEY_PREFIX}:${projectId || "default"}`;
+}
+
 function isKnownModule(moduleId: unknown): moduleId is string {
   return typeof moduleId === "string" && [...plannerModules, { id: "settings" }].some((module) => module.id === moduleId);
 }
@@ -551,13 +569,13 @@ function writeWorkspaceSnapshot(projectId: string | undefined, snapshot: Workspa
   }
 }
 
-function readProcedureDraftSnapshot() {
+function readProcedureDraftSnapshot(projectId?: string) {
   if (typeof window === "undefined") {
     return undefined;
   }
 
   try {
-    const rawDraft = window.localStorage.getItem(PROCEDURE_DRAFT_STORAGE_KEY);
+    const rawDraft = window.localStorage.getItem(procedureDraftStorageKey(projectId));
     if (!rawDraft) {
       return undefined;
     }
@@ -598,7 +616,7 @@ function readProcedureDraftSnapshot() {
   }
 }
 
-function writeProcedureDraftSnapshot(task: Task) {
+function writeProcedureDraftSnapshot(projectId: string | undefined, task: Task) {
   if (typeof window === "undefined") {
     return;
   }
@@ -610,20 +628,20 @@ function writeProcedureDraftSnapshot(task: Task) {
   };
 
   try {
-    window.localStorage.setItem(PROCEDURE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    window.localStorage.setItem(procedureDraftStorageKey(projectId), JSON.stringify(draft));
   } catch {
     // The in-memory editor state remains the immediate source of truth if local storage is unavailable.
   }
 }
 
-function writeProcedureFieldDraftSnapshot(drafts: ProcedureDraftMap) {
+function writeProcedureFieldDraftSnapshot(projectId: string | undefined, drafts: ProcedureDraftMap) {
   if (typeof window === "undefined") {
     return;
   }
 
   const fields = Object.values(drafts).filter((field) => field.dirty);
   if (fields.length === 0) {
-    clearProcedureDraftSnapshot();
+    clearProcedureDraftSnapshot(projectId);
     return;
   }
 
@@ -634,25 +652,25 @@ function writeProcedureFieldDraftSnapshot(drafts: ProcedureDraftMap) {
   };
 
   try {
-    window.localStorage.setItem(PROCEDURE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    window.localStorage.setItem(procedureDraftStorageKey(projectId), JSON.stringify(draft));
   } catch {
     // The in-memory editor state remains the immediate source of truth if local storage is unavailable.
   }
 }
 
-function clearProcedureDraftSnapshot(taskId?: string) {
+function clearProcedureDraftSnapshot(projectId?: string, taskId?: string) {
   if (typeof window === "undefined") {
     return;
   }
 
   if (taskId) {
-    const currentDraft = readProcedureDraftSnapshot();
+    const currentDraft = readProcedureDraftSnapshot(projectId);
     if (currentDraft && "version" in currentDraft && currentDraft.version === 2) {
       const remainingFields = currentDraft.fields.filter((field) => field.taskId !== taskId);
       if (remainingFields.length > 0) {
         try {
           window.localStorage.setItem(
-            PROCEDURE_DRAFT_STORAGE_KEY,
+            procedureDraftStorageKey(projectId),
             JSON.stringify({ version: 2, fields: remainingFields, savedAt: new Date().toISOString() }),
           );
         } catch {
@@ -666,7 +684,7 @@ function clearProcedureDraftSnapshot(taskId?: string) {
   }
 
   try {
-    window.localStorage.removeItem(PROCEDURE_DRAFT_STORAGE_KEY);
+    window.localStorage.removeItem(procedureDraftStorageKey(projectId));
   } catch {
     // Ignore local storage cleanup failures.
   }
@@ -5301,6 +5319,14 @@ export function LineWorkspace({
   const remoteTaskRefreshTimerRef = useRef<number | null>(null);
   const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
   const loadedProjectIdRef = useRef<string | undefined>(undefined);
+  // True only once the REMOTE planner load has applied for the loaded project. A cached IndexedDB
+  // snapshot alone must never enable the shell autosave: savePlannerShellToSupabase is a destructive
+  // diff-save, and persisting a stale snapshot would delete rows teammates added since it was written.
+  const remoteStateConfirmedRef = useRef(false);
+  // The product's Main scenario id (earliest-created, what an unqualified remote load fetches).
+  // Recorded alongside cache writes so a reload can tell whether the cached snapshot matches the
+  // scenario the remote load will return.
+  const mainScenarioIdRef = useRef<string | undefined>(undefined);
   const hasLoadedAnyProjectRef = useRef(hasRecentProjectSwitchSession());
   const projectSwitchStartedAtRef = useRef<number | undefined>(recentProjectSwitchStartedAt());
   const projectSwitchSkeletonTimerRef = useRef<number | null>(null);
@@ -5379,6 +5405,13 @@ export function LineWorkspace({
       cancelled = true;
     };
   }, [derivedState.product.id, hasLoadedRemoteState]);
+
+  // Keep the Main scenario id current whenever the switcher list refreshes (earliest first = Main).
+  useEffect(() => {
+    if (scenarios.length > 0) {
+      mainScenarioIdRef.current = scenarios[0].id;
+    }
+  }, [scenarios]);
 
   useEffect(() => {
     function handlePageHide() {
@@ -5698,6 +5731,17 @@ export function LineWorkspace({
       }
     }
 
+    // customFields hold user-typed custom Gantt column values — same echo/refresh race as the text
+    // fields, but it is an object, so compare structurally (the map is rebuilt immutably on every
+    // keystroke, making reference equality useless). Local wins under the same conditions as above.
+    if (
+      localTask.customFields !== undefined &&
+      localTask.customFields !== mergedTask.customFields &&
+      JSON.stringify(localTask.customFields) !== JSON.stringify(mergedTask.customFields)
+    ) {
+      preserved.customFields = localTask.customFields;
+    }
+
     if (Object.keys(preserved).length === 0) {
       return mergedTask;
     }
@@ -5758,7 +5802,7 @@ export function LineWorkspace({
   }
 
   function updateProcedureDraftSnapshotStorage() {
-    writeProcedureFieldDraftSnapshot(procedureDraftsRef.current);
+    writeProcedureFieldDraftSnapshot(projectId, procedureDraftsRef.current);
   }
 
   function cleanupCleanProcedureDrafts(taskId?: string) {
@@ -6017,7 +6061,7 @@ export function LineWorkspace({
             : task,
         ),
       };
-      void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
+      void writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
       return nextState;
     });
   }
@@ -6224,7 +6268,7 @@ export function LineWorkspace({
       const previousDrafts = procedureDraftsRef.current;
       const previousQueues = procedureSaveQueuesRef.current;
       const previousDeferred = deferredProcedureServerUpdatesRef.current;
-      const previousStorage = window.localStorage.getItem(PROCEDURE_DRAFT_STORAGE_KEY);
+      const previousStorage = window.localStorage.getItem(procedureDraftStorageKey(projectId));
 
       try {
         procedureDraftsRef.current = {};
@@ -6236,9 +6280,9 @@ export function LineWorkspace({
         procedureSaveQueuesRef.current = previousQueues;
         deferredProcedureServerUpdatesRef.current = previousDeferred;
         if (previousStorage === null) {
-          window.localStorage.removeItem(PROCEDURE_DRAFT_STORAGE_KEY);
+          window.localStorage.removeItem(procedureDraftStorageKey(projectId));
         } else {
-          window.localStorage.setItem(PROCEDURE_DRAFT_STORAGE_KEY, previousStorage);
+          window.localStorage.setItem(procedureDraftStorageKey(projectId), previousStorage);
         }
       }
     }
@@ -6528,6 +6572,12 @@ export function LineWorkspace({
   }, [hasAutosaveHarnessParam]);
 
   function flushPendingPlannerSave() {
+    // Until the remote load has confirmed the state we're editing, the shell diff-save must never
+    // run: flushing a cache-era snapshot would delete rows added remotely since it was written.
+    if (!remoteStateConfirmedRef.current) {
+      return;
+    }
+
     if (!plannerDirtyRef.current && !plannerSaveTimerRef.current) {
       return;
     }
@@ -6576,6 +6626,17 @@ export function LineWorkspace({
   // failed/partial save. Realtime re-subscribes automatically via the derivedState.scenario.id effect.
   // Flush + await all local saves before a scenario action; on failure show a warning and return false.
   async function ensureSavedBeforeScenarioAction(failTitle: string, failBody: string): Promise<boolean> {
+    // Without a confirmed remote load there is no safe way to persist local changes (the shell save
+    // stays disabled); surface an error instead of waiting for a save that can never run.
+    if (!remoteStateConfirmedRef.current) {
+      notifyFeedback({
+        title: failTitle,
+        body: "The latest database state hasn't finished loading, so local changes can't be saved safely yet. Try again in a moment.",
+        tone: "warning",
+      });
+      return false;
+    }
+
     flushPendingPlannerSave();
     const saved = await waitForLocalSavesToSettle();
     if (!saved) {
@@ -6788,14 +6849,31 @@ export function LineWorkspace({
     }
   }
 
+  // Whether the workspace still shows the project + scenario a refresh was started for. Refreshes
+  // resolve asynchronously; by then the user may have switched, and applying (or caching) the
+  // fetched result would contaminate the newly loaded view. Reads live values from refs so that
+  // in-flight promise callbacks are not fooled by their captured render's scope.
+  function isRefreshTargetCurrent(forProjectId: string, forScenarioId: string) {
+    return (
+      latestDerivedStateRef.current.scenario.id === forScenarioId && loadedProjectIdRef.current === forProjectId
+    );
+  }
+
   function refreshTasksFromSupabase(taskIds: string[]) {
     if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
       return;
     }
 
+    const forProjectId = projectId ?? "";
+    const forScenarioId = latestDerivedStateRef.current.scenario.id;
+
     void Promise.all(taskIds.map((taskId) => loadTaskFromSupabase(taskId, projectId)))
       .then((latestTasks) => {
+        if (!isRefreshTargetCurrent(forProjectId, forScenarioId)) {
+          return;
+        }
+
         if (hasPlannerShellSaveWork()) {
           pendingRemoteRefreshRef.current = true;
           return;
@@ -6836,13 +6914,16 @@ export function LineWorkspace({
             ...current,
             tasks: [...mergedTasks, ...insertedTasks],
           };
-          void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
+          void writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
           return nextState;
         });
         setSaveError(undefined);
         setSaveState("saved");
       })
       .catch(() => {
+        if (!isRefreshTargetCurrent(forProjectId, forScenarioId)) {
+          return;
+        }
         requestRemotePlannerRefresh();
       });
   }
@@ -6876,8 +6957,15 @@ export function LineWorkspace({
     // Refresh the ACTIVE scenario, not the product's default. Without the scenario id this reloads the
     // earliest (Main) scenario and overwrites whichever projection is open -- the "switch bounces back
     // to Main" bug. The active scenario id is read live from the derived-state ref.
-    void loadPlannerStateFromSupabase(projectId, latestDerivedStateRef.current.scenario.id)
+    const forProjectId = projectId ?? "";
+    const forScenarioId = latestDerivedStateRef.current.scenario.id;
+
+    void loadPlannerStateFromSupabase(projectId, forScenarioId)
       .then((savedState) => {
+        if (!isRefreshTargetCurrent(forProjectId, forScenarioId)) {
+          return;
+        }
+
         if (!savedState || hasPlannerShellSaveWork()) {
           pendingRemoteRefreshRef.current = true;
           return;
@@ -6919,7 +7007,7 @@ export function LineWorkspace({
               ...current.tasks.filter((task) => !savedTaskIds.has(task.id) && hasDirtyOrActiveProcedureDrafts(task.id)),
             ],
           };
-          void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
+          void writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
           return nextState;
         });
         setSelectedTaskId((currentTaskId) =>
@@ -6936,6 +7024,9 @@ export function LineWorkspace({
         setSaveState("saved");
       })
       .catch((error: unknown) => {
+        if (!isRefreshTargetCurrent(forProjectId, forScenarioId)) {
+          return;
+        }
         setSaveError(error instanceof Error ? error.message : "Unable to refresh database changes.");
         setSaveState("error");
       });
@@ -7000,13 +7091,18 @@ export function LineWorkspace({
     setIsProjectSwitching(isSwitchingProject);
     setHasLoadedRemoteState((loaded) => (isSwitchingProject && loaded ? true : false));
     setSaveState("loading");
+    // The shell autosave stays disabled until THIS project's remote load confirms the state; a
+    // cached snapshot alone must never be diff-saved back to the database.
+    remoteStateConfirmedRef.current = false;
+    mainScenarioIdRef.current = undefined;
 
     function applyLoadedPlannerState(savedState: PlannerState, source: "cache" | "remote") {
       const normalizedSavedState = ensureNomenclatureCollections(savedState);
-      const procedureDraft = readProcedureDraftSnapshot();
+      const procedureDraft = readProcedureDraftSnapshot(projectId);
       const workspaceSnapshot = readWorkspaceSnapshot(projectId);
       let recoveredTaskIds: string[] = [];
       let recoveredTask: Task | undefined;
+      let hasUnmatchedRecoveredDrafts = false;
       let hydratedState = normalizedSavedState;
 
       if (procedureDraft && "version" in procedureDraft && procedureDraft.version === 2) {
@@ -7023,7 +7119,13 @@ export function LineWorkspace({
           procedureDraftLog("recovery restored a draft", recoveredDrafts[key]);
         });
         procedureDraftsRef.current = recoveredDrafts;
-        recoveredTaskIds = [...new Set(procedureDraft.fields.map((field) => field.taskId))];
+        // Only drafts whose task exists in this load can be re-saved here. Others (e.g. another
+        // scenario's tasks) stay in storage for a later load instead of flagging a phantom draft.
+        const recoveredDraftTaskIds = [...new Set(procedureDraft.fields.map((field) => field.taskId))];
+        recoveredTaskIds = recoveredDraftTaskIds.filter((taskId) =>
+          normalizedSavedState.tasks.some((task) => task.id === taskId),
+        );
+        hasUnmatchedRecoveredDrafts = recoveredTaskIds.length < recoveredDraftTaskIds.length;
         hydratedState = {
           ...normalizedSavedState,
           tasks: normalizedSavedState.tasks.map((task) => applyProcedureDraftsToTask(task, recoveredDrafts)),
@@ -7039,6 +7141,8 @@ export function LineWorkspace({
             ...normalizedSavedState,
             tasks: normalizedSavedState.tasks.map((task) => (task.id === mergedDraftTask.id ? mergedDraftTask : task)),
           };
+        } else {
+          hasUnmatchedRecoveredDrafts = true;
         }
       }
       const snapshotTask = workspaceSnapshot?.selectedTaskId
@@ -7091,9 +7195,18 @@ export function LineWorkspace({
         return;
       }
 
+      // Only a confirmed remote load may enable the shell autosave. An unqualified remote load
+      // always returns the product's Main scenario, so record its id for future cache writes.
+      remoteStateConfirmedRef.current = true;
+      mainScenarioIdRef.current = hydratedState.scenario.id;
+      // The remote state just replaced whatever was on screen (including any cache-era edits, by
+      // design), so no unsaved shell work remains; a dangling dirty flag would defer realtime
+      // refreshes forever since the gated autosave never ran to clear it.
+      plannerDirtyRef.current = false;
+
       finishProjectSwitch();
 
-      void writeCachedPlannerState(projectId, hydratedState).catch(() => undefined);
+      void writeCachedPlannerState(projectId, hydratedState, mainScenarioIdRef.current).catch(() => undefined);
 
       if (recoveredTaskIds.length > 0) {
         setSaveState("draft");
@@ -7108,13 +7221,25 @@ export function LineWorkspace({
         return;
       }
 
-      clearProcedureDraftSnapshot();
+      // Keep drafts that matched no task in this load (they belong to a different scenario);
+      // clearing them here would destroy recoverable typing.
+      if (!hasUnmatchedRecoveredDrafts) {
+        clearProcedureDraftSnapshot(projectId);
+      }
       setSaveState("saved");
     }
 
     void readCachedPlannerState(projectId)
-      .then((cachedState) => {
-        if (!mounted || remoteLoaded || !cachedState) {
+      .then((cachedSnapshot) => {
+        if (!mounted || remoteLoaded || !cachedSnapshot) {
+          return;
+        }
+
+        // The remote load below fetches the product's Main scenario. Painting a cached snapshot of
+        // a different -- or unknown (older cache records) -- scenario would flash the wrong Gantt
+        // until the remote result replaces it, so skip straight to the skeleton in that case.
+        const { state: cachedState, scenarioId, mainScenarioId } = cachedSnapshot;
+        if (!scenarioId || !mainScenarioId || scenarioId !== mainScenarioId) {
           return;
         }
 
@@ -7152,6 +7277,8 @@ export function LineWorkspace({
         }
         loadedProjectIdRef.current = currentProjectId;
         hasLoadedAnyProjectRef.current = true;
+        // The remote answered (an empty project); local edits from here start from confirmed state.
+        remoteStateConfirmedRef.current = true;
         finishProjectSwitch();
         setHasLoadedRemoteState(true);
         setSaveState("idle");
@@ -7162,6 +7289,9 @@ export function LineWorkspace({
         }
         remoteLoaded = true;
 
+        // The remote load failed, so the on-screen state (possibly a stale cache) is unconfirmed:
+        // remoteStateConfirmedRef stays false, keeping the destructive shell autosave disabled, and
+        // the save indicator stays in "error" instead of pretending a cache-only state is saved.
         setSaveError(error instanceof Error ? error.message : "Unable to load database state.");
         finishProjectSwitch();
         setHasLoadedRemoteState(true);
@@ -7230,17 +7360,35 @@ export function LineWorkspace({
       // Drop any task ids still queued for the scenario we're leaving -- otherwise a same-project
       // scenario switch would refresh them into (and contaminate) the next scenario's task list.
       pendingRemoteTaskIdsRef.current.clear();
-      Object.values(procedureSaveTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+      // FLUSH -- don't drop -- debounced procedure saves for the scope we're leaving; clearing the
+      // timers alone would silently discard the user's last keystrokes. Best effort: the queue
+      // snapshots were prepared when the save was scheduled, and startProcedureTaskSave no-ops if
+      // they are gone. (Scenario switches drain saves beforehand, so this mostly fires on unmount.)
+      Object.entries(procedureSaveTimersRef.current).forEach(([taskId, timerId]) => {
+        window.clearTimeout(timerId);
+        void startProcedureTaskSave(taskId);
+      });
       procedureSaveTimersRef.current = {};
       Object.values(procedureRetryTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
       procedureRetryTimersRef.current = {};
+      // NOTE: the project-switch skeleton timer is intentionally NOT cleared here. This cleanup
+      // re-runs on every product/scenario change -- exactly when finishProjectSwitch has just armed
+      // the timer -- and clearing it wedged the workspace on the switch skeleton forever. It is
+      // cleared by a dedicated unmount-only effect below instead.
+      unsubscribe();
+    };
+  }, [derivedState.product.id, derivedState.scenario.id, hasLoadedRemoteState]);
+
+  // Unmount-only cleanup for the project-switch skeleton timer (see note in the effect above).
+  useEffect(
+    () => () => {
       if (projectSwitchSkeletonTimerRef.current) {
         window.clearTimeout(projectSwitchSkeletonTimerRef.current);
         projectSwitchSkeletonTimerRef.current = null;
       }
-      unsubscribe();
-    };
-  }, [derivedState.product.id, derivedState.scenario.id, hasLoadedRemoteState]);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!SIMULATION_ENABLED || !isPlaying) {
@@ -7283,6 +7431,13 @@ export function LineWorkspace({
 
   useEffect(() => {
     if (!hasLoadedRemoteState || dirtyVersion === 0) {
+      return;
+    }
+
+    // A cached snapshot may be editable before the remote load lands, but it must never autosave:
+    // the shell save is a destructive diff, and persisting stale state would delete teammates'
+    // newer tasks. The remote apply replaces local state wholesale, so nothing is lost by waiting.
+    if (!remoteStateConfirmedRef.current) {
       return;
     }
 
@@ -7543,7 +7698,7 @@ export function LineWorkspace({
     saveInFlightRef.current = false;
     plannerDirtyRef.current = false;
     if (lastPersistedState) {
-      void writeCachedPlannerState(projectId, lastPersistedState).catch(() => undefined);
+      void writeCachedPlannerState(projectId, lastPersistedState, mainScenarioIdRef.current).catch(() => undefined);
     }
     setSaveState("saved");
     flushDeferredRemoteRefresh();
@@ -7712,7 +7867,7 @@ export function LineWorkspace({
               : task,
           ),
         };
-        void writeCachedPlannerState(projectId, nextState).catch(() => undefined);
+        void writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
         return nextState;
       });
 
@@ -8058,7 +8213,9 @@ export function LineWorkspace({
     void moveManufacturingStepToTaskInSupabase(nextSourceTask, nextTargetTask, stepId, scheduledTasks, projectId)
       .then(() => {
         setSaveState("saved");
-        void writeCachedPlannerState(projectId, { ...previousState, tasks: scheduledTasks }).catch(() => undefined);
+        void writeCachedPlannerState(projectId, { ...previousState, tasks: scheduledTasks }, mainScenarioIdRef.current).catch(
+          () => undefined,
+        );
         notifyFeedback({
           title: "Step moved",
           body: `Moved the step to ${taskDisplayCode(nextTargetTask)} ${nextTargetTask.name || "Untitled task"}.`,
@@ -8108,6 +8265,16 @@ export function LineWorkspace({
   }
 
   async function applyProjectTasksUpdate(nextTasks: Task[], options?: { silent?: boolean }) {
+    // This path runs the destructive shell diff-save directly; refuse it until the remote load has
+    // confirmed the state being edited (a cached snapshot could delete teammates' newer tasks).
+    if (!remoteStateConfirmedRef.current) {
+      const message = "The latest database state hasn't finished loading yet. Try again in a moment.";
+      setSaveError(message);
+      setSaveState("error");
+      notifyFeedback({ title: "Save blocked", body: message, tone: "warning" });
+      return;
+    }
+
     setSaveError(undefined);
     setSaveState("saving");
 
@@ -9364,7 +9531,7 @@ export function LineWorkspace({
           projectId,
         );
         await saveTasksToSupabase(changedTasks, projectId);
-        await writeCachedPlannerState(projectId, nextState);
+        await writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current);
         setSaveState("saved");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to save Gantt order.";

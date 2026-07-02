@@ -3,15 +3,16 @@ import {
   DEFAULT_EXTRACTION_MODEL,
   SOP_EXTRACTION_TOOL,
   SOP_SYSTEM_PROMPT,
-  type ExtractedSop,
 } from "@/domain/sop/extraction";
+import { validateExtractedSop } from "@/domain/sop/extraction-validate";
 import { prepareSopUpload, type PreparedSopUpload } from "@/lib/sop/parse-document";
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Document reading + an LLM round-trip can exceed the default serverless window.
-export const maxDuration = 60;
+// Reading a long document + a long structured generation can take minutes; use the
+// full window Vercel functions allow rather than cutting real conversions off at 60s.
+export const maxDuration = 300;
 
 // Cap upload size so a huge file can't OOM the function or blow the time budget.
 // docx is parsed in-process by mammoth; a PDF is base64-encoded and sent to Claude,
@@ -20,11 +21,37 @@ const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20 MB
 
 const SOP_INSTRUCTION = "Convert this legacy SOP into the standardized schema.";
 
+// claude-sonnet-4-6 supports up to 64K output tokens; 32K comfortably fits very long
+// SOPs while leaving headroom. Override with SOP_EXTRACTION_MAX_TOKENS if needed.
+const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
+
+function resolveMaxOutputTokens(): number {
+  const parsed = Number.parseInt(process.env.SOP_EXTRACTION_MAX_TOKENS ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
+// The Claude API rejects PDFs beyond its ~100-page limit and oversized requests as 4xx
+// invalid-request errors. Those are the user's document's fault, not a conversion
+// failure — detect them so the route can answer 422 with an actionable message.
+function isDocumentTooLargeError(error: unknown): boolean {
+  if (!(error instanceof Anthropic.APIError)) return false;
+  const status = error.status ?? 0;
+  if (status < 400 || status >= 500) return false;
+  if (status === 413) return true;
+  const message = error.message.toLowerCase();
+  return (
+    (message.includes("page") && /limit|maximum|exceed|too many/.test(message)) ||
+    message.includes("too large") ||
+    message.includes("request_too_large")
+  );
+}
+
 // Each conversion is a full LLM round-trip (up to 20 MB of PDF); cap per-user throughput.
 const checkExtractionRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 5 });
 
 // Build the Claude user-turn content for the upload. The PDF rides as a document block
-// (Claude reads/OCRs it); docx text is sent inline. Either way this sits AFTER the cached
+// (Claude reads/OCRs it); docx HTML is sent inline, preceded by any embedded images
+// (usually the process flowchart) as image blocks. Either way this sits AFTER the cached
 // system + tool prefix, so it doesn't invalidate the prompt cache.
 function buildUserContent(upload: PreparedSopUpload): Anthropic.ContentBlockParam[] {
   if (upload.kind === "pdf") {
@@ -38,6 +65,10 @@ function buildUserContent(upload: PreparedSopUpload): Anthropic.ContentBlockPara
   }
 
   return [
+    ...upload.images.map<Anthropic.ContentBlockParam>((image) => ({
+      type: "image",
+      source: { type: "base64", media_type: image.mediaType, data: image.base64 },
+    })),
     {
       type: "text",
       text: `${SOP_INSTRUCTION}\n\n<sop_document>\n${upload.text}\n</sop_document>`,
@@ -123,21 +154,29 @@ export async function POST(request: Request) {
     const client = new Anthropic({ apiKey });
     const model = process.env.SOP_EXTRACTION_MODEL || DEFAULT_EXTRACTION_MODEL;
 
-    const message = await client.messages.create({
-      model,
-      max_tokens: 8192,
-      // Cache the (large, stable) instructions + tool schema across uploads.
-      system: [{ type: "text", text: SOP_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-      tools: [SOP_EXTRACTION_TOOL as unknown as Anthropic.Tool],
-      tool_choice: { type: "tool", name: SOP_EXTRACTION_TOOL.name },
-      messages: [{ role: "user", content: buildUserContent(upload) }],
-    });
+    const maxTokens = resolveMaxOutputTokens();
 
-    // A truncated response yields partial tool input (invalid JSON / missing
-    // fields), which would crash the client downstream — surface it instead.
+    // Stream purely to sidestep the SDK's non-streaming timeout on long generations —
+    // the response is still consumed whole via finalMessage(), same shape as before.
+    const message = await client.messages
+      .stream({
+        model,
+        max_tokens: maxTokens,
+        // Cache the (large, stable) instructions + tool schema across uploads.
+        system: [{ type: "text", text: SOP_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+        tools: [SOP_EXTRACTION_TOOL as unknown as Anthropic.Tool],
+        tool_choice: { type: "tool", name: SOP_EXTRACTION_TOOL.name },
+        messages: [{ role: "user", content: buildUserContent(upload) }],
+      })
+      .finalMessage();
+
+    // Last resort: a truncated response yields partial tool input (invalid JSON /
+    // missing fields), which would crash the client downstream — surface it instead.
     if (message.stop_reason === "max_tokens") {
       return Response.json(
-        { error: "This SOP is too long to convert in one pass. Split it into smaller documents and try again." },
+        {
+          error: `The converted SOP exceeded the ${maxTokens.toLocaleString()}-token output limit. Split the document into smaller SOPs and convert them separately.`,
+        },
         { status: 502 },
       );
     }
@@ -147,8 +186,25 @@ export async function POST(request: Request) {
       return Response.json({ error: "The model did not return structured SOP data." }, { status: 502 });
     }
 
-    return Response.json({ sop: toolUse.input as ExtractedSop });
+    // Never trust the model's tool input shape — coerce/validate at the boundary.
+    const sop = validateExtractedSop(toolUse.input);
+    if (!sop) {
+      return Response.json(
+        { error: "The model returned malformed SOP data with no usable content. Try converting again." },
+        { status: 502 },
+      );
+    }
+
+    return Response.json(
+      upload.kind === "docx" ? { sop, docxImages: upload.imageMeta } : { sop },
+    );
   } catch (error) {
+    if (isDocumentTooLargeError(error)) {
+      return Response.json(
+        { error: "This PDF exceeds the ~100-page limit for conversion. Split it into smaller PDFs and try again." },
+        { status: 422 },
+      );
+    }
     const detail = error instanceof Error ? error.message : "Unknown error during extraction.";
     return Response.json({ error: `Conversion failed: ${detail}` }, { status: 502 });
   }

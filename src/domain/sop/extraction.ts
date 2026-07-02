@@ -51,7 +51,7 @@ export interface ExtractedSop {
 
 export const SOP_SYSTEM_PROMPT = `You convert legacy Standard Operating Procedures (SOPs) into a company's standardized structure.
 
-You will receive the raw text of an old SOP (extracted from a PDF or Word file). Map its content into the standardized schema by calling the \`emit_sop\` tool exactly once.
+You will receive the content of an old SOP: either the original PDF, or text/HTML extracted from a Word file (HTML markup preserves the source's tables and lists). Embedded images from the source document may be attached alongside the text — these are typically the process flowchart; use them to inform the procedure's steps, flow order, and decision branches. Map the content into the standardized schema by calling the \`emit_sop\` tool exactly once.
 
 Rules:
 - Preserve the original wording of the content; reorganize, do not rewrite or summarize, except where a field calls for a short value (e.g. the flowchart \`description\` label — keep the full text in \`detail\`).

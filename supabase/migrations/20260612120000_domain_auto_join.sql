@@ -39,9 +39,8 @@ create policy "auto_join_domains manager delete" on workspace_auto_join_domains
 for delete to authenticated
 using (public.has_workspace_role(workspace_id, array['owner', 'admin']::workspace_role[]));
 
-insert into workspace_auto_join_domains (domain, workspace_id, role)
-values ('anacorp.com', 'workspace-default', 'viewer')
-on conflict (domain) do nothing;
+-- Seeding is environment-specific and lives outside migration history (audit #5):
+-- run scripts/seed-workspace-defaults.mjs to register the auto-join domain rule.
 
 -- Extend the redeem RPC (already called on every app load) with the auto-join step.
 -- Body mirrors the live definition (including the modules copy from

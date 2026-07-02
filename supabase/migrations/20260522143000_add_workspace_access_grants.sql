@@ -91,7 +91,5 @@ create policy "workspace_access_grants admin delete" on workspace_access_grants
 for delete to authenticated
 using (public.has_workspace_role(workspace_id, array['owner', 'admin']::workspace_role[]));
 
-insert into workspace_access_grants (workspace_id, email, role, granted_by)
-values ('workspace-default', 'rlopez@anacorp.com', 'owner', null)
-on conflict (workspace_id, email) do update
-set role = excluded.role;
+-- Seeding is environment-specific and lives outside migration history (audit #5):
+-- run scripts/seed-workspace-defaults.mjs to grant the founding owner.

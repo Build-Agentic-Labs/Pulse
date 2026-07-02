@@ -72,7 +72,5 @@ create policy "workspaces admin controlled insert" on workspaces
 for insert to authenticated
 with check (false);
 
--- Seed the founding superadmin.
-insert into platform_admins (email)
-values ('rlopez@anacorp.com')
-on conflict (email) do nothing;
+-- Seeding is environment-specific and lives outside migration history (audit #5):
+-- run scripts/seed-workspace-defaults.mjs to add the founding superadmin.

@@ -567,6 +567,7 @@ function mapTask(row: Record<string, unknown>): Task {
     qualityGate: Boolean(row.quality_gate),
     travelerSignoffRequired: Boolean(row.traveler_signoff_required),
     sopLink: maybeText(row.sop_link),
+    sopId: maybeText(row.sop_id),
     workInstructionLink: maybeText(row.work_instruction_link),
     drawingLink: maybeText(row.drawing_link),
     materialKit: maybeText(row.material_kit),
@@ -809,6 +810,7 @@ function taskRow(task: Task) {
     quality_gate: task.qualityGate,
     traveler_signoff_required: task.travelerSignoffRequired,
     sop_link: task.sopLink ?? null,
+    sop_id: task.sopId ?? null,
     work_instruction_link: task.workInstructionLink ?? null,
     drawing_link: task.drawingLink ?? null,
     material_kit: task.materialKit ?? null,
@@ -2315,6 +2317,47 @@ export async function loadScenariosForProduct(productId: string): Promise<Scenar
       .order("created_at", { ascending: true }),
   );
   return ((rows ?? []) as Record<string, unknown>[]).map(mapScenarioSummary);
+}
+
+export type SopSummary = {
+  id: string;
+  sopNumber?: string;
+  title?: string;
+  status?: string;
+};
+
+// Lightweight list of SOPs for the task SOP picker. The sops table is read-gated by org-tools
+// access, so a planner user without that access simply gets zero rows back -- callers treat an
+// empty list as "hide the picker" rather than an error. Real errors also degrade to [] (with a
+// console.warn) so a broken SOP lookup can never break the planner.
+export async function listSopSummariesFromSupabase(): Promise<SopSummary[]> {
+  try {
+    const supabase = plannerClient();
+    const { data, error } = await supabase
+      .from("sops")
+      .select("id,sop_number,title,status")
+      .is("deleted_at", null)
+      .order("sop_number", { ascending: true, nullsFirst: false })
+      .order("title", { ascending: true });
+
+    if (error) {
+      if (!isMissingRelationError(error)) {
+        console.warn(`Failed to load SOP summaries for the task picker: ${error.message}`);
+      }
+      return [];
+    }
+
+    return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+      id: String(row.id),
+      sopNumber: maybeText(row.sop_number),
+      title: maybeText(row.title),
+      status: maybeText(row.status),
+    }));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`Failed to load SOP summaries for the task picker: ${detail}`);
+    return [];
+  }
 }
 
 // Deep-copy a scenario into a new independent "projection" scenario (high-level Gantt only -- stations,

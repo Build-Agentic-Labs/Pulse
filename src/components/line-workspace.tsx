@@ -164,6 +164,7 @@ import {
   deleteToolLibraryFromSupabase,
   deleteScenario,
   duplicateScenario,
+  listSopSummariesFromSupabase,
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
   loadTaskFromSupabase,
@@ -186,6 +187,7 @@ import {
   taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
   type SaveState,
+  type SopSummary,
   type ToolLibraryItem,
 } from "@/domain/supabase-planner";
 import type {
@@ -371,7 +373,9 @@ const PROCEDURE_SAVE_DEBUG = false;
 // would otherwise overwrite characters the user just typed. mergeServerTaskIntoLocalTask preserves
 // the local value for these when it can only be unsaved local typing. customFields (custom Gantt
 // column cells) get the same treatment via a dedicated object-aware guard in
-// preserveLocalEditedTaskText, since this list is string-only.
+// preserveLocalEditedTaskText, since this list is string-only. sopId is select-driven rather than
+// typed, but shares the same echo race: a procedure save whose snapshot predates the SOP pick
+// echoes the old sop id back on completion, so it needs the same local-wins protection.
 const LOCAL_EDITED_TASK_TEXT_FIELDS = [
   "name",
   "description",
@@ -379,6 +383,7 @@ const LOCAL_EDITED_TASK_TEXT_FIELDS = [
   "notes",
   "qcChecklist",
   "sopLink",
+  "sopId",
   "workInstructionLink",
   "drawingLink",
   "materialKit",
@@ -4229,6 +4234,44 @@ function StationBalance({
   );
 }
 
+// SOP summaries for the task SOP picker, cached per browser session. The sops table is read-gated
+// by org-tools access, so planner users without it get an empty list back -- the picker simply
+// stays hidden. Cached at module scope (like signedUrlCache in supabase-planner) so reopening the
+// drawer or switching tasks never re-fetches within a session.
+let sopSummariesSessionCache: SopSummary[] | undefined;
+
+function sopSummaryLabel(sop: SopSummary): string {
+  const base =
+    sop.sopNumber && sop.title ? `${sop.sopNumber} — ${sop.title}` : sop.title ?? sop.sopNumber ?? sop.id;
+  return sop.status && sop.status !== "draft" ? `${base} (${sop.status})` : base;
+}
+
+// Lazily loads the SOP picker options the first time a task panel renders (not on workspace
+// mount), then serves the session cache. Returns [] until loaded or when the user has no SOPs.
+function useSopSummaries(enabled: boolean): SopSummary[] {
+  const [sopSummaries, setSopSummaries] = useState<SopSummary[]>(() => sopSummariesSessionCache ?? []);
+
+  useEffect(() => {
+    if (!enabled || sopSummariesSessionCache) {
+      return;
+    }
+
+    let cancelled = false;
+    void listSopSummariesFromSupabase().then((summaries) => {
+      sopSummariesSessionCache = summaries;
+      if (!cancelled && summaries.length > 0) {
+        setSopSummaries(summaries);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+
+  return sopSummaries;
+}
+
 function DetailDrawer({
   task,
   station,
@@ -4307,6 +4350,7 @@ function DetailDrawer({
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [newStepPartNumbers, setNewStepPartNumbers] = useState<Record<string, string>>({});
   const [stepPhotoUploadCounts, setStepPhotoUploadCounts] = useState<Record<string, number>>({});
+  const sopSummaries = useSopSummaries(Boolean(task && station));
   const stepCheckDefinitions = getManufacturingStepCheckDefinitions();
   const collapsedRail = (
     <div aria-hidden={!collapsed} className={railClass}>
@@ -4699,6 +4743,21 @@ function DetailDrawer({
             <span>{station.bottleneckFlag ? "Bottleneck" : "Balanced"}</span>
           </div>
         </div>
+
+        {sopSummaries.length > 0 ? (
+          <label className="block">
+            <span className="ui-field-label">SOP</span>
+            <ThemedSelect
+              ariaLabel="Linked SOP"
+              value={task.sopId ?? ""}
+              options={[
+                { value: "", label: "None" },
+                ...sopSummaries.map((sop) => ({ value: sop.id, label: sopSummaryLabel(sop) })),
+              ]}
+              onChange={(sopId) => onUpdateTask(task.id, { sopId: sopId || undefined })}
+            />
+          </label>
+        ) : null}
 
         <label className="block">
           <span className="ui-field-label">Description</span>

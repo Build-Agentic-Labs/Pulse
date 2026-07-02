@@ -301,6 +301,7 @@ export interface Task {
   qualityGate: boolean;
   travelerSignoffRequired: boolean;
   sopLink?: string;
+  sopId?: string;
   workInstructionLink?: string;
   drawingLink?: string;
   materialKit?: string;

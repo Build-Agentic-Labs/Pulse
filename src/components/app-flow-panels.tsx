@@ -10,79 +10,27 @@ function prefersReducedMotion() {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// ── Line-balancing brand animation: an overloaded line (Station 2 over takt)
-// rebalances into an even, within-takt layout, looping. ────────────────────
-const LB_START = 34;
-const LB_SLOT = 54;
-const LB_W = 46;
-const LB_LANEY = [8, 58, 108];
-const LB_BAD = [[0], [1, 2, 3, 4, 5], [6, 7]];
-const LB_GOOD = [[0, 1, 2], [3, 4], [5, 6, 7]];
+// ── Dot-matrix ripple: a diagonal wave of brightness travels across a grid of
+// dots (one red), pure CSS via per-dot animation delay. ─────────────────────
+const DM_COLS = 14;
+const DM_ROWS = 8;
+const DM_RED = { row: 3, col: 9 };
 
-type LbPos = Record<number, { left: number; top: number; hot: boolean }>;
-
-function lbPositions(layout: number[][]): LbPos {
-  const pos: LbPos = {};
-  layout.forEach((ids, lane) => {
-    ids.forEach((id, slot) => {
-      // Centre the 22px block in the 42px lane band.
-      pos[id] = { left: LB_START + slot * LB_SLOT, top: LB_LANEY[lane] + 10, hot: slot >= 3 };
-    });
-  });
-  return pos;
-}
-
-const LB_POS_BAD = lbPositions(LB_BAD);
-const LB_POS_GOOD = lbPositions(LB_GOOD);
-
-function LineBalanceArt() {
-  const [good, setGood] = useState(false);
-
-  useEffect(() => {
-    if (prefersReducedMotion()) {
-      setGood(true);
-      return;
-    }
-    const timer = window.setInterval(() => setGood((value) => !value), 4800);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const pos = good ? LB_POS_GOOD : LB_POS_BAD;
-
+function DotMatrixArt() {
   return (
-    <div className={`ui-lb ${good ? "is-good" : ""}`} aria-hidden="true">
-      <div className="ui-lb-head">
-        <div className="ui-lb-status">
-          <span className="ui-lb-badge" />
-          <div>
-            <div className="ui-lb-title">{good ? "Balanced" : "Unbalanced"}</div>
-            <div className="ui-lb-sub">{good ? "All stations within takt" : "Station 2 exceeds takt"}</div>
-          </div>
-        </div>
-        <div className="ui-lb-metric">
-          <div className="ui-lb-metric-v">{good ? "96%" : "61%"}</div>
-          <div className="ui-lb-metric-l">Balance</div>
-        </div>
-      </div>
-      <div className="ui-lb-chart">
-        {LB_LANEY.map((y, i) => (
-          <div key={i} className="ui-lb-lane" style={{ top: y }}>
-            <span className="ui-lb-tag">S{i + 1}</span>
-            <span className="ui-lb-rail" />
-          </div>
-        ))}
-        <div className="ui-lb-takt" />
-        {Array.from({ length: 8 }, (_, id) => {
-          const p = pos[id];
+    <div className="ui-dm" aria-hidden="true">
+      {Array.from({ length: DM_ROWS }).map((_, row) =>
+        Array.from({ length: DM_COLS }).map((__, col) => {
+          const isRed = row === DM_RED.row && col === DM_RED.col;
           return (
-            <div
-              key={id}
-              className={`ui-lb-blk ${!good && p.hot ? "is-hot" : ""}`}
-              style={{ width: LB_W, left: p.left, top: p.top }}
+            <span
+              key={`${row}-${col}`}
+              className={`ui-dm-dot ${isRed ? "is-red" : ""}`}
+              style={{ animationDelay: `${((col + row) * 0.09).toFixed(2)}s` }}
             />
           );
-        })}
-      </div>
+        }),
+      )}
     </div>
   );
 }
@@ -109,9 +57,6 @@ function GlossaryCarousel() {
 
   return (
     <div className="ui-auth-gloss">
-      <div className="ui-auth-gloss-label ui-eyebrow">
-        <span className="ui-auth-gloss-dot" /> Manufacturing glossary
-      </div>
       <div className="ui-auth-gloss-stack">
         {GLOSSARY.map(([term, definition], n) => (
           <article key={term} className={`ui-auth-term ${n === index ? "is-active" : ""}`}>
@@ -120,16 +65,12 @@ function GlossaryCarousel() {
           </article>
         ))}
       </div>
-      <div className="ui-auth-dots">
-        {GLOSSARY.map(([term], n) => (
-          <button
-            key={term}
-            type="button"
-            aria-label={`Show ${term}`}
-            className={n === index ? "is-active" : ""}
-            onClick={() => setIndex(n)}
-          />
-        ))}
+      <div className="ui-auth-gloss-foot">
+        <span className="ui-auth-gloss-count">
+          {String(index + 1).padStart(2, "0")} / {String(GLOSSARY.length).padStart(2, "0")}
+        </span>
+        {/* Keyed by index so the fill restarts each term, tracking the auto-advance. */}
+        <span key={index} className="ui-auth-gloss-progress" />
       </div>
     </div>
   );
@@ -293,7 +234,7 @@ export function AuthFormPanel({
           <span className="ui-auth-wordmark">Pulse</span>
         </div>
         <div className="ui-auth-art">
-          <LineBalanceArt />
+          <DotMatrixArt />
         </div>
         <GlossaryCarousel />
         <div className="ui-auth-foot ui-eyebrow">

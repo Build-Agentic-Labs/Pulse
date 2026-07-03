@@ -67,7 +67,7 @@ export function SopDetailClient() {
 
   if (state.status === "missing" || state.status === "error") {
     return (
-      <SopShell sidebar={browseSidebar} back={{ href: "/", label: "Back to planner" }}>
+      <SopShell sidebar={browseSidebar} back={{ href: "/", label: "Back to home" }}>
         <div className="flex h-full items-center justify-center p-4">
           <div className="text-center">
             <p className="ui-section-subtitle text-ink-tertiary">

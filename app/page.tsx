@@ -1,5 +1,5 @@
-import { PlannerRouteShell } from "@/components/project-route-shells";
+import { HomeRouteShell } from "@/components/project-route-shells";
 
 export default function Home() {
-  return <PlannerRouteShell />;
+  return <HomeRouteShell />;
 }

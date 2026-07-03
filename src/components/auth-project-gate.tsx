@@ -14,10 +14,22 @@ import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 type ProjectRouteKind = "planner" | "mobile-photos" | "excel/gantt";
 
+/** What the company dashboard (and other project-less home surfaces) render with. */
+export type DashboardHomeContext = {
+  groups: WorkspaceProjectGroup[];
+  displayName: string;
+  preferredProjectId?: string;
+};
+
 type AuthProjectGateProps = {
   children: (project: PlannerProjectContext | undefined, onReady: () => void) => ReactNode;
   projectId?: string;
   routeKind?: ProjectRouteKind;
+  /**
+   * Home mode: instead of auto-redirecting a project-less visit into the last project,
+   * render this once workspaces are ready (auth/loading/error handling unchanged).
+   */
+  renderHome?: (home: DashboardHomeContext) => ReactNode;
 };
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
@@ -182,7 +194,12 @@ function fallbackProjectContext(projectId: string): PlannerProjectContext {
   };
 }
 
-export function AuthProjectGate({ children, projectId, routeKind = "planner" }: AuthProjectGateProps) {
+function resolveDisplayName(session: Session | null): string {
+  const metadata = (session?.user.user_metadata ?? {}) as { full_name?: string };
+  return metadata.full_name?.trim() || session?.user.email?.split("@")[0] || "";
+}
+
+export function AuthProjectGate({ children, projectId, routeKind = "planner", renderHome }: AuthProjectGateProps) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [session, setSession] = useState<Session | null>(null);
@@ -308,8 +325,11 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     };
   }, [supabase]);
 
+  const homeMode = Boolean(renderHome);
+
   useEffect(() => {
-    if (projectId || status !== "ready") {
+    // Home mode renders in place — never bounce the visit into a project.
+    if (homeMode || projectId || status !== "ready") {
       return;
     }
 
@@ -322,7 +342,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
         router.replace(projectHref(target.id, routeKind));
       }
     }
-  }, [flatProjects, projectId, routeKind, router, status]);
+  }, [flatProjects, homeMode, projectId, routeKind, router, status]);
 
   useEffect(() => {
     if (selectedProject?.projectId) {
@@ -338,7 +358,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   }
 
   const isRedirectingToProject =
-    !projectId && status === "ready" && flatProjects.length > 0;
+    !homeMode && !projectId && status === "ready" && flatProjects.length > 0;
 
   if (projectId && !sessionReady && hasRecentProjectSwitchSession()) {
     return <>{children(fallbackProjectContext(projectId), () => setChildReady(true))}</>;
@@ -398,7 +418,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
             <p className="text-xs ui-mono-label tracking-wide text-danger">Workspace unavailable</p>
             <h1 className="mt-2 text-2xl font-medium">You do not have access to this workspace.</h1>
             <button className="ui-btn-primary mt-5" onClick={() => router.push("/")}>
-              Open planner
+              Go to home
             </button>
           </section>
         </main>
@@ -410,6 +430,15 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
         {!childReady && status !== "ready" && !hasRecentProjectSwitchSession() ? <AppLoadingShell title={WORKSPACE_LOADING_TITLE} /> : null}
         {children(selectedProject ?? fallbackProjectContext(projectId), () => setChildReady(true))}
       </>
+    );
+  }
+
+  if (renderHome && status === "ready") {
+    const preferredId = readLastProjectId();
+    const preferred =
+      flatProjects.find((entry) => entry.project.id === preferredId)?.project ?? flatProjects[0]?.project;
+    return (
+      <>{renderHome({ groups, displayName: resolveDisplayName(session), preferredProjectId: preferred?.id })}</>
     );
   }
 

@@ -20,6 +20,8 @@ import {
   ImageIcon,
   ListChecks,
   Package,
+  PanelLeft,
+  PanelLeftClose,
   Pause,
   Play,
   Plus,
@@ -1331,15 +1333,11 @@ function plannerSaveStatus(state: SaveState): { message: string; error?: boolean
 }
 
 function TopNav({
-  sidebarCollapsed,
-  onToggleSidebar,
   context,
   chromeStatus,
   saveStatus,
   presence,
 }: {
-  sidebarCollapsed: boolean;
-  onToggleSidebar: () => void;
   context?: ReturnType<typeof buildPlannerChromeContext>;
   chromeStatus?: { message: string; error?: boolean } | null;
   saveStatus?: { message: string; error?: boolean } | null;
@@ -1354,20 +1352,6 @@ function TopNav({
       <header className="ui-chrome ui-chrome-planner z-40 h-12 shrink-0">
         <div className="ui-chrome-planner-brand">
           <BackToDashboardButton />
-          <button
-            type="button"
-            onClick={onToggleSidebar}
-            className="ui-btn-ghost hidden h-8 w-8 shrink-0 items-center justify-center px-0 lg:inline-flex"
-            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-            aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-            aria-expanded={!sidebarCollapsed}
-          >
-            <ChevronLeft
-              size={14}
-              strokeWidth={1.75}
-              className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
-            />
-          </button>
           <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
             <RollingText text="Pulse" rollOnMount />
           </Link>
@@ -1403,20 +1387,6 @@ function TopNav({
     <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between gap-3 px-3 sm:px-4 lg:px-0">
       <div className="ui-chrome-brand flex min-w-0 items-center gap-1 sm:gap-2 lg:gap-0.5 lg:px-2">
         <BackToDashboardButton />
-        <button
-          type="button"
-          onClick={onToggleSidebar}
-          className="ui-btn-ghost hidden h-8 w-8 shrink-0 items-center justify-center px-0 lg:inline-flex"
-          title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-          aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-          aria-expanded={!sidebarCollapsed}
-        >
-          <ChevronLeft
-            size={14}
-            strokeWidth={1.75}
-            className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
-          />
-        </button>
         <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
           Pulse
         </Link>
@@ -1436,6 +1406,24 @@ function TopNav({
   );
 }
 
+/** Floating control that reappears when the sidebar is collapsed, so it can be reopened. */
+function SidebarReopenButton({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  if (!collapsed) {
+    return null;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="ui-btn-ghost absolute left-2 top-2 z-30 hidden h-8 w-8 items-center justify-center bg-surface px-0 lg:inline-flex"
+      title="Show sidebar"
+      aria-label="Show sidebar"
+    >
+      <PanelLeft size={15} strokeWidth={1.75} />
+    </button>
+  );
+}
+
 function Sidebar({
   activeModule,
   settingsSection,
@@ -1443,6 +1431,7 @@ function Sidebar({
   onChange,
   onSetupSectionChange,
   onOpenSettings,
+  onCollapse,
   project,
 }: {
   activeModule: string;
@@ -1451,6 +1440,7 @@ function Sidebar({
   onChange: (moduleId: string) => void;
   onSetupSectionChange: (section: SetupSection) => void;
   onOpenSettings: (section?: SettingsSection) => void;
+  onCollapse: () => void;
   project?: PlannerProjectContext;
 }) {
   const isSettingsModule = activeModule === "settings";
@@ -1458,6 +1448,17 @@ function Sidebar({
 
   return (
     <aside className="ui-nav-sidebar">
+      <div className="flex h-9 shrink-0 items-center justify-end px-2">
+        <button
+          type="button"
+          onClick={onCollapse}
+          className="ui-btn-ghost inline-flex h-7 w-7 items-center justify-center px-0"
+          title="Hide sidebar"
+          aria-label="Hide sidebar"
+        >
+          <PanelLeftClose size={15} strokeWidth={1.75} />
+        </button>
+      </div>
       <SidebarWorkspacePanel activeProject={project} />
 
       <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-2">
@@ -8072,13 +8073,15 @@ export function LineWorkspace({
         style={workspaceGridStyle}
       >
         <TopNav
-          sidebarCollapsed={sidebarCollapsed}
-          onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
           context={displayedPlannerChromeContext}
           chromeStatus={chromeStatus}
           saveStatus={plannerSaveStatus(saveState)}
         />
-        <div className={workspaceGridClass}>
+        <div className={`relative ${workspaceGridClass}`}>
+          <SidebarReopenButton
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed((value) => !value)}
+          />
           <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
             <Sidebar
               activeModule="dashboard"
@@ -8087,6 +8090,7 @@ export function LineWorkspace({
               onChange={() => undefined}
               onSetupSectionChange={() => undefined}
               onOpenSettings={() => undefined}
+              onCollapse={() => setSidebarCollapsed(true)}
               project={activeProjectContext}
             />
           </div>
@@ -10378,8 +10382,6 @@ export function LineWorkspace({
       style={workspaceGridStyle}
     >
       <TopNav
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         context={displayedPlannerChromeContext}
         chromeStatus={chromeStatus}
         saveStatus={plannerSaveStatus(saveState)}
@@ -10434,7 +10436,11 @@ export function LineWorkspace({
         </section>
       ) : null}
 
-      <div className={workspaceGridClass}>
+      <div className={`relative ${workspaceGridClass}`}>
+        <SidebarReopenButton
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed((value) => !value)}
+        />
         <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
           <Sidebar
             activeModule={sidebarActiveModule}
@@ -10443,6 +10449,7 @@ export function LineWorkspace({
             onChange={navigateModule}
             onSetupSectionChange={setSetupSection}
             onOpenSettings={openSettings}
+            onCollapse={() => setSidebarCollapsed(true)}
             project={activeProjectContext}
           />
         </div>

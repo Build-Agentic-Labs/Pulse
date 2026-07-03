@@ -4713,51 +4713,132 @@ body {
   flex-direction: column;
   padding: 52px;
   border-right: 1px solid var(--color-border);
-  background: linear-gradient(160deg, var(--color-surface), var(--color-canvas));
+  background: var(--color-surface);
 }
 @media (min-width: 900px) {
   .ui-auth-brand {
     display: flex;
   }
 }
-.ui-auth-brand::before {
-  content: "";
+/* Registered so the glow beam's position can be animated inside a mask gradient. */
+@property --ui-auth-gp {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: -20%;
+}
+/* Base field: calm, evenly spaced dim dots. No motion, always present. */
+.ui-auth-dotfield {
   position: absolute;
   inset: 0;
-  background-image: linear-gradient(var(--color-border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--color-border) 1px, transparent 1px);
-  background-size: 44px 44px;
-  opacity: 0.5;
-  -webkit-mask-image: radial-gradient(120% 80% at 20% 12%, #000, transparent 78%);
-  mask-image: radial-gradient(120% 80% at 20% 12%, #000, transparent 78%);
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, var(--color-border-strong) 1px, transparent 1.7px);
+  background-size: 26px 26px;
+  opacity: 0.85;
 }
+/* Idle ambient glow: a diagonal beam of bright dots drifts corner-to-corner. */
+.ui-auth-dotglow {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  transition: opacity 0.6s var(--ease-ui);
+  background-image: radial-gradient(circle, var(--color-accent) 2px, transparent 2.8px);
+  background-size: 26px 26px;
+  -webkit-mask-image: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent calc(var(--ui-auth-gp) - 16%),
+    rgba(0, 0, 0, 0.55) var(--ui-auth-gp),
+    transparent calc(var(--ui-auth-gp) + 16%),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent calc(var(--ui-auth-gp) - 16%),
+    rgba(0, 0, 0, 0.55) var(--ui-auth-gp),
+    transparent calc(var(--ui-auth-gp) + 16%),
+    transparent 100%
+  );
+  animation: ui-auth-drift 9s linear infinite alternate;
+}
+.ui-auth-brand.is-hover .ui-auth-dotglow {
+  opacity: 0;
+}
+@keyframes ui-auth-drift {
+  0% {
+    --ui-auth-gp: -20%;
+  }
+  100% {
+    --ui-auth-gp: 120%;
+  }
+}
+/* Zoom lens: bright, enlarged dots revealed in a soft circle at the pointer. */
+.ui-auth-dotlens {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s var(--ease-ui);
+  background-image: radial-gradient(circle, var(--color-accent) 2px, transparent 2.8px);
+  background-size: 26px 26px;
+  -webkit-mask-image: radial-gradient(
+    circle 200px at var(--ui-auth-mx, -999px) var(--ui-auth-my, -999px),
+    #000 0%,
+    rgba(0, 0, 0, 0.6) 30%,
+    rgba(0, 0, 0, 0.15) 60%,
+    transparent 90%
+  );
+  mask-image: radial-gradient(
+    circle 200px at var(--ui-auth-mx, -999px) var(--ui-auth-my, -999px),
+    #000 0%,
+    rgba(0, 0, 0, 0.6) 30%,
+    rgba(0, 0, 0, 0.15) 60%,
+    transparent 90%
+  );
+}
+.ui-auth-brand.is-hover .ui-auth-dotlens {
+  opacity: 0.7;
+}
+/* Legibility scrim over the dots: darken top (wordmark) and bottom (glossary). */
 .ui-auth-brand::after {
   content: "";
   position: absolute;
-  width: 520px;
-  height: 520px;
-  left: -120px;
-  bottom: -160px;
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--color-danger) 22%, transparent), transparent 62%);
-  filter: blur(20px);
-  opacity: 0.5;
-}
-.ui-auth-brand > * {
-  position: relative;
-  z-index: 2;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    var(--color-surface),
+    transparent 20%,
+    transparent 55%,
+    color-mix(in srgb, var(--color-surface) 88%, transparent)
+  );
 }
 .ui-auth-wordmark {
-  font-family: var(--type-display);
-  font-weight: 500;
+  font-family: var(--type-sans);
+  font-weight: 700;
   font-size: 22px;
   letter-spacing: -0.01em;
   color: var(--color-accent);
 }
-.ui-auth-art {
-  flex: 1;
-  display: flex;
-  align-items: center;
+.ui-auth-brand-desc {
+  margin-top: 14px;
+  max-width: 32ch;
+  color: var(--color-ink-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.ui-auth-brand-top,
+.ui-auth-brand-mid {
+  position: relative;
+  z-index: 2;
+}
+.ui-auth-brand-mid {
+  margin-top: auto;
 }
 .ui-auth-foot {
   margin-top: 32px;
@@ -4913,54 +4994,9 @@ body {
   color: var(--color-ink-secondary);
 }
 
-/* dot-matrix ripple art */
-.ui-dm {
-  display: grid;
-  grid-template-columns: repeat(14, 1fr);
-  gap: 15px;
-  width: 100%;
-  max-width: 360px;
-}
-.ui-dm-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  justify-self: center;
-  background: var(--color-border-strong);
-  animation: ui-dm-ripple 3.4s var(--ease-ui) infinite;
-}
-.ui-dm-dot.is-red {
-  background: var(--color-danger);
-  animation-name: ui-dm-ripple-red;
-}
-@keyframes ui-dm-ripple {
-  0%,
-  100% {
-    opacity: 0.32;
-    transform: scale(0.85);
-    background: var(--color-border-strong);
-  }
-  22% {
-    opacity: 1;
-    transform: scale(1.5);
-    background: var(--color-accent);
-  }
-}
-@keyframes ui-dm-ripple-red {
-  0%,
-  100% {
-    opacity: 0.5;
-    transform: scale(0.85);
-  }
-  22% {
-    opacity: 1;
-    transform: scale(1.6);
-  }
-}
-
 /* minimal glossary */
 .ui-auth-gloss {
-  margin-top: 8px;
+  margin-top: 22px;
 }
 .ui-auth-gloss-stack {
   position: relative;
@@ -4979,7 +5015,7 @@ body {
   transform: none;
 }
 .ui-auth-term h2 {
-  font-size: 21px;
+  font-size: 22px;
   font-weight: 500;
   letter-spacing: -0.01em;
   color: var(--color-accent);
@@ -4989,51 +5025,14 @@ body {
   margin-top: 8px;
   max-width: 40ch;
   font-size: 13px;
-  line-height: 1.5;
-}
-.ui-auth-gloss-foot {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 20px;
-}
-.ui-auth-gloss-count {
-  font-family: var(--type-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: var(--color-ink-tertiary);
-  white-space: nowrap;
-}
-.ui-auth-gloss-progress {
-  position: relative;
-  flex: 1;
-  height: 1px;
-  background: var(--color-border);
-  overflow: hidden;
-}
-.ui-auth-gloss-progress::after {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0;
-  background: var(--color-ink-secondary);
-  animation: ui-gloss-fill 4600ms linear forwards;
-}
-@keyframes ui-gloss-fill {
-  to {
-    width: 100%;
-  }
+  line-height: 1.55;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ui-dm-dot {
+  .ui-auth-dotglow {
     animation: none;
   }
   .ui-auth-term {
     transition: none;
-  }
-  .ui-auth-gloss-progress::after {
-    animation: none;
-    width: 100%;
   }
 }

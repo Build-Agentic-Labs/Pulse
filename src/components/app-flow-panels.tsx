@@ -1,7 +1,7 @@
 "use client";
 
 import { Moon, RefreshCw, Sun } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { NothingLoadingBlock, NothingSpinner, NothingStatus } from "@/components/nothing-ui";
 import { useTheme } from "@/components/theme-provider";
 import { SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
@@ -10,28 +10,72 @@ function prefersReducedMotion() {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// ── Dot-matrix ripple: a diagonal wave of brightness travels across a grid of
-// dots (one red), pure CSS via per-dot animation delay. ─────────────────────
-const DM_COLS = 14;
-const DM_ROWS = 8;
-const DM_RED = { row: 3, col: 9 };
+// ── Brand dot field: a full-bleed field of dim dots with an idle glow beam
+// drifting across it, plus a soft "zoom lens" of bright dots that follows the
+// pointer. The lens position is driven by CSS custom properties set on the
+// panel element, throttled through requestAnimationFrame. ────────────────────
+function BrandPanel() {
+  const ref = useRef<HTMLElement>(null);
 
-function DotMatrixArt() {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || prefersReducedMotion()) {
+      return;
+    }
+    let raf = 0;
+    let px = 0;
+    let py = 0;
+
+    function handleMove(event: PointerEvent) {
+      if (!el) {
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      px = event.clientX - rect.left;
+      py = event.clientY - rect.top;
+      el.classList.add("is-hover");
+      if (!raf) {
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          el.style.setProperty("--ui-auth-mx", `${px}px`);
+          el.style.setProperty("--ui-auth-my", `${py}px`);
+        });
+      }
+    }
+
+    function handleLeave() {
+      el?.classList.remove("is-hover");
+    }
+
+    el.addEventListener("pointermove", handleMove);
+    el.addEventListener("pointerleave", handleLeave);
+    return () => {
+      el.removeEventListener("pointermove", handleMove);
+      el.removeEventListener("pointerleave", handleLeave);
+      if (raf) {
+        cancelAnimationFrame(raf);
+      }
+    };
+  }, []);
+
   return (
-    <div className="ui-dm" aria-hidden="true">
-      {Array.from({ length: DM_ROWS }).map((_, row) =>
-        Array.from({ length: DM_COLS }).map((__, col) => {
-          const isRed = row === DM_RED.row && col === DM_RED.col;
-          return (
-            <span
-              key={`${row}-${col}`}
-              className={`ui-dm-dot ${isRed ? "is-red" : ""}`}
-              style={{ animationDelay: `${((col + row) * 0.09).toFixed(2)}s` }}
-            />
-          );
-        }),
-      )}
-    </div>
+    <aside className="ui-auth-brand" ref={ref}>
+      <div className="ui-auth-dotfield" aria-hidden="true" />
+      <div className="ui-auth-dotglow" aria-hidden="true" />
+      <div className="ui-auth-dotlens" aria-hidden="true" />
+      <div className="ui-auth-brand-top">
+        <span className="ui-auth-wordmark">Pulse</span>
+        <p className="ui-auth-brand-desc">
+          Real-time production analytics for the shop floor — track takt time, throughput, and downtime as they happen.
+        </p>
+      </div>
+      <div className="ui-auth-brand-mid">
+        <GlossaryCarousel />
+        <div className="ui-auth-foot ui-eyebrow">
+          <span className="ui-auth-foot-dot" /> Anacorp Manufacturing
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -64,13 +108,6 @@ function GlossaryCarousel() {
             <p>{definition}</p>
           </article>
         ))}
-      </div>
-      <div className="ui-auth-gloss-foot">
-        <span className="ui-auth-gloss-count">
-          {String(index + 1).padStart(2, "0")} / {String(GLOSSARY.length).padStart(2, "0")}
-        </span>
-        {/* Keyed by index so the fill restarts each term, tracking the auto-advance. */}
-        <span key={index} className="ui-auth-gloss-progress" />
       </div>
     </div>
   );
@@ -229,22 +266,10 @@ export function AuthFormPanel({
         </button>
       </div>
 
-      <aside className="ui-auth-brand">
-        <div>
-          <span className="ui-auth-wordmark">Pulse</span>
-        </div>
-        <div className="ui-auth-art">
-          <DotMatrixArt />
-        </div>
-        <GlossaryCarousel />
-        <div className="ui-auth-foot ui-eyebrow">
-          <span className="ui-auth-foot-dot" /> Anacorp Manufacturing
-        </div>
-      </aside>
+      <BrandPanel />
 
       <main className="ui-auth-form-side">
         <div className="ui-auth-form-wrap">
-          <p className="ui-eyebrow">Organization access</p>
           <h1 className="ui-auth-h1">{copy.title}</h1>
           <p className="ui-auth-subtitle">{copy.subtitle}</p>
 

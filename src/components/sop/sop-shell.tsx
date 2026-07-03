@@ -4,8 +4,8 @@ import { ChevronLeft, Moon, Sun } from "lucide-react";
 import Link from "next/link";
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { RollingText } from "@/components/rolling-text";
-import { SidebarUserPanel } from "@/components/sidebar-user-panel";
 import { useTheme } from "@/components/theme-provider";
+import { UserNav } from "@/components/user-nav";
 
 /**
  * App-shell layout for the SOP section, matching the settings page: a full-width
@@ -72,6 +72,7 @@ export function SopShell({
           <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
+          <UserNav />
         </div>
       </header>
 
@@ -89,9 +90,6 @@ export function SopShell({
             ) : null}
             {sidebar}
           </nav>
-          <div className="mt-auto px-2 py-2">
-            <SidebarUserPanel />
-          </div>
         </aside>
 
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">

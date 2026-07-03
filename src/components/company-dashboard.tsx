@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { DashboardHomeContext } from "./auth-project-gate";
+import { UserNav } from "./user-nav";
 
 export type SpaceKey = "product" | "planning" | "production" | "quality" | "people" | "insights";
 
@@ -88,13 +89,6 @@ function timeGreeting(): string {
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
-}
-
-function initials(displayName: string): string {
-  const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "—";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 const ICON_TILE_CLASSES =
@@ -210,9 +204,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
           </>
         ) : null}
         <span className="flex-1" />
-        <span className="grid h-[30px] w-[30px] place-items-center rounded-full border border-border-strong bg-surface-raised font-mono text-[10px] text-ink">
-          {initials(displayName)}
-        </span>
+        <UserNav showSpacesLink={false} />
       </header>
 
       <main className="relative mx-auto max-w-[940px] px-8 py-16">

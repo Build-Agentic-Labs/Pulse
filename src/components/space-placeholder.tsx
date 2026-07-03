@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { SpaceIcon, type SpaceKey } from "./company-dashboard";
+import { UserNav } from "./user-nav";
 
 type SpacePlaceholderProps = {
   space: SpaceKey;
@@ -28,9 +29,7 @@ export function SpacePlaceholder({ space, name, description, planned, children }
         <span className="h-4 w-px bg-border-strong" />
         <span className="ui-mono-label">{name}</span>
         <span className="flex-1" />
-        <Link href="/" className="ui-mono-label transition hover:text-ink">
-          ← Home
-        </Link>
+        <UserNav />
       </header>
 
       <main className="mx-auto max-w-[760px] px-8 py-16">

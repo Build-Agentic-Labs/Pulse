@@ -18,7 +18,6 @@ import {
   FileText,
   GitBranch,
   ImageIcon,
-  LayoutGrid,
   ListChecks,
   Package,
   Pause,
@@ -221,7 +220,7 @@ import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
 import { announceProjectSwitch, projectPlannerHref, SidebarWorkspacePanel } from "./sidebar-workspace-panel";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
-import { SidebarUserPanel } from "./sidebar-user-panel";
+import { UserNav } from "./user-nav";
 import { ProcedureStepToolTable } from "./procedure-step-tool-table";
 import { StepPhotoViewer } from "./step-photo-viewer";
 import { StepExplodedViewGallery } from "./step-exploded-view-gallery";
@@ -1350,14 +1349,6 @@ function TopNav({
               className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
             />
           </button>
-          <Link
-            href="/"
-            className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
-            title="All spaces"
-            aria-label="Go to the company dashboard"
-          >
-            <LayoutGrid size={14} strokeWidth={1.75} />
-          </Link>
           <div className="ui-brand-compact shrink-0">
             <RollingText text="Pulse" rollOnMount />
           </div>
@@ -1386,6 +1377,7 @@ function TopNav({
           <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
+          <UserNav />
         </div>
       </header>
     );
@@ -1408,14 +1400,6 @@ function TopNav({
             className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
           />
         </button>
-        <Link
-          href="/"
-          className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
-          title="All spaces"
-          aria-label="Go to the company dashboard"
-        >
-          <LayoutGrid size={14} strokeWidth={1.75} />
-        </Link>
         <div className="ui-brand-compact shrink-0">Pulse</div>
       </div>
 
@@ -1430,6 +1414,7 @@ function TopNav({
         <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
+        <UserNav />
       </div>
     </header>
   );
@@ -1566,7 +1551,6 @@ function Sidebar({
             Settings
           </button>
         ) : null}
-        <SidebarUserPanel />
       </div>
     </aside>
   );

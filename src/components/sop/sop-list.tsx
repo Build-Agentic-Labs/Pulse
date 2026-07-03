@@ -218,7 +218,7 @@ export function SopList() {
   );
 
   return (
-    <SopShell sidebar={sidebar} back={{ href: "/", label: "Back to home" }}>
+    <SopShell sidebar={sidebar}>
       {convert ? <SopConvertOverlay fileName={convert.fileName} phase={convert.phase} /> : null}
 
       <input

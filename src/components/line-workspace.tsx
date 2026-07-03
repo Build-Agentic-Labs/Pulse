@@ -109,7 +109,7 @@ import {
   removeStepPartReference,
 } from "@/domain/step-part-references";
 import { addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
-import { buildProjectToolCatalog, planToolNameTidy, removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
+import { removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
 import { buildProjectToolRegistry, type ProjectToolDefinition } from "@/domain/tool-registry";
 import { canonicalToolKey, formatToolName } from "@/domain/tool-name-format";
 import type { ToolTypeValue } from "@/domain/tool-types";
@@ -5676,30 +5676,8 @@ export function LineWorkspace({
     };
   }, [activeProjectContext?.projectId]);
 
-  // Auto-clean existing tool names once per project (replaces the manual Tidy
-  // button). Ref-guarded so it runs once and never loops on its own task write.
-  // Waits for the tool library to load so library rows are migrated too (not
-  // just the task strings) — otherwise a fast task load would tidy with an empty
-  // library and leave the DB rows messy.
-  const autoTidiedProjectRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (!projectId || !hasLoadedRemoteState || isProjectSwitching || !toolLibraryLoaded) {
-      return;
-    }
-    if (autoTidiedProjectRef.current === projectId || derivedState.tasks.length === 0) {
-      return;
-    }
-    // Evaluate once per project after load; mark checked regardless so a fully
-    // clean project doesn't rebuild the catalog on every later task edit.
-    autoTidiedProjectRef.current = projectId;
-    const plan = planToolNameTidy(
-      buildProjectToolCatalog(derivedState.tasks, projectToolRegistry, toolLibraryItems),
-    );
-    if (plan.length > 0) {
-      void tidyCatalogToolNames(plan);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, hasLoadedRemoteState, isProjectSwitching, toolLibraryLoaded, derivedState.tasks, projectToolRegistry, toolLibraryItems]);
+  // Tool-name cleanup is user-triggered from the Tools catalog ("Tidy names"),
+  // not automatic on load — see tidyCatalogToolNames / ProjectCatalogSetupPanel.
 
   useEffect(() => {
     if (!hasLoadedRemoteState || isProjectSwitching) {
@@ -10503,6 +10481,7 @@ export function LineWorkspace({
                         onMasterBomChange={updateMasterBom}
                         onSaveTool={saveCatalogTool}
                         onDeleteTool={deleteCatalogTool}
+                        onTidyToolNames={tidyCatalogToolNames}
                         onSavePart={saveCatalogPart}
                         onDeletePart={deleteCatalogPart}
                         onConfirmAction={requestFeedbackConfirm}

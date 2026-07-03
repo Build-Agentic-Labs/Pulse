@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, FileSpreadsheet, Trash2, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight, FileSpreadsheet, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import type { MasterBom } from "@/domain/master-bom";
@@ -8,6 +8,7 @@ import {
   buildProjectPartCatalog,
   buildProjectToolCatalog,
   groupToolCatalogByType,
+  planToolNameTidy,
   type ProjectPartCatalogEntry,
   type ProjectToolCatalogEntry,
 } from "@/domain/project-catalog";
@@ -183,6 +184,7 @@ export function ProjectCatalogSetupPanel({
   onMasterBomChange,
   onSaveTool,
   onDeleteTool,
+  onTidyToolNames,
   onSavePart,
   onDeletePart,
   onConfirmAction,
@@ -195,6 +197,7 @@ export function ProjectCatalogSetupPanel({
   onMasterBomChange?: (bom: MasterBom | undefined) => void;
   onSaveTool: (entry: ProjectToolCatalogEntry, draft: ToolDraft) => Promise<void>;
   onDeleteTool: (entry: ProjectToolCatalogEntry) => Promise<void>;
+  onTidyToolNames?: (plan: Array<{ from: string; to: string }>) => Promise<void>;
   onSavePart: (entry: ProjectPartCatalogEntry, draft: PartDraft) => Promise<void>;
   onDeletePart: (entry: ProjectPartCatalogEntry) => Promise<void>;
   onConfirmAction: (message: FeedbackConfirm) => void;
@@ -206,13 +209,27 @@ export function ProjectCatalogSetupPanel({
     [projectToolRegistry, tasks, toolLibraryItems],
   );
   const toolGroups = useMemo(() => groupToolCatalogByType(toolCatalog), [toolCatalog]);
+  const tidyPlan = useMemo(() => planToolNameTidy(toolCatalog), [toolCatalog]);
   const partCatalog = useMemo(() => buildProjectPartCatalog(tasks), [tasks]);
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>({});
   const [partDrafts, setPartDrafts] = useState<Record<string, PartDraft>>({});
   const [savingToolKey, setSavingToolKey] = useState<string>();
   const [savingPartKey, setSavingPartKey] = useState<string>();
+  const [tidying, setTidying] = useState(false);
   const [toolsCollapsed, setToolsCollapsed] = useState(false);
   const [partsCollapsed, setPartsCollapsed] = useState(false);
+
+  async function handleTidyToolNames() {
+    if (!onTidyToolNames || tidyPlan.length === 0 || tidying) {
+      return;
+    }
+    setTidying(true);
+    try {
+      await onTidyToolNames(tidyPlan);
+    } finally {
+      setTidying(false);
+    }
+  }
 
   useEffect(() => {
     setToolDrafts((current) => {
@@ -425,23 +442,37 @@ export function ProjectCatalogSetupPanel({
     <div className="ui-procedure-catalog mx-auto max-w-[1500px] space-y-5">
       {showTools ? (
       <section>
-        <button
-          type="button"
-          className="ui-catalog-collapse-trigger mb-3"
-          onClick={() => setToolsCollapsed((collapsed) => !collapsed)}
-          aria-expanded={!toolsCollapsed}
-        >
-          <span className="min-w-0">
-            <span className="ui-setup-section-title block">Tools</span>
-            <span className="ui-setup-section-desc block">
-              {toolCatalog.length} tool{toolCatalog.length === 1 ? "" : "s"} in this build, grouped by type. IDs and colors stay stable across tasks.
+        <div className="mb-3 flex items-start gap-2">
+          <button
+            type="button"
+            className="ui-catalog-collapse-trigger flex-1"
+            onClick={() => setToolsCollapsed((collapsed) => !collapsed)}
+            aria-expanded={!toolsCollapsed}
+          >
+            <span className="min-w-0">
+              <span className="ui-setup-section-title block">Tools</span>
+              <span className="ui-setup-section-desc block">
+                {toolCatalog.length} tool{toolCatalog.length === 1 ? "" : "s"} in this build, grouped by type. IDs and colors stay stable across tasks.
+              </span>
             </span>
-          </span>
-          <span className="ui-catalog-collapse-meta">
-            {toolCatalog.length}
-            {toolsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-          </span>
-        </button>
+            <span className="ui-catalog-collapse-meta">
+              {toolCatalog.length}
+              {toolsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            </span>
+          </button>
+          {onTidyToolNames && tidyPlan.length > 0 ? (
+            <button
+              type="button"
+              onClick={handleTidyToolNames}
+              disabled={tidying}
+              className="ui-btn-ghost h-9 shrink-0 gap-2 self-center px-2.5 text-xs disabled:opacity-60"
+              title={`Clean up casing and spacing on ${tidyPlan.length} tool name${tidyPlan.length === 1 ? "" : "s"}. Letters are never changed.`}
+            >
+              <Sparkles size={14} />
+              {tidying ? "Tidying…" : `Tidy names (${tidyPlan.length})`}
+            </button>
+          ) : null}
+        </div>
 
         {toolsCollapsed ? null : toolCatalog.length === 0 ? (
           <div className="ui-procedure-empty">Tools added to procedure steps will appear here for cleanup and renaming.</div>

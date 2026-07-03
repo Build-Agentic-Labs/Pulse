@@ -1,10 +1,138 @@
 "use client";
 
 import { Moon, RefreshCw, Sun } from "lucide-react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { NothingLoadingBlock, NothingSpinner, NothingStatus } from "@/components/nothing-ui";
 import { useTheme } from "@/components/theme-provider";
 import { SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
+
+function prefersReducedMotion() {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// ── Line-balancing brand animation: an overloaded line (Station 2 over takt)
+// rebalances into an even, within-takt layout, looping. ────────────────────
+const LB_START = 26;
+const LB_SLOT = 40;
+const LB_W = 34;
+const LB_LANEY = [6, 46, 86];
+const LB_BAD = [[0], [1, 2, 3, 4, 5], [6, 7]];
+const LB_GOOD = [[0, 1, 2], [3, 4], [5, 6, 7]];
+
+type LbPos = Record<number, { left: number; top: number; hot: boolean }>;
+
+function lbPositions(layout: number[][]): LbPos {
+  const pos: LbPos = {};
+  layout.forEach((ids, lane) => {
+    ids.forEach((id, slot) => {
+      pos[id] = { left: LB_START + slot * LB_SLOT, top: LB_LANEY[lane] + 9, hot: slot >= 3 };
+    });
+  });
+  return pos;
+}
+
+const LB_POS_BAD = lbPositions(LB_BAD);
+const LB_POS_GOOD = lbPositions(LB_GOOD);
+
+function LineBalanceArt() {
+  const [good, setGood] = useState(false);
+
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setGood(true);
+      return;
+    }
+    const timer = window.setInterval(() => setGood((value) => !value), 3600);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const pos = good ? LB_POS_GOOD : LB_POS_BAD;
+
+  return (
+    <div className={`ui-lb ${good ? "is-good" : ""}`} aria-hidden="true">
+      <div className="ui-lb-head">
+        <div className="ui-lb-status">
+          <span className="ui-lb-badge" />
+          <div>
+            <div className="ui-lb-title">{good ? "Balanced" : "Unbalanced"}</div>
+            <div className="ui-lb-sub">{good ? "All stations within takt" : "Station 2 exceeds takt"}</div>
+          </div>
+        </div>
+        <div className="ui-lb-metric">
+          <div className="ui-lb-metric-v">{good ? "96%" : "61%"}</div>
+          <div className="ui-lb-metric-l">Balance</div>
+        </div>
+      </div>
+      <div className="ui-lb-chart">
+        {LB_LANEY.map((y, i) => (
+          <div key={i} className="ui-lb-lane" style={{ top: y }}>
+            <span className="ui-lb-tag">S{i + 1}</span>
+            <span className="ui-lb-rail" />
+          </div>
+        ))}
+        <div className="ui-lb-takt" />
+        {Array.from({ length: 8 }, (_, id) => {
+          const p = pos[id];
+          return (
+            <div
+              key={id}
+              className={`ui-lb-blk ${!good && p.hot ? "is-hot" : ""}`}
+              style={{ width: LB_W, left: p.left, top: p.top }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const GLOSSARY: Array<[string, string]> = [
+  ["Takt Time", "The pace production must hold to meet demand — available time divided by the units required."],
+  ["Line Balancing", "Distributing work evenly across stations so no single operator becomes the bottleneck."],
+  ["Work Order", "A released instruction to build a specific quantity of a product by a due date."],
+  ["Cycle Time", "The time to complete one unit at a station, from the first touch to the last."],
+  ["Traveler", "The record that moves with a work order, capturing what happened at every step."],
+  ["Throughput", "The number of finished units a line completes over a given period."],
+];
+
+function GlossaryCarousel() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      return;
+    }
+    const timer = window.setInterval(() => setIndex((value) => (value + 1) % GLOSSARY.length), 4600);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="ui-auth-gloss">
+      <div className="ui-auth-gloss-label ui-eyebrow">
+        <span className="ui-auth-gloss-dot" /> Manufacturing glossary
+      </div>
+      <div className="ui-auth-gloss-stack">
+        {GLOSSARY.map(([term, definition], n) => (
+          <article key={term} className={`ui-auth-term ${n === index ? "is-active" : ""}`}>
+            <h2>{term}</h2>
+            <p>{definition}</p>
+          </article>
+        ))}
+      </div>
+      <div className="ui-auth-dots">
+        {GLOSSARY.map(([term], n) => (
+          <button
+            key={term}
+            type="button"
+            aria-label={`Show ${term}`}
+            className={n === index ? "is-active" : ""}
+            onClick={() => setIndex(n)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function FlowShell({ children }: { children: ReactNode }) {
   const { theme, toggleTheme } = useTheme();
@@ -91,15 +219,23 @@ function MicrosoftLogo() {
 
 type AuthFormMode = "signin" | "signup" | "reset";
 
-const AUTH_MODE_COPY: Record<AuthFormMode, { subtitle: string; submit: string; busy: string }> = {
-  signin: { subtitle: "Sign in with your work email.", submit: "Sign in", busy: "Signing in" },
-  signup: { subtitle: "Create your account with your work email.", submit: "Create account", busy: "Creating account" },
-  reset: { subtitle: "We'll email you a link to set a new password.", submit: "Send reset link", busy: "Sending link" },
+const AUTH_MODE_COPY: Record<AuthFormMode, { title: string; subtitle: string; submit: string; busy: string }> = {
+  signin: { title: "Sign in", subtitle: "Welcome back. Use your work email.", submit: "Sign in", busy: "Signing in" },
+  signup: {
+    title: "Create account",
+    subtitle: "Create your account with your work email.",
+    submit: "Create account",
+    busy: "Creating account",
+  },
+  reset: {
+    title: "Reset password",
+    subtitle: "We'll email you a link to set a new password.",
+    submit: "Send reset link",
+    busy: "Sending link",
+  },
 };
 
 export function AuthFormPanel({
-  eyebrow = "Pulse",
-  title,
   message,
   isSubmitting,
   onSignIn,
@@ -108,8 +244,9 @@ export function AuthFormPanel({
   onResetPassword,
   onResendConfirmation,
 }: {
+  /** Retained for API compatibility; the split screen derives its heading per mode. */
   eyebrow?: string;
-  title: string;
+  title?: string;
   message: string;
   isSubmitting: boolean;
   onSignIn: (email: string, password: string) => void;
@@ -118,6 +255,7 @@ export function AuthFormPanel({
   onResetPassword?: (email: string) => void;
   onResendConfirmation?: (email: string) => void;
 }) {
+  const { theme, toggleTheme } = useTheme();
   const [mode, setMode] = useState<AuthFormMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -142,22 +280,39 @@ export function AuthFormPanel({
   }
 
   return (
-    <FlowShell>
-      <section className="ui-auth-card">
-        <header className="ui-auth-card-header">
-          <div className="ui-auth-brand font-display">{eyebrow}</div>
-          <p className="ui-eyebrow mt-3">Organization access</p>
-          <h1 className="ui-section-title mt-2">{title}</h1>
-          <p className="ui-section-subtitle mt-1">{copy.subtitle}</p>
-        </header>
+    <div className="ui-auth-split">
+      <div className="ui-auth-theme">
+        <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-9 w-9 px-0" title="Toggle theme">
+          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
+      </div>
 
-        <div className="ui-auth-card-body">
-          <form className="ui-field-group" onSubmit={submit}>
+      <aside className="ui-auth-brand">
+        <div>
+          <span className="ui-auth-wordmark">Pulse</span>
+        </div>
+        <div className="ui-auth-art">
+          <LineBalanceArt />
+        </div>
+        <GlossaryCarousel />
+        <div className="ui-auth-foot ui-eyebrow">
+          <span className="ui-auth-foot-dot" /> Anacorp Manufacturing
+        </div>
+      </aside>
+
+      <main className="ui-auth-form-side">
+        <div className="ui-auth-form-wrap">
+          <p className="ui-eyebrow">Organization access</p>
+          <h1 className="ui-auth-h1">{copy.title}</h1>
+          <p className="ui-auth-subtitle">{copy.subtitle}</p>
+
+          <form className="ui-auth-form" onSubmit={submit}>
             {mode === "signup" ? (
-              <label className="block">
-                <span className="ui-field-label">Full name</span>
+              <div className="ui-auth-field">
+                <label htmlFor="auth-name">Full name</label>
                 <input
-                  className="ui-field-standalone font-mono"
+                  id="auth-name"
+                  className="ui-auth2-input"
                   type="text"
                   value={fullName}
                   onChange={(event) => setFullName(event.target.value)}
@@ -165,55 +320,53 @@ export function AuthFormPanel({
                   placeholder="Your name"
                   required
                 />
-              </label>
+              </div>
             ) : null}
 
-            <label className="block">
-              <span className="ui-field-label">Email</span>
+            <div className="ui-auth-field">
+              <label htmlFor="auth-email">Work email</label>
               <input
-                className="ui-field-standalone font-mono"
+                id="auth-email"
+                className="ui-auth2-input"
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 autoComplete="email"
-                placeholder="you@company.com"
+                placeholder="you@anacorp.com"
                 required
               />
-            </label>
+            </div>
 
             {mode !== "reset" ? (
-              <label className="block">
-                <span className="ui-field-label">Password</span>
+              <div className="ui-auth-field">
+                <div className="ui-auth-field-row">
+                  <label htmlFor="auth-password">Password</label>
+                  {mode === "signin" && onResetPassword ? (
+                    <button
+                      type="button"
+                      className="ui-auth-forgot"
+                      onClick={() => setMode("reset")}
+                      disabled={isSubmitting}
+                    >
+                      Forgot password?
+                    </button>
+                  ) : null}
+                </div>
                 <input
-                  className="ui-field-standalone font-mono"
+                  id="auth-password"
+                  className="ui-auth2-input"
                   type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                  placeholder={mode === "signup" ? "Choose a password" : "Enter password"}
+                  placeholder={mode === "signup" ? "Choose a password" : "Enter your password"}
                   required
                 />
-              </label>
-            ) : null}
-
-            {mode === "signin" && onResetPassword ? (
-              <div className="text-right">
-                <button
-                  type="button"
-                  className="ui-auth-link text-[12px] text-ink-secondary underline-offset-2 hover:underline"
-                  onClick={() => setMode("reset")}
-                  disabled={isSubmitting}
-                >
-                  Forgot password?
-                </button>
               </div>
             ) : null}
 
             {visibleMessage ? (
-              <p
-                className={`ui-auth-message ${messageTone === "info" ? "ui-auth-message-info" : "ui-auth-message-error"}`}
-                role="alert"
-              >
+              <p className={`ui-auth-msg ${messageTone === "info" ? "ui-auth-msg-info" : "ui-auth-msg-error"}`} role="alert">
                 {formatAuthMessage(visibleMessage)}
               </p>
             ) : null}
@@ -221,7 +374,7 @@ export function AuthFormPanel({
             {showResend ? (
               <button
                 type="button"
-                className="ui-btn-ghost font-mono h-9 w-full disabled:opacity-40"
+                className="ui-auth-btn ui-auth-btn-ghost"
                 disabled={isSubmitting}
                 onClick={() => onResendConfirmation?.(email)}
               >
@@ -229,53 +382,48 @@ export function AuthFormPanel({
               </button>
             ) : null}
 
-            <div className="space-y-2.5 pt-1">
-              <button className="ui-btn-primary font-mono h-11 w-full" type="submit" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <span className="flex items-center gap-3">
-                    <NothingSpinner inline />
-                    <NothingStatus>{copy.busy}</NothingStatus>
-                  </span>
-                ) : (
-                  copy.submit
-                )}
-              </button>
+            <button className="ui-auth-btn ui-auth-btn-primary" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <span className="flex items-center gap-3">
+                  <NothingSpinner inline />
+                  <NothingStatus>{copy.busy}</NothingStatus>
+                </span>
+              ) : (
+                copy.submit
+              )}
+            </button>
 
-              {mode !== "reset" ? (
-                <>
-                  <div className="ui-auth-divider">
-                    <span className="ui-auth-divider-line" aria-hidden="true" />
-                    <span className="ui-auth-divider-label">Or</span>
-                    <span className="ui-auth-divider-line" aria-hidden="true" />
-                  </div>
+            {mode !== "reset" ? (
+              <>
+                <div className="ui-auth-or">
+                  <span>Or</span>
+                </div>
+                {onMicrosoftSignIn ? (
+                  <button
+                    className="ui-auth-btn ui-auth-btn-ghost"
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => onMicrosoftSignIn()}
+                  >
+                    <MicrosoftLogo />
+                    Continue with Microsoft
+                  </button>
+                ) : null}
+              </>
+            ) : null}
 
-                  {onMicrosoftSignIn ? (
-                    <button
-                      className="ui-btn-ghost font-mono h-11 w-full gap-2.5 disabled:opacity-40"
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => onMicrosoftSignIn()}
-                    >
-                      <MicrosoftLogo />
-                      Continue with Microsoft
-                    </button>
-                  ) : null}
-                </>
-              ) : null}
-
-              <button
-                className="ui-btn-ghost font-mono h-11 w-full disabled:opacity-40"
-                type="button"
-                disabled={isSubmitting}
-                onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-              >
-                {mode === "signin" ? "Create account" : "Back to sign in"}
-              </button>
-            </div>
+            <button
+              className="ui-auth-btn ui-auth-btn-ghost"
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+            >
+              {mode === "signin" ? "Create account" : "Back to sign in"}
+            </button>
           </form>
         </div>
-      </section>
-    </FlowShell>
+      </main>
+    </div>
   );
 }
 

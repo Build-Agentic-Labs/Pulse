@@ -12,7 +12,7 @@ import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/type
 import { useAuthFormActions } from "@/lib/auth-form-actions";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
-type ProjectRouteKind = "planner" | "mobile-photos" | "excel/gantt";
+type ProjectRouteKind = "planner" | "mobile-photos";
 
 /** What the company dashboard (and other project-less home surfaces) render with. */
 export type DashboardHomeContext = {

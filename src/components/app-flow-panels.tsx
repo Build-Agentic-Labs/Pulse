@@ -12,10 +12,10 @@ function prefersReducedMotion() {
 
 // ── Line-balancing brand animation: an overloaded line (Station 2 over takt)
 // rebalances into an even, within-takt layout, looping. ────────────────────
-const LB_START = 26;
-const LB_SLOT = 40;
-const LB_W = 34;
-const LB_LANEY = [6, 46, 86];
+const LB_START = 34;
+const LB_SLOT = 54;
+const LB_W = 46;
+const LB_LANEY = [8, 58, 108];
 const LB_BAD = [[0], [1, 2, 3, 4, 5], [6, 7]];
 const LB_GOOD = [[0, 1, 2], [3, 4], [5, 6, 7]];
 
@@ -25,7 +25,8 @@ function lbPositions(layout: number[][]): LbPos {
   const pos: LbPos = {};
   layout.forEach((ids, lane) => {
     ids.forEach((id, slot) => {
-      pos[id] = { left: LB_START + slot * LB_SLOT, top: LB_LANEY[lane] + 9, hot: slot >= 3 };
+      // Centre the 22px block in the 42px lane band.
+      pos[id] = { left: LB_START + slot * LB_SLOT, top: LB_LANEY[lane] + 10, hot: slot >= 3 };
     });
   });
   return pos;
@@ -42,7 +43,7 @@ function LineBalanceArt() {
       setGood(true);
       return;
     }
-    const timer = window.setInterval(() => setGood((value) => !value), 3600);
+    const timer = window.setInterval(() => setGood((value) => !value), 4800);
     return () => window.clearInterval(timer);
   }, []);
 

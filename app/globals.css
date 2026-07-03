@@ -4916,7 +4916,7 @@ body {
 /* line-balancing art */
 .ui-lb {
   position: relative;
-  width: 300px;
+  width: 380px;
   max-width: 100%;
 }
 .ui-lb-head {
@@ -4942,21 +4942,21 @@ body {
   background: var(--color-success);
 }
 .ui-lb-title {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 500;
   color: var(--color-accent);
 }
 .ui-lb-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-ink-secondary);
-  margin-top: 1px;
+  margin-top: 2px;
 }
 .ui-lb-metric {
   text-align: right;
   font-family: var(--type-mono);
 }
 .ui-lb-metric-v {
-  font-size: 16px;
+  font-size: 19px;
   color: var(--color-accent);
 }
 .ui-lb-metric-l {
@@ -4967,20 +4967,20 @@ body {
 }
 .ui-lb-chart {
   position: relative;
-  height: 118px;
+  height: 158px;
 }
 .ui-lb-lane {
   position: absolute;
   left: 0;
   right: 0;
-  height: 34px;
+  height: 42px;
 }
 .ui-lb-tag {
   position: absolute;
   left: 0;
-  top: 13px;
+  top: 16px;
   font-family: var(--type-mono);
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--color-ink-tertiary);
 }
@@ -4999,7 +4999,7 @@ body {
   bottom: -4px;
   width: 1px;
   background: var(--color-border-strong);
-  left: 146px;
+  left: 196px;
 }
 .ui-lb-takt::after {
   content: "TAKT";
@@ -5013,12 +5013,13 @@ body {
 }
 .ui-lb-blk {
   position: absolute;
-  height: 16px;
-  border-radius: 4px;
+  height: 22px;
+  border-radius: 5px;
   border: 1px solid var(--color-border-strong);
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  transition: left 0.95s cubic-bezier(0.34, 1.32, 0.5, 1), top 0.95s cubic-bezier(0.34, 1.32, 0.5, 1),
-    background 0.5s, border-color 0.5s;
+  /* Steady, non-overshooting ease so blocks glide calmly between stations. */
+  transition: left 1.25s cubic-bezier(0.6, 0, 0.2, 1), top 1.25s cubic-bezier(0.6, 0, 0.2, 1),
+    background 0.7s ease, border-color 0.7s ease;
 }
 .ui-lb-blk.is-hot {
   background: var(--color-danger);

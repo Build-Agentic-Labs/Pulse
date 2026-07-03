@@ -269,6 +269,17 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
   // Runs before the session effect so the cached paint lands on the first client frame.
   useEffect(() => {
     if (!hasLocalSupabaseSession()) {
+      // No persisted session in this browser: the async resolve below is guaranteed to
+      // land on the auth panel, so show it immediately instead of flashing the loading
+      // shell first. Exception: an OAuth/email-link callback carries its credentials in
+      // the URL and has no stored token yet — keep the loading shell while it exchanges.
+      const isAuthCallback = /[?#&](code|access_token|refresh_token|error_description)=/.test(
+        window.location.href,
+      );
+      if (!isAuthCallback) {
+        setSessionReady(true);
+        setStatus("auth");
+      }
       return;
     }
 

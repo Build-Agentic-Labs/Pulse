@@ -34,11 +34,23 @@ function resolveDisplayName(profile: UserProfile) {
   return emailLocal || "Signed in";
 }
 
+// Survives navigations within the tab: a remounting UserNav paints the last known
+// identity immediately instead of flashing the signed-out fallback while the session
+// re-hydrates. undefined = never resolved, null = known signed out.
+let lastKnownProfile: UserProfile | null | undefined;
+
 function useUserProfile(supabase: ReturnType<typeof createPlannerSupabaseClient>) {
-  const [profile, setProfile] = useState<UserProfile>();
+  const [profile, setProfile] = useState<UserProfile | null | undefined>(lastKnownProfile);
 
   useEffect(() => {
     let mounted = true;
+
+    function applyProfile(next: UserProfile | null) {
+      lastKnownProfile = next;
+      if (mounted) {
+        setProfile(next);
+      }
+    }
 
     async function hydrateUser() {
       const { session } = await resolveSupabaseSession(supabase);
@@ -49,7 +61,7 @@ function useUserProfile(supabase: ReturnType<typeof createPlannerSupabaseClient>
       }
 
       if (!user) {
-        setProfile(undefined);
+        applyProfile(null);
         return;
       }
 
@@ -77,14 +89,14 @@ function useUserProfile(supabase: ReturnType<typeof createPlannerSupabaseClient>
         avatarUrl = String(profileRow.avatar_url);
       }
 
-      setProfile({ fullName, email, avatarUrl });
+      applyProfile({ fullName, email, avatarUrl });
     }
 
     void hydrateUser();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
-        setProfile(undefined);
+        applyProfile(null);
         return;
       }
 
@@ -232,6 +244,10 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
             </div>
           ) : null}
         </>
+      ) : profile === undefined ? (
+        // Session still resolving on this tab's first mount: hold layout with a quiet
+        // placeholder instead of flashing the signed-out state.
+        <span aria-hidden="true" className="h-[30px] w-[30px] shrink-0 rounded-full border border-line bg-surface-raised" />
       ) : (
         <Link href="/login" className="ui-btn-ghost inline-flex h-8 items-center px-3 text-[12px]">
           Sign in

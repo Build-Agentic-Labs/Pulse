@@ -18,6 +18,7 @@ import {
   FileText,
   GitBranch,
   ImageIcon,
+  LayoutGrid,
   ListChecks,
   Package,
   Pause,
@@ -1349,6 +1350,14 @@ function TopNav({
               className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
             />
           </button>
+          <Link
+            href="/"
+            className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
+            title="All spaces"
+            aria-label="Go to the company dashboard"
+          >
+            <LayoutGrid size={14} strokeWidth={1.75} />
+          </Link>
           <div className="ui-brand-compact shrink-0">
             <RollingText text="Pulse" rollOnMount />
           </div>
@@ -1399,6 +1408,14 @@ function TopNav({
             className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
           />
         </button>
+        <Link
+          href="/"
+          className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
+          title="All spaces"
+          aria-label="Go to the company dashboard"
+        >
+          <LayoutGrid size={14} strokeWidth={1.75} />
+        </Link>
         <div className="ui-brand-compact shrink-0">Pulse</div>
       </div>
 

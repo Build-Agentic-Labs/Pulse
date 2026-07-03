@@ -3,6 +3,7 @@
 import { Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useConfirm } from "@/components/confirm-provider";
 import { rasicLegend, SOP_STATUS_LABELS, SOP_STATUSES, type Sop, type SopStatus } from "@/domain/sop/schema";
 import { applySampleData } from "@/domain/sop/sample";
 import { saveSop, SopConflictError } from "@/lib/sop/store";
@@ -73,6 +74,7 @@ export function SopEditor({
   isNew?: boolean;
 }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [sop, setSop] = useState<Sop>(initial);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
@@ -188,10 +190,19 @@ export function SopEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autosaveArmed, sop]);
 
-  // Confirm in-app exits (shell back link / brand link) while edits are unsaved.
-  function confirmLeave(): boolean {
+  // Confirm in-app exits (shell back link / brand link) while edits are unsaved. The shell
+  // awaits this, so an unsaved-changes exit resolves through the themed dialog instead of a
+  // native prompt. (Tab close / hard reload still uses the native beforeunload guard below,
+  // which browsers require to be synchronous.)
+  async function confirmLeave(): Promise<boolean> {
     if (!dirty) return true;
-    return window.confirm("You have unsaved changes. Leave without saving?");
+    return confirm({
+      title: "Leave without saving?",
+      body: "You have unsaved changes that will be lost.",
+      tone: "warning",
+      confirmLabel: "Leave",
+      cancelLabel: "Stay",
+    });
   }
 
   async function handleFinish() {

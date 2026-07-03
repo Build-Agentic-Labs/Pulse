@@ -4,6 +4,7 @@ import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { NothingSpinner } from "@/components/nothing-ui";
 import { getSop, type SopRecord } from "@/lib/sop/store";
 import { SopEditor } from "./sop-editor";
 import { SopShell } from "./sop-shell";
@@ -82,5 +83,13 @@ export function SopDetailClient() {
     );
   }
 
-  return <div className="fixed inset-0 bg-canvas" />;
+  // Loading: keep the app frame up (sidebar + chrome) with a centered spinner so opening a
+  // SOP doesn't flash a blank white canvas before the editor mounts.
+  return (
+    <SopShell sidebar={browseSidebar}>
+      <div className="flex h-full items-center justify-center p-4">
+        <NothingSpinner />
+      </div>
+    </SopShell>
+  );
 }

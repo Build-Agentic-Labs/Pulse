@@ -1,10 +1,10 @@
 "use client";
 
-import { ChevronLeft, Moon, Sun } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { RollingText } from "@/components/rolling-text";
-import { useTheme } from "@/components/theme-provider";
 import { BackToDashboardButton, UserNav } from "@/components/user-nav";
 
 /**
@@ -26,19 +26,26 @@ export function SopShell({
   crumb?: string;
   actions?: ReactNode;
   /**
-   * Guard for the shell's own exit links (brand + back). Return false to cancel the
-   * navigation — used by the editor to confirm leaving with unsaved changes.
+   * Guard for the shell's own exit links (brand + back). Resolve false to cancel the
+   * navigation — used by the editor to confirm leaving with unsaved changes. May be
+   * async so the guard can await the themed confirm dialog before navigating.
    */
-  confirmLeave?: () => boolean;
+  confirmLeave?: () => boolean | Promise<boolean>;
   children: ReactNode;
 }) {
-  const { theme, toggleTheme } = useTheme();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
 
+  // When a guard is present we can't decide synchronously (the themed confirm resolves a
+  // promise), so we always intercept the click, capture the destination href, then navigate
+  // programmatically once the guard resolves true. Without a guard, links behave normally.
   function guardNavigation(event: MouseEvent<HTMLAnchorElement>) {
-    if (confirmLeave && !confirmLeave()) {
-      event.preventDefault();
-    }
+    if (!confirmLeave) return;
+    const href = event.currentTarget.getAttribute("href");
+    event.preventDefault();
+    void Promise.resolve(confirmLeave()).then((ok) => {
+      if (ok && href) router.push(href);
+    });
   }
 
   return (
@@ -70,9 +77,6 @@ export function SopShell({
 
         <div className="flex items-center gap-0.5 sm:gap-1">
           {actions}
-          <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
-            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
           <UserNav />
         </div>
       </header>

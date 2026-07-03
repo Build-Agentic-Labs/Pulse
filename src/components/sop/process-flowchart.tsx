@@ -284,6 +284,7 @@ function MapView({
                     maxHeight={140}
                     value={activity.input ?? ""}
                     placeholder="Input"
+                    disabled={disabled}
                     onChange={(event) => onPatch(index, { input: event.target.value })}
                   />
                 </td>
@@ -294,6 +295,7 @@ function MapView({
                       maxHeight={shape === "decision" ? 88 : 140}
                       value={activity.description}
                       placeholder="Step"
+                      disabled={disabled}
                       onChange={(event) => onPatch(index, { description: event.target.value })}
                     />
                   </StepNode>
@@ -309,6 +311,7 @@ function MapView({
                     maxHeight={140}
                     value={activity.output ?? ""}
                     placeholder="Output"
+                    disabled={disabled}
                     onChange={(event) => onPatch(index, { output: event.target.value })}
                   />
                 </td>
@@ -326,8 +329,9 @@ function MapView({
                                 ? `${role || "Role"}: ${RASIC_LABELS[code]} — click to change`
                                 : `${role || "Role"}: unassigned — click to assign`
                             }
+                            disabled={disabled}
                             onClick={() => onCycle(index, role)}
-                            className={`ui-mono-label rounded-full border px-2 py-0.5 text-[10px] transition ${
+                            className={`ui-mono-label rounded-full border px-2 py-0.5 transition disabled:cursor-default ${
                               code
                                 ? "border-accent-muted bg-accent-subtle text-accent"
                                 : "border-line text-ink-tertiary hover:text-ink"
@@ -349,6 +353,7 @@ function MapView({
                       type="button"
                       className="ui-btn-ghost h-7 w-7 px-0 text-ink-tertiary hover:text-ink"
                       title={`Shape: ${SHAPE_META[shape].label} — click to change`}
+                      disabled={disabled}
                       onClick={() => onShape(index)}
                     >
                       <ShapeIcon size={13} />
@@ -357,7 +362,7 @@ function MapView({
                       type="button"
                       className="ui-btn-ghost h-7 w-7 px-0 text-ink-tertiary disabled:opacity-30"
                       title="Move up"
-                      disabled={index === 0}
+                      disabled={disabled || index === 0}
                       onClick={() => onMove(index, -1)}
                     >
                       <ChevronUp size={14} />
@@ -366,19 +371,21 @@ function MapView({
                       type="button"
                       className="ui-btn-ghost h-7 w-7 px-0 text-ink-tertiary disabled:opacity-30"
                       title="Move down"
-                      disabled={index === activities.length - 1}
+                      disabled={disabled || index === activities.length - 1}
                       onClick={() => onMove(index, 1)}
                     >
                       <ChevronDown size={14} />
                     </button>
-                    <button
-                      type="button"
-                      className="ui-btn-ghost h-7 w-7 px-0 text-ink-tertiary hover:text-danger"
-                      title="Delete step"
-                      onClick={() => onRemove(index)}
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    {disabled ? null : (
+                      <button
+                        type="button"
+                        className="ui-btn-ghost h-7 w-7 px-0 text-ink-tertiary hover:text-danger"
+                        title="Delete step"
+                        onClick={() => onRemove(index)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

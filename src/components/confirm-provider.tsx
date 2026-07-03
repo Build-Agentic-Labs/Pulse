@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackTone } from "./themed-feedback";
 
 /** Options for a single confirmation, minus the imperative onConfirm wiring the hook supplies. */
@@ -26,23 +26,19 @@ const ConfirmContext = createContext<ConfirmFn | null>(null);
  */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<FeedbackConfirm>();
-  const [resolver, setResolver] = useState<((value: boolean) => void) | null>(null);
+  const resolverRef = useRef<((value: boolean) => void) | null>(null);
 
-  const settle = useCallback(
-    (value: boolean) => {
-      setPending(undefined);
-      setResolver((current: ((value: boolean) => void) | null) => {
-        current?.(value);
-        return null;
-      });
-    },
-    [],
-  );
+  const settle = useCallback((value: boolean) => {
+    setPending(undefined);
+    const resolve = resolverRef.current;
+    resolverRef.current = null;
+    resolve?.(value);
+  }, []);
 
   const confirm = useCallback<ConfirmFn>(
     (options) =>
       new Promise<boolean>((resolve) => {
-        setResolver(() => resolve);
+        resolverRef.current = resolve;
         setPending({
           title: options.title,
           body: options.body,

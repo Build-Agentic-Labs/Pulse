@@ -4,6 +4,7 @@ import { FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "@/components/confirm-provider";
 import { SOP_STATUS_LABELS, type Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
@@ -49,6 +50,7 @@ function markImportDone(workspaceId: string) {
 
 export function SopList() {
   const router = useRouter();
+  const confirm = useConfirm();
   const { workspaceId, role } = useSopWorkspace();
   const editable = canEdit(role);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -149,7 +151,13 @@ export function SopList() {
     const label = sop.title || sop.sopNumber || "this SOP";
     // Soft delete under the hood (deleted_at), but it still leaves the list immediately --
     // confirm so a misclick on the row's trash icon can't silently remove a document.
-    if (!window.confirm(`Delete "${label}"? It will be removed from the SOP list.`)) {
+    const ok = await confirm({
+      title: `Delete "${label}"?`,
+      body: "It will be removed from the SOP list.",
+      tone: "danger",
+      confirmLabel: "Delete SOP",
+    });
+    if (!ok) {
       return;
     }
     const previous = sops;
@@ -296,58 +304,54 @@ export function SopList() {
             </div>
           ) : (
             visibleSops.map((sop) => (
-              <button
+              // The row is a Link (the whole card navigates) with a real sibling delete
+              // button -- never a button nested in a button, which is invalid interactive
+              // markup and swallows keyboard activation.
+              <div
                 key={sop.id}
-                type="button"
-                className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-hover"
-                onClick={() => router.push(`/sops/${sop.id}`)}
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
               >
-                <FileText size={15} className="shrink-0 text-ink-tertiary" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-ink">
-                    {sop.title || sop.sopNumber || "Untitled SOP"}
-                  </div>
-                  <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
-                    {[sop.sopNumber, sop.version ? `v${sop.version}` : "", sop.source === "converted" ? "converted" : "authored"]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                </div>
-                <span
-                  className={`ui-mono-label shrink-0 rounded-full border border-line px-2 py-0.5 ${
-                    sop.status === "approved"
-                      ? "text-accent"
-                      : sop.status === "obsolete"
-                        ? "text-danger"
-                        : "text-ink-tertiary"
-                  }`}
+                <Link
+                  href={`/sops/${sop.id}`}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
                 >
-                  {SOP_STATUS_LABELS[sop.status]}
-                </span>
-                {formatDate(sop.updatedAt) ? (
-                  <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
-                ) : null}
-                {editable ? (
+                  <FileText size={15} className="shrink-0 text-ink-tertiary" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-ink">
+                      {sop.title || sop.sopNumber || "Untitled SOP"}
+                    </div>
+                    <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
+                      {[sop.sopNumber, sop.version ? `v${sop.version}` : "", sop.source === "converted" ? "converted" : "authored"]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  </div>
                   <span
-                    role="button"
-                    tabIndex={0}
+                    className={`ui-chip shrink-0 ${
+                      sop.status === "approved"
+                        ? "border-accent text-accent"
+                        : sop.status === "obsolete"
+                          ? "border-danger text-danger"
+                          : ""
+                    }`}
+                  >
+                    {SOP_STATUS_LABELS[sop.status]}
+                  </span>
+                  {formatDate(sop.updatedAt) ? (
+                    <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
+                  ) : null}
+                </Link>
+                {editable ? (
+                  <button
+                    type="button"
                     className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger"
                     title="Delete SOP"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleDelete(sop);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.stopPropagation();
-                        void handleDelete(sop);
-                      }
-                    }}
+                    onClick={() => void handleDelete(sop)}
                   >
                     <Trash2 size={13} />
-                  </span>
+                  </button>
                 ) : null}
-              </button>
+              </div>
             ))
           )}
         </section>

@@ -86,7 +86,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
         className="pointer-events-none fixed inset-0 bg-[radial-gradient(720px_340px_at_50%_-120px,color-mix(in_srgb,var(--color-ink)_5%,transparent),transparent_70%)]"
       />
 
-      <header className="sticky top-0 z-10 flex h-12 items-center gap-4 border-b border-line bg-surface px-5">
+      <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface px-4">
         <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
           Pulse
         </Link>

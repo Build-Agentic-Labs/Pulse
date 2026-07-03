@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, PanelLeft, PanelLeftClose } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type MouseEvent, type ReactNode } from "react";
@@ -52,20 +52,6 @@ export function SopShell({
       <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between px-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-3">
           <BackToDashboardButton onNavigate={guardNavigation} />
-          <button
-            type="button"
-            onClick={() => setCollapsed((value) => !value)}
-            className="ui-btn-ghost hidden h-8 w-8 shrink-0 items-center justify-center px-0 lg:inline-flex"
-            title={collapsed ? "Show sidebar" : "Hide sidebar"}
-            aria-label={collapsed ? "Show sidebar" : "Hide sidebar"}
-            aria-expanded={!collapsed}
-          >
-            <ChevronLeft
-              size={14}
-              strokeWidth={1.75}
-              className={`transition-transform duration-300 ease-ui ${collapsed ? "rotate-180" : ""}`}
-            />
-          </button>
           <Link href="/" className="ui-brand-compact shrink-0" onClick={guardNavigation}>
             Pulse
           </Link>
@@ -80,11 +66,33 @@ export function SopShell({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            className="ui-btn-ghost absolute left-2 top-2 z-30 hidden h-8 w-8 items-center justify-center bg-surface px-0 text-ink-tertiary hover:text-ink lg:inline-flex"
+            title="Show sidebar"
+            aria-label="Show sidebar"
+          >
+            <PanelLeft size={15} strokeWidth={1.75} />
+          </button>
+        ) : null}
         <aside
           className="ui-nav-sidebar shrink-0 overflow-hidden transition-[width,opacity] duration-300 ease-ui"
           style={collapsed ? { width: 0, opacity: 0 } : undefined}
         >
+          <div className="flex h-9 shrink-0 items-center justify-end px-2">
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              className="ui-btn-ghost inline-flex h-7 w-7 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
+              title="Hide sidebar"
+              aria-label="Hide sidebar"
+            >
+              <PanelLeftClose size={15} strokeWidth={1.75} />
+            </button>
+          </div>
           <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-2">
             {back ? (
               <Link href={back.href} className="ui-settings-back" title={back.label} onClick={guardNavigation}>

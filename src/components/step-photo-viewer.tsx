@@ -47,6 +47,7 @@ import {
 } from "@/domain/photo-annotations";
 import type { StepPhotoAttachment } from "@/domain/step-photos";
 import { refreshSignedMediaUrl } from "@/domain/supabase-planner";
+import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "./themed-select";
 
 type AnnotationContextMenu = {
@@ -361,6 +362,7 @@ export function StepPhotoViewer({
   // re-sign, tracked as null) falls back to a placeholder instead of a broken image.
   const [signedUrlOverrides, setSignedUrlOverrides] = useState<Record<string, string | null>>({});
   const refreshedPathsRef = useRef(new Set<string>());
+  const confirm = useConfirm();
 
   async function handlePhotoError(storagePath?: string) {
     if (!storagePath) {
@@ -432,6 +434,27 @@ export function StepPhotoViewer({
       setContextMenu(null);
     },
     [updateAnnotations],
+  );
+
+  // The right-click menu is the discoverable delete affordance, so it gets a themed confirm.
+  // Keyboard Delete (below) stays immediate: it already requires a deliberate selection and is
+  // guarded against text-input focus, and routing it through the async dialog would collide with
+  // this viewer's window-level Escape/Delete key handling (Escape would both cancel the confirm
+  // and close the viewer).
+  const confirmDeleteAnnotation = useCallback(
+    async (annotationId: string) => {
+      const ok = await confirm({
+        title: "Delete annotation?",
+        tone: "danger",
+        confirmLabel: "Delete annotation",
+      });
+      if (ok) {
+        deleteAnnotation(annotationId);
+      } else {
+        setContextMenu(null);
+      }
+    },
+    [confirm, deleteAnnotation],
   );
 
   const applyColor = useCallback(
@@ -1555,7 +1578,7 @@ export function StepPhotoViewer({
           <button
             type="button"
             className="ui-photo-annotation-context-menu-item ui-photo-annotation-context-menu-item-danger"
-            onClick={() => deleteAnnotation(contextMenu.annotationId)}
+            onClick={() => void confirmDeleteAnnotation(contextMenu.annotationId)}
           >
             Delete annotation
           </button>

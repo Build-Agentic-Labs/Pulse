@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { ExplodedView } from "@/domain/step-exploded-views";
 import { refreshSignedMediaUrl } from "@/domain/supabase-planner";
+import { useConfirm } from "@/components/confirm-provider";
 
 /**
  * Display of the SolidWorks exploded views attached to a procedure task — a thumbnail grid that opens
@@ -25,6 +26,7 @@ export function StepExplodedViewGallery({
   // re-sign, tracked as null) falls back to the placeholder tile instead of a broken image.
   const [signedUrlOverrides, setSignedUrlOverrides] = useState<Record<string, string | null>>({});
   const refreshedPathsRef = useRef(new Set<string>());
+  const confirm = useConfirm();
 
   async function handleImageError(storagePath?: string) {
     if (!storagePath) {
@@ -51,11 +53,17 @@ export function StepExplodedViewGallery({
     return fallbackUrl;
   }
 
-  function confirmDelete(view: ExplodedView) {
+  async function confirmDelete(view: ExplodedView) {
     if (!onDelete) {
       return;
     }
-    if (window.confirm(`Delete "${view.caption?.trim() || view.name}"? This can't be undone.`)) {
+    const ok = await confirm({
+      title: "Delete this exploded view?",
+      body: view.caption?.trim() || view.name,
+      tone: "danger",
+      confirmLabel: "Delete",
+    });
+    if (ok) {
       if (activeId === view.id) {
         setActiveId(null);
       }
@@ -63,7 +71,8 @@ export function StepExplodedViewGallery({
     }
   }
 
-  // Escape closes the lightbox, matching the step-photo viewer's dialog behavior.
+  // Escape closes the lightbox; Left/Right arrows step between views — matching the
+  // step-photo viewer's dialog navigation.
   useEffect(() => {
     if (!activeId) {
       return;
@@ -71,11 +80,24 @@ export function StepExplodedViewGallery({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setActiveId(null);
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        const index = views.findIndex((view) => view.id === activeId);
+        if (index === -1) {
+          return;
+        }
+        const nextIndex = event.key === "ArrowLeft" ? index - 1 : index + 1;
+        if (nextIndex < 0 || nextIndex >= views.length) {
+          return;
+        }
+        event.preventDefault();
+        setActiveId(views[nextIndex]?.id ?? null);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeId]);
+  }, [activeId, views]);
 
   if (views.length === 0) {
     return null;
@@ -98,7 +120,7 @@ export function StepExplodedViewGallery({
             <button
               type="button"
               onClick={() => setActiveId(view.id)}
-              className="h-full w-full overflow-hidden rounded border border-line bg-surface-sunken"
+              className="h-full w-full overflow-hidden rounded-sm border border-line bg-surface-sunken"
               title={explodedViewTitle(view)}
               aria-label={`Open ${view.name}`}
             >
@@ -121,7 +143,7 @@ export function StepExplodedViewGallery({
             {onDelete ? (
               <button
                 type="button"
-                onClick={() => confirmDelete(view)}
+                onClick={() => void confirmDelete(view)}
                 className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition group-hover:opacity-100 hover:bg-danger"
                 title="Delete exploded view"
                 aria-label={`Delete ${view.name}`}
@@ -149,7 +171,7 @@ export function StepExplodedViewGallery({
                 className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-danger hover:bg-danger hover:text-white"
                 onClick={(event) => {
                   event.stopPropagation();
-                  confirmDelete(active);
+                  void confirmDelete(active);
                 }}
                 aria-label="Delete exploded view"
                 title="Delete exploded view"
@@ -178,19 +200,19 @@ export function StepExplodedViewGallery({
             />
           ) : (
             <div
-              className="flex h-64 w-full max-w-[90vw] items-center justify-center rounded bg-surface-sunken text-ink-tertiary"
+              className="flex h-64 w-full max-w-[90vw] items-center justify-center rounded-sm bg-surface-sunken text-ink-tertiary"
               onClick={(event) => event.stopPropagation()}
             >
               <Box size={32} strokeWidth={1.5} aria-hidden="true" />
             </div>
           )}
           <div
-            className="mt-3 max-w-[90vw] text-center text-sm text-canvas"
+            className="mt-3 max-w-[90vw] text-center text-sm text-white"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="font-medium">{active.caption || active.name}</div>
             {explodedViewMeta(active) ? (
-              <div className="ui-mono-label mt-1 text-canvas/70">{explodedViewMeta(active)}</div>
+              <div className="ui-mono-label mt-1 text-white/70">{explodedViewMeta(active)}</div>
             ) : null}
           </div>
         </div>

@@ -69,6 +69,7 @@ import { NothingSpinner } from "@/components/nothing-ui";
 import { StepExplodedViewGallery } from "@/components/step-exploded-view-gallery";
 import { TaskVideoGallery } from "@/components/task-video-gallery";
 import { ThemedSelect } from "@/components/themed-select";
+import { BackToDashboardButton, UserNav } from "@/components/user-nav";
 
 const MAX_IMAGE_EDGE = 1280;
 const JPEG_QUALITY = 0.72;
@@ -1627,7 +1628,7 @@ export function MobilePhotoPortal({
 
         if (!savedState) {
           if (projectId) {
-            setErrorMessage("Unable to load this workspace's line plan. Confirm you are signed in and have access.");
+            setErrorMessage("Unable to load this project's line plan. Confirm you are signed in and have access.");
             setSaveState("error");
             return;
           }
@@ -3578,6 +3579,25 @@ export function MobilePhotoPortal({
                   Timer
                 </button>
               ) : null}
+            </div>
+            <div className="ui-photo-mobile-header-nav flex shrink-0 items-center gap-1.5">
+              {saveState === "saving" || saveState === "saved" || saveState === "error" ? (
+                <span
+                  className="ui-mono-label whitespace-nowrap text-ink-tertiary"
+                  aria-live="polite"
+                  title={
+                    saveState === "error"
+                      ? "Changes could not be saved"
+                      : saveState === "saving"
+                        ? "Saving changes…"
+                        : "All changes saved"
+                  }
+                >
+                  {saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}
+                </span>
+              ) : null}
+              <BackToDashboardButton />
+              <UserNav showSpacesLink={false} />
             </div>
           </div>
         </div>

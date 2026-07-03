@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { TaskVideo } from "@/domain/task-videos";
 import { refreshSignedMediaUrl } from "@/domain/supabase-planner";
+import { useConfirm } from "@/components/confirm-provider";
 
 /**
  * Build-animation videos attached to a task. A row of poster tiles that open a lightbox video player;
@@ -24,6 +25,7 @@ export function TaskVideoGallery({
   // re-sign, tracked as null) falls back to the placeholder instead of a broken player.
   const [signedUrlOverrides, setSignedUrlOverrides] = useState<Record<string, string | null>>({});
   const refreshedPathsRef = useRef(new Set<string>());
+  const confirm = useConfirm();
 
   async function handleMediaError(storagePath?: string) {
     if (!storagePath) {
@@ -50,6 +52,8 @@ export function TaskVideoGallery({
     return fallbackUrl;
   }
 
+  // Escape closes the lightbox; Left/Right arrows step between videos — matching the
+  // step-photo viewer's dialog navigation.
   useEffect(() => {
     if (!activeId) {
       return;
@@ -57,17 +61,36 @@ export function TaskVideoGallery({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setActiveId(null);
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        const index = videos.findIndex((video) => video.id === activeId);
+        if (index === -1) {
+          return;
+        }
+        const nextIndex = event.key === "ArrowLeft" ? index - 1 : index + 1;
+        if (nextIndex < 0 || nextIndex >= videos.length) {
+          return;
+        }
+        event.preventDefault();
+        setActiveId(videos[nextIndex]?.id ?? null);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeId]);
+  }, [activeId, videos]);
 
-  function confirmDelete(video: TaskVideo) {
+  async function confirmDelete(video: TaskVideo) {
     if (!onDelete) {
       return;
     }
-    if (window.confirm(`Delete "${video.caption?.trim() || video.name}"? This can't be undone.`)) {
+    const ok = await confirm({
+      title: "Delete this build animation?",
+      body: video.caption?.trim() || video.name,
+      tone: "danger",
+      confirmLabel: "Delete",
+    });
+    if (ok) {
       if (activeId === video.id) {
         setActiveId(null);
       }
@@ -93,7 +116,7 @@ export function TaskVideoGallery({
             <button
               type="button"
               onClick={() => setActiveId(video.id)}
-              className="flex h-full w-full items-center justify-center overflow-hidden rounded border border-line bg-black/80"
+              className="flex h-full w-full items-center justify-center overflow-hidden rounded-sm border border-line bg-black/80"
               title={video.caption?.trim() || video.name}
               aria-label={`Play ${video.name}`}
             >
@@ -115,7 +138,7 @@ export function TaskVideoGallery({
             {onDelete ? (
               <button
                 type="button"
-                onClick={() => confirmDelete(video)}
+                onClick={() => void confirmDelete(video)}
                 className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition group-hover:opacity-100 hover:bg-danger"
                 title="Delete build animation"
                 aria-label={`Delete ${video.name}`}
@@ -142,7 +165,7 @@ export function TaskVideoGallery({
                 className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-danger hover:bg-danger hover:text-white"
                 onClick={(event) => {
                   event.stopPropagation();
-                  confirmDelete(active);
+                  void confirmDelete(active);
                 }}
                 aria-label="Delete build animation"
                 title="Delete build animation"
@@ -167,20 +190,20 @@ export function TaskVideoGallery({
               controls
               autoPlay
               loop
-              className="max-h-[80vh] max-w-[90vw] rounded bg-black"
+              className="max-h-[80vh] max-w-[90vw] rounded-sm bg-black"
               onClick={(event) => event.stopPropagation()}
               onError={() => void handleMediaError(active.storagePath)}
             />
           ) : (
             <div
-              className="flex h-64 w-full max-w-[90vw] items-center justify-center rounded bg-black text-white/70"
+              className="flex h-64 w-full max-w-[90vw] items-center justify-center rounded-sm bg-black text-white/70"
               onClick={(event) => event.stopPropagation()}
             >
               <Film size={32} strokeWidth={1.5} aria-hidden="true" />
             </div>
           )}
           <div
-            className="mt-3 max-w-[90vw] text-center text-sm text-canvas"
+            className="mt-3 max-w-[90vw] text-center text-sm text-white"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="font-medium">{active.caption || active.name}</div>

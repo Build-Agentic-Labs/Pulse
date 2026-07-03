@@ -66,6 +66,23 @@ async function main() {
   try {
     await client.query("begin");
 
+    // The auto-join domain seeds FIRST: since 20260703120000, platform_admins and
+    // workspace_access_grants emails are validated against workspace_auto_join_domains
+    // by trigger, so on a fresh database the domain rule must exist before either.
+    if (args.autoJoinDomain) {
+      const domain = args.autoJoinDomain.trim().toLowerCase();
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) {
+        throw new Error(`--auto-join-domain is not a valid domain: "${args.autoJoinDomain}"`);
+      }
+      await client.query(
+        `insert into public.workspace_auto_join_domains (domain, workspace_id, role)
+         values ($1, $2, 'viewer')
+         on conflict (domain) do nothing`,
+        [domain, args.workspace],
+      );
+      console.log(`✓ workspace_auto_join_domains: @${domain} -> viewer of ${args.workspace}`);
+    }
+
     if (args.superadminEmail) {
       const email = normalizeEmail(args.superadminEmail, "--superadmin-email");
       await client.query(
@@ -84,20 +101,6 @@ async function main() {
         [args.workspace, email],
       );
       console.log(`✓ workspace_access_grants: ${email} -> owner of ${args.workspace}`);
-    }
-
-    if (args.autoJoinDomain) {
-      const domain = args.autoJoinDomain.trim().toLowerCase();
-      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) {
-        throw new Error(`--auto-join-domain is not a valid domain: "${args.autoJoinDomain}"`);
-      }
-      await client.query(
-        `insert into public.workspace_auto_join_domains (domain, workspace_id, role)
-         values ($1, $2, 'viewer')
-         on conflict (domain) do nothing`,
-        [domain, args.workspace],
-      );
-      console.log(`✓ workspace_auto_join_domains: @${domain} -> viewer of ${args.workspace}`);
     }
 
     await client.query("commit");

@@ -32,6 +32,7 @@ import { STEP_TOOL_LISTS_FIELD, getTaskStepToolListMap } from "./step-tools";
 import { applyCalculatedFields } from "./calculations";
 import { defaultDocumentTypeCodes } from "./nomenclature";
 import { formatDisplayTitle } from "@/lib/display-names";
+import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -390,6 +391,7 @@ function mapWorkspaceAccessGrant(row: Record<string, unknown>): WorkspaceAccessG
     grantedBy: maybeText(row.granted_by),
     redeemedBy: maybeText(row.redeemed_by),
     redeemedAt: maybeText(row.redeemed_at),
+    expiresAt: maybeText(row.expires_at),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -1728,8 +1730,16 @@ export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProje
         supabase.rpc("redeem_workspace_access_grants"),
       ]);
 
-      if (redeemResult.error && redeemResult.error.code !== "PGRST202") {
-        throw redeemResult.error;
+      if (redeemResult.error) {
+        if (redeemResult.error.code !== "PGRST202") {
+          throw redeemResult.error;
+        }
+        // Function missing = migrations not applied in this environment. Memberships
+        // can't be minted, which looks like "signed in but no projects" — leave a
+        // trace instead of failing silently.
+        console.warn(
+          "redeem_workspace_access_grants is missing — apply database migrations so invites and domain auto-join can mint memberships.",
+        );
       }
 
       bootstrappedMembershipUserIds.add(user.id);
@@ -1990,7 +2000,7 @@ export async function loadWorkspaceMembersFromSupabase(workspaceId: string): Pro
 
   const userIds = [...new Set(members.map((row) => String(row.user_id)))];
   const profileRows = userIds.length
-    ? await throwIfError(supabase.from("profiles").select("id,full_name,avatar_url").in("id", userIds))
+    ? await throwIfError(supabase.from("profiles").select("id,full_name,avatar_url,email").in("id", userIds))
     : [];
   const profileById = new Map((profileRows ?? []).map((profile) => [String(profile.id), profile]));
 
@@ -2003,6 +2013,7 @@ export async function loadWorkspaceMembersFromSupabase(workspaceId: string): Pro
       createdAt: String(row.created_at),
       fullName: maybeText(profile?.full_name),
       avatarUrl: maybeText(profile?.avatar_url),
+      email: maybeText(profile?.email),
     };
   });
 }
@@ -2020,6 +2031,10 @@ export async function loadWorkspaceAccessGrantsFromSupabase(workspaceId: string)
   return (rows ?? []).map(mapWorkspaceAccessGrant);
 }
 
+// How long an invite stays redeemable. Mirrors the column default in the
+// 20260703120000 migration; re-inviting ("resend") refreshes the window.
+const GRANT_EXPIRY_DAYS = 30;
+
 export async function upsertWorkspaceAccessGrantInSupabase(
   workspaceId: string,
   email: string,
@@ -2027,12 +2042,23 @@ export async function upsertWorkspaceAccessGrantInSupabase(
 ): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase();
 
-  if (!normalizedEmail.endsWith("@anacorp.com")) {
-    throw new Error("Only Anacorp work emails can be granted access.");
+  if (!isAllowedSignupEmail(normalizedEmail)) {
+    throw new Error(SIGNUP_DOMAIN_MESSAGE);
   }
 
   const supabase = plannerClient();
   const { data: userData } = await supabase.auth.getUser();
+
+  // Re-inviting someone a manager previously removed lifts the revocation, so the
+  // grant can mint a membership again on their next sign-in.
+  const { error: revocationError } = await supabase
+    .from("workspace_revocations")
+    .delete()
+    .eq("workspace_id", workspaceId)
+    .eq("email", normalizedEmail);
+  if (revocationError && !isMissingRelationError(revocationError)) {
+    throw revocationError;
+  }
 
   await throwIfError(
     supabase.from("workspace_access_grants").upsert(
@@ -2041,10 +2067,71 @@ export async function upsertWorkspaceAccessGrantInSupabase(
         email: normalizedEmail,
         role,
         granted_by: userData.user?.id ?? null,
+        expires_at: new Date(Date.now() + GRANT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+        redeemed_by: null,
+        redeemed_at: null,
       },
       { onConflict: "workspace_id,email" },
     ),
   );
+}
+
+// Offboard a member: the RPC deletes the membership + per-project access + pending
+// invites and records a revocation so domain auto-join cannot silently re-add them.
+export async function removeWorkspaceMemberInSupabase(workspaceId: string, userId: string): Promise<void> {
+  const supabase = plannerClient();
+  const { error } = await supabase.rpc("remove_workspace_member", {
+    target_workspace_id: workspaceId,
+    target_user_id: userId,
+  });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      throw new Error("Member removal requires the latest database migration. Apply migrations and retry.");
+    }
+    throw error;
+  }
+}
+
+export async function updateWorkspaceMemberRoleInSupabase(
+  workspaceId: string,
+  userId: string,
+  role: WorkspaceRole,
+): Promise<void> {
+  const supabase = plannerClient();
+  const { data, error } = await supabase
+    .from("workspace_members")
+    .update({ role })
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
+    .select("user_id");
+  if (error) {
+    throw error;
+  }
+  // RLS silently filters rows the caller may not update (e.g. an admin touching an
+  // owner row) — surface that instead of pretending the change landed.
+  if (!data?.length) {
+    throw new Error("You don't have permission to change this member's role.");
+  }
+}
+
+export async function updateOwnProfileNameInSupabase(fullName: string): Promise<void> {
+  const name = fullName.trim();
+  if (!name) {
+    throw new Error("Display name is required.");
+  }
+
+  const supabase = plannerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) {
+    throw new Error("Sign in first.");
+  }
+
+  await throwIfError(supabase.from("profiles").update({ full_name: name }).eq("id", userData.user.id));
+  // Keep auth metadata in sync so the next profile bootstrap doesn't revert the name.
+  const { error } = await supabase.auth.updateUser({ data: { full_name: name } });
+  if (error) {
+    throw error;
+  }
 }
 
 export async function deleteWorkspaceAccessGrantFromSupabase(workspaceId: string, email: string): Promise<void> {
@@ -2100,8 +2187,10 @@ export async function loadMembersAccessForWorkspace(workspaceId: string): Promis
     return {
       userId: member.userId,
       fullName: member.fullName,
+      email: member.email,
       role: member.role,
       isSelf: member.userId === selfId,
+      joinedAt: member.createdAt,
       projectLevels,
       orgTools: orgByUser.get(member.userId) ?? "none",
     };

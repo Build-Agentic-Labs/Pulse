@@ -59,8 +59,10 @@ export type AccessLevel = "none" | "view" | "edit";
 export interface MemberAccess {
   userId: string;
   fullName?: string;
+  email?: string;
   role: WorkspaceRole;
   isSelf: boolean;
+  joinedAt?: string;
   // projectId -> level (absent = "none")
   projectLevels: Record<string, AccessLevel>;
   orgTools: AccessLevel;
@@ -138,6 +140,7 @@ export interface WorkspaceMember {
 export interface WorkspaceMemberProfile extends WorkspaceMember {
   fullName?: string;
   avatarUrl?: string;
+  email?: string;
 }
 
 export interface WorkspaceAccessGrant {
@@ -147,6 +150,7 @@ export interface WorkspaceAccessGrant {
   grantedBy?: string;
   redeemedBy?: string;
   redeemedAt?: string;
+  expiresAt?: string;
   createdAt: string;
   updatedAt: string;
 }

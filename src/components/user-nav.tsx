@@ -167,7 +167,9 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
     try {
       await supabase.auth.signOut();
       setOpen(false);
-      router.push("/login");
+      // Land on the root: it shows the sign-in form while signed out, and signing back
+      // in reveals the company dashboard right there (not the last-visited project).
+      router.push("/");
     } finally {
       setIsSigningOut(false);
     }

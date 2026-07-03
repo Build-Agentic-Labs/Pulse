@@ -1,8 +1,15 @@
-import { MobilePhotoRouteShell, PlannerRouteShell } from "@/components/project-route-shells";
+import {
+  HomeRouteShell,
+  MobilePhotoRouteShell,
+  PlannerRouteShell,
+  PlanningRouteShell,
+  ProductionRouteShell,
+} from "@/components/project-route-shells";
 
 function routeShellForReturnTo(returnTo?: string) {
+  // No specific destination -> the company dashboard, same as signing in at /.
   if (!returnTo) {
-    return <PlannerRouteShell />;
+    return <HomeRouteShell />;
   }
 
   let pathname = returnTo;
@@ -26,7 +33,15 @@ function routeShellForReturnTo(returnTo?: string) {
     return <PlannerRouteShell projectId={decodeURIComponent(projectPlannerMatch[1])} />;
   }
 
-  return <PlannerRouteShell />;
+  if (pathname === "/planning") {
+    return <PlanningRouteShell />;
+  }
+
+  if (pathname === "/production") {
+    return <ProductionRouteShell />;
+  }
+
+  return <HomeRouteShell />;
 }
 
 export default async function LoginPage({

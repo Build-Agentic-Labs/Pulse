@@ -87,7 +87,9 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
       />
 
       <header className="sticky top-0 z-10 flex h-12 items-center gap-4 border-b border-line bg-surface px-5">
-        <span className="text-[15px] font-bold tracking-tight text-ink">Pulse</span>
+        <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
+          Pulse
+        </Link>
         {workspaceName ? (
           <>
             <span className="h-4 w-px bg-border-strong" />

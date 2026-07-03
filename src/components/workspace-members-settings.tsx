@@ -1,8 +1,9 @@
 "use client";
 
-import { ChevronRight, MailPlus, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronRight, MailPlus, Plus, RotateCw, Search, ShieldCheck, Trash2, UserMinus } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ThemedSelect } from "@/components/themed-select";
+import { SIGNUP_DOMAIN_MESSAGE, isAllowedSignupEmail } from "@/lib/allowed-signup-domain";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import {
   createPlannerSupabaseClient,
@@ -10,8 +11,10 @@ import {
   loadMembersAccessForWorkspace,
   loadWorkspaceAccessGrantsFromSupabase,
   loadWorkspaceProjectGroups,
+  removeWorkspaceMemberInSupabase,
   setOrgToolAccessInSupabase,
   setProjectAccessInSupabase,
+  updateWorkspaceMemberRoleInSupabase,
   upsertWorkspaceAccessGrantInSupabase,
 } from "@/domain/supabase-planner";
 import type {
@@ -53,16 +56,38 @@ const accessLevelOptions: Array<{ value: AccessLevel; label: string }> = [
   { value: "edit", label: "Edit" },
 ];
 
-const workspaceRoleOptions: Array<{ value: WorkspaceRole; label: string }> = [
-  { value: "viewer", label: "Viewer" },
-  { value: "editor", label: "Editor" },
-  { value: "admin", label: "Admin" },
-  { value: "owner", label: "Owner" },
-];
+const ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
+  owner: "Full control: members, roles, owners, and organization settings.",
+  admin: "Manages members, invites, and every project. Cannot manage owners.",
+  editor: "Edits the projects they've been granted Edit access to.",
+  viewer: "Read-only on the projects they've been granted View access to.",
+};
+
+const workspaceRoleOptions: Array<{ value: WorkspaceRole; label: string; description: string }> = (
+  ["viewer", "editor", "admin", "owner"] as const
+).map((role) => ({
+  value: role,
+  label: role.charAt(0).toUpperCase() + role.slice(1),
+  description: ROLE_DESCRIPTIONS[role],
+}));
 
 function isManagerRole(role?: WorkspaceRole) {
   return role === "owner" || role === "admin";
 }
+
+function formatDate(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function memberLabel(member: MemberAccess) {
+  return member.fullName || member.email || member.userId;
+}
+
+type InviteResult = { text: string; tone: "info" | "error" };
 
 export function WorkspaceMembersSettings({ project }: { project?: PlannerProjectContext }) {
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
@@ -76,8 +101,14 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
   const [members, setMembers] = useState<MemberAccess[]>([]);
   const [grants, setGrants] = useState<WorkspaceAccessGrant[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>();
+  const [search, setSearch] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<WorkspaceRole>("editor");
+  // Two-step confirmation targets for destructive actions.
+  const [confirmRemoveUserId, setConfirmRemoveUserId] = useState<string>();
+  const [confirmCancelEmail, setConfirmCancelEmail] = useState<string>();
+
+  const callerIsOwner = detectedRole === "owner" || detectedRole === "superadmin";
 
   async function load() {
     try {
@@ -157,19 +188,86 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     }
   }
 
-  async function invite() {
-    const email = inviteEmail.trim();
-    if (!email || !workspaceId) {
+  async function changeMemberRole(userId: string, role: WorkspaceRole) {
+    if (!workspaceId) return;
+    const previous = members;
+    setMembers((current) => current.map((member) => (member.userId === userId ? { ...member, role } : member)));
+    try {
+      await updateWorkspaceMemberRoleInSupabase(workspaceId, userId, role);
+    } catch (error) {
+      setMembers(previous);
+      setMessage(error instanceof Error ? error.message : "Unable to change the role.");
+    }
+  }
+
+  // Writes the grant and asks the server to send the invitation email. Falls back to a
+  // grant-only write when the API route is unreachable, and says so honestly.
+  async function sendInvite(email: string, role: WorkspaceRole): Promise<InviteResult> {
+    if (!workspaceId) {
+      return { text: "Select an organization first.", tone: "error" };
+    }
+
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (!accessToken) {
+      return { text: "Sign in again to invite members.", tone: "error" };
+    }
+
+    let response: Response;
+    try {
+      response = await fetch("/api/invites", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId, email, role }),
+      });
+    } catch {
+      await upsertWorkspaceAccessGrantInSupabase(workspaceId, email, role);
+      return {
+        text: `Access granted for ${email}, but the invitation email could not be sent — ask them to sign in with this address.`,
+        tone: "info",
+      };
+    }
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      emailSent?: boolean;
+      reason?: string;
+    };
+
+    if (!response.ok) {
+      return { text: payload.error ?? "Unable to invite user.", tone: "error" };
+    }
+
+    if (payload.emailSent) {
+      return { text: `Invitation email sent to ${email}. The invite expires in 30 days.`, tone: "info" };
+    }
+
+    return {
+      text: payload.reason ? `Access granted for ${email}. ${payload.reason}` : `Access granted for ${email}.`,
+      tone: "info",
+    };
+  }
+
+  async function invite(email = inviteEmail, role = inviteRole) {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) {
       setMessage("Add a work email first.");
       return;
     }
+    if (!isAllowedSignupEmail(normalized)) {
+      setMessage(SIGNUP_DOMAIN_MESSAGE);
+      return;
+    }
+
     setIsSubmitting(true);
     setMessage("");
     try {
-      await upsertWorkspaceAccessGrantInSupabase(workspaceId, email, inviteRole);
-      setInviteEmail("");
-      await load();
-      setMessage("Invite sent. They'll appear as a member after they sign in.");
+      const result = await sendInvite(normalized, role);
+      if (result.tone === "info") {
+        setInviteEmail("");
+        await load();
+      }
+      setMessage(result.text);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to invite user.");
     } finally {
@@ -183,9 +281,27 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     setMessage("");
     try {
       await deleteWorkspaceAccessGrantFromSupabase(workspaceId, email);
+      setConfirmCancelEmail(undefined);
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to remove invite.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function removeMember(userId: string) {
+    if (!workspaceId) return;
+    setIsSubmitting(true);
+    setMessage("");
+    try {
+      await removeWorkspaceMemberInSupabase(workspaceId, userId);
+      setConfirmRemoveUserId(undefined);
+      setSelectedUserId(undefined);
+      await load();
+      setMessage("Member removed. They can no longer sign in to this organization; re-invite them to restore access.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to remove the member.");
     } finally {
       setIsSubmitting(false);
     }
@@ -201,10 +317,10 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
 
   if (status === "forbidden") {
     return (
-      <Block title="Members" description="Only organization managers can manage members and access.">
+      <Block title="Members" description="Only organization owners and admins can manage members and access.">
         <div className="p-3.5 ui-settings-group-row-value">
-          Signed in as <strong>{signedInEmail || "unknown"}</strong> (detected access: {detectedRole}). This account
-          can&apos;t manage members. Sign in as an owner/admin or superadmin.
+          Signed in as <strong>{signedInEmail || "unknown"}</strong> (role: {detectedRole}). This account
+          can&apos;t manage members. Ask an owner or admin if you need access changed.
         </div>
       </Block>
     );
@@ -223,61 +339,184 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     );
   }
 
+  const query = search.trim().toLowerCase();
+  const filteredMembers = query
+    ? members.filter((member) =>
+        [member.fullName, member.email, member.userId].some((value) => value?.toLowerCase().includes(query)),
+      )
+    : members;
   const selected = members.find((member) => member.userId === selectedUserId);
-  const pendingGrants = grants.filter((grant) => !grant.redeemedAt);
+  const pendingGrants = grants.filter(
+    (grant) => !grant.redeemedAt && (!query || grant.email.toLowerCase().includes(query)),
+  );
+  const selectedIsOwner = selected?.role === "owner";
+  // Mirrors the DB role ceiling: admins cannot touch owner rows or mint owners.
+  const canEditSelectedRole = Boolean(selected && !selected.isSelf && (callerIsOwner || !selectedIsOwner));
+  const roleOptionsForSelected = callerIsOwner
+    ? workspaceRoleOptions
+    : workspaceRoleOptions.filter((option) => option.value !== "owner");
 
   return (
     <>
       {message ? <p className="ui-settings-section-desc px-1 text-ink-secondary">{message}</p> : null}
 
-      <Block title="Members" description="Pick a member to set their access.">
-        {members.length ? (
-          members.map((member) => {
-            const manager = isManagerRole(member.role);
-            const active = member.userId === selectedUserId;
-            return (
-              <button
-                key={member.userId}
-                type="button"
-                onClick={() => setSelectedUserId(active ? undefined : member.userId)}
-                className={`ui-settings-group-row w-full text-left transition-colors hover:bg-surface-hover ${
-                  active ? "bg-surface-active" : ""
-                }`}
-              >
-                <div className="ui-settings-group-row-copy">
-                  <div className="ui-settings-group-row-label">
-                    {member.fullName || member.userId}
-                    {member.isSelf ? " (you)" : ""}
+      <Block title="Members" description="Everyone in this organization, including invites that haven't been accepted yet.">
+        <div className="flex items-center gap-2 border-b border-line px-3.5 py-2">
+          <Search size={13} className="shrink-0 text-ink-tertiary" />
+          <input
+            className="w-full bg-transparent text-[13px] outline-none placeholder:text-ink-tertiary"
+            type="search"
+            placeholder="Search by name or email"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
+
+        {filteredMembers.length || pendingGrants.length ? (
+          <>
+            {filteredMembers.map((member) => {
+              const manager = isManagerRole(member.role);
+              const active = member.userId === selectedUserId;
+              const joined = formatDate(member.joinedAt);
+              return (
+                <button
+                  key={member.userId}
+                  type="button"
+                  onClick={() => {
+                    setSelectedUserId(active ? undefined : member.userId);
+                    setConfirmRemoveUserId(undefined);
+                  }}
+                  className={`ui-settings-group-row w-full text-left transition-colors hover:bg-surface-hover ${
+                    active ? "bg-surface-active" : ""
+                  }`}
+                >
+                  <div className="ui-settings-group-row-copy">
+                    <div className="ui-settings-group-row-label">
+                      {memberLabel(member)}
+                      {member.isSelf ? " (you)" : ""}
+                    </div>
+                    <div className="ui-settings-group-row-desc">
+                      <span className="capitalize" title={ROLE_DESCRIPTIONS[member.role]}>
+                        {member.role}
+                      </span>
+                      {manager ? " · full access" : ""}
+                      {member.email ? ` · ${member.email}` : ""}
+                      {joined ? ` · joined ${joined}` : ""}
+                    </div>
                   </div>
-                  <div className="ui-settings-group-row-desc capitalize">
-                    {manager ? `${member.role} · full access` : member.role}
+                  <div className="ui-settings-group-row-control">
+                    <ChevronRight
+                      size={14}
+                      className={`text-ink-tertiary transition-transform ${active ? "rotate-90" : ""}`}
+                    />
+                  </div>
+                </button>
+              );
+            })}
+
+            {pendingGrants.map((grant) => {
+              const expires = formatDate(grant.expiresAt);
+              const expired = grant.expiresAt ? new Date(grant.expiresAt).getTime() < Date.now() : false;
+              const confirming = confirmCancelEmail === grant.email;
+              return (
+                <div key={grant.email} className="ui-settings-group-row">
+                  <div className="ui-settings-group-row-copy">
+                    <div className="flex items-center gap-2">
+                      <MailPlus size={13} className="shrink-0 text-ink-tertiary" />
+                      <span className="ui-settings-group-row-label truncate">{grant.email}</span>
+                      <span className="ui-chip shrink-0">{expired ? "Expired" : "Pending"}</span>
+                    </div>
+                    <div className="ui-settings-group-row-desc">
+                      <span className="capitalize" title={ROLE_DESCRIPTIONS[grant.role]}>
+                        {grant.role}
+                      </span>
+                      {expires ? ` · ${expired ? "expired" : "expires"} ${expires}` : ""}
+                    </div>
+                  </div>
+                  <div className="ui-settings-group-row-control flex items-center gap-1.5">
+                    {confirming ? (
+                      <>
+                        <button
+                          type="button"
+                          className="ui-btn-ghost h-7 px-2 text-danger disabled:opacity-50"
+                          onClick={() => void removeGrant(grant.email)}
+                          disabled={isSubmitting}
+                        >
+                          Cancel invite
+                        </button>
+                        <button
+                          type="button"
+                          className="ui-btn-ghost h-7 px-2 disabled:opacity-50"
+                          onClick={() => setConfirmCancelEmail(undefined)}
+                          disabled={isSubmitting}
+                        >
+                          Keep
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="ui-btn-ghost h-7 w-7 shrink-0 px-0 disabled:opacity-50"
+                          onClick={() => void invite(grant.email, grant.role)}
+                          disabled={isSubmitting}
+                          title="Resend invite (refreshes the 30-day expiry)"
+                        >
+                          <RotateCw size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="ui-btn-ghost h-7 w-7 shrink-0 px-0 text-danger disabled:opacity-50"
+                          onClick={() => setConfirmCancelEmail(grant.email)}
+                          disabled={isSubmitting}
+                          title="Cancel invite"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="ui-settings-group-row-control">
-                  <ChevronRight
-                    size={14}
-                    className={`text-ink-tertiary transition-transform ${active ? "rotate-90" : ""}`}
-                  />
-                </div>
-              </button>
-            );
-          })
+              );
+            })}
+          </>
         ) : (
-          <div className="p-3.5 ui-settings-group-row-value">No members yet.</div>
+          <div className="p-3.5 ui-settings-group-row-value">
+            {query ? "No members match your search." : "No members yet."}
+          </div>
         )}
       </Block>
 
       {selected ? (
         <Block
-          title={`Access · ${selected.fullName || selected.userId}`}
+          title={`Access · ${memberLabel(selected)}`}
           description={
-            isManagerRole(selected.role) ? undefined : "Set this member's access to each workspace and Org tools."
+            isManagerRole(selected.role)
+              ? "Owners and admins automatically have full access to every project and Org tools."
+              : "Set this member's access to each project and to Org tools."
           }
         >
+          <Row label="Role" description={ROLE_DESCRIPTIONS[selected.role]}>
+            {canEditSelectedRole ? (
+              <ThemedSelect
+                triggerClassName="h-9 px-3"
+                value={selected.role}
+                options={roleOptionsForSelected}
+                onChange={(value) => void changeMemberRole(selected.userId, value as WorkspaceRole)}
+                disabled={isSubmitting}
+              />
+            ) : (
+              <span className="ui-settings-group-row-value capitalize">
+                {selected.role}
+                {selected.isSelf ? " (you)" : ""}
+              </span>
+            )}
+          </Row>
+
           {isManagerRole(selected.role) ? (
             <div className="flex items-center gap-2 p-3.5 ui-settings-group-row-value">
               <ShieldCheck size={14} className="text-ink-tertiary" />
-              Full access to all workspaces and Org tools (manager role).
+              Full access to all projects and Org tools (manager role).
             </div>
           ) : (
             <>
@@ -303,10 +542,53 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
               </Row>
             </>
           )}
+
+          {!selected.isSelf && (callerIsOwner || !selectedIsOwner) ? (
+            <div className="flex items-center justify-between gap-2 p-3.5">
+              {confirmRemoveUserId === selected.userId ? (
+                <>
+                  <span className="ui-settings-group-row-desc">
+                    Remove {memberLabel(selected)}? They lose all access and won&apos;t rejoin automatically.
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      className="ui-btn-ghost h-8 px-3 text-danger disabled:opacity-50"
+                      onClick={() => void removeMember(selected.userId)}
+                      disabled={isSubmitting}
+                    >
+                      Remove member
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn-ghost h-8 px-3 disabled:opacity-50"
+                      onClick={() => setConfirmRemoveUserId(undefined)}
+                      disabled={isSubmitting}
+                    >
+                      Keep
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="ui-btn-ghost h-8 gap-1.5 px-3 text-danger disabled:opacity-50"
+                  onClick={() => setConfirmRemoveUserId(selected.userId)}
+                  disabled={isSubmitting}
+                >
+                  <UserMinus size={13} />
+                  Remove from organization
+                </button>
+              )}
+            </div>
+          ) : null}
         </Block>
       ) : null}
 
-      <Block title="Invite a user" description="Anacorp emails only. New users start with no access until you grant it.">
+      <Block
+        title="Invite a user"
+        description="Anacorp work emails only. They'll get an email invitation; access starts at the role you pick, with no project access until you grant it."
+      >
         <div className="space-y-2 p-3.5">
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
             <input
@@ -320,7 +602,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
             <ThemedSelect
               triggerClassName="h-9 px-3"
               value={inviteRole}
-              options={workspaceRoleOptions}
+              options={callerIsOwner ? workspaceRoleOptions : workspaceRoleOptions.filter((o) => o.value !== "owner")}
               onChange={(value) => setInviteRole(value as WorkspaceRole)}
               disabled={isSubmitting}
             />
@@ -334,29 +616,9 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
               Invite
             </button>
           </div>
-
-          {pendingGrants.length ? (
-            <div className="divide-y divide-line rounded-lg border border-line">
-              {pendingGrants.map((grant) => (
-                <div key={grant.email} className="flex items-center justify-between gap-2 px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <MailPlus size={13} className="shrink-0 text-ink-tertiary" />
-                    <span className="truncate ui-settings-group-row-value">{grant.email}</span>
-                    <span className="ui-chip shrink-0 capitalize">{grant.role}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="ui-btn-ghost h-7 w-7 shrink-0 px-0 text-danger disabled:opacity-50"
-                    onClick={() => void removeGrant(grant.email)}
-                    disabled={isSubmitting}
-                    title="Cancel invite"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          <p className="ui-settings-group-row-desc">
+            {ROLE_DESCRIPTIONS[inviteRole]}
+          </p>
         </div>
       </Block>
     </>

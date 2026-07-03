@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership } from "@/domain/supabase-planner";
 import type { WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
-import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
+import { useAuthFormActions } from "@/lib/auth-form-actions";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 const WORKSPACE_STORAGE_KEY = "pulse:sops:workspace-id";
@@ -100,7 +100,7 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaceId, setWorkspaceIdState] = useState<string | undefined>(undefined);
   const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
   const [message, setMessage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const auth = useAuthFormActions(supabase);
   const statusRef = useRef(status);
 
   useEffect(() => {
@@ -188,55 +188,6 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
     [workspaceId, role, groups],
   );
 
-  async function handleSignIn(email: string, password: string) {
-    setIsSubmitting(true);
-    setMessage("");
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) throw error;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to sign in.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleCreateAccount(email: string, password: string) {
-    if (!isAllowedSignupEmail(email)) {
-      setMessage(SIGNUP_DOMAIN_MESSAGE);
-      return;
-    }
-
-    setIsSubmitting(true);
-    setMessage("");
-    try {
-      const { error } = await supabase.auth.signUp({ email: email.trim(), password });
-      if (error) throw error;
-      setMessage("Account created. If email confirmation is enabled, confirm the email before signing in.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to create account.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleMicrosoftSignIn() {
-    setIsSubmitting(true);
-    setMessage("");
-    try {
-      const redirectTo = typeof window !== "undefined" ? window.location.origin : undefined;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "azure",
-        options: { scopes: "openid email profile", redirectTo },
-      });
-      if (error) throw error;
-      // Success navigates away to Microsoft; leave isSubmitting set so the button stays busy.
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to start Microsoft sign-in.");
-      setIsSubmitting(false);
-    }
-  }
-
   if (!sessionReady || (session && status === "loading")) {
     return <AppLoadingShell title="Loading SOPs" />;
   }
@@ -245,11 +196,13 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
     return (
       <AuthFormPanel
         title="Sign in to your organization"
-        message={message}
-        isSubmitting={isSubmitting}
-        onSignIn={handleSignIn}
-        onCreateAccount={handleCreateAccount}
-        onMicrosoftSignIn={handleMicrosoftSignIn}
+        message={auth.message}
+        isSubmitting={auth.isSubmitting}
+        onSignIn={(email, password) => void auth.handleSignIn(email, password)}
+        onCreateAccount={(email, password, fullName) => void auth.handleCreateAccount(email, password, fullName)}
+        onMicrosoftSignIn={() => void auth.handleMicrosoftSignIn()}
+        onResetPassword={(email) => void auth.handleResetPassword(email)}
+        onResendConfirmation={(email) => void auth.handleResendConfirmation(email)}
       />
     );
   }

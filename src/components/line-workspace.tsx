@@ -5563,6 +5563,16 @@ export function LineWorkspace({
       ? []
       : currentAllocationRecommendations;
   const activeProjectContext = derivedState.project ?? projectContext;
+  // Per-project view-only access. RLS already rejects these writes server-side; gating
+  // here keeps the UI honest instead of letting edits look saved and silently vanish.
+  const isViewOnlyAccess = Boolean(
+    activeProjectContext &&
+      (activeProjectContext.accessLevel === "view" ||
+        (activeProjectContext.accessLevel === undefined && activeProjectContext.role === "viewer")),
+  );
+  const isViewOnlyAccessRef = useRef(isViewOnlyAccess);
+  isViewOnlyAccessRef.current = isViewOnlyAccess;
+  const viewOnlyNoticeShownRef = useRef(false);
   const projectToolRegistry = useMemo(
     () => buildProjectToolRegistry(derivedState.tasks, toolLibraryItems),
     [derivedState.tasks, toolLibraryItems],
@@ -7706,7 +7716,30 @@ export function LineWorkspace({
     setSaveState((state) => (state === "loading" || state === "saving" ? state : "idle"));
   }
 
+  // True (and shows a one-time notice) when the signed-in user only has view access to
+  // this project — callers should skip the write entirely.
+  function blockViewOnlyWrite(): boolean {
+    if (!isViewOnlyAccessRef.current) {
+      return false;
+    }
+    if (!viewOnlyNoticeShownRef.current) {
+      viewOnlyNoticeShownRef.current = true;
+      notifyFeedback({
+        title: "View-only access",
+        body: "You can browse this project, but changes are not saved. Ask an organization admin for edit access.",
+        tone: "warning",
+      });
+    }
+    return true;
+  }
+
   async function persistPlannerState(stateToSave: PlannerState) {
+    if (blockViewOnlyWrite()) {
+      plannerDirtyRef.current = false;
+      setSaveState("idle");
+      return;
+    }
+
     if (stateToSave.tasks.length === 0) {
       const message = "Refusing to save an empty Gantt. Add at least one task before saving.";
       setSaveError(message);
@@ -7845,6 +7878,15 @@ export function LineWorkspace({
   async function startProcedureTaskSave(taskId: string) {
     const queue = getProcedureTaskSaveQueue(taskId);
     if (queue.inFlight || !queue.pendingTaskSnapshot || !queue.pendingTasksSnapshot) {
+      return;
+    }
+
+    if (blockViewOnlyWrite()) {
+      queue.pending = false;
+      queue.pendingTaskSnapshot = undefined;
+      queue.pendingTasksSnapshot = undefined;
+      queue.pendingDraftSnapshot = undefined;
+      setSaveState("idle");
       return;
     }
 
@@ -9576,6 +9618,10 @@ export function LineWorkspace({
       tasks: reorderedTasks,
     };
 
+    if (blockViewOnlyWrite()) {
+      return;
+    }
+
     saveInFlightRef.current = true;
     setSaveError(undefined);
     setSaveState("saving");
@@ -9891,6 +9937,20 @@ export function LineWorkspace({
         context={displayedPlannerChromeContext}
         chromeStatus={chromeStatus}
       />
+
+      {isViewOnlyAccess ? (
+        <section className="ui-workspace-notice">
+          <div className="flex items-start gap-3">
+            <div className="min-w-0">
+              <NothingStatus>View-only access</NothingStatus>
+              <p className="ui-workspace-notice-body">
+                You can browse this project, but you can&apos;t make changes. Ask an organization owner or admin
+                for edit access.
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {workspaceNotice ? (
         <section className="ui-workspace-notice">

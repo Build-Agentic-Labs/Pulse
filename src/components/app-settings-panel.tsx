@@ -10,6 +10,8 @@ import { useTheme } from "@/components/theme-provider";
 
 import { displayWorkspaceName, projectContextLabel } from "@/lib/display-names";
 
+import { AccountSettings } from "@/components/account-settings";
+
 import { PhonePhotoPortalPanel } from "@/components/phone-photo-portal-panel";
 
 import { WorkspaceMembersSettings } from "@/components/workspace-members-settings";
@@ -238,9 +240,11 @@ export function AppSettingsPanel({
 
           <SettingsPage title="General" description="Account, organization access, and mobile photo capture.">
 
+            <AccountSettings />
+
             <SettingsSectionBlock title="Organization access">
 
-              <SettingsRow label="Workspace">
+              <SettingsRow label="Project">
 
                 <span className="ui-settings-group-row-value">{project?.projectName ?? "None selected"}</span>
 
@@ -342,11 +346,11 @@ export function AppSettingsPanel({
 
         {activeSection === "workspace" ? (
 
-          <SettingsPage title="Organization" description="Rename organizations and workspaces, archive folders, and manage members.">
+          <SettingsPage title="Organization" description="Rename the organization, manage members, and control who can access each project.">
 
             <SettingsSectionBlock title="Current organization">
 
-              <SettingsRow label="Active workspace">
+              <SettingsRow label="Active project">
 
                 <span className="ui-settings-group-row-value">
 

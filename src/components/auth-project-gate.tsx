@@ -3,13 +3,13 @@
 import type { Session } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
+import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel, PasswordUpdatePanel } from "@/components/app-flow-panels";
 import {
   createPlannerSupabaseClient,
   ensureDefaultWorkspaceMembership,
 } from "@/domain/supabase-planner";
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
-import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
+import { useAuthFormActions } from "@/lib/auth-form-actions";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 type ProjectRouteKind = "planner" | "mobile-photos" | "excel/gantt";
@@ -73,6 +73,9 @@ function buildProjectContext(groups: WorkspaceProjectGroup[], projectId: string)
         workspaceId: group.workspace.id,
         workspaceName: group.workspace.name,
         role: group.role,
+        // Per-project level for view-only gating; managers always edit.
+        accessLevel:
+          group.isSuperAdmin || group.role === "owner" || group.role === "admin" ? "edit" : project.accessLevel,
       };
     }
   }
@@ -187,8 +190,9 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   const [groups, setGroups] = useState<WorkspaceProjectGroup[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
   const [message, setMessage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [childReady, setChildReady] = useState(false);
+  const auth = useAuthFormActions(supabase);
   const statusRef = useRef(status);
 
   useEffect(() => {
@@ -282,6 +286,13 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
       setSession(nextSession);
       setSessionReady(true);
 
+      if (event === "PASSWORD_RECOVERY") {
+        // The user arrived from a reset email: collect the new password before
+        // letting them into the app.
+        setRecoveryMode(true);
+        return;
+      }
+
       if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
         return;
       }
@@ -319,72 +330,10 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     }
   }, [selectedProject?.projectId]);
 
-  async function handleSignIn(email: string, password: string) {
-    setIsSubmitting(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) {
-        throw error;
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to sign in.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleMicrosoftSignIn() {
-    setIsSubmitting(true);
-    setMessage("");
-
-    try {
-      // Azure (Entra) provider is configured in the Supabase dashboard. The browser
-      // redirects to Microsoft, back to Supabase's /auth/v1/callback, then to redirectTo,
-      // where the global Supabase client picks up the session (detectSessionInUrl) and
-      // onAuthStateChange fires SIGNED_IN. redirectTo must be allowlisted in Supabase
-      // (Authentication -> URL Configuration).
-      const redirectTo = typeof window !== "undefined" ? window.location.origin : undefined;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "azure",
-        options: {
-          scopes: "openid email profile",
-          redirectTo,
-        },
-      });
-      if (error) {
-        throw error;
-      }
-      // Success navigates away to Microsoft; leave isSubmitting set so the button stays busy.
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to start Microsoft sign-in.");
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleCreateAccount(email: string, password: string) {
-    if (!isAllowedSignupEmail(email)) {
-      setMessage(SIGNUP_DOMAIN_MESSAGE);
-      return;
-    }
-
-    setIsSubmitting(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-      });
-      if (error) {
-        throw error;
-      }
-      setMessage("Account created. If email confirmation is enabled, confirm the email before signing in.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to create account.");
-    } finally {
-      setIsSubmitting(false);
+  async function handleUpdatePassword(password: string) {
+    const updated = await auth.handleUpdatePassword(password);
+    if (updated) {
+      setRecoveryMode(false);
     }
   }
 
@@ -406,15 +355,27 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
     );
   }
 
+  if (recoveryMode) {
+    return (
+      <PasswordUpdatePanel
+        message={auth.message}
+        isSubmitting={auth.isSubmitting}
+        onUpdatePassword={(password) => void handleUpdatePassword(password)}
+      />
+    );
+  }
+
   if ((sessionReady && !session) || status === "auth") {
     return (
       <AuthFormPanel
         title="Sign in to your organization"
-        message={message}
-        isSubmitting={isSubmitting}
-        onSignIn={handleSignIn}
-        onCreateAccount={handleCreateAccount}
-        onMicrosoftSignIn={handleMicrosoftSignIn}
+        message={auth.message}
+        isSubmitting={auth.isSubmitting}
+        onSignIn={(email, password) => void auth.handleSignIn(email, password)}
+        onCreateAccount={(email, password, fullName) => void auth.handleCreateAccount(email, password, fullName)}
+        onMicrosoftSignIn={() => void auth.handleMicrosoftSignIn()}
+        onResetPassword={(email) => void auth.handleResetPassword(email)}
+        onResendConfirmation={(email) => void auth.handleResendConfirmation(email)}
       />
     );
   }
@@ -459,7 +420,45 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner" }: 
   }
 
   if (flatProjects.length === 0) {
-    return <>{children(undefined, () => {})}</>;
+    // Members who can create a project get the app shell (it has the create flow).
+    // Viewers with no project grants get an explanation instead of an empty planner.
+    const canCreateProjects = groups.some(
+      (group) => group.isSuperAdmin || group.role === "owner" || group.role === "admin" || group.role === "editor",
+    );
+
+    if (canCreateProjects) {
+      return <>{children(undefined, () => {})}</>;
+    }
+
+    return (
+      <main className="grid min-h-screen place-items-center bg-canvas px-4 text-ink">
+        <section className="w-full max-w-lg ui-panel p-6">
+          <p className="text-xs ui-mono-label tracking-wide text-ink-tertiary">No project access yet</p>
+          <h1 className="mt-2 text-2xl font-medium">You&apos;re in, but nothing is shared with you yet.</h1>
+          <p className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
+            Your account ({session?.user.email ?? "unknown"}) is part of the organization, but no projects have
+            been shared with it. Ask an organization owner or admin to grant you access from Settings &rarr;
+            Organization &rarr; Members.
+          </p>
+          <div className="mt-5 flex gap-2">
+            <button
+              className="ui-btn-primary"
+              onClick={() => void refreshWorkspaceProjects(session, { showLoading: true })}
+            >
+              Check again
+            </button>
+            <button
+              className="ui-btn-ghost"
+              onClick={() => {
+                void supabase.auth.signOut().then(() => router.push("/login"));
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   return (

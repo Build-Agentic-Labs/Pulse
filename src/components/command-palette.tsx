@@ -143,7 +143,7 @@ export function CommandPalette({
       aria-modal="true"
       aria-label="Command palette"
     >
-      <div className="w-full max-w-xl overflow-hidden rounded-xl border border-line bg-surface text-ink shadow-2xl">
+      <div className="w-full max-w-xl overflow-hidden rounded-xl border border-line bg-surface text-ink shadow-modal">
         <div className="flex items-center gap-2.5 border-b border-line px-4 py-3">
           <Search size={15} className="shrink-0 text-ink-tertiary" />
           <input

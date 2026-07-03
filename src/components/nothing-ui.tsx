@@ -51,7 +51,7 @@ export function NothingLoadingBlock({
 }
 
 export function NothingLoadingShell({
-  title = "Loading workspace",
+  title = "Loading…",
 }: {
   title?: string;
 }) {

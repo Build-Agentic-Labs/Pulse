@@ -128,7 +128,7 @@ export function BulkTaskEditor({
       aria-modal="true"
       aria-label="Bulk edit tasks"
     >
-      <div className="flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-line bg-surface text-ink shadow-2xl">
+      <div className="flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-line bg-surface text-ink shadow-modal">
         <div className="flex items-center gap-2.5 border-b border-line px-4 py-3">
           <span className="text-[13px] font-medium">Bulk edit tasks</span>
           <input

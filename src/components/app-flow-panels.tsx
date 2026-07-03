@@ -63,7 +63,7 @@ function formatAuthMessage(message: string) {
 }
 
 export function AppLoadingShell({
-  title = "Loading workspace",
+  title = "Loading…",
 }: {
   title?: string;
 }) {

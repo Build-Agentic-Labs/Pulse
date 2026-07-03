@@ -2,7 +2,7 @@ import Script from "next/script";
 import { ExcelGanttRouteShell } from "@/components/project-route-shells";
 
 export const metadata = {
-  title: "M-Tools Gantt for Excel",
+  title: "Gantt for Excel | Pulse",
   description: "Excel-hosted Pulse Gantt workspace",
 };
 

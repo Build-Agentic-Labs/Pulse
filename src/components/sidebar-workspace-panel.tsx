@@ -248,7 +248,7 @@ export function SidebarWorkspacePanel({
       await hydrate();
       router.push(projectPlannerHref(created.projectId));
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Unable to create workspace.");
+      setCreateError(error instanceof Error ? error.message : "Unable to create project.");
     } finally {
       setIsSubmitting(false);
     }
@@ -257,7 +257,7 @@ export function SidebarWorkspacePanel({
   function requestDeleteProject(project: Project, anchorRect: DOMRect) {
     setDeleteError("");
     setFeedbackConfirm({
-      title: "Remove workspace?",
+      title: "Remove project?",
       body: `"${project.name}" and all of its planner data will be permanently deleted. This cannot be undone.`,
       tone: "danger",
       confirmLabel: "Remove",
@@ -292,10 +292,33 @@ export function SidebarWorkspacePanel({
         router.push(nextProject ? projectPlannerHref(nextProject.id) : "/");
       }
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Unable to remove workspace.");
+      setDeleteError(error instanceof Error ? error.message : "Unable to remove project.");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function requestArchiveProject(project: Project, anchorRect: DOMRect) {
+    setDeleteError("");
+    setFeedbackConfirm({
+      title: "Archive project?",
+      body: `"${project.name}" will be moved out of your active projects. You can restore it later.`,
+      tone: "warning",
+      confirmLabel: "Archive",
+      cancelLabel: "Keep",
+      placement: "anchor",
+      anchorRect: {
+        top: anchorRect.top,
+        right: anchorRect.right,
+        bottom: anchorRect.bottom,
+        left: anchorRect.left,
+        width: anchorRect.width,
+        height: anchorRect.height,
+      },
+      onConfirm: () => {
+        void archiveProject(project);
+      },
+    });
   }
 
   async function archiveProject(project: Project) {
@@ -312,7 +335,7 @@ export function SidebarWorkspacePanel({
         router.push(nextProject ? projectPlannerHref(nextProject.id) : "/");
       }
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Unable to archive workspace.");
+      setDeleteError(error instanceof Error ? error.message : "Unable to archive project.");
     } finally {
       setIsSubmitting(false);
     }
@@ -332,7 +355,7 @@ export function SidebarWorkspacePanel({
       setRenameDraft("");
       await hydrate();
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Unable to rename workspace.");
+      setDeleteError(error instanceof Error ? error.message : "Unable to rename project.");
     } finally {
       setIsSubmitting(false);
     }
@@ -360,7 +383,7 @@ export function SidebarWorkspacePanel({
     <>
       <div className="px-2 py-2">
         <div className="group flex min-h-8 items-center justify-between gap-1">
-          <div className="ui-nav-section mb-0 px-2">Workspaces</div>
+          <div className="ui-nav-section mb-0 px-2">Projects</div>
           {status === "ready" && canEdit(role) ? (
             <button
               type="button"
@@ -369,8 +392,8 @@ export function SidebarWorkspacePanel({
                 setIsAdding((open) => !open);
                 setCreateError("");
               }}
-              title="Add workspace"
-              aria-label="Add workspace"
+              title="Add project"
+              aria-label="Add project"
               aria-expanded={isAdding}
             >
               <Plus size={14} />
@@ -380,7 +403,7 @@ export function SidebarWorkspacePanel({
 
         <div className="mt-1 space-y-0.5">
           {status === "loading" ? (
-            <div className="px-2 py-1.5 text-[11px] text-ink-tertiary">Loading workspaces…</div>
+            <div className="px-2 py-1.5 text-[11px] text-ink-tertiary">Loading projects…</div>
           ) : null}
 
           {status === "auth" ? (
@@ -393,7 +416,7 @@ export function SidebarWorkspacePanel({
           {status === "error" ? (
             <button type="button" className="ui-nav-context w-full" onClick={() => void hydrate()}>
               <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />
-              <span className="min-w-0 flex-1 truncate">Retry workspaces</span>
+              <span className="min-w-0 flex-1 truncate">Retry projects</span>
             </button>
           ) : null}
 
@@ -488,7 +511,7 @@ export function SidebarWorkspacePanel({
           <form className="mt-1 flex items-center gap-0.5" onSubmit={handleCreate}>
             <input
               className="ui-field-standalone h-7 min-w-0 flex-1 rounded-md px-2 text-[11px] font-normal"
-              placeholder="Workspace name"
+              placeholder="Project name"
               value={newProjectName}
               onChange={(event) => setNewProjectName(event.target.value)}
               disabled={isSubmitting}
@@ -498,8 +521,8 @@ export function SidebarWorkspacePanel({
               type="submit"
               className="ui-btn-ghost h-6 w-6 shrink-0 px-0 normal-case tracking-normal disabled:opacity-40"
               disabled={isSubmitting || !newProjectName.trim()}
-              title="Create workspace"
-              aria-label="Create workspace"
+              title="Create project"
+              aria-label="Create project"
             >
               <Check size={12} strokeWidth={2} />
             </button>
@@ -513,7 +536,7 @@ export function SidebarWorkspacePanel({
               }}
               disabled={isSubmitting}
               title="Cancel"
-              aria-label="Cancel new workspace"
+              aria-label="Cancel new project"
             >
               <X size={12} strokeWidth={2} />
             </button>
@@ -543,14 +566,14 @@ export function SidebarWorkspacePanel({
           items={[
             {
               id: "rename",
-              label: "Rename workspace",
+              label: "Rename project",
               onSelect: () => startRenameProject(contextMenu.project),
             },
             {
               id: "archive",
-              label: "Archive workspace",
+              label: "Archive project",
               disabled: isSubmitting,
-              onSelect: () => void archiveProject(contextMenu.project),
+              onSelect: () => requestArchiveProject(contextMenu.project, contextMenu.anchorRect),
             },
             {
               id: "remove",

@@ -1349,9 +1349,9 @@ function TopNav({
               className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
             />
           </button>
-          <div className="ui-brand-compact shrink-0">
+          <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
             <RollingText text="Pulse" rollOnMount />
-          </div>
+          </Link>
         </div>
 
         <div className="ui-chrome-planner-context min-w-0">
@@ -1400,7 +1400,9 @@ function TopNav({
             className={`transition-transform duration-300 ease-ui ${sidebarCollapsed ? "rotate-180" : ""}`}
           />
         </button>
-        <div className="ui-brand-compact shrink-0">Pulse</div>
+        <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
+          Pulse
+        </Link>
       </div>
 
       <div className="flex min-w-0 flex-1 lg:hidden" />

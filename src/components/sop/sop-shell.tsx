@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { RollingText } from "@/components/rolling-text";
 import { useTheme } from "@/components/theme-provider";
-import { UserNav } from "@/components/user-nav";
+import { BackToDashboardButton, UserNav } from "@/components/user-nav";
 
 /**
  * App-shell layout for the SOP section, matching the settings page: a full-width
@@ -45,6 +45,7 @@ export function SopShell({
     <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink">
       <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between px-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-3">
+          <BackToDashboardButton onNavigate={guardNavigation} />
           <button
             type="button"
             onClick={() => setCollapsed((value) => !value)}

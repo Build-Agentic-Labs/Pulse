@@ -1,9 +1,9 @@
 "use client";
 
-import { LayoutGrid, LogOut } from "lucide-react";
+import { ArrowLeft, LayoutGrid, LogOut } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
@@ -98,6 +98,29 @@ function useUserProfile(supabase: ReturnType<typeof createPlannerSupabaseClient>
   }, [supabase]);
 
   return profile;
+}
+
+/**
+ * The consistent far-left back affordance on every space surface: a full arrow (distinct
+ * from the sidebar-collapse chevron) that returns to the company dashboard. Pass
+ * `onNavigate` to guard the exit (e.g. unsaved-changes confirms).
+ */
+export function BackToDashboardButton({
+  onNavigate,
+}: {
+  onNavigate?: (event: MouseEvent<HTMLAnchorElement>) => void;
+}) {
+  return (
+    <Link
+      href="/"
+      onClick={onNavigate}
+      className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
+      title="Back to dashboard"
+      aria-label="Back to the company dashboard"
+    >
+      <ArrowLeft size={15} strokeWidth={1.75} />
+    </Link>
+  );
 }
 
 /**

@@ -220,7 +220,7 @@ import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
 import { announceProjectSwitch, projectPlannerHref, SidebarWorkspacePanel } from "./sidebar-workspace-panel";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
-import { UserNav } from "./user-nav";
+import { BackToDashboardButton, UserNav } from "./user-nav";
 import { ProcedureStepToolTable } from "./procedure-step-tool-table";
 import { StepPhotoViewer } from "./step-photo-viewer";
 import { StepExplodedViewGallery } from "./step-exploded-view-gallery";
@@ -1335,6 +1335,7 @@ function TopNav({
     return (
       <header className="ui-chrome ui-chrome-planner z-40 h-12 shrink-0">
         <div className="ui-chrome-planner-brand">
+          <BackToDashboardButton />
           <button
             type="button"
             onClick={onToggleSidebar}
@@ -1386,6 +1387,7 @@ function TopNav({
   return (
     <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between gap-3 px-3 sm:px-4 lg:px-0">
       <div className="ui-chrome-brand flex min-w-0 items-center gap-1 sm:gap-2 lg:gap-0.5 lg:px-2">
+        <BackToDashboardButton />
         <button
           type="button"
           onClick={onToggleSidebar}

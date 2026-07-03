@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { SpaceIcon, type SpaceKey } from "./company-dashboard";
-import { UserNav } from "./user-nav";
+import { BackToDashboardButton, UserNav } from "./user-nav";
 
 type SpacePlaceholderProps = {
   space: SpaceKey;
@@ -22,7 +22,8 @@ type SpacePlaceholderProps = {
 export function SpacePlaceholder({ space, name, description, planned, children }: SpacePlaceholderProps) {
   return (
     <div className="min-h-screen bg-canvas text-ink">
-      <header className="sticky top-0 z-10 flex h-12 items-center gap-4 border-b border-line bg-surface px-5">
+      <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface px-4">
+        <BackToDashboardButton />
         <Link href="/" className="text-[15px] font-bold tracking-tight text-ink">
           Pulse
         </Link>

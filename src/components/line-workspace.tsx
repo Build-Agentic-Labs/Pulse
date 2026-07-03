@@ -1415,7 +1415,7 @@ function SidebarReopenButton({ collapsed, onToggle }: { collapsed: boolean; onTo
     <button
       type="button"
       onClick={onToggle}
-      className="ui-btn-ghost absolute left-2 top-2 z-30 hidden h-8 w-8 items-center justify-center bg-surface px-0 lg:inline-flex"
+      className="ui-btn-ghost absolute left-2 top-2 z-30 hidden h-8 w-8 items-center justify-center bg-surface px-0 text-ink-tertiary hover:text-ink lg:inline-flex"
       title="Show sidebar"
       aria-label="Show sidebar"
     >
@@ -1452,7 +1452,7 @@ function Sidebar({
         <button
           type="button"
           onClick={onCollapse}
-          className="ui-btn-ghost inline-flex h-7 w-7 items-center justify-center px-0"
+          className="ui-btn-ghost inline-flex h-7 w-7 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
           title="Hide sidebar"
           aria-label="Hide sidebar"
         >

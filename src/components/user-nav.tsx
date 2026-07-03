@@ -6,7 +6,99 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { useTheme } from "@/components/theme-provider";
+import { SPACE_META, SPACE_ORDER, SpaceIcon, spaceDisabledLabel, spaceHref } from "@/components/spaces";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
+
+const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
+
+function readLastProjectId(): string | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  try {
+    return window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Hover/click menu on the spaces grid button — jump straight to any company space. */
+function SpacesMenu() {
+  const [open, setOpen] = useState(false);
+  const [projectId, setProjectId] = useState<string>();
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setProjectId(readLastProjectId());
+  }, []);
+
+  const cancelClose = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), 140);
+  };
+
+  useEffect(() => () => cancelClose(), []);
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => {
+        cancelClose();
+        setOpen(true);
+      }}
+      onMouseLeave={scheduleClose}
+    >
+      <Link
+        href="/"
+        className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0"
+        title="All spaces"
+        aria-label="Go to the company dashboard"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onFocus={() => setOpen(true)}
+        onBlur={scheduleClose}
+      >
+        <LayoutGrid size={15} strokeWidth={1.75} />
+      </Link>
+
+      {open ? (
+        <div role="menu" className="absolute right-0 top-full z-50 mt-2 w-64 ui-panel p-1.5 shadow-modal">
+          <div className="px-2.5 pb-1.5 pt-1 ui-mono-label text-ink-tertiary">Spaces</div>
+          {SPACE_ORDER.map((space) => {
+            const href = spaceHref(space, projectId);
+            const content = (
+              <>
+                <span className="text-ink-secondary">
+                  <SpaceIcon space={space} size={16} />
+                </span>
+                <span className="flex-1 truncate text-[13px] text-ink">{SPACE_META[space].name}</span>
+                {!href ? (
+                  <span className="ui-mono-label text-ink-tertiary">{spaceDisabledLabel(space)}</span>
+                ) : null}
+              </>
+            );
+            const rowClass = "flex items-center gap-2.5 rounded-sm px-2.5 py-1.5";
+            return href ? (
+              <Link key={space} href={href} role="menuitem" className={`${rowClass} transition hover:bg-surface-hover`}>
+                {content}
+              </Link>
+            ) : (
+              <div key={space} className={`${rowClass} opacity-45`} aria-disabled="true">
+                {content}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 type UserProfile = {
   fullName?: string;
@@ -203,16 +295,7 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
         {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
       </button>
 
-      {showSpacesLink ? (
-        <Link
-          href="/"
-          className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0"
-          title="All spaces"
-          aria-label="Go to the company dashboard"
-        >
-          <LayoutGrid size={15} strokeWidth={1.75} />
-        </Link>
-      ) : null}
+      {showSpacesLink ? <SpacesMenu /> : null}
 
       {profile?.email ? (
         <>

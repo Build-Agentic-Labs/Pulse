@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { SpaceIcon, type SpaceKey } from "./company-dashboard";
+import { SpaceIcon, type SpaceKey } from "./spaces";
 import { BackToDashboardButton, UserNav } from "./user-nav";
 
 type SpacePlaceholderProps = {

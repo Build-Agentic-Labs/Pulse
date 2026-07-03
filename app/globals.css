@@ -1988,17 +1988,6 @@ body {
   }
 }
 
-@keyframes ui-brand-pulse {
-  0%,
-  100% {
-    opacity: 0.78;
-  }
-
-  50% {
-    opacity: 1;
-  }
-}
-
 @keyframes ui-skeleton-shimmer {
   0% {
     background-position: 160% 0;
@@ -3900,14 +3889,7 @@ body {
     font-size: 1.5rem;
     letter-spacing: -0.04em;
     line-height: 1;
-    animation: ui-brand-pulse 2.6s var(--ease-ui) infinite;
     @apply font-medium text-ink;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .ui-auth-brand {
-      animation: none;
-    }
   }
 
   .ui-auth-divider {

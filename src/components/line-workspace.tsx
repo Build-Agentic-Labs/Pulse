@@ -63,7 +63,6 @@ import {
 import { buildOperatorAssignmentsFromIePlan } from "@/domain/operator-allocation";
 import type { IeSmartAllocationPlan, IeSmartAllocationRequest } from "@/domain/ie-smart-allocation";
 import { getTaskOperatorIds, getTaskOperatorResetPatch, syncTaskOperatorCount } from "@/domain/operator-assignments";
-import { RollingText } from "@/components/rolling-text";
 import { buildStationSetupDocumentHtml } from "@/domain/report";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
 import { readCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
@@ -1353,12 +1352,12 @@ function TopNav({
         <div className="ui-chrome-planner-brand">
           <BackToDashboardButton />
           <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
-            <RollingText text="Pulse" rollOnMount />
+            Pulse
           </Link>
         </div>
 
         <div className="ui-chrome-planner-context min-w-0">
-          <RollingText text={context.title} className="ui-chrome-context-title truncate" />
+          <span className="ui-chrome-context-title truncate">{context.title}</span>
           <span className="ui-chrome-context-meta hidden min-w-0 truncate sm:inline">
             <span className={context.statusClass}>{context.status}</span>
             {context.detail ? (

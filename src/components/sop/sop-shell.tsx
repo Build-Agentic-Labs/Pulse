@@ -4,7 +4,6 @@ import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type MouseEvent, type ReactNode } from "react";
-import { RollingText } from "@/components/rolling-text";
 import { BackToDashboardButton, UserNav } from "@/components/user-nav";
 
 /**
@@ -68,7 +67,7 @@ export function SopShell({
             />
           </button>
           <Link href="/" className="ui-brand-compact shrink-0" onClick={guardNavigation}>
-            <RollingText text="Pulse" rollOnMount />
+            Pulse
           </Link>
           {crumb ? (
             <span className="hidden min-w-0 truncate ui-section-subtitle text-ink-secondary sm:inline">{crumb}</span>

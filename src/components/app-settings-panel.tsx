@@ -14,6 +14,8 @@ import { AccountSettings } from "@/components/account-settings";
 
 import { PhonePhotoPortalPanel } from "@/components/phone-photo-portal-panel";
 
+import { WorkspaceActivitySettings } from "@/components/workspace-activity-settings";
+
 import { WorkspaceMembersSettings } from "@/components/workspace-members-settings";
 
 import { WorkspaceListSettings } from "@/components/workspace-list-settings";
@@ -365,6 +367,8 @@ export function AppSettingsPanel({
             <WorkspaceListSettings />
 
             <WorkspaceMembersSettings project={project} />
+
+            <WorkspaceActivitySettings project={project} />
 
           </SettingsPage>
 

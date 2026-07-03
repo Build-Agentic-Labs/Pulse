@@ -46,7 +46,7 @@ function canManage(role?: WorkspaceRole) {
   return role === "owner" || role === "admin";
 }
 
-function projectPlannerHref(projectId: string) {
+export function projectPlannerHref(projectId: string) {
   return `/projects/${projectId}/planner?view=dashboard`;
 }
 
@@ -106,7 +106,7 @@ function mergeProjects(projects: Project[], activeProject?: PlannerProjectContex
   return [...byId.values()];
 }
 
-function announceProjectSwitch(project: Project) {
+export function announceProjectSwitch(project: Project) {
   if (typeof window !== "undefined") {
     try {
       window.sessionStorage.setItem(PROJECT_SWITCH_SESSION_KEY, String(Date.now()));

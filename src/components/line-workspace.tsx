@@ -167,6 +167,7 @@ import {
   listSopSummariesFromSupabase,
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
+  loadWorkspaceProjectGroups,
   loadTaskFromSupabase,
   renameScenario,
   updateScenarioTarget,
@@ -200,12 +201,14 @@ import type {
   PlannerState,
   Product,
   ProductStatus,
+  Project,
   ScenarioSummary,
   Station,
   Task,
   Zone,
 } from "@/domain/types";
 import { ClearableNumberInput } from "./clearable-number-input";
+import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
 import { GanttTimeline } from "./gantt-timeline";
 import { OperatorUtilizationPanel } from "./operator-utilization-panel";
 import { ScenarioTabs } from "./scenario-tabs";
@@ -214,7 +217,8 @@ import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
 import { AppLoadingShell } from "./app-flow-panels";
 import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
-import { SidebarWorkspacePanel } from "./sidebar-workspace-panel";
+import { announceProjectSwitch, projectPlannerHref, SidebarWorkspacePanel } from "./sidebar-workspace-panel";
+import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
 import { SidebarUserPanel } from "./sidebar-user-panel";
 import { ProcedureStepToolTable } from "./procedure-step-tool-table";
 import { StepPhotoViewer } from "./step-photo-viewer";
@@ -353,6 +357,13 @@ const setupSections = [
 type SetupSection = (typeof setupSections)[number]["id"];
 
 const comingSoonModuleIds = new Set(["balance", "reports"]);
+
+// Modules reachable via Alt+1..N and the command palette (coming-soon ones excluded).
+const quickSwitchModules = plannerModules.filter((module) => !comingSoonModuleIds.has(module.id));
+
+// Cap on the planner undo history. Snapshots are structural-shared PlannerState objects,
+// so the memory cost is per-edit deltas, not full copies.
+const UNDO_HISTORY_LIMIT = 50;
 
 const SIMULATION_ENABLED = false;
 
@@ -1268,16 +1279,54 @@ function StatCard({
   );
 }
 
+function presenceInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0]?.[0] ?? "?";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return `${first}${last}`.toUpperCase();
+}
+
+function PresenceStack({ peers }: { peers: PresencePeer[] }) {
+  if (!peers.length) {
+    return null;
+  }
+
+  const visible = peers.slice(0, 4);
+  return (
+    <div
+      className="hidden items-center -space-x-1.5 sm:flex"
+      title={`Also viewing this project: ${peers.map((peer) => peer.name).join(", ")}`}
+    >
+      {visible.map((peer) => (
+        <span
+          key={peer.key}
+          className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-surface-active text-[10px] font-medium text-ink-secondary"
+          title={peer.name}
+        >
+          {presenceInitials(peer.name)}
+        </span>
+      ))}
+      {peers.length > visible.length ? (
+        <span className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-surface text-[10px] text-ink-tertiary">
+          +{peers.length - visible.length}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function TopNav({
   sidebarCollapsed,
   onToggleSidebar,
   context,
   chromeStatus,
+  presence,
 }: {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   context?: ReturnType<typeof buildPlannerChromeContext>;
   chromeStatus?: { message: string; error?: boolean } | null;
+  presence?: PresencePeer[];
 }) {
   const { theme, toggleTheme } = useTheme();
 
@@ -1318,6 +1367,7 @@ function TopNav({
         </div>
 
         <div className="ui-chrome-planner-actions">
+          {presence ? <PresenceStack peers={presence} /> : null}
           {chromeStatus ? (
             <div className="ui-chrome-status max-w-[min(28rem,42vw)]">
               <NothingStatus error={chromeStatus.error}>{chromeStatus.message}</NothingStatus>
@@ -5573,6 +5623,17 @@ export function LineWorkspace({
   const isViewOnlyAccessRef = useRef(isViewOnlyAccess);
   isViewOnlyAccessRef.current = isViewOnlyAccess;
   const viewOnlyNoticeShownRef = useRef(false);
+  // Undo/redo history over user-driven plannerState mutations (captured by the effect
+  // near the autosave scheduler; remote realtime patches and scenario loads are excluded).
+  const undoStackRef = useRef<PlannerState[]>([]);
+  const redoStackRef = useRef<PlannerState[]>([]);
+  const undoTrackingRef = useRef<{ state: PlannerState; dirtyVersion: number; scenarioId?: string } | null>(null);
+  const skipHistoryCaptureRef = useRef(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  // Cross-app palette data, loaded lazily the first time the palette opens.
+  const [paletteProjects, setPaletteProjects] = useState<Array<{ project: Project; workspaceName: string }>>([]);
+  const [paletteSops, setPaletteSops] = useState<SopSummary[]>([]);
+  const presencePeers = usePlannerPresence(projectId);
   const projectToolRegistry = useMemo(
     () => buildProjectToolRegistry(derivedState.tasks, toolLibraryItems),
     [derivedState.tasks, toolLibraryItems],
@@ -7498,6 +7559,33 @@ export function LineWorkspace({
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
   }, []);
 
+  // Undo history capture. dirtyVersion only advances on user-driven edits (markDirty),
+  // so remote realtime patches and scenario/project loads never pollute the stack — they
+  // just reset the tracking baseline. Undo/redo applications set skipHistoryCaptureRef
+  // because they manage the stacks themselves.
+  useEffect(() => {
+    const tracking = undoTrackingRef.current;
+    const scenarioId = plannerState.scenario?.id;
+
+    if (!tracking || tracking.scenarioId !== scenarioId) {
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+    } else if (
+      dirtyVersion !== tracking.dirtyVersion &&
+      plannerState !== tracking.state &&
+      !skipHistoryCaptureRef.current
+    ) {
+      undoStackRef.current.push(tracking.state);
+      if (undoStackRef.current.length > UNDO_HISTORY_LIMIT) {
+        undoStackRef.current.shift();
+      }
+      redoStackRef.current = [];
+    }
+
+    skipHistoryCaptureRef.current = false;
+    undoTrackingRef.current = { state: plannerState, dirtyVersion, scenarioId };
+  }, [plannerState, dirtyVersion]);
+
   useEffect(() => {
     if (!hasLoadedRemoteState || dirtyVersion === 0) {
       return;
@@ -7650,6 +7738,230 @@ export function LineWorkspace({
     setIsResizingDetailDrawer(true);
   }
 
+  // Global shortcuts read the latest handlers through a ref so the window listener can be
+  // attached once without re-binding on every render (and without stale closures).
+  const keyboardActionsRef = useRef({
+    undo: () => {},
+    redo: () => {},
+    togglePalette: () => {},
+    goToModule: (_index: number) => {},
+  });
+  keyboardActionsRef.current = {
+    undo: undoPlannerChange,
+    redo: redoPlannerChange,
+    togglePalette: () => setCommandPaletteOpen((open) => !open),
+    goToModule: (index: number) => {
+      const targetModule = quickSwitchModules[index];
+      if (targetModule) {
+        navigateModule(targetModule.id);
+      }
+    },
+  };
+
+  useEffect(() => {
+    function isEditableTarget(target: EventTarget | null) {
+      if (!(target instanceof HTMLElement)) {
+        return false;
+      }
+      if (target.isContentEditable) {
+        return true;
+      }
+      const tag = target.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    }
+
+    function handleGlobalKeyDown(event: KeyboardEvent) {
+      const actions = keyboardActionsRef.current;
+      const meta = event.metaKey || event.ctrlKey;
+
+      if (meta && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        actions.togglePalette();
+        return;
+      }
+
+      // Text fields keep their native undo; the planner stack only handles the canvas.
+      if (meta && !event.altKey && event.key.toLowerCase() === "z" && !isEditableTarget(event.target)) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          actions.redo();
+        } else {
+          actions.undo();
+        }
+        return;
+      }
+
+      if (meta && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "y" && !isEditableTarget(event.target)) {
+        event.preventDefault();
+        actions.redo();
+        return;
+      }
+
+      // event.code sidesteps Alt producing special characters in event.key on macOS.
+      if (event.altKey && !meta && event.code.startsWith("Digit") && !isEditableTarget(event.target)) {
+        const digit = Number(event.code.slice(5));
+        if (digit >= 1 && digit <= quickSwitchModules.length) {
+          event.preventDefault();
+          actions.goToModule(digit - 1);
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!commandPaletteOpen) {
+      return;
+    }
+    void loadWorkspaceProjectGroups()
+      .then((groups) =>
+        setPaletteProjects(
+          groups.flatMap((group) =>
+            group.projects
+              .filter((candidate) => candidate.status !== "archived")
+              .map((candidate) => ({ project: candidate, workspaceName: group.workspace.name })),
+          ),
+        ),
+      )
+      .catch(() => undefined);
+    void listSopSummariesFromSupabase()
+      .then(setPaletteSops)
+      .catch(() => undefined);
+  }, [commandPaletteOpen]);
+
+  const commandPaletteGroups = useMemo<CommandPaletteGroup[]>(() => {
+    if (!commandPaletteOpen) {
+      return [];
+    }
+
+    const taskModuleIds = new Set(["gantt", "procedure", "work-instructions"]);
+    const ensureTaskModule = () => {
+      if (!taskModuleIds.has(activeModule)) {
+        setActiveModule("gantt");
+      }
+    };
+
+    return [
+      {
+        label: "Navigate",
+        items: [
+          ...quickSwitchModules.map((module, index) => ({
+            id: `module:${module.id}`,
+            label: module.label,
+            hint: `Alt+${index + 1}`,
+            keywords: "module view open",
+            action: () => navigateModule(module.id),
+          })),
+          {
+            id: "settings:general",
+            label: "Settings",
+            hint: "General",
+            keywords: "account profile password theme",
+            action: () => openSettings("general"),
+          },
+          {
+            id: "settings:workspace",
+            label: "Members & access",
+            hint: "Settings",
+            keywords: "invite user role organization access members",
+            action: () => openSettings("workspace"),
+          },
+        ],
+      },
+      {
+        label: "Scenarios",
+        items: scenarios
+          .filter((scenario) => scenario.id !== derivedState.scenario.id)
+          .map((scenario) => ({
+            id: `scenario:${scenario.id}`,
+            label: scenario.name,
+            hint: "Switch scenario",
+            action: () => void switchScenario(scenario.id),
+          })),
+      },
+      {
+        label: "Tasks",
+        items: derivedState.tasks.map((task) => ({
+          id: `task:${task.id}`,
+          label: task.name,
+          hint: task.wbs,
+          keywords: "task",
+          action: () => {
+            ensureTaskModule();
+            openTaskDetail(task.id);
+          },
+        })),
+      },
+      {
+        label: "Stations",
+        items: derivedState.stations.map((station) => ({
+          id: `station:${station.id}`,
+          label: station.name,
+          hint: "Station",
+          action: () => {
+            ensureTaskModule();
+            selectStation(station.id);
+          },
+        })),
+      },
+      {
+        label: "Projects",
+        items: paletteProjects
+          .filter((entry) => entry.project.id !== projectId)
+          .map((entry) => ({
+            id: `project:${entry.project.id}`,
+            label: entry.project.name,
+            hint: entry.workspaceName,
+            keywords: "project workspace open switch",
+            action: () => {
+              announceProjectSwitch(entry.project);
+              router.push(projectPlannerHref(entry.project.id));
+            },
+          })),
+      },
+      {
+        label: "SOPs",
+        items: paletteSops.map((sop) => ({
+          id: `sop:${sop.id}`,
+          label: sop.title || sop.sopNumber || sop.id,
+          hint: sop.sopNumber && sop.title ? sop.sopNumber : "SOP",
+          keywords: "sop standard operating procedure document",
+          action: () => router.push(`/sops/${sop.id}`),
+        })),
+      },
+      {
+        label: "Actions",
+        items: [
+          {
+            id: "action:undo",
+            label: "Undo last change",
+            hint: "⌘Z",
+            action: () => undoPlannerChange(),
+          },
+          {
+            id: "action:redo",
+            label: "Redo change",
+            hint: "⇧⌘Z",
+            action: () => redoPlannerChange(),
+          },
+        ],
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    commandPaletteOpen,
+    activeModule,
+    scenarios,
+    derivedState.scenario.id,
+    derivedState.tasks,
+    derivedState.stations,
+    paletteProjects,
+    paletteSops,
+    projectId,
+  ]);
+
   const isProcedureModule = activeModule === "procedure";
   const isDashboardModule = activeModule === "dashboard";
   const isSettingsModule = activeModule === "settings";
@@ -7731,6 +8043,38 @@ export function LineWorkspace({
       });
     }
     return true;
+  }
+
+  function undoPlannerChange() {
+    if (blockViewOnlyWrite()) {
+      return;
+    }
+    const previous = undoStackRef.current.pop();
+    if (!previous) {
+      notifyFeedback({ title: "Nothing to undo", tone: "neutral" });
+      return;
+    }
+    redoStackRef.current.push(undoTrackingRef.current?.state ?? plannerState);
+    skipHistoryCaptureRef.current = true;
+    setPlannerState(previous);
+    markDirty();
+    notifyFeedback({ title: "Undid last change", tone: "neutral" });
+  }
+
+  function redoPlannerChange() {
+    if (blockViewOnlyWrite()) {
+      return;
+    }
+    const next = redoStackRef.current.pop();
+    if (!next) {
+      notifyFeedback({ title: "Nothing to redo", tone: "neutral" });
+      return;
+    }
+    undoStackRef.current.push(undoTrackingRef.current?.state ?? plannerState);
+    skipHistoryCaptureRef.current = true;
+    setPlannerState(next);
+    markDirty();
+    notifyFeedback({ title: "Redid change", tone: "neutral" });
   }
 
   async function persistPlannerState(stateToSave: PlannerState) {
@@ -9881,6 +10225,7 @@ export function LineWorkspace({
     setActiveModule("settings");
   }
 
+
   const lineReadinessPanel = (
     <LineReadinessPanel
       allocationRecommendations={visibleAllocationRecommendations}
@@ -9936,6 +10281,13 @@ export function LineWorkspace({
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         context={displayedPlannerChromeContext}
         chromeStatus={chromeStatus}
+        presence={presencePeers}
+      />
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        groups={commandPaletteGroups}
       />
 
       {isViewOnlyAccess ? (

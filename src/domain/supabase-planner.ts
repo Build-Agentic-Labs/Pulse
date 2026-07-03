@@ -2197,6 +2197,60 @@ export async function loadMembersAccessForWorkspace(workspaceId: string): Promis
   });
 }
 
+// One row from the audit_log table (written by DB triggers on the access tables).
+export interface AuditLogEntry {
+  id: number;
+  workspaceId?: string;
+  actorId?: string;
+  actorEmail?: string;
+  action: string;
+  targetType: string;
+  targetId?: string;
+  details?: { old?: Record<string, unknown>; new?: Record<string, unknown> };
+  createdAt: string;
+}
+
+/**
+ * Workspace activity, newest first. Managers/superadmins see rows via the
+ * "audit_log manager read" policy; other callers just get zero rows back.
+ * Org-wide entries (workspace_id null: org_tool_access, platform_admins) are included.
+ */
+export async function loadAuditLogFromSupabase(
+  workspaceId: string,
+  options: { beforeId?: number; limit?: number } = {},
+): Promise<AuditLogEntry[]> {
+  const supabase = plannerClient();
+  let query = supabase
+    .from("audit_log")
+    .select("*")
+    .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+    .order("id", { ascending: false })
+    .limit(options.limit ?? 30);
+  if (options.beforeId !== undefined) {
+    query = query.lt("id", options.beforeId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  return (data ?? []).map((row) => ({
+    id: Number(row.id),
+    workspaceId: maybeText(row.workspace_id),
+    actorId: maybeText(row.actor_id),
+    actorEmail: maybeText(row.actor_email),
+    action: String(row.action ?? ""),
+    targetType: String(row.target_type ?? ""),
+    targetId: maybeText(row.target_id),
+    details: row.details && typeof row.details === "object" ? (row.details as AuditLogEntry["details"]) : undefined,
+    createdAt: String(row.created_at),
+  }));
+}
+
 export async function setProjectAccessInSupabase(
   projectId: string,
   userId: string,

@@ -207,6 +207,7 @@ import type {
   Task,
   Zone,
 } from "@/domain/types";
+import { BulkTaskEditor } from "./bulk-task-editor";
 import { ClearableNumberInput } from "./clearable-number-input";
 import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
 import { GanttTimeline } from "./gantt-timeline";
@@ -5633,7 +5634,11 @@ export function LineWorkspace({
   // Cross-app palette data, loaded lazily the first time the palette opens.
   const [paletteProjects, setPaletteProjects] = useState<Array<{ project: Project; workspaceName: string }>>([]);
   const [paletteSops, setPaletteSops] = useState<SopSummary[]>([]);
+  const [bulkEditorOpen, setBulkEditorOpen] = useState(false);
   const presencePeers = usePlannerPresence(projectId);
+  const presencePeersRef = useRef<PresencePeer[]>([]);
+  presencePeersRef.current = presencePeers;
+  const lastConflictNoticeAtRef = useRef(0);
   const projectToolRegistry = useMemo(
     () => buildProjectToolRegistry(derivedState.tasks, toolLibraryItems),
     [derivedState.tasks, toolLibraryItems],
@@ -7061,6 +7066,7 @@ export function LineWorkspace({
   function requestRemoteTaskRefresh(taskId: string) {
     if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
+      maybeNotifyConcurrentEdit();
       return;
     }
 
@@ -7162,9 +7168,30 @@ export function LineWorkspace({
       });
   }
 
+  // A realtime change landed while this user has unsaved local edits. Authorship isn't
+  // in the payload, so gate on presence (someone else is actually in this project) to
+  // avoid firing on the echo of our own saves, and throttle to one notice a minute.
+  function maybeNotifyConcurrentEdit() {
+    const peers = presencePeersRef.current;
+    if (!peers.length || !plannerDirtyRef.current) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastConflictNoticeAtRef.current < 60_000) {
+      return;
+    }
+    lastConflictNoticeAtRef.current = now;
+    notifyFeedback({
+      title: `Editing alongside ${peers.map((peer) => peer.name).join(", ")}`,
+      body: "This scenario just changed while you have unsaved edits. The latest save wins — coordinate to avoid overwriting each other's work.",
+      tone: "warning",
+    });
+  }
+
   function requestRemotePlannerRefresh() {
     if (hasPlannerShellSaveWork()) {
       pendingRemoteRefreshRef.current = true;
+      maybeNotifyConcurrentEdit();
       return;
     }
 
@@ -7907,6 +7934,35 @@ export function LineWorkspace({
         })),
       },
       {
+        label: "Steps",
+        searchOnly: true,
+        items: derivedState.tasks.flatMap((task) =>
+          (task.manufacturingSteps ?? []).map((step) => ({
+            id: `step:${task.id}:${step.id}`,
+            label: step.name || step.instruction.slice(0, 80) || `Step ${step.sequence}`,
+            hint: task.name,
+            keywords: `step ${step.instruction.slice(0, 200)}`,
+            action: () => openProcedureStepName(task.id, step.id),
+          })),
+        ),
+      },
+      {
+        label: "Parts",
+        searchOnly: true,
+        items: derivedState.tasks.flatMap((task) =>
+          (task.partReferences ?? []).map((part) => ({
+            id: `part:${task.id}:${part.id}`,
+            label: part.partNumber,
+            hint: task.name,
+            keywords: `part ${part.description ?? ""}`,
+            action: () => {
+              ensureTaskModule();
+              openTaskDetail(task.id);
+            },
+          })),
+        ),
+      },
+      {
         label: "Projects",
         items: paletteProjects
           .filter((entry) => entry.project.id !== projectId)
@@ -7934,6 +7990,13 @@ export function LineWorkspace({
       {
         label: "Actions",
         items: [
+          {
+            id: "action:bulk-edit",
+            label: "Bulk edit tasks…",
+            hint: "Move / delete",
+            keywords: "bulk multi select move zone delete tasks",
+            action: () => setBulkEditorOpen(true),
+          },
           {
             id: "action:undo",
             label: "Undo last change",
@@ -10288,6 +10351,16 @@ export function LineWorkspace({
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         groups={commandPaletteGroups}
+      />
+
+      <BulkTaskEditor
+        open={bulkEditorOpen}
+        onClose={() => setBulkEditorOpen(false)}
+        tasks={derivedState.tasks}
+        zones={derivedState.zones}
+        taskCode={taskDisplayCode}
+        onMoveToZone={moveTasksToZone}
+        onDelete={deleteTasks}
       />
 
       {isViewOnlyAccess ? (

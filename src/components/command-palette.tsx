@@ -17,6 +17,9 @@ export type CommandPaletteItem = {
 export type CommandPaletteGroup = {
   label: string;
   items: CommandPaletteItem[];
+  // Hide the group until the user types — for large corpora (steps, parts) that
+  // would otherwise drown the default view.
+  searchOnly?: boolean;
 };
 
 const MAX_ITEMS_PER_GROUP = 6;
@@ -67,6 +70,9 @@ export function CommandPalette({
     const result: FlatItem[] = [];
 
     for (const group of groups) {
+      if (group.searchOnly && !normalized) {
+        continue;
+      }
       const matches = normalized
         ? group.items
             .map((item) => ({ item, score: scoreItem(item, normalized) }))

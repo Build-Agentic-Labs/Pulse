@@ -89,7 +89,7 @@
 
   --type-sans: var(--font-space-grotesk), "DM Sans", system-ui, sans-serif;
   --type-mono: var(--font-space-mono), "JetBrains Mono", "SF Mono", monospace;
-  --type-display: var(--font-doto), var(--font-space-mono), monospace;
+  --type-display: var(--font-space-mono), "JetBrains Mono", "SF Mono", monospace;
 
   --type-hero: 1.375rem;
   --type-title: 1rem;

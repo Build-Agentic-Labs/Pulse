@@ -52,33 +52,6 @@ const mono = localFont({
   ],
 });
 
-const doto = localFont({
-  variable: "--font-doto",
-  display: "swap",
-  src: [
-    {
-      path: "../node_modules/@fontsource/doto/files/doto-latin-400-normal.woff2",
-      weight: "400",
-      style: "normal",
-    },
-    {
-      path: "../node_modules/@fontsource/doto/files/doto-latin-500-normal.woff2",
-      weight: "500",
-      style: "normal",
-    },
-    {
-      path: "../node_modules/@fontsource/doto/files/doto-latin-600-normal.woff2",
-      weight: "600",
-      style: "normal",
-    },
-    {
-      path: "../node_modules/@fontsource/doto/files/doto-latin-700-normal.woff2",
-      weight: "700",
-      style: "normal",
-    },
-  ],
-});
-
 export const metadata: Metadata = {
   title: "Pulse",
   description: "Manufacturing line development planner",
@@ -98,7 +71,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${grotesk.variable} ${mono.variable} ${doto.variable} h-full overflow-hidden`}
+      className={`${grotesk.variable} ${mono.variable} h-full overflow-hidden`}
       suppressHydrationWarning
     >
       <head>

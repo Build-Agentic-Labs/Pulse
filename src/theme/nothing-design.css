@@ -16,7 +16,7 @@
   --nd-warning: #d4a843;
   --nd-interactive: #5b9bf6;
 
-  --nd-font-display: var(--font-doto), var(--font-space-mono), monospace;
+  --nd-font-display: var(--font-space-mono), monospace;
   --nd-font-body: var(--font-space-grotesk), "DM Sans", system-ui, sans-serif;
   --nd-font-mono: var(--font-space-mono), "JetBrains Mono", "SF Mono", monospace;
 

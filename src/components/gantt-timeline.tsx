@@ -1047,12 +1047,12 @@ export function GanttTimeline({
 
   function finishLinkClass(row: GanttRow) {
     if (isLinkedFinishSourceForActiveStart(row)) {
-      return "border-accent/70 bg-accent-muted text-accent shadow-[0_0_0_2px_rgba(20,184,166,0.14),0_0_16px_rgba(20,184,166,0.28)]";
+      return "border-accent/70 bg-accent-muted text-accent ring-2 ring-border-strong";
     }
 
     return canUseFinishAsLinkSource(linkingRowId, row)
       ? "border-accent bg-accent-muted text-accent hover:bg-accent-subtle"
-      : "border-line bg-surface-sunken text-steel disabled:opacity-50";
+      : "border-line bg-surface-sunken text-ink-secondary disabled:opacity-50";
   }
 
   function getStartInputValue(rowId: string, minutes: number) {
@@ -1444,7 +1444,7 @@ export function GanttTimeline({
                 aria-label="Expand task table"
                 title="Expand task table"
               >
-                <ChevronRight size={15} />
+                <ChevronRight size={15} strokeWidth={1.75} />
               </button>
               <div className="mt-2 flex flex-1 items-center">
                 <span className="rotate-180 ui-mono-label [writing-mode:vertical-rl]">
@@ -1460,14 +1460,14 @@ export function GanttTimeline({
               <button
                 type="button"
                 onClick={() => setTableCollapsed(true)}
-                className="absolute right-2 top-2 z-20 inline-flex h-7 w-7 items-center justify-center rounded-md border border-line bg-surface/95 text-steel transition hover:bg-surface-sunken hover:text-ink"
+                className="absolute right-2 top-2 z-20 inline-flex h-7 w-7 items-center justify-center rounded-md border border-line bg-surface/95 text-ink-secondary transition hover:bg-surface-sunken hover:text-ink"
                 aria-label="Collapse task table"
                 title="Collapse task table"
               >
-                <ChevronLeft size={14} />
+                <ChevronLeft size={14} strokeWidth={1.75} />
               </button>
               <div
-                className="grid h-11 items-center gap-2 border-b border-line pl-3 pr-4 text-center text-[11px] font-semibold uppercase tracking-wide text-steel"
+                className="grid h-11 items-center gap-2 border-b border-line pl-3 pr-4 text-center text-[11px] font-semibold uppercase tracking-wide text-ink-secondary"
                 style={tableGridStyle}
               >
                 <span className="whitespace-nowrap text-center">Code</span>
@@ -1493,7 +1493,7 @@ export function GanttTimeline({
                     disabled={smartAllocationPending}
                     aria-label="Optimize line"
                     title={smartAllocationPending ? "Optimizing line…" : "Optimize line — schedule & staff into a new scenario"}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-ink-tertiary transition hover:border-line hover:bg-surface-muted hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-sm border border-transparent text-ink-tertiary transition hover:border-line hover:bg-surface-muted hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60"
                   >
                     <Sparkles size={12} strokeWidth={2} />
                   </button>
@@ -1556,9 +1556,9 @@ export function GanttTimeline({
                         </div>
                       )}
                     </div>
-                    <span className="text-center font-mono font-bold text-steel">{formatRelativeHours(row.zone.startMinute)}</span>
+                    <span className="text-center font-mono font-bold text-ink-secondary">{formatRelativeHours(row.zone.startMinute)}</span>
                     <span className="text-center font-bold text-ink-secondary">{round(row.zone.durationMinutes / 60, 2)}</span>
-                    <span className="text-center font-mono font-bold text-steel">{formatRelativeHours(row.zone.finishMinute)}</span>
+                    <span className="text-center font-mono font-bold text-ink-secondary">{formatRelativeHours(row.zone.finishMinute)}</span>
                     <span className="text-center font-semibold text-ink-secondary">{row.zone.plannedOperators}</span>
                     <span className="text-center font-semibold text-ink-secondary">{round(row.zone.plannedManHours, 1)}</span>
                     <button
@@ -1567,11 +1567,11 @@ export function GanttTimeline({
                         event.stopPropagation();
                         void copyZoneGanttRows(row.zone);
                       }}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-steel outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
                       aria-label={`Copy ${row.zone.name || "zone"} rows for Excel`}
                       title={`Copy ${row.zone.name || "zone"} rows for Excel`}
                     >
-                      <Copy size={14} />
+                      <Copy size={14} strokeWidth={1.75} />
                     </button>
                     {row.zone.editable ? (
                       <button
@@ -1580,11 +1580,11 @@ export function GanttTimeline({
                           event.stopPropagation();
                           onDeleteZone(row.zone.id);
                         }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-steel outline-none hover:border-danger/40 hover:bg-danger-muted hover:text-danger"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-danger/40 hover:bg-danger-muted hover:text-danger"
                         aria-label={`Delete zone ${row.zone.name || "Untitled zone"}`}
                         title="Delete zone"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={14} strokeWidth={1.75} />
                       </button>
                     ) : (
                       <span aria-hidden="true" />
@@ -1595,11 +1595,11 @@ export function GanttTimeline({
                         event.stopPropagation();
                         onAddTaskToZone(row.zone.editable ? row.zone.id : undefined);
                       }}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-steel outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
                       aria-label={`Add task to ${row.zone.name || "Untitled zone"}`}
                       title={`Add task to ${row.zone.name || "Untitled zone"}`}
                     >
-                      <Plus size={14} />
+                      <Plus size={14} strokeWidth={1.75} />
                     </button>
                   </div>
                 );
@@ -1670,7 +1670,7 @@ export function GanttTimeline({
                         <span className="truncate">{taskDisplayCode(primaryTask)}</span>
                       </button>
                     ) : (
-                      <span className="flex h-8 w-full items-center justify-center justify-self-center truncate text-center font-mono text-[11px] font-medium text-steel">
+                      <span className="flex h-8 w-full items-center justify-center justify-self-center truncate text-center font-mono text-[11px] font-medium text-ink-secondary">
                         Uncoded
                       </span>
                     )}
@@ -1680,7 +1680,7 @@ export function GanttTimeline({
                           <input
                       aria-label={`${taskDisplayCode(editableTask)} task name`}
                             data-task-name-id={editableTask.id}
-                            className="h-9 w-full min-w-0 rounded border border-line bg-surface px-2 font-medium text-ink outline-none transition placeholder:text-steel/70"
+                            className="h-9 w-full min-w-0 rounded border border-line bg-surface px-2 font-medium text-ink outline-none transition placeholder:text-ink-secondary/70"
                             value={editableTask.name}
                             placeholder="Blank task"
                             onClick={(event) => event.stopPropagation()}
@@ -1722,7 +1722,7 @@ export function GanttTimeline({
                       className={`h-9 rounded border px-1 text-center font-mono font-bold outline-none ${
                         linkingRowId === row.id
                           ? "border-accent bg-accent-muted text-accent"
-                          : "border-line bg-surface text-steel"
+                          : "border-line bg-surface text-ink-secondary"
                       }`}
                       value={getStartInputValue(row.id, row.group.startMinute)}
                       onFocus={(event) => {
@@ -1752,7 +1752,7 @@ export function GanttTimeline({
                             groupDurationOverTakt
                               ? TAKT_FLAG_INPUT_CLASS
                               : stepCount > 0
-                                ? "border-line bg-surface-sunken text-steel"
+                                ? "border-line bg-surface-sunken text-ink-secondary"
                                 : "border-line bg-surface text-ink"
                           }`}
                           value={round(row.group.durationMinutes / 60, 2)}
@@ -1818,11 +1818,11 @@ export function GanttTimeline({
                           event.stopPropagation();
                           openPredecessorPicker(primaryTask);
                         }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-steel outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
                         aria-label="Add predecessor"
                         title="Add predecessor"
                       >
-                        <Link2 size={14} />
+                        <Link2 size={14} strokeWidth={1.75} />
                       </button>
                     ) : (
                       <span aria-hidden="true" />
@@ -1833,11 +1833,11 @@ export function GanttTimeline({
                         event.stopPropagation();
                         onDeleteTasks(row.group.tasks.map((task) => task.id));
                       }}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-steel outline-none hover:border-danger/40 hover:bg-danger-muted hover:text-danger"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-danger/40 hover:bg-danger-muted hover:text-danger"
                       aria-label={`Delete task ${row.group.wbs}`}
                       title="Delete task"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={14} strokeWidth={1.75} />
                     </button>
                     <button
                       type="button"
@@ -1848,12 +1848,12 @@ export function GanttTimeline({
                         }
                         toggleGroup(row.group.id);
                       }}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-steel outline-none hover:bg-surface-sunken hover:text-ink"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-line bg-surface text-ink-secondary outline-none hover:bg-surface-sunken hover:text-ink"
                       aria-expanded={expanded}
                       aria-label={`${expanded ? "Collapse" : "Expand"} process ${row.group.wbs}`}
                       title={expanded ? "Collapse task" : "Expand task"}
                     >
-                      {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      {expanded ? <ChevronDown size={14} strokeWidth={1.75} /> : <ChevronRight size={14} strokeWidth={1.75} />}
                     </button>
                   </div>
                 );
@@ -1879,7 +1879,7 @@ export function GanttTimeline({
                     }`}
                     style={tableGridStyle}
                   >
-                    <span className="truncate text-center font-mono text-[11px] text-steel" title={rowStepCode}>
+                    <span className="truncate text-center font-mono text-[11px] text-ink-secondary" title={rowStepCode}>
                       {visibleRowStepCode}
                     </span>
                     {hasStepName ? (
@@ -1905,7 +1905,7 @@ export function GanttTimeline({
                       className={`h-9 rounded border px-1 text-center font-mono font-bold outline-none ${
                         linkingRowId === row.id
                           ? "border-accent bg-accent-muted text-accent"
-                          : "border-line bg-surface-sunken text-steel"
+                          : "border-line bg-surface-sunken text-ink-secondary"
                       }`}
                       value={getStartInputValue(row.id, row.startMinute)}
                       onClick={(event) => event.stopPropagation()}
@@ -1988,7 +1988,7 @@ export function GanttTimeline({
                   }`}
                   style={tableGridStyle}
                 >
-                  <span className="text-center font-mono text-[11px] text-steel">{taskDisplayCode(task)}</span>
+                  <span className="text-center font-mono text-[11px] text-ink-secondary">{taskDisplayCode(task)}</span>
                   {editingTaskNameId === task.id || task.name.trim() === "" ? (
                     <input
                       aria-label={`${task.wbs} task name`}
@@ -2020,7 +2020,7 @@ export function GanttTimeline({
                   <input
                     aria-label={`${task.wbs} start link`}
                     className={`h-9 rounded border px-1 text-center font-mono font-bold outline-none ${
-                      linkingRowId === row.id ? "border-accent bg-accent-muted text-accent" : "border-line bg-surface-sunken text-steel"
+                      linkingRowId === row.id ? "border-accent bg-accent-muted text-accent" : "border-line bg-surface-sunken text-ink-secondary"
                     }`}
                     value={getStartInputValue(row.id, window.startMinute)}
                     onFocus={(event) => {
@@ -2088,11 +2088,11 @@ export function GanttTimeline({
                       event.stopPropagation();
                       openPredecessorPicker(task);
                     }}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-steel outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
                     aria-label="Add predecessor"
                     title="Add predecessor"
                   >
-                    <Link2 size={14} />
+                    <Link2 size={14} strokeWidth={1.75} />
                   </button>
                   <button
                     type="button"
@@ -2100,11 +2100,11 @@ export function GanttTimeline({
                       event.stopPropagation();
                       onDeleteTasks([task.id]);
                     }}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded border border-transparent text-steel outline-none hover:border-danger/40 hover:bg-danger-muted hover:text-danger"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-danger/40 hover:bg-danger-muted hover:text-danger"
                     aria-label={`Delete task ${task.wbs}`}
                     title="Delete task"
                   >
-                    <Trash2 size={14} />
+                    <Trash2 size={14} strokeWidth={1.75} />
                   </button>
                   <span aria-hidden="true" />
                 </div>
@@ -2137,7 +2137,7 @@ export function GanttTimeline({
               aria-label={canvasMaximized ? "Restore Gantt canvas" : "Maximize Gantt canvas"}
               title={canvasMaximized ? "Restore Gantt canvas" : "Maximize Gantt canvas"}
             >
-              {canvasMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              {canvasMaximized ? <Minimize2 size={16} strokeWidth={1.75} /> : <Maximize2 size={16} strokeWidth={1.75} />}
             </button>
           </div>
           <div className="h-full overflow-auto">
@@ -2171,7 +2171,7 @@ export function GanttTimeline({
                             style={{ left: x }}
                           />
                           <div
-                            className="absolute top-[15px] whitespace-nowrap text-[11px] font-bold text-steel"
+                            className="absolute top-[15px] whitespace-nowrap text-[11px] font-bold text-ink-secondary"
                             style={{ left: x + 6 }}
                           >
                             {formatMinutes(minute)}
@@ -2599,7 +2599,7 @@ export function GanttTimeline({
             <label className="block">
               <span className="ui-field-label">Zone</span>
               <select
-                className="h-10 w-full rounded border border-line bg-surface px-3 text-sm font-semibold text-ink outline-none"
+                className="h-10 w-full rounded-sm border border-line bg-surface px-3 text-[13px] text-ink outline-none"
                 value={mappingDraft.zoneId}
                 onChange={(event) => {
                   const zoneId = event.target.value;
@@ -2625,7 +2625,7 @@ export function GanttTimeline({
             <label className="block">
               <span className="ui-field-label">Component</span>
               <select
-                className="h-10 w-full rounded border border-line bg-surface px-3 text-sm font-semibold text-ink outline-none"
+                className="h-10 w-full rounded-sm border border-line bg-surface px-3 text-[13px] text-ink outline-none"
                 value={mappingDraft.componentId}
                 onChange={(event) => {
                   const componentId = event.target.value;
@@ -2683,7 +2683,7 @@ export function GanttTimeline({
               type="button"
               onClick={saveCodeMapping}
               disabled={Boolean(mappingDuplicateTask)}
-              className="inline-flex h-10 min-w-32 items-center justify-center rounded-md border border-accent bg-accent px-4 text-sm font-medium text-canvas transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              className="ui-btn-primary h-10 min-w-32 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Save Code
             </button>
@@ -2709,7 +2709,7 @@ export function GanttTimeline({
             <h2 id="predecessor-picker-title" className="mt-1 text-xl font-medium text-ink">
               Predecessors for {taskDisplayCode(predecessorPickerTask)} {predecessorPickerTask.name || "Blank task"}
             </h2>
-            <p className="mt-1 text-sm font-semibold text-steel">
+            <p className="mt-1 text-sm font-semibold text-ink-secondary">
               This task will start after all selected predecessor tasks are complete.
             </p>
           </div>
@@ -2736,7 +2736,7 @@ export function GanttTimeline({
                     <label
                       key={candidate.id}
                       className={`grid grid-cols-[48px_128px_minmax(260px,1fr)_150px_104px_104px] items-center gap-3 border-b border-line px-3 py-3 text-sm last:border-b-0 ${
-                        invalid ? "cursor-not-allowed bg-danger-muted/45 text-steel" : "cursor-pointer bg-surface hover:bg-accent-muted"
+                        invalid ? "cursor-not-allowed bg-danger-muted/45 text-ink-secondary" : "cursor-pointer bg-surface hover:bg-accent-muted"
                       }`}
                     >
                       <input
@@ -2757,11 +2757,11 @@ export function GanttTimeline({
                           style={{ backgroundColor: candidateZone?.stroke ?? UNZONED_COLOR }}
                           aria-hidden="true"
                         />
-                        <span className="min-w-0 truncate text-xs ui-mono-label tracking-wide text-steel" title={candidateZone?.name ?? "Unzoned"}>
+                        <span className="min-w-0 truncate text-xs ui-mono-label tracking-wide text-ink-secondary" title={candidateZone?.name ?? "Unzoned"}>
                           {candidateZone?.name ?? "Unzoned"}
                         </span>
                       </span>
-                      <span className="font-mono text-xs font-medium text-steel">
+                      <span className="font-mono text-xs font-medium text-ink-secondary">
                         {formatRelativeHours(candidateWindow.finishMinute)}
                       </span>
                       <span
@@ -2770,7 +2770,7 @@ export function GanttTimeline({
                             ? "bg-accent-muted text-accent"
                             : state === "invalid"
                               ? "bg-danger-muted text-danger"
-                              : "bg-surface-sunken text-steel"
+                              : "bg-surface-sunken text-ink-secondary"
                         }`}
                       >
                         {state}
@@ -2779,7 +2779,7 @@ export function GanttTimeline({
                   );
                 })
               ) : (
-                <div className="px-4 py-8 text-sm font-semibold text-steel">No tasks are available yet.</div>
+                <div className="px-4 py-10 text-center ui-section-subtitle text-ink-tertiary">No tasks are available yet.</div>
               )}
             </div>
           </div>
@@ -2795,7 +2795,7 @@ export function GanttTimeline({
             <button
               type="button"
               onClick={savePredecessors}
-              className="inline-flex h-10 min-w-44 items-center justify-center rounded-md border border-accent bg-accent px-4 text-sm font-medium text-canvas transition hover:opacity-90"
+              className="ui-btn-primary h-10 min-w-44"
             >
               Save predecessors
             </button>

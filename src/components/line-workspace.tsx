@@ -28,8 +28,6 @@ import {
   SkipBack,
   SkipForward,
   SlidersHorizontal,
-  Sun,
-  Moon,
   Tags,
   Timer,
   Trash2,
@@ -228,7 +226,6 @@ import { TaskVideoGallery } from "./task-video-gallery";
 import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
 import { AppSettingsPanel, settingsSections, type SettingsSection } from "./app-settings-panel";
 import { ThemedSelect } from "./themed-select";
-import { useTheme } from "./theme-provider";
 
 type ProductNumberField =
   | "targetManHours"
@@ -806,7 +803,7 @@ function StatusPill({ status }: { status: string }) {
         ? "border-warn/30 bg-warn-muted/20 text-warn-strong"
         : status === "red" || status === "blocked" || status === "qc_hold" || status === "rework"
           ? "border-danger/25 bg-danger-muted/10 text-danger"
-          : "border-line bg-surface-sunken text-steel";
+          : "border-line bg-surface-sunken text-ink-secondary";
 
   return (
     <span className={`ui-chip ${tone}`}>
@@ -875,7 +872,7 @@ function StepPhotoAttachmentEditor({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="ui-field-label mb-0 flex items-center gap-1">
           Photos
-          {photos.length > 0 ? <span className="text-steel/70">({photos.length})</span> : null}
+          {photos.length > 0 ? <span className="text-ink-secondary/70">({photos.length})</span> : null}
         </div>
         <label
           className={`ui-btn-ghost cursor-pointer ${compact ? "h-8 gap-1.5 px-2" : "h-10 gap-2"} ${
@@ -927,7 +924,7 @@ function StepPhotoAttachmentEditor({
                     event.stopPropagation();
                     onRequestRemove(photo);
                   }}
-                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-surface/90 text-steel opacity-0 transition hover:text-danger focus:opacity-100 focus-visible:ring-2 focus-visible:ring-accent group-hover:opacity-100 group-focus-within:opacity-100"
+                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-surface/90 text-ink-secondary opacity-0 transition hover:text-danger focus:opacity-100 focus-visible:ring-2 focus-visible:ring-accent group-hover:opacity-100 group-focus-within:opacity-100"
                   aria-label={`Remove photo from step ${step.sequence}`}
                   title="Remove photo"
                 >
@@ -938,7 +935,7 @@ function StepPhotoAttachmentEditor({
           ))}
         </div>
       ) : (
-        <div className="border-t border-dashed border-line pt-2 text-xs font-semibold text-steel">
+        <div className="border-t border-dashed border-line pt-2 text-xs font-semibold text-ink-secondary">
           No photos attached to this step yet.
         </div>
       )}
@@ -1040,7 +1037,7 @@ function StepPartReferenceEditor({
                 <button
                   type="button"
                   onClick={() => onRemove(part.id)}
-                  className="text-steel/70 hover:text-danger"
+                  className="text-ink-secondary/70 hover:text-danger"
                   aria-label={`Remove ${part.partNumber} from step ${step.sequence}`}
                   title={`Remove ${part.partNumber}`}
                 >
@@ -1175,7 +1172,7 @@ function ProcedureStepChecksEditor({
   }
 
   if (enabledDefinitions.length === 0) {
-    return <div className="text-xs text-steel">No checks configured for this workspace.</div>;
+    return <div className="text-xs text-ink-secondary">No checks configured for this workspace.</div>;
   }
 
   return (
@@ -1316,20 +1313,41 @@ function PresenceStack({ peers }: { peers: PresencePeer[] }) {
   );
 }
 
+// Maps the persistent planner save state to the chrome status chip. Returns null for
+// states that need no indicator (idle/loading/draft) so the chip only appears when it matters.
+function plannerSaveStatus(state: SaveState): { message: string; error?: boolean } | null {
+  switch (state) {
+    case "saving":
+    case "retrying":
+      return { message: "Saving…" };
+    case "saved":
+      return { message: "Saved" };
+    case "error":
+    case "conflict":
+      return { message: "Save failed", error: true };
+    default:
+      return null;
+  }
+}
+
 function TopNav({
   sidebarCollapsed,
   onToggleSidebar,
   context,
   chromeStatus,
+  saveStatus,
   presence,
 }: {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   context?: ReturnType<typeof buildPlannerChromeContext>;
   chromeStatus?: { message: string; error?: boolean } | null;
+  saveStatus?: { message: string; error?: boolean } | null;
   presence?: PresencePeer[];
 }) {
-  const { theme, toggleTheme } = useTheme();
+  // A transient chrome event (notifyFeedback) takes priority; otherwise show the
+  // persistent save indicator so the planner always signals its save state.
+  const status = chromeStatus ?? saveStatus ?? null;
 
   if (context) {
     return (
@@ -1370,14 +1388,11 @@ function TopNav({
 
         <div className="ui-chrome-planner-actions">
           {presence ? <PresenceStack peers={presence} /> : null}
-          {chromeStatus ? (
+          {status ? (
             <div className="ui-chrome-status max-w-[min(28rem,42vw)]">
-              <NothingStatus error={chromeStatus.error}>{chromeStatus.message}</NothingStatus>
+              <NothingStatus error={status.error}>{status.message}</NothingStatus>
             </div>
           ) : null}
-          <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
-            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
           <UserNav />
         </div>
       </header>
@@ -1410,14 +1425,11 @@ function TopNav({
       <div className="flex min-w-0 flex-1 lg:hidden" />
 
       <div className="flex shrink-0 items-center gap-0.5 sm:gap-1 lg:pr-4">
-        {chromeStatus ? (
+        {status ? (
           <div className="ui-chrome-status max-w-[min(24rem,38vw)]">
-            <NothingStatus error={chromeStatus.error}>{chromeStatus.message}</NothingStatus>
+            <NothingStatus error={status.error}>{status.message}</NothingStatus>
           </div>
         ) : null}
-        <button type="button" onClick={toggleTheme} className="ui-btn-ghost h-10" title="Toggle theme">
-          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
         <UserNav />
       </div>
     </header>
@@ -1455,10 +1467,10 @@ function Sidebar({
               type="button"
               onClick={() => onChange("dashboard")}
               className="ui-settings-back"
-              title="Back to planner"
+              title="Back to Product"
             >
               <ChevronLeft size={14} strokeWidth={1.75} />
-              Back to planner
+              Back to Product
             </button>
             <div className="space-y-0.5">
               {settingsSections.map((item) => {
@@ -1485,10 +1497,10 @@ function Sidebar({
               type="button"
               onClick={() => onChange("dashboard")}
               className="ui-settings-back"
-              title="Back to planner"
+              title="Back to Product"
             >
               <ChevronLeft size={14} strokeWidth={1.75} />
-              Back to planner
+              Back to Product
             </button>
             <div className="ui-nav-section">Setup</div>
             <div className="space-y-0.5">
@@ -2258,7 +2270,7 @@ function ProcedureWorkspace({
   if (!task) {
     return (
       <section className="ui-workspace-content h-full min-h-0 overflow-hidden p-4">
-        <div className="ui-panel p-5 text-sm font-bold text-steel">
+        <div className="ui-panel p-5 text-sm font-bold text-ink-secondary">
           No task is available for procedure authoring.
         </div>
       </section>
@@ -2365,7 +2377,7 @@ function ProcedureWorkspace({
                             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
                               shown
                                 ? "border-accent/40 bg-accent/10 text-ink"
-                                : "border-line bg-surface-raised text-steel opacity-70"
+                                : "border-line bg-surface-raised text-ink-secondary opacity-70"
                             }`}
                           >
                             <Icon size={12} strokeWidth={1.75} />
@@ -2648,7 +2660,15 @@ function ProcedureWorkspace({
                           <ProcedureStepToolTable
                             tools={stepTools}
                             registry={projectToolRegistry}
-                            onRemove={(toolName) => removeManufacturingStepTool(step.id, toolName)}
+                            onRemove={(toolName) =>
+                              onConfirmAction({
+                                title: `Remove ${toolName}?`,
+                                body: `Remove ${toolName} from step ${step.sequence}.`,
+                                tone: "danger",
+                                confirmLabel: "Remove Tool",
+                                onConfirm: () => removeManufacturingStepTool(step.id, toolName),
+                              })
+                            }
                             removeAriaLabel={(toolName) => `Remove ${toolName} from step ${step.sequence}`}
                           />
                         </div>
@@ -2960,9 +2980,11 @@ function ProductSetupPanel({
 function ProcedureChecksSetupPanel({
   product,
   onProductStepChecks,
+  onConfirmAction,
 }: {
   product: Product;
   onProductStepChecks: (definitions: ManufacturingStepCheckDefinition[]) => void;
+  onConfirmAction: (message: FeedbackConfirm) => void;
 }) {
   const checkDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
   const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({});
@@ -3098,7 +3120,15 @@ function ProcedureChecksSetupPanel({
               <button
                 type="button"
                 className="inline-flex h-8 w-7 shrink-0 items-center justify-center rounded text-ink-tertiary transition hover:bg-danger-muted hover:text-danger"
-                onClick={() => removeCheckDefinition(definition.key)}
+                onClick={() =>
+                  onConfirmAction({
+                    title: `Remove ${definition.label}?`,
+                    body: "This removes the check from manufacturing steps for this product.",
+                    tone: "danger",
+                    confirmLabel: "Remove Check",
+                    onConfirm: () => removeCheckDefinition(definition.key),
+                  })
+                }
                 aria-label={`Remove ${definition.label}`}
                 title={`Remove ${definition.label}`}
               >
@@ -3158,7 +3188,7 @@ function WorkInstructionsPanel({
     if (isReady(task)) {
       return { label: "Ready", className: "border-accent/50 bg-accent/10 text-ink" };
     }
-    return { label: "Incomplete", className: "border-line bg-surface-raised text-steel" };
+    return { label: "Incomplete", className: "border-line bg-surface-raised text-ink-secondary" };
   }
 
   return (
@@ -3225,9 +3255,7 @@ function WorkInstructionsPanel({
                             <ListChecks size={13} strokeWidth={1.75} />
                           </span>
                         </span>
-                        <span
-                          className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${status.className}`}
-                        >
+                        <span className={`ui-chip shrink-0 ${status.className}`}>
                           {status.label}
                         </span>
                       </button>
@@ -3421,7 +3449,7 @@ function NomenclatureSetupPanel({
                 />
               </div>
             ))}
-            {zones.length === 0 ? <div className="px-3 py-3 text-sm font-semibold text-steel">Add zones in the Gantt before assigning zone codes.</div> : null}
+            {zones.length === 0 ? <div className="px-3 py-3 text-sm font-semibold text-ink-secondary">Add zones in the Gantt before assigning zone codes.</div> : null}
           </div>
         </SetupFieldGroup>
 
@@ -3449,7 +3477,7 @@ function NomenclatureSetupPanel({
                 <button
                   type="button"
                   onClick={() => onDeleteComponent(component.id)}
-                  className="inline-flex h-8 items-center justify-center rounded border border-line bg-surface text-steel hover:border-danger hover:text-danger"
+                  className="inline-flex h-8 items-center justify-center rounded border border-line bg-surface text-ink-secondary hover:border-danger hover:text-danger"
                   title="Delete component"
                   aria-label={`Delete ${component.name || component.code || "component"}`}
                 >
@@ -3457,7 +3485,7 @@ function NomenclatureSetupPanel({
                 </button>
               </div>
             ))}
-            {components.length === 0 ? <div className="px-3 py-3 text-sm font-semibold text-steel">Add component codes such as CLU, ALT, BAT, or PNL.</div> : null}
+            {components.length === 0 ? <div className="px-3 py-3 text-sm font-semibold text-ink-secondary">Add component codes such as CLU, ALT, BAT, or PNL.</div> : null}
           </div>
           <button type="button" onClick={onAddComponent} className="ui-btn-ghost mt-3 h-9 gap-2">
             <Plus size={14} />
@@ -3489,7 +3517,7 @@ function NomenclatureSetupPanel({
                 <button
                   type="button"
                   onClick={() => onDeleteDocumentType(documentType.id)}
-                  className="inline-flex h-8 items-center justify-center rounded border border-line bg-surface text-steel hover:border-danger hover:text-danger"
+                  className="inline-flex h-8 items-center justify-center rounded border border-line bg-surface text-ink-secondary hover:border-danger hover:text-danger"
                   title="Delete document type"
                   aria-label={`Delete ${documentType.name || documentType.code || "document type"}`}
                 >
@@ -3633,7 +3661,7 @@ function ZoneMetricsPanel({
 
   if (metrics.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-line bg-surface-raised p-3 text-xs font-semibold text-steel">
+      <div className="rounded-md border border-dashed border-line bg-surface-raised p-3 text-xs font-semibold text-ink-secondary">
         Create a zone in the Gantt to see headcount, man-hours, and cycle time by area.
       </div>
     );
@@ -3678,7 +3706,7 @@ function ZoneMetricsPanel({
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-xs ui-mono-label tracking-wide text-ink">{metric.name}</div>
-              <div className="text-[11px] font-semibold text-steel">{metric.taskCount} high-level task(s)</div>
+              <div className="text-[11px] font-semibold text-ink-secondary">{metric.taskCount} high-level task(s)</div>
             </div>
             <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: metric.color }} />
           </div>
@@ -3826,7 +3854,7 @@ function CrewReadinessCard({
         <div className={`min-w-0 bg-surface ${compact ? "border-t border-line pt-3" : "xl:pl-1"}`}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="ui-mono-label">Operators</div>
-            <div className="text-[10px] font-medium text-steel">
+            <div className="text-[10px] font-medium text-ink-secondary">
               {visibleWorkerCount}/{kpis.wholePersonStaffingRequirement}
             </div>
           </div>
@@ -3841,16 +3869,16 @@ function CrewReadinessCard({
                     title={`Operator ${letter}: ${allocation}% allocated`}
                   >
                     <WorkerIcon colorIndex={index} letter={letter} />
-                    <span className="text-[9px] font-medium leading-none text-steel">{round(allocation, 0)}%</span>
+                    <span className="text-[9px] font-medium leading-none text-ink-secondary">{round(allocation, 0)}%</span>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="text-[11px] font-semibold text-steel">No staffing requirement yet.</div>
+            <div className="text-[11px] font-semibold text-ink-secondary">No staffing requirement yet.</div>
           )}
           {kpis.wholePersonStaffingRequirement > WORKER_ICON_LETTERS.length ? (
-            <div className="mt-2 text-[10px] font-semibold text-steel">First {WORKER_ICON_LETTERS.length} icons shown.</div>
+            <div className="mt-2 text-[10px] font-semibold text-ink-secondary">First {WORKER_ICON_LETTERS.length} icons shown.</div>
           ) : null}
         </div>
       </div>
@@ -4037,7 +4065,7 @@ function PlanningRecommendationsPanel({
             <AlertTriangle size={13} />
             Planning Recommendations
           </div>
-          <div className="mt-1 text-[11px] leading-snug text-steel">
+          <div className="mt-1 text-[11px] leading-snug text-ink-secondary">
             {recommendations.length} allocation issue{recommendations.length === 1 ? "" : "s"} need review.
           </div>
         </div>
@@ -4069,7 +4097,7 @@ function PlanningRecommendationsPanel({
               <div className="mt-0.5 text-[10px] ui-mono-label text-warn-strong">{recommendation.classification}</div>
             </div>
             <div className="min-w-0">
-              <div className="truncate text-[11px] leading-snug text-steel" title={recommendation.condition}>
+              <div className="truncate text-[11px] leading-snug text-ink-secondary" title={recommendation.condition}>
                 {recommendation.condition}
               </div>
               <div className="truncate text-[11px] leading-snug text-ink" title={recommendation.recommendation}>
@@ -4230,7 +4258,7 @@ function StationBalance({
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-base font-medium text-ink">Station Balance</h2>
-          <div className="text-xs font-semibold text-steel">Takt line: {formatMinutes(taktMinutes)}</div>
+          <div className="text-xs font-semibold text-ink-secondary">Takt line: {formatMinutes(taktMinutes)}</div>
         </div>
         <BarChart3 className="text-accent" size={22} />
       </div>
@@ -4252,7 +4280,7 @@ function StationBalance({
                   <div className="truncate text-sm font-medium text-ink">
                     {station.sequence}. {station.name}
                   </div>
-                  <div className="text-xs font-semibold text-steel">
+                  <div className="text-xs font-semibold text-ink-secondary">
                     {formatMinutes(station.plannedCycleMinutes)} / {formatManHours(station.plannedManHours)}
                   </div>
                 </div>
@@ -4268,7 +4296,7 @@ function StationBalance({
                   style={{ width: `${width}%` }}
                 />
               </div>
-              <div className="mt-2 flex items-center justify-between text-xs font-semibold text-steel">
+              <div className="mt-2 flex items-center justify-between text-xs font-semibold text-ink-secondary">
                 <span>Operators</span>
                 <ClearableNumberInput
                   aria-label={`${station.name} operators`}
@@ -4459,7 +4487,7 @@ function DetailDrawer({
             <button
               type="button"
               onClick={onToggleCollapsed}
-              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-steel transition hover:bg-surface-sunken"
+              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-ink-secondary transition hover:bg-surface-sunken"
               title="Collapse selected task drawer"
               aria-label="Collapse selected task drawer"
             >
@@ -4707,7 +4735,7 @@ function DetailDrawer({
             <button
               type="button"
               onClick={onToggleCollapsed}
-              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-steel hover:bg-surface-sunken"
+              className="flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-ink-secondary hover:bg-surface-sunken"
               title="Collapse selected task drawer"
               aria-label="Collapse selected task drawer"
             >
@@ -4724,9 +4752,9 @@ function DetailDrawer({
         />
         <TaskVideoGallery videos={getTaskVideos(task)} onDelete={(video) => onDeleteTaskVideo(task.id, video)} />
         <div className="ui-panel p-3">
-          <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Manufacturing Code</div>
+          <div className="mb-3 text-xs ui-mono-label tracking-wide text-ink-secondary">Manufacturing Code</div>
           <div className="mb-3 font-mono text-lg font-bold text-ink">{taskDisplayCode(task)}</div>
-          <div className="mb-3 rounded border border-line bg-surface-sunken px-2 py-1.5 font-mono text-xs font-semibold text-steel">
+          <div className="mb-3 rounded border border-line bg-surface-sunken px-2 py-1.5 font-mono text-xs font-semibold text-ink-secondary">
             {documentDisplayCode(task) || "Work instruction code pending"}
           </div>
           <div className="grid gap-2">
@@ -4790,9 +4818,9 @@ function DetailDrawer({
           </div>
         </div>
         <div className="ui-panel p-3">
-          <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Station</div>
+          <div className="mb-3 text-xs ui-mono-label tracking-wide text-ink-secondary">Station</div>
           <div className="text-sm font-bold text-ink">{station.sequence}. {station.name}</div>
-          <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-semibold text-steel">
+          <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-semibold text-ink-secondary">
             <span>Cycle {formatMinutes(station.plannedCycleMinutes)}</span>
             <span>{formatManHours(station.plannedManHours)}</span>
             <span>Operators {station.plannedOperators}</span>
@@ -4827,8 +4855,8 @@ function DetailDrawer({
         <div className="ui-panel p-2.5">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs ui-mono-label tracking-wide text-steel">Manufacturing Steps</div>
-              <div className="text-xs font-semibold text-steel">{manufacturingSteps.length} step(s)</div>
+              <div className="text-xs ui-mono-label tracking-wide text-ink-secondary">Manufacturing Steps</div>
+              <div className="text-xs font-semibold text-ink-secondary">{manufacturingSteps.length} step(s)</div>
             </div>
             <button
               type="button"
@@ -4840,7 +4868,7 @@ function DetailDrawer({
             </button>
           </div>
           {manufacturingSteps.length === 0 ? (
-            <div className="border-t border-dashed border-line px-1 py-2 text-xs font-semibold text-steel">
+            <div className="border-t border-dashed border-line px-1 py-2 text-xs font-semibold text-ink-secondary">
               Add operation-level steps for this task.
             </div>
           ) : (
@@ -4965,7 +4993,7 @@ function DetailDrawer({
                             </button>
                           </div>
                           {stepTools.length > 0 ? (
-                            <div className="flex flex-wrap gap-x-2 gap-y-1 pl-[42px] text-[10px] font-bold text-steel">
+                            <div className="flex flex-wrap gap-x-2 gap-y-1 pl-[42px] text-[10px] font-bold text-ink-secondary">
                               {stepTools.map((tool) => (
                                 <span
                                   key={tool}
@@ -4975,7 +5003,7 @@ function DetailDrawer({
                                   <button
                                     type="button"
                                     onClick={() => removeManufacturingStepTool(step.id, tool)}
-                                    className="text-steel/70 hover:text-danger"
+                                    className="text-ink-secondary/70 hover:text-danger"
                                     aria-label={`Remove ${tool}`}
                                     title={`Remove ${tool}`}
                                   >
@@ -5028,7 +5056,7 @@ function DetailDrawer({
                       <button
                         type="button"
                         onClick={() => requestRemoveManufacturingStep(step.id)}
-                        className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-steel hover:bg-danger-muted hover:text-danger"
+                        className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-danger-muted hover:text-danger"
                         title="Remove step"
                         aria-label={`Remove step ${step.sequence}`}
                       >
@@ -5045,8 +5073,8 @@ function DetailDrawer({
         <div className="ui-panel p-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs ui-mono-label tracking-wide text-steel">Part References</div>
-              <div className="text-xs font-semibold text-steel">{partReferences.length} part number(s)</div>
+              <div className="text-xs ui-mono-label tracking-wide text-ink-secondary">Part References</div>
+              <div className="text-xs font-semibold text-ink-secondary">{partReferences.length} part number(s)</div>
             </div>
             <button
               type="button"
@@ -5059,7 +5087,7 @@ function DetailDrawer({
           </div>
           <div className="space-y-3">
             {partReferences.length === 0 ? (
-              <div className="rounded border border-dashed border-line bg-surface-raised p-3 text-xs font-semibold text-steel">
+              <div className="rounded border border-dashed border-line bg-surface-raised p-3 text-xs font-semibold text-ink-secondary">
                 Add part numbers, quantities, and disposition notes used by this task.
               </div>
             ) : null}
@@ -5090,7 +5118,7 @@ function DetailDrawer({
                   <button
                     type="button"
                     onClick={() => removePartReference(part.id)}
-                    className="flex h-8 items-center justify-center rounded border border-line bg-surface text-steel hover:border-danger hover:text-danger"
+                    className="flex h-8 items-center justify-center rounded border border-line bg-surface text-ink-secondary hover:border-danger hover:text-danger"
                     title="Remove part reference"
                   >
                     <Trash2 size={14} />
@@ -5136,7 +5164,7 @@ function DetailDrawer({
         </div>
 
         <div className="ui-panel p-3">
-          <div className="mb-3 text-xs ui-mono-label tracking-wide text-steel">Gates</div>
+          <div className="mb-3 text-xs ui-mono-label tracking-wide text-ink-secondary">Gates</div>
           <div className="grid grid-cols-2 gap-2">
             <label className="flex items-center gap-2 text-sm font-semibold text-ink">
               <input
@@ -8035,7 +8063,7 @@ export function LineWorkspace({
 
   if (!hasLoadedRemoteState) {
     if (!isProjectSwitching) {
-      return <AppLoadingShell title="Loading workspace" />;
+      return <AppLoadingShell title="Loading project" />;
     }
 
     return (
@@ -8048,6 +8076,7 @@ export function LineWorkspace({
           onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
           context={displayedPlannerChromeContext}
           chromeStatus={chromeStatus}
+          saveStatus={plannerSaveStatus(saveState)}
         />
         <div className={workspaceGridClass}>
           <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
@@ -8513,6 +8542,17 @@ export function LineWorkspace({
   }
 
   function deleteComponentCode(componentId: string) {
+    const component = derivedState.components.find((candidate) => candidate.id === componentId);
+    requestFeedbackConfirm({
+      title: `Delete ${component?.name || component?.code || "component"}?`,
+      body: "This removes the component code and clears it from any tasks that use it.",
+      tone: "danger",
+      confirmLabel: "Delete",
+      onConfirm: () => executeDeleteComponentCode(componentId),
+    });
+  }
+
+  function executeDeleteComponentCode(componentId: string) {
     markDirty();
     setPlannerState((current) => {
       const components = current.components.filter((component) => component.id !== componentId);
@@ -8569,6 +8609,17 @@ export function LineWorkspace({
   }
 
   function deleteDocumentTypeCode(documentTypeId: string) {
+    const documentType = derivedState.documentTypes.find((candidate) => candidate.id === documentTypeId);
+    requestFeedbackConfirm({
+      title: `Delete ${documentType?.name || documentType?.code || "document type"}?`,
+      body: "This removes the document type code from this product's setup.",
+      tone: "danger",
+      confirmLabel: "Delete",
+      onConfirm: () => executeDeleteDocumentTypeCode(documentTypeId),
+    });
+  }
+
+  function executeDeleteDocumentTypeCode(documentTypeId: string) {
     markDirty();
     setPlannerState((current) => ({
       ...current,
@@ -9075,8 +9126,10 @@ export function LineWorkspace({
             void uploadStepPhotoAttachment(taskId, stepId, removedPhoto as StepPhotoAttachment, activeProjectContext)
               .then(() => setSaveState("saved"))
               .catch((error: unknown) => {
-                setSaveError(error instanceof Error ? error.message : "Unable to restore the selected photo.");
+                const message = error instanceof Error ? error.message : "Unable to restore the selected photo.";
+                setSaveError(message);
                 setSaveState("error");
+                notifyFeedback({ title: "Restore failed", body: message, tone: "danger" });
               });
           },
         });
@@ -9091,8 +9144,10 @@ export function LineWorkspace({
         }));
       }
 
-      setSaveError(error instanceof Error ? error.message : "Unable to remove the selected photo.");
+      const message = error instanceof Error ? error.message : "Unable to remove the selected photo.";
+      setSaveError(message);
       setSaveState("error");
+      notifyFeedback({ title: "Delete failed", body: message, tone: "danger" });
     } finally {
       saveInFlightRef.current = false;
       flushDeferredRemoteRefresh();
@@ -9506,7 +9561,7 @@ export function LineWorkspace({
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warn/25 px-3 py-2">
                 <div>
                   <div className="text-[10px] ui-mono-label tracking-wide text-warn-strong">Unallocated Required Work</div>
-                  <div className="mt-0.5 text-xs font-bold text-steel">
+                  <div className="mt-0.5 text-xs font-bold text-ink-secondary">
                     The plan is feasible only after these staffing exceptions are resolved.
                   </div>
                 </div>
@@ -9525,8 +9580,8 @@ export function LineWorkspace({
                       </div>
                     </div>
                     <div>
-                      <div className="font-medium text-steel">{review.condition}</div>
-                      <div className="mt-1 font-semibold leading-snug text-steel">{review.impact}</div>
+                      <div className="font-medium text-ink-secondary">{review.condition}</div>
+                      <div className="mt-1 font-semibold leading-snug text-ink-secondary">{review.impact}</div>
                       <div className="mt-1 font-bold leading-snug text-ink">{review.recommendation}</div>
                     </div>
                     <div className="flex items-start sm:justify-end">
@@ -9543,7 +9598,7 @@ export function LineWorkspace({
           <div className="flex flex-wrap items-center justify-between gap-3 ui-panel-raised px-3 py-2">
             <div>
               <div className="ui-mono-label">Review Packet</div>
-              <div className="mt-0.5 text-xs font-bold text-steel">
+              <div className="mt-0.5 text-xs font-bold text-ink-secondary">
                 Copies audit text plus the Gantt data used by Smart Allocation.
               </div>
             </div>
@@ -9561,7 +9616,7 @@ export function LineWorkspace({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
               <div>
                 <div className="ui-mono-label">Allocation Audit</div>
-                <div className="mt-0.5 text-xs font-bold text-steel">
+                <div className="mt-0.5 text-xs font-bold text-ink-secondary">
                   {round(audit.assignmentCoveragePercent, 0)}% coverage · peak {audit.peakManpower} · spread {formatMinutes(audit.loadSpreadMinutes)}
                 </div>
               </div>
@@ -9572,7 +9627,7 @@ export function LineWorkspace({
 
             <div className="p-2">
               <div className="overflow-hidden rounded border border-line">
-                <div className="grid grid-cols-[54px_0.8fr_1fr_1fr] items-center gap-2 border-b border-line bg-surface-sunken px-2 py-1.5 text-[9px] ui-mono-label tracking-wide text-steel">
+                <div className="grid grid-cols-[54px_0.8fr_1fr_1fr] items-center gap-2 border-b border-line bg-surface-sunken px-2 py-1.5 text-[9px] ui-mono-label tracking-wide text-ink-secondary">
                   <div>Op</div>
                   <div>Load</div>
                   <div>Work</div>
@@ -9583,7 +9638,7 @@ export function LineWorkspace({
                     operator.budgetVarianceMinutes > 1
                       ? "text-warn-strong"
                       : operator.budgetVarianceMinutes < -1
-                        ? "text-steel"
+                        ? "text-ink-secondary"
                         : "text-accent";
                   return (
                     <div
@@ -9596,9 +9651,9 @@ export function LineWorkspace({
                       </div>
                       <div className="whitespace-nowrap">
                         <span className="font-medium text-ink">{formatMinutes(operator.assignedMinutes)}</span>
-                        <span className="ml-1 font-bold text-steel">· {round(operator.utilizationPercent, 0)}%</span>
+                        <span className="ml-1 font-bold text-ink-secondary">· {round(operator.utilizationPercent, 0)}%</span>
                       </div>
-                      <div className="truncate font-bold text-steel">
+                      <div className="truncate font-bold text-ink-secondary">
                         {operator.assignedTaskCount} task(s) · {operator.idleGapCount > 0 ? `${formatMinutes(operator.idleMinutes)} idle` : "continuous"}
                       </div>
                       <div className={`truncate font-medium ${budgetTone}`}>
@@ -9614,7 +9669,7 @@ export function LineWorkspace({
               </div>
             </div>
 
-            <div className="border-t border-line px-3 py-2 text-[11px] font-semibold leading-snug text-steel">
+            <div className="border-t border-line px-3 py-2 text-[11px] font-semibold leading-snug text-ink-secondary">
               {audit.strategyNotes[audit.strategyNotes.length - 1]}
             </div>
           </div>
@@ -9623,7 +9678,7 @@ export function LineWorkspace({
             <div className="ui-panel">
               <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2">
                 <div className="ui-mono-label">Needs Review</div>
-                <div className="text-[10px] font-medium text-steel">{issueEntries.length} item(s)</div>
+                <div className="text-[10px] font-medium text-ink-secondary">{issueEntries.length} item(s)</div>
               </div>
               <div className="max-h-[170px] overflow-auto">
                 {visibleIssueEntries.map((issue) => (
@@ -9652,7 +9707,7 @@ export function LineWorkspace({
                   </div>
                 ))}
                 {issueRemainder > 0 ? (
-                  <div className="bg-surface px-3 py-2 text-xs font-bold text-steel">
+                  <div className="bg-surface px-3 py-2 text-xs font-bold text-ink-secondary">
                     {issueRemainder} more item(s)
                   </div>
                 ) : null}
@@ -10327,6 +10382,7 @@ export function LineWorkspace({
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         context={displayedPlannerChromeContext}
         chromeStatus={chromeStatus}
+        saveStatus={plannerSaveStatus(saveState)}
         presence={presencePeers}
       />
 
@@ -10496,6 +10552,7 @@ export function LineWorkspace({
                       <ProcedureChecksSetupPanel
                         product={derivedState.product}
                         onProductStepChecks={updateProductStepChecks}
+                        onConfirmAction={requestFeedbackConfirm}
                       />
                     ) : null}
                   </div>

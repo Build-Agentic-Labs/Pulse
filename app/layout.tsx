@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { ConfirmProvider } from "@/components/confirm-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { themeInitScript } from "@/lib/theme-init";
 import "./globals.css";
@@ -86,7 +87,9 @@ export default function RootLayout({
         />
       </head>
       <body className="h-full overflow-hidden font-sans">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

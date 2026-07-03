@@ -38,7 +38,7 @@ export function SpacePlaceholder({ space, name, description, planned, children }
           <SpaceIcon space={space} />
         </span>
         <h1 className="mt-5 text-[28px] font-medium tracking-tight text-ink">{name}</h1>
-        <p className="mt-2 max-w-[52ch] text-[13.5px] text-ink-secondary">{description}</p>
+        <p className="mt-2 max-w-[52ch] text-sm text-ink-secondary">{description}</p>
 
         <section className="ui-panel mt-8 p-5">
           <div className="ui-mono-label">This space is coming together</div>

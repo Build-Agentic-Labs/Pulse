@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { DashboardHomeContext } from "./auth-project-gate";
@@ -102,17 +103,13 @@ function DashboardCard({ card }: { card: SpaceCard }) {
         <SpaceIcon space={card.space} />
       </span>
       <div className="mt-auto">
-        <h3 className="flex items-center gap-2 text-[15.5px] font-medium tracking-tight text-ink">
+        <h3 className="ui-section-title flex items-center gap-2">
           {card.name}
           {disabled ? (
-            <span className="ml-auto rounded-full border border-line px-2 py-0.5 ui-mono-label text-ink-tertiary">
-              {card.soonLabel ?? "Soon"}
-            </span>
+            <span className="ui-chip ml-auto">{card.soonLabel ?? "Soon"}</span>
           ) : (
             <span className="ml-auto -translate-x-1.5 text-ink opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 12h14m-6-6 6 6-6 6" />
-              </svg>
+              <ArrowRight size={16} strokeWidth={1.75} aria-hidden="true" />
             </span>
           )}
         </h3>
@@ -122,7 +119,7 @@ function DashboardCard({ card }: { card: SpaceCard }) {
   );
 
   const baseClasses =
-    "group relative flex min-h-[172px] flex-col gap-4 rounded-[14px] border border-line bg-surface p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition duration-200";
+    "group relative flex min-h-[172px] flex-col gap-4 rounded-xl border border-line bg-surface p-6 transition duration-200";
 
   if (disabled) {
     return <div className={`${baseClasses} opacity-50`}>{body}</div>;
@@ -131,7 +128,7 @@ function DashboardCard({ card }: { card: SpaceCard }) {
   return (
     <Link
       href={card.href!}
-      className={`${baseClasses} hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_32px_-12px_rgba(0,0,0,0.45)] active:translate-y-0`}
+      className={`${baseClasses} hover:-translate-y-0.5 hover:border-border-strong hover:shadow-float active:translate-y-0`}
     >
       {body}
     </Link>
@@ -214,7 +211,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
             {timeGreeting()}
             {displayName ? `, ${displayName.split(" ")[0]}` : ""}.
           </h1>
-          <p className="mt-2 text-[13.5px] text-ink-secondary">Pick a space to get started.</p>
+          <p className="mt-2 text-sm text-ink-secondary">Pick a space to get started.</p>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

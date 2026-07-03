@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 
 export type FeedbackTone = "neutral" | "success" | "warning" | "danger";
 
@@ -147,6 +147,20 @@ export function ThemedFeedbackLayer({
   const cornerToasts = toasts.filter((toast) => toast.placement !== "center");
   const centerToasts = toasts.filter((toast) => toast.placement === "center");
 
+  // Escape cancels an open confirm, matching every menu/popover in the app.
+  useEffect(() => {
+    if (!confirm) {
+      return;
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onCancelConfirm();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [confirm, onCancelConfirm]);
+
   return (
     <>
       <div className="pointer-events-none fixed right-4 top-20 z-[90] flex w-[min(420px,calc(100vw-2rem))] flex-col gap-3">
@@ -254,8 +268,16 @@ export function ThemedFeedbackLayer({
           </>
         ) : (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
+            {/* Backdrop: clicking outside cancels (danger confirms included — Escape and
+                the explicit Cancel button remain, so this can't destroy data by accident). */}
+            <button
+              type="button"
+              className="absolute inset-0 cursor-default bg-ink/20"
+              onClick={onCancelConfirm}
+              aria-label="Dismiss confirmation"
+            />
             <div
-              className={`w-full max-w-[460px] overflow-hidden rounded-md border bg-surface ${toneStyles[confirm.tone ?? "neutral"].border}`}
+              className={`relative w-full max-w-[460px] overflow-hidden rounded-md border bg-surface shadow-modal ${toneStyles[confirm.tone ?? "neutral"].border}`}
               role="dialog"
               aria-modal="true"
               aria-labelledby="feedback-confirm-title"

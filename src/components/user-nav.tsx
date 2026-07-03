@@ -1,10 +1,11 @@
 "use client";
 
-import { ArrowLeft, LayoutGrid, LogOut } from "lucide-react";
+import { ArrowLeft, LayoutGrid, LogOut, Moon, Sun } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { useTheme } from "@/components/theme-provider";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 type UserProfile = {
@@ -144,6 +145,7 @@ export function BackToDashboardButton({
 export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean }) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
+  const { theme, toggleTheme } = useTheme();
   const profile = useUserProfile(supabase);
   const [open, setOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -191,6 +193,16 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
 
   return (
     <div ref={containerRef} className="relative flex shrink-0 items-center gap-1">
+      <button
+        type="button"
+        onClick={toggleTheme}
+        className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0"
+        title="Toggle theme"
+        aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      >
+        {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
+      </button>
+
       {showSpacesLink ? (
         <Link
           href="/"
@@ -198,7 +210,7 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
           title="All spaces"
           aria-label="Go to the company dashboard"
         >
-          <LayoutGrid size={14} strokeWidth={1.75} />
+          <LayoutGrid size={15} strokeWidth={1.75} />
         </Link>
       ) : null}
 
@@ -224,7 +236,7 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
           {open ? (
             <div
               role="menu"
-              className="absolute right-0 top-full z-50 mt-2 w-60 ui-panel p-1.5 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.45)]"
+              className="absolute right-0 top-full z-50 mt-2 w-60 ui-panel p-1.5 shadow-modal"
             >
               <div className="px-2.5 py-2">
                 <div className="truncate text-[13px] font-medium text-ink">{displayName}</div>

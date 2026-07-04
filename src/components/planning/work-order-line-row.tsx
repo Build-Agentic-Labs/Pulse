@@ -109,6 +109,9 @@ export function WorkOrderLineRow({
     }
     const trimmed = value.trim();
     if (trimmed === "") {
+      // Invalidate any in-flight search too -- a slow response arriving after the clear
+      // must not reopen the dropdown over an empty field.
+      searchSeqRef.current += 1;
       setSuggestions([]);
       setSuggestionsOpen(false);
       return;
@@ -129,7 +132,17 @@ export function WorkOrderLineRow({
     }, ITEM_SEARCH_DEBOUNCE_MS);
   }
 
+  /** Stop any scheduled or in-flight search so a late response can't reopen the dropdown. */
+  function cancelPendingSearch() {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    searchSeqRef.current += 1;
+  }
+
   function pickSuggestion(suggestion: ItemSuggestion) {
+    cancelPendingSearch();
     setItemNo(suggestion.itemNo);
     setDescription(suggestion.description);
     setSuggestionsOpen(false);
@@ -138,6 +151,7 @@ export function WorkOrderLineRow({
   }
 
   function handleItemNoBlur() {
+    cancelPendingSearch();
     setSuggestionsOpen(false);
     const trimmed = itemNo.trim();
     if (trimmed !== line.itemNo) {
@@ -153,7 +167,8 @@ export function WorkOrderLineRow({
 
   function handleBuildQtyBlur() {
     const parsed = Number(buildQty);
-    const next = Number.isFinite(parsed) ? parsed : line.buildQty;
+    // Clamp at zero: `min={0}` on the input is advisory only and doesn't stop typed negatives.
+    const next = Number.isFinite(parsed) ? Math.max(0, parsed) : line.buildQty;
     setBuildQty(String(next));
     if (next !== line.buildQty) {
       onFieldSave(line.id, { buildQty: next });
@@ -168,7 +183,8 @@ export function WorkOrderLineRow({
       return;
     }
     const parsed = Number(shippedQty);
-    const next = Number.isFinite(parsed) ? parsed : line.shippedQty;
+    // Clamp at zero, same as build qty -- the input's `min={0}` doesn't stop typed negatives.
+    const next = Number.isFinite(parsed) ? Math.max(0, parsed) : line.shippedQty;
     setShippedQty(next === null ? "" : String(next));
     if (next !== line.shippedQty) {
       onFieldSave(line.id, { shippedQty: next });

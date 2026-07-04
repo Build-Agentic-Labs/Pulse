@@ -97,13 +97,18 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
   // transition) or fire after unmount.
   const loadSeqRef = useRef(0);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { preserveError?: boolean }) => {
     const seq = ++loadSeqRef.current;
     if (!workspaceId || !workOrderId) {
       return;
     }
     setLoadStatus("loading");
-    setError("");
+    // `preserveError` keeps a just-set notice (e.g. "This order changed elsewhere — reloading")
+    // visible through the reload; without it, this synchronous clear batches with the caller's
+    // setError and the message would never paint.
+    if (!options?.preserveError) {
+      setError("");
+    }
     try {
       const found = await getWorkOrder(workspaceId, workOrderId);
       if (seq !== loadSeqRef.current) return;
@@ -134,13 +139,15 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
     if (!workspaceId || !order || order[field] === value) {
       return;
     }
-    const previousOrder = order;
+    const previousValue = order[field];
     setOrder((current) => (current ? { ...current, [field]: value } : current));
     try {
       await updateWorkOrderHeader(workspaceId, order.id, { [field]: value } as Partial<HeaderForm>);
     } catch (caught) {
-      setOrder(previousOrder);
-      setForm(headerFormFrom(previousOrder));
+      // Roll back ONLY the failed field -- restoring the whole header form would wipe
+      // un-blurred edits in sibling fields (same rationale as the line row's per-field resync).
+      setOrder((current) => (current ? { ...current, [field]: previousValue } : current));
+      setForm((current) => (current ? { ...current, [field]: previousValue } : current));
       setError(caught instanceof Error ? caught.message : "Could not save the work order.");
     }
   }
@@ -218,7 +225,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
       const ok = await transitionWorkOrder(workspaceId, order.id, order.status, to);
       if (!ok) {
         setError("This order changed elsewhere — reloading");
-        await refresh();
+        await refresh({ preserveError: true });
         return;
       }
       await refresh();

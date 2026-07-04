@@ -617,10 +617,15 @@ export async function upsertItemMaster(
 
   const existingItemNos = new Set<string>();
   for (let offset = 0; ; offset += ITEM_MASTER_PAGE_SIZE) {
+    // An explicit .order() is required for stable pagination: without one, PostgREST row order
+    // can shift between pages, so rows get skipped/duplicated and the added/updated counts come
+    // out wrong on item masters larger than one page. (Same idiom as the wbs-ordered paging in
+    // supabase-planner.ts.)
     const { data, error } = await supabase
       .from("planning_item_master")
       .select("item_no")
       .eq("workspace_id", workspaceId)
+      .order("item_no")
       .range(offset, offset + ITEM_MASTER_PAGE_SIZE - 1);
     if (error) {
       throw new Error(`Could not load the existing item master: ${error.message}`);
@@ -660,9 +665,11 @@ export async function searchItems(
   limit = 12,
 ): Promise<Array<{ itemNo: string; description: string }>> {
   const supabase = createPlannerSupabaseClient();
-  // `%` and `,` are structural in PostgREST's `.or()` filter syntax (wildcard / clause separator);
-  // strip them from the search term rather than let them alter the query.
-  const escaped = query.replace(/[%,]/g, "");
+  // `%`, `,`, `(` and `)` are structural in PostgREST's `.or()` filter syntax (wildcard, clause
+  // separator, and grouping); strip them from the search term rather than let them alter the
+  // query or throw a filter-parse error (real item descriptions contain parens, e.g. "WIDGET (RED)").
+  // Character class mirrors assertSafeOrFilterValue in src/domain/supabase-planner.ts.
+  const escaped = query.replace(/[%,()]/g, "");
   if (escaped === "") {
     return [];
   }

@@ -9,6 +9,7 @@
 
 import {
   buildTransitionPatch,
+  lineNeedsAssemblyNo,
   orderNoMonthKey,
   suggestOrderNo,
   WORK_ORDER_NO_PREFIX,
@@ -32,6 +33,8 @@ export interface WorkOrderSummary {
   status: WorkOrderStatus;
   orderDate: string;
   updatedAt: string;
+  /** Count of this order's lines still missing their assembly order number (see `lineNeedsAssemblyNo`). */
+  missingAssemblyCount: number;
 }
 
 export interface WorkOrderLine {
@@ -127,6 +130,7 @@ const TEMPLATE_LINE_COLUMNS = "id, item_no, description, build_qty, position";
 
 // ── mappers (snake_case rows -> camelCase types) ─────────────────────────
 
+/** `missingAssemblyCount` is filled in separately by `listWorkOrders`, once counts are known. */
 function mapWorkOrderSummary(row: Record<string, unknown>): WorkOrderSummary {
   return {
     id: String(row.id),
@@ -137,6 +141,7 @@ function mapWorkOrderSummary(row: Record<string, unknown>): WorkOrderSummary {
     status: (row.status as WorkOrderStatus) ?? "draft",
     orderDate: String(row.order_date ?? ""),
     updatedAt: String(row.updated_at ?? ""),
+    missingAssemblyCount: 0,
   };
 }
 
@@ -233,7 +238,39 @@ export async function listWorkOrders(workspaceId: string): Promise<WorkOrderSumm
   if (error) {
     throw new Error(`Could not load work orders: ${error.message}`);
   }
-  return (data ?? []).map(mapWorkOrderSummary);
+  const summaries = (data ?? []).map(mapWorkOrderSummary);
+  if (summaries.length === 0) {
+    return summaries;
+  }
+
+  // Second, simple query for the board's A#-completeness column: fetch every line's fulfillment
+  // + assembly-order-no for the workspace and tally the missing ones per order, client-side.
+  // Keeps the primary list query a flat header projection rather than a join/aggregate.
+  const { data: lineRows, error: linesError } = await supabase
+    .from("work_order_lines")
+    .select("work_order_id, fulfillment, assembly_order_no")
+    .eq("workspace_id", workspaceId);
+  if (linesError) {
+    throw new Error(`Could not load work-order completeness: ${linesError.message}`);
+  }
+
+  const missingByOrderId = new Map<string, number>();
+  for (const row of lineRows ?? []) {
+    const line = {
+      fulfillment: (row.fulfillment as WorkOrderFulfillment) ?? "assembly",
+      assemblyOrderNo: String(row.assembly_order_no ?? ""),
+    };
+    if (!lineNeedsAssemblyNo(line)) {
+      continue;
+    }
+    const orderId = String(row.work_order_id);
+    missingByOrderId.set(orderId, (missingByOrderId.get(orderId) ?? 0) + 1);
+  }
+
+  return summaries.map((summary) => ({
+    ...summary,
+    missingAssemblyCount: missingByOrderId.get(summary.id) ?? 0,
+  }));
 }
 
 export async function getWorkOrder(workspaceId: string, id: string): Promise<WorkOrderDetail | null> {

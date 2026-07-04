@@ -4,9 +4,9 @@ import { AuthProjectGate } from "./auth-project-gate";
 import { CompanyDashboard } from "./company-dashboard";
 import { LineWorkspace } from "./line-workspace";
 import { MobilePhotoPortal } from "./mobile-photo-portal";
-import { NothingLoadingBlock } from "./nothing-ui";
-import { PlanningAccessGate, PlanningShell } from "./planning/planning-shell";
+import { PlanningAccessGate } from "./planning/planning-shell";
 import { PlanningWorkspaceProvider } from "./planning/planning-workspace-provider";
+import { WorkOrderBoard } from "./planning/work-order-board";
 import { SpacePlaceholder } from "./space-placeholder";
 
 /** The post-login landing page: company-space cards instead of an auto-redirect. */
@@ -22,12 +22,7 @@ export function PlanningRouteShell() {
       renderHome={(home) => (
         <PlanningWorkspaceProvider groups={home.groups}>
           <PlanningAccessGate>
-            <PlanningShell>
-              {/* WorkOrderBoard arrives in Task 7 — compiling stub until then. */}
-              <div className="ui-panel p-5">
-                <NothingLoadingBlock title="Work orders" body="The work-order board is coming together." />
-              </div>
-            </PlanningShell>
+            <WorkOrderBoard />
           </PlanningAccessGate>
         </PlanningWorkspaceProvider>
       )}

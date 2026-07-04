@@ -22,9 +22,11 @@ type PlanningShellProps = {
  * pass `backHref="/planning"` so the arrow steps back to the board, not the dashboard.
  */
 export function PlanningShell({ title, actions, backHref, backLabel = "Back to work orders", children }: PlanningShellProps) {
+  // The app disables document scrolling globally (html/body overflow:hidden — see
+  // globals.css), so each space provides its own scroll container, like the SOP shell.
   return (
-    <div className="min-h-screen bg-canvas text-ink">
-      <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface px-4">
+    <div className="flex h-[100dvh] flex-col bg-canvas text-ink">
+      <header className="relative z-10 flex h-12 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
         {backHref ? (
           <Link
             href={backHref}
@@ -56,7 +58,9 @@ export function PlanningShell({ title, actions, backHref, backLabel = "Back to w
         <UserNav />
       </header>
 
-      <main className="mx-auto max-w-[1100px] px-8 py-8">{children}</main>
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[1100px] px-8 py-8">{children}</div>
+      </main>
     </div>
   );
 }

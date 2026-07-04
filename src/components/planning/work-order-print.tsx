@@ -137,6 +137,13 @@ const PRINT_STYLES = `
   body {
     background: #fff;
   }
+  /* The on-screen preview scrolls inside a fixed-height container (document scrolling is
+     disabled app-wide); when printing, that container must expand or output gets clipped
+     to the first page-height of content. */
+  .wo-print-scroll {
+    height: auto !important;
+    overflow: visible !important;
+  }
   .wo-print-chrome {
     display: none;
   }
@@ -276,7 +283,7 @@ export function WorkOrderPrintPreview({ workOrderId }: { workOrderId: string }) 
   }, [refresh]);
 
   return (
-    <div className="min-h-screen bg-canvas">
+    <div className="wo-print-scroll h-[100dvh] overflow-y-auto bg-canvas">
       <PrintToolbar backHref={`/planning/work-orders/${workOrderId}`} label={order ? order.orderNo : "Work order"} />
       <div className="px-8 py-8">
         {status === "loading" ? (
@@ -353,7 +360,7 @@ export function BatchPrintPreview({ ids }: { ids: string[] }) {
   }, [refresh]);
 
   return (
-    <div className="min-h-screen bg-canvas">
+    <div className="wo-print-scroll h-[100dvh] overflow-y-auto bg-canvas">
       <PrintToolbar backHref="/planning" label={`Print ${ids.length} work order${ids.length === 1 ? "" : "s"}`} />
       <div className="px-8 py-8">
         {status === "loading" ? (

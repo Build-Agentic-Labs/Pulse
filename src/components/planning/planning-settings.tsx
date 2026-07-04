@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronRight, Loader2, Upload } from "lucide-react";
-import { Fragment, useRef, useState, type ChangeEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { ThemedFeedbackLayer, type FeedbackToast } from "@/components/themed-feedback";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
 import { WORK_ORDER_TYPE_LABELS, WORK_ORDER_TYPES, type WorkOrderType } from "@/domain/work-orders";
@@ -89,6 +89,13 @@ export function PlanningSettings() {
   const { workspaceId, canWrite } = usePlanningWorkspace();
   const [toasts, setToasts] = useState<FeedbackToast[]>([]);
   const [templateReloadToken, setTemplateReloadToken] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // The section mounts at the top of the board page; scroll it into view so opening
+  // the gear never appears to do nothing when the user is scrolled down the table.
+  useEffect(() => {
+    rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   function notify(toast: Omit<FeedbackToast, "id">) {
     toastSeq += 1;
@@ -280,7 +287,7 @@ export function PlanningSettings() {
   }
 
   return (
-    <div className="space-y-5">
+    <div ref={rootRef} className="scroll-mt-4 space-y-5">
       <section className="ui-panel p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

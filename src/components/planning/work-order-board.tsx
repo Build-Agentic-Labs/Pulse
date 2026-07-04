@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
@@ -49,7 +49,14 @@ export function WorkOrderBoard() {
   const [monthFilter, setMonthFilter] = useState(ALL_FILTER);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
+  // Stale-response guard (same intent as sop-list.tsx's `active` flag / the provider's
+  // `cancelled` flag): each load takes a ticket from this counter, and only the latest ticket
+  // may commit state. Covers both the workspace-change effect and the manual Retry path, which
+  // share `refresh`.
+  const loadSeqRef = useRef(0);
+
   const refresh = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     if (!workspaceId) {
       setOrders([]);
       setListStatus("ready");
@@ -59,9 +66,11 @@ export function WorkOrderBoard() {
     setError("");
     try {
       const next = await listWorkOrders(workspaceId);
+      if (seq !== loadSeqRef.current) return;
       setOrders(next);
       setListStatus("ready");
     } catch (caught) {
+      if (seq !== loadSeqRef.current) return;
       setError(caught instanceof Error ? caught.message : "Could not load work orders.");
       setListStatus("error");
     }
@@ -69,6 +78,10 @@ export function WorkOrderBoard() {
 
   useEffect(() => {
     void refresh();
+    return () => {
+      // Invalidate any in-flight load when the workspace changes or the board unmounts.
+      loadSeqRef.current += 1;
+    };
   }, [refresh]);
 
   const statusOptions = useMemo<ThemedSelectOption[]>(() => {

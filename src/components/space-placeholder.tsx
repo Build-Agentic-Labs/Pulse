@@ -57,14 +57,3 @@ export function SpacePlaceholder({ space, name, description, planned, children }
     </div>
   );
 }
-
-/** Muted skeleton block used inside template previews. */
-export function TemplateRow({ widths }: { widths: string[] }) {
-  return (
-    <div className="flex items-center gap-3 border-b border-line py-2.5 last:border-b-0">
-      {widths.map((width, index) => (
-        <span key={index} className="h-2.5 rounded-full bg-surface-raised" style={{ width }} />
-      ))}
-    </div>
-  );
-}

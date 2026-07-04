@@ -4,7 +4,10 @@ import { AuthProjectGate } from "./auth-project-gate";
 import { CompanyDashboard } from "./company-dashboard";
 import { LineWorkspace } from "./line-workspace";
 import { MobilePhotoPortal } from "./mobile-photo-portal";
-import { SpacePlaceholder, TemplateRow } from "./space-placeholder";
+import { NothingLoadingBlock } from "./nothing-ui";
+import { PlanningAccessGate, PlanningShell } from "./planning/planning-shell";
+import { PlanningWorkspaceProvider } from "./planning/planning-workspace-provider";
+import { SpacePlaceholder } from "./space-placeholder";
 
 /** The post-login landing page: company-space cards instead of an auto-redirect. */
 export function HomeRouteShell() {
@@ -16,31 +19,17 @@ export function HomeRouteShell() {
 export function PlanningRouteShell() {
   return (
     <AuthProjectGate
-      renderHome={() => (
-        <SpacePlaceholder
-          space="planning"
-          name="Planning"
-          description="Production planning for the whole line: a tool that helps the planner turn demand into scheduled, capacity-checked work orders."
-          planned={[
-            "Work orders — create, release and track orders through the line",
-            "Schedule — orders placed against takt and station capacity",
-            "Capacity — load vs. available hours per station and shift",
-          ]}
-        >
-          <section className="ui-panel mt-4 p-5">
-            <div className="flex items-baseline justify-between">
-              <div className="ui-mono-label">Work orders · Template preview</div>
-              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-tertiary">
-                WO · Product · Qty · Due · Status
+      renderHome={(home) => (
+        <PlanningWorkspaceProvider groups={home.groups}>
+          <PlanningAccessGate>
+            <PlanningShell>
+              {/* WorkOrderBoard arrives in Task 7 — compiling stub until then. */}
+              <div className="ui-panel p-5">
+                <NothingLoadingBlock title="Work orders" body="The work-order board is coming together." />
               </div>
-            </div>
-            <div className="mt-3">
-              <TemplateRow widths={["56px", "22%", "36px", "64px", "48px"]} />
-              <TemplateRow widths={["56px", "30%", "36px", "64px", "48px"]} />
-              <TemplateRow widths={["56px", "18%", "36px", "64px", "48px"]} />
-            </div>
-          </section>
-        </SpacePlaceholder>
+            </PlanningShell>
+          </PlanningAccessGate>
+        </PlanningWorkspaceProvider>
       )}
     >
       {() => null}

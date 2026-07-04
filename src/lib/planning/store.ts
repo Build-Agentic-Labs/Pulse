@@ -76,6 +76,8 @@ export interface TemplateSummary {
   orderType: WorkOrderType;
   retiredAt: string | null;
   updatedAt: string;
+  /** Count of the template's lines; filled in separately by `listTemplates`, once counts are known. */
+  lineCount: number;
 }
 
 export interface TemplateLine {
@@ -179,6 +181,7 @@ function mapWorkOrderDetail(header: Record<string, unknown>, lines: Record<strin
   };
 }
 
+/** `lineCount` is filled in separately by `listTemplates`, once counts are known. */
 function mapTemplateSummary(row: Record<string, unknown>): TemplateSummary {
   return {
     id: String(row.id),
@@ -188,6 +191,7 @@ function mapTemplateSummary(row: Record<string, unknown>): TemplateSummary {
     orderType: (row.order_type as WorkOrderType) ?? "mts",
     retiredAt: row.retired_at ? String(row.retired_at) : null,
     updatedAt: String(row.updated_at ?? ""),
+    lineCount: 0,
   };
 }
 
@@ -501,7 +505,32 @@ export async function listTemplates(
   if (error) {
     throw new Error(`Could not load templates: ${error.message}`);
   }
-  return (data ?? []).map(mapTemplateSummary);
+  const summaries = (data ?? []).map(mapTemplateSummary);
+  if (summaries.length === 0) {
+    return summaries;
+  }
+
+  // Second, simple query for each template's line count: fetch every template line's template_id
+  // for the workspace and tally client-side. Same idiom as listWorkOrders' missingAssemblyCount
+  // bulk query — one flat query instead of a per-template detail fetch (N+1).
+  const { data: lineRows, error: linesError } = await supabase
+    .from("work_order_template_lines")
+    .select("template_id")
+    .eq("workspace_id", workspaceId);
+  if (linesError) {
+    throw new Error(`Could not load template line counts: ${linesError.message}`);
+  }
+
+  const countByTemplateId = new Map<string, number>();
+  for (const row of lineRows ?? []) {
+    const templateId = String(row.template_id);
+    countByTemplateId.set(templateId, (countByTemplateId.get(templateId) ?? 0) + 1);
+  }
+
+  return summaries.map((summary) => ({
+    ...summary,
+    lineCount: countByTemplateId.get(summary.id) ?? 0,
+  }));
 }
 
 export async function getTemplate(workspaceId: string, id: string): Promise<TemplateDetail | null> {

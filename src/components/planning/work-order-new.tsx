@@ -85,10 +85,19 @@ function groupByModel(templates: TemplateSummary[]): TemplateGroup[] {
     }));
 }
 
+/** The selected template's lazily-fetched detail: idle while blank, loading/error/ready otherwise. */
+type SelectedDetailState =
+  | { status: "idle" }
+  | { status: "loading"; templateId: string }
+  | { status: "error"; templateId: string }
+  | { status: "ready"; templateId: string; detail: TemplateDetail };
+
 /**
  * Single-screen "new work order" flow: a searchable template picker on the left (grouped by
  * model, plus a "Start blank" row) and the create form on the right. Picking a template
  * prefills the form and carries its lines into the new order; picking blank starts empty.
+ * Row line counts come from `TemplateSummary.lineCount` (one bulk query inside `listTemplates`);
+ * the full template detail is fetched lazily, only for the picked template.
  */
 export function WorkOrderNew() {
   const router = useRouter();
@@ -96,17 +105,20 @@ export function WorkOrderNew() {
 
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [templatesStatus, setTemplatesStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [templateDetails, setTemplateDetails] = useState<Record<string, TemplateDetail | null>>({});
   const [existingOrderNos, setExistingOrderNos] = useState<string[]>([]);
 
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>(BLANK_SELECTION);
+  const [selectedDetail, setSelectedDetail] = useState<SelectedDetailState>({ status: "idle" });
   const [form, setForm] = useState<FormState>(blankForm());
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Stale-response guard: same idiom as work-order-board.tsx's loadSeqRef.
+  // Stale-response guards: same idiom as work-order-board.tsx's loadSeqRef. `detailSeqRef`
+  // covers the lazy per-selection template fetch, so a slow response for an earlier pick can
+  // never prefill the form after the user has moved on to another template (or to blank).
   const loadSeqRef = useRef(0);
+  const detailSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const seq = ++loadSeqRef.current;
@@ -123,17 +135,6 @@ export function WorkOrderNew() {
       setTemplates(templateList);
       setExistingOrderNos(orders.map((order) => order.orderNo));
       setTemplatesStatus("ready");
-
-      // Line counts aren't on the summary row, so fetch every template's detail up front (the
-      // picker list is small — per-workspace templates, not per-order) and cache it for reuse
-      // when a row is picked, rather than re-fetching on selection.
-      const details = await Promise.allSettled(templateList.map((template) => getTemplate(workspaceId, template.id)));
-      if (seq !== loadSeqRef.current) return;
-      const nextDetails: Record<string, TemplateDetail | null> = {};
-      details.forEach((result, index) => {
-        nextDetails[templateList[index].id] = result.status === "fulfilled" ? result.value : null;
-      });
-      setTemplateDetails(nextDetails);
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;
       setError(caught instanceof Error ? caught.message : "Could not load templates.");
@@ -145,6 +146,7 @@ export function WorkOrderNew() {
     void refresh();
     return () => {
       loadSeqRef.current += 1;
+      detailSeqRef.current += 1;
     };
   }, [refresh]);
 
@@ -161,34 +163,60 @@ export function WorkOrderNew() {
     return groupByModel(matching);
   }, [templates, query]);
 
-  const selectedTemplate = selectedId === BLANK_SELECTION ? null : (templateDetails[selectedId] ?? null);
-  const selectedTemplateSummary = selectedId === BLANK_SELECTION ? null : templates.find((t) => t.id === selectedId);
-  const selectedTemplateResolving = selectedId !== BLANK_SELECTION && !(selectedId in templateDetails);
-
+  /**
+   * Select a picker row. For a template this always (re)fetches its detail — re-clicking a row
+   * whose fetch failed is the retry path — and the prefill is applied when the detail arrives,
+   * guarded by `detailSeqRef` so only the latest selection may write the form. The prefill lands
+   * exactly once per selection (on arrival), so later user edits are never re-clobbered.
+   */
   function selectTemplate(id: string) {
+    const seq = ++detailSeqRef.current;
     setSelectedId(id);
+    setError("");
+
     if (id === BLANK_SELECTION) {
+      setSelectedDetail({ status: "idle" });
       setForm(blankForm());
       return;
     }
-    const detail = templateDetails[id];
-    if (detail) {
-      setForm(formFromTemplate(detail));
-    }
+
+    setSelectedDetail({ status: "loading", templateId: id });
+    getTemplate(workspaceId, id)
+      .then((detail) => {
+        if (seq !== detailSeqRef.current) return;
+        if (!detail) {
+          setSelectedDetail({ status: "error", templateId: id });
+          setError("This template no longer exists. Pick another or start blank.");
+          return;
+        }
+        setSelectedDetail({ status: "ready", templateId: id, detail });
+        setForm(formFromTemplate(detail));
+      })
+      .catch((caught) => {
+        if (seq !== detailSeqRef.current) return;
+        setSelectedDetail({ status: "error", templateId: id });
+        setError(caught instanceof Error ? caught.message : "Could not load the template.");
+      });
   }
+
+  const selectedTemplateSummary = selectedId === BLANK_SELECTION ? null : templates.find((t) => t.id === selectedId);
+  const readyDetail = selectedDetail.status === "ready" ? selectedDetail.detail : null;
 
   const suggestedOrderNo = useMemo(
     () => suggestOrderNo(existingOrderNos, form.orderDate),
     [existingOrderNos, form.orderDate],
   );
 
-  const lineCountLabel = selectedId === BLANK_SELECTION
-    ? "Blank order — no lines yet."
-    : selectedTemplateResolving
-      ? "Loading template lines…"
-      : selectedTemplate
-        ? `${selectedTemplate.lines.length} line${selectedTemplate.lines.length === 1 ? "" : "s"} from template.`
-        : "Could not load this template's lines.";
+  const lineCountLabel =
+    selectedId === BLANK_SELECTION
+      ? "Blank order — no lines yet."
+      : selectedDetail.status === "loading"
+        ? "Loading template lines…"
+        : selectedDetail.status === "error"
+          ? "Could not load this template — click its row to retry."
+          : readyDetail
+            ? `${readyDetail.lines.length} line${readyDetail.lines.length === 1 ? "" : "s"} from template.`
+            : "";
 
   const canSubmit =
     canWrite &&
@@ -196,14 +224,14 @@ export function WorkOrderNew() {
     form.customer.trim() !== "" &&
     form.orderDate.trim() !== "" &&
     !saving &&
-    (selectedId === BLANK_SELECTION || Boolean(selectedTemplate));
+    (selectedId === BLANK_SELECTION || Boolean(readyDetail));
 
   async function handleCreate() {
     if (!workspaceId || !canSubmit) return;
     setSaving(true);
     setError("");
     try {
-      const lines = selectedTemplate ? linesFromTemplate(selectedTemplate) : [];
+      const lines = readyDetail ? linesFromTemplate(readyDetail) : [];
       const id = await createWorkOrder(workspaceId, {
         templateId: selectedId === BLANK_SELECTION ? null : selectedId,
         customer: form.customer.trim(),
@@ -280,34 +308,25 @@ export function WorkOrderNew() {
                         <div className="ui-mono-label bg-surface-muted px-4 py-1.5 text-ink-tertiary">
                           {group.model}
                         </div>
-                        {group.templates.map((template) => {
-                          const detail = templateDetails[template.id];
-                          const lineCount =
-                            template.id in templateDetails ? (detail ? detail.lines.length : null) : undefined;
-                          return (
-                            <button
-                              key={template.id}
-                              type="button"
-                              className={`flex w-full flex-col gap-0.5 px-4 py-3 text-left transition-colors hover:bg-surface-hover ${
-                                selectedId === template.id ? "ui-state-selected" : ""
-                              }`}
-                              onClick={() => selectTemplate(template.id)}
-                            >
-                              <span className="truncate text-sm font-medium text-ink">{template.name}</span>
-                              <span className="ui-mono-label truncate text-ink-tertiary">
-                                {[
-                                  template.customer || "—",
-                                  WORK_ORDER_TYPE_LABELS[template.orderType],
-                                  lineCount === undefined
-                                    ? "…"
-                                    : lineCount === null
-                                      ? "? lines"
-                                      : `${lineCount} line${lineCount === 1 ? "" : "s"}`,
-                                ].join(" · ")}
-                              </span>
-                            </button>
-                          );
-                        })}
+                        {group.templates.map((template) => (
+                          <button
+                            key={template.id}
+                            type="button"
+                            className={`flex w-full flex-col gap-0.5 px-4 py-3 text-left transition-colors hover:bg-surface-hover ${
+                              selectedId === template.id ? "ui-state-selected" : ""
+                            }`}
+                            onClick={() => selectTemplate(template.id)}
+                          >
+                            <span className="truncate text-sm font-medium text-ink">{template.name}</span>
+                            <span className="ui-mono-label truncate text-ink-tertiary">
+                              {[
+                                template.customer || "—",
+                                WORK_ORDER_TYPE_LABELS[template.orderType],
+                                `${template.lineCount} line${template.lineCount === 1 ? "" : "s"}`,
+                              ].join(" · ")}
+                            </span>
+                          </button>
+                        ))}
                       </div>
                     ))
                   )}

@@ -4,8 +4,7 @@ import { AuthProjectGate } from "./auth-project-gate";
 import { CompanyDashboard } from "./company-dashboard";
 import { LineWorkspace } from "./line-workspace";
 import { MobilePhotoPortal } from "./mobile-photo-portal";
-import { PlanningAccessGate } from "./planning/planning-shell";
-import { PlanningWorkspaceProvider } from "./planning/planning-workspace-provider";
+import { PlanningRoute } from "./planning/planning-route";
 import { WorkOrderBoard } from "./planning/work-order-board";
 import { SpacePlaceholder } from "./space-placeholder";
 
@@ -18,17 +17,9 @@ export function HomeRouteShell() {
 
 export function PlanningRouteShell() {
   return (
-    <AuthProjectGate
-      renderHome={(home) => (
-        <PlanningWorkspaceProvider groups={home.groups}>
-          <PlanningAccessGate>
-            <WorkOrderBoard />
-          </PlanningAccessGate>
-        </PlanningWorkspaceProvider>
-      )}
-    >
-      {() => null}
-    </AuthProjectGate>
+    <PlanningRoute>
+      <WorkOrderBoard />
+    </PlanningRoute>
   );
 }
 

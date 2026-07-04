@@ -88,20 +88,21 @@ describe("buildTransitionPatch", () => {
   it("stamps cancellation without touching progress stamps forward", () => {
     expect(buildTransitionPatch("cancelled", now)).toEqual({ status: "cancelled", cancelled_at: now });
   });
-  it("omits earlier stamp columns entirely so the DB keeps prior history", () => {
-    const inProduction = buildTransitionPatch("in_production", now);
-    expect(inProduction).toEqual({
+  it("omits released_at entirely when reaching in_production, rather than nulling it", () => {
+    const patch = buildTransitionPatch("in_production", now);
+    expect(patch).toEqual({
       status: "in_production",
       production_started_at: now,
       shipped_at: null,
       cancelled_at: null,
     });
-    expect("released_at" in inProduction).toBe(false);
-
-    const shipped = buildTransitionPatch("shipped", now);
-    expect(shipped).toEqual({ status: "shipped", shipped_at: now, cancelled_at: null });
-    expect("released_at" in shipped).toBe(false);
-    expect("production_started_at" in shipped).toBe(false);
+    expect("released_at" in patch).toBe(false);
+  });
+  it("omits released_at and production_started_at entirely when reaching shipped", () => {
+    const patch = buildTransitionPatch("shipped", now);
+    expect(patch).toEqual({ status: "shipped", shipped_at: now, cancelled_at: null });
+    expect("released_at" in patch).toBe(false);
+    expect("production_started_at" in patch).toBe(false);
   });
 });
 

@@ -9,7 +9,6 @@
 
 import {
   buildTransitionPatch,
-  lineNeedsAssemblyNo,
   orderNoMonthKey,
   suggestOrderNo,
   WORK_ORDER_NO_PREFIX,
@@ -247,26 +246,22 @@ export async function listWorkOrders(workspaceId: string): Promise<WorkOrderSumm
     return summaries;
   }
 
-  // Second, simple query for the board's A#-completeness column: fetch every line's fulfillment
-  // + assembly-order-no for the workspace and tally the missing ones per order, client-side.
-  // Keeps the primary list query a flat header projection rather than a join/aggregate.
+  // Second, simple query for the board's A#-completeness column: fetch only the lines that are
+  // actually missing their assembly order number (assembly fulfillment, blank assembly_order_no)
+  // and tally them per order, client-side. Keeps the primary list query a flat header projection
+  // rather than a join/aggregate, and keeps this one narrow instead of fetching every line.
   const { data: lineRows, error: linesError } = await supabase
     .from("work_order_lines")
-    .select("work_order_id, fulfillment, assembly_order_no")
-    .eq("workspace_id", workspaceId);
+    .select("work_order_id")
+    .eq("workspace_id", workspaceId)
+    .eq("fulfillment", "assembly")
+    .eq("assembly_order_no", "");
   if (linesError) {
     throw new Error(`Could not load work-order completeness: ${linesError.message}`);
   }
 
   const missingByOrderId = new Map<string, number>();
   for (const row of lineRows ?? []) {
-    const line = {
-      fulfillment: (row.fulfillment as WorkOrderFulfillment) ?? "assembly",
-      assemblyOrderNo: String(row.assembly_order_no ?? ""),
-    };
-    if (!lineNeedsAssemblyNo(line)) {
-      continue;
-    }
     const orderId = String(row.work_order_id);
     missingByOrderId.set(orderId, (missingByOrderId.get(orderId) ?? 0) + 1);
   }

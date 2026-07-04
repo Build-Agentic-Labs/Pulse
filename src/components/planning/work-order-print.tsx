@@ -50,12 +50,12 @@ function formatShipped(line: WorkOrderLine): string {
 const PRINT_STYLES = `
 .wo-sheet {
   background: #fff;
-  color: #111827;
+  color: #13211b;
   font-family: var(--type-sans);
   max-width: 820px;
   margin: 0 auto 24px;
   padding: 48px 56px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #d8d0c2;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 .wo-sheet-header {
@@ -74,14 +74,14 @@ const PRINT_STYLES = `
 .wo-order-type {
   margin-top: 4px;
   font-size: 13px;
-  color: #6b7280;
+  color: #52606d;
 }
 .wo-meta {
   font-family: var(--type-mono);
   font-size: 12px;
   line-height: 1.7;
   text-align: right;
-  color: #111827;
+  color: #13211b;
   white-space: nowrap;
 }
 .wo-lines {
@@ -91,17 +91,17 @@ const PRINT_STYLES = `
   font-size: 13px;
 }
 .wo-lines th {
-  border-bottom: 1px solid #111827;
+  border-bottom: 1px solid #13211b;
   padding: 6px 8px;
   font-family: var(--type-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b7280;
+  color: #52606d;
   text-align: left;
 }
 .wo-lines td {
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #d8d0c2;
   padding: 8px;
   vertical-align: top;
 }
@@ -117,7 +117,7 @@ const PRINT_STYLES = `
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b7280;
+  color: #52606d;
 }
 .wo-notes p {
   margin: 0;
@@ -125,13 +125,13 @@ const PRINT_STYLES = `
   font-size: 13px;
 }
 .wo-sheet-footer {
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #d8d0c2;
   padding-top: 12px;
   font-family: var(--type-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b7280;
+  color: #52606d;
 }
 @media print {
   body {

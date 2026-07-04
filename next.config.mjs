@@ -13,6 +13,11 @@ const securityHeaders = [
       "base-uri 'self'",
       "object-src 'none'",
       `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ""} https://appsforoffice.microsoft.com`,
+      // fflate (read-excel-file's unzip step, used by the Planning workbook/item-master
+      // uploads) decompresses inside a Web Worker created from a blob: URL. Without an
+      // explicit worker-src, workers fall back to script-src (which has no blob:), Chrome
+      // blocks the worker, fflate's callback never fires, and the upload spins forever.
+      "worker-src 'self' blob:",
       "style-src 'self' 'unsafe-inline'",
       `img-src 'self' data: blob: ${supabaseOrigin}`,
       `connect-src 'self' ${supabaseOrigin} ${supabaseRealtimeOrigin}${isDevelopment ? " ws://localhost:* ws://127.0.0.1:*" : ""}`,

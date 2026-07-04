@@ -71,10 +71,37 @@ function parseCsv(text: string): RawRow[] {
   return rows;
 }
 
+const READ_TIMEOUT_MS = 45_000;
+
+/**
+ * The excel reader's unzip step runs in a Web Worker; if the environment blocks the worker
+ * (e.g. a CSP without `worker-src blob:`), its callback never fires and the promise never
+ * settles. Racing a timeout turns that silent stall into an actionable error.
+ */
+async function withReadTimeout<T>(read: Promise<T>, fileName: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `Reading “${fileName}” timed out. If this keeps happening, check the browser console for a blocked-worker (Content-Security-Policy) error and report it.`,
+          ),
+        ),
+      READ_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([read, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Read every sheet of an uploaded .xlsx/.xls workbook into cell matrices, keyed by sheet name. */
 export async function readWorkbookFile(file: File): Promise<{ sheets: Array<{ name: string; rows: WorkbookCell[][] }> }> {
   const { default: readXlsxFile } = await import("read-excel-file/browser");
-  const sheets = await readXlsxFile(file);
+  const sheets = await withReadTimeout(readXlsxFile(file), file.name);
   return {
     sheets: sheets.map((sheet) => ({ name: sheet.sheet, rows: sheet.data as WorkbookCell[][] })),
   };
@@ -89,6 +116,6 @@ export async function readItemMasterFile(file: File): Promise<WorkbookCell[][]> 
   }
 
   const { readSheet } = await import("read-excel-file/browser");
-  const rows = await readSheet(file);
+  const rows = await withReadTimeout(readSheet(file), file.name);
   return rows as WorkbookCell[][];
 }

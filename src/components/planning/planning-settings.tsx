@@ -42,6 +42,30 @@ type ParsedSheetDraft = {
 
 type SkippedSheet = { sheetName: string; reason: string };
 
+type Progress = { done: number; total: number; detail?: string };
+
+/** Thin monochrome progress bar + caption, used while long imports run. */
+function ProgressRow({ label, progress }: { label: string; progress: Progress }) {
+  const percent = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+  return (
+    <div className="mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="ui-section-subtitle text-ink">
+          {label} {progress.done} / {progress.total}
+          {progress.detail ? <span className="text-ink-tertiary"> · {progress.detail}</span> : null}
+        </span>
+        <span className="ui-mono-label text-ink-tertiary">{percent}%</span>
+      </div>
+      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-border-strong/40">
+        <div
+          className="h-full rounded-full bg-accent transition-[width] duration-200 ease-out"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function draftToSheet(draft: ParsedSheetDraft): ParsedTemplateSheet {
   return {
     sheetName: draft.sheetName,
@@ -80,6 +104,7 @@ export function PlanningSettings() {
   const [itemMasterReading, setItemMasterReading] = useState(false);
   const [itemMasterPreview, setItemMasterPreview] = useState<ItemMasterPreview | null>(null);
   const [itemMasterApplying, setItemMasterApplying] = useState(false);
+  const [applyProgress, setApplyProgress] = useState<Progress | null>(null);
 
   async function handleItemMasterFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
@@ -113,8 +138,11 @@ export function PlanningSettings() {
       return;
     }
     setItemMasterApplying(true);
+    setApplyProgress({ done: 0, total: itemMasterPreview.items.length });
     try {
-      const { added, updated } = await upsertItemMaster(workspaceId, itemMasterPreview.items);
+      const { added, updated } = await upsertItemMaster(workspaceId, itemMasterPreview.items, (done, total) =>
+        setApplyProgress({ done, total }),
+      );
       notify({ title: "Item master updated", body: `${added} added, ${updated} updated.`, tone: "success" });
       setItemMasterPreview(null);
     } catch (caught) {
@@ -125,6 +153,7 @@ export function PlanningSettings() {
       });
     } finally {
       setItemMasterApplying(false);
+      setApplyProgress(null);
     }
   }
 
@@ -136,6 +165,7 @@ export function PlanningSettings() {
   const [skippedSheets, setSkippedSheets] = useState<SkippedSheet[]>([]);
   const [expandedWarnings, setExpandedWarnings] = useState<ReadonlySet<string>>(new Set());
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<Progress | null>(null);
 
   async function handleWorkbookFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
@@ -203,9 +233,12 @@ export function PlanningSettings() {
   async function handleImportTemplates() {
     if (parsedSheets.length === 0 || importing) return;
     setImporting(true);
+    setImportProgress({ done: 0, total: parsedSheets.length });
     try {
       const sheets = parsedSheets.map(draftToSheet);
-      const { imported, failed } = await importTemplates(workspaceId, sheets);
+      const { imported, failed } = await importTemplates(workspaceId, sheets, (done, total, sheetName) =>
+        setImportProgress({ done, total, detail: sheetName }),
+      );
       if (failed.length === 0) {
         notify({
           title: "Templates imported",
@@ -233,6 +266,7 @@ export function PlanningSettings() {
       });
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   }
 
@@ -272,6 +306,14 @@ export function PlanningSettings() {
           className="hidden"
           onChange={(event) => void handleItemMasterFile(event)}
         />
+
+        {itemMasterReading ? (
+          <p className="ui-section-subtitle mt-4 flex items-center gap-2 border-t border-line pt-4 text-ink">
+            <Loader2 size={13} className="animate-spin" /> Reading the file and parsing items…
+          </p>
+        ) : null}
+
+        {applyProgress ? <ProgressRow label="Saving items…" progress={applyProgress} /> : null}
 
         {itemMasterPreview ? (
           <div className="mt-4 border-t border-line pt-4">
@@ -361,6 +403,15 @@ export function PlanningSettings() {
           className="hidden"
           onChange={(event) => void handleWorkbookFile(event)}
         />
+
+        {workbookReading ? (
+          <p className="ui-section-subtitle mt-4 flex items-center gap-2 border-t border-line pt-4 text-ink">
+            <Loader2 size={13} className="animate-spin" /> Reading the workbook and parsing every sheet — this can take a
+            few seconds on a large file…
+          </p>
+        ) : null}
+
+        {importProgress ? <ProgressRow label="Importing templates…" progress={importProgress} /> : null}
 
         {workbookError ? (
           <div className="mt-4 ui-notice ui-notice-bad px-4 py-3 ui-section-subtitle">{workbookError}</div>

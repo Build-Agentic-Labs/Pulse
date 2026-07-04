@@ -616,11 +616,14 @@ export async function retireTemplate(workspaceId: string, id: string, retired: b
 export async function importTemplates(
   workspaceId: string,
   sheets: readonly ParsedTemplateSheet[],
+  /** Called after each sheet finishes (imported or failed), so the UI can show live progress. */
+  onProgress?: (done: number, total: number, sheetName: string) => void,
 ): Promise<{ imported: number; failed: Array<{ sheetName: string; message: string }> }> {
   const supabase = createPlannerSupabaseClient();
   const { data: userData } = await supabase.auth.getUser();
 
   let imported = 0;
+  let done = 0;
   const failed: Array<{ sheetName: string; message: string }> = [];
 
   for (const sheet of sheets) {
@@ -639,6 +642,8 @@ export async function importTemplates(
       .single();
     if (insertError) {
       failed.push({ sheetName: sheet.sheetName, message: insertError.message });
+      done += 1;
+      onProgress?.(done, sheets.length, sheet.sheetName);
       continue;
     }
 
@@ -655,11 +660,15 @@ export async function importTemplates(
       );
       if (linesError) {
         failed.push({ sheetName: sheet.sheetName, message: linesError.message });
+        done += 1;
+        onProgress?.(done, sheets.length, sheet.sheetName);
         continue;
       }
     }
 
     imported += 1;
+    done += 1;
+    onProgress?.(done, sheets.length, sheet.sheetName);
   }
 
   return { imported, failed };
@@ -673,6 +682,8 @@ const ITEM_MASTER_UPSERT_CHUNK_SIZE = 500;
 export async function upsertItemMaster(
   workspaceId: string,
   items: readonly ParsedItemMasterRow[],
+  /** Called after each saved chunk with the number of rows written so far. */
+  onProgress?: (done: number, total: number) => void,
 ): Promise<{ added: number; updated: number }> {
   const supabase = createPlannerSupabaseClient();
 
@@ -715,6 +726,7 @@ export async function upsertItemMaster(
     if (error) {
       throw new Error(`Could not save the item master: ${error.message}`);
     }
+    onProgress?.(Math.min(i + ITEM_MASTER_UPSERT_CHUNK_SIZE, items.length), items.length);
   }
 
   return counts;

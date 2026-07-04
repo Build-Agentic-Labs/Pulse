@@ -96,7 +96,8 @@ const STATUS_TIMESTAMP_COLUMNS = ["released_at", "production_started_at", "shipp
 
 /**
  * DB patch for a status transition. Reaching a flow status stamps it and clears
- * every later stamp (so stepping back erases the future). Cancelling stamps
+ * every LATER stamp (so stepping back erases the future); earlier stamps are
+ * omitted entirely so the DB keeps that prior history. Cancelling stamps
  * cancelled_at only, preserving progress stamps for a possible revive.
  */
 export function buildTransitionPatch(to: WorkOrderStatus, nowIso: string): Record<string, string | null> {
@@ -107,11 +108,13 @@ export function buildTransitionPatch(to: WorkOrderStatus, nowIso: string): Recor
   const patch: Record<string, string | null> = { status: to, cancelled_at: null };
   STATUS_TIMESTAMP_COLUMNS.forEach((column, index) => {
     // Column index n stamps flow status n + 1 (draft has no stamp).
-    patch[column] = index + 1 === reachedIndex ? nowIso : index + 1 < reachedIndex ? patch[column] ?? null : null;
+    if (index + 1 === reachedIndex) {
+      patch[column] = nowIso;
+    } else if (index + 1 > reachedIndex) {
+      patch[column] = null;
+    }
+    // index + 1 < reachedIndex: earlier stamp, omit so the DB keeps its prior value.
   });
-  if (reachedIndex > 0) {
-    patch[STATUS_TIMESTAMP_COLUMNS[reachedIndex - 1]] = nowIso;
-  }
   return patch;
 }
 

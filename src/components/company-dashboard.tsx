@@ -2,6 +2,8 @@
 
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { fetchMySpaceAccess } from "@/lib/planning/store";
 import type { DashboardHomeContext } from "./auth-project-gate";
 import { SPACE_META, SPACE_ORDER, SpaceIcon, spaceDisabledLabel, spaceHref, type SpaceKey } from "./spaces";
 import { UserNav } from "./user-nav";
@@ -12,6 +14,8 @@ type SpaceCard = {
   desc: string;
   href?: string;
   soonLabel?: string;
+  /** Overrides soonLabel and forces the disabled/locked rendering even when href is set. */
+  lockedLabel?: string;
 };
 
 function timeGreeting(): string {
@@ -25,7 +29,7 @@ const ICON_TILE_CLASSES =
   "grid h-11 w-11 place-items-center rounded-xl border border-line bg-gradient-to-b from-surface-raised to-canvas text-ink-secondary transition group-hover:border-border-strong group-hover:text-ink";
 
 function DashboardCard({ card }: { card: SpaceCard }) {
-  const disabled = !card.href;
+  const disabled = !card.href || Boolean(card.lockedLabel);
   const body = (
     <>
       <span className={ICON_TILE_CLASSES}>
@@ -35,7 +39,7 @@ function DashboardCard({ card }: { card: SpaceCard }) {
         <h3 className="ui-section-title flex items-center gap-2">
           {card.name}
           {disabled ? (
-            <span className="ui-chip ml-auto">{card.soonLabel ?? "Soon"}</span>
+            <span className="ui-chip ml-auto">{card.lockedLabel ?? card.soonLabel ?? "Soon"}</span>
           ) : (
             <span className="ml-auto -translate-x-1.5 text-ink opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100">
               <ArrowRight size={16} strokeWidth={1.75} aria-hidden="true" />
@@ -66,12 +70,44 @@ function DashboardCard({ card }: { card: SpaceCard }) {
 
 export function CompanyDashboard({ groups, displayName, preferredProjectId }: DashboardHomeContext) {
   const workspaceName = groups[0]?.workspace.name ?? "";
+  const workspaceId = groups[0]?.workspace.id ?? "";
+  const role = groups[0]?.role;
+  const isManager = role === "owner" || role === "admin" || Boolean(groups[0]?.isSuperAdmin);
+
+  // Mirrors PlanningWorkspaceProvider's own access check (planning-workspace-provider.tsx):
+  // managers implicitly have Planning; editors/viewers need `fetchMySpaceAccess` to resolve.
+  // `null` while unknown -- the card renders normally in that state, since the /planning route
+  // gate is the real guard and we don't want a locked flash before the check completes.
+  const [planningAccess, setPlanningAccess] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId || isManager) {
+      setPlanningAccess(true);
+      return;
+    }
+    setPlanningAccess(null);
+    let cancelled = false;
+    fetchMySpaceAccess(workspaceId, "planning")
+      .then((granted) => {
+        if (!cancelled) setPlanningAccess(granted);
+      })
+      .catch(() => {
+        if (!cancelled) setPlanningAccess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, isManager]);
+
+  const planningLocked = planningAccess === false;
+
   const cards: SpaceCard[] = SPACE_ORDER.map((space) => ({
     space,
     name: SPACE_META[space].name,
     desc: SPACE_META[space].desc,
     href: spaceHref(space, preferredProjectId),
     soonLabel: spaceDisabledLabel(space),
+    lockedLabel: space === "planning" && planningLocked ? "Restricted" : undefined,
   }));
 
   const today = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(

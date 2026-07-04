@@ -25,6 +25,7 @@ import type {
   WorkspaceAccessGrant,
   WorkspaceRole,
 } from "@/domain/types";
+import { grantSpaceAccess, listSpaceAccess, revokeSpaceAccess, type SpaceAccessRow } from "@/lib/planning/store";
 
 // Local copies of the settings primitives (kept here to avoid a circular import with
 // app-settings-panel, which imports this component).
@@ -100,6 +101,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
   const [projects, setProjects] = useState<Project[]>([]);
   const [members, setMembers] = useState<MemberAccess[]>([]);
   const [grants, setGrants] = useState<WorkspaceAccessGrant[]>([]);
+  const [spaceAccess, setSpaceAccess] = useState<SpaceAccessRow[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>();
   const [search, setSearch] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -142,12 +144,14 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
       setWorkspaceId(group.workspace.id);
       setProjects(group.projects);
 
-      const [nextMembers, nextGrants] = await Promise.all([
+      const [nextMembers, nextGrants, nextSpaceAccess] = await Promise.all([
         loadMembersAccessForWorkspace(group.workspace.id),
         loadWorkspaceAccessGrantsFromSupabase(group.workspace.id).catch(() => []),
+        listSpaceAccess(group.workspace.id).catch(() => []),
       ]);
       setMembers(nextMembers);
       setGrants(nextGrants);
+      setSpaceAccess(nextSpaceAccess);
       setStatus("ready");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load members.");
@@ -197,6 +201,30 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     } catch (error) {
       setMembers(previous);
       setMessage(error instanceof Error ? error.message : "Unable to change the role.");
+    }
+  }
+
+  function hasPlanningAccess(userId: string): boolean {
+    return spaceAccess.some((row) => row.space === "planning" && row.userId === userId);
+  }
+
+  async function togglePlanningAccess(userId: string, granted: boolean) {
+    if (!workspaceId) return;
+    const previous = spaceAccess;
+    setSpaceAccess((current) =>
+      granted
+        ? current.filter((row) => !(row.space === "planning" && row.userId === userId))
+        : [...current, { userId, space: "planning", grantedBy: null, createdAt: new Date().toISOString() }],
+    );
+    try {
+      if (granted) {
+        await revokeSpaceAccess(workspaceId, userId, "planning");
+      } else {
+        await grantSpaceAccess(workspaceId, userId, "planning");
+      }
+    } catch (error) {
+      setSpaceAccess(previous);
+      setMessage(error instanceof Error ? error.message : "Unable to update Planning access.");
     }
   }
 
@@ -510,6 +538,21 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                 {selected.role}
                 {selected.isSelf ? " (you)" : ""}
               </span>
+            )}
+          </Row>
+
+          <Row label="Planning" description="Work orders, schedules and capacity for the production plan.">
+            {isManagerRole(selected.role) ? (
+              <span className="ui-chip">Included</span>
+            ) : (
+              <button
+                type="button"
+                className="ui-btn-ghost h-8 px-3 disabled:opacity-50"
+                onClick={() => void togglePlanningAccess(selected.userId, hasPlanningAccess(selected.userId))}
+                disabled={isSubmitting}
+              >
+                {hasPlanningAccess(selected.userId) ? "Revoke" : "Grant"}
+              </button>
             )}
           </Row>
 

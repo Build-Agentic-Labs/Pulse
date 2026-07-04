@@ -154,7 +154,16 @@ export function WorkOrderBoard() {
             aria-pressed={settingsOpen}
             aria-label="Planning settings"
             title="Planning settings"
-            onClick={() => setSettingsOpen((current) => !current)}
+            onClick={() =>
+              setSettingsOpen((current) => {
+                // The settings section renders at the top of the page; bring it into
+                // view when opening so the toggle never appears to do nothing.
+                if (!current) {
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }
+                return !current;
+              })
+            }
           >
             <Settings size={14} />
           </button>

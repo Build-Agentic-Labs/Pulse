@@ -68,6 +68,11 @@ export function WorkOrderLineRow({
   const searchSeqRef = useRef(0);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const itemNoInputRef = useRef<HTMLInputElement>(null);
+  // The line table lives in an overflow-x-auto scroll container, which clips absolutely
+  // positioned descendants — a dropdown on the bottom rows (the "Add line" flow) would be
+  // cut off. Fixed positioning escapes the clip; the rect is measured when results open.
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => setItemNo(line.itemNo), [line.itemNo]);
   useEffect(() => setDescription(line.description), [line.description]);
@@ -98,8 +103,19 @@ export function WorkOrderLineRow({
       }
       setSuggestionsOpen(false);
     }
+    // The dropdown is position:fixed, so any scroll/resize would leave it floating at a
+    // stale spot — close it instead (typing again reopens it at the right place).
+    function handleViewportChange() {
+      setSuggestionsOpen(false);
+    }
     document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleViewportChange);
+    };
   }, [suggestionsOpen]);
 
   function handleItemNoChange(value: string) {
@@ -122,7 +138,9 @@ export function WorkOrderLineRow({
         .then((results) => {
           if (seq !== searchSeqRef.current) return;
           setSuggestions(results);
-          setSuggestionsOpen(results.length > 0);
+          const rect = itemNoInputRef.current?.getBoundingClientRect();
+          setDropdownPos(rect ? { top: rect.bottom + 4, left: rect.left } : null);
+          setSuggestionsOpen(results.length > 0 && Boolean(rect));
         })
         .catch(() => {
           if (seq !== searchSeqRef.current) return;
@@ -234,23 +252,32 @@ export function WorkOrderLineRow({
       <td className="px-3 py-2">
         <div ref={rootRef} className="relative">
           <input
+            ref={itemNoInputRef}
             type="text"
             className="ui-input"
             value={itemNo}
             onChange={(event) => handleItemNoChange(event.target.value)}
             onBlur={handleItemNoBlur}
-            onFocus={() => suggestions.length > 0 && setSuggestionsOpen(true)}
+            onFocus={() => {
+              if (suggestions.length === 0) {
+                return;
+              }
+              const rect = itemNoInputRef.current?.getBoundingClientRect();
+              setDropdownPos(rect ? { top: rect.bottom + 4, left: rect.left } : null);
+              setSuggestionsOpen(Boolean(rect));
+            }}
             placeholder="Item no."
             role="combobox"
             aria-autocomplete="list"
             aria-expanded={suggestionsOpen}
             aria-controls={suggestionsListId}
           />
-          {suggestionsOpen && suggestions.length > 0 ? (
+          {suggestionsOpen && suggestions.length > 0 && dropdownPos ? (
             <div
               id={suggestionsListId}
               role="listbox"
-              className="absolute left-0 top-full z-20 mt-1 max-h-56 w-64 overflow-y-auto rounded-md border border-line bg-surface shadow-lg"
+              style={{ top: dropdownPos.top, left: dropdownPos.left }}
+              className="fixed z-40 max-h-56 w-64 overflow-y-auto rounded-md border border-line bg-surface shadow-lg"
             >
               {suggestions.map((suggestion) => (
                 <button

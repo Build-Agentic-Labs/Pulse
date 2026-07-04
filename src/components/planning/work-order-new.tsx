@@ -271,7 +271,9 @@ export function WorkOrderNew() {
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto">
+            {/* min-h-0 lets this flex child shrink below its content height — without it the
+                list grows past the panel's max-h, gets clipped, and can never scroll. */}
+            <div className="min-h-0 flex-1 overflow-y-auto">
               {templatesStatus === "loading" ? (
                 <div className="px-4 py-10">
                   <NothingLoadingBlock title="Loading templates" />

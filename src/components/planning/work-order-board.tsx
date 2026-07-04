@@ -1,11 +1,13 @@
 "use client";
 
+import { Settings } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
 import { WORK_ORDER_STATUS_LABELS, WORK_ORDER_TYPE_LABELS } from "@/domain/work-orders";
 import { listWorkOrders, type WorkOrderSummary } from "@/lib/planning/store";
+import { PlanningSettings } from "./planning-settings";
 import { PlanningShell } from "./planning-shell";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
@@ -48,6 +50,7 @@ export function WorkOrderBoard() {
   const [customerFilter, setCustomerFilter] = useState(ALL_FILTER);
   const [monthFilter, setMonthFilter] = useState(ALL_FILTER);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Stale-response guard (same intent as sop-list.tsx's `active` flag / the provider's
   // `cancelled` flag): each load takes a ticket from this counter, and only the latest ticket
@@ -141,8 +144,25 @@ export function WorkOrderBoard() {
   }
 
   return (
-    <PlanningShell title="Work orders">
+    <PlanningShell
+      title="Work orders"
+      actions={
+        canWrite ? (
+          <button
+            type="button"
+            className={`ui-btn-ghost h-8 w-8 px-0 ${settingsOpen ? "ui-state-selected" : ""}`}
+            aria-pressed={settingsOpen}
+            aria-label="Planning settings"
+            title="Planning settings"
+            onClick={() => setSettingsOpen((current) => !current)}
+          >
+            <Settings size={14} />
+          </button>
+        ) : null
+      }
+    >
       <div className="space-y-5">
+        {settingsOpen ? <PlanningSettings /> : null}
         <div className="flex flex-wrap items-center gap-3">
           <span className="ui-mono-label whitespace-nowrap text-ink-secondary">
             {orders.length} work order{orders.length === 1 ? "" : "s"}

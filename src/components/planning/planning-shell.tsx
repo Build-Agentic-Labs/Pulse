@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
@@ -9,23 +10,47 @@ import { usePlanningWorkspace } from "./planning-workspace-provider";
 type PlanningShellProps = {
   title?: ReactNode;
   actions?: ReactNode;
+  /** Where the header's back arrow leads. Omitted = dashboard (space root). */
+  backHref?: string;
+  backLabel?: string;
   children: ReactNode;
 };
 
 /**
  * Sticky-header shell for the Planning space. Header idiom copied verbatim from
- * space-placeholder.tsx so Planning matches every other space's chrome.
+ * space-placeholder.tsx so Planning matches every other space's chrome. Sub-pages
+ * pass `backHref="/planning"` so the arrow steps back to the board, not the dashboard.
  */
-export function PlanningShell({ title, actions, children }: PlanningShellProps) {
+export function PlanningShell({ title, actions, backHref, backLabel = "Back to work orders", children }: PlanningShellProps) {
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface px-4">
-        <BackToDashboardButton />
+        {backHref ? (
+          <Link
+            href={backHref}
+            className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
+            title={backLabel}
+            aria-label={backLabel}
+          >
+            <ArrowLeft size={15} strokeWidth={1.75} />
+          </Link>
+        ) : (
+          <BackToDashboardButton />
+        )}
         <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
           Pulse
         </Link>
         <span className="h-4 w-px bg-border-strong" />
-        <span className="ui-mono-label">Planning{title ? <> · {title}</> : null}</span>
+        <span className="ui-mono-label">
+          {backHref ? (
+            <Link href="/planning" className="hover:text-ink" title="Work orders">
+              Planning
+            </Link>
+          ) : (
+            "Planning"
+          )}
+          {title ? <> · {title}</> : null}
+        </span>
         <span className="flex-1" />
         {actions}
         <UserNav />

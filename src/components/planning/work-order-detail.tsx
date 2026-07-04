@@ -281,6 +281,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
   return (
     <PlanningShell
       title={order ? order.orderNo : "Work order"}
+      backHref="/planning"
       actions={
         order ? (
           <div className="flex items-center gap-2">

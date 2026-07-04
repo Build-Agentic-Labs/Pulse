@@ -249,7 +249,7 @@ export function WorkOrderNew() {
   }
 
   return (
-    <PlanningShell title="New work order">
+    <PlanningShell title="New work order" backHref="/planning">
       <div className="space-y-5">
         <div>
           <h1 className="ui-section-title">New work order</h1>

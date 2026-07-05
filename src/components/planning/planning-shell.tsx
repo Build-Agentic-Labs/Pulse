@@ -13,6 +13,8 @@ type PlanningShellProps = {
   /** Where the header's back arrow leads. Omitted = dashboard (space root). */
   backHref?: string;
   backLabel?: string;
+  /** Widens the content column (e.g. the detail page's side-by-side print preview). */
+  wide?: boolean;
   children: ReactNode;
 };
 
@@ -21,7 +23,7 @@ type PlanningShellProps = {
  * space-placeholder.tsx so Planning matches every other space's chrome. Sub-pages
  * pass `backHref="/planning"` so the arrow steps back to the board, not the dashboard.
  */
-export function PlanningShell({ title, actions, backHref, backLabel = "Back to work orders", children }: PlanningShellProps) {
+export function PlanningShell({ title, actions, backHref, backLabel = "Back to work orders", wide = false, children }: PlanningShellProps) {
   // The app disables document scrolling globally (html/body overflow:hidden — see
   // globals.css), so each space provides its own scroll container, like the SOP shell.
   return (
@@ -59,7 +61,7 @@ export function PlanningShell({ title, actions, backHref, backLabel = "Back to w
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1100px] px-8 py-8">{children}</div>
+        <div className={`mx-auto px-8 py-8 ${wide ? "max-w-[1760px]" : "max-w-[1100px]"}`}>{children}</div>
       </main>
     </div>
   );

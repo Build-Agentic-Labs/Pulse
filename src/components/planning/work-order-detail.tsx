@@ -28,6 +28,7 @@ import {
 import { PlanningShell } from "./planning-shell";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 import { WorkOrderLineRow } from "./work-order-line-row";
+import { WorkOrderPrintDocument } from "./work-order-print";
 
 const FORWARD_ACTION_LABELS: Partial<Record<WorkOrderStatus, string>> = {
   draft: "Release",
@@ -282,6 +283,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
     <PlanningShell
       title={order ? order.orderNo : "Work order"}
       backHref="/planning"
+      wide
       actions={
         order ? (
           <div className="flex items-center gap-2">
@@ -338,8 +340,9 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
           </button>
         </section>
       ) : order && form ? (
-        <div className="space-y-5">
-          {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
+        <div className="grid grid-cols-1 items-start gap-8 2xl:grid-cols-[minmax(0,1fr)_minmax(520px,720px)]">
+          <div className="min-w-0 space-y-5">
+            {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
           <section className="ui-panel space-y-4 p-5">
             <div className="flex flex-wrap items-center gap-3">
@@ -481,6 +484,22 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
               </div>
             ) : null}
           </section>
+          </div>
+
+          {/* Live print preview: the exact document the Print route produces, re-rendered
+              from the same state the editor mutates. Hidden below 2xl where there is no
+              room beside the editor — the Print button remains the path there. */}
+          <aside className="sticky top-0 hidden min-w-0 2xl:block">
+            <div className="mb-2 flex items-baseline justify-between">
+              <span className="ui-mono-label text-ink-tertiary">Print preview · live</span>
+              <Link href={`/planning/work-orders/${order.id}/print`} className="ui-mono-label text-ink-tertiary hover:text-ink">
+                Open full preview
+              </Link>
+            </div>
+            <div className="max-h-[calc(100dvh-120px)] overflow-y-auto pr-1">
+              <WorkOrderPrintDocument order={order} lines={order.lines} />
+            </div>
+          </aside>
         </div>
       ) : null}
     </PlanningShell>

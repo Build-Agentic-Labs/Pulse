@@ -54,62 +54,104 @@ const PRINT_STYLES = `
   font-family: var(--type-sans);
   max-width: 820px;
   margin: 0 auto 24px;
-  padding: 48px 56px;
+  padding: 44px 52px;
   border: 1px solid #d8d0c2;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  /* US Letter proportions on screen, so the preview reads as the real page. */
+  aspect-ratio: 8.5 / 11;
+  display: flex;
+  flex-direction: column;
 }
 .wo-sheet-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
-.wo-customer {
-  font-size: 28px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  line-height: 1.15;
-}
-.wo-order-type {
-  margin-top: 4px;
-  font-size: 13px;
-  color: #52606d;
+.wo-logo {
+  height: 40px;
+  width: auto;
 }
 .wo-meta {
   font-family: var(--type-mono);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.7;
   text-align: right;
   color: #13211b;
   white-space: nowrap;
 }
+.wo-title {
+  font-size: 26px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+.wo-order-type {
+  margin-top: 2px;
+  font-family: var(--type-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #52606d;
+}
+.wo-model {
+  margin-top: 14px;
+  margin-bottom: 26px;
+  font-family: var(--type-mono);
+  font-size: 18px;
+  font-weight: 700;
+}
 .wo-lines {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 28px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .wo-lines th {
-  border-bottom: 1px solid #13211b;
+  border-bottom: 2px solid #13211b;
   padding: 6px 8px;
   font-family: var(--type-mono);
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #52606d;
+  letter-spacing: 0.06em;
+  color: #13211b;
   text-align: left;
 }
+.wo-lines th.wo-col-qty,
+.wo-lines td.wo-col-qty {
+  text-align: center;
+  width: 110px;
+}
 .wo-lines td {
+  padding: 10px 8px 2px;
+  vertical-align: bottom;
+}
+.wo-lines th:first-child,
+.wo-lines td:first-child {
+  width: 170px;
+  white-space: nowrap;
+}
+.wo-lines td:nth-child(2) {
+  white-space: nowrap;
+}
+/* Description sits on its own row under the item number, like the Excel sheet;
+   the block divider lives under the description, not between the pair. */
+.wo-line-desc td {
   border-bottom: 1px solid #d8d0c2;
-  padding: 8px;
-  vertical-align: top;
+  padding: 2px 8px 12px;
+  font-size: 12.5px;
+  color: #52606d;
 }
 .wo-mono {
   font-family: var(--type-mono);
 }
+/* Notes + footer sit at the bottom of the page, matching the Excel layout. */
+.wo-sheet-bottom {
+  margin-top: auto;
+}
 .wo-notes {
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 .wo-notes-label {
   margin-bottom: 6px;
@@ -152,8 +194,13 @@ const PRINT_STYLES = `
     margin: 0;
     border: none;
     box-shadow: none;
+    /* Pagination owns the page height when printing; the on-screen letter
+       aspect and bottom-pinning must not force overflow onto a second page. */
+    aspect-ratio: auto;
+    display: block;
   }
-  tr {
+  tr,
+  tbody {
     break-inside: avoid;
   }
 }
@@ -174,48 +221,52 @@ export function WorkOrderPrintDocument({ order, lines }: WorkOrderPrintDocumentP
       <style>{PRINT_STYLES}</style>
       <article className="wo-sheet">
         <header className="wo-sheet-header">
-          <div>
-            <div className="wo-customer">{order.customer}</div>
-            <div className="wo-order-type">{WORK_ORDER_TYPE_LABELS[order.orderType]}</div>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element -- self-contained print document */}
+          <img className="wo-logo" src="/sop/ana-logo.png" alt="ANA" />
           <div className="wo-meta">
             <div>Order {order.orderNo}</div>
             <div>{formatOrderDate(order.orderDate)}</div>
-            <div>{order.model}</div>
           </div>
         </header>
+
+        {/* Title block mirrors the Excel sheet: "<CUSTOMER> WORK ORDER", type, then model. */}
+        <div>
+          <div className="wo-title">{order.customer ? `${order.customer} Work Order` : "Work Order"}</div>
+          <div className="wo-order-type">{WORK_ORDER_TYPE_LABELS[order.orderType]}</div>
+        </div>
+        {order.model ? <div className="wo-model">{order.model}</div> : <div className="wo-model" />}
 
         <table className="wo-lines">
           <thead>
             <tr>
-              <th>Item no</th>
-              <th>Description</th>
-              <th>Source</th>
-              <th>Build qty</th>
-              <th>Shipped</th>
+              <th>Item no.</th>
+              <th>A# / Source</th>
+              <th className="wo-col-qty">Build qty</th>
+              <th className="wo-col-qty">Shipped qty</th>
             </tr>
           </thead>
-          <tbody>
-            {lines.map((line) => (
-              <tr key={line.id}>
+          {lines.map((line) => (
+            <tbody key={line.id}>
+              <tr>
                 <td className="wo-mono">{line.itemNo}</td>
-                <td>{line.description}</td>
-                <td>{formatSource(line)}</td>
-                <td>{line.buildQty}</td>
-                <td className="wo-mono">{formatShipped(line)}</td>
+                <td className="wo-mono">{formatSource(line)}</td>
+                <td className="wo-col-qty">{line.buildQty}</td>
+                <td className="wo-col-qty wo-mono">{formatShipped(line)}</td>
               </tr>
-            ))}
-          </tbody>
+              <tr className="wo-line-desc">
+                <td colSpan={4}>{line.description}</td>
+              </tr>
+            </tbody>
+          ))}
         </table>
 
-        {order.notes.trim() ? (
+        <div className="wo-sheet-bottom">
           <div className="wo-notes">
             <div className="wo-notes-label">Notes</div>
-            <p>{order.notes}</p>
+            <p>{order.notes.trim() ? order.notes : "—"}</p>
           </div>
-        ) : null}
-
-        <footer className="wo-sheet-footer">Pulse · printed {new Date().toLocaleString()}</footer>
+          <footer className="wo-sheet-footer">Pulse · printed {new Date().toLocaleString()}</footer>
+        </div>
       </article>
     </>
   );

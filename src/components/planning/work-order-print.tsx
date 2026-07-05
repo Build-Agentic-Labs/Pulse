@@ -150,6 +150,13 @@ const PRINT_STYLES = `
 .wo-sheet-bottom {
   margin-top: auto;
 }
+/* Inside the fit-to-screen preview pane the sheet keeps its natural letter size and
+   the pane scales it as a whole — see FittedPrintPreview in work-order-detail.tsx. */
+.wo-fit .wo-sheet {
+  width: 820px;
+  max-width: none;
+  margin: 0;
+}
 .wo-notes {
   margin-bottom: 28px;
 }

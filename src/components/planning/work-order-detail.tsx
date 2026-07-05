@@ -30,6 +30,68 @@ import { usePlanningWorkspace } from "./planning-workspace-provider";
 import { WorkOrderLineRow } from "./work-order-line-row";
 import { WorkOrderPrintDocument } from "./work-order-print";
 
+// US Letter at the sheet's natural 820px width (820 × 11 / 8.5).
+const SHEET_NATURAL_WIDTH = 820;
+const SHEET_NATURAL_HEIGHT = Math.round((SHEET_NATURAL_WIDTH * 11) / 8.5);
+
+/**
+ * Renders the print document scaled so the ENTIRE letter page always fits inside the
+ * pane — no scrolling to see the sheet. The pane is sized to the viewport (minus the
+ * space header and page padding); a ResizeObserver on both the pane and the sheet
+ * recomputes the scale when the window resizes or the document grows past one page.
+ */
+function FittedPrintPreview({ order }: { order: WorkOrderRecord }) {
+  const paneRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<{ scale: number; height: number } | null>(null);
+
+  useEffect(() => {
+    const pane = paneRef.current;
+    const sheet = sheetRef.current;
+    if (!pane || !sheet) {
+      return;
+    }
+    function compute() {
+      if (!pane || !sheet) {
+        return;
+      }
+      const box = pane.getBoundingClientRect();
+      // A long order grows taller than one letter page; fit whatever it actually is.
+      const naturalHeight = Math.max(SHEET_NATURAL_HEIGHT, sheet.scrollHeight);
+      const scale = Math.min(box.width / SHEET_NATURAL_WIDTH, box.height / naturalHeight, 1);
+      setFit(scale > 0 ? { scale, height: naturalHeight * scale } : null);
+    }
+    compute();
+    const observer = new ResizeObserver(compute);
+    observer.observe(pane);
+    observer.observe(sheet);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={paneRef} className="h-[calc(100dvh-140px)]">
+      <div
+        className="mx-auto overflow-hidden"
+        style={{
+          width: fit ? SHEET_NATURAL_WIDTH * fit.scale : SHEET_NATURAL_WIDTH,
+          height: fit ? fit.height : 0,
+          visibility: fit ? "visible" : "hidden",
+        }}
+      >
+        {/* The transform scales pixels, not layout — the wrapper above clamps the
+            layout box to the scaled size so nothing bleeds past the pane. */}
+        <div
+          ref={sheetRef}
+          className="wo-fit origin-top-left"
+          style={{ width: SHEET_NATURAL_WIDTH, transform: fit ? `scale(${fit.scale})` : undefined }}
+        >
+          <WorkOrderPrintDocument order={order} lines={order.lines} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const FORWARD_ACTION_LABELS: Partial<Record<WorkOrderStatus, string>> = {
   draft: "Release",
   released: "Start production",
@@ -487,8 +549,9 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
           </div>
 
           {/* Live print preview: the exact document the Print route produces, re-rendered
-              from the same state the editor mutates. Hidden below 2xl where there is no
-              room beside the editor — the Print button remains the path there. */}
+              from the same state the editor mutates, scaled so the whole letter page is
+              always visible without scrolling. Hidden below 2xl where there is no room
+              beside the editor — the Print button remains the path there. */}
           <aside className="sticky top-0 hidden min-w-0 2xl:block">
             <div className="mb-2 flex items-baseline justify-between">
               <span className="ui-mono-label text-ink-tertiary">Print preview · live</span>
@@ -496,9 +559,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
                 Open full preview
               </Link>
             </div>
-            <div className="max-h-[calc(100dvh-120px)] overflow-y-auto pr-1">
-              <WorkOrderPrintDocument order={order} lines={order.lines} />
-            </div>
+            <FittedPrintPreview order={order} />
           </aside>
         </div>
       ) : null}

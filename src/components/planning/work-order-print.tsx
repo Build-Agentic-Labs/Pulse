@@ -414,8 +414,11 @@ export function WorkOrderPrintPreview({ workOrderId }: { workOrderId: string }) 
       }
       setOrder(found);
       setStatus("ready");
-      // Mains carry the final-assembly match strip; other types render without it.
-      const info = found.orderType === "head_unit" ? await getWorkOrderMatch(workspaceId, found) : null;
+      // Mains carry the final-assembly match strip; other types render without it. The lookup is
+      // isolated (own catch) so a match failure degrades to no strip rather than erroring a page
+      // whose order loaded fine — matching the detail view and batch route.
+      const info =
+        found.orderType === "head_unit" ? await getWorkOrderMatch(workspaceId, found).catch(() => null) : null;
       if (seq === loadSeqRef.current) setMatch(info);
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;

@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
-import { WORK_ORDER_TYPE_LABELS, WORK_ORDER_TYPES, suggestOrderNo, type WorkOrderType } from "@/domain/work-orders";
+import {
+  WORK_ORDER_TYPE_LABELS,
+  WORK_ORDER_TYPES,
+  suggestOrderNo,
+  trailerOrderNo,
+  type WorkOrderType,
+} from "@/domain/work-orders";
 import {
   createWorkOrder,
   getTemplate,
@@ -202,8 +208,13 @@ export function WorkOrderNew() {
   const selectedTemplateSummary = selectedId === BLANK_SELECTION ? null : templates.find((t) => t.id === selectedId);
   const readyDetail = selectedDetail.status === "ready" ? selectedDetail.detail : null;
 
+  // Trailer numbers are the config letter, not a running NN, and there is no letter picker here yet
+  // (Task C owns it) — so show a static `TRL-MMYY-{letter}` shape rather than a misleading sequence.
   const suggestedOrderNo = useMemo(
-    () => suggestOrderNo(existingOrderNos, form.orderDate, form.orderType),
+    () =>
+      form.orderType === "trailer"
+        ? trailerOrderNo(form.orderDate, "?")
+        : suggestOrderNo(existingOrderNos, form.orderDate, form.orderType),
     [existingOrderNos, form.orderDate, form.orderType],
   );
 
@@ -232,7 +243,7 @@ export function WorkOrderNew() {
     setError("");
     try {
       const lines = readyDetail ? linesFromTemplate(readyDetail) : [];
-      const id = await createWorkOrder(workspaceId, {
+      const result = await createWorkOrder(workspaceId, {
         templateId: selectedId === BLANK_SELECTION ? null : selectedId,
         customer: form.customer.trim(),
         model: form.model.trim(),
@@ -241,7 +252,7 @@ export function WorkOrderNew() {
         notes: form.notes,
         lines,
       });
-      router.push(`/planning/work-orders/${id}`);
+      router.push(`/planning/work-orders/${result.id}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not create the work order.");
       setSaving(false);

@@ -11,14 +11,19 @@ import {
   buildTransitionPatch,
   ORDER_TYPE_PREFIXES,
   orderNoMonthKey,
+  setNoFromOrderNo,
   suggestOrderNo,
+  trailerOrderNo,
   type WorkOrderFulfillment,
   type WorkOrderStatus,
   type WorkOrderType,
 } from "@/domain/work-orders";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import type { WorkOrderMatchInfo } from "@/components/planning/work-order-print";
 import { diffItemMaster, type ParsedItemMasterRow } from "./parse-item-master";
 import type { ParsedTemplateSheet } from "./parse-workbook";
+
+type PlannerSupabaseClient = ReturnType<typeof createPlannerSupabaseClient>;
 
 // ── types ─────────────────────────────────────────────────────────────────
 
@@ -32,6 +37,12 @@ export interface WorkOrderSummary {
   status: WorkOrderStatus;
   orderDate: string;
   updatedAt: string;
+  /** Short set/match number shared by a Gen↔PM pair, e.g. "01"; "" for unset/legacy orders. */
+  setNo: string;
+  /** Trailer configuration letter — set on Mains (the trailer they pair with) and TRL orders. "" if none. */
+  trailerLetter: string;
+  /** On a PM order, the id of the Main it married to; null otherwise. */
+  mainOrderId: string | null;
   /** Count of this order's lines still missing their assembly order number (see `lineNeedsAssemblyNo`). */
   missingAssemblyCount: number;
 }
@@ -58,6 +69,12 @@ export interface WorkOrderDetail {
   status: WorkOrderStatus;
   orderDate: string;
   notes: string;
+  /** Short set/match number shared by a Gen↔PM pair, e.g. "01"; "" for unset/legacy orders. */
+  setNo: string;
+  /** Trailer configuration letter — set on Mains (the trailer they pair with) and TRL orders. "" if none. */
+  trailerLetter: string;
+  /** On a PM order, the id of the Main it married to; null otherwise. */
+  mainOrderId: string | null;
   releasedAt: string | null;
   productionStartedAt: string | null;
   shippedAt: string | null;
@@ -75,6 +92,10 @@ export interface TemplateSummary {
   orderType: WorkOrderType;
   retiredAt: string | null;
   updatedAt: string;
+  /** Set definition: the PM template that auto-creates with a Main built from this template. Null = none. */
+  pmTemplateId: string | null;
+  /** Set definition: default trailer configuration letter for orders from this template. "" = none. */
+  defaultTrailerLetter: string;
   /** Count of the template's lines; filled in separately by `listTemplates`, once counts are known. */
   lineCount: number;
 }
@@ -94,6 +115,10 @@ export interface TemplateDetail {
   model: string;
   orderType: WorkOrderType;
   notesDefault: string;
+  /** Set definition: the PM template that auto-creates with a Main built from this template. Null = none. */
+  pmTemplateId: string | null;
+  /** Set definition: default trailer configuration letter for orders from this template. "" = none. */
+  defaultTrailerLetter: string;
   retiredAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -107,6 +132,23 @@ export interface SpaceAccessRow {
   createdAt: string;
 }
 
+/** A trailer supermarket configuration: letter → human name → optional trailer template. */
+export interface TrailerConfig {
+  letter: string;
+  name: string;
+  trailerTemplateId: string | null;
+  updatedAt: string;
+}
+
+/** The auto-created Power Module half of a Gen↔PM set, supplied alongside a `head_unit` order. */
+export interface CreateWorkOrderPmInput {
+  templateId: string | null;
+  lines: Array<Omit<WorkOrderLine, "id">>;
+  customer: string;
+  model: string;
+  notes: string;
+}
+
 export interface CreateWorkOrderInput {
   templateId: string | null;
   customer: string;
@@ -115,19 +157,36 @@ export interface CreateWorkOrderInput {
   orderDate: string;
   notes: string;
   lines: Array<Omit<WorkOrderLine, "id">>;
+  /** Trailer configuration letter: required for `trailer` orders, the paired trailer for a Main. */
+  trailerLetter?: string;
+  /** When present on a `head_unit` order, also creates the married Power Module order. */
+  pm?: CreateWorkOrderPmInput | null;
+}
+
+/** The created order's id + number, plus the PM's when a set was created. */
+export interface CreateWorkOrderResult {
+  id: string;
+  orderNo: string;
+  pmId?: string;
+  pmOrderNo?: string;
 }
 
 // ── column projections ───────────────────────────────────────────────────
 
-const WORK_ORDER_LIST_COLUMNS = "id, order_no, customer, model, order_type, status, order_date, updated_at";
+const WORK_ORDER_LIST_COLUMNS =
+  "id, order_no, customer, model, order_type, status, order_date, set_no, trailer_letter, main_order_id, updated_at";
 const WORK_ORDER_COLUMNS =
-  "id, order_no, template_id, customer, model, order_type, status, order_date, notes, released_at, production_started_at, shipped_at, cancelled_at, created_at, updated_at";
+  "id, order_no, template_id, customer, model, order_type, status, order_date, notes, set_no, trailer_letter, main_order_id, released_at, production_started_at, shipped_at, cancelled_at, created_at, updated_at";
 const WORK_ORDER_LINE_COLUMNS =
   "id, item_no, description, build_qty, shipped_qty, fulfillment, assembly_order_no, pull_from_ref, position";
 
-const TEMPLATE_LIST_COLUMNS = "id, name, customer, model, order_type, retired_at, updated_at";
-const TEMPLATE_COLUMNS = "id, name, customer, model, order_type, notes_default, retired_at, created_at, updated_at";
+const TEMPLATE_LIST_COLUMNS =
+  "id, name, customer, model, order_type, pm_template_id, default_trailer_letter, retired_at, updated_at";
+const TEMPLATE_COLUMNS =
+  "id, name, customer, model, order_type, notes_default, pm_template_id, default_trailer_letter, retired_at, created_at, updated_at";
 const TEMPLATE_LINE_COLUMNS = "id, item_no, description, build_qty, position";
+
+const TRAILER_CONFIG_COLUMNS = "letter, name, trailer_template_id, updated_at";
 
 // ── mappers (snake_case rows -> camelCase types) ─────────────────────────
 
@@ -142,6 +201,9 @@ function mapWorkOrderSummary(row: Record<string, unknown>): WorkOrderSummary {
     status: (row.status as WorkOrderStatus) ?? "draft",
     orderDate: String(row.order_date ?? ""),
     updatedAt: String(row.updated_at ?? ""),
+    setNo: String(row.set_no ?? ""),
+    trailerLetter: String(row.trailer_letter ?? ""),
+    mainOrderId: row.main_order_id ? String(row.main_order_id) : null,
     missingAssemblyCount: 0,
   };
 }
@@ -170,6 +232,9 @@ function mapWorkOrderDetail(header: Record<string, unknown>, lines: Record<strin
     status: (header.status as WorkOrderStatus) ?? "draft",
     orderDate: String(header.order_date ?? ""),
     notes: String(header.notes ?? ""),
+    setNo: String(header.set_no ?? ""),
+    trailerLetter: String(header.trailer_letter ?? ""),
+    mainOrderId: header.main_order_id ? String(header.main_order_id) : null,
     releasedAt: header.released_at ? String(header.released_at) : null,
     productionStartedAt: header.production_started_at ? String(header.production_started_at) : null,
     shippedAt: header.shipped_at ? String(header.shipped_at) : null,
@@ -188,6 +253,8 @@ function mapTemplateSummary(row: Record<string, unknown>): TemplateSummary {
     customer: String(row.customer ?? ""),
     model: String(row.model ?? ""),
     orderType: (row.order_type as WorkOrderType) ?? "mts",
+    pmTemplateId: row.pm_template_id ? String(row.pm_template_id) : null,
+    defaultTrailerLetter: String(row.default_trailer_letter ?? ""),
     retiredAt: row.retired_at ? String(row.retired_at) : null,
     updatedAt: String(row.updated_at ?? ""),
     lineCount: 0,
@@ -212,6 +279,8 @@ function mapTemplateDetail(header: Record<string, unknown>, lines: Record<string
     model: String(header.model ?? ""),
     orderType: (header.order_type as WorkOrderType) ?? "mts",
     notesDefault: String(header.notes_default ?? ""),
+    pmTemplateId: header.pm_template_id ? String(header.pm_template_id) : null,
+    defaultTrailerLetter: String(header.default_trailer_letter ?? ""),
     retiredAt: header.retired_at ? String(header.retired_at) : null,
     createdAt: String(header.created_at ?? ""),
     updatedAt: String(header.updated_at ?? ""),
@@ -225,6 +294,15 @@ function mapSpaceAccessRow(row: Record<string, unknown>): SpaceAccessRow {
     space: String(row.space ?? ""),
     grantedBy: row.granted_by ? String(row.granted_by) : null,
     createdAt: String(row.created_at ?? ""),
+  };
+}
+
+function mapTrailerConfig(row: Record<string, unknown>): TrailerConfig {
+  return {
+    letter: String(row.letter ?? ""),
+    name: String(row.name ?? ""),
+    trailerTemplateId: row.trailer_template_id ? String(row.trailer_template_id) : null,
+    updatedAt: String(row.updated_at ?? ""),
   };
 }
 
@@ -300,12 +378,85 @@ export async function getWorkOrder(workspaceId: string, id: string): Promise<Wor
   return mapWorkOrderDetail(header, lines ?? []);
 }
 
-export async function createWorkOrder(workspaceId: string, input: CreateWorkOrderInput): Promise<string> {
+/**
+ * Insert a work order's lines, positioned by array order. Throws a message naming the (already
+ * created) order so a partial failure surfaces the number rather than a bare Postgres error.
+ */
+async function insertWorkOrderLines(
+  supabase: PlannerSupabaseClient,
+  workspaceId: string,
+  workOrderId: string,
+  orderNo: string,
+  lines: ReadonlyArray<Omit<WorkOrderLine, "id">>,
+): Promise<void> {
+  if (lines.length === 0) {
+    return;
+  }
+  const { error } = await supabase.from("work_order_lines").insert(
+    lines.map((line, index) => ({
+      work_order_id: workOrderId,
+      workspace_id: workspaceId,
+      item_no: line.itemNo,
+      description: line.description,
+      build_qty: line.buildQty,
+      shipped_qty: line.shippedQty,
+      fulfillment: line.fulfillment,
+      assembly_order_no: line.assemblyOrderNo,
+      pull_from_ref: line.pullFromRef,
+      position: index,
+    })),
+  );
+  if (error) {
+    throw new Error(`Order ${orderNo} was created but its lines failed: ${error.message}`);
+  }
+}
+
+/** The month's existing GEN+PM order numbers — the shared pool a set's NN is drawn from. */
+async function fetchGenPmOrderNos(
+  supabase: PlannerSupabaseClient,
+  workspaceId: string,
+  mmyy: string,
+): Promise<string[]> {
+  const monthOrFilter = [ORDER_TYPE_PREFIXES.head_unit, ORDER_TYPE_PREFIXES.power_module]
+    .map((prefix) => `order_no.ilike.${prefix}-${mmyy}-%`)
+    .join(",");
+  const { data, error } = await supabase
+    .from("work_orders")
+    .select("order_no")
+    .eq("workspace_id", workspaceId)
+    .or(monthOrFilter);
+  if (error) {
+    throw new Error(`Could not load existing order numbers: ${error.message}`);
+  }
+  return (data ?? []).map((row) => String(row.order_no));
+}
+
+/**
+ * Create a work order. Three shapes:
+ *  - `head_unit` with `pm`: creates the married Gen↔PM set — Main `GEN-MMYY-NN` and Power Module
+ *    `PM-MMYY-NN` sharing one NN (computed once from the shared GEN+PM pool). Retries the pair once
+ *    on a 23505 race; if the PM cannot land after the Main did, throws naming the Main (never drops it).
+ *  - `trailer`: requires a valid A–Z `trailerLetter`, numbers as `TRL-MMYY-{LETTER}`; a duplicate in
+ *    the month is a semantic collision (one order per config/month) surfaced as a friendly Error — no retry.
+ *  - everything else (including a `head_unit` with no `pm`): the type's own prefix, recompute-once on race.
+ */
+export async function createWorkOrder(
+  workspaceId: string,
+  input: CreateWorkOrderInput,
+): Promise<CreateWorkOrderResult> {
   const supabase = createPlannerSupabaseClient();
   const { data: userData } = await supabase.auth.getUser();
+  const createdBy = userData.user?.id ?? null;
   const mmyy = orderNoMonthKey(input.orderDate);
-  // Numbering scopes to this month's rows for the relevant prefix(es). head_unit/power_module
-  // share one GEN+PM sequence pool, so fetch both; every other type scans only its own prefix.
+
+  if (input.orderType === "trailer") {
+    return createTrailerWorkOrder(supabase, workspaceId, input, createdBy);
+  }
+  if (input.orderType === "head_unit" && input.pm) {
+    return createGenPmSet(supabase, workspaceId, input, input.pm, mmyy, createdBy);
+  }
+
+  // Default path: the type's own prefix (head_unit/power_module share the GEN+PM pool via suggestOrderNo).
   const scanPrefixes =
     input.orderType === "head_unit" || input.orderType === "power_module"
       ? [ORDER_TYPE_PREFIXES.head_unit, ORDER_TYPE_PREFIXES.power_module]
@@ -338,7 +489,8 @@ export async function createWorkOrder(workspaceId: string, input: CreateWorkOrde
         order_type: input.orderType,
         order_date: input.orderDate,
         notes: input.notes,
-        created_by: userData.user?.id ?? null,
+        set_no: setNoFromOrderNo(orderNo),
+        created_by: createdBy,
       })
       .select("id")
       .single();
@@ -349,28 +501,145 @@ export async function createWorkOrder(workspaceId: string, input: CreateWorkOrde
       throw new Error(`Could not create the work order: ${insertError.message}`);
     }
 
-    if (input.lines.length > 0) {
-      const { error: linesError } = await supabase.from("work_order_lines").insert(
-        input.lines.map((line, index) => ({
-          work_order_id: inserted.id,
-          workspace_id: workspaceId,
-          item_no: line.itemNo,
-          description: line.description,
-          build_qty: line.buildQty,
-          shipped_qty: line.shippedQty,
-          fulfillment: line.fulfillment,
-          assembly_order_no: line.assemblyOrderNo,
-          pull_from_ref: line.pullFromRef,
-          position: index,
-        })),
-      );
-      if (linesError) {
-        throw new Error(`Order ${orderNo} was created but its lines failed: ${linesError.message}`);
-      }
-    }
-    return inserted.id;
+    await insertWorkOrderLines(supabase, workspaceId, inserted.id, orderNo, input.lines);
+    return { id: inserted.id, orderNo };
   }
   throw new Error("Could not allocate a unique order number; try again.");
+}
+
+/** Trailer supermarket order: one per config letter per month; a 23505 is a semantic duplicate. */
+async function createTrailerWorkOrder(
+  supabase: PlannerSupabaseClient,
+  workspaceId: string,
+  input: CreateWorkOrderInput,
+  createdBy: string | null,
+): Promise<CreateWorkOrderResult> {
+  const letter = (input.trailerLetter ?? "").trim().toUpperCase();
+  // The domain's trailerOrderNo does not validate the letter — reject here before building a number.
+  if (!/^[A-Z]$/.test(letter)) {
+    throw new Error("A trailer configuration letter (A–Z) is required to create a trailer order.");
+  }
+  const orderNo = trailerOrderNo(input.orderDate, letter);
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("work_orders")
+    .insert({
+      workspace_id: workspaceId,
+      order_no: orderNo,
+      template_id: input.templateId,
+      customer: input.customer,
+      model: input.model,
+      order_type: "trailer",
+      order_date: input.orderDate,
+      notes: input.notes,
+      trailer_letter: letter,
+      set_no: setNoFromOrderNo(orderNo),
+      created_by: createdBy,
+    })
+    .select("id")
+    .single();
+  if (insertError) {
+    if (insertError.code === "23505") {
+      throw new Error(
+        `${orderNo} already exists for this month — open it and raise its build quantity instead.`,
+      );
+    }
+    throw new Error(`Could not create the work order: ${insertError.message}`);
+  }
+
+  await insertWorkOrderLines(supabase, workspaceId, inserted.id, orderNo, input.lines);
+  return { id: inserted.id, orderNo };
+}
+
+/**
+ * Create the married Gen↔PM set. NN is computed ONCE per attempt from the shared GEN+PM pool so the
+ * Main (`GEN-MMYY-NN`) and Power Module (`PM-MMYY-NN`) always carry the same set number. A 23505 on
+ * either insert retries the whole pair once with a fresh NN (the Main is deleted first — its lines
+ * cascade — so no orphan). If the PM still cannot land after the Main did, the Main is left in place
+ * and an Error naming it is thrown, so the created Main is never silently dropped.
+ */
+async function createGenPmSet(
+  supabase: PlannerSupabaseClient,
+  workspaceId: string,
+  input: CreateWorkOrderInput,
+  pm: CreateWorkOrderPmInput,
+  mmyy: string,
+  createdBy: string | null,
+): Promise<CreateWorkOrderResult> {
+  const mainTrailerLetter = (input.trailerLetter ?? "").trim().toUpperCase();
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const existing = await fetchGenPmOrderNos(supabase, workspaceId, mmyy);
+    const mainOrderNo = suggestOrderNo(existing, input.orderDate, "head_unit");
+    const setNo = setNoFromOrderNo(mainOrderNo);
+    const pmOrderNo = `${ORDER_TYPE_PREFIXES.power_module}-${mmyy}-${setNo}`;
+
+    const { data: mainInserted, error: mainError } = await supabase
+      .from("work_orders")
+      .insert({
+        workspace_id: workspaceId,
+        order_no: mainOrderNo,
+        template_id: input.templateId,
+        customer: input.customer,
+        model: input.model,
+        order_type: "head_unit",
+        order_date: input.orderDate,
+        notes: input.notes,
+        set_no: setNo,
+        trailer_letter: mainTrailerLetter,
+        created_by: createdBy,
+      })
+      .select("id")
+      .single();
+    if (mainError) {
+      if (mainError.code === "23505" && attempt === 0) {
+        continue; // NN taken between scan and insert — recompute the pair.
+      }
+      throw new Error(`Could not create the work order: ${mainError.message}`);
+    }
+
+    // Main landed. Its lines cascade on delete, so it is safe to insert them before the PM.
+    await insertWorkOrderLines(supabase, workspaceId, mainInserted.id, mainOrderNo, input.lines);
+
+    const { data: pmInserted, error: pmError } = await supabase
+      .from("work_orders")
+      .insert({
+        workspace_id: workspaceId,
+        order_no: pmOrderNo,
+        template_id: pm.templateId,
+        customer: pm.customer,
+        model: pm.model,
+        order_type: "power_module",
+        order_date: input.orderDate,
+        notes: pm.notes,
+        set_no: setNo,
+        main_order_id: mainInserted.id,
+        created_by: createdBy,
+      })
+      .select("id")
+      .single();
+    if (pmError) {
+      if (pmError.code === "23505" && attempt === 0) {
+        // Roll the Main back (lines cascade) and retry the pair once with a fresh NN.
+        const { error: rollbackError } = await supabase
+          .from("work_orders")
+          .delete()
+          .eq("workspace_id", workspaceId)
+          .eq("id", mainInserted.id);
+        if (rollbackError) {
+          throw new Error(
+            `${mainOrderNo} was created but its power module failed and could not be rolled back: ${rollbackError.message}`,
+          );
+        }
+        continue;
+      }
+      throw new Error(`${mainOrderNo} was created but its power module failed: ${pmError.message}`);
+    }
+
+    await insertWorkOrderLines(supabase, workspaceId, pmInserted.id, pmOrderNo, pm.lines);
+    return { id: mainInserted.id, orderNo: mainOrderNo, pmId: pmInserted.id, pmOrderNo };
+  }
+  throw new Error("Could not allocate a unique set number; try again.");
 }
 
 export async function updateWorkOrderHeader(
@@ -498,6 +767,61 @@ export async function transitionWorkOrder(
   return (data ?? []).length > 0;
 }
 
+/**
+ * The final-assembly match strip for a Main (`head_unit`) order: its set number, the paired PM's
+ * order number (reverse lookup by `main_order_id`), and the trailer letter with its catalog name.
+ * Returns null for non-Main types — PM and trailer sheets do not carry the strip in v1.
+ */
+export async function getWorkOrderMatch(
+  workspaceId: string,
+  order: {
+    id: string;
+    orderNo: string;
+    orderType: WorkOrderType;
+    setNo: string;
+    trailerLetter: string;
+    mainOrderId: string | null;
+  },
+): Promise<WorkOrderMatchInfo | null> {
+  if (order.orderType !== "head_unit") {
+    return null;
+  }
+  const supabase = createPlannerSupabaseClient();
+
+  // Paired Power Module: the PM order whose main_order_id points back at this Main.
+  const { data: pmRow, error: pmError } = await supabase
+    .from("work_orders")
+    .select("order_no")
+    .eq("workspace_id", workspaceId)
+    .eq("main_order_id", order.id)
+    .maybeSingle();
+  if (pmError) {
+    throw new Error(`Could not load the paired power module: ${pmError.message}`);
+  }
+
+  const trailerLetter = order.trailerLetter.trim().toUpperCase() || null;
+  let trailerConfigName: string | null = null;
+  if (trailerLetter) {
+    const { data: configRow, error: configError } = await supabase
+      .from("trailer_configs")
+      .select("name")
+      .eq("workspace_id", workspaceId)
+      .eq("letter", trailerLetter)
+      .maybeSingle();
+    if (configError) {
+      throw new Error(`Could not load the trailer configuration: ${configError.message}`);
+    }
+    trailerConfigName = configRow ? String(configRow.name ?? "") || null : null;
+  }
+
+  return {
+    setNo: order.setNo || setNoFromOrderNo(order.orderNo),
+    pmOrderNo: pmRow ? String(pmRow.order_no ?? "") || null : null,
+    trailerLetter,
+    trailerConfigName,
+  };
+}
+
 // ── templates ─────────────────────────────────────────────────────────────
 
 export async function listTemplates(
@@ -579,6 +903,8 @@ export async function saveTemplate(workspaceId: string, template: TemplateDetail
       model: template.model,
       order_type: template.orderType,
       notes_default: template.notesDefault,
+      pm_template_id: template.pmTemplateId,
+      default_trailer_letter: template.defaultTrailerLetter,
     })
     .eq("workspace_id", workspaceId)
     .eq("id", template.id);
@@ -683,6 +1009,59 @@ export async function importTemplates(
   }
 
   return { imported, failed };
+}
+
+// ── trailer configs ─────────────────────────────────────────────────────────
+
+export async function listTrailerConfigs(workspaceId: string): Promise<TrailerConfig[]> {
+  const supabase = createPlannerSupabaseClient();
+  const { data, error } = await supabase
+    .from("trailer_configs")
+    .select(TRAILER_CONFIG_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .order("letter", { ascending: true });
+  if (error) {
+    throw new Error(`Could not load trailer configurations: ${error.message}`);
+  }
+  return (data ?? []).map(mapTrailerConfig);
+}
+
+/**
+ * Upsert a trailer configuration keyed on (workspace_id, letter). The letter is uppercased/trimmed
+ * and must be a single A–Z character; anything else is rejected before touching the database.
+ */
+export async function saveTrailerConfig(workspaceId: string, config: TrailerConfig): Promise<void> {
+  const letter = config.letter.trim().toUpperCase();
+  if (!/^[A-Z]$/.test(letter)) {
+    throw new Error("A trailer configuration letter must be a single letter A–Z.");
+  }
+  const supabase = createPlannerSupabaseClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const { error } = await supabase.from("trailer_configs").upsert(
+    {
+      workspace_id: workspaceId,
+      letter,
+      name: config.name,
+      trailer_template_id: config.trailerTemplateId,
+      created_by: userData.user?.id ?? null,
+    },
+    { onConflict: "workspace_id,letter" },
+  );
+  if (error) {
+    throw new Error(`Could not save the trailer configuration: ${error.message}`);
+  }
+}
+
+export async function deleteTrailerConfig(workspaceId: string, letter: string): Promise<void> {
+  const supabase = createPlannerSupabaseClient();
+  const { error } = await supabase
+    .from("trailer_configs")
+    .delete()
+    .eq("workspace_id", workspaceId)
+    .eq("letter", letter.trim().toUpperCase());
+  if (error) {
+    throw new Error(`Could not delete the trailer configuration: ${error.message}`);
+  }
 }
 
 // ── item master ───────────────────────────────────────────────────────────

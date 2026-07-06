@@ -19,6 +19,7 @@ import {
   addWorkOrderLine,
   deleteWorkOrderLine,
   getWorkOrder,
+  getWorkOrderMatch,
   saveWorkOrderLine,
   transitionWorkOrder,
   updateWorkOrderHeader,
@@ -28,7 +29,7 @@ import {
 import { PlanningShell } from "./planning-shell";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 import { WorkOrderLineRow } from "./work-order-line-row";
-import { WorkOrderPrintDocument } from "./work-order-print";
+import { WorkOrderPrintDocument, type WorkOrderMatchInfo } from "./work-order-print";
 
 // US Letter at the sheet's natural 820px width (820 × 11 / 8.5).
 const SHEET_NATURAL_WIDTH = 820;
@@ -40,7 +41,7 @@ const SHEET_NATURAL_HEIGHT = Math.round((SHEET_NATURAL_WIDTH * 11) / 8.5);
  * space header and page padding); a ResizeObserver on both the pane and the sheet
  * recomputes the scale when the window resizes or the document grows past one page.
  */
-function FittedPrintPreview({ order }: { order: WorkOrderRecord }) {
+function FittedPrintPreview({ order, match }: { order: WorkOrderRecord; match: WorkOrderMatchInfo | null }) {
   const paneRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<{ scale: number; height: number } | null>(null);
@@ -85,7 +86,7 @@ function FittedPrintPreview({ order }: { order: WorkOrderRecord }) {
           className="wo-fit origin-top-left"
           style={{ width: SHEET_NATURAL_WIDTH, transform: fit ? `scale(${fit.scale})` : undefined }}
         >
-          <WorkOrderPrintDocument order={order} lines={order.lines} />
+          <WorkOrderPrintDocument order={order} lines={order.lines} match={match} />
         </div>
       </div>
     </div>
@@ -148,6 +149,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
   const { workspaceId, canWrite, canManage } = usePlanningWorkspace();
 
   const [order, setOrder] = useState<WorkOrderRecord | null>(null);
+  const [match, setMatch] = useState<WorkOrderMatchInfo | null>(null);
   const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error" | "not-found">("loading");
   const [error, setError] = useState("");
   const [form, setForm] = useState<HeaderForm | null>(null);
@@ -184,6 +186,19 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
       setOrder(found);
       setForm(headerFormFrom(found));
       setLoadStatus("ready");
+      // Final-assembly match strip: only Mains carry it. Fetched after the order commits so a
+      // slow lookup never delays the editor; guarded by the same seq so a stale result is dropped.
+      if (found.orderType === "head_unit") {
+        getWorkOrderMatch(workspaceId, found)
+          .then((info) => {
+            if (seq === loadSeqRef.current) setMatch(info);
+          })
+          .catch(() => {
+            if (seq === loadSeqRef.current) setMatch(null);
+          });
+      } else {
+        setMatch(null);
+      }
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;
       setError(caught instanceof Error ? caught.message : "Could not load the work order.");
@@ -559,7 +574,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
                 Open full preview
               </Link>
             </div>
-            <FittedPrintPreview order={order} />
+            <FittedPrintPreview order={order} match={match} />
           </aside>
         </div>
       ) : null}

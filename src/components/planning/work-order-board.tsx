@@ -32,6 +32,45 @@ function monthLabel(key: string): string {
 }
 
 /**
+ * The board's "Set" cell, read per order type: a generator shows its set number and paired trailer
+ * letter; a power module shows its set number plus a link back to its Main; a trailer shows its
+ * configuration letter; everything else shows a dash.
+ */
+function SetCell({ order, onOpenMain }: { order: WorkOrderSummary; onOpenMain: (id: string) => void }) {
+  if (order.orderType === "head_unit") {
+    return (
+      <span className="font-mono text-xs text-ink-secondary">
+        {order.setNo ? `SET ${order.setNo}` : "—"}
+        {order.trailerLetter ? ` · ${order.trailerLetter}` : ""}
+      </span>
+    );
+  }
+  if (order.orderType === "power_module") {
+    return (
+      <span className="flex items-center gap-2">
+        <span className="font-mono text-xs text-ink-secondary">{order.setNo ? `SET ${order.setNo}` : "—"}</span>
+        {order.mainOrderId ? (
+          <button
+            type="button"
+            className="ui-mono-label text-ink-tertiary underline-offset-2 hover:text-ink hover:underline"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenMain(order.mainOrderId as string);
+            }}
+          >
+            → Main
+          </button>
+        ) : null}
+      </span>
+    );
+  }
+  if (order.orderType === "trailer") {
+    return <span className="ui-chip">{order.trailerLetter || "—"}</span>;
+  }
+  return <span className="text-ink-tertiary">—</span>;
+}
+
+/**
  * The Planning space's work-order board: filterable/searchable list of every work order in the
  * workspace, with checkbox selection for batch print. Owns its own `PlanningShell` (see
  * project-route-shells.tsx's `PlanningRouteShell`, which renders provider > gate > this component
@@ -243,7 +282,7 @@ export function WorkOrderBoard() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[880px] border-collapse text-sm">
+              <table className="w-full min-w-[1000px] border-collapse text-sm">
                 <thead>
                   <tr>
                     <th className="w-10 border-b border-line px-4 py-2.5" aria-hidden="true" />
@@ -252,6 +291,7 @@ export function WorkOrderBoard() {
                     <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Model</th>
                     <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Type</th>
                     <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Status</th>
+                    <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Set</th>
                     <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Order date</th>
                     <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">A#</th>
                   </tr>
@@ -292,6 +332,9 @@ export function WorkOrderBoard() {
                         <span className={order.status === "in_production" ? "ui-chip-accent" : "ui-chip"}>
                           {WORK_ORDER_STATUS_LABELS[order.status]}
                         </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        <SetCell order={order} onOpenMain={(id) => router.push(`/planning/work-orders/${id}`)} />
                       </td>
                       <td className="ui-mono-label whitespace-nowrap px-3 py-2.5 text-ink-tertiary">
                         {formatOrderDate(order.orderDate)}

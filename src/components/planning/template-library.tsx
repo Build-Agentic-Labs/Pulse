@@ -12,10 +12,12 @@ import {
   getTemplate,
   importTemplates,
   listTemplates,
+  listTrailerConfigs,
   retireTemplate,
   saveTemplate,
   type TemplateDetail,
   type TemplateSummary,
+  type TrailerConfig,
 } from "@/lib/planning/store";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
@@ -59,6 +61,9 @@ type TemplateEditDraft = {
   model: string;
   orderType: WorkOrderType;
   notesDefault: string;
+  /** Set definition (generator templates only): the PM template to auto-create, and the default trailer letter. */
+  pmTemplateId: string | null;
+  defaultTrailerLetter: string;
   lines: TemplateLineDraft[];
 };
 
@@ -69,6 +74,8 @@ function draftFromDetail(detail: TemplateDetail): TemplateEditDraft {
     model: detail.model,
     orderType: detail.orderType,
     notesDefault: detail.notesDefault,
+    pmTemplateId: detail.pmTemplateId,
+    defaultTrailerLetter: detail.defaultTrailerLetter,
     lines: detail.lines.map((line) => ({
       id: line.id,
       itemNo: line.itemNo,
@@ -85,6 +92,8 @@ function draftChanged(detail: TemplateDetail, draft: TemplateEditDraft): boolean
     draft.model.trim() !== detail.model ||
     draft.orderType !== detail.orderType ||
     draft.notesDefault !== detail.notesDefault ||
+    draft.pmTemplateId !== detail.pmTemplateId ||
+    draft.defaultTrailerLetter !== detail.defaultTrailerLetter ||
     draft.lines.length !== detail.lines.length
   ) {
     return true;
@@ -120,6 +129,7 @@ export function TemplateLibrary({
   const { workspaceId, canWrite } = usePlanningWorkspace();
 
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [trailerConfigs, setTrailerConfigs] = useState<TrailerConfig[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
@@ -146,9 +156,13 @@ export function TemplateLibrary({
     setStatus("loading");
     setError("");
     try {
-      const next = await listTemplates(workspaceId, { includeRetired: true });
+      const [next, configs] = await Promise.all([
+        listTemplates(workspaceId, { includeRetired: true }),
+        listTrailerConfigs(workspaceId),
+      ]);
       if (seq !== loadSeqRef.current) return;
       setTemplates(next);
+      setTrailerConfigs(configs);
       setStatus("ready");
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;
@@ -166,6 +180,25 @@ export function TemplateLibrary({
   }, [refresh, reloadToken]);
 
   const groups = useMemo(() => groupByModel(templates), [templates]);
+
+  // Set-definition option lists (generator templates only): pair with a power-module template
+  // and/or a default trailer configuration letter.
+  const pmTemplateOptions = useMemo<ThemedSelectOption[]>(
+    () => [
+      { value: "", label: "None" },
+      ...templates
+        .filter((template) => template.orderType === "power_module" && !template.retiredAt)
+        .map((template) => ({ value: template.id, label: template.name })),
+    ],
+    [templates],
+  );
+  const trailerLetterOptions = useMemo<ThemedSelectOption[]>(
+    () => [
+      { value: "", label: "None" },
+      ...trailerConfigs.map((config) => ({ value: config.letter, label: `${config.letter} — ${config.name || "Unnamed"}` })),
+    ],
+    [trailerConfigs],
+  );
 
   async function toggleExpand(template: TemplateSummary) {
     if (expandedId === template.id) {
@@ -242,6 +275,9 @@ export function TemplateLibrary({
         model: expandedDraft.model.trim(),
         orderType: expandedDraft.orderType,
         notesDefault: expandedDraft.notesDefault,
+        // Set definition is only meaningful on generators; clear it for any other type.
+        pmTemplateId: expandedDraft.orderType === "head_unit" ? expandedDraft.pmTemplateId : null,
+        defaultTrailerLetter: expandedDraft.orderType === "head_unit" ? expandedDraft.defaultTrailerLetter : "",
         lines: expandedDraft.lines.map((line, index) => ({
           id: line.id,
           itemNo: line.itemNo.trim(),
@@ -500,6 +536,46 @@ export function TemplateLibrary({
                                 />
                               </label>
                             </div>
+
+                            {expandedDraft.orderType === "head_unit" ? (
+                              <div className="rounded-md border border-line bg-surface-muted p-3">
+                                <div className="ui-mono-label text-ink-tertiary">Set definition</div>
+                                <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
+                                  Creating a work order from this generator auto-creates the paired power module and
+                                  stamps the trailer letter on the printed sheet.
+                                </p>
+                                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                  <label className="block min-w-0">
+                                    <span className="ui-field-label">Power-module template</span>
+                                    <ThemedSelect
+                                      value={expandedDraft.pmTemplateId ?? ""}
+                                      onChange={(value) => updateDraft({ pmTemplateId: value === "" ? null : value })}
+                                      options={pmTemplateOptions}
+                                      ariaLabel="Paired power-module template"
+                                      className="mt-1 w-full"
+                                      disabled={!canWrite}
+                                    />
+                                  </label>
+                                  <label className="block min-w-0">
+                                    <span className="ui-field-label">Default trailer letter</span>
+                                    <ThemedSelect
+                                      value={expandedDraft.defaultTrailerLetter}
+                                      onChange={(value) => updateDraft({ defaultTrailerLetter: value })}
+                                      options={trailerLetterOptions}
+                                      ariaLabel="Default trailer configuration"
+                                      className="mt-1 w-full"
+                                      disabled={!canWrite}
+                                    />
+                                  </label>
+                                </div>
+                                {pmTemplateOptions.length === 1 && trailerLetterOptions.length === 1 ? (
+                                  <p className="ui-section-subtitle mt-2 text-ink-tertiary">
+                                    No power-module templates or trailer configurations exist yet — add them to enable
+                                    sets.
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : null}
 
                             <div className="overflow-x-auto rounded-md border border-line">
                               <table className="w-full min-w-[560px] border-collapse text-sm">

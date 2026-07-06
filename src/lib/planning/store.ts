@@ -188,6 +188,21 @@ const TEMPLATE_LINE_COLUMNS = "id, item_no, description, build_qty, position";
 
 const TRAILER_CONFIG_COLUMNS = "letter, name, trailer_template_id, updated_at";
 
+// ── validation helpers ───────────────────────────────────────────────────
+
+/**
+ * Normalize an optional trailer-configuration letter (a Main's override or a template's default):
+ * trimmed + uppercased, and required to be either "" (none) or a single A–Z. Same rule and message
+ * as the trailer-order path, applied wherever a letter is persisted rather than used to build a number.
+ */
+function normalizeOptionalTrailerLetter(value: string | null | undefined): string {
+  const letter = (value ?? "").trim().toUpperCase();
+  if (letter !== "" && !/^[A-Z]$/.test(letter)) {
+    throw new Error("A trailer configuration letter must be a single letter A–Z.");
+  }
+  return letter;
+}
+
 // ── mappers (snake_case rows -> camelCase types) ─────────────────────────
 
 /** `missingAssemblyCount` is filled in separately by `listWorkOrders`, once counts are known. */
@@ -457,6 +472,9 @@ export async function createWorkOrder(
   }
 
   // Default path: the type's own prefix (head_unit/power_module share the GEN+PM pool via suggestOrderNo).
+  // A Main with no PM may still carry a trailer letter; other types never do.
+  const defaultTrailerLetter =
+    input.orderType === "head_unit" ? normalizeOptionalTrailerLetter(input.trailerLetter) : "";
   const scanPrefixes =
     input.orderType === "head_unit" || input.orderType === "power_module"
       ? [ORDER_TYPE_PREFIXES.head_unit, ORDER_TYPE_PREFIXES.power_module]
@@ -490,6 +508,7 @@ export async function createWorkOrder(
         order_date: input.orderDate,
         notes: input.notes,
         set_no: setNoFromOrderNo(orderNo),
+        trailer_letter: defaultTrailerLetter,
         created_by: createdBy,
       })
       .select("id")
@@ -566,7 +585,7 @@ async function createGenPmSet(
   mmyy: string,
   createdBy: string | null,
 ): Promise<CreateWorkOrderResult> {
-  const mainTrailerLetter = (input.trailerLetter ?? "").trim().toUpperCase();
+  const mainTrailerLetter = normalizeOptionalTrailerLetter(input.trailerLetter);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const existing = await fetchGenPmOrderNos(supabase, workspaceId, mmyy);
@@ -788,16 +807,20 @@ export async function getWorkOrderMatch(
   }
   const supabase = createPlannerSupabaseClient();
 
-  // Paired Power Module: the PM order whose main_order_id points back at this Main.
-  const { data: pmRow, error: pmError } = await supabase
+  // Paired Power Module: the PM order whose main_order_id points back at this Main. Take the
+  // earliest by created_at (rather than .maybeSingle(), which errors if a Main ever has more
+  // than one PM pointing at it — degrade to the first marriage instead of throwing).
+  const { data: pmRows, error: pmError } = await supabase
     .from("work_orders")
     .select("order_no")
     .eq("workspace_id", workspaceId)
     .eq("main_order_id", order.id)
-    .maybeSingle();
+    .order("created_at", { ascending: true })
+    .limit(1);
   if (pmError) {
     throw new Error(`Could not load the paired power module: ${pmError.message}`);
   }
+  const pmRow = pmRows?.[0] ?? null;
 
   const trailerLetter = order.trailerLetter.trim().toUpperCase() || null;
   let trailerConfigName: string | null = null;
@@ -894,6 +917,7 @@ export async function getTemplate(workspaceId: string, id: string): Promise<Temp
 /** Header update + full line replace: delete the template's lines, then insert the new set. */
 export async function saveTemplate(workspaceId: string, template: TemplateDetail): Promise<void> {
   const supabase = createPlannerSupabaseClient();
+  const defaultTrailerLetter = normalizeOptionalTrailerLetter(template.defaultTrailerLetter);
 
   const { error: headerError } = await supabase
     .from("work_order_templates")
@@ -904,7 +928,7 @@ export async function saveTemplate(workspaceId: string, template: TemplateDetail
       order_type: template.orderType,
       notes_default: template.notesDefault,
       pm_template_id: template.pmTemplateId,
-      default_trailer_letter: template.defaultTrailerLetter,
+      default_trailer_letter: defaultTrailerLetter,
     })
     .eq("workspace_id", workspaceId)
     .eq("id", template.id);

@@ -12,6 +12,7 @@ import { readItemMasterFile, readWorkbookFile } from "@/lib/planning/read-files"
 import { importTemplates, upsertItemMaster } from "@/lib/planning/store";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 import { TemplateLibrary } from "./template-library";
+import { TrailerConfigsSettings } from "./trailer-configs-settings";
 
 const TYPE_OPTIONS: ThemedSelectOption[] = WORK_ORDER_TYPES.map((type) => ({
   value: type,
@@ -544,6 +545,8 @@ export function PlanningSettings() {
           </div>
         ) : null}
       </section>
+
+      <TrailerConfigsSettings onNotify={notify} onChanged={() => setTemplateReloadToken((token) => token + 1)} />
 
       <TemplateLibrary reloadToken={templateReloadToken} onNotify={notify} />
 

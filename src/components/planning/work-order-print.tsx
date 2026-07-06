@@ -102,6 +102,52 @@ const PRINT_STYLES = `
   font-size: 18px;
   font-weight: 700;
 }
+/* Final-assembly match block: the one strip the operator reads to pick the set.
+   Three tags — GEN set number, PM set number, trailer letter — big and unmissable. */
+.wo-match {
+  display: flex;
+  border: 2px solid #13211b;
+  margin-bottom: 26px;
+}
+.wo-match-cell {
+  flex: 1;
+  padding: 10px 14px 12px;
+  border-right: 1px solid #13211b;
+}
+.wo-match-cell:last-child {
+  border-right: none;
+}
+.wo-match-label {
+  font-family: var(--type-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #52606d;
+}
+.wo-match-value {
+  margin-top: 2px;
+  font-family: var(--type-mono);
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.wo-match-sub {
+  margin-top: 2px;
+  font-family: var(--type-mono);
+  font-size: 10px;
+  color: #52606d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wo-match-title {
+  font-family: var(--type-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #13211b;
+  margin-bottom: 6px;
+}
 .wo-lines {
   width: 100%;
   border-collapse: collapse;
@@ -216,13 +262,27 @@ const PRINT_STYLES = `
 }
 `;
 
+/** Set/letter pairing shown in the final-assembly match block on a Main work order. */
+export interface WorkOrderMatchInfo {
+  /** The short set number both married documents carry, e.g. "01". */
+  setNo: string;
+  /** The paired power-module order number, e.g. "PM-0726-01". Null = no PM in this set. */
+  pmOrderNo: string | null;
+  /** Trailer configuration letter from the config catalog, e.g. "A". Null = no trailer. */
+  trailerLetter: string | null;
+  /** Human name of the trailer configuration, e.g. "Dual axle · electric brakes". */
+  trailerConfigName?: string | null;
+}
+
 export interface WorkOrderPrintDocumentProps {
   order: WorkOrderDetail;
   lines: WorkOrderLine[];
+  /** When present (Main orders), renders the final-assembly match strip. */
+  match?: WorkOrderMatchInfo | null;
 }
 
 /** One printed page for a single work order. Pure render — reused by both print routes. */
-export function WorkOrderPrintDocument({ order, lines }: WorkOrderPrintDocumentProps) {
+export function WorkOrderPrintDocument({ order, lines, match }: WorkOrderPrintDocumentProps) {
   return (
     <>
       <style>{PRINT_STYLES}</style>
@@ -242,6 +302,33 @@ export function WorkOrderPrintDocument({ order, lines }: WorkOrderPrintDocumentP
           <div className="wo-order-type">{WORK_ORDER_TYPE_LABELS[order.orderType]}</div>
         </div>
         {order.model ? <div className="wo-model">{order.model}</div> : <div className="wo-model" />}
+
+        {match ? (
+          <div>
+            <div className="wo-match-title">Final assembly match</div>
+            <div className="wo-match">
+              <div className="wo-match-cell">
+                <div className="wo-match-label">Gen</div>
+                <div className="wo-match-value">{match.setNo}</div>
+                <div className="wo-match-sub">{order.orderNo}</div>
+              </div>
+              <div className="wo-match-cell">
+                <div className="wo-match-label">Power module</div>
+                <div className="wo-match-value">{match.pmOrderNo ? match.setNo : "—"}</div>
+                <div className="wo-match-sub">{match.pmOrderNo ?? "No power module in this set"}</div>
+              </div>
+              <div className="wo-match-cell">
+                <div className="wo-match-label">Trailer</div>
+                <div className="wo-match-value">{match.trailerLetter ?? "—"}</div>
+                <div className="wo-match-sub">
+                  {match.trailerLetter
+                    ? match.trailerConfigName ?? "Pull any matching trailer"
+                    : "No trailer in this set"}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <table className="wo-lines">
           <thead>

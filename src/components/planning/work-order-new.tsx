@@ -203,8 +203,8 @@ export function WorkOrderNew() {
   const readyDetail = selectedDetail.status === "ready" ? selectedDetail.detail : null;
 
   const suggestedOrderNo = useMemo(
-    () => suggestOrderNo(existingOrderNos, form.orderDate),
-    [existingOrderNos, form.orderDate],
+    () => suggestOrderNo(existingOrderNos, form.orderDate, form.orderType),
+    [existingOrderNos, form.orderDate, form.orderType],
   );
 
   const lineCountLabel =

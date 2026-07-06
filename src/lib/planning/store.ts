@@ -9,9 +9,9 @@
 
 import {
   buildTransitionPatch,
+  ORDER_TYPE_PREFIXES,
   orderNoMonthKey,
   suggestOrderNo,
-  WORK_ORDER_NO_PREFIX,
   type WorkOrderFulfillment,
   type WorkOrderStatus,
   type WorkOrderType,
@@ -303,18 +303,29 @@ export async function getWorkOrder(workspaceId: string, id: string): Promise<Wor
 export async function createWorkOrder(workspaceId: string, input: CreateWorkOrderInput): Promise<string> {
   const supabase = createPlannerSupabaseClient();
   const { data: userData } = await supabase.auth.getUser();
-  const monthPrefix = `${WORK_ORDER_NO_PREFIX}-${orderNoMonthKey(input.orderDate)}-%`;
+  const mmyy = orderNoMonthKey(input.orderDate);
+  // Numbering scopes to this month's rows for the relevant prefix(es). head_unit/power_module
+  // share one GEN+PM sequence pool, so fetch both; every other type scans only its own prefix.
+  const scanPrefixes =
+    input.orderType === "head_unit" || input.orderType === "power_module"
+      ? [ORDER_TYPE_PREFIXES.head_unit, ORDER_TYPE_PREFIXES.power_module]
+      : [ORDER_TYPE_PREFIXES[input.orderType]];
+  const monthOrFilter = scanPrefixes.map((prefix) => `order_no.ilike.${prefix}-${mmyy}-%`).join(",");
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const { data: existing, error: existingError } = await supabase
       .from("work_orders")
       .select("order_no")
       .eq("workspace_id", workspaceId)
-      .ilike("order_no", monthPrefix);
+      .or(monthOrFilter);
     if (existingError) {
       throw new Error(`Could not load existing order numbers: ${existingError.message}`);
     }
-    const orderNo = suggestOrderNo((existing ?? []).map((row) => row.order_no), input.orderDate);
+    const orderNo = suggestOrderNo(
+      (existing ?? []).map((row) => row.order_no),
+      input.orderDate,
+      input.orderType,
+    );
 
     const { data: inserted, error: insertError } = await supabase
       .from("work_orders")

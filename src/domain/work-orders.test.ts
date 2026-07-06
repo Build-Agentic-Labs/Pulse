@@ -5,13 +5,15 @@ import {
   missingAssemblyCount,
   nextForwardStatus,
   orderNoMonthKey,
+  setNoFromOrderNo,
   suggestOrderNo,
+  trailerOrderNo,
 } from "./work-orders";
 
 describe("orderNoMonthKey", () => {
-  it("derives YYMM from an ISO date", () => {
-    expect(orderNoMonthKey("2026-07-15")).toBe("2607");
-    expect(orderNoMonthKey("2027-01-02")).toBe("2701");
+  it("derives MMYY from an ISO date", () => {
+    expect(orderNoMonthKey("2026-07-15")).toBe("0726");
+    expect(orderNoMonthKey("2027-01-02")).toBe("0127");
   });
   it("falls back to 0000 on malformed input", () => {
     expect(orderNoMonthKey("garbage")).toBe("0000");
@@ -19,20 +21,52 @@ describe("orderNoMonthKey", () => {
 });
 
 describe("suggestOrderNo", () => {
-  it("starts each month at 01", () => {
-    expect(suggestOrderNo([], "2026-07-15")).toBe("WO-2607-01");
+  it("starts each month at 01 with the type prefix", () => {
+    expect(suggestOrderNo([], "2026-07-15", "head_unit")).toBe("GEN-0726-01");
+    expect(suggestOrderNo([], "2026-07-15", "accessories")).toBe("ACC-0726-01");
   });
   it("continues the month's sequence", () => {
-    expect(suggestOrderNo(["WO-2607-01", "WO-2607-03"], "2026-07-20")).toBe("WO-2607-04");
+    expect(suggestOrderNo(["GEN-0726-01", "GEN-0726-03"], "2026-07-20", "head_unit")).toBe("GEN-0726-04");
   });
-  it("ignores other months and junk", () => {
-    expect(suggestOrderNo(["WO-2606-09", "MTS-0705-02", "WO-2607-02"], "2026-07-01")).toBe("WO-2607-03");
+  it("ignores other months and other types", () => {
+    expect(suggestOrderNo(["GEN-0626-09", "MTS-0605-02", "GEN-0726-02"], "2026-07-01", "head_unit")).toBe(
+      "GEN-0726-03",
+    );
   });
   it("is case/whitespace tolerant", () => {
-    expect(suggestOrderNo([" wo-2607-07 "], "2026-07-31")).toBe("WO-2607-08");
+    expect(suggestOrderNo([" gen-0726-07 "], "2026-07-31", "head_unit")).toBe("GEN-0726-08");
   });
   it("grows past two digits", () => {
-    expect(suggestOrderNo(["WO-2607-99"], "2026-07-01")).toBe("WO-2607-100");
+    expect(suggestOrderNo(["GEN-0726-99"], "2026-07-01", "head_unit")).toBe("GEN-0726-100");
+  });
+  it("shares one sequence pool across GEN and PM so a set's NN is never reused", () => {
+    // A power module numbering off an existing Main must skip past the Main's NN.
+    expect(suggestOrderNo(["GEN-0726-02"], "2026-07-10", "power_module")).toBe("PM-0726-03");
+    // ...and a Main must skip past an existing PM number too.
+    expect(suggestOrderNo(["PM-0726-05"], "2026-07-10", "head_unit")).toBe("GEN-0726-06");
+  });
+  it("keeps other types independent of the GEN/PM pool", () => {
+    expect(suggestOrderNo(["GEN-0726-09", "PM-0726-09"], "2026-07-10", "accessories")).toBe("ACC-0726-01");
+  });
+});
+
+describe("trailerOrderNo", () => {
+  it("numbers a trailer by its config letter", () => {
+    expect(trailerOrderNo("2026-07-15", "A")).toBe("TRL-0726-A");
+  });
+  it("uppercases and trims the letter", () => {
+    expect(trailerOrderNo("2026-07-15", " b ")).toBe("TRL-0726-B");
+  });
+});
+
+describe("setNoFromOrderNo", () => {
+  it("extracts the trailing set segment", () => {
+    expect(setNoFromOrderNo("GEN-0726-01")).toBe("01");
+    expect(setNoFromOrderNo("PM-0726-03")).toBe("03");
+  });
+  it("tolerates junk", () => {
+    expect(setNoFromOrderNo("garbage")).toBe("");
+    expect(setNoFromOrderNo("")).toBe("");
   });
 });
 

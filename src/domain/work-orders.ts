@@ -3,7 +3,14 @@
 
 export type WorkOrderStatus = "draft" | "released" | "in_production" | "shipped" | "cancelled";
 export type WorkOrderFulfillment = "assembly" | "pull_from" | "pull_from_stock";
-export type WorkOrderType = "head_unit" | "accessories" | "decal" | "trailer" | "rework" | "mts";
+export type WorkOrderType =
+  | "head_unit"
+  | "power_module"
+  | "accessories"
+  | "decal"
+  | "trailer"
+  | "rework"
+  | "mts";
 
 export const WORK_ORDER_STATUS_FLOW = ["draft", "released", "in_production", "shipped"] as const;
 
@@ -16,7 +23,8 @@ export const WORK_ORDER_STATUS_LABELS: Record<WorkOrderStatus, string> = {
 };
 
 export const WORK_ORDER_TYPE_LABELS: Record<WorkOrderType, string> = {
-  head_unit: "Head unit",
+  head_unit: "Generator (Main)",
+  power_module: "Power module",
   accessories: "Accessories",
   decal: "Decal",
   trailer: "Trailer",
@@ -25,6 +33,17 @@ export const WORK_ORDER_TYPE_LABELS: Record<WorkOrderType, string> = {
 };
 
 export const WORK_ORDER_TYPES = Object.keys(WORK_ORDER_TYPE_LABELS) as WorkOrderType[];
+
+/** Order-number prefix per type. GEN and PM share one per-month sequence pool (see `suggestOrderNo`). */
+export const ORDER_TYPE_PREFIXES: Record<WorkOrderType, string> = {
+  head_unit: "GEN",
+  power_module: "PM",
+  trailer: "TRL",
+  accessories: "ACC",
+  decal: "DEC",
+  rework: "RWK",
+  mts: "MTS",
+};
 
 export function nextForwardStatus(status: WorkOrderStatus): WorkOrderStatus | null {
   const index = WORK_ORDER_STATUS_FLOW.indexOf(status as (typeof WORK_ORDER_STATUS_FLOW)[number]);
@@ -64,32 +83,58 @@ export function canTransitionWorkOrder(
   return fromIndex > 0 && toIndex === fromIndex - 1;
 }
 
-export const WORK_ORDER_NO_PREFIX = "WO";
-
-/** "2026-07-15" → "2607". Malformed dates bucket to "0000" rather than throwing. */
+/** "2026-07-15" → "0726". Malformed dates bucket to "0000" rather than throwing. */
 export function orderNoMonthKey(orderDate: string): string {
   const match = /^(\d{4})-(\d{2})/.exec(orderDate.trim());
   if (!match) {
     return "0000";
   }
-  return `${match[1].slice(2)}${match[2]}`;
+  return `${match[2]}${match[1].slice(2)}`;
 }
 
-/** Next number in the month's series: WO-YYMM-NN, restarting at 01 each month. */
-export function suggestOrderNo(existingOrderNos: readonly string[], orderDate: string): string {
-  const prefix = `${WORK_ORDER_NO_PREFIX}-${orderNoMonthKey(orderDate)}-`;
+/**
+ * Next number in the month's series: `{PREFIX}-MMYY-NN`, restarting at 01 each month.
+ * GEN (head_unit) and PM (power_module) share a single per-month sequence pool — a set's
+ * Main and Power Module carry the same NN — so numbering either one scans BOTH GEN- and PM-
+ * numbers for the month, ensuring a set's NN is never reused by either side. Other types
+ * scan only their own prefix.
+ */
+export function suggestOrderNo(
+  existingOrderNos: readonly string[],
+  orderDate: string,
+  orderType: WorkOrderType,
+): string {
+  const mmyy = orderNoMonthKey(orderDate);
+  const prefix = ORDER_TYPE_PREFIXES[orderType];
+  const sharesGenPmPool = orderType === "head_unit" || orderType === "power_module";
+  const scanPrefixes = sharesGenPmPool
+    ? [`${ORDER_TYPE_PREFIXES.head_unit}-${mmyy}-`, `${ORDER_TYPE_PREFIXES.power_module}-${mmyy}-`]
+    : [`${prefix}-${mmyy}-`];
+
   let max = 0;
   for (const orderNo of existingOrderNos) {
     const normalized = orderNo.trim().toUpperCase();
-    if (!normalized.startsWith(prefix)) {
+    const matched = scanPrefixes.find((candidate) => normalized.startsWith(candidate));
+    if (!matched) {
       continue;
     }
-    const sequence = Number.parseInt(normalized.slice(prefix.length), 10);
+    const sequence = Number.parseInt(normalized.slice(matched.length), 10);
     if (Number.isFinite(sequence) && sequence > max) {
       max = sequence;
     }
   }
-  return `${prefix}${String(max + 1).padStart(2, "0")}`;
+  return `${prefix}-${mmyy}-${String(max + 1).padStart(2, "0")}`;
+}
+
+/** Trailer supermarket order number: `TRL-MMYY-{LETTER}` (one per config letter per month). */
+export function trailerOrderNo(orderDate: string, letter: string): string {
+  return `${ORDER_TYPE_PREFIXES.trailer}-${orderNoMonthKey(orderDate)}-${letter.trim().toUpperCase()}`;
+}
+
+/** The short set/match number — the trailing segment of an order no. `GEN-0726-01` → `01`; junk → "". */
+export function setNoFromOrderNo(orderNo: string): string {
+  const match = /^[A-Za-z]+-\d{4}-(.+)$/.exec(orderNo.trim());
+  return match ? match[1] : "";
 }
 
 const STATUS_TIMESTAMP_COLUMNS = ["released_at", "production_started_at", "shipped_at"] as const;

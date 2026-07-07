@@ -5,14 +5,25 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
-import { WORK_ORDER_TYPE_LABELS, WORK_ORDER_TYPES, suggestOrderNo, type WorkOrderType } from "@/domain/work-orders";
+import {
+  ORDER_TYPE_PREFIXES,
+  WORK_ORDER_TYPE_LABELS,
+  WORK_ORDER_TYPES,
+  orderNoMonthKey,
+  setNoFromOrderNo,
+  suggestOrderNo,
+  trailerOrderNo,
+  type WorkOrderType,
+} from "@/domain/work-orders";
 import {
   createWorkOrder,
   getTemplate,
   listTemplates,
+  listTrailerConfigs,
   listWorkOrders,
   type TemplateDetail,
   type TemplateSummary,
+  type TrailerConfig,
   type WorkOrderLine,
 } from "@/lib/planning/store";
 import { PlanningShell } from "./planning-shell";
@@ -35,10 +46,12 @@ type FormState = {
   orderType: WorkOrderType;
   orderDate: string;
   notes: string;
+  /** Trailer configuration letter: optional on a Main, required on a trailer order, "" otherwise. */
+  trailerLetter: string;
 };
 
 function blankForm(): FormState {
-  return { customer: "", model: "", orderType: WORK_ORDER_TYPES[0], orderDate: todayIso(), notes: "" };
+  return { customer: "", model: "", orderType: WORK_ORDER_TYPES[0], orderDate: todayIso(), notes: "", trailerLetter: "" };
 }
 
 function formFromTemplate(template: TemplateDetail): FormState {
@@ -48,6 +61,8 @@ function formFromTemplate(template: TemplateDetail): FormState {
     orderType: template.orderType,
     orderDate: todayIso(),
     notes: template.notesDefault,
+    // A generator template can carry a default trailer letter; other types default to none.
+    trailerLetter: template.orderType === "head_unit" ? template.defaultTrailerLetter : "",
   };
 }
 
@@ -106,6 +121,7 @@ export function WorkOrderNew() {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [templatesStatus, setTemplatesStatus] = useState<"loading" | "ready" | "error">("loading");
   const [existingOrderNos, setExistingOrderNos] = useState<string[]>([]);
+  const [trailerConfigs, setTrailerConfigs] = useState<TrailerConfig[]>([]);
 
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>(BLANK_SELECTION);
@@ -124,16 +140,22 @@ export function WorkOrderNew() {
     const seq = ++loadSeqRef.current;
     if (!workspaceId) {
       setTemplates([]);
+      setTrailerConfigs([]);
       setTemplatesStatus("ready");
       return;
     }
     setTemplatesStatus("loading");
     setError("");
     try {
-      const [templateList, orders] = await Promise.all([listTemplates(workspaceId), listWorkOrders(workspaceId)]);
+      const [templateList, orders, configs] = await Promise.all([
+        listTemplates(workspaceId),
+        listWorkOrders(workspaceId),
+        listTrailerConfigs(workspaceId),
+      ]);
       if (seq !== loadSeqRef.current) return;
       setTemplates(templateList);
       setExistingOrderNos(orders.map((order) => order.orderNo));
+      setTrailerConfigs(configs);
       setTemplatesStatus("ready");
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;
@@ -202,9 +224,40 @@ export function WorkOrderNew() {
   const selectedTemplateSummary = selectedId === BLANK_SELECTION ? null : templates.find((t) => t.id === selectedId);
   const readyDetail = selectedDetail.status === "ready" ? selectedDetail.detail : null;
 
+  // A generator (Main) order optionally carries a trailer letter; a trailer order requires one.
+  const isHeadUnit = form.orderType === "head_unit";
+  const requiresTrailerLetter = form.orderType === "trailer";
+  const showTrailerSelect = isHeadUnit || requiresTrailerLetter;
+  // A Main whose template links a power-module template auto-creates the married PM order.
+  const pmTemplateId = readyDetail?.orderType === "head_unit" ? readyDetail.pmTemplateId : null;
+  const createsSet = isHeadUnit && Boolean(pmTemplateId);
+
+  const trailerLetterOptions = useMemo<ThemedSelectOption[]>(() => {
+    const configOptions = trailerConfigs.map((config) => ({
+      value: config.letter,
+      label: `${config.letter} — ${config.name || "Unnamed"}`,
+    }));
+    const placeholder = requiresTrailerLetter
+      ? { value: "", label: "Select a configuration…" }
+      : { value: "", label: "No trailer" };
+    return [placeholder, ...configOptions];
+  }, [trailerConfigs, requiresTrailerLetter]);
+
   const suggestedOrderNo = useMemo(
-    () => suggestOrderNo(existingOrderNos, form.orderDate),
-    [existingOrderNos, form.orderDate],
+    () =>
+      form.orderType === "trailer"
+        ? trailerOrderNo(form.orderDate, form.trailerLetter || "?")
+        : suggestOrderNo(existingOrderNos, form.orderDate, form.orderType),
+    [existingOrderNos, form.orderDate, form.orderType, form.trailerLetter],
+  );
+
+  // The married PM order shares the Main's month + NN, so its preview number is derivable.
+  const pmSuggestedOrderNo = useMemo(
+    () =>
+      createsSet
+        ? `${ORDER_TYPE_PREFIXES.power_module}-${orderNoMonthKey(form.orderDate)}-${setNoFromOrderNo(suggestedOrderNo)}`
+        : null,
+    [createsSet, form.orderDate, suggestedOrderNo],
   );
 
   const lineCountLabel =
@@ -218,13 +271,15 @@ export function WorkOrderNew() {
             ? `${readyDetail.lines.length} line${readyDetail.lines.length === 1 ? "" : "s"} from template.`
             : "";
 
+  const trailerLetterValid = /^[A-Z]$/.test(form.trailerLetter);
   const canSubmit =
     canWrite &&
     Boolean(workspaceId) &&
     form.customer.trim() !== "" &&
     form.orderDate.trim() !== "" &&
     !saving &&
-    (selectedId === BLANK_SELECTION || Boolean(readyDetail));
+    (selectedId === BLANK_SELECTION || Boolean(readyDetail)) &&
+    (!requiresTrailerLetter || trailerLetterValid);
 
   async function handleCreate() {
     if (!workspaceId || !canSubmit) return;
@@ -232,7 +287,29 @@ export function WorkOrderNew() {
     setError("");
     try {
       const lines = readyDetail ? linesFromTemplate(readyDetail) : [];
-      const id = await createWorkOrder(workspaceId, {
+
+      // A Main linked to a PM template auto-creates the married Power Module: pull the PM
+      // template's lines so both orders are built in one call, sharing the set number.
+      let pm = null;
+      if (createsSet && pmTemplateId) {
+        const pmDetail = await getTemplate(workspaceId, pmTemplateId);
+        if (!pmDetail) {
+          setError(
+            "The linked power-module template could not be loaded. Fix this generator template's set definition in Settings, or start blank.",
+          );
+          setSaving(false);
+          return;
+        }
+        pm = {
+          templateId: pmDetail.id,
+          lines: linesFromTemplate(pmDetail),
+          customer: pmDetail.customer || form.customer.trim(),
+          model: pmDetail.model,
+          notes: pmDetail.notesDefault,
+        };
+      }
+
+      const result = await createWorkOrder(workspaceId, {
         templateId: selectedId === BLANK_SELECTION ? null : selectedId,
         customer: form.customer.trim(),
         model: form.model.trim(),
@@ -240,8 +317,10 @@ export function WorkOrderNew() {
         orderDate: form.orderDate,
         notes: form.notes,
         lines,
+        trailerLetter: form.trailerLetter,
+        pm,
       });
-      router.push(`/planning/work-orders/${id}`);
+      router.push(`/planning/work-orders/${result.id}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not create the work order.");
       setSaving(false);
@@ -399,6 +478,41 @@ export function WorkOrderNew() {
                 />
               </div>
             </div>
+
+            {showTrailerSelect ? (
+              <div>
+                <label className="ui-mono-label">
+                  Trailer {requiresTrailerLetter ? "configuration" : "configuration (optional)"}
+                </label>
+                {trailerConfigs.length === 0 ? (
+                  <p className="ui-section-subtitle mt-1 text-ink-tertiary">
+                    No trailer configurations yet — add them in Settings → Trailer configurations.
+                  </p>
+                ) : (
+                  <ThemedSelect
+                    value={form.trailerLetter}
+                    onChange={(value) => setForm((current) => ({ ...current, trailerLetter: value }))}
+                    options={trailerLetterOptions}
+                    ariaLabel="Trailer configuration"
+                    disabled={!canWrite || saving}
+                    className="mt-1 w-full"
+                  />
+                )}
+              </div>
+            ) : null}
+
+            {createsSet ? (
+              <div className="ui-notice px-3 py-2">
+                <div className="ui-mono-label text-ink-tertiary">Creates a set</div>
+                <div className="mt-1 font-mono text-sm text-ink">
+                  {suggestedOrderNo} + {pmSuggestedOrderNo}
+                  {trailerLetterValid ? ` · Trailer ${form.trailerLetter}` : ""}
+                </div>
+                <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
+                  The generator and its power module are created together and share the set number.
+                </p>
+              </div>
+            ) : null}
 
             <div>
               <label className="ui-mono-label" htmlFor="wo-new-notes">

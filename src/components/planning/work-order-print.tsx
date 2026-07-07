@@ -17,7 +17,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
 import { WORK_ORDER_TYPE_LABELS } from "@/domain/work-orders";
-import { getWorkOrder, type WorkOrderDetail, type WorkOrderLine } from "@/lib/planning/store";
+import { getWorkOrder, getWorkOrderMatch, type WorkOrderDetail, type WorkOrderLine } from "@/lib/planning/store";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
 // ── formatting helpers ───────────────────────────────────────────────────
@@ -391,6 +391,7 @@ function PrintToolbar({ backHref, label }: { backHref: string; label: string }) 
 export function WorkOrderPrintPreview({ workOrderId }: { workOrderId: string }) {
   const { workspaceId } = usePlanningWorkspace();
   const [order, setOrder] = useState<WorkOrderDetail | null>(null);
+  const [match, setMatch] = useState<WorkOrderMatchInfo | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error" | "not-found">("loading");
   const [error, setError] = useState("");
 
@@ -413,6 +414,12 @@ export function WorkOrderPrintPreview({ workOrderId }: { workOrderId: string }) 
       }
       setOrder(found);
       setStatus("ready");
+      // Mains carry the final-assembly match strip; other types render without it. The lookup is
+      // isolated (own catch) so a match failure degrades to no strip rather than erroring a page
+      // whose order loaded fine — matching the detail view and batch route.
+      const info =
+        found.orderType === "head_unit" ? await getWorkOrderMatch(workspaceId, found).catch(() => null) : null;
+      if (seq === loadSeqRef.current) setMatch(info);
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;
       setError(caught instanceof Error ? caught.message : "Could not load the work order.");
@@ -445,7 +452,7 @@ export function WorkOrderPrintPreview({ workOrderId }: { workOrderId: string }) 
             </button>
           </section>
         ) : order ? (
-          <WorkOrderPrintDocument order={order} lines={order.lines} />
+          <WorkOrderPrintDocument order={order} lines={order.lines} match={match} />
         ) : null}
       </div>
     </div>
@@ -458,6 +465,7 @@ export function WorkOrderPrintPreview({ workOrderId }: { workOrderId: string }) 
 export function BatchPrintPreview({ ids }: { ids: string[] }) {
   const { workspaceId } = usePlanningWorkspace();
   const [orders, setOrders] = useState<WorkOrderDetail[]>([]);
+  const [matches, setMatches] = useState<Record<string, WorkOrderMatchInfo | null>>({});
   const [failedIds, setFailedIds] = useState<string[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -468,6 +476,7 @@ export function BatchPrintPreview({ ids }: { ids: string[] }) {
     const seq = ++loadSeqRef.current;
     if (ids.length === 0) {
       setOrders([]);
+      setMatches({});
       setFailedIds([]);
       setStatus("ready");
       return;
@@ -480,14 +489,21 @@ export function BatchPrintPreview({ ids }: { ids: string[] }) {
         ids.map(async (id) => {
           try {
             const found = await getWorkOrder(workspaceId, id);
-            return { id, order: found };
+            // Each Main carries its own match strip; a failed match lookup degrades to no strip.
+            const match =
+              found && found.orderType === "head_unit"
+                ? await getWorkOrderMatch(workspaceId, found).catch(() => null)
+                : null;
+            return { id, order: found, match };
           } catch {
-            return { id, order: null };
+            return { id, order: null, match: null };
           }
         }),
       );
       if (seq !== loadSeqRef.current) return;
-      setOrders(results.filter((result) => result.order !== null).map((result) => result.order as WorkOrderDetail));
+      const loaded = results.filter((result) => result.order !== null);
+      setOrders(loaded.map((result) => result.order as WorkOrderDetail));
+      setMatches(Object.fromEntries(loaded.map((result) => [(result.order as WorkOrderDetail).id, result.match])));
       setFailedIds(results.filter((result) => result.order === null).map((result) => result.id));
       setStatus("ready");
     } catch (caught) {
@@ -534,7 +550,7 @@ export function BatchPrintPreview({ ids }: { ids: string[] }) {
               </section>
             ) : null}
             {orders.map((order) => (
-              <WorkOrderPrintDocument key={order.id} order={order} lines={order.lines} />
+              <WorkOrderPrintDocument key={order.id} order={order} lines={order.lines} match={matches[order.id] ?? null} />
             ))}
           </>
         )}

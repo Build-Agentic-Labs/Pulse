@@ -639,15 +639,20 @@ async function createGenPmSet(
       .single();
     if (pmError) {
       if (pmError.code === "23505" && attempt === 0) {
-        // Roll the Main back (lines cascade) and retry the pair once with a fresh NN.
-        const { error: rollbackError } = await supabase
+        // Roll the Main back (lines cascade) and retry the pair once with a fresh NN. `.select("id")`
+        // verifies a row was actually deleted: RLS can permit an INSERT but silently drop a DELETE
+        // (0 rows, no error), which would otherwise strand an orphan Main AND let the retry create a
+        // duplicate set. On a failed rollback, surface a clear error instead of silently retrying.
+        const { data: rolledBack, error: rollbackError } = await supabase
           .from("work_orders")
           .delete()
           .eq("workspace_id", workspaceId)
-          .eq("id", mainInserted.id);
-        if (rollbackError) {
+          .eq("id", mainInserted.id)
+          .select("id");
+        if (rollbackError || !rolledBack || rolledBack.length === 0) {
           throw new Error(
-            `${mainOrderNo} was created but its power module failed and could not be rolled back: ${rollbackError.message}`,
+            `${mainOrderNo} was created but its power module could not be assigned a number and the generator ` +
+              `could not be rolled back automatically. Ask a workspace admin to delete order ${mainOrderNo}, then try again.`,
           );
         }
         continue;

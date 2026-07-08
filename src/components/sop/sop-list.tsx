@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { Building2, FileText, Inbox, Library, Loader2, Plus, ShieldCheck, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -203,6 +203,14 @@ export function SopList() {
           <FileText size={15} strokeWidth={1.75} />
           <span>All SOPs</span>
         </Link>
+        <Link href="/sops/library" className="ui-nav-item ui-nav-item-idle">
+          <Library size={15} strokeWidth={1.75} />
+          <span>Effective library</span>
+        </Link>
+        <Link href="/sops/review" className="ui-nav-item ui-nav-item-idle">
+          <Inbox size={15} strokeWidth={1.75} />
+          <span>Review queue</span>
+        </Link>
         {editable ? (
           <>
             <Link href="/sops/new" className="ui-nav-item ui-nav-item-idle">
@@ -351,6 +359,13 @@ export function SopList() {
                   {formatDate(sop.updatedAt) ? (
                     <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
                   ) : null}
+                </Link>
+                <Link
+                  href={`/sops/${sop.id}/control`}
+                  className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-ink"
+                  title="Document control & approval"
+                >
+                  <ShieldCheck size={14} />
                 </Link>
                 {editable ? (
                   <button

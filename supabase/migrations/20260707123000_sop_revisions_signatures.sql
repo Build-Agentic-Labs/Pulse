@@ -99,7 +99,7 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
-declare s record; v_hash text; v_name text; v_id text;
+declare s record; v_hash text; v_name text; v_id text; v_existing text;
 begin
   select * into s from public.sops where id = p_sop and deleted_at is null;
   if s is null then raise exception 'SOP % not found', p_sop; end if;
@@ -130,8 +130,21 @@ begin
     end if;
   elsif p_meaning = 'rejection' then
     if p_reason is null or btrim(p_reason) = '' then raise exception 'A rejection needs a reason'; end if;
+    if not (public.has_department_role(s.department_id, array['reviewer', 'approver']::public.department_sop_role[])
+            or auth.uid() is not distinct from s.submitted_by) then
+      raise exception 'Only a reviewer, approver, or the submitter can reject this SOP';
+    end if;
   else
     raise exception 'Unknown signature meaning %', p_meaning;
+  end if;
+
+  -- Idempotent: a retried sign (e.g. after a transient transition failure) must not append a
+  -- duplicate immutable signature for the same signer/meaning/content.
+  select id into v_existing from public.sop_signatures
+    where sop_id = p_sop and signer_id = auth.uid() and meaning = p_meaning and signed_content_hash = v_hash
+    limit 1;
+  if v_existing is not null then
+    return v_existing;
   end if;
 
   v_id := gen_random_uuid()::text;

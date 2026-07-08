@@ -22,8 +22,14 @@ async function throwIfError<T>(
 ): Promise<T> {
   const { data, error } = await operation;
   if (error) {
+    if (error.code === "23505" && error.message.includes("quality_gate")) {
+      throw new Error("Only one Quality department is allowed per organization.");
+    }
     if (error.code === "23505" && !error.message.includes("pkey")) {
       throw new Error("A department with this code already exists in this organization.");
+    }
+    if (error.code === "23503") {
+      throw new Error("This department still owns SOPs — reassign or retire them before deleting it.");
     }
     throw new Error(error.message);
   }
@@ -63,22 +69,41 @@ export interface DepartmentInput {
   isQualityGate: boolean;
 }
 
-/** Insert or update a department. The DB enforces code-uniqueness and one-quality-gate. */
+/**
+ * Insert or update a department. The DB enforces code-uniqueness and one-quality-gate. `code` is
+ * immutable once set (it drives DEPT-TYPE-NNN numbering), so updates change only name + gate.
+ */
 export async function saveDepartment(workspaceId: string, input: DepartmentInput): Promise<Department> {
   const supabase = createPlannerSupabaseClient();
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id ?? null;
-  const row = {
-    id: input.id ?? newId(),
-    workspace_id: workspaceId,
-    code: input.code.trim(),
-    name: input.name.trim(),
-    is_quality_gate: input.isQualityGate,
-    updated_by: userId,
-    ...(input.id ? {} : { created_by: userId }),
-  };
+
+  if (input.id) {
+    const saved = await throwIfError(
+      supabase
+        .from("departments")
+        .update({ name: input.name.trim(), is_quality_gate: input.isQualityGate, updated_by: userId })
+        .eq("id", input.id)
+        .select(DEPT_COLUMNS)
+        .single(),
+    );
+    return mapDepartment(saved as Record<string, unknown>);
+  }
+
   const saved = await throwIfError(
-    supabase.from("departments").upsert(row).select(DEPT_COLUMNS).single(),
+    supabase
+      .from("departments")
+      .insert({
+        id: newId(),
+        workspace_id: workspaceId,
+        code: input.code.trim(),
+        name: input.name.trim(),
+        is_quality_gate: input.isQualityGate,
+        created_by: userId,
+        updated_by: userId,
+      })
+      .select(DEPT_COLUMNS)
+      .single(),
   );
   return mapDepartment(saved as Record<string, unknown>);
 }

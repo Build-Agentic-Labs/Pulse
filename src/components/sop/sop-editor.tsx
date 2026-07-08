@@ -1,10 +1,11 @@
 "use client";
 
 import { Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useConfirm } from "@/components/confirm-provider";
-import { rasicLegend, SOP_STATUS_LABELS, SOP_STATUSES, type Sop, type SopStatus } from "@/domain/sop/schema";
+import { rasicLegend, SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
 import { applySampleData } from "@/domain/sop/sample";
 import { saveSop, SopConflictError } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
@@ -385,26 +386,28 @@ export function SopEditor({
                     />
                   </Field>
                   <Field label="Status">
-                    <select
-                      className="ui-field-standalone"
-                      value={sop.status}
-                      disabled={!canEdit}
-                      onChange={(event) => update({ status: event.target.value as SopStatus })}
-                    >
-                      {SOP_STATUSES.map((status) => (
-                        <option
-                          key={status}
-                          value={status}
-                          // Approval-gated states are picked by workspace managers only; the
-                          // current value stays selectable so the control never lies.
-                          disabled={
-                            !canApprove && (status === "approved" || status === "obsolete") && status !== sop.status
-                          }
-                        >
-                          {SOP_STATUS_LABELS[status]}
-                        </option>
-                      ))}
-                    </select>
+                    {/* Lifecycle transitions are enforced in the DB and driven from the control
+                        page (they require department roles + e-signatures), so the editor shows
+                        status read-only and links out rather than offering a select that would
+                        always fail the transition guard. */}
+                    <div className="flex h-9 items-center gap-2">
+                      <span
+                        className={`ui-chip ${
+                          sop.status === "approved"
+                            ? "border-accent text-accent"
+                            : sop.status === "obsolete"
+                              ? "border-danger text-danger"
+                              : ""
+                        }`}
+                      >
+                        {SOP_STATUS_LABELS[sop.status]}
+                      </span>
+                      {!isNew ? (
+                        <Link href={`/sops/${sop.id}/control`} className="ui-btn-ghost h-8 px-2">
+                          Manage lifecycle
+                        </Link>
+                      ) : null}
+                    </div>
                   </Field>
                   <Field label="Revision date">
                     <input

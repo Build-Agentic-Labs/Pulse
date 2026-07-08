@@ -1,9 +1,21 @@
 # Schedule-Import Hardening — Prerequisites for Work-Order Set Generation
 
 **Date:** 2026-07-07
-**Status:** Draft for review
+**Status:** In progress — foundation partly applied, paused on user decisions
 **Precedes:** the production-schedule → work-order-set importer (separate spec, not yet written)
 **Builds on:** `2026-07-06-work-order-sets-design.md` (shipped), `anacorp-product-nomenclature` (memory)
+
+## Progress (as of 2026-07-07)
+
+Applied to the live workspace by `scripts/planning/harden-schedule-import.mjs` (idempotent, re-runnable):
+- **W1 ✅** — 4 PM templates retyped `head_unit → power_module` (`70PM`, `220PM`, `400PM`, `500PM`); a stray `SDG150 TRAILER` template retyped `head_unit → trailer`.
+- **W2 ✅** — trailer catalog: `E = Electric`, `S = Surge / Hydraulic`. **D7 confirmed**: plain `Hydraulic` → S.
+- **W3 ◑ partial** — 7 generator templates linked to the 70 PM (all 70-series). **5 pending**: `HEAD UNIT 25-25 ×4` (needs 25 PM), `HEAD UNIT BOSS125-125` (needs 125 PM).
+- **W4 ◑ drafted** — customer normalization map built from June data. Resolves cleanly: Herc (67 lines / 3 spellings → HERC), Equipment Share (49 / 2 → ES), United Rentals (37 → UR), REIC, OES. **Flagged, no gen template**: Kiewit (9), DEVALL (8), CAT dealers (8), Paragon, Bingham. **Data issue**: `SACRAMENTO` (14 lines) is location text in the CUSTOMER column, not a customer.
+
+**Blocked on user decisions:** D5 (25/125 PM BOM source — the critical-path unblocker), D6 (does 25-25 get a separate PM order), the no-template-customer policy (~43 lines), the Sacramento contamination, missing combo `125-65`, and confirming D1–D4. Resume there → dry-run validator over June → build the importer.
+
+---
 
 ## Purpose
 

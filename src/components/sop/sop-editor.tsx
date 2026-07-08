@@ -63,14 +63,11 @@ export function SopEditor({
   initial,
   workspaceId,
   canEdit = true,
-  canApprove = false,
   isNew = false,
 }: {
   initial: Sop;
   workspaceId?: string;
   canEdit?: boolean;
-  /** Workspace managers only: allows transitions to `approved` / `obsolete`. */
-  canApprove?: boolean;
   /** True when the SOP has never been persisted (autosave stays off until the first save). */
   isNew?: boolean;
 }) {

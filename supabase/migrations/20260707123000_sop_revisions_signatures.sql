@@ -106,6 +106,13 @@ begin
   v_hash := public.sop_doc_hash(s.document);
   select full_name into v_name from public.profiles where id = auth.uid();
 
+  -- Signatures only make sense in the state their transition acts on — keeps the WORM log clean.
+  if p_meaning in ('dept_approval', 'review', 'rejection') and s.status <> 'in_review' then
+    raise exception 'This action is only available while the SOP is in review';
+  elsif p_meaning = 'quality_approval' and s.status <> 'approved' then
+    raise exception 'Quality approval is only available once the SOP is department-approved';
+  end if;
+
   if p_meaning = 'dept_approval' then
     if not public.has_department_role(s.department_id, array['approver']::public.department_sop_role[]) then
       raise exception 'Only a department approver can sign the approval';

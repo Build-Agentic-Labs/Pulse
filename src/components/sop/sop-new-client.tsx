@@ -6,7 +6,7 @@ import { createEmptySop } from "@/domain/sop/schema";
 import { newSopId } from "@/lib/sop/store";
 import { SopEditor } from "./sop-editor";
 import { SopShell } from "./sop-shell";
-import { canEdit, canManage, useSopWorkspace } from "./sop-workspace-provider";
+import { canEdit, useSopWorkspace } from "./sop-workspace-provider";
 
 export function SopNewClient() {
   const { workspaceId, role } = useSopWorkspace();
@@ -31,12 +31,6 @@ export function SopNewClient() {
   // isNew keeps autosave off until the first (INSERT) save — without it the editor issues a
   // guarded UPDATE against a row that doesn't exist yet and throws SopConflictError.
   return (
-    <SopEditor
-      initial={initial}
-      workspaceId={workspaceId}
-      canEdit={canEdit(role)}
-      canApprove={canManage(role)}
-      isNew
-    />
+    <SopEditor initial={initial} workspaceId={workspaceId} canEdit={canEdit(role)} isNew />
   );
 }

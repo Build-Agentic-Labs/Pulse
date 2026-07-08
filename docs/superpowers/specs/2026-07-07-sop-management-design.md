@@ -3,8 +3,10 @@
 **Date:** 2026-07-07
 **Space:** Quality (`/sops`)
 **Branch:** `worktree-sop-space`
-**Status:** Design — pending user review
+**Status:** Design v2 — revised after Fable design review (all findings applied)
 **Mockups:** Claude Design → *Pulse Design* → card group **"Quality — SOP System"** (`sop/01`–`sop/04`)
+
+> **v2 changelog (post-review):** single state machine (no dual doc/revision status); published copy via a `sops.effective_revision_id` pointer (revisions stay truly WORM); content freeze + soft-delete guard via a plain `BEFORE UPDATE` trigger; segregation-of-duties bound to `submitted_by`/`auth.uid()` (spoof-proof, NULL-safe); Quality gate via an explicit `is_quality_gate` flag with distinct-signer enforcement; DB-computed content hashes; `space_access` CHECK migration required; `sop_approval_steps`, `departments.parent_id`/`owner_role`, and `sops.dept_code` **cut**; future-dated auto-effective **deferred**.
 
 ---
 
@@ -20,18 +22,18 @@ Turn the current flat SOP list into a real quality-document system with three ca
 
 | Decision | Choice |
 |---|---|
-| Compliance depth | **ISO 9001, Part-11-ready** — signer identity + meaning + content-hash binding + author≠approver enforced by trigger; full 21 CFR Part 11 (re-auth, watermarks, training records) deferred to Phase 4, no rebuild needed |
-| Versioning | **Frozen version snapshots** — append-only `sop_revisions`; exactly one `effective` version per SOP |
-| Approval routing | **Dept approver → Quality** two-step, stored in a flexible step model so parallel/multi-level can be enabled later |
+| Compliance depth | **ISO 9001, Part-11-ready** — signer identity + meaning + **DB-computed** content-hash binding + author≠approver enforced by trigger; full 21 CFR Part 11 (re-auth, watermarks, training records) deferred to Phase 4, no rebuild needed |
+| Versioning | **Frozen version snapshots** — append-only, truly immutable `sop_revisions`; the in-force copy is named by `sops.effective_revision_id` |
+| Approval routing | **Dept approver → Quality**, two fixed steps recorded as WORM `sop_signatures` rows (no separate step table) |
 | Departments | **First-class, admin-managed in-app**; a user may belong to many departments with a different role in each |
 | Numbering | **DEPT-TYPE-NNN** (e.g. `QA-SOP-014`) via a transactional counter; number never changes on revision |
-| Quality gate | **Quality is a department** whose approvers can approve any department's SOP (the mandatory independent gate) |
+| Quality gate | A department flagged **`is_quality_gate`** whose approvers can approve any department's SOP, and must be a **different person** than the dept approver |
 
 ## 3. Hard constraints (from the codebase)
 
-- **No server tier / no service-role key.** Postgres RLS + `SECURITY DEFINER` triggers are the *only* enforcement layer. Every rule below ("only an approver may approve", "author ≠ approver", "one effective version") is enforced in the database, with a mirrored TypeScript predicate for the UI only.
-- **Build on the existing `sops` table**, don't rewrite. New control fields are promoted columns (stripped from the `document` jsonb exactly as `status` already is). `saveSop`'s optimistic-concurrency guard stays.
-- **Reuse proven patterns:** the `enforce_work_order_transition` trigger, the immutable `audit_log` + `audit_access_change()`, the `project_access` table shape + `has_*_access()` helper idiom, the `space_access` grant, and the Planning-space feature triad.
+- **No server tier / no service-role key.** Postgres RLS + `SECURITY DEFINER` triggers/functions are the *only* enforcement layer. Every rule below is enforced in the database, with a mirrored TypeScript predicate for the UI only. **Corollary (Fable F2/F13):** anything the client can send in a raw PostgREST request must be assumed hostile — freeze rules, SoD, and content hashes are computed/enforced server-side in the DB, never trusted from the client.
+- **Build on the existing `sops` table**, don't rewrite. New control fields are promoted columns (stripped from the `document` jsonb exactly as `status` already is, `store.ts:146`). `saveSop`'s optimistic-concurrency guard stays.
+- **Reuse proven patterns:** the `enforce_work_order_transition` trigger *as inspiration* (see F2 — ours must be plain `BEFORE UPDATE`, not `OF status`), the immutable `audit_log`, the `project_access` table shape + `has_*_access()` helper idiom, and the Planning-space feature triad.
 - **Migration conventions:** `supabase/migrations/YYYYMMDDHHMMSS_snake.sql`, idempotent, all auth-touching functions `security definer set search_path=''`, schema-qualified. Timestamps after the current latest (`20260706130000`).
 
 ## 4. Data model
@@ -39,109 +41,121 @@ Turn the current flat SOP list into a real quality-document system with three ca
 ### 4.1 New tables
 
 **`departments`** — owning entity for SOPs.
-`id text pk`, `workspace_id → workspaces on delete cascade`, `code text` (short, e.g. `QA`; unique per workspace, used in numbering), `name text`, `owner_role text null` (own by role, not person — resolves to current holder), `parent_id text null` (optional hierarchy), `created_by`, `updated_by`, `created_at`, `updated_at`.
-Partial-unique index on `(workspace_id, lower(btrim(code)))`.
+`id text pk`, `workspace_id → workspaces on delete cascade`, `code text` (short, e.g. `QA`; unique per workspace; **immutable once any number is minted for it** — F5/F15), `name text`, `is_quality_gate boolean default false` (the cross-department approval gate — F5), `created_by`, `updated_by`, `created_at`, `updated_at`.
+Partial-unique index on `(workspace_id, lower(btrim(code)))`. At most one `is_quality_gate = true` per workspace (partial unique index).
+*Cut (F/cut-list): `parent_id`, `owner_role`.*
 
 **`department_members`** — many-to-many membership with a per-department role (clone of `project_access` shape + RLS).
 Composite PK `(department_id, user_id)`, `dept_role department_sop_role`, `granted_by`, `updated_at` (trigger).
-New enum `department_sop_role ('author','reviewer','approver')`.
+New enum `department_sop_role ('author','reviewer','approver')`. **Roles are cumulative** (F16): `approver` ⊇ `reviewer` ⊇ `author` capabilities. Any of the three (in the owning dept) may create/edit drafts and submit to review; **signing** a review step needs ≥`reviewer`, the dept-approval step needs `approver`, the Quality step needs `approver` in an `is_quality_gate` department.
 
-**`sop_revisions`** — append-only frozen snapshots.
-`id`, `sop_id → sops`, `workspace_id`, `version_label text`, `document jsonb` (frozen copy), `content_hash text`, `status text`, `approved_by uuid`, `approved_at timestamptz`, `created_at`.
-`CREATE UNIQUE INDEX ... ON sop_revisions(sop_id) WHERE status='effective'` → **one effective version per SOP**.
-RLS: insert only via the approval path; no update/delete (immutable).
+**`sop_revisions`** — append-only, **truly immutable** frozen snapshots (F7).
+`id`, `sop_id → sops`, `workspace_id`, `version_label text`, `document jsonb` (frozen copy), `content_hash text` (**DB-computed**, F13), `created_at`, `created_by`.
+**No `status` column and no per-status index** — "which revision is in force" is named by `sops.effective_revision_id`; "superseded" is derived (any revision that isn't the pointer). RLS: `INSERT` only via the definer snapshot function; **no `UPDATE`/`DELETE` policy** (WORM). `REVOKE UPDATE, DELETE`.
 
-**`sop_signatures`** — append-only e-signatures (Part 11 §11.50/§11.70 shape).
-`id`, `sop_id`, `revision_id → sop_revisions`, `signer_id uuid`, `meaning text` (authorship / review / approval / QA), `signer_printed_name text`, `signed_content_hash text` (binds to the exact revision), `auth_method text`, `signed_at timestamptz`.
-`REVOKE UPDATE, DELETE` (WORM). `re_authenticated boolean default false` reserved for Phase 4.
+**`sop_signatures`** — append-only e-signatures + the record of each approval step (F7 cut of the step table).
+`id`, `sop_id`, `revision_id → sop_revisions`, `signer_id uuid` (**= `auth.uid()`, DB-stamped**), `meaning text ('authorship'|'review'|'dept_approval'|'quality_approval'|'rejection')`, `signer_printed_name text` (**DB-stamped from `profiles`**, F13), `signed_content_hash text` (binds to the revision), `rejected_reason text null`, `signed_at timestamptz`, `auth_method text`, `re_authenticated boolean default false` (Phase-4 landing pads — cheap to keep). `REVOKE UPDATE, DELETE` (WORM).
 
-**`sop_approval_steps`** — routing (ship two-step, store flexibly).
-`id`, `sop_id`, `step_order int`, `kind text ('reviewer','dept_approver','quality')`, `quorum int default 1`, `state text ('pending','signed','rejected')`, `round_no int default 1`, `assignee_role text null`.
-
-**`doc_number_counter`** — transactional numbering (no MAX+1 races).
-PK `(workspace_id, department_id, doc_type)`, `next_seq int`. A `SECURITY DEFINER` function `next_sop_number(workspace, department, doc_type)` bumps and returns `DEPT-TYPE-NNN`.
+**`doc_number_counter`** — transactional numbering (F10).
+PK `(workspace_id, department_id, doc_type)`, `next_seq int`. `SECURITY DEFINER` function `next_sop_number(workspace, department, doc_type)`:
+- internally verifies `has_department_role(department, ['author','reviewer','approver'])` **and** workspace membership before minting (F10b);
+- `INSERT ... ON CONFLICT (workspace_id, department_id, doc_type) DO UPDATE SET next_seq = doc_number_counter.next_seq + 1 RETURNING next_seq` — race-safe including first mint (F10a);
+- counters are **seeded above the parsed maxima of existing `sop_number` values** at migration time (F10c);
+- returns `DEPT-TYPE-NNN`.
 
 ### 4.2 `sops` — additive promoted columns (`add column if not exists`)
 
-`department_id text references departments(id)` (nullable for migration; backfilled), `doc_type text default 'SOP'`, `dept_code text`, `seq_int int`, `major_version smallint`, `minor_version smallint`, `change_significance text ('MAJOR'|'MINOR'|'ADMINISTRATIVE')`, `requires_retraining boolean default false`, `approved_by uuid`, `approved_at timestamptz`, `effective_date date`, `next_review_date date`, `review_interval_months smallint default 24`.
-Existing `sop_number` and its partial-unique index remain (backstop).
+`department_id text references departments(id)`, `doc_type text default 'SOP'`, `seq_int int`, `major_version smallint`, `minor_version smallint`, `submitted_by uuid` (stamped on `→ in_review`, the SoD anchor — F3), `approved_by uuid`, `approved_at timestamptz`, `effective_date date`, `next_review_date date`, `review_interval_months smallint default 24`, `effective_revision_id text references sop_revisions(id)` (**the in-force copy** — F7), `rejected_reason text null`, `rejected_by uuid null`, `change_significance text` and `requires_retraining boolean default false` (**informational only** — not read by any trigger; retraining enforcement is Phase 4 — cut-list).
+Existing `sop_number` and its partial-unique index remain. `major_version`/`minor_version` are canonical; the display string is derived; `meta.version` in jsonb becomes display-only (F15).
+*Cut: `sops.dept_code` (derive via join at mint time — F/cut-list).*
 
-### 4.3 Lifecycle
-
-Extend the `status` CHECK from `draft|in_review|approved|obsolete` to:
+### 4.3 Lifecycle — ONE state machine, on `sops.status` (F1)
 
 ```
-Happy path:   draft → in_review → approved → effective → superseded
-Reject:       in_review → draft   (new round; prior steps closed, round_no++)
-Retire:       effective → obsolete
+Author:      draft → in_review          (stamps submitted_by = auth.uid())
+Reject:      in_review → draft          (records rejection signature + rejected_reason; clears submitted_by)
+Approve:     in_review → approved       (dept approver signs; SoD enforced)
+Make live:   approved → effective       (Quality signs; snapshots revision; sets effective_revision_id)
+Revise:      effective → draft          ("start revision": snapshots current effective first, bumps version)
+Retire:      effective|approved → obsolete
 ```
 
-`approved` = signed but not yet in force; `effective` = in force (one at a time); future-dated `effective_date` flips `approved → effective` (and prior `effective → superseded`) atomically.
+- **No `superseded` status** — a prior effective revision is simply no longer pointed to by `effective_revision_id`.
+- Only `draft` rows are content-editable. Every other state freezes `document`/header (enforced in §6).
+- Future-dated `effective_date` is **not** auto-flipped in v1 (F9): "Make effective" is an explicit user action and `effective_date` defaults to today; `pg_cron` auto-go-live is a deferred follow-up.
 
 ## 5. Access & RLS
 
-- **`has_department_role(department_id, roles[])`** — `SECURITY DEFINER` helper modeled on `has_org_tool_access`, folding in workspace managers/superadmin via `has_workspace_role`. Quality-department approvers resolve as able to approve any department's SOP.
-- **`org_tool_access`** stays the coarse "can touch the SOP module" gate; `department_role` decides *which* SOPs and *which* verb.
-- **`SopAccessGate`** — mirror `PlanningAccessGate` using the existing free-form `space_access` `"quality"` string (no migration).
-- **RLS on `sops`:** draft/in-review readable by owning department + assigned reviewers + managers; `effective`/`superseded` readable org-wide (the read-only library); writes gated by `has_department_role`.
-- Attach the existing `audit_access_change()` trigger to `sops` → tamper-proof status-change trail (Part 11 §11.10(e)) in one statement.
+- **`space_access` needs a migration (F/refuted):** its CHECK is `space in ('planning','production')`. Phase 1 migration extends it to include `'quality'`; then `SopAccessGate` mirrors `PlanningAccessGate`.
+- **`has_department_role(department_id, roles[])`** — `SECURITY DEFINER` helper on `department_members`. For the **dept** steps it folds in workspace managers/superadmin (convenience). For the **Quality** step it does **not** fold in managers (F4) — it requires actual `approver` membership in an `is_quality_gate` department. A Quality approver satisfies `approver` for *any* target department via: `role in target dept OR (role='approver' AND member of a is_quality_gate dept)` (F5). `has_department_role(NULL, …)` returns **false** (F11).
+- **`org_tool_access`** stays the coarse "can touch the SOP module" gate for authoring; `department_role` decides *which* SOPs and *which* verb.
+- **RLS on `sops`, status-by-status (F12 — enumerate all):**
+  - `draft`, `in_review`, `approved`: readable by owning-department members + managers only (dept-scoped; NULL-dept ⇒ managers only — F11).
+  - `effective`: readable by **every workspace member** (the read-only library), independent of `org_tool_access`.
+  - `obsolete`: readable by owning-department members + managers.
+  - Writes gated by `has_department_role`; the transition trigger (§6) is the real lifecycle gate.
+- **Audit (F8):** do **not** attach `audit_access_change()` to `sops`. Instead a small purpose-built `AFTER UPDATE OF status` function logs `(sop_id, actor=auth.uid(), old.status, new.status)` into `audit_log` with `target_type='sop'`, `target_id=sop_id`, and a **minimal** `details` (no full `document` jsonb) — avoids autosave bloat and content leakage to managers.
 
-## 6. Enforcement — the transition guard (core)
+## 6. Enforcement — the transition guard (core, revised)
 
-Twin-predicate convention, cloned from work-orders:
+Twin-predicate convention:
 
-- **`canTransitionSop(from, to, role, isAuthor)`** in `src/domain/sop/` — pure, unit-tested; drives UI enable/disable (fixes the "nobody can approve" bug at the UI edge).
-- **`enforce_sop_transition()`** — `BEFORE UPDATE OF status`, `SECURITY DEFINER`, `search_path=''` trigger:
-  - no-op on unchanged status;
-  - `→ in_review`: author/editor of owning dept;
-  - `→ approved`: `has_department_role(department_id, ARRAY['approver'])` **and** the final Quality step signed; **rejects if `NEW.approved_by = author`** (segregation of duties); stamps `approved_by`/`approved_at`;
-  - `→ effective`: atomic — set this revision effective, supersede the prior effective, compute `next_review_date = effective_date + review_interval_months`;
-  - non-`draft` rows are otherwise frozen (content immutable once submitted).
+- **`canTransitionSop(from, to, role, isSubmitter)`** in `src/domain/sop/` — pure, unit-tested; drives UI enable/disable (fixes the "nobody can approve" bug at the UI edge).
+- **`enforce_sop_transition()`** — a **plain `BEFORE UPDATE`** trigger (not `OF status` — F2), `SECURITY DEFINER`, `search_path=''`:
+  - **Content freeze (F2):** if `OLD.status <> 'draft'`, reject any change to `document`/title/number/`department_id`/version columns.
+  - **Soft-delete guard (F2):** reject setting `deleted_at` unless `OLD.status in ('draft','obsolete')` or caller is a manager.
+  - **Status transitions:** no-op when `status` unchanged; validate the edge against §4.3; on `→ in_review` stamp `submitted_by := auth.uid()` and require non-null `department_id` (F11); on reject clear `submitted_by`, require a `rejected_reason`.
+  - **SoD (F3):** on `→ approved`, force `NEW.approved_by := auth.uid()` (ignore client value), and reject if `auth.uid() = COALESCE(submitted_by, created_by)` or if `submitted_by IS NULL`. On `→ effective`, the Quality signer must differ from the dept approver (F4).
+  - **Effective swap (F7):** `→ effective` calls the snapshot function (creates the WORM `sop_revisions` row + DB content hash) and sets `NEW.effective_revision_id` to it — a single-row atomic update; no sibling-row mutation, no re-entrant trigger.
+- **Phased trigger (F6):** Phase 2 ships **v1** (edge validation + content/delete freeze + SoD, role checks). Phase 3 ships a **superseding migration** adding the "required signatures exist" precondition (dept-approval signature before `→ approved`; quality-approval signature before `→ effective`).
+- **Content hash (F13):** computed in the DB snapshot function as `encode(sha256(convert_to(document::text,'UTF8')),'hex')`.
 
 ## 7. App layer
 
 Follow the Planning triad (`route → workspace-provider → shell (+AccessGate)`, CRUD in `src/lib/sop/store.ts`).
 
 **New surfaces (mockups in parentheses):**
-- Departments admin — list, members, per-dept roles (Screen 01)
+- Departments admin — list, members, per-dept roles, the Quality-gate flag (Screen 01)
 - SOP library with department filter, status badges, review-date flags (Screen 02)
-- SOP detail: control header + lifecycle stepper + approval routing + e-sign + reject-with-reason (Screen 03)
-- Effective library — read-only, org-wide, with "where-used" back-links to tasks (Screen 04)
-- Review queue; Numbering settings
+- SOP detail: control header + lifecycle stepper + approval routing (from `sop_signatures`) + e-sign + reject-with-reason (Screen 03)
+- Effective library — read-only, org-wide, served from `effective_revision_id`, with "where-used" back-links (Screen 04)
+- Review queue
 
 **Modified:**
-- `sops` store — promoted columns, `next_sop_number`, snapshot-on-approve, one-effective swap
+- `sops` store — promoted columns, `next_sop_number`, snapshot-on-make-effective via the definer fn, `effective_revision_id` reads for the published copy
 - `sop-workspace-provider` — expose department roles
 - `sop-list` — dept filter + new badges + review dates
-- `sop-editor` — **fix the two live bugs**: pass `isNew` (new authored SOP first-save no longer throws `SopConflictError`) and `canApprove` (approval reachable), plus the approval/sign panel
-- `spaces` — `SopAccessGate`
+- `sop-editor` — **fix the two live bugs** (§8); the SOP-number field becomes **read-only once a department is assigned** (F10d); approval/sign panel
+- **AI converter** (`app/api/sops/extract`) + list — assign a `department_id` on convert (picker, defaulting to an **"Unassigned"** department seeded per workspace — F11)
+- `spaces` — `SopAccessGate` (after the `space_access` CHECK migration)
+- Where-used (Screen 04) surfaces tasks linked to `obsolete`/soft-deleted SOPs, and soft-deleting an SOP with active task links is **blocked/warned** (F14)
 
 ## 8. Bug fixes (in scope, Phase 2)
 
-1. `isNew` never passed (`sop-new-client.tsx:31`, `sop-detail-client.tsx:60`) → first save of a hand-authored SOP is a guarded UPDATE against a missing row → `SopConflictError`.
-2. `canApprove` never passed (`sop-editor.tsx` + callsites) → approval transitions unreachable for everyone.
+1. `isNew` never passed at the **new-SOP callsite** (`sop-new-client.tsx:31`) → `SopEditor` defaults `isNew=false` → `persistedUpdatedAt` truthy → **autosave (~2s after first edit) issues a guarded UPDATE against a nonexistent row → `SopConflictError` before the user ever clicks Save** (F16 correction — the `sop-detail-client.tsx` path is fine; default `false` is correct there).
+2. `canApprove` never passed (`sop-editor.tsx` + callsites) → approval transitions unreachable for everyone, including owners.
 
 ## 9. Error handling
 
-Optimistic concurrency keeps throwing `SopConflictError` (friendly "reopen and retry"). Trigger rejections surface as readable messages ("Only a Quality approver can approve this SOP", "You can't approve an SOP you authored"). Numbering races are impossible (transactional counter). RLS denials degrade to empty/blocked states, never leaking other departments' drafts.
+Optimistic concurrency keeps throwing `SopConflictError` (friendly "reopen and retry"). Trigger rejections surface as readable messages ("Only a Quality approver can approve this", "You can't approve an SOP you submitted", "This SOP is effective — start a revision to edit"). Numbering races are impossible (transactional `ON CONFLICT` counter). RLS denials degrade to empty/blocked states, never leaking other departments' drafts.
 
 ## 10. Testing
 
-- **Unit (TS):** `canTransitionSop` (every edge, author≠approver, role matrix), version-bump logic, `DEPT-TYPE-NNN` formatting.
-- **DB/integration:** trigger enforcement (illegal transitions rejected, SoD, one-effective invariant, atomic supersession), numbering under concurrency, RLS visibility per department/role.
-- **Component:** departments admin, approval panel states, editor bug regressions.
-- **E2E (Playwright):** author → review → dept approve → Quality sign → effective, plus reject-with-reason rework.
+- **Unit (TS):** `canTransitionSop` (every edge, SoD via submitter, role matrix, cumulative roles), version-bump logic, `DEPT-TYPE-NNN` formatting.
+- **DB/integration (the load-bearing part):** content-freeze on non-draft (document-only PATCH rejected), soft-delete guard, SoD with NULL author, distinct-signer Quality gate, one-effective-via-pointer, numbering under concurrency + seeding above legacy maxima, DB content-hash determinism, RLS visibility per status/department/role.
+- **Component:** departments admin, approval panel states, editor bug regressions (incl. autosave-on-new).
+- **E2E (Playwright):** author → review → dept approve → Quality make-effective, plus reject-with-reason rework and start-revision.
 - Target 80%+ on new domain logic.
 
 ## 11. Phasing
 
-- **Phase 1 — Departments:** `departments` + `department_members` + `department_sop_role` + `has_department_role`; `sops.department_id`; `doc_number_counter` + `next_sop_number`; Departments admin UI; `SopAccessGate`. (department_id nullable + backfill.)
-- **Phase 2 — Enforced control:** lifecycle extension; `enforce_sop_transition` + `canTransitionSop`; attach `audit_access_change` to `sops`; `effective_date` / `next_review_date` columns + periodic-review flags; **fix the two bugs** + editor approval wiring.
-- **Phase 3 — Review/approve & history:** `sop_revisions` snapshots; `sop_signatures` (content-hash bound, WORM); `sop_approval_steps` (two-step dept→Quality); review queue; effective library + where-used.
-- **Phase 4 — Regulated only (deferred):** re-authentication at signing (§11.200), controlled-copy watermarking, training/read-acknowledge records.
+- **Phase 1 — Departments:** `departments` (+`is_quality_gate`, +"Unassigned" seed) + `department_members` + `department_sop_role` + `has_department_role`; `sops.department_id`; `doc_number_counter` + `next_sop_number` (seeded above maxima); **`space_access` CHECK migration** + `SopAccessGate`; Departments admin UI. (department_id nullable + backfill.)
+- **Phase 2 — Enforced control:** lifecycle extension; `enforce_sop_transition` **v1** (freeze + delete-guard + SoD + roles) + `canTransitionSop`; purpose-built status-audit trigger; `submitted_by`/`approved_by`/`effective_date`/`next_review_date` columns; **fix the two bugs** + editor approval wiring + read-only number field; converter department assignment.
+- **Phase 3 — Review/approve & history:** `sop_revisions` (WORM) + `sop_signatures` (WORM, DB-hashed) + `effective_revision_id`; **superseding trigger migration** adding the required-signature preconditions and the effective-swap snapshot; review queue; effective library + where-used (incl. obsolete/deleted task links).
+- **Phase 4 — Regulated only (deferred):** re-authentication at signing (§11.200), controlled-copy watermarking, training/read-acknowledge records (activates `requires_retraining`).
 
-## 12. Non-goals (YAGNI)
+## 12. Non-goals / cut list (YAGNI)
 
-- No full `documents` + `document_versions` refactor (snapshots deliver the value with far less churn).
-- No Part 11 re-auth / watermarks / training now (tables are shaped to add them later).
+- **Cut:** `sop_approval_steps` table (two-step routing is fully captured by WORM `sop_signatures` + `rejected_reason`), `departments.parent_id`, `departments.owner_role`, `sops.dept_code`, `sop_revisions.status` (replaced by the `effective_revision_id` pointer).
+- **Deferred:** full `documents`+`document_versions` refactor (snapshots deliver the value); future-dated auto-effective (`pg_cron`); Part 11 re-auth / watermarks / training; `change_significance`/`requires_retraining` stay informational until Phase 4.
 - Insights/reporting on SOPs out of scope.

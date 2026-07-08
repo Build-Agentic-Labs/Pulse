@@ -386,3 +386,16 @@ describe("canTransitionSop", () => {
 **Placeholder scan:** UI tasks reference mockup screens + exact classes rather than inlining 300-line components — intentional (executor has full design-system context); DB/domain tasks carry complete code. `profiles.full_name` flagged "verify column" in 3.1.
 
 **Type consistency:** `SopStatus`, `DeptRole`, `canTransitionSop` signature, `has_department_role(dept, roles[])`, `next_sop_number(ws,dept,type)`, `effective_revision_id` used consistently across tasks.
+
+---
+
+## Implementation Deltas & Follow-ups (as-built, 2026-07-07)
+
+Built and verified green (typecheck + 253 unit tests + `next build`); reviewed by a second model (Fable) and its CRITICAL/HIGH findings fixed in place. Deliberately deferred, documented here rather than silently skipped:
+
+- **Dept-scoped `sops` read/write RLS (spec §5):** still uses the coarse `org_tool_access` gate. Tightening reads/writes to `has_department_role` changes who can see/edit *existing* SOPs (all backfilled into "Unassigned" ⇒ managers-only), so it needs a backfill + comms step. The lifecycle/SoD gate (the trigger) is fully enforced; only the per-department *visibility* refinement is pending. `SopAccessGate` on the new `space_access` `'quality'` string is likewise deferred (grants default absent ⇒ would lock users out until granted).
+- **Effective library** reads the live `sops` row filtered to `status='effective'` (its `document` equals the frozen `effective_revision_id` snapshot, since content is frozen once non-draft), not the revision table directly. "Where-used" back-links and the soft-delete-with-task-links block (spec F14), plus the `sop-list` department filter + review-date flags, are not yet built.
+- **AI converter** doesn't assign a department; converted SOPs start unassigned and are assigned on the control page before review.
+- **DB/integration tests (spec §10, pgTAP)** are the key pre-merge follow-up — not runnable in this worktree (no local Postgres). The load-bearing cases to cover: content-freeze on a non-draft document-only PATCH, SoD with spoofed `submitted_by`/`approved_by` (now pinned), one-effective-via-`effective_revision_id`, born-effective INSERT rejection, numbering under concurrency.
+- **Migrations are NOT applied to the live DB** and nothing is pushed to `main` — the user's steps.
+- **Lint** fails only on the worktree's dual-`.eslintrc` config conflict (environmental); no rule violations in the new code.

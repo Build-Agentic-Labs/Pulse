@@ -32,12 +32,12 @@ The PM half of every set has nothing to build from today.
 - Keeps the generator templates (`HEAD UNIT xx-yy`) as the Main templates; adds the PM templates they pair to.
 
 ### W2 — Trailer config catalog + brake normalization *(prerequisite data + rule)*
-- **Catalog letters** (recommend): `A = Electric brakes`, `B = Surge / Hydraulic`, `C = Hydraulic`.
-- **Brake-string → letter map** (with cleaning), covering every June value:
-  - `Electric`, `Electrical` → **A**
-  - `Surge/Hydraulic`, `SURGE` → **B**
-  - `Hydraulic` → **C**
-  - `N/A`, `NA`, ``, `�NA` → **none** (no trailer / not applicable — these are PM lines)
+- **Catalog: exactly two trailers** (per the shop) — recommend mnemonic letters over arbitrary ones:
+  `E = Electric`, `S = Surge / Hydraulic`.
+- **Brake-string → letter map**, covering every June value:
+  - `Electric`, `Electrical` → **E**
+  - `Surge/Hydraulic`, `SURGE`, `Hydraulic` → **S**  *(plain `Hydraulic` — 58 lines — folds into the surge/hydraulic trailer; confirm D7)*
+  - `N/A`, `NA`, ``, `�NA` → **none** (no trailer / not applicable — PM lines)
 - Optionally link each letter to an `SDG… TRLR` trailer template so trailer restock orders inherit a BOM.
 
 ### W3 — Set-definitions *(prerequisite data)*
@@ -70,6 +70,7 @@ Confirm the rules the importer applies per line (D1–D6).
 | **D4** | Quantity: a line/SO with N units → **N separate sets** (serialized `-01…-0N`) or one order of qty N? | **N separate sets** — serialized matching at final assembly needs distinct set numbers. |
 | **D5** | Source of the **25 PM / 125 PM** BOMs (W1)? | Hand-author in the template library, **or** point me at a PM workbook / BC export to import. |
 | **D6** | Does the **25-25** unit get a *separate* PM work order at all, or is the 25 PM built into the head unit? (no standalone 25 PM exists) | Confirm per shop reality — drives whether small EBOSS lines are 2-order sets or 1-order. |
+| **D7** | Does plain **`Hydraulic`** (58 June lines) map to the **Surge/Hydraulic (S)** trailer? Only two trailers exist, and it isn't Electric — so it should. | **Yes → S.** Confirm, since 58 lines ride on it. |
 
 ## Data-quality rules (applied by the importer, defined here)
 - **Customer normalization** table (W4) — the largest cleanup; ~19 spellings → ~10 canonicals → suffixes.

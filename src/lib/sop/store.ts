@@ -18,7 +18,8 @@ const STORAGE_KEY = "pulse:sops:v1";
 const SOP_COLUMNS = "id, workspace_id, sop_number, title, version, source, status, document, created_at, updated_at";
 
 // Slim projection for the list surface: promoted columns only, never the full jsonb document.
-const SOP_LIST_COLUMNS = "id, sop_number, title, version, source, status, updated_at";
+const SOP_LIST_COLUMNS =
+  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date";
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
@@ -35,6 +36,9 @@ export interface SopListItem {
   source: Sop["source"];
   status: SopStatus;
   updatedAt: string;
+  departmentId: string | null;
+  effectiveDate: string | null;
+  nextReviewDate: string | null;
 }
 
 /**
@@ -97,6 +101,9 @@ function mapSopListItem(row: Record<string, unknown>): SopListItem {
     source: row.source === "converted" ? "converted" : "authored",
     status: (row.status as SopStatus | null) ?? "draft",
     updatedAt: String(row.updated_at ?? ""),
+    departmentId: (row.department_id as string | null) ?? null,
+    effectiveDate: (row.effective_date as string | null) ?? null,
+    nextReviewDate: (row.next_review_date as string | null) ?? null,
   };
 }
 
@@ -188,12 +195,33 @@ export async function saveSop(sop: Sop, workspaceId: string, options: SaveSopOpt
   return mapSop(inserted as Record<string, unknown>);
 }
 
+/** How many production tasks link to this SOP (the "where-used" back-reference). */
+export async function countTasksUsingSop(sopId: string): Promise<number> {
+  const supabase = createPlannerSupabaseClient();
+  const { count, error } = await supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("sop_id", sopId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return count ?? 0;
+}
+
 /**
  * Soft delete: the row is kept (deleted_at set, which also frees the SOP number for reuse
- * via the partial unique index) and filtered out of every read path above.
+ * via the partial unique index) and filtered out of every read path above. Blocked while any
+ * production task still links to the SOP, so a delete can't silently orphan a task's reference
+ * (the DB trigger separately blocks deleting a non-draft/obsolete controlled document).
  */
 export async function deleteSop(id: string): Promise<void> {
   const supabase = createPlannerSupabaseClient();
+  const linked = await countTasksUsingSop(id);
+  if (linked > 0) {
+    throw new Error(
+      `This SOP is used by ${linked} production task${linked === 1 ? "" : "s"} — unlink it there before deleting.`,
+    );
+  }
   await throwIfError(supabase.from("sops").update({ deleted_at: nowIso() }).eq("id", id).is("deleted_at", null));
 }
 

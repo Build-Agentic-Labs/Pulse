@@ -18,7 +18,7 @@ import {
   type SopControl,
   type SopSignature,
 } from "@/lib/sop/review";
-import { getSop, SopConflictError } from "@/lib/sop/store";
+import { countTasksUsingSop, getSop, SopConflictError } from "@/lib/sop/store";
 import { SopDepartmentAssign } from "./sop-department-assign";
 import { SopShell } from "./sop-shell";
 import { canEdit, canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
@@ -71,6 +71,7 @@ interface ReadyData {
   departments: Department[];
   deptRoles: Map<string, DeptRole>;
   userId: string | null;
+  whereUsed: number;
 }
 
 type ActionTone = "primary" | "ghost" | "danger";
@@ -137,13 +138,14 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
     setLoadError("");
     try {
       const supabase = createPlannerSupabaseClient();
-      const [record, control, signatures, deptRoles, departments, userResult] = await Promise.all([
+      const [record, control, signatures, deptRoles, departments, userResult, used] = await Promise.all([
         getSop(sopId),
         getSopControl(sopId),
         listSignatures(sopId),
         fetchMyDeptRoles(workspaceId),
         listDepartments(workspaceId),
         supabase.auth.getUser(),
+        countTasksUsingSop(sopId),
       ]);
       if (!control) {
         setPhase("missing");
@@ -156,6 +158,7 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
         departments,
         deptRoles,
         userId: userResult.data.user?.id ?? null,
+        whereUsed: used,
       });
       setPhase("ready");
     } catch (error) {
@@ -258,7 +261,7 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
 
   if (!ready) return null;
 
-  const { control, signatures, departments, deptRoles, userId, title } = ready;
+  const { control, signatures, departments, deptRoles, userId, title, whereUsed } = ready;
   const dept = control.departmentId ? departments.find((d) => d.id === control.departmentId) : undefined;
   const myRole = control.departmentId ? deptRoles.get(control.departmentId) : undefined;
   const isQualityApprover = departments.some((d) => d.isQualityGate && deptRoles.get(d.id) === "approver");
@@ -331,6 +334,12 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
             <div>
               <div className="ui-mono-label text-ink-tertiary">Next review</div>
               <div className="mt-1 font-mono text-sm text-ink">{formatDate(control.nextReviewDate) || "—"}</div>
+            </div>
+            <div>
+              <div className="ui-mono-label text-ink-tertiary">Used by</div>
+              <div className="mt-1 text-sm text-ink">
+                {whereUsed} task{whereUsed === 1 ? "" : "s"}
+              </div>
             </div>
           </div>
           {control.status === "draft" ? (

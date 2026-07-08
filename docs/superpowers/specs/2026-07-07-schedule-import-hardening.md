@@ -1,19 +1,27 @@
 # Schedule-Import Hardening — Prerequisites for Work-Order Set Generation
 
 **Date:** 2026-07-07
-**Status:** In progress — foundation partly applied, paused on user decisions
+**Status:** ✅ Hardened — resolution module + dry-run validator built, all decisions resolved, dry-run passes the acceptance gate. Residual data to-dos enumerated below (not code work).
 **Precedes:** the production-schedule → work-order-set importer (separate spec, not yet written)
 **Builds on:** `2026-07-06-work-order-sets-design.md` (shipped), `anacorp-product-nomenclature` (memory)
 
 ## Progress (as of 2026-07-07)
 
-Applied to the live workspace by `scripts/planning/harden-schedule-import.mjs` (idempotent, re-runnable):
-- **W1 ✅** — 4 PM templates retyped `head_unit → power_module` (`70PM`, `220PM`, `400PM`, `500PM`); a stray `SDG150 TRAILER` template retyped `head_unit → trailer`.
-- **W2 ✅** — trailer catalog: `E = Electric`, `S = Surge / Hydraulic`. **D7 confirmed**: plain `Hydraulic` → S.
-- **W3 ◑ partial** — 7 generator templates linked to the 70 PM (all 70-series). **5 pending**: `HEAD UNIT 25-25 ×4` (needs 25 PM), `HEAD UNIT BOSS125-125` (needs 125 PM).
-- **W4 ◑ drafted** — customer normalization map built from June data. Resolves cleanly: Herc (67 lines / 3 spellings → HERC), Equipment Share (49 / 2 → ES), United Rentals (37 → UR), REIC, OES. **Flagged, no gen template**: Kiewit (9), DEVALL (8), CAT dealers (8), Paragon, Bingham. **Data issue**: `SACRAMENTO` (14 lines) is location text in the CUSTOMER column, not a customer.
+**Decisions resolved:** D1–D4 confirmed as recommended · D5 = **skip** (don't author 25/125 PM yet — flag those lines) · D6 = **separate** (EBOSS25-25 is a GEN+PM set, needs a 25 PM template) · D7 = **yes** (plain Hydraulic → S) · customer fallback = **hard-flag & skip** (no combo-generic fallback).
 
-**Blocked on user decisions:** D5 (25/125 PM BOM source — the critical-path unblocker), D6 (does 25-25 get a separate PM order), the no-template-customer policy (~43 lines), the Sacramento contamination, missing combo `125-65`, and confirming D1–D4. Resume there → dry-run validator over June → build the importer.
+**Data setup applied to the live workspace** by `scripts/planning/harden-schedule-import.mjs` (idempotent):
+- **W1 ✅** — 4 PM templates retyped `head_unit → power_module` (`70PM`, `220PM`, `400PM`, `500PM`); a stray `SDG150 TRAILER` template retyped `head_unit → trailer`.
+- **W2 ✅** — trailer catalog: `E = Electric`, `S = Surge / Hydraulic`.
+- **W3 ◑** — 7 generator templates linked to the 70 PM (all 70-series). 25/125 links await their PM templates (D5 skip).
+
+**Resolution logic built (TDD, `src/domain/schedule-import.ts`, 53 unit tests):** `parseModel`, `normalizeCustomer` (whole-word matching for short suffixes — hardened against `DOES`↛OES etc.), `normalizeBrake`, `cleanSo`, `aoStatus`, `isSectionHeaderRow`, `parseGenTemplateName`/`parsePmSize`/`buildTemplateIndex` (flags name↔model combo mismatch), `resolveLine`. Read-only inventory dump: `scripts/planning/inventory-schedule-import.mjs`.
+
+**Dry-run over June** (`scripts/planning/dry-run-schedule-import.ts`, run via `node --experimental-strip-types`): 223 raw rows → **11 section-header rows skipped** → **212 importable → 160 resolved / 52 flagged**, every flag enumerated. Adversarially audited (Fable, 5 lenses); confirmed findings fixed. **Acceptance gate ✓.**
+
+**Residual to-dos (data, not code) before a real import run:**
+- Author **25 PM** (37 lines) + **125 PM** (9 lines) templates → clears 46 `pm-template-missing` flags (D5 unblock).
+- Add gen variants: **25-25 Kiewit/CAT**, **70-45 Kiewit** (8+8 lines); the **125-65** combo has no gen template (1 line).
+- Importer-stage (next spec): **dedup** — one June unit appears on two rows (shared VIN `7H6…869`); the per-line resolver doesn't dedup.
 
 ---
 
@@ -66,13 +74,15 @@ The importer's core lookup. Two-key resolution:
    - `United Rentals` → **UR** · `Kiewit` / `PETER KIEWIT` → **Kiewit** · `REIC` → **REIC** · `OES` → **OES**
    - CAT dealers (`Quinn CAT`, `RING POWER- CAT`, `Western States…CAT`) → **CAT** *(no template yet)*
    - Contaminated values (`SACRAMENTO - DUE BY 6/29`, `IWCE tradeshow…`) → strip to real customer or flag
-- **Resolution**: `combo + suffix` → head_unit template. No exact customer match → fall back to any template for that combo (flag "customer-generic"), or flag "no template" if the combo itself is missing.
+- **Resolution**: `combo + suffix` → head_unit template. **Adopted policy = hard-flag & skip** (supersedes the earlier "combo-generic fallback" idea): no exact `combo+suffix` template → block the line with `no-template-for-customer` (or `no-gen-template-for-combo` if the combo itself is missing). The resolver never borrows another customer's template. A suffix-less generic template (e.g. `HEAD UNIT BOSS125-125`) is therefore currently *not* auto-matched to a named customer; flip that only by an explicit decision.
 - **Known coverage gaps to flag, not guess**: combo `125-65` (no template); customers with no variant (`DEVALL DIESEL`, `Paragon`, `Bingham`, `Sunstate`, `Red D Arc`, CAT dealers).
 
 ### W5 — Decompose & AO rules *(decisions — see below)*
 Confirm the rules the importer applies per line (D1–D6).
 
-## Decisions requiring your input
+## Decisions — RESOLVED 2026-07-07
+
+All resolved (see Progress header): **D1–D4** confirmed as recommended · **D5 = skip** (flag 25/125 PM lines, don't author yet) · **D6 = separate** (25-25 is a GEN+PM set) · **D7 = yes** (Hydraulic → S) · customer fallback = **hard-flag & skip**. The table below is the original recommendation set, retained for rationale.
 
 | # | Decision | Recommendation |
 |---|---|---|

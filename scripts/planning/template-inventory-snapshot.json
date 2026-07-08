@@ -1,0 +1,22 @@
+{
+  "_comment": "Snapshot of the live work-order template inventory used by dry-run-schedule-import.ts. Regenerate from `node --env-file=.env.local scripts/planning/inventory-schedule-import.mjs`. Only head_unit + power_module rows and trailer letters matter for resolution; `id` is the template name here (the dry-run needs coverage, not real ids). Captured 2026-07-07, workspace-default.",
+  "trailerLetters": ["E", "S"],
+  "templates": [
+    { "id": "HEAD UNIT 25-25 ES", "name": "HEAD UNIT 25-25 ES", "model": "BOSS25-25", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 25-25 HERC", "name": "HEAD UNIT 25-25 HERC", "model": "BOSS25-25", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 25-25 Peak", "name": "HEAD UNIT 25-25 Peak", "model": "BOSS25-25", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 25-25 UR", "name": "HEAD UNIT 25-25 UR", "model": "BOSS25-25", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 70-40 UR", "name": "HEAD UNIT 70-40 UR", "model": "BOSS70-40", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 70-45 HERC", "name": "HEAD UNIT 70-45 HERC", "model": "BOSS70-45", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 70-45 OES", "name": "HEAD UNIT 70-45 OES", "model": "BOSS70-40", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 70-45 REIC", "name": "HEAD UNIT 70-45 REIC", "model": "BOSS70-45", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 70-45 T-MOBILE", "name": "HEAD UNIT 70-45 T-MOBILE", "model": "BOSS70-45", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 70-65 ES", "name": "HEAD UNIT 70-65 ES", "model": "BOSS70-65", "order_type": "head_unit" },
+    { "id": "HEAD UNIT BOSS125-125", "name": "HEAD UNIT BOSS125-125", "model": "BOSS125-125-XQ125", "order_type": "head_unit" },
+    { "id": "MOCK — Head Unit Test", "name": "MOCK — Head Unit Test", "model": "BOSS70-40", "order_type": "head_unit" },
+    { "id": "HEAD UNIT 70PM", "name": "HEAD UNIT 70PM", "model": "BOSS70 PM", "order_type": "power_module" },
+    { "id": "HEAD UNIT BOSS220PM", "name": "HEAD UNIT BOSS220PM", "model": "BOSS220 PM", "order_type": "power_module" },
+    { "id": "HEAD UNIT BOSS400PM", "name": "HEAD UNIT BOSS400PM", "model": "BOSS400 PM", "order_type": "power_module" },
+    { "id": "HEAD UNIT BOSS500PM", "name": "HEAD UNIT BOSS500PM", "model": "BOSS500 PM", "order_type": "power_module" }
+  ]
+}

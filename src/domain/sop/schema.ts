@@ -33,13 +33,14 @@ export function rasicLegend(separator = "  ·  "): string {
 // Lifecycle status
 // ---------------------------------------------------------------------------
 
-export const SOP_STATUSES = ["draft", "in_review", "approved", "obsolete"] as const;
+export const SOP_STATUSES = ["draft", "in_review", "approved", "effective", "obsolete"] as const;
 export type SopStatus = (typeof SOP_STATUSES)[number];
 
 export const SOP_STATUS_LABELS: Record<SopStatus, string> = {
   draft: "Draft",
   in_review: "In review",
   approved: "Approved",
+  effective: "Effective",
   obsolete: "Obsolete",
 };
 

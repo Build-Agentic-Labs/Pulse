@@ -10,8 +10,9 @@
  */
 
 import { canAuthor, canDeptApprove, canSignReview, type DeptRole } from "@/domain/departments";
+import type { SopStatus } from "./schema";
 
-export type SopStatus = "draft" | "in_review" | "approved" | "effective" | "obsolete";
+export type { SopStatus };
 
 export const SOP_STATUS_ORDER: SopStatus[] = ["draft", "in_review", "approved", "effective", "obsolete"];
 

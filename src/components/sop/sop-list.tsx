@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { Building2, FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -18,7 +18,7 @@ import {
 } from "@/lib/sop/store";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { SopShell } from "./sop-shell";
-import { canEdit, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { canEdit, canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 function formatDate(iso: string): string {
   if (!iso) return "";
@@ -221,6 +221,17 @@ export function SopList() {
           </>
         ) : null}
       </div>
+      {canManage(role) ? (
+        <>
+          <div className="ui-nav-section mt-3">Manage</div>
+          <div className="space-y-0.5">
+            <Link href="/sops/departments" className="ui-nav-item ui-nav-item-idle">
+              <Building2 size={15} strokeWidth={1.75} />
+              <span>Departments</span>
+            </Link>
+          </div>
+        </>
+      ) : null}
       <SopWorkspaceSwitcher />
     </>
   );

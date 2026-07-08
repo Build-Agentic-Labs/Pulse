@@ -8,7 +8,7 @@ import { NothingSpinner } from "@/components/nothing-ui";
 import { getSop, type SopRecord } from "@/lib/sop/store";
 import { SopEditor } from "./sop-editor";
 import { SopShell } from "./sop-shell";
-import { canEdit, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { canEdit, canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 const browseSidebar = (
   <>
@@ -62,6 +62,7 @@ export function SopDetailClient() {
         initial={state.record.sop}
         workspaceId={state.record.workspaceId}
         canEdit={canEdit(role)}
+        canApprove={canManage(role)}
       />
     );
   }

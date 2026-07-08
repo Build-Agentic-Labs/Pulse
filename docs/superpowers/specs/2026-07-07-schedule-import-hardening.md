@@ -100,21 +100,38 @@ All resolved (see Progress header): **D1–D4** confirmed as recommended · **D5
 - **SO# cleaning**: strip trailing transfer text (`S-ORD144307 TO5745` → `S-ORD144307`); treat `NEED`/blank as "no SO — flag".
 - **AO status**: `A#####` = ok; `NEED MTS#`/blank = flag "A# to enter"; the 9 flagged June lines are known and acceptable.
 
-## Acceptance criteria — "hardened" means
+## Acceptance criteria — "hardened" means  ✅ MET
 Run the June Henderson sheet through the resolution logic as a **dry run (no writes)**. Every line
-must either:
-1. resolve to a **complete set** — generator template + PM template + trailer letter + AO status, **or**
-2. **flag a specific, actionable reason** (missing template for combo X, unknown customer Y, A# to enter).
+must either resolve to a **complete set** (generator + PM template + trailer letter + AO status) or
+**flag a specific, actionable reason**, and the flagged set must be small, enumerated, understood.
 
-And the flagged set is **small, enumerated, and understood** — we can point at each flagged line and
-say why. Target from today's data: the ~1 missing combo (`125-65`), the handful of no-template
-customers, and the 9 missing-AO lines — nothing resolving silently wrong.
+**Result** (`node --experimental-strip-types scripts/planning/dry-run-schedule-import.ts`): 223 raw
+rows → 11 section-header rows skipped → **212 importable → 160 resolved / 52 flagged**, 0 silent.
+The 52 flags are four buckets, all understood: 46 `pm-template-missing` (25/125 PM unauthored, D5),
+16 `no-template-for-customer` (Kiewit/CAT variants), 5 `unrecognized-model` (PDS185EZ/SDG65S), 1
+`no-gen-template-for-combo` (125-65). Advisories surfaced separately: 9 `ao-to-enter`, 32
+`trailer-letter-unspecified`, 2 `template-model-mismatch` (the 70-45-OES name↔model bug), 18 no-SO.
+
+## What's still needed (to run a real import, not code)
+The resolver + gate are done. The remaining work is **data authoring + the importer build**, in order:
+
+1. **Author the two missing PM templates** — `25 PM` (37 lines) and `125 PM` (9 lines). Clears all 46
+   `pm-template-missing` flags. This is decision **D5** (deferred as "skip"); needs the BOM source.
+2. **Fill the gen-template gaps** — add customer variants `25-25 Kiewit`, `25-25 CAT`, `70-45 Kiewit`
+   (16 lines), and create a `125-65` generator template (1 line). Or accept those as hard-flagged.
+3. **(optional) 125-125 generic policy** — the suffix-less `HEAD UNIT BOSS125-125` is currently *not*
+   auto-matched to CAT (hard-flag & skip). One-line flip in `resolveLine` if generic templates should
+   serve any recognized customer. Decision pending.
+4. **Fix the `70-45 OES` template** — its `model` column says `BOSS70-40`; confirm/repair the row so
+   the `template-model-mismatch` advisory clears.
+5. **Re-run the dry-run** after 1–2 to confirm the flagged set shrinks as expected, then **build the
+   importer** (next spec — see Out of scope) on top of `resolveLine`.
+
+Regenerate the inventory snapshot after template edits:
+`node --env-file=.env.local scripts/planning/inventory-schedule-import.mjs` (read-only) then update
+`scripts/planning/template-inventory-snapshot.json`.
 
 ## Out of scope
-The importer UI/flow (upload → worklist queue → one-line-at-a-time create). That is the next spec,
-built once this foundation passes the dry-run.
-
-## Sequence
-W1–W3 are data setup (partly parallel). W4–W5 are rules/decisions, pinnable now. Land D1–D6, do
-W1–W3, encode W4's tables, then a **dry-run validator over the June file** proves readiness → build
-the importer.
+The importer UI/flow (upload → worklist queue → one-line-at-a-time create), and cross-line **dedup**
+(one June unit spans two rows, shared VIN — the per-line resolver doesn't dedup). Both belong to the
+next spec, built on this foundation now that the dry-run passes.

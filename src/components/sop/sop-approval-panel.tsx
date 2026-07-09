@@ -20,7 +20,7 @@ import {
 } from "@/lib/sop/review";
 import { countTasksUsingSop, getSop, SopConflictError } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
-import { canEdit, canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 const MEANING_LABELS: Record<SignatureMeaning, string> = {
   authorship: "Authored — technical content",

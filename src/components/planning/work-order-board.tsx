@@ -6,10 +6,13 @@ import { useRouter } from "next/navigation";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
 import { WORK_ORDER_STATUS_LABELS, WORK_ORDER_TYPE_LABELS } from "@/domain/work-orders";
-import { listWorkOrders, type WorkOrderSummary } from "@/lib/planning/store";
+import { listWorkOrders, purgeLegacyWorkOrderTemplates, type WorkOrderSummary } from "@/lib/planning/store";
 import { PlanningSettings } from "./planning-settings";
 import { PlanningShell } from "./planning-shell";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
+
+/** One-time client flag so we only attempt the MTS-template purge once per browser session. */
+const PURGE_SESSION_KEY = "pulse:planning:purged-legacy-templates";
 
 const ALL_FILTER = "all";
 
@@ -83,6 +86,7 @@ export function WorkOrderBoard() {
   const [orders, setOrders] = useState<WorkOrderSummary[]>([]);
   const [listStatus, setListStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
+  const [purgeNotice, setPurgeNotice] = useState("");
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState(ALL_FILTER);
@@ -125,6 +129,42 @@ export function WorkOrderBoard() {
       loadSeqRef.current += 1;
     };
   }, [refresh]);
+
+  // One-time purge of MTS Excel "work order templates" (layout clones, not product truth).
+  // Editors only; failures are non-fatal so a permission miss doesn't block the board.
+  useEffect(() => {
+    if (!workspaceId || !canWrite) return;
+    let sessionDone = false;
+    try {
+      sessionDone = window.sessionStorage.getItem(PURGE_SESSION_KEY) === workspaceId;
+    } catch {
+      // private browsing — still attempt once per mount via sessionDone=false
+    }
+    if (sessionDone) return;
+
+    let cancelled = false;
+    void purgeLegacyWorkOrderTemplates(workspaceId)
+      .then(({ deleted }) => {
+        if (cancelled) return;
+        try {
+          window.sessionStorage.setItem(PURGE_SESSION_KEY, workspaceId);
+        } catch {
+          // ignore
+        }
+        if (deleted > 0) {
+          setPurgeNotice(
+            `Removed ${deleted} legacy work-order template${deleted === 1 ? "" : "s"} from the MTS Excel import. Existing orders were not changed.`,
+          );
+        }
+      })
+      .catch(() => {
+        // Non-fatal: board still works if purge is denied by RLS or offline.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, canWrite]);
 
   const statusOptions = useMemo<ThemedSelectOption[]>(() => {
     const statuses = Array.from(new Set(orders.map((order) => order.status)));
@@ -202,6 +242,14 @@ export function WorkOrderBoard() {
     >
       <div className="space-y-5">
         {settingsOpen ? <PlanningSettings /> : null}
+        {purgeNotice ? (
+          <div className="ui-notice px-4 py-3 ui-section-subtitle flex flex-wrap items-start justify-between gap-3">
+            <p className="min-w-0 flex-1 text-ink-secondary">{purgeNotice}</p>
+            <button type="button" className="ui-btn-ghost h-8 shrink-0 px-3" onClick={() => setPurgeNotice("")}>
+              Dismiss
+            </button>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-3">
           <span className="ui-mono-label whitespace-nowrap text-ink-secondary">
             {orders.length} work order{orders.length === 1 ? "" : "s"}
@@ -266,6 +314,10 @@ export function WorkOrderBoard() {
           ) : orders.length === 0 ? (
             <div className="px-4 py-10 text-center">
               <p className="ui-section-subtitle text-ink-tertiary">No work orders yet.</p>
+              <p className="ui-section-subtitle mx-auto mt-1 max-w-md text-ink-tertiary">
+                Create a blank order and add items from the item master. Excel MTS sheet copies are not used as
+                templates.
+              </p>
               {canWrite ? (
                 <button
                   type="button"

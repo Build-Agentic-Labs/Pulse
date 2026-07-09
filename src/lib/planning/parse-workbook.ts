@@ -1,5 +1,6 @@
-// Parses one sheet of the planner's "MTS Work Orders Master" workbook into a
-// work-order template draft. Pure: takes a cell matrix, returns data + warnings.
+// LEGACY: parses one sheet of the planner's "MTS Work Orders Master" workbook.
+// Those sheets were Excel layout clones — not product source of truth. Kept only
+// for historical unit tests; the Planning UI no longer imports this workbook.
 import type { WorkOrderType } from "@/domain/work-orders";
 
 export type WorkbookCell = string | number | boolean | Date | null;

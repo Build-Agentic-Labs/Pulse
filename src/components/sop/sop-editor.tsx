@@ -5,8 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useConfirm } from "@/components/confirm-provider";
+import type { Department } from "@/domain/departments";
 import { rasicLegend, SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
-import { saveSop, SopConflictError } from "@/lib/sop/store";
+import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
+import { mintSopNumber } from "@/lib/sop/review";
+import { saveSop, SopConflictError, type SaveSopOptions } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
 import { ProcessFlowchart } from "./process-flowchart";
@@ -63,16 +66,27 @@ export function SopEditor({
   workspaceId,
   canEdit = true,
   isNew = false,
+  authoringDepartments,
 }: {
   initial: Sop;
   workspaceId?: string;
   canEdit?: boolean;
   /** True when the SOP has never been persisted (autosave stays off until the first save). */
   isNew?: boolean;
+  /** The departments the author may own this SOP with. Present only for new SOPs (length >= 1). */
+  authoringDepartments?: Department[];
 }) {
   const router = useRouter();
   const confirm = useConfirm();
   const [sop, setSop] = useState<Sop>(initial);
+  // Owning-department selection for a new SOP (undefined mode => not the create flow).
+  const authMode = isNew && authoringDepartments ? authoringMode(authoringDepartments) : null;
+  const [deptId, setDeptId] = useState<string>(() => {
+    if (authMode?.kind === "single") return authMode.department.id;
+    if (authMode?.kind === "choose") return authMode.departments[0]?.id ?? "";
+    return "";
+  });
+  const selectedDept = authoringDepartments?.find((d) => d.id === deptId) ?? null;
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -112,14 +126,40 @@ export function SopEditor({
       setSaveStatus("error");
       return false;
     }
-    const statusChanged = sop.status !== lastSavedStatusRef.current;
-    const historyEntry = statusChanged ? statusChangeEntry(sop, lastSavedStatusRef.current) : undefined;
-    const toSave: Sop = historyEntry ? { ...sop, changeHistory: [...sop.changeHistory, historyEntry] } : sop;
-    const editVersion = editVersionRef.current;
+
+    // First save of a new SOP: the owning department mints the number (and is written on INSERT).
+    const firstSave = isNew && !persistedUpdatedAt;
+    if (firstSave && !deptId) {
+      setSaveError("Choose an owning department before saving.");
+      setSaveStatus("error");
+      return false;
+    }
+
     setSaveStatus("saving");
     setSaveError("");
+
+    let working = sop;
+    const saveOptions: SaveSopOptions = { expectedUpdatedAt: persistedUpdatedAt };
+    if (firstSave) {
+      try {
+        const minted = await mintSopNumber(workspaceId, deptId, DEFAULT_DOC_TYPE);
+        working = { ...sop, meta: { ...sop.meta, sopNumber: minted } };
+        setSop(working);
+        saveOptions.departmentId = deptId;
+        saveOptions.docType = DEFAULT_DOC_TYPE;
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Could not assign a SOP number.");
+        setSaveStatus("error");
+        return false;
+      }
+    }
+
+    const statusChanged = working.status !== lastSavedStatusRef.current;
+    const historyEntry = statusChanged ? statusChangeEntry(working, lastSavedStatusRef.current) : undefined;
+    const toSave: Sop = historyEntry ? { ...working, changeHistory: [...working.changeHistory, historyEntry] } : working;
+    const editVersion = editVersionRef.current;
     try {
-      const next = await saveSop(toSave, workspaceId, { expectedUpdatedAt: persistedUpdatedAt });
+      const next = await saveSop(toSave, workspaceId, saveOptions);
       setPersistedUpdatedAt(next.updatedAt);
       lastSavedStatusRef.current = next.status;
       if (editVersionRef.current === editVersion) {
@@ -336,14 +376,40 @@ export function SopEditor({
             {step.id === "document" ? (
               <Section title="Document">
                 <div className="grid gap-3 sm:grid-cols-2">
+                  {authMode && authMode.kind !== "blocked" ? (
+                    <Field label="Owning department">
+                      {authMode.kind === "single" ? (
+                        <div className="flex h-9 items-center">
+                          <span className="ui-chip">
+                            {authMode.department.code} · {authMode.department.name}
+                          </span>
+                        </div>
+                      ) : (
+                        <select
+                          className="ui-field-standalone"
+                          value={deptId}
+                          disabled={!canEdit}
+                          onChange={(event) => setDeptId(event.target.value)}
+                        >
+                          {authMode.departments.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.code} · {d.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </Field>
+                  ) : null}
                   <Field label="SOP number">
-                    <input
-                      className="ui-field-standalone"
-                      value={sop.meta.sopNumber}
-                      placeholder="SOP-QA-001"
-                      disabled={!canEdit}
-                      onChange={(event) => update({ meta: { ...sop.meta, sopNumber: event.target.value } })}
-                    />
+                    <div className="flex h-9 items-center">
+                      <span className="font-mono text-sm text-ink">
+                        {isNew && !persistedUpdatedAt
+                          ? selectedDept
+                            ? previewSopNumber(selectedDept.code, DEFAULT_DOC_TYPE)
+                            : "Assigned on save"
+                          : sop.meta.sopNumber || "—"}
+                      </span>
+                    </div>
                   </Field>
                   <Field label="Title">
                     <input

@@ -1,7 +1,6 @@
 "use client";
 
-import { Building2, FileText, Flag, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
-import Link from "next/link";
+import { Building2, Flag, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
@@ -15,8 +14,7 @@ import {
   saveDepartment,
   setMember,
 } from "@/lib/departments/store";
-import { SopShell } from "./sop-shell";
-import { canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { canManage, useSopWorkspace } from "./sop-workspace-provider";
 
 const DEPT_ROLES: readonly DeptRole[] = ["author", "reviewer", "approver"];
 const QA_GATE_NOTE =
@@ -159,29 +157,8 @@ export function DepartmentsAdmin() {
     }
   }
 
-  const sidebar = (
-    <>
-      <div className="ui-nav-section">SOPs</div>
-      <div className="space-y-0.5">
-        <Link href="/sops" className="ui-nav-item ui-nav-item-idle">
-          <FileText size={15} strokeWidth={1.75} />
-          <span>All SOPs</span>
-        </Link>
-      </div>
-      <div className="ui-nav-section mt-4">Manage</div>
-      <div className="space-y-0.5">
-        <span className="ui-nav-item ui-nav-item-active">
-          <Building2 size={15} strokeWidth={1.75} />
-          <span>Departments</span>
-        </span>
-      </div>
-      <SopWorkspaceSwitcher />
-    </>
-  );
-
   return (
-    <SopShell sidebar={sidebar} crumb="Quality / Departments">
-      <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto max-w-5xl space-y-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="ui-section-title">Departments</h1>
@@ -327,7 +304,6 @@ export function DepartmentsAdmin() {
           )}
         </div>
       </div>
-    </SopShell>
   );
 }
 

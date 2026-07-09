@@ -1,15 +1,6 @@
-import { EffectiveLibrary } from "@/components/sop/effective-library";
-import { SopWorkspaceProvider } from "@/components/sop/sop-workspace-provider";
+import { redirect } from "next/navigation";
 
-export const metadata = {
-  title: "Effective library | Pulse",
-  description: "The single approved, in-force version of every SOP.",
-};
-
+// The Effective library is a tab inside the persistent SOP workspace; keep the old path working.
 export default function SopLibraryPage() {
-  return (
-    <SopWorkspaceProvider>
-      <EffectiveLibrary />
-    </SopWorkspaceProvider>
-  );
+  redirect("/sops?tab=library");
 }

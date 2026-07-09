@@ -5,6 +5,7 @@
  */
 
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
+import { pickMemberDepartments } from "@/domain/departments";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 
 const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate";
@@ -157,4 +158,23 @@ export async function fetchMyDeptRoles(workspaceId: string): Promise<Map<string,
     if (deptIds.has(m.departmentId)) roles.set(m.departmentId, m.deptRole);
   }
   return roles;
+}
+
+/**
+ * The departments the current user is an explicit member of (author/reviewer/approver), for the
+ * builder's owning-department picker. Managers are intentionally NOT folded in here (unlike the DB
+ * `has_department_role`): authoring requires real membership, so a manager with no department is
+ * blocked from creating SOPs until added to one.
+ */
+export async function listMyDepartments(workspaceId: string): Promise<Department[]> {
+  const supabase = createPlannerSupabaseClient();
+  const { data: userData } = await getUserFromSession(supabase);
+  const userId = userData.user?.id;
+  if (!userId) return [];
+  const departments = await listDepartments(workspaceId);
+  const rows = await throwIfError(
+    supabase.from("department_members").select(MEMBER_COLUMNS).eq("user_id", userId),
+  );
+  const memberIds = new Set((rows ?? []).map((row: Record<string, unknown>) => mapMember(row).departmentId));
+  return pickMemberDepartments(departments, memberIds);
 }

@@ -10,6 +10,7 @@
 
 import { createEmptySop, type Sop, type SopStatus } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
+import { effectiveSopNumber } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 
 const STORAGE_KEY = "pulse:sops:v1";
@@ -87,6 +88,12 @@ function mapSop(row: Record<string, unknown>): Sop {
     ...document,
     id: String(row.id),
     status: (row.status as SopStatus | null) ?? "draft",
+    // The promoted `sop_number` column is authoritative (the list reads it); overlay it onto the
+    // jsonb copy so the editor and list never disagree.
+    meta: {
+      ...document.meta,
+      sopNumber: effectiveSopNumber(row.sop_number as string | null | undefined, document.meta?.sopNumber ?? ""),
+    },
     createdAt: String(row.created_at ?? document.createdAt ?? ""),
     updatedAt: String(row.updated_at ?? document.updatedAt ?? ""),
   };
@@ -140,6 +147,12 @@ export interface SaveSopOptions {
    * UPDATE that throws `SopConflictError` if the row moved; absent -> plain INSERT.
    */
   expectedUpdatedAt?: string;
+  /**
+   * Owning department + document type, written only on the initial INSERT (the DB trigger freezes
+   * `department_id` once the SOP leaves draft, and it is never changed on later saves).
+   */
+  departmentId?: string;
+  docType?: string;
 }
 
 export async function saveSop(sop: Sop, workspaceId: string, options: SaveSopOptions = {}): Promise<Sop> {
@@ -184,11 +197,20 @@ export async function saveSop(sop: Sop, workspaceId: string, options: SaveSopOpt
     return mapSop(updated as Record<string, unknown>);
   }
 
-  // First save: a plain INSERT so created_by is written exactly once and never rewritten.
+  // First save: a plain INSERT so created_by is written exactly once and never rewritten. The
+  // owning department + doc type ride along here (frozen afterwards) when the builder supplies them.
   const inserted = await throwIfError(
     supabase
       .from("sops")
-      .insert({ ...row, id: next.id, workspace_id: workspaceId, created_by: userId })
+      .insert({
+        ...row,
+        id: next.id,
+        workspace_id: workspaceId,
+        created_by: userId,
+        ...(options.departmentId
+          ? { department_id: options.departmentId, doc_type: options.docType ?? "SOP" }
+          : {}),
+      })
       .select(SOP_COLUMNS)
       .single(),
   );

@@ -87,6 +87,8 @@ export function SopNewClient() {
     );
   }
 
+  // isNew keeps autosave off until the first (INSERT) save — without it the editor issues a
+  // guarded UPDATE against a row that doesn't exist yet and throws SopConflictError.
   return (
     <SopEditor
       initial={initial}

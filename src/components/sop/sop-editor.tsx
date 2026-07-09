@@ -378,13 +378,7 @@ export function SopEditor({
                 <div className="grid gap-3 sm:grid-cols-2">
                   {authMode && authMode.kind !== "blocked" ? (
                     <Field label="Owning department">
-                      {authMode.kind === "single" ? (
-                        <div className="flex h-9 items-center">
-                          <span className="ui-chip">
-                            {authMode.department.code} · {authMode.department.name}
-                          </span>
-                        </div>
-                      ) : (
+                      {authMode.kind === "choose" && !persistedUpdatedAt ? (
                         <select
                           className="ui-field-standalone"
                           value={deptId}
@@ -397,6 +391,12 @@ export function SopEditor({
                             </option>
                           ))}
                         </select>
+                      ) : (
+                        <div className="flex h-9 items-center">
+                          <span className="ui-chip">
+                            {selectedDept ? `${selectedDept.code} · ${selectedDept.name}` : "—"}
+                          </span>
+                        </div>
                       )}
                     </Field>
                   ) : null}

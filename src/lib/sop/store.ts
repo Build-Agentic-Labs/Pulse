@@ -10,7 +10,7 @@
 
 import { createEmptySop, type Sop, type SopStatus } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
-import { effectiveSopNumber } from "@/domain/sop/authoring";
+import { DEFAULT_DOC_TYPE, effectiveSopNumber } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 
 const STORAGE_KEY = "pulse:sops:v1";
@@ -208,7 +208,7 @@ export async function saveSop(sop: Sop, workspaceId: string, options: SaveSopOpt
         workspace_id: workspaceId,
         created_by: userId,
         ...(options.departmentId
-          ? { department_id: options.departmentId, doc_type: options.docType ?? "SOP" }
+          ? { department_id: options.departmentId, doc_type: options.docType ?? DEFAULT_DOC_TYPE }
           : {}),
       })
       .select(SOP_COLUMNS)

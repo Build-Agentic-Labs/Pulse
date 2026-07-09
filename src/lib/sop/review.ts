@@ -150,34 +150,6 @@ export async function transitionSop(
   return mapControl(updated as unknown as Record<string, unknown>);
 }
 
-/**
- * Assign a draft SOP to a department and mint its DEPT-TYPE-NNN number (the number encodes the
- * department, so assignment and numbering happen together). Only valid on a draft — the trigger
- * freezes department_id once the SOP leaves draft. Guarded on updated_at.
- */
-export async function assignDepartment(
-  id: string,
-  workspaceId: string,
-  departmentId: string,
-  docType: string,
-  expectedUpdatedAt: string,
-): Promise<SopControl> {
-  const supabase = createPlannerSupabaseClient();
-  const sopNumber = await mintSopNumber(workspaceId, departmentId, docType);
-  const updated = await throwIfError(
-    supabase
-      .from("sops")
-      .update({ department_id: departmentId, doc_type: docType, sop_number: sopNumber })
-      .eq("id", id)
-      .eq("updated_at", expectedUpdatedAt)
-      .is("deleted_at", null)
-      .select(CONTROL_COLUMNS)
-      .maybeSingle(),
-  );
-  if (!updated) throw new SopConflictError();
-  return mapControl(updated as unknown as Record<string, unknown>);
-}
-
 export async function listSignatures(sopId: string): Promise<SopSignature[]> {
   const supabase = createPlannerSupabaseClient();
   const rows = await throwIfError(

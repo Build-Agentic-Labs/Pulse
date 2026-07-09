@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import { rasicLegend, SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
-import { applySampleData } from "@/domain/sop/sample";
 import { saveSop, SopConflictError } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
@@ -154,13 +153,6 @@ export function SopEditor({
     void persist();
   }
 
-  function handleLoadSample() {
-    setSop((current) => applySampleData(current));
-    editVersionRef.current += 1;
-    setDirty(true);
-    setSaveStatus("idle");
-  }
-
   // Warn on tab close / hard navigation while there are unsaved edits.
   useEffect(() => {
     if (!dirty) return;
@@ -235,17 +227,6 @@ export function SopEditor({
 
   const actions = (
     <>
-      {canEdit ? (
-        <button
-          type="button"
-          className="ui-btn-ghost h-10 gap-2"
-          onClick={handleLoadSample}
-          title="Fill every step with sample data"
-        >
-          <Sparkles size={15} />
-          <span className="hidden sm:inline">Sample</span>
-        </button>
-      ) : null}
       <button
         type="button"
         className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"

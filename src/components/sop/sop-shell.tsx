@@ -71,7 +71,7 @@ export function SopShell({
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            className="ui-btn-ghost absolute left-2 top-2 z-30 hidden h-8 w-8 items-center justify-center bg-surface px-0 text-ink-tertiary hover:text-ink lg:inline-flex"
+            className="ui-btn-ghost absolute bottom-3 left-2 z-30 hidden h-8 w-8 items-center justify-center rounded-full border border-line bg-surface px-0 text-ink-tertiary hover:text-ink lg:inline-flex"
             title="Show sidebar"
             aria-label="Show sidebar"
           >
@@ -79,21 +79,10 @@ export function SopShell({
           </button>
         ) : null}
         <aside
-          className="ui-nav-sidebar shrink-0 overflow-hidden transition-[width,opacity] duration-300 ease-ui"
+          className="ui-nav-sidebar flex shrink-0 flex-col overflow-hidden transition-[width,opacity] duration-300 ease-ui"
           style={collapsed ? { width: 0, opacity: 0 } : undefined}
         >
-          <div className="flex h-9 shrink-0 items-center justify-end px-2">
-            <button
-              type="button"
-              onClick={() => setCollapsed(true)}
-              className="ui-btn-ghost inline-flex h-7 w-7 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
-              title="Hide sidebar"
-              aria-label="Hide sidebar"
-            >
-              <PanelLeftClose size={15} strokeWidth={1.75} />
-            </button>
-          </div>
-          <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-2">
+          <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-3">
             {back ? (
               <Link href={back.href} className="ui-settings-back" title={back.label} onClick={guardNavigation}>
                 <ChevronLeft size={14} strokeWidth={1.75} />
@@ -102,6 +91,17 @@ export function SopShell({
             ) : null}
             {sidebar}
           </nav>
+          <div className="shrink-0 px-2 pb-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
+              title="Hide sidebar"
+              aria-label="Hide sidebar"
+            >
+              <PanelLeftClose size={15} strokeWidth={1.75} />
+            </button>
+          </div>
         </aside>
 
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">

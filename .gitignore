@@ -30,3 +30,6 @@ UFO/*.zip
 *.log
 .DS_Store
 .vercel
+
+# agent worktrees (isolated checkouts)
+.claude/worktrees/

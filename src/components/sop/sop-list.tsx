@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Loader2, Plus, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { FileText, Loader2, Plus, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -36,6 +36,17 @@ function reviewFlag(iso: string | null): { label: string; className: string } | 
   if (days < 0) return { label: "overdue", className: "text-danger" };
   if (days <= 30) return { label: "due soon", className: "text-warn" };
   return null;
+}
+
+/** Stable soft accent for a department code so filters read as distinct, not identical pills. */
+function departmentAccent(code: string): string {
+  let hash = 0;
+  for (let i = 0; i < code.length; i += 1) {
+    hash = (hash * 31 + code.charCodeAt(i)) >>> 0;
+  }
+  const hues = [208, 162, 28, 286, 338, 188, 48, 132, 304, 12, 248];
+  const hue = hues[hash % hues.length];
+  return `hsl(${hue} 42% 40%)`;
 }
 
 function importDoneKey(workspaceId: string): string {
@@ -74,7 +85,6 @@ export function SopList() {
   const [pendingImport, setPendingImport] = useState<Sop[]>([]);
   const [importing, setImporting] = useState(false);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [deptFilter, setDeptFilter] = useState<string>("all");
   const converting = convert !== null;
 
   const refreshList = useCallback(async () => {
@@ -97,18 +107,47 @@ export function SopList() {
     }
   }, [workspaceId]);
 
-  const deptById = useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments]);
-
-  const visibleSops = useMemo(() => {
+  const filteredSops = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return sops.filter((sop) => {
-      if (deptFilter !== "all" && sop.departmentId !== deptFilter) return false;
-      if (!needle) return true;
-      return sop.title.toLowerCase().includes(needle) || sop.sopNumber.toLowerCase().includes(needle);
-    });
-  }, [sops, query, deptFilter]);
+    if (!needle) return sops;
+    return sops.filter(
+      (sop) => sop.title.toLowerCase().includes(needle) || sop.sopNumber.toLowerCase().includes(needle),
+    );
+  }, [sops, query]);
 
-  // Departments power the filter chips and each row's owning-department badge.
+  const groups = useMemo(() => {
+    const byDept = new Map<string, SopListItem[]>();
+    const unassigned: SopListItem[] = [];
+    for (const sop of filteredSops) {
+      if (!sop.departmentId) {
+        unassigned.push(sop);
+        continue;
+      }
+      const list = byDept.get(sop.departmentId) ?? [];
+      list.push(sop);
+      byDept.set(sop.departmentId, list);
+    }
+    const ordered: { key: string; department: Department | null; sops: SopListItem[] }[] = departments.map(
+      (department) => ({
+        key: department.id,
+        department,
+        sops: byDept.get(department.id) ?? [],
+      }),
+    );
+    for (const [departmentId, list] of byDept) {
+      if (departments.some((dept) => dept.id === departmentId)) continue;
+      ordered.push({ key: departmentId, department: null, sops: list });
+    }
+    if (unassigned.length > 0 || departments.length === 0) {
+      ordered.push({ key: "unassigned", department: null, sops: unassigned });
+    }
+    if (query.trim()) {
+      return ordered.filter((group) => group.sops.length > 0);
+    }
+    return ordered;
+  }, [filteredSops, departments, query]);
+
+  // Departments power the grouped sections.
   useEffect(() => {
     if (!workspaceId) return;
     let active = true;
@@ -117,7 +156,7 @@ export function SopList() {
         if (active) setDepartments(rows);
       })
       .catch(() => {
-        /* non-fatal: the list still works without the department filter */
+        /* non-fatal: the list still works without department grouping */
       });
     return () => {
       active = false;
@@ -242,11 +281,13 @@ export function SopList() {
         }}
       />
 
-      <div className="mx-auto max-w-3xl space-y-5">
+      <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="ui-section-title">SOPs</h1>
-            <p className="ui-section-subtitle">Create standardized SOPs, or convert an old document into the new format.</p>
+            <p className="ui-section-subtitle">
+              Organized by department. Create a new SOP, or convert an old document into the new format.
+            </p>
           </div>
           {editable ? (
             <div className="flex items-center gap-2">
@@ -270,35 +311,15 @@ export function SopList() {
         {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
         {listStatus === "ready" && sops.length > 0 ? (
-          <input
-            type="search"
-            className="ui-field-standalone w-full"
-            placeholder="Search by SOP number or title"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        ) : null}
-
-        {listStatus === "ready" && departments.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              className={`ui-chip ${deptFilter === "all" ? "border-ink text-ink" : ""}`}
-              onClick={() => setDeptFilter("all")}
-            >
-              All
-            </button>
-            {departments.map((dept) => (
-              <button
-                key={dept.id}
-                type="button"
-                className={`ui-chip ${deptFilter === dept.id ? "border-ink text-ink" : ""}`}
-                title={dept.name}
-                onClick={() => setDeptFilter(dept.id)}
-              >
-                {dept.code}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 border-b border-line pb-2 focus-within:border-ink/40">
+            <Search size={14} className="shrink-0 text-ink-tertiary" strokeWidth={1.75} />
+            <input
+              type="search"
+              className="min-w-0 flex-1 bg-transparent text-[13px] font-normal text-ink outline-none placeholder:text-ink-tertiary"
+              placeholder="Search by SOP number or title"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
           </div>
         ) : null}
 
@@ -322,102 +343,150 @@ export function SopList() {
           </div>
         ) : null}
 
-        <section className="ui-panel divide-y divide-line overflow-hidden">
-          {listStatus === "loading" ? (
-            <div className="flex items-center justify-center px-4 py-10">
-              <Loader2 size={18} className="animate-spin text-ink-tertiary" />
-            </div>
-          ) : listStatus === "error" ? (
-            <div className="px-4 py-10 text-center">
-              <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load SOPs."}</p>
-              <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
-                Retry
-              </button>
-            </div>
-          ) : sops.length === 0 ? (
-            <div className="px-4 py-10 text-center">
-              <FileText size={20} className="mx-auto text-ink-tertiary" />
-              <p className="mt-2 ui-section-subtitle text-ink-tertiary">
-                No SOPs yet. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
-              </p>
-            </div>
-          ) : visibleSops.length === 0 ? (
-            <div className="px-4 py-10 text-center">
-              <p className="ui-section-subtitle text-ink-tertiary">No SOPs match &ldquo;{query.trim()}&rdquo;.</p>
-            </div>
-          ) : (
-            visibleSops.map((sop) => {
-              const dept = sop.departmentId ? deptById.get(sop.departmentId) : undefined;
-              const flag = reviewFlag(sop.nextReviewDate);
-              // The row is a Link (the whole card navigates) with a real sibling delete
-              // button -- never a button nested in a button, which is invalid interactive
-              // markup and swallows keyboard activation.
+        {listStatus === "loading" ? (
+          <section className="ui-panel flex items-center justify-center px-4 py-10">
+            <Loader2 size={18} className="animate-spin text-ink-tertiary" />
+          </section>
+        ) : listStatus === "error" ? (
+          <section className="ui-panel px-4 py-10 text-center">
+            <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load SOPs."}</p>
+            <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
+              Retry
+            </button>
+          </section>
+        ) : sops.length === 0 ? (
+          <section className="ui-panel px-4 py-10 text-center">
+            <FileText size={20} className="mx-auto text-ink-tertiary" />
+            <p className="mt-2 ui-section-subtitle text-ink-tertiary">
+              No SOPs yet. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
+            </p>
+          </section>
+        ) : filteredSops.length === 0 ? (
+          <section className="ui-panel px-4 py-10 text-center">
+            <p className="ui-section-subtitle text-ink-tertiary">No SOPs match &ldquo;{query.trim()}&rdquo;.</p>
+          </section>
+        ) : (
+          <div className="space-y-8">
+            {groups.map((group) => {
+              const name =
+                group.department?.name ?? (group.key === "unassigned" ? "Unassigned" : "Unknown department");
+              const accent = departmentAccent(group.department?.code ?? group.key);
+              const count = group.sops.length;
+
               return (
-              <div
-                key={sop.id}
-                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
-              >
-                <Link
-                  href={`/sops/${sop.id}`}
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                >
-                  <FileText size={15} className="shrink-0 text-ink-tertiary" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-ink">
-                      {sop.title || sop.sopNumber || "Untitled SOP"}
+                <section key={group.key} className="space-y-2.5">
+                  <div className="flex items-baseline justify-between gap-3 px-0.5">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: accent }}
+                        aria-hidden
+                      />
+                      <h2 className="truncate text-[15px] font-semibold tracking-tight text-ink">{name}</h2>
                     </div>
-                    <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
-                      {[sop.sopNumber, sop.version ? `v${sop.version}` : "", sop.source === "converted" ? "converted" : "authored"]
-                        .filter(Boolean)
-                        .join(" · ")}
+                    <span className="shrink-0 text-[12px] tabular-nums text-ink-tertiary">
+                      {count} {count === 1 ? "SOP" : "SOPs"}
+                    </span>
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border border-line bg-surface">
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[680px] border-collapse text-left">
+                        <thead>
+                          <tr className="border-b border-line">
+                            <th className="w-36 px-5 py-3 text-[11px] font-medium text-ink-secondary">Number</th>
+                            <th className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Title</th>
+                            <th className="w-32 px-5 py-3 text-[11px] font-medium text-ink-secondary">Status</th>
+                            <th className="w-28 px-5 py-3 text-[11px] font-medium text-ink-secondary">Updated</th>
+                            <th className="w-24 px-3 py-3"><span className="sr-only">Actions</span></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {count === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                                No SOPs yet
+                              </td>
+                            </tr>
+                          ) : (
+                            group.sops.map((sop) => {
+                              const flag = reviewFlag(sop.nextReviewDate);
+                              return (
+                                <tr
+                                  key={sop.id}
+                                  className="group border-b border-line/70 transition-colors last:border-b-0 hover:bg-surface-hover"
+                                >
+                                <td className="px-5 py-3.5 align-middle">
+                                  <Link
+                                    href={`/sops/${sop.id}`}
+                                    className="font-mono text-[12px] tracking-wide text-ink-secondary hover:text-ink"
+                                  >
+                                    {sop.sopNumber || "—"}
+                                  </Link>
+                                </td>
+                                <td className="max-w-0 px-5 py-3.5 align-middle">
+                                  <Link href={`/sops/${sop.id}`} className="block min-w-0">
+                                    <span className="block truncate text-[13px] font-medium leading-snug text-ink">
+                                      {sop.title || sop.sopNumber || "Untitled SOP"}
+                                    </span>
+                                    {flag ? (
+                                      <span className={`mt-1 block text-[11px] ${flag.className}`}>{flag.label}</span>
+                                    ) : null}
+                                  </Link>
+                                </td>
+                                <td className="px-5 py-3.5 align-middle">
+                                  <span
+                                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                                      sop.status === "approved"
+                                        ? "bg-accent/10 text-accent"
+                                        : sop.status === "effective"
+                                          ? "bg-success/10 text-success"
+                                          : sop.status === "obsolete"
+                                            ? "bg-danger/10 text-danger"
+                                            : "bg-surface-muted text-ink-secondary"
+                                    }`}
+                                  >
+                                    {SOP_STATUS_LABELS[sop.status]}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3.5 align-middle text-[12px] tabular-nums text-ink-tertiary">
+                                  {formatDate(sop.updatedAt) || "—"}
+                                </td>
+                                <td className="px-2 py-2.5 align-middle">
+                                  <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                                    <Link
+                                      href={`/sops/${sop.id}/control`}
+                                      className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-ink"
+                                      title="Document control & approval"
+                                    >
+                                      <ShieldCheck size={14} />
+                                    </Link>
+                                    {editable ? (
+                                      <button
+                                        type="button"
+                                        className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
+                                        title="Delete SOP"
+                                        onClick={() => void handleDelete(sop)}
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
-                  {dept ? (
-                    <span className="ui-chip shrink-0" title={dept.name}>
-                      {dept.code}
-                    </span>
-                  ) : null}
-                  <span
-                    className={`ui-chip shrink-0 ${
-                      sop.status === "approved"
-                        ? "border-accent text-accent"
-                        : sop.status === "effective"
-                          ? "border-success text-success"
-                          : sop.status === "obsolete"
-                            ? "border-danger text-danger"
-                            : ""
-                    }`}
-                  >
-                    {SOP_STATUS_LABELS[sop.status]}
-                  </span>
-                  {flag ? (
-                    <span className={`hidden ui-mono-label sm:inline ${flag.className}`}>{flag.label}</span>
-                  ) : formatDate(sop.updatedAt) ? (
-                    <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
-                  ) : null}
-                </Link>
-                <Link
-                  href={`/sops/${sop.id}/control`}
-                  className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-ink"
-                  title="Document control & approval"
-                >
-                  <ShieldCheck size={14} />
-                </Link>
-                {editable ? (
-                  <button
-                    type="button"
-                    className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger"
-                    title="Delete SOP"
-                    onClick={() => void handleDelete(sop)}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                ) : null}
-              </div>
+                </section>
               );
-            })
-          )}
-        </section>
+            })}
+
+          </div>
+        )}
       </div>
     </>
   );

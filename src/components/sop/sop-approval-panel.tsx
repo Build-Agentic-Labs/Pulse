@@ -19,7 +19,6 @@ import {
   type SopSignature,
 } from "@/lib/sop/review";
 import { countTasksUsingSop, getSop, SopConflictError } from "@/lib/sop/store";
-import { SopDepartmentAssign } from "./sop-department-assign";
 import { SopShell } from "./sop-shell";
 import { canEdit, canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
@@ -342,11 +341,6 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
               </div>
             </div>
           </div>
-          {control.status === "draft" ? (
-            <div className="border-t border-line pt-3">
-              <SopDepartmentAssign control={control} canEdit={canEdit(role)} onChanged={() => void reload()} />
-            </div>
-          ) : null}
           {control.status === "draft" && control.rejectedReason ? (
             <div className="ui-notice ui-notice-warn px-4 py-3">
               <div className="ui-mono-label text-ink-tertiary">Sent back for rework</div>

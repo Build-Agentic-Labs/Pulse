@@ -1,12 +1,11 @@
 "use client";
 
-import { Building2, FileText, Inbox, Library, Loader2 } from "lucide-react";
+import { Library, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SOP_STATUS_LABELS } from "@/domain/sop/schema";
 import { listSops, type SopListItem } from "@/lib/sop/store";
-import { SopShell } from "./sop-shell";
-import { SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { useSopWorkspace } from "./sop-workspace-provider";
 
 /** Department code = the first '-'-delimited segment of the SOP number ("ENG-SOP-007" -> "ENG"). */
 function departmentOf(sopNumber: string): string {
@@ -75,40 +74,8 @@ export function EffectiveLibrary() {
     return sops.filter((sop) => departmentOf(sop.sopNumber) === activeDepartment);
   }, [sops, activeDepartment]);
 
-  const sidebar = (
-    <>
-      <div className="ui-nav-section">SOPs</div>
-      <div className="space-y-0.5">
-        <Link href="/sops" className="ui-nav-item ui-nav-item-idle">
-          <FileText size={15} strokeWidth={1.75} />
-          <span>All SOPs</span>
-        </Link>
-        <span className="ui-nav-item ui-nav-item-active" aria-current="page">
-          <Library size={15} strokeWidth={1.75} />
-          <span>Effective library</span>
-        </span>
-      </div>
-      <div className="ui-nav-section mt-3">Control</div>
-      <div className="space-y-0.5">
-        <Link href="/sops/review" className="ui-nav-item ui-nav-item-idle">
-          <Inbox size={15} strokeWidth={1.75} />
-          <span>Review queue</span>
-        </Link>
-      </div>
-      <div className="ui-nav-section mt-3">Manage</div>
-      <div className="space-y-0.5">
-        <Link href="/sops/departments" className="ui-nav-item ui-nav-item-idle">
-          <Building2 size={15} strokeWidth={1.75} />
-          <span>Departments</span>
-        </Link>
-      </div>
-      <SopWorkspaceSwitcher />
-    </>
-  );
-
   return (
-    <SopShell sidebar={sidebar} crumb="Quality / Effective library">
-      <div className="mx-auto max-w-4xl space-y-5">
+    <div className="mx-auto max-w-4xl space-y-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="ui-section-title">Effective library</h1>
@@ -190,6 +157,5 @@ export function EffectiveLibrary() {
           </div>
         )}
       </div>
-    </SopShell>
   );
 }

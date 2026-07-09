@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, FileText, Inbox, Library, Loader2, Plus, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { FileText, Loader2, Plus, ShieldCheck, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,8 +19,7 @@ import {
   type SopListItem,
 } from "@/lib/sop/store";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
-import { SopShell } from "./sop-shell";
-import { canEdit, canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { canEdit, useSopWorkspace } from "./sop-workspace-provider";
 
 function formatDate(iso: string): string {
   if (!iso) return "";
@@ -227,57 +226,8 @@ export function SopList() {
     setPendingImport([]);
   }
 
-  const sidebar = (
-    <>
-      <div className="ui-nav-section">SOPs</div>
-      <div className="space-y-0.5">
-        <Link href="/sops" className="ui-nav-item ui-nav-item-active">
-          <FileText size={15} strokeWidth={1.75} />
-          <span>All SOPs</span>
-        </Link>
-        <Link href="/sops/library" className="ui-nav-item ui-nav-item-idle">
-          <Library size={15} strokeWidth={1.75} />
-          <span>Effective library</span>
-        </Link>
-        <Link href="/sops/review" className="ui-nav-item ui-nav-item-idle">
-          <Inbox size={15} strokeWidth={1.75} />
-          <span>Review queue</span>
-        </Link>
-        {editable ? (
-          <>
-            <Link href="/sops/new" className="ui-nav-item ui-nav-item-idle">
-              <Plus size={15} strokeWidth={1.75} />
-              <span>New SOP</span>
-            </Link>
-            <button
-              type="button"
-              className="ui-nav-item ui-nav-item-idle w-full disabled:opacity-50"
-              disabled={converting || !workspaceId}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              {converting ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} strokeWidth={1.75} />}
-              <span>{converting ? "Converting…" : "Convert old SOP"}</span>
-            </button>
-          </>
-        ) : null}
-      </div>
-      {canManage(role) ? (
-        <>
-          <div className="ui-nav-section mt-3">Manage</div>
-          <div className="space-y-0.5">
-            <Link href="/sops/departments" className="ui-nav-item ui-nav-item-idle">
-              <Building2 size={15} strokeWidth={1.75} />
-              <span>Departments</span>
-            </Link>
-          </div>
-        </>
-      ) : null}
-      <SopWorkspaceSwitcher />
-    </>
-  );
-
   return (
-    <SopShell sidebar={sidebar}>
+    <>
       {convert ? <SopConvertOverlay fileName={convert.fileName} phase={convert.phase} /> : null}
 
       <input
@@ -293,9 +243,28 @@ export function SopList() {
       />
 
       <div className="mx-auto max-w-3xl space-y-5">
-        <div>
-          <h1 className="ui-section-title">SOPs</h1>
-          <p className="ui-section-subtitle">Create standardized SOPs, or convert an old document into the new format.</p>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="ui-section-title">SOPs</h1>
+            <p className="ui-section-subtitle">Create standardized SOPs, or convert an old document into the new format.</p>
+          </div>
+          {editable ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-50"
+                disabled={converting || !workspaceId}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {converting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {converting ? "Converting…" : "Convert"}
+              </button>
+              <Link href="/sops/new" className="ui-btn-primary h-9 gap-1.5 px-3">
+                <Plus size={14} strokeWidth={2} />
+                New SOP
+              </Link>
+            </div>
+          ) : null}
         </div>
 
         {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
@@ -450,6 +419,6 @@ export function SopList() {
           )}
         </section>
       </div>
-    </SopShell>
+    </>
   );
 }

@@ -1,15 +1,6 @@
-import { ReviewQueue } from "@/components/sop/review-queue";
-import { SopWorkspaceProvider } from "@/components/sop/sop-workspace-provider";
+import { redirect } from "next/navigation";
 
-export const metadata = {
-  title: "Review queue | Pulse",
-  description: "SOPs awaiting review and approval.",
-};
-
+// The Review queue is a tab inside the persistent SOP workspace; keep the old path working.
 export default function SopReviewPage() {
-  return (
-    <SopWorkspaceProvider>
-      <ReviewQueue />
-    </SopWorkspaceProvider>
-  );
+  redirect("/sops?tab=review");
 }

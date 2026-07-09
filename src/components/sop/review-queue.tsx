@@ -1,12 +1,11 @@
 "use client";
 
-import { Building2, FileText, Inbox, Library, Loader2 } from "lucide-react";
+import { FileText, Inbox, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { SOP_STATUS_LABELS, type SopStatus } from "@/domain/sop/schema";
 import { listSops, type SopListItem } from "@/lib/sop/store";
-import { SopShell } from "./sop-shell";
-import { SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { useSopWorkspace } from "./sop-workspace-provider";
 
 /** The two lifecycle states that sit in the review queue: submitted for review, and signed-off. */
 const QUEUE_STATUSES: readonly SopStatus[] = ["in_review", "approved"];
@@ -70,40 +69,8 @@ export function ReviewQueue() {
     void refreshList();
   }, [refreshList]);
 
-  const sidebar = (
-    <>
-      <div className="ui-nav-section">SOPs</div>
-      <div className="space-y-0.5">
-        <Link href="/sops" className="ui-nav-item ui-nav-item-idle">
-          <FileText size={15} strokeWidth={1.75} />
-          <span>All SOPs</span>
-        </Link>
-        <Link href="/sops/library" className="ui-nav-item ui-nav-item-idle">
-          <Library size={15} strokeWidth={1.75} />
-          <span>Effective library</span>
-        </Link>
-      </div>
-      <div className="ui-nav-section mt-3">Control</div>
-      <div className="space-y-0.5">
-        <span className="ui-nav-item ui-nav-item-active" aria-current="page">
-          <Inbox size={15} strokeWidth={1.75} />
-          <span>Review queue</span>
-        </span>
-      </div>
-      <div className="ui-nav-section mt-3">Manage</div>
-      <div className="space-y-0.5">
-        <Link href="/sops/departments" className="ui-nav-item ui-nav-item-idle">
-          <Building2 size={15} strokeWidth={1.75} />
-          <span>Departments</span>
-        </Link>
-      </div>
-      <SopWorkspaceSwitcher />
-    </>
-  );
-
   return (
-    <SopShell sidebar={sidebar} crumb="Quality / Review queue">
-      <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto max-w-3xl space-y-5">
         <div>
           <h1 className="ui-section-title">Review queue</h1>
           <p className="ui-section-subtitle">
@@ -157,6 +124,5 @@ export function ReviewQueue() {
           )}
         </section>
       </div>
-    </SopShell>
   );
 }

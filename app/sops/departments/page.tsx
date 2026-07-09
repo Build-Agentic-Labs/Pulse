@@ -1,15 +1,6 @@
-import { DepartmentsAdmin } from "@/components/sop/departments-admin";
-import { SopWorkspaceProvider } from "@/components/sop/sop-workspace-provider";
+import { redirect } from "next/navigation";
 
-export const metadata = {
-  title: "Departments | Pulse",
-  description: "Manage SOP departments, their members, and the independent Quality gate.",
-};
-
+// Departments is a tab inside the persistent SOP workspace; keep the old path working.
 export default function DepartmentsPage() {
-  return (
-    <SopWorkspaceProvider>
-      <DepartmentsAdmin />
-    </SopWorkspaceProvider>
-  );
+  redirect("/sops?tab=departments");
 }

@@ -270,11 +270,25 @@ function plannerClient() {
 
   if (typeof window !== "undefined") {
     const globalScope = globalThis as PlannerSupabaseGlobal;
-    globalScope.__buildlogicPlannerSupabaseClient ??= createClient(supabaseUrl, supabaseAnonKey);
+    globalScope.__buildlogicPlannerSupabaseClient ??= createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        // One persistent browser session that auto-refreshes its token in the background.
+        // Keep auth traffic low elsewhere (see getUserFromSession) so the /token refresh
+        // endpoint stays under Supabase's rate limit — a throttled refresh silently logs the
+        // user out.
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    });
     return globalScope.__buildlogicPlannerSupabaseClient;
   }
 
-  serverPlannerSupabaseClient ??= createClient(supabaseUrl, supabaseAnonKey);
+  // Server-side: never persist or refresh a session (there's no browser storage, and
+  // authenticated server work uses a per-request, bearer-scoped client instead).
+  serverPlannerSupabaseClient ??= createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   return serverPlannerSupabaseClient;
 }
 

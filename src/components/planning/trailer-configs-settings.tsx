@@ -1,43 +1,28 @@
 "use client";
 
 import { Loader2, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
 import type { FeedbackToast } from "@/components/themed-feedback";
-import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
-import {
-  deleteTrailerConfig,
-  listTemplates,
-  listTrailerConfigs,
-  saveTrailerConfig,
-  type TemplateSummary,
-  type TrailerConfig,
-} from "@/lib/planning/store";
+import { deleteTrailerConfig, listTrailerConfigs, saveTrailerConfig, type TrailerConfig } from "@/lib/planning/store";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
-const NO_TEMPLATE = "";
-
 /**
- * One editable catalog row. Name is a controlled input resynced from `config.name` (the codebase's
- * standard pattern, e.g. work-order-line-row.tsx) so a failed save that reverts via a re-fetch — or
- * an external change — is reflected, rather than leaving a stale edit in an uncontrolled field.
+ * One editable catalog row. Name is a controlled input resynced from `config.name` so a failed
+ * save that reverts via a re-fetch — or an external change — is reflected.
  */
 function TrailerConfigRow({
   config,
-  templateOptions,
   canWrite,
   busy,
   onSaveName,
-  onSaveTemplate,
   onDelete,
 }: {
   config: TrailerConfig;
-  templateOptions: ThemedSelectOption[];
   canWrite: boolean;
   busy: boolean;
   onSaveName: (name: string) => void;
-  onSaveTemplate: (templateId: string | null) => void;
   onDelete: () => void;
 }) {
   const [name, setName] = useState(config.name);
@@ -62,14 +47,6 @@ function TrailerConfigRow({
           }
         }}
       />
-      <ThemedSelect
-        value={config.trailerTemplateId ?? NO_TEMPLATE}
-        onChange={(value) => onSaveTemplate(value === NO_TEMPLATE ? null : value)}
-        options={templateOptions}
-        ariaLabel={`Trailer template for configuration ${config.letter}`}
-        disabled={!canWrite || busy}
-        className="w-56"
-      />
       {canWrite ? (
         <button
           type="button"
@@ -86,23 +63,19 @@ function TrailerConfigRow({
 }
 
 /**
- * Trailer supermarket catalog: each single letter (A, B, …) names a standard trailer configuration
- * and optionally links the trailer template that builds it. Generators reference these letters as
- * their default; final assembly matches the letter printed on the Main. Editor-gated (`canWrite`);
- * bumps `onChanged` after any mutation so the template library's default-letter picker refreshes.
+ * Trailer supermarket catalog: each single letter (E, S, …) names a standard trailer configuration.
+ * Generators reference these letters; final assembly matches the letter printed on the Main.
+ * No linked "trailer work-order template" — MTS sheet clones are not catalog source of truth.
  */
 export function TrailerConfigsSettings({
   onNotify,
-  onChanged,
 }: {
   onNotify: (toast: Omit<FeedbackToast, "id">) => void;
-  onChanged: () => void;
 }) {
   const confirm = useConfirm();
   const { workspaceId, canWrite } = usePlanningWorkspace();
 
   const [configs, setConfigs] = useState<TrailerConfig[]>([]);
-  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
@@ -117,20 +90,15 @@ export function TrailerConfigsSettings({
     const seq = ++loadSeqRef.current;
     if (!workspaceId) {
       setConfigs([]);
-      setTemplates([]);
       setStatus("ready");
       return;
     }
     setStatus("loading");
     setError("");
     try {
-      const [nextConfigs, nextTemplates] = await Promise.all([
-        listTrailerConfigs(workspaceId),
-        listTemplates(workspaceId),
-      ]);
+      const nextConfigs = await listTrailerConfigs(workspaceId);
       if (seq !== loadSeqRef.current) return;
       setConfigs(nextConfigs);
-      setTemplates(nextTemplates);
       setStatus("ready");
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;
@@ -146,26 +114,14 @@ export function TrailerConfigsSettings({
     };
   }, [refresh]);
 
-  const trailerTemplateOptions = useMemo<ThemedSelectOption[]>(
-    () => [
-      { value: NO_TEMPLATE, label: "No template" },
-      ...templates
-        .filter((template) => template.orderType === "trailer")
-        .map((template) => ({ value: template.id, label: template.name })),
-    ],
-    [templates],
-  );
-
   async function persist(config: TrailerConfig, successTitle: string) {
     setBusyLetter(config.letter);
     try {
       await saveTrailerConfig(workspaceId, config);
-      // Merge locally so inline edits don't flash while the whole list re-fetches.
       setConfigs((current) => {
         const without = current.filter((existing) => existing.letter !== config.letter);
         return [...without, config].sort((a, b) => a.letter.localeCompare(b.letter));
       });
-      onChanged();
       if (successTitle) onNotify({ title: successTitle, tone: "success" });
     } catch (caught) {
       onNotify({
@@ -199,7 +155,6 @@ export function TrailerConfigsSettings({
       });
       setNewLetter("");
       setNewName("");
-      onChanged();
       onNotify({ title: `Added trailer configuration ${letter}`, tone: "success" });
       await refresh();
     } catch (caught) {
@@ -216,7 +171,7 @@ export function TrailerConfigsSettings({
   async function handleDelete(config: TrailerConfig) {
     const ok = await confirm({
       title: `Delete trailer configuration ${config.letter}?`,
-      body: "Generators that default to this letter keep it, but it will no longer appear in pickers.",
+      body: "Generators that reference this letter keep it, but it will no longer appear in pickers.",
       tone: "danger",
       confirmLabel: "Delete",
     });
@@ -225,7 +180,6 @@ export function TrailerConfigsSettings({
     try {
       await deleteTrailerConfig(workspaceId, config.letter);
       setConfigs((current) => current.filter((existing) => existing.letter !== config.letter));
-      onChanged();
       onNotify({ title: `Deleted configuration ${config.letter}`, tone: "success" });
     } catch (caught) {
       onNotify({
@@ -243,7 +197,7 @@ export function TrailerConfigsSettings({
       <div className="ui-setup-section-title">Trailer configurations</div>
       <p className="ui-setup-section-desc">
         Each letter is a standard trailer configuration for the supermarket. Generators reference a letter; final
-        assembly matches it.
+        assembly matches it on the printed Main sheet.
       </p>
 
       {status === "loading" ? (
@@ -266,11 +220,9 @@ export function TrailerConfigsSettings({
               <TrailerConfigRow
                 key={config.letter}
                 config={config}
-                templateOptions={trailerTemplateOptions}
                 canWrite={canWrite}
                 busy={busyLetter === config.letter}
                 onSaveName={(name) => void persist({ ...config, name }, "")}
-                onSaveTemplate={(templateId) => void persist({ ...config, trailerTemplateId: templateId }, "")}
                 onDelete={() => void handleDelete(config)}
               />
             ))
@@ -289,7 +241,7 @@ export function TrailerConfigsSettings({
               <input
                 className="ui-input min-w-[180px] flex-1"
                 value={newName}
-                placeholder="Configuration name (e.g. Dual axle · electric brakes)"
+                placeholder="Configuration name (e.g. Electric, Surge / Hydraulic)"
                 aria-label="New configuration name"
                 onChange={(event) => setNewName(event.target.value)}
               />

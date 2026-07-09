@@ -1,6 +1,7 @@
 /**
- * Supabase-backed persistence for the Planning space: work orders, work-order templates, the
- * item master, and space_access grants. Mirrors the CRUD idioms in `src/lib/sop/store.ts`:
+ * Supabase-backed persistence for the Planning space: work orders, trailer configs, the item
+ * master, and space_access grants. (Legacy MTS Excel "work order templates" are only purged —
+ * they are not product source of truth.) Mirrors the CRUD idioms in `src/lib/sop/store.ts`:
  * explicit column projections (never `select('*')`), every query scoped by `workspace_id`,
  * `created_by` sourced from `getUserFromSession(supabase)` on inserts, `created_at`/`updated_at` left
  * for the DB to own, snake_case rows mapped to camelCase types at the store boundary, and
@@ -21,7 +22,6 @@ import {
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import type { WorkOrderMatchInfo } from "@/components/planning/work-order-print";
 import { diffItemMaster, type ParsedItemMasterRow } from "./parse-item-master";
-import type { ParsedTemplateSheet } from "./parse-workbook";
 
 type PlannerSupabaseClient = ReturnType<typeof createPlannerSupabaseClient>;
 
@@ -84,47 +84,6 @@ export interface WorkOrderDetail {
   lines: WorkOrderLine[];
 }
 
-export interface TemplateSummary {
-  id: string;
-  name: string;
-  customer: string;
-  model: string;
-  orderType: WorkOrderType;
-  retiredAt: string | null;
-  updatedAt: string;
-  /** Set definition: the PM template that auto-creates with a Main built from this template. Null = none. */
-  pmTemplateId: string | null;
-  /** Set definition: default trailer configuration letter for orders from this template. "" = none. */
-  defaultTrailerLetter: string;
-  /** Count of the template's lines; filled in separately by `listTemplates`, once counts are known. */
-  lineCount: number;
-}
-
-export interface TemplateLine {
-  id: string;
-  itemNo: string;
-  description: string;
-  buildQty: number;
-  position: number;
-}
-
-export interface TemplateDetail {
-  id: string;
-  name: string;
-  customer: string;
-  model: string;
-  orderType: WorkOrderType;
-  notesDefault: string;
-  /** Set definition: the PM template that auto-creates with a Main built from this template. Null = none. */
-  pmTemplateId: string | null;
-  /** Set definition: default trailer configuration letter for orders from this template. "" = none. */
-  defaultTrailerLetter: string;
-  retiredAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  lines: TemplateLine[];
-}
-
 export interface SpaceAccessRow {
   userId: string;
   space: string;
@@ -132,16 +91,18 @@ export interface SpaceAccessRow {
   createdAt: string;
 }
 
-/** A trailer supermarket configuration: letter → human name → optional trailer template. */
+/** A trailer supermarket configuration: letter → human name. */
 export interface TrailerConfig {
   letter: string;
   name: string;
+  /** Legacy column; always null after MTS template purge. Kept for DB shape compatibility. */
   trailerTemplateId: string | null;
   updatedAt: string;
 }
 
-/** The auto-created Power Module half of a Gen↔PM set, supplied alongside a `head_unit` order. */
+/** The auto-created Power Module half of a Gen↔PM set (e.g. schedule import). */
 export interface CreateWorkOrderPmInput {
+  /** Reserved for future catalog provenance; null for blank create. */
   templateId: string | null;
   lines: Array<Omit<WorkOrderLine, "id">>;
   customer: string;
@@ -150,6 +111,7 @@ export interface CreateWorkOrderPmInput {
 }
 
 export interface CreateWorkOrderInput {
+  /** Reserved for future catalog provenance; null for blank create. */
   templateId: string | null;
   customer: string;
   model: string;
@@ -179,12 +141,6 @@ const WORK_ORDER_COLUMNS =
   "id, order_no, template_id, customer, model, order_type, status, order_date, notes, set_no, trailer_letter, main_order_id, released_at, production_started_at, shipped_at, cancelled_at, created_at, updated_at";
 const WORK_ORDER_LINE_COLUMNS =
   "id, item_no, description, build_qty, shipped_qty, fulfillment, assembly_order_no, pull_from_ref, position";
-
-const TEMPLATE_LIST_COLUMNS =
-  "id, name, customer, model, order_type, pm_template_id, default_trailer_letter, retired_at, updated_at";
-const TEMPLATE_COLUMNS =
-  "id, name, customer, model, order_type, notes_default, pm_template_id, default_trailer_letter, retired_at, created_at, updated_at";
-const TEMPLATE_LINE_COLUMNS = "id, item_no, description, build_qty, position";
 
 const TRAILER_CONFIG_COLUMNS = "letter, name, trailer_template_id, updated_at";
 
@@ -257,49 +213,6 @@ function mapWorkOrderDetail(header: Record<string, unknown>, lines: Record<strin
     createdAt: String(header.created_at ?? ""),
     updatedAt: String(header.updated_at ?? ""),
     lines: lines.map(mapWorkOrderLine),
-  };
-}
-
-/** `lineCount` is filled in separately by `listTemplates`, once counts are known. */
-function mapTemplateSummary(row: Record<string, unknown>): TemplateSummary {
-  return {
-    id: String(row.id),
-    name: String(row.name ?? ""),
-    customer: String(row.customer ?? ""),
-    model: String(row.model ?? ""),
-    orderType: (row.order_type as WorkOrderType) ?? "mts",
-    pmTemplateId: row.pm_template_id ? String(row.pm_template_id) : null,
-    defaultTrailerLetter: String(row.default_trailer_letter ?? ""),
-    retiredAt: row.retired_at ? String(row.retired_at) : null,
-    updatedAt: String(row.updated_at ?? ""),
-    lineCount: 0,
-  };
-}
-
-function mapTemplateLine(row: Record<string, unknown>): TemplateLine {
-  return {
-    id: String(row.id),
-    itemNo: String(row.item_no ?? ""),
-    description: String(row.description ?? ""),
-    buildQty: Number(row.build_qty ?? 0),
-    position: Number(row.position ?? 0),
-  };
-}
-
-function mapTemplateDetail(header: Record<string, unknown>, lines: Record<string, unknown>[]): TemplateDetail {
-  return {
-    id: String(header.id),
-    name: String(header.name ?? ""),
-    customer: String(header.customer ?? ""),
-    model: String(header.model ?? ""),
-    orderType: (header.order_type as WorkOrderType) ?? "mts",
-    notesDefault: String(header.notes_default ?? ""),
-    pmTemplateId: header.pm_template_id ? String(header.pm_template_id) : null,
-    defaultTrailerLetter: String(header.default_trailer_letter ?? ""),
-    retiredAt: header.retired_at ? String(header.retired_at) : null,
-    createdAt: String(header.created_at ?? ""),
-    updatedAt: String(header.updated_at ?? ""),
-    lines: lines.map(mapTemplateLine),
   };
 }
 
@@ -850,194 +763,48 @@ export async function getWorkOrderMatch(
   };
 }
 
-// ── templates ─────────────────────────────────────────────────────────────
+// ── legacy MTS templates (purge only) ─────────────────────────────────────
 
-export async function listTemplates(
-  workspaceId: string,
-  options: { includeRetired?: boolean } = {},
-): Promise<TemplateSummary[]> {
+/**
+ * Permanently remove every work-order template in the workspace (and their lines via cascade).
+ * The MTS Excel master sheets were layout clones with hand-typed BOMs — not product truth.
+ * Existing work orders keep snapshotted lines; `work_orders.template_id` is set null on delete.
+ * Clears trailer_config template links first so no dangling FKs remain.
+ */
+export async function purgeLegacyWorkOrderTemplates(workspaceId: string): Promise<{ deleted: number }> {
   const supabase = createPlannerSupabaseClient();
-  const base = supabase.from("work_order_templates").select(TEMPLATE_LIST_COLUMNS).eq("workspace_id", workspaceId);
-  const scoped = options.includeRetired ? base : base.is("retired_at", null);
-  const { data, error } = await scoped.order("name", { ascending: true });
-  if (error) {
-    throw new Error(`Could not load templates: ${error.message}`);
-  }
-  const summaries = (data ?? []).map(mapTemplateSummary);
-  if (summaries.length === 0) {
-    return summaries;
+
+  // Drop optional links from the trailer catalog before deleting templates.
+  const { error: clearTrailerError } = await supabase
+    .from("trailer_configs")
+    .update({ trailer_template_id: null })
+    .eq("workspace_id", workspaceId)
+    .not("trailer_template_id", "is", null);
+  if (clearTrailerError) {
+    throw new Error(`Could not clear trailer template links: ${clearTrailerError.message}`);
   }
 
-  // Second, simple query for each template's line count: fetch every template line's template_id
-  // for the workspace and tally client-side. Same idiom as listWorkOrders' missingAssemblyCount
-  // bulk query — one flat query instead of a per-template detail fetch (N+1).
-  const { data: lineRows, error: linesError } = await supabase
-    .from("work_order_template_lines")
-    .select("template_id")
+  const { data: existing, error: countError } = await supabase
+    .from("work_order_templates")
+    .select("id")
     .eq("workspace_id", workspaceId);
-  if (linesError) {
-    throw new Error(`Could not load template line counts: ${linesError.message}`);
+  if (countError) {
+    throw new Error(`Could not list work-order templates: ${countError.message}`);
   }
-
-  const countByTemplateId = new Map<string, number>();
-  for (const row of lineRows ?? []) {
-    const templateId = String(row.template_id);
-    countByTemplateId.set(templateId, (countByTemplateId.get(templateId) ?? 0) + 1);
-  }
-
-  return summaries.map((summary) => ({
-    ...summary,
-    lineCount: countByTemplateId.get(summary.id) ?? 0,
-  }));
-}
-
-export async function getTemplate(workspaceId: string, id: string): Promise<TemplateDetail | null> {
-  const supabase = createPlannerSupabaseClient();
-  const { data: header, error: headerError } = await supabase
-    .from("work_order_templates")
-    .select(TEMPLATE_COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .eq("id", id)
-    .maybeSingle();
-  if (headerError) {
-    throw new Error(`Could not load the template: ${headerError.message}`);
-  }
-  if (!header) {
-    return null;
-  }
-
-  const { data: lines, error: linesError } = await supabase
-    .from("work_order_template_lines")
-    .select(TEMPLATE_LINE_COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .eq("template_id", id)
-    .order("position", { ascending: true });
-  if (linesError) {
-    throw new Error(`Could not load the template's lines: ${linesError.message}`);
-  }
-
-  return mapTemplateDetail(header, lines ?? []);
-}
-
-/** Header update + full line replace: delete the template's lines, then insert the new set. */
-export async function saveTemplate(workspaceId: string, template: TemplateDetail): Promise<void> {
-  const supabase = createPlannerSupabaseClient();
-  const defaultTrailerLetter = normalizeOptionalTrailerLetter(template.defaultTrailerLetter);
-
-  const { error: headerError } = await supabase
-    .from("work_order_templates")
-    .update({
-      name: template.name,
-      customer: template.customer,
-      model: template.model,
-      order_type: template.orderType,
-      notes_default: template.notesDefault,
-      pm_template_id: template.pmTemplateId,
-      default_trailer_letter: defaultTrailerLetter,
-    })
-    .eq("workspace_id", workspaceId)
-    .eq("id", template.id);
-  if (headerError) {
-    throw new Error(`Could not save the template: ${headerError.message}`);
+  const deleted = (existing ?? []).length;
+  if (deleted === 0) {
+    return { deleted: 0 };
   }
 
   const { error: deleteError } = await supabase
-    .from("work_order_template_lines")
-    .delete()
-    .eq("workspace_id", workspaceId)
-    .eq("template_id", template.id);
-  if (deleteError) {
-    throw new Error(`Could not replace the template's lines: ${deleteError.message}`);
-  }
-
-  if (template.lines.length > 0) {
-    const { error: insertError } = await supabase.from("work_order_template_lines").insert(
-      template.lines.map((line, index) => ({
-        template_id: template.id,
-        workspace_id: workspaceId,
-        item_no: line.itemNo,
-        description: line.description,
-        build_qty: line.buildQty,
-        position: index,
-      })),
-    );
-    if (insertError) {
-      throw new Error(`Could not save the template's lines: ${insertError.message}`);
-    }
-  }
-}
-
-export async function retireTemplate(workspaceId: string, id: string, retired: boolean): Promise<void> {
-  const supabase = createPlannerSupabaseClient();
-  const { error } = await supabase
     .from("work_order_templates")
-    .update({ retired_at: retired ? new Date().toISOString() : null })
-    .eq("workspace_id", workspaceId)
-    .eq("id", id);
-  if (error) {
-    throw new Error(`Could not update the template: ${error.message}`);
-  }
-}
-
-export async function importTemplates(
-  workspaceId: string,
-  sheets: readonly ParsedTemplateSheet[],
-  /** Called after each sheet finishes (imported or failed), so the UI can show live progress. */
-  onProgress?: (done: number, total: number, sheetName: string) => void,
-): Promise<{ imported: number; failed: Array<{ sheetName: string; message: string }> }> {
-  const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await getUserFromSession(supabase);
-
-  let imported = 0;
-  let done = 0;
-  const failed: Array<{ sheetName: string; message: string }> = [];
-
-  for (const sheet of sheets) {
-    const { data: inserted, error: insertError } = await supabase
-      .from("work_order_templates")
-      .insert({
-        workspace_id: workspaceId,
-        name: sheet.templateName,
-        customer: sheet.customer,
-        model: sheet.model,
-        order_type: sheet.orderType,
-        notes_default: sheet.notes,
-        created_by: userData.user?.id ?? null,
-      })
-      .select("id")
-      .single();
-    if (insertError) {
-      failed.push({ sheetName: sheet.sheetName, message: insertError.message });
-      done += 1;
-      onProgress?.(done, sheets.length, sheet.sheetName);
-      continue;
-    }
-
-    if (sheet.lines.length > 0) {
-      const { error: linesError } = await supabase.from("work_order_template_lines").insert(
-        sheet.lines.map((line) => ({
-          template_id: inserted.id,
-          workspace_id: workspaceId,
-          item_no: line.itemNo,
-          description: line.description,
-          build_qty: line.buildQty,
-          position: line.position,
-        })),
-      );
-      if (linesError) {
-        failed.push({ sheetName: sheet.sheetName, message: linesError.message });
-        done += 1;
-        onProgress?.(done, sheets.length, sheet.sheetName);
-        continue;
-      }
-    }
-
-    imported += 1;
-    done += 1;
-    onProgress?.(done, sheets.length, sheet.sheetName);
+    .delete()
+    .eq("workspace_id", workspaceId);
+  if (deleteError) {
+    throw new Error(`Could not delete work-order templates: ${deleteError.message}`);
   }
 
-  return { imported, failed };
+  return { deleted };
 }
 
 // ── trailer configs ─────────────────────────────────────────────────────────

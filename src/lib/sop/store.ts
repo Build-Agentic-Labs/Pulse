@@ -10,7 +10,7 @@
 
 import { createEmptySop, type Sop, type SopStatus } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
-import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 
 const STORAGE_KEY = "pulse:sops:v1";
 
@@ -144,7 +144,7 @@ export interface SaveSopOptions {
 
 export async function saveSop(sop: Sop, workspaceId: string, options: SaveSopOptions = {}): Promise<Sop> {
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const userId = userData.user?.id ?? null;
   const next: Sop = { ...sop, updatedAt: nowIso() };
 

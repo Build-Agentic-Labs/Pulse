@@ -5,7 +5,7 @@
  */
 
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
-import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 
 const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate";
 const MEMBER_COLUMNS = "department_id, user_id, dept_role";
@@ -75,7 +75,7 @@ export interface DepartmentInput {
  */
 export async function saveDepartment(workspaceId: string, input: DepartmentInput): Promise<Department> {
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const userId = userData.user?.id ?? null;
 
   if (input.id) {
@@ -123,7 +123,7 @@ export async function listMembers(departmentId: string): Promise<DepartmentMembe
 
 export async function setMember(departmentId: string, userId: string, role: DeptRole): Promise<void> {
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   await throwIfError(
     supabase
       .from("department_members")
@@ -143,7 +143,7 @@ export async function removeMember(departmentId: string, userId: string): Promis
 /** My department roles across the workspace — powers UI enable/disable (DB still enforces). */
 export async function fetchMyDeptRoles(workspaceId: string): Promise<Map<string, DeptRole>> {
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const userId = userData.user?.id;
   if (!userId) return new Map();
   const depts = await listDepartments(workspaceId);

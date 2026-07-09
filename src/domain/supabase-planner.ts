@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import type {
   AccessLevel,
   ActualEvent,
@@ -280,6 +280,21 @@ function plannerClient() {
 
 export function createPlannerSupabaseClient() {
   return plannerClient();
+}
+
+/**
+ * The current user from the CACHED session — NO network round-trip. Use this instead of
+ * `getUserFromSession(supabase)` for "who am I" (stamping created_by/updated_by, presence keys).
+ * `getUser()` calls the auth server on every invocation, which counts against Supabase Auth's
+ * (GoTrue) rate limit; under heavy navigation that burst can trip the limit and boot the user to
+ * login. `getSession()` reads the already-verified JWT locally. Returns the same
+ * `{ data: { user }, error }` shape so call sites don't change how they read the result.
+ */
+export async function getUserFromSession(
+  supabase: SupabaseClient,
+): Promise<{ data: { user: User | null }; error: null }> {
+  const { data } = await supabase.auth.getSession();
+  return { data: { user: data.session?.user ?? null }, error: null };
 }
 
 function num(value: unknown, fallback = 0) {
@@ -1565,7 +1580,7 @@ async function loadProjectContext(
     throw new Error("Organization not found or you do not have access to it.");
   }
 
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const member = userData.user
     ? await throwIfError(
         supabase
@@ -1673,7 +1688,7 @@ export async function fetchOrgToolAccess(
   if (await fetchIsSuperAdmin(supabase)) {
     return "edit";
   }
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   if (!userData.user) {
     return "none";
   }
@@ -1708,10 +1723,10 @@ export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProje
 
   const load = (async () => {
     const supabase = plannerClient();
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const { data: userData } = await getUserFromSession(supabase);
 
-    if (userError || !userData.user) {
-      throw new Error(userError?.message ?? "Sign in before loading organizations.");
+    if (!userData.user) {
+      throw new Error("Sign in before loading organizations.");
     }
 
     const user = userData.user;
@@ -1760,10 +1775,10 @@ export async function loadWorkspaceProjectGroups(knownUserId?: string): Promise<
   let userId = knownUserId;
 
   if (!userId) {
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const { data: userData } = await getUserFromSession(supabase);
 
-    if (userError || !userData.user) {
-      throw new Error(userError?.message ?? "Sign in before loading organizations.");
+    if (!userData.user) {
+      throw new Error("Sign in before loading organizations.");
     }
 
     userId = userData.user.id;
@@ -1869,7 +1884,7 @@ export async function loadWorkspaceProjectGroups(knownUserId?: string): Promise<
 
 export async function createProjectWithStarterPlan(workspaceId: string, name: string): Promise<PlannerProjectContext> {
   const supabase = plannerClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const projectId = newScopedId("project");
   const projectName = name.trim() || "New Process Map";
 
@@ -2047,7 +2062,7 @@ export async function upsertWorkspaceAccessGrantInSupabase(
   }
 
   const supabase = plannerClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
 
   // Re-inviting someone a manager previously removed lifts the revocation, so the
   // grant can mint a membership again on their next sign-in.
@@ -2121,7 +2136,7 @@ export async function updateOwnProfileNameInSupabase(fullName: string): Promise<
   }
 
   const supabase = plannerClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   if (!userData.user) {
     throw new Error("Sign in first.");
   }
@@ -2149,7 +2164,7 @@ export async function deleteWorkspaceAccessGrantFromSupabase(workspaceId: string
 // and Org tools level. Readable by workspace managers and superadmins.
 export async function loadMembersAccessForWorkspace(workspaceId: string): Promise<MemberAccess[]> {
   const supabase = plannerClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const selfId = userData.user?.id;
 
   // Members and the workspace's project list are independent — fetch them together.
@@ -2257,7 +2272,7 @@ export async function setProjectAccessInSupabase(
   level: AccessLevel,
 ): Promise<void> {
   const supabase = plannerClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   await throwIfError(
     supabase.from("project_access").upsert(
       { project_id: projectId, user_id: userId, level, granted_by: userData.user?.id ?? null },
@@ -2268,7 +2283,7 @@ export async function setProjectAccessInSupabase(
 
 export async function setOrgToolAccessInSupabase(userId: string, level: AccessLevel): Promise<void> {
   const supabase = plannerClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   await throwIfError(
     supabase.from("org_tool_access").upsert(
       { user_id: userId, level, granted_by: userData.user?.id ?? null },

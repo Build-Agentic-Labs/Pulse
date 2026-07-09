@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 
 export type PresencePeer = {
   key: string;
@@ -27,7 +27,7 @@ export function usePlannerPresence(projectId?: string): PresencePeer[] {
     let channel: ReturnType<typeof supabase.channel> | null = null;
 
     void (async () => {
-      const { data } = await supabase.auth.getUser();
+      const { data } = await getUserFromSession(supabase);
       const user = data.user;
       if (!user || disposed) {
         return;

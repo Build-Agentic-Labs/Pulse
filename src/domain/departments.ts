@@ -40,3 +40,8 @@ export function canSignReview(role: DeptRole): boolean {
 export function canDeptApprove(role: DeptRole): boolean {
   return roleAtLeast(role, "approver");
 }
+
+/** Departments in `all` that the user is a member of, preserving `all`'s order. */
+export function pickMemberDepartments(all: Department[], memberIds: ReadonlySet<string>): Department[] {
+  return all.filter((department) => memberIds.has(department.id));
+}

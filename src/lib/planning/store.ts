@@ -2,7 +2,7 @@
  * Supabase-backed persistence for the Planning space: work orders, work-order templates, the
  * item master, and space_access grants. Mirrors the CRUD idioms in `src/lib/sop/store.ts`:
  * explicit column projections (never `select('*')`), every query scoped by `workspace_id`,
- * `created_by` sourced from `supabase.auth.getUser()` on inserts, `created_at`/`updated_at` left
+ * `created_by` sourced from `getUserFromSession(supabase)` on inserts, `created_at`/`updated_at` left
  * for the DB to own, snake_case rows mapped to camelCase types at the store boundary, and
  * Supabase errors re-thrown as human-readable `Error`s.
  */
@@ -18,7 +18,7 @@ import {
   type WorkOrderStatus,
   type WorkOrderType,
 } from "@/domain/work-orders";
-import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import type { WorkOrderMatchInfo } from "@/components/planning/work-order-print";
 import { diffItemMaster, type ParsedItemMasterRow } from "./parse-item-master";
 import type { ParsedTemplateSheet } from "./parse-workbook";
@@ -460,7 +460,7 @@ export async function createWorkOrder(
   input: CreateWorkOrderInput,
 ): Promise<CreateWorkOrderResult> {
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const createdBy = userData.user?.id ?? null;
   const mmyy = orderNoMonthKey(input.orderDate);
 
@@ -986,7 +986,7 @@ export async function importTemplates(
   onProgress?: (done: number, total: number, sheetName: string) => void,
 ): Promise<{ imported: number; failed: Array<{ sheetName: string; message: string }> }> {
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
 
   let imported = 0;
   let done = 0;
@@ -1065,7 +1065,7 @@ export async function saveTrailerConfig(workspaceId: string, config: TrailerConf
     throw new Error("A trailer configuration letter must be a single letter A–Z.");
   }
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const { error } = await supabase.from("trailer_configs").upsert(
     {
       workspace_id: workspaceId,
@@ -1194,7 +1194,7 @@ export async function listSpaceAccess(workspaceId: string): Promise<SpaceAccessR
 
 export async function grantSpaceAccess(workspaceId: string, userId: string, space: string): Promise<void> {
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const { error } = await supabase.from("space_access").insert({
     workspace_id: workspaceId,
     user_id: userId,
@@ -1222,7 +1222,7 @@ export async function revokeSpaceAccess(workspaceId: string, userId: string, spa
 /** Used by non-admin clients to learn their own access -- RLS lets a user read their own row. */
 export async function fetchMySpaceAccess(workspaceId: string, space: string): Promise<boolean> {
   const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData } = await getUserFromSession(supabase);
   const userId = userData.user?.id;
   if (!userId) {
     return false;

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import type { Department, DeptRole } from "@/domain/departments";
 import { canTransitionSop, SOP_STATUS_ORDER, type SopStatus } from "@/domain/sop/lifecycle";
 import { SOP_STATUS_LABELS } from "@/domain/sop/schema";
-import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
 import {
   getSopControl,
@@ -144,7 +144,7 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
         listSignatures(sopId),
         fetchMyDeptRoles(workspaceId),
         listDepartments(workspaceId),
-        supabase.auth.getUser(),
+        getUserFromSession(supabase),
         countTasksUsingSop(sopId),
       ]);
       if (!control) {

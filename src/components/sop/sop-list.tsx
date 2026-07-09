@@ -1,12 +1,14 @@
 "use client";
 
-import { FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { Building2, FileText, Inbox, Library, Loader2, Plus, ShieldCheck, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
+import type { Department } from "@/domain/departments";
 import { SOP_STATUS_LABELS, type Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
+import { listDepartments } from "@/lib/departments/store";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import {
   deleteSop,
@@ -18,12 +20,23 @@ import {
 } from "@/lib/sop/store";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { SopShell } from "./sop-shell";
-import { canEdit, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { canEdit, canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 function formatDate(iso: string): string {
   if (!iso) return "";
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+}
+
+/** Periodic-review flag for a next-review date: overdue (past) or due soon (within 30 days). */
+function reviewFlag(iso: string | null): { label: string; className: string } | null {
+  if (!iso) return null;
+  const due = new Date(iso);
+  if (Number.isNaN(due.getTime())) return null;
+  const days = Math.ceil((due.getTime() - Date.now()) / 86_400_000);
+  if (days < 0) return { label: "overdue", className: "text-danger" };
+  if (days <= 30) return { label: "due soon", className: "text-warn" };
+  return null;
 }
 
 function importDoneKey(workspaceId: string): string {
@@ -61,6 +74,8 @@ export function SopList() {
   const [query, setQuery] = useState("");
   const [pendingImport, setPendingImport] = useState<Sop[]>([]);
   const [importing, setImporting] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [deptFilter, setDeptFilter] = useState<string>("all");
   const converting = convert !== null;
 
   const refreshList = useCallback(async () => {
@@ -83,15 +98,32 @@ export function SopList() {
     }
   }, [workspaceId]);
 
+  const deptById = useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments]);
+
   const visibleSops = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) {
-      return sops;
-    }
-    return sops.filter(
-      (sop) => sop.title.toLowerCase().includes(needle) || sop.sopNumber.toLowerCase().includes(needle),
-    );
-  }, [sops, query]);
+    return sops.filter((sop) => {
+      if (deptFilter !== "all" && sop.departmentId !== deptFilter) return false;
+      if (!needle) return true;
+      return sop.title.toLowerCase().includes(needle) || sop.sopNumber.toLowerCase().includes(needle);
+    });
+  }, [sops, query, deptFilter]);
+
+  // Departments power the filter chips and each row's owning-department badge.
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    void listDepartments(workspaceId)
+      .then((rows) => {
+        if (active) setDepartments(rows);
+      })
+      .catch(() => {
+        /* non-fatal: the list still works without the department filter */
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
 
   // Load the workspace's SOPs, then surface any legacy localStorage SOPs not yet in this
   // workspace as a one-time import offer (id-deduped; skipped once dismissed/imported).
@@ -203,6 +235,14 @@ export function SopList() {
           <FileText size={15} strokeWidth={1.75} />
           <span>All SOPs</span>
         </Link>
+        <Link href="/sops/library" className="ui-nav-item ui-nav-item-idle">
+          <Library size={15} strokeWidth={1.75} />
+          <span>Effective library</span>
+        </Link>
+        <Link href="/sops/review" className="ui-nav-item ui-nav-item-idle">
+          <Inbox size={15} strokeWidth={1.75} />
+          <span>Review queue</span>
+        </Link>
         {editable ? (
           <>
             <Link href="/sops/new" className="ui-nav-item ui-nav-item-idle">
@@ -221,6 +261,17 @@ export function SopList() {
           </>
         ) : null}
       </div>
+      {canManage(role) ? (
+        <>
+          <div className="ui-nav-section mt-3">Manage</div>
+          <div className="space-y-0.5">
+            <Link href="/sops/departments" className="ui-nav-item ui-nav-item-idle">
+              <Building2 size={15} strokeWidth={1.75} />
+              <span>Departments</span>
+            </Link>
+          </div>
+        </>
+      ) : null}
       <SopWorkspaceSwitcher />
     </>
   );
@@ -257,6 +308,29 @@ export function SopList() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
+        ) : null}
+
+        {listStatus === "ready" && departments.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              className={`ui-chip ${deptFilter === "all" ? "border-ink text-ink" : ""}`}
+              onClick={() => setDeptFilter("all")}
+            >
+              All
+            </button>
+            {departments.map((dept) => (
+              <button
+                key={dept.id}
+                type="button"
+                className={`ui-chip ${deptFilter === dept.id ? "border-ink text-ink" : ""}`}
+                title={dept.name}
+                onClick={() => setDeptFilter(dept.id)}
+              >
+                {dept.code}
+              </button>
+            ))}
+          </div>
         ) : null}
 
         {editable && pendingImport.length > 0 ? (
@@ -303,10 +377,13 @@ export function SopList() {
               <p className="ui-section-subtitle text-ink-tertiary">No SOPs match &ldquo;{query.trim()}&rdquo;.</p>
             </div>
           ) : (
-            visibleSops.map((sop) => (
+            visibleSops.map((sop) => {
+              const dept = sop.departmentId ? deptById.get(sop.departmentId) : undefined;
+              const flag = reviewFlag(sop.nextReviewDate);
               // The row is a Link (the whole card navigates) with a real sibling delete
               // button -- never a button nested in a button, which is invalid interactive
               // markup and swallows keyboard activation.
+              return (
               <div
                 key={sop.id}
                 className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
@@ -326,20 +403,36 @@ export function SopList() {
                         .join(" · ")}
                     </div>
                   </div>
+                  {dept ? (
+                    <span className="ui-chip shrink-0" title={dept.name}>
+                      {dept.code}
+                    </span>
+                  ) : null}
                   <span
                     className={`ui-chip shrink-0 ${
                       sop.status === "approved"
                         ? "border-accent text-accent"
-                        : sop.status === "obsolete"
-                          ? "border-danger text-danger"
-                          : ""
+                        : sop.status === "effective"
+                          ? "border-success text-success"
+                          : sop.status === "obsolete"
+                            ? "border-danger text-danger"
+                            : ""
                     }`}
                   >
                     {SOP_STATUS_LABELS[sop.status]}
                   </span>
-                  {formatDate(sop.updatedAt) ? (
+                  {flag ? (
+                    <span className={`hidden ui-mono-label sm:inline ${flag.className}`}>{flag.label}</span>
+                  ) : formatDate(sop.updatedAt) ? (
                     <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
                   ) : null}
+                </Link>
+                <Link
+                  href={`/sops/${sop.id}/control`}
+                  className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-ink"
+                  title="Document control & approval"
+                >
+                  <ShieldCheck size={14} />
                 </Link>
                 {editable ? (
                   <button
@@ -352,7 +445,8 @@ export function SopList() {
                   </button>
                 ) : null}
               </div>
-            ))
+              );
+            })
           )}
         </section>
       </div>

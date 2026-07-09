@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
+import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
+import type { MemberAccess } from "@/domain/types";
 import {
   deleteDepartment,
   listDepartments,
@@ -30,6 +32,11 @@ function messageFrom(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+/** Display a member by their real identity, never the raw Supabase UUID. */
+function memberLabel(member: MemberAccess): string {
+  return member.fullName || member.email || member.userId;
+}
+
 export function DepartmentsAdmin() {
   const confirm = useConfirm();
   const { workspaceId, role } = useSopWorkspace();
@@ -43,6 +50,7 @@ export function DepartmentsAdmin() {
 
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [directory, setDirectory] = useState<MemberAccess[]>([]);
 
   const handleError = useCallback((message: string) => setError(message), []);
   const handleCountChange = useCallback((departmentId: string, count: number) => {
@@ -84,6 +92,25 @@ export function DepartmentsAdmin() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The workspace member directory powers the name/email member picker (no raw UUIDs).
+  useEffect(() => {
+    if (!workspaceId) {
+      setDirectory([]);
+      return;
+    }
+    let active = true;
+    void loadMembersAccessForWorkspace(workspaceId)
+      .then((rows) => {
+        if (active) setDirectory(rows);
+      })
+      .catch(() => {
+        /* directory is optional; existing members still list, just without name/email */
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
 
   const selected = useMemo(
     () => departments.find((dept) => dept.id === selectedId),
@@ -277,6 +304,7 @@ export function DepartmentsAdmin() {
               <MembersPanel
                 department={selected}
                 manage={manage}
+                directory={directory}
                 onError={handleError}
                 onCountChange={handleCountChange}
               />
@@ -364,16 +392,32 @@ function NewDepartmentForm({ saving, onSubmit, onCancel }: NewDepartmentFormProp
 interface MembersPanelProps {
   department: Department;
   manage: boolean;
+  directory: MemberAccess[];
   onError: (message: string) => void;
   onCountChange: (departmentId: string, count: number) => void;
 }
 
-function MembersPanel({ department, manage, onError, onCountChange }: MembersPanelProps) {
+function MembersPanel({ department, manage, directory, onError, onCountChange }: MembersPanelProps) {
   const [members, setMembers] = useState<DepartmentMember[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [newUserId, setNewUserId] = useState("");
+  const [pick, setPick] = useState("");
   const [adding, setAdding] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+
+  const byId = useMemo(() => new Map(directory.map((member) => [member.userId, member])), [directory]);
+  const labelFor = (userId: string) => {
+    const member = byId.get(userId);
+    return member ? memberLabel(member) : userId;
+  };
+  const emailFor = (userId: string) => {
+    const member = byId.get(userId);
+    return member?.fullName && member.email ? member.email : "";
+  };
+  // Workspace members not already in this department — the pool the picker offers.
+  const available = useMemo(
+    () => directory.filter((member) => !members.some((existing) => existing.userId === member.userId)),
+    [directory, members],
+  );
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -407,7 +451,7 @@ function MembersPanel({ department, manage, onError, onCountChange }: MembersPan
   }
 
   async function handleAdd() {
-    const userId = newUserId.trim();
+    const userId = pick.trim();
     if (!userId) return;
     setAdding(true);
     try {
@@ -415,7 +459,7 @@ function MembersPanel({ department, manage, onError, onCountChange }: MembersPan
       const next = await listMembers(department.id);
       setMembers(next);
       onCountChange(department.id, next.length);
-      setNewUserId("");
+      setPick("");
     } catch (caught) {
       onError(messageFrom(caught, "Could not add the member."));
     } finally {
@@ -455,9 +499,14 @@ function MembersPanel({ department, manage, onError, onCountChange }: MembersPan
         <ul className="space-y-2">
           {members.map((member) => (
             <li key={member.userId} className="flex items-center gap-2">
-              <span className="ui-mono-label min-w-0 flex-1 truncate text-ink" title={member.userId}>
-                {member.userId}
-              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-ink" title={member.userId}>
+                  {labelFor(member.userId)}
+                </div>
+                {emailFor(member.userId) ? (
+                  <div className="ui-mono-label truncate text-ink-tertiary">{emailFor(member.userId)}</div>
+                ) : null}
+              </div>
               {manage ? (
                 <>
                   <select
@@ -493,28 +542,38 @@ function MembersPanel({ department, manage, onError, onCountChange }: MembersPan
       {manage ? (
         <div className="space-y-1.5 border-t border-line pt-3">
           <div className="flex items-center gap-2">
-            <input
-              className="ui-field-standalone h-8 min-w-0 flex-1 px-2 text-xs"
-              placeholder="Add member by user ID"
-              value={newUserId}
-              onChange={(event) => setNewUserId(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void handleAdd();
-              }}
-            />
+            <select
+              className="ui-field-standalone h-8 min-w-0 flex-1 px-2 text-xs disabled:opacity-50"
+              value={pick}
+              disabled={adding || available.length === 0}
+              onChange={(event) => setPick(event.target.value)}
+            >
+              <option value="">
+                {directory.length === 0
+                  ? "No workspace members found"
+                  : available.length === 0
+                    ? "Everyone is already a member"
+                    : "Add a member…"}
+              </option>
+              {available.map((member) => (
+                <option key={member.userId} value={member.userId}>
+                  {memberLabel(member)}
+                  {member.fullName && member.email ? ` · ${member.email}` : ""}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               className="ui-btn-primary h-8 shrink-0 gap-1.5 px-3 disabled:opacity-50"
               onClick={() => void handleAdd()}
-              disabled={adding || newUserId.trim().length === 0}
+              disabled={adding || pick.length === 0}
             >
               {adding ? <Loader2 size={13} className="animate-spin" /> : <UserPlus size={13} />}
               Add
             </button>
           </div>
           <p className="ui-mono-label text-ink-tertiary">
-            Paste the member&rsquo;s Supabase user ID (UUID). Added as author — adjust the role above. A full
-            name/email picker is out of scope for now.
+            Added as author — adjust the role above. Members come from your organization&rsquo;s people.
           </p>
         </div>
       ) : null}

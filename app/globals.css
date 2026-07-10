@@ -4218,7 +4218,8 @@ body {
   .ui-scenario-tab-active .ui-scenario-tab-close,
   .ui-scenario-tab:hover .ui-scenario-tab-edit,
   .ui-scenario-tab-active .ui-scenario-tab-edit,
-  .ui-scenario-tab-close:focus-visible {
+  .ui-scenario-tab-close:focus-visible,
+  .ui-scenario-tab-edit:focus-visible {
     opacity: 1;
   }
 

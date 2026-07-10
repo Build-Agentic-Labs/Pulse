@@ -55,6 +55,15 @@ export interface TransitionContext {
   hasOpenObjection?: boolean;
   /** Gate D needs a written reason before an effective SOP can be reopened. */
   hasRevisionReason?: boolean;
+  /**
+   * This user overruled an objection during the current cycle. A Quality approver who set an
+   * objection aside may not also release the document — the trigger refuses, so the button must
+   * not invite it. Where Quality has a single approver this makes the SOP un-releasable by them;
+   * another Quality approver must do it.
+   */
+  overruledThisCycle?: boolean;
+  /** A rejection signature by this user, bound to the current content and cycle, exists. */
+  hasOwnRejection?: boolean;
 }
 
 export interface TransitionResult {
@@ -84,6 +93,8 @@ export function canTransitionSop(ctx: TransitionContext): TransitionResult {
     quorumMet = false,
     hasOpenObjection = false,
     hasRevisionReason = false,
+    overruledThisCycle = false,
+    hasOwnRejection = false,
   } = ctx;
 
   if (from === to) return OK;
@@ -111,15 +122,19 @@ export function canTransitionSop(ctx: TransitionContext): TransitionResult {
       return OK;
 
     case "in_review->draft":
-      // Reject is driven from inside sign_sop. Recall is a plain, reason-less transition.
-      if (holdsBlockingSeat) return OK;
+      // Recall is a plain, reason-less transition by the submitter. Reject is NOT this edge from
+      // the client's side: sign_sop records the objection and performs the transition itself, so
+      // the trigger only accepts a bare UPDATE here when a rejection signature already exists.
       if (isSubmitter) return OK;
+      if (holdsBlockingSeat && hasOwnRejection) return OK;
       return no("Only a Responsible or Accountable reviewer can reject this SOP, or its submitter can recall it.");
 
     case "approved->effective":
       if (!isQualityApprover) return no("Only a Quality approver can make an SOP effective.");
       if (holdsAnySeat) return no("The Quality approver must not hold a review seat on this SOP.");
       if (isAuthor || isSubmitter) return no("The Quality approver must differ from the author.");
+      if (overruledThisCycle)
+        return no("You overruled an objection on this SOP; another Quality approver must release it.");
       return OK;
 
     case "effective->draft": // start a revision

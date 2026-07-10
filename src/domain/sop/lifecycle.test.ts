@@ -116,6 +116,18 @@ describe("canTransitionSop", () => {
       ).toBe(false);
     });
 
+    it("blocks a Quality approver who overruled an objection this cycle", () => {
+      expect(
+        canTransitionSop({
+          ...base,
+          from: "approved",
+          to: "effective",
+          isQualityApprover: true,
+          overruledThisCycle: true,
+        }).ok,
+      ).toBe(false);
+    });
+
     it("blocks a Quality approver who authored or submitted the SOP", () => {
       expect(
         canTransitionSop({ ...base, from: "approved", to: "effective", isQualityApprover: true, isAuthor: true })
@@ -134,10 +146,24 @@ describe("canTransitionSop", () => {
   });
 
   describe("reject and recall", () => {
-    it("lets a blocking seat holder reject from in_review", () => {
+    it("lets a blocking seat holder send the SOP back once their rejection is signed", () => {
+      expect(
+        canTransitionSop({
+          ...base,
+          role: undefined,
+          from: "in_review",
+          to: "draft",
+          holdsBlockingSeat: true,
+          hasOwnRejection: true,
+        }).ok,
+      ).toBe(true);
+    });
+
+    it("blocks a bare transition to draft by a seat holder who has not signed a rejection", () => {
+      // sign_sop performs this edge itself; a client-driven UPDATE without the signature is refused.
       expect(
         canTransitionSop({ ...base, role: undefined, from: "in_review", to: "draft", holdsBlockingSeat: true }).ok,
-      ).toBe(true);
+      ).toBe(false);
     });
 
     it("lets the submitter recall their own submission", () => {

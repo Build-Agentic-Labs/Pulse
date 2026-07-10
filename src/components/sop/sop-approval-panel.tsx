@@ -318,6 +318,14 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
   const authorshipSigned = signatures.some(
     (sig) => sig.meaning === "authorship" && sig.signerId === userId && isSignatureCurrent(sig, control),
   );
+  // A Quality approver who set an objection aside cannot also release the document.
+  const overruledThisCycle = signatures.some(
+    (sig) =>
+      sig.meaning === "objection_overruled" && sig.signerId === userId && sig.reviewCycle === control.reviewCycle,
+  );
+  const hasOwnRejection = signatures.some(
+    (sig) => sig.meaning === "rejection" && sig.signerId === userId && isSignatureCurrent(sig, control),
+  );
 
   const deptCode = (departmentId: string | null): string =>
     departments.find((d) => d.id === departmentId)?.code ?? "—";
@@ -340,6 +348,8 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
       quorumMet,
       hasOpenObjection: objections.length > 0,
       hasRevisionReason: revisionReason.trim().length > 0,
+      overruledThisCycle,
+      hasOwnRejection,
     }).ok;
 
   // A signature I may still owe, for a seat I hold, against the document as it stands now.

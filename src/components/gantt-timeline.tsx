@@ -1432,6 +1432,11 @@ export function GanttTimeline({
 
   return (
     <>
+    {/* Reordering is native HTML5 drag-and-drop and renaming is onDoubleClick-only;
+        neither fires on touch. Say so rather than let both fail silently on a phone. */}
+    <p className="border-b border-line bg-surface-sunken px-3 py-2 text-[11px] leading-snug text-ink-secondary lg:hidden">
+      Reordering and renaming tasks require a larger screen.
+    </p>
     <section className="ui-gantt-timeline">
       <div className="ui-gantt-timeline-grid" style={{ gridTemplateColumns: `${tableColumnWidth}px minmax(0,1fr)` }}>
         <div className="ui-gantt-table-pane">

@@ -4210,6 +4210,8 @@ body {
     border-radius: 0.2rem;
     background: transparent;
     color: color-mix(in srgb, var(--color-steel) 82%, transparent);
+    opacity: 0;
+    transition: opacity 160ms var(--ease-ui), background 160ms var(--ease-ui), color 160ms var(--ease-ui);
   }
 
   .ui-scenario-tab:hover .ui-scenario-tab-close,

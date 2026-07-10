@@ -189,7 +189,7 @@ export function PlanningSettings() {
                 </p>
 
                 {itemMasterPreview.items.length > 0 ? (
-                  <div className="mt-3 overflow-x-auto rounded-md border border-line">
+                  <div className="mt-3 ui-table-scroll rounded-md border border-line">
                     <table className="w-full min-w-[520px] border-collapse text-sm">
                       <thead>
                         <tr>

@@ -333,7 +333,7 @@ export function WorkOrderBoard() {
               <p className="ui-section-subtitle text-ink-tertiary">No work orders match these filters.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll">
               <table className="w-full min-w-[1000px] border-collapse text-sm">
                 <thead>
                   <tr>

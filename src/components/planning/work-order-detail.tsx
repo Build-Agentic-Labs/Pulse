@@ -511,7 +511,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
           </section>
 
           <section className="ui-panel overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll">
               <table className="w-full min-w-[960px] border-collapse text-sm">
                 <thead>
                   <tr>

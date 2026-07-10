@@ -245,6 +245,25 @@ body {
   background-clip: padding-box;
 }
 
+/* Wide data tables already scroll, but `* { scrollbar-width: none }` above hides
+   every scrollbar — so nothing tells a phone user the table continues off-screen.
+   Restore a thin scrollbar on these wrappers only. No `touch-action` override:
+   a table must pan horizontally AND let the page scroll vertically. */
+.ui-table-scroll {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-ink-secondary) 45%, transparent) transparent;
+}
+
+.ui-table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.ui-table-scroll::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-ink-secondary) 45%, transparent);
+}
+
 .ui-photo-viewer {
   background: transparent;
 }

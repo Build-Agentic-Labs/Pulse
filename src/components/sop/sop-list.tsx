@@ -390,7 +390,7 @@ export function SopList() {
                   </div>
 
                   <div className="overflow-hidden rounded-xl border border-line bg-surface">
-                    <div className="overflow-x-auto">
+                    <div className="ui-table-scroll">
                       <table className="w-full min-w-[680px] border-collapse text-left">
                         <thead>
                           <tr className="border-b border-line">

@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Flag, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
+import { Building2, ChevronDown, Flag, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
@@ -158,7 +158,7 @@ export function DepartmentsAdmin() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="ui-depts mx-auto max-w-5xl space-y-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="ui-section-title">Departments</h1>
@@ -287,14 +287,16 @@ export function DepartmentsAdmin() {
               />
 
               {manage ? (
-                <button
-                  type="button"
-                  className="ui-btn-ghost h-8 gap-1.5 px-3 text-ink-tertiary hover:text-danger"
-                  onClick={() => void handleDeleteDepartment(selected)}
-                >
-                  <Trash2 size={13} />
-                  Delete department
-                </button>
+                <div className="border-t border-line pt-3">
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-8 gap-1.5 px-3 text-ink-tertiary hover:text-danger"
+                    onClick={() => void handleDeleteDepartment(selected)}
+                  >
+                    <Trash2 size={13} />
+                    Delete department
+                  </button>
+                </div>
               ) : null}
             </section>
           ) : (
@@ -485,18 +487,25 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
               </div>
               {manage ? (
                 <>
-                  <select
-                    className="ui-field-standalone h-8 shrink-0 px-2 py-0 text-xs disabled:opacity-50"
-                    value={member.deptRole}
-                    disabled={busyUserId === member.userId}
-                    onChange={(event) => void handleRoleChange(member.userId, event.target.value as DeptRole)}
-                  >
-                    {DEPT_ROLES.map((deptRole) => (
-                      <option key={deptRole} value={deptRole}>
-                        {deptRole}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative shrink-0">
+                    <select
+                      className="ui-field-standalone h-8 w-28 cursor-pointer appearance-none pl-2.5 pr-7 text-xs shadow-none transition-colors hover:border-border-strong focus:border-border-strong disabled:opacity-50"
+                      value={member.deptRole}
+                      disabled={busyUserId === member.userId}
+                      onChange={(event) => void handleRoleChange(member.userId, event.target.value as DeptRole)}
+                    >
+                      {DEPT_ROLES.map((deptRole) => (
+                        <option key={deptRole} value={deptRole}>
+                          {deptRole}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={13}
+                      strokeWidth={2}
+                      className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+                    />
+                  </div>
                   <button
                     type="button"
                     className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger disabled:opacity-50"
@@ -518,26 +527,33 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
       {manage ? (
         <div className="space-y-1.5 border-t border-line pt-3">
           <div className="flex items-center gap-2">
-            <select
-              className="ui-field-standalone h-8 min-w-0 flex-1 px-2 text-xs disabled:opacity-50"
-              value={pick}
-              disabled={adding || available.length === 0}
-              onChange={(event) => setPick(event.target.value)}
-            >
-              <option value="">
-                {directory.length === 0
-                  ? "No workspace members found"
-                  : available.length === 0
-                    ? "Everyone is already a member"
-                    : "Add a member…"}
-              </option>
-              {available.map((member) => (
-                <option key={member.userId} value={member.userId}>
-                  {memberLabel(member)}
-                  {member.fullName && member.email ? ` · ${member.email}` : ""}
+            <div className="relative min-w-0 flex-1">
+              <select
+                className="ui-field-standalone h-8 w-full cursor-pointer appearance-none pl-2.5 pr-8 text-xs shadow-none transition-colors hover:border-border-strong focus:border-border-strong disabled:opacity-50"
+                value={pick}
+                disabled={adding || available.length === 0}
+                onChange={(event) => setPick(event.target.value)}
+              >
+                <option value="">
+                  {directory.length === 0
+                    ? "No workspace members found"
+                    : available.length === 0
+                      ? "Everyone is already a member"
+                      : "Add a member…"}
                 </option>
-              ))}
-            </select>
+                {available.map((member) => (
+                  <option key={member.userId} value={member.userId}>
+                    {memberLabel(member)}
+                    {member.fullName && member.email ? ` · ${member.email}` : ""}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={14}
+                strokeWidth={2}
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
+              />
+            </div>
             <button
               type="button"
               className="ui-btn-primary h-8 shrink-0 gap-1.5 px-3 disabled:opacity-50"

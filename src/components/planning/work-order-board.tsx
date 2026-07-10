@@ -250,7 +250,7 @@ export function WorkOrderBoard() {
             </button>
           </div>
         ) : null}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="ui-wo-toolbar flex flex-wrap items-center gap-2">
           <span className="ui-mono-label whitespace-nowrap text-ink-secondary">
             {orders.length} work order{orders.length === 1 ? "" : "s"}
           </span>
@@ -277,8 +277,8 @@ export function WorkOrderBoard() {
           />
           <input
             type="search"
-            className="ui-input max-w-[220px]"
-            placeholder="Search order # or customer"
+            className="ui-input w-[140px] max-w-[220px] grow"
+            placeholder="Search orders"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             disabled={listStatus !== "ready" || orders.length === 0}
@@ -293,7 +293,7 @@ export function WorkOrderBoard() {
             Print selected ({selected.size})
           </button>
           {canWrite ? (
-            <button type="button" className="ui-btn-primary h-8 px-4" onClick={handleNewWorkOrder}>
+            <button type="button" className="ui-btn-primary h-8 px-3" onClick={handleNewWorkOrder}>
               New work order
             </button>
           ) : null}

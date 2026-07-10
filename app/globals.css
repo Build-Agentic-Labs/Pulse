@@ -3633,6 +3633,55 @@ body {
     color: var(--color-ink-tertiary);
   }
 
+  /* Departments admin: squared, document-control geometry. A QMS surface reads
+     better as stamped tags and datasheet cards than consumer pills, so inside
+     .ui-depts every control/label squares to 4px and containers to 6px. Scoped
+     overrides (same pattern as .sop-editor above) so the rest of the app keeps
+     its rounded language. */
+  .ui-depts .ui-panel {
+    border-radius: 6px;
+  }
+
+  .ui-depts .ui-btn-primary,
+  .ui-depts .ui-btn-ghost,
+  .ui-depts .ui-chip,
+  .ui-depts .ui-chip-accent,
+  .ui-depts .ui-notice,
+  .ui-depts .ui-field-standalone {
+    border-radius: 4px;
+  }
+
+  /* Work-order board toolbar: one 32px control row. Globally the themed-select
+     triggers are 40px/14px and .ui-input is a 16px underline field — three
+     control heights in one row read oversized and mismatched. Inside the
+     toolbar everything drops to compact 12px mono boxes with the same 4px
+     squared geometry as the buttons (no pills). Scoped so both classes keep
+     their global look elsewhere. */
+  .ui-wo-toolbar .ui-themed-select-trigger {
+    height: 2rem;
+    font-size: 0.75rem;
+    padding: 0 0.625rem;
+    border-radius: 4px;
+  }
+
+  .ui-wo-toolbar .ui-input {
+    height: 2rem;
+    padding: 0 0.625rem;
+    font-size: 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-border-strong) 42%, transparent);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--color-surface-raised) 54%, transparent);
+  }
+
+  .ui-wo-toolbar .ui-input:focus {
+    border-color: color-mix(in srgb, var(--color-ink) 38%, transparent);
+  }
+
+  .ui-wo-toolbar .ui-btn-primary,
+  .ui-wo-toolbar .ui-btn-ghost {
+    border-radius: 4px;
+  }
+
   .ui-product-setup .ui-field-shell,
   .ui-product-setup .ui-field-standalone {
     background: color-mix(in srgb, var(--color-surface-raised) 36%, transparent);

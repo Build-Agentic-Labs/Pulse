@@ -1,7 +1,6 @@
 "use client";
 
 import { Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useConfirm } from "@/components/confirm-provider";
@@ -13,6 +12,8 @@ import { saveSop, SopConflictError, type SaveSopOptions } from "@/lib/sop/store"
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
 import { ProcessFlowchart } from "./process-flowchart";
+import { SopMasthead } from "./sop-masthead";
+import { SopPrintPreview } from "./sop-print-preview";
 
 type StepId = "document" | "overview" | "procedure" | "annexes" | "approvals";
 
@@ -90,6 +91,7 @@ export function SopEditor({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   // Edits since the last successful save -- drives the leave guards and autosave.
@@ -241,6 +243,14 @@ export function SopEditor({
     }
   }
 
+  // The approval flow needs a saved row, so a never-saved SOP is persisted first, then opened
+  // on its control page. This is what the masthead's primary action calls before first save.
+  async function handleStartApproval() {
+    if (await persist()) {
+      router.push(`/sops/${sop.id}/control`);
+    }
+  }
+
   async function handleSaveAndExport() {
     if (await persist()) {
       await handleExport();
@@ -341,6 +351,19 @@ export function SopEditor({
     >
       <div className="sop-editor">
         <div className="mx-auto max-w-4xl space-y-5 pb-16">
+            {/* Always-on title block: what is being made, its control number, state, and progress. */}
+            <SopMasthead
+              sop={sop}
+              department={selectedDept ?? undefined}
+              saveState={saveStatus}
+              dirty={dirty}
+              isNew={isNew && !persistedUpdatedAt}
+              sectionsComplete={STEPS.filter((entry) => stepFilled(sop, entry.id)).length}
+              sectionsTotal={STEPS.length}
+              onPreview={() => setPreviewing(true)}
+              onStartApproval={() => void handleStartApproval()}
+            />
+
             {sop.source === "converted" && !reviewDismissed ? (
               <div className="ui-notice ui-notice-warn flex items-start gap-3">
                 <Sparkles size={16} className="mt-0.5 shrink-0 text-ink-secondary" />
@@ -430,10 +453,9 @@ export function SopEditor({
                     />
                   </Field>
                   <Field label="Status">
-                    {/* Lifecycle transitions are enforced in the DB and driven from the control
-                        page (they require department roles + e-signatures), so the editor shows
-                        status read-only and links out rather than offering a select that would
-                        always fail the transition guard. */}
+                    {/* Read-only here; lifecycle transitions run from the control page (they need
+                        department roles + e-signatures). The way in is the masthead's
+                        "Review & approve", so no duplicate control lives in this field. */}
                     <div className="flex h-9 items-center gap-2">
                       <span
                         className={`ui-chip ${
@@ -446,11 +468,6 @@ export function SopEditor({
                       >
                         {SOP_STATUS_LABELS[sop.status]}
                       </span>
-                      {!isNew ? (
-                        <Link href={`/sops/${sop.id}/control`} className="ui-btn-ghost h-8 px-2">
-                          Manage lifecycle
-                        </Link>
-                      ) : null}
                     </div>
                   </Field>
                   <Field label="Revision date">
@@ -638,6 +655,7 @@ export function SopEditor({
             </div>
           </div>
         </div>
+        {previewing ? <SopPrintPreview sop={sop} onClose={() => setPreviewing(false)} /> : null}
       </SopShell>
   );
 }

@@ -4197,8 +4197,25 @@ body {
     transition: opacity 160ms var(--ease-ui), background 160ms var(--ease-ui), color 160ms var(--ease-ui);
   }
 
+  .ui-scenario-tab-edit {
+    display: inline-flex;
+    height: 1rem;
+    width: 1rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    margin-right: 0.125rem;
+    border: 0;
+    border-radius: 0.2rem;
+    background: transparent;
+    color: color-mix(in srgb, var(--color-steel) 82%, transparent);
+  }
+
   .ui-scenario-tab:hover .ui-scenario-tab-close,
   .ui-scenario-tab-active .ui-scenario-tab-close,
+  .ui-scenario-tab:hover .ui-scenario-tab-edit,
+  .ui-scenario-tab-active .ui-scenario-tab-edit,
   .ui-scenario-tab-close:focus-visible {
     opacity: 1;
   }

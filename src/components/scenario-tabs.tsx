@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Plus, X } from "lucide-react";
+import { Loader2, Pencil, Plus, X } from "lucide-react";
 
 import type { ScenarioSummary } from "@/domain/types";
 
@@ -140,7 +140,7 @@ export function ScenarioTabs({
                 role="tab"
                 aria-selected={isActive}
                 disabled={isSwitching}
-                title={isMain ? "Master plan" : scenario.notes || "Double-click to rename"}
+                title={isMain ? "Master plan" : scenario.notes || "Switch to this projection"}
                 onClick={() => onSwitch(scenario.id)}
                 onDoubleClick={() => {
                   if (!isMain) {
@@ -152,6 +152,18 @@ export function ScenarioTabs({
                 <span>{isMain ? "Main Plan" : scenario.name || "Untitled"}</span>
                 {isPending ? <Loader2 size={12} className="shrink-0 animate-spin" /> : null}
               </button>
+              {!isMain ? (
+                <button
+                  type="button"
+                  disabled={isSwitching}
+                  title="Rename this projection"
+                  aria-label={`Rename ${scenario.name || "scenario"}`}
+                  onClick={() => startRename(scenario)}
+                  className="ui-scenario-tab-edit"
+                >
+                  <Pencil size={10} />
+                </button>
+              ) : null}
               {!isMain ? (
                 <button
                   type="button"

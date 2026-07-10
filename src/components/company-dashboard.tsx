@@ -115,7 +115,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
   );
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
+    <div className="h-[100dvh] overflow-y-auto bg-canvas text-ink">
       {/* Soft light-source glow at the top of the page (theme-aware, barely there). */}
       <div
         aria-hidden="true"

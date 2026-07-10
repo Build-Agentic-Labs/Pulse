@@ -21,7 +21,7 @@ type SpacePlaceholderProps = {
  */
 export function SpacePlaceholder({ space, name, description, planned, children }: SpacePlaceholderProps) {
   return (
-    <div className="min-h-screen bg-canvas text-ink">
+    <div className="h-[100dvh] overflow-y-auto bg-canvas text-ink">
       <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface px-4">
         <BackToDashboardButton />
         <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">

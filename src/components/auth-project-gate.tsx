@@ -424,7 +424,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
   if (projectId) {
     if (status === "ready" && !selectedProject) {
       return (
-        <main className="grid min-h-screen place-items-center bg-canvas px-4 text-ink">
+        <main className="grid h-[100dvh] place-items-center overflow-y-auto bg-canvas px-4 py-8 text-ink">
           <section className="w-full max-w-lg ui-panel p-6">
             <p className="text-xs ui-mono-label tracking-wide text-danger">Project unavailable</p>
             <h1 className="mt-2 text-2xl font-medium">You do not have access to this project.</h1>
@@ -471,7 +471,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
     }
 
     return (
-      <main className="grid min-h-screen place-items-center bg-canvas px-4 text-ink">
+      <main className="grid h-[100dvh] place-items-center overflow-y-auto bg-canvas px-4 py-8 text-ink">
         <section className="w-full max-w-lg ui-panel p-6">
           <p className="text-xs ui-mono-label tracking-wide text-ink-tertiary">No project access yet</p>
           <h1 className="mt-2 text-2xl font-medium">You&apos;re in, but nothing is shared with you yet.</h1>

@@ -20,7 +20,7 @@ const SOP_COLUMNS = "id, workspace_id, sop_number, title, version, source, statu
 
 // Slim projection for the list surface: promoted columns only, never the full jsonb document.
 const SOP_LIST_COLUMNS =
-  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date";
+  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, rejected_reason";
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
@@ -40,6 +40,9 @@ export interface SopListItem {
   departmentId: string | null;
   effectiveDate: string | null;
   nextReviewDate: string | null;
+  createdBy: string | null;
+  /** Mirror of the objection that sent this SOP back; the signature is the source of truth. */
+  rejectedReason: string | null;
 }
 
 /**
@@ -111,6 +114,8 @@ function mapSopListItem(row: Record<string, unknown>): SopListItem {
     departmentId: (row.department_id as string | null) ?? null,
     effectiveDate: (row.effective_date as string | null) ?? null,
     nextReviewDate: (row.next_review_date as string | null) ?? null,
+    createdBy: (row.created_by as string | null) ?? null,
+    rejectedReason: (row.rejected_reason as string | null) ?? null,
   };
 }
 

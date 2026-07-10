@@ -5,11 +5,16 @@
  *
  * States (one machine, on `sops.status`):
  *   draft → in_review → approved → effective   (+ effective → draft to start a revision)
- *   in_review → draft (reject)                  effective|approved → obsolete (retire)
+ *   in_review → draft (reject or recall)        effective|approved → obsolete (retire)
  * "Superseded" is not a status — the in-force copy is named by `sops.effective_revision_id`.
+ *
+ * Two edges are NOT user-driven and have no button:
+ *   * in_review → approved happens inside `sign_sop` when the last blocking seat signs.
+ *   * in_review → draft (reject) happens inside `sign_sop` when a rejection is recorded.
+ * They are still modelled here so the panel can explain why an SOP moved on its own.
  */
 
-import { canAuthor, canDeptApprove, canSignReview, type DeptRole } from "@/domain/departments";
+import { canDeptApprove, type DeptRole } from "@/domain/departments";
 import type { SopStatus } from "./schema";
 
 export type { SopStatus };
@@ -19,16 +24,37 @@ export const SOP_STATUS_ORDER: SopStatus[] = ["draft", "in_review", "approved", 
 export interface TransitionContext {
   from: SopStatus;
   to: SopStatus;
-  /** The user's role in the SOP's owning department, if any. */
+  /** The user's role in the SOP's OWNING department, if any. */
   role?: DeptRole;
-  /** True when this user submitted the SOP to review (the segregation-of-duties anchor). */
+  /** True when this user submitted the SOP to review. */
   isSubmitter: boolean;
+  /** True when this user created the SOP. */
+  isAuthor?: boolean;
   /** True when this user is an approver in the workspace's Quality-gate department. */
   isQualityApprover: boolean;
   /** True when the SOP has an owning department (required before it can leave draft). */
   hasDept: boolean;
-  /** Workspace owner/admin — folds in for department-scoped verbs (not the Quality step). */
+  /** Workspace owner/admin — folds in for department-scoped verbs (never for signing). */
   isManager?: boolean;
+
+  /** The roster carries at least one Responsible department. */
+  hasResponsibleSeat?: boolean;
+  /** Exactly one Accountable department is required; the DB has a partial unique index too. */
+  accountableSeatCount?: number;
+  /** This user holds a Responsible or Accountable seat on this SOP. */
+  holdsBlockingSeat?: boolean;
+  /** This user holds any seat at all (blocking, support, or consulted). */
+  holdsAnySeat?: boolean;
+  /** Every seat's designated signer belongs to that seat's department. */
+  seatsStaffedCorrectly?: boolean;
+  /** An authorship signature by this user exists, bound to the current content and cycle. */
+  authorshipSigned?: boolean;
+  /** Every blocking seat has signed for the current content and cycle. */
+  quorumMet?: boolean;
+  /** A rejection stands against the document as it is now. */
+  hasOpenObjection?: boolean;
+  /** Gate D needs a written reason before an effective SOP can be reopened. */
+  hasRevisionReason?: boolean;
 }
 
 export interface TransitionResult {
@@ -40,36 +66,65 @@ const OK: TransitionResult = { ok: true };
 const no = (reason: string): TransitionResult => ({ ok: false, reason });
 
 export function canTransitionSop(ctx: TransitionContext): TransitionResult {
-  const { from, to, role, isSubmitter, isQualityApprover, hasDept, isManager = false } = ctx;
+  const {
+    from,
+    to,
+    role,
+    isSubmitter,
+    isAuthor = false,
+    isQualityApprover,
+    hasDept,
+    isManager = false,
+    hasResponsibleSeat = false,
+    accountableSeatCount = 0,
+    holdsBlockingSeat = false,
+    holdsAnySeat = false,
+    seatsStaffedCorrectly = true,
+    authorshipSigned = false,
+    quorumMet = false,
+    hasOpenObjection = false,
+    hasRevisionReason = false,
+  } = ctx;
 
   if (from === to) return OK;
 
-  // Any department member can author/submit; signing needs the cumulative role.
-  const canAuth = isManager || (role !== undefined && canAuthor(role));
-  const canReview = isManager || (role !== undefined && canSignReview(role));
+  const isOwningDeptMember = isManager || role !== undefined;
   const canDept = isManager || (role !== undefined && canDeptApprove(role));
 
   switch (`${from}->${to}`) {
     case "draft->in_review":
-      if (!hasDept) return no("Assign a department before submitting for review.");
-      if (!canAuth) return no("Only a member of the owning department can submit this SOP.");
+      if (!hasDept) return no("Assign an owning department before submitting for review.");
+      if (!isOwningDeptMember) return no("Only a member of the owning department can submit this SOP.");
+      if (!hasResponsibleSeat) return no("Name at least one Responsible department before submitting.");
+      if (accountableSeatCount !== 1) return no("Name exactly one Accountable department before submitting.");
+      if (!seatsStaffedCorrectly) return no("Every seat's reviewer must belong to that seat's department.");
+      if (holdsBlockingSeat) return no("You hold a blocking seat on this SOP; someone else must submit it.");
+      if (!authorshipSigned) return no("Sign the authorship declaration before submitting this SOP.");
+      if (hasOpenObjection) return no("Resolve the open objection before resubmitting this SOP.");
       return OK;
 
     case "in_review->approved":
-      if (!canDept) return no("Only a department approver can approve this SOP.");
+      // Not a button. `sign_sop` performs this edge when the last blocking seat signs.
       if (isSubmitter) return no("You can't approve an SOP you submitted for review.");
+      if (!quorumMet) return no("Every Responsible and Accountable department must sign before Quality review.");
+      if (hasOpenObjection) return no("Resolve the open objection before this SOP can be approved.");
       return OK;
 
-    case "in_review->draft": // reject / rework
-      if (!canReview) return no("Only a reviewer or approver can send this back.");
-      return OK;
+    case "in_review->draft":
+      // Reject is driven from inside sign_sop. Recall is a plain, reason-less transition.
+      if (holdsBlockingSeat) return OK;
+      if (isSubmitter) return OK;
+      return no("Only a Responsible or Accountable reviewer can reject this SOP, or its submitter can recall it.");
 
     case "approved->effective":
       if (!isQualityApprover) return no("Only a Quality approver can make an SOP effective.");
+      if (holdsAnySeat) return no("The Quality approver must not hold a review seat on this SOP.");
+      if (isAuthor || isSubmitter) return no("The Quality approver must differ from the author.");
       return OK;
 
     case "effective->draft": // start a revision
-      if (!canAuth) return no("Only a member of the owning department can start a revision.");
+      if (!isOwningDeptMember) return no("Only a member of the owning department can start a revision.");
+      if (!hasRevisionReason) return no("A revision needs a reason: what is changing, and why.");
       return OK;
 
     case "effective->obsolete":

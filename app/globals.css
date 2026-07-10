@@ -210,11 +210,6 @@ body {
   overflow: hidden;
 }
 
-.excel-addin-shell {
-  min-width: 980px;
-  min-height: 720px;
-}
-
 body {
   margin: 0;
   background: var(--color-canvas);

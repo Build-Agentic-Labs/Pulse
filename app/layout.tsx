@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { ConfirmProvider } from "@/components/confirm-provider";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -60,6 +60,14 @@ export const metadata: Metadata = {
     icon: "/pulse-favicon.png",
     apple: "/apple-touch-icon.png",
   },
+};
+
+// `viewportFit: "cover"` is load-bearing: every `env(safe-area-inset-*)` in the
+// codebase resolves to 0 without it.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export const dynamic = "force-dynamic";

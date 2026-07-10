@@ -4732,11 +4732,15 @@ body {
    the left, refined form on the right. Raw CSS (token-driven) so it
    stays theme-aware without @apply ordering surprises.
    =================================================================== */
+/* `height` + `overflow-y: auto`, not `min-height`: the body is `overflow: hidden`,
+   so a growing root clips its own content out of reach. Content shorter than the
+   viewport renders identically (no scrollbar appears). */
 .ui-auth-split {
   position: relative;
   display: grid;
   grid-template-columns: 1fr;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow-y: auto;
   background: var(--color-canvas);
 }
 @media (min-width: 900px) {

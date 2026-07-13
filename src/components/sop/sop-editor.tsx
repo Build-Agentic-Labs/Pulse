@@ -8,6 +8,7 @@ import type { Department } from "@/domain/departments";
 import { rasicLegend, SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
 import { mintSopNumber } from "@/lib/sop/review";
+import { loadWorkspaceMembersFromSupabase } from "@/domain/supabase-planner";
 import { saveSop, SopConflictError, type SaveSopOptions } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
@@ -94,6 +95,9 @@ export function SopEditor({
   const [previewing, setPreviewing] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [reviewDismissed, setReviewDismissed] = useState(false);
+  // People with access to this workspace, offered as name suggestions on the approvals table so
+  // approvers are picked from the real roster instead of retyped (and misspelled) each time.
+  const [approverOptions, setApproverOptions] = useState<{ name: string; email?: string }[]>([]);
   // Edits since the last successful save -- drives the leave guards and autosave.
   const [dirty, setDirty] = useState(false);
   // A save lost the concurrency check: freeze autosave so we never loop against the conflict.
@@ -221,6 +225,28 @@ export function SopEditor({
     // the debounce after every edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autosaveArmed, sop]);
+
+  // Load the workspace roster once to suggest approver names. Read-only and non-blocking: if it
+  // fails, the approvals table just falls back to free typing.
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    loadWorkspaceMembersFromSupabase(workspaceId)
+      .then((members) => {
+        if (!active) return;
+        const options = members
+          .filter((member) => member.fullName?.trim())
+          .map((member) => ({ name: member.fullName!.trim(), email: member.email }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setApproverOptions(options);
+      })
+      .catch(() => {
+        /* suggestions are a convenience; leave the field as free text on failure */
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
 
   // Confirm in-app exits (shell back link / brand link) while edits are unsaved. The shell
   // awaits this, so an unsaved-changes exit resolves through the themed dialog instead of a
@@ -604,7 +630,7 @@ export function SopEditor({
 
             {step.id === "approvals" ? (
               <Section title="Change approvals">
-                <ApprovalsEditor rows={sop.approvals} disabled={!canEdit} onChange={(approvals) => update({ approvals })} />
+                <ApprovalsEditor rows={sop.approvals} disabled={!canEdit} approvers={approverOptions} onChange={(approvals) => update({ approvals })} />
               </Section>
             ) : null}
 
@@ -881,18 +907,33 @@ function ChangeHistoryEditor({
 function ApprovalsEditor({
   rows,
   disabled = false,
+  approvers = [],
   onChange,
 }: {
   rows: Sop["approvals"];
   disabled?: boolean;
+  /** Workspace roster offered as name suggestions on each approval row. */
+  approvers?: { name: string; email?: string }[];
   onChange: (rows: Sop["approvals"]) => void;
 }) {
   function patch(index: number, field: keyof Sop["approvals"][number], value: string) {
     onChange(rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   }
 
+  const namesListId = "sop-approver-names";
+
   return (
     <div className="space-y-2">
+      {/* Shared suggestion list of everyone with workspace access; the Name inputs reference it
+          so approvers are picked from the real roster while still allowing an occasional
+          external name to be typed. */}
+      <datalist id={namesListId}>
+        {approvers.map((person) => (
+          <option key={person.name} value={person.name}>
+            {person.email ?? ""}
+          </option>
+        ))}
+      </datalist>
       {rows.map((row, index) => (
         <div key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_10rem_auto]">
           <input
@@ -906,6 +947,8 @@ function ApprovalsEditor({
             className="ui-field-standalone"
             value={row.name}
             placeholder="Name"
+            list={namesListId}
+            autoComplete="off"
             disabled={disabled}
             onChange={(event) => patch(index, "name", event.target.value)}
           />

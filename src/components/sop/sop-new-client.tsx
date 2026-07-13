@@ -8,7 +8,7 @@ import { listMyDepartments } from "@/lib/departments/store";
 import { newSopId } from "@/lib/sop/store";
 import { SopEditor } from "./sop-editor";
 import { SopShell } from "./sop-shell";
-import { canEdit, useSopWorkspace } from "./sop-workspace-provider";
+import { useSopWorkspace } from "./sop-workspace-provider";
 
 /** Shell-wrapped centered message used for the empty / loading / blocked states. */
 function NewSopNotice({ children }: { children: ReactNode }) {
@@ -22,7 +22,7 @@ function NewSopNotice({ children }: { children: ReactNode }) {
 }
 
 export function SopNewClient() {
-  const { workspaceId, role } = useSopWorkspace();
+  const { workspaceId, canEditSops } = useSopWorkspace();
   // Build the blank SOP once, client-side (needs crypto + Date).
   const [initial] = useState(() => createEmptySop(newSopId(), new Date().toISOString()));
   // undefined = not loaded yet; [] = loaded, user is in no department.
@@ -93,7 +93,7 @@ export function SopNewClient() {
     <SopEditor
       initial={initial}
       workspaceId={workspaceId}
-      canEdit={canEdit(role)}
+      canEdit={canEditSops}
       isNew
       authoringDepartments={myDepartments}
     />

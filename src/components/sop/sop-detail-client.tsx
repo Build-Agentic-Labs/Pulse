@@ -8,7 +8,7 @@ import { NothingSpinner } from "@/components/nothing-ui";
 import { getSop, type SopRecord } from "@/lib/sop/store";
 import { SopEditor } from "./sop-editor";
 import { SopShell } from "./sop-shell";
-import { canEdit, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+import { SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 const browseSidebar = (
   <>
@@ -35,7 +35,7 @@ type DetailState =
 
 export function SopDetailClient() {
   const params = useParams<{ sopId: string }>();
-  const { role } = useSopWorkspace();
+  const { canEditSops } = useSopWorkspace();
   const [state, setState] = useState<DetailState>({ status: "pending" });
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export function SopDetailClient() {
         key={state.record.sop.id}
         initial={state.record.sop}
         workspaceId={state.record.workspaceId}
-        canEdit={canEdit(role)}
+        canEdit={canEditSops}
       />
     );
   }

@@ -19,7 +19,7 @@ import {
   type SopListItem,
 } from "@/lib/sop/store";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
-import { canEdit, useSopWorkspace } from "./sop-workspace-provider";
+import { useSopWorkspace } from "./sop-workspace-provider";
 
 function formatDate(iso: string): string {
   if (!iso) return "";
@@ -74,8 +74,8 @@ function markImportDone(workspaceId: string) {
 export function SopList() {
   const router = useRouter();
   const confirm = useConfirm();
-  const { workspaceId, role } = useSopWorkspace();
-  const editable = canEdit(role);
+  const { workspaceId, canEditSops } = useSopWorkspace();
+  const editable = canEditSops;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sops, setSops] = useState<SopListItem[]>([]);
   const [listStatus, setListStatus] = useState<"loading" | "ready" | "error">("loading");

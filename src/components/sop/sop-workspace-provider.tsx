@@ -3,8 +3,8 @@
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
-import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership } from "@/domain/supabase-planner";
-import type { WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
+import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrgToolAccess } from "@/domain/supabase-planner";
+import type { AccessLevel, WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
 import { useAuthFormActions } from "@/lib/auth-form-actions";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
@@ -16,6 +16,17 @@ export function canEdit(role?: WorkspaceRole): boolean {
   return role === "owner" || role === "admin" || role === "editor";
 }
 
+/**
+ * Whether the current user may author/edit SOPs — mirrors the database's has_org_tool_access(edit):
+ * workspace owners/admins always can, and any other member (including a viewer) can if they hold
+ * org-tool EDIT access. Gating on this instead of the raw workspace role keeps the editor honest
+ * with the RLS the save actually hits — a viewer granted SOP edit access can author, and a member
+ * without it can't type into a form the database would reject anyway.
+ */
+export function canEditSops(role?: WorkspaceRole, orgToolAccess?: AccessLevel): boolean {
+  return role === "owner" || role === "admin" || orgToolAccess === "edit";
+}
+
 /** Workspace managers: the only roles allowed to move a SOP to `approved` or `obsolete`. */
 export function canManage(role?: WorkspaceRole): boolean {
   return role === "owner" || role === "admin";
@@ -25,6 +36,10 @@ type SopWorkspaceContextValue = {
   status: "loading" | "ready";
   workspaceId?: string;
   role?: WorkspaceRole;
+  /** The user's org-tool (SOP) access level; undefined while still loading. */
+  orgToolAccess?: AccessLevel;
+  /** Derived: may this user author/edit SOPs? See canEditSops. */
+  canEditSops: boolean;
   workspaces: WorkspaceProjectGroup[];
   setWorkspaceId: (workspaceId: string) => void;
 };
@@ -98,6 +113,7 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
   const [sessionReady, setSessionReady] = useState(false);
   const [groups, setGroups] = useState<WorkspaceProjectGroup[]>([]);
   const [workspaceId, setWorkspaceIdState] = useState<string | undefined>(undefined);
+  const [orgToolAccess, setOrgToolAccess] = useState<AccessLevel | undefined>(undefined);
   const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
   const [message, setMessage] = useState("");
   const auth = useAuthFormActions(supabase);
@@ -173,6 +189,26 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
+  // The user's org-tool (SOP) access level. Org-wide (per user, not per workspace), so it tracks
+  // the session rather than the selected workspace. Falls back to "none" if it can't be read.
+  useEffect(() => {
+    if (!session) {
+      setOrgToolAccess(undefined);
+      return;
+    }
+    let active = true;
+    fetchOrgToolAccess(supabase)
+      .then((level) => {
+        if (active) setOrgToolAccess(level);
+      })
+      .catch(() => {
+        if (active) setOrgToolAccess("none");
+      });
+    return () => {
+      active = false;
+    };
+  }, [session, supabase]);
+
   function setWorkspaceId(nextId: string) {
     setWorkspaceIdState(nextId);
     writeStoredWorkspaceId(nextId);
@@ -184,8 +220,16 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const contextValue = useMemo<SopWorkspaceContextValue>(
-    () => ({ status: "ready", workspaceId, role, workspaces: groups, setWorkspaceId }),
-    [workspaceId, role, groups],
+    () => ({
+      status: "ready",
+      workspaceId,
+      role,
+      orgToolAccess,
+      canEditSops: canEditSops(role, orgToolAccess),
+      workspaces: groups,
+      setWorkspaceId,
+    }),
+    [workspaceId, role, orgToolAccess, groups],
   );
 
   if (!sessionReady || (session && status === "loading")) {

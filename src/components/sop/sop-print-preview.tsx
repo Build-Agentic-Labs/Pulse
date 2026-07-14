@@ -1,38 +1,80 @@
 "use client";
 
 import { Printer, X } from "lucide-react";
-import { useEffect } from "react";
-import type { Sop } from "@/domain/sop/schema";
-
-/**
- * A print-ready preview of the finished SOP. The author sees exactly the document that will be
- * released, and "Save as PDF" hands off to the browser's print dialog — no PDF dependency, and
- * the same output whether they save a PDF or send it to a printer.
- *
- * The sheet is always a light paper page, independent of the app theme: a controlled document is
- * a white page with dark ink, and it must print that way from either theme. The scoped print CSS
- * hides the app chrome so only the sheet reaches the page.
- */
+import { useEffect, useMemo, type ReactNode } from "react";
+import { rasicLegend, type Sop } from "@/domain/sop/schema";
+import { buildProcedureSvgPages } from "@/lib/sop/procedure-flow-image";
 
 function formatDate(iso: string): string {
   if (!iso) return "";
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleDateString();
+  if (Number.isNaN(date.getTime())) return iso;
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${mm}/${dd}/${date.getFullYear()}`;
 }
 
-/** A document section that renders only when it has content, so the preview reflects real state. */
-function DocSection({ title, children, show }: { title: string; children: React.ReactNode; show: boolean }) {
-  if (!show) return null;
+function DocumentHeader({ sop }: { sop: Sop }) {
   return (
-    <section className="sop-doc-section">
+    <header className="sop-export-header">
+      <div className="sop-export-header-main">
+        <img src="/sop/ana-logo.png" alt="ANA Inc." />
+        <div>{`${sop.meta.sopNumber || "SOP-QA-00X"}: ${sop.meta.title || ""}`.trim()}</div>
+      </div>
+      <div className="sop-export-header-info">
+        <div>Version: {sop.meta.version || "1.0"}</div>
+        <div>Revision date: {formatDate(sop.meta.revisionDate) || "MM/DD/YY"}</div>
+        <div>Effective date: {formatDate(sop.meta.effectiveDate) || "MM/DD/YY"}</div>
+      </div>
+    </header>
+  );
+}
+
+function DocumentFooter({ page, total }: { page: number; total: number }) {
+  return (
+    <footer className="sop-export-footer">
+      <div>Page {page} / {total}</div>
+      <div>ANA INC. CONFIDENTIAL: This copyrighted work and all information is the property of ANA INC. All rights reserved</div>
+    </footer>
+  );
+}
+
+function DocumentPage({
+  sop,
+  page,
+  total,
+  children,
+  className = "",
+}: {
+  sop: Sop;
+  page: number;
+  total: number;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <article className={`sop-print-page ${className}`}>
+      <DocumentHeader sop={sop} />
+      <main className="sop-print-page-body">{children}</main>
+      <DocumentFooter page={page} total={total} />
+    </article>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="sop-export-section">
       <h2>{title}</h2>
       {children}
     </section>
   );
 }
 
+function EmptyAwareText({ value }: { value: string }) {
+  return <p className={value ? undefined : "sop-export-empty"}>{value || "—"}</p>;
+}
+
 export function SopPrintPreview({ sop, onClose }: { sop: Sop; onClose: () => void }) {
-  // Close on Escape; a preview overlay should never trap the keyboard.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -41,8 +83,14 @@ export function SopPrintPreview({ sop, onClose }: { sop: Sop; onClose: () => voi
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const { meta, procedure } = sop;
-  const hasProcedure = procedure.activities.length > 0;
+  // This is the same SVG source that Export rasterizes and embeds in the Word document.
+  // Reusing it here keeps flowchart shapes, pagination, columns, and RASIC assignments aligned.
+  const flowPages = useMemo(
+    () => (sop.procedure.activities.length ? buildProcedureSvgPages(sop) : []),
+    [sop],
+  );
+  const totalPages = 2 + flowPages.length;
+  const backMatterPage = totalPages;
 
   return (
     <div className="sop-preview-overlay" role="dialog" aria-modal="true" aria-label="SOP document preview">
@@ -50,7 +98,7 @@ export function SopPrintPreview({ sop, onClose }: { sop: Sop; onClose: () => voi
         .sop-preview-overlay {
           position: fixed; inset: 0; z-index: 60;
           display: flex; flex-direction: column;
-          background: rgba(15, 18, 21, 0.55);
+          background: rgba(15, 18, 21, 0.62);
         }
         .sop-preview-bar {
           display: flex; align-items: center; justify-content: space-between;
@@ -58,237 +106,151 @@ export function SopPrintPreview({ sop, onClose }: { sop: Sop; onClose: () => voi
           background: var(--color-surface, #fff); border-bottom: 1px solid var(--color-line, #ddd);
         }
         .sop-preview-scroll { flex: 1; overflow: auto; padding: 24px 16px 64px; }
-        .sop-print-sheet {
-          max-width: 820px; margin: 0 auto; background: #fff; color: #14181c;
-          padding: 40px 48px; border-radius: 3px;
+        .sop-print-pages { display: grid; gap: 24px; justify-content: center; }
+        .sop-print-page {
+          box-sizing: border-box; width: 8.5in; min-height: 11in;
+          display: flex; flex-direction: column;
+          padding: 0.52in 0.75in 0.42in;
+          background: #fff; color: #1a1a1a;
           box-shadow: 0 8px 40px rgba(0,0,0,0.25);
-          font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-          line-height: 1.55;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 10pt; line-height: 1.35;
         }
-        .sop-doc-titleblock { border: 1px solid #14181c; }
-        .sop-doc-titleblock-top {
-          display: flex; justify-content: space-between; align-items: flex-start;
-          gap: 16px; padding: 12px 16px; border-bottom: 1px solid #14181c;
+        .sop-export-header {
+          flex: none; display: grid; grid-template-columns: 75% 25%;
+          min-height: 1.12in; border: 1px solid #666;
         }
-        .sop-doc-org { font-weight: 700; letter-spacing: 0.02em; font-size: 15px; }
-        .sop-doc-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; text-align: right; }
-        .sop-doc-title { padding: 14px 16px; font-size: 20px; font-weight: 650; }
-        .sop-doc-fields {
-          display: grid; grid-template-columns: repeat(4, 1fr);
-          border-top: 1px solid #14181c;
+        .sop-export-header-main {
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          gap: 7px; padding: 7px 10px; border-right: 1px solid #666;
+          text-align: center; font-size: 11pt; font-weight: 700;
         }
-        .sop-doc-fields > div { padding: 8px 12px; border-right: 1px solid #d5d9d7; }
-        .sop-doc-fields > div:last-child { border-right: none; }
-        .sop-doc-fieldlabel {
-          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7472;
+        .sop-export-header-main img { width: 150px; height: 42px; object-fit: contain; }
+        .sop-export-header-info { display: grid; grid-template-rows: repeat(3, 1fr); font-size: 8pt; }
+        .sop-export-header-info > div {
+          display: flex; align-items: center; padding: 3px 8px; border-bottom: 1px solid #666;
         }
-        .sop-doc-fieldvalue { margin-top: 3px; font-size: 13px; }
-        .sop-doc-section { margin-top: 26px; }
-        .sop-doc-section h2 {
-          font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
-          font-weight: 700; color: #1e4e5c; margin: 0 0 8px;
-          border-bottom: 1px solid #d5d9d7; padding-bottom: 4px;
+        .sop-export-header-info > div:last-child { border-bottom: 0; }
+        .sop-print-page-body { flex: 1; padding-top: 12px; }
+        .sop-export-section { margin-top: 12px; break-inside: avoid; }
+        .sop-export-section:first-child { margin-top: 0; }
+        .sop-export-section h2 {
+          margin: 0 0 4px; color: #1a1a1a;
+          font: 700 12pt/1.3 Arial, Helvetica, sans-serif;
         }
-        .sop-doc-section p { margin: 0; font-size: 14px; white-space: pre-wrap; }
-        .sop-doc-list { margin: 0; padding-left: 20px; font-size: 14px; }
-        .sop-doc-list li { margin: 2px 0; }
-        .sop-doc-defs { display: grid; gap: 6px; }
-        .sop-doc-def { display: grid; grid-template-columns: 160px 1fr; gap: 12px; font-size: 14px; }
-        .sop-doc-def dt { font-weight: 600; }
-        .sop-doc-def dd { margin: 0; }
-        .sop-doc-step { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid #eceeed; }
-        .sop-doc-step-n {
-          flex: none; width: 24px; height: 24px; border: 1px solid #14181c; border-radius: 3px;
-          display: flex; align-items: center; justify-content: center;
-          font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+        .sop-export-section p { margin: 0 0 4px; white-space: pre-wrap; }
+        .sop-export-empty { color: #666; }
+        .sop-export-list { margin: 0; padding-left: 20px; }
+        .sop-export-list li { margin: 0 0 2px; }
+        .sop-export-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        .sop-export-table th, .sop-export-table td {
+          border: 1px solid #ccc; padding: 5px 7px; text-align: left; vertical-align: top;
+          overflow-wrap: anywhere; white-space: pre-wrap;
         }
-        .sop-doc-step-body { min-width: 0; }
-        .sop-doc-step-desc { font-weight: 600; font-size: 14px; }
-        .sop-doc-step-detail { font-size: 13px; color: #40484a; margin-top: 2px; white-space: pre-wrap; }
-        .sop-doc-step-roles { font-size: 11px; color: #6b7472; margin-top: 4px; }
-        .sop-doc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .sop-doc-table th, .sop-doc-table td {
-          border: 1px solid #d5d9d7; padding: 6px 9px; text-align: left; vertical-align: top;
+        .sop-export-table th { background: #f0f0f0; font-weight: 700; }
+        .sop-export-annex { margin: 0 0 5px; }
+        .sop-export-flow-page .sop-print-page-body {
+          display: flex; flex-direction: column; justify-content: flex-start;
         }
-        .sop-doc-table th {
-          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; background: #f3f5f4;
+        .sop-export-flow-svg { width: 100%; }
+        .sop-export-flow-svg svg { display: block; width: 100%; height: auto; }
+        .sop-export-legend { margin: 8px 0 0; color: #666; font-size: 8pt; font-style: italic; }
+        .sop-export-footer {
+          flex: none; margin-top: 12px; color: #666; text-align: center; font-size: 7pt; line-height: 1.35;
+        }
+        .sop-export-footer > div:first-child { font-size: 8pt; margin-bottom: 2px; }
+        @media (max-width: 900px) {
+          .sop-print-page { width: 100%; min-height: auto; padding: 28px 32px; }
         }
         @media print {
-          body { visibility: hidden !important; }
-          .sop-preview-overlay { position: absolute; inset: 0; background: #fff; z-index: 0; }
-          .sop-preview-overlay, .sop-print-sheet, .sop-print-sheet * { visibility: visible !important; }
-          .sop-preview-bar, .sop-preview-scroll { padding: 0; background: #fff; }
-          .sop-preview-noprint { display: none !important; }
-          .sop-print-sheet { box-shadow: none; max-width: none; margin: 0; padding: 0; border-radius: 0; }
-          .sop-doc-step, .sop-doc-section { break-inside: avoid; }
-          @page { margin: 18mm 16mm; }
+          body { visibility: hidden !important; margin: 0 !important; }
+          .sop-preview-overlay { position: absolute; inset: 0; display: block; background: #fff; z-index: 0; }
+          .sop-preview-overlay, .sop-print-pages, .sop-print-page, .sop-print-page * { visibility: visible !important; }
+          .sop-preview-bar { display: none !important; }
+          .sop-preview-scroll { overflow: visible; padding: 0; }
+          .sop-print-pages { display: block; }
+          .sop-print-page {
+            width: 8.5in; height: 11in; min-height: 11in; margin: 0;
+            padding: 0.52in 0.75in 0.42in; box-shadow: none;
+            break-after: page; page-break-after: always;
+          }
+          .sop-print-page:last-child { break-after: auto; page-break-after: auto; }
+          @page { size: Letter portrait; margin: 0; }
         }
       `}</style>
 
-      <div className="sop-preview-bar sop-preview-noprint">
-        <span className="ui-mono-label text-ink-tertiary">Document preview</span>
+      <div className="sop-preview-bar">
+        <span className="ui-mono-label text-ink-tertiary">Export preview</span>
         <div className="flex items-center gap-2">
           <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" onClick={() => window.print()}>
             <Printer size={15} />
             Save as PDF
           </button>
-          <button
-            type="button"
-            className="ui-btn-ghost h-9 w-9 px-0"
-            onClick={onClose}
-            aria-label="Close preview"
-          >
+          <button type="button" className="ui-btn-ghost h-9 w-9 px-0" onClick={onClose} aria-label="Close preview">
             <X size={16} className="mx-auto" />
           </button>
         </div>
       </div>
 
       <div className="sop-preview-scroll">
-        <article className="sop-print-sheet">
-          <div className="sop-doc-titleblock">
-            <div className="sop-doc-titleblock-top">
-              <span className="sop-doc-org">ANA INC.</span>
-              <span className="sop-doc-num">
-                {meta.sopNumber || "—"}
-                <br />
-                Rev {meta.version || "—"}
-              </span>
-            </div>
-            <div className="sop-doc-title">{meta.title || "Untitled SOP"}</div>
-            <div className="sop-doc-fields">
-              <div>
-                <div className="sop-doc-fieldlabel">Document no.</div>
-                <div className="sop-doc-fieldvalue">{meta.sopNumber || "—"}</div>
-              </div>
-              <div>
-                <div className="sop-doc-fieldlabel">Revision</div>
-                <div className="sop-doc-fieldvalue">{meta.version || "—"}</div>
-              </div>
-              <div>
-                <div className="sop-doc-fieldlabel">Revision date</div>
-                <div className="sop-doc-fieldvalue">{formatDate(meta.revisionDate) || "—"}</div>
-              </div>
-              <div>
-                <div className="sop-doc-fieldlabel">Effective date</div>
-                <div className="sop-doc-fieldvalue">{formatDate(meta.effectiveDate) || "—"}</div>
-              </div>
-            </div>
-          </div>
+        <div className="sop-print-pages">
+          <DocumentPage sop={sop} page={1} total={totalPages}>
+            <Section title="Purpose"><EmptyAwareText value={sop.purpose} /></Section>
+            <Section title="Scope"><EmptyAwareText value={sop.scope} /></Section>
+            <Section title="Definitions">
+              {sop.definitions.length ? (
+                <table className="sop-export-table">
+                  <colgroup><col style={{ width: "30%" }} /><col style={{ width: "70%" }} /></colgroup>
+                  <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+                  <tbody>{sop.definitions.map((row, index) => <tr key={index}><td>{row.term}</td><td>{row.definition}</td></tr>)}</tbody>
+                </table>
+              ) : <EmptyAwareText value="" />}
+            </Section>
+            <Section title="Responsible Person(s)">
+              {sop.responsiblePersons.length ? <ul className="sop-export-list">{sop.responsiblePersons.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
+            </Section>
+            <Section title="References">
+              {sop.references.length ? <ul className="sop-export-list">{sop.references.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
+            </Section>
+            <Section title="Measurement">
+              {sop.measurements.length ? <ul className="sop-export-list">{sop.measurements.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
+            </Section>
+            <Section title="Procedure"><EmptyAwareText value={sop.procedure.processFlowDescription} /></Section>
+          </DocumentPage>
 
-          <DocSection title="Purpose" show={Boolean(sop.purpose.trim())}>
-            <p>{sop.purpose}</p>
-          </DocSection>
+          {flowPages.map((flowPage, index) => (
+            <DocumentPage key={index} sop={sop} page={index + 2} total={totalPages} className="sop-export-flow-page">
+              <div className="sop-export-flow-svg" dangerouslySetInnerHTML={{ __html: flowPage.svg }} />
+              <p className="sop-export-legend">{rasicLegend(".  ")}.</p>
+            </DocumentPage>
+          ))}
 
-          <DocSection title="Scope" show={Boolean(sop.scope.trim())}>
-            <p>{sop.scope}</p>
-          </DocSection>
-
-          <DocSection title="Definitions" show={sop.definitions.length > 0}>
-            <dl className="sop-doc-defs">
-              {sop.definitions.map((def, index) => (
-                <div key={index} className="sop-doc-def">
-                  <dt>{def.term}</dt>
-                  <dd>{def.definition}</dd>
-                </div>
-              ))}
-            </dl>
-          </DocSection>
-
-          <DocSection title="Responsible persons" show={sop.responsiblePersons.length > 0}>
-            <ul className="sop-doc-list">
-              {sop.responsiblePersons.map((person, index) => (
-                <li key={index}>{person}</li>
-              ))}
-            </ul>
-          </DocSection>
-
-          <DocSection title="References" show={sop.references.length > 0}>
-            <ul className="sop-doc-list">
-              {sop.references.map((ref, index) => (
-                <li key={index}>{ref}</li>
-              ))}
-            </ul>
-          </DocSection>
-
-          <DocSection title="Procedure" show={hasProcedure}>
-            {procedure.processFlowDescription.trim() ? (
-              <p style={{ marginBottom: 10 }}>{procedure.processFlowDescription}</p>
-            ) : null}
-            {procedure.activities.map((activity) => {
-              const roles = Object.entries(activity.assignments)
-                .map(([role, code]) => `${role}: ${code}`)
-                .join("   ");
-              return (
-                <div key={activity.id} className="sop-doc-step">
-                  <span className="sop-doc-step-n">{activity.step}</span>
-                  <div className="sop-doc-step-body">
-                    <div className="sop-doc-step-desc">{activity.description}</div>
-                    {activity.detail ? <div className="sop-doc-step-detail">{activity.detail}</div> : null}
-                    {roles ? <div className="sop-doc-step-roles">{roles}</div> : null}
-                  </div>
-                </div>
-              );
-            })}
-          </DocSection>
-
-          <DocSection title="Annexes & forms" show={sop.annexes.length > 0}>
-            <ul className="sop-doc-list">
-              {sop.annexes.map((annex, index) => (
-                <li key={index}>
-                  <strong>{annex.label}</strong> — {annex.description}
-                </li>
-              ))}
-            </ul>
-          </DocSection>
-
-          <DocSection title="Change history" show={sop.changeHistory.length > 0}>
-            <table className="sop-doc-table">
-              <thead>
-                <tr>
-                  <th>Version</th>
-                  <th>Changes</th>
-                  <th>Created by</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sop.changeHistory.map((entry, index) => (
-                  <tr key={index}>
-                    <td>{entry.version}</td>
-                    <td>{entry.changes}</td>
-                    <td>{entry.createdByName}</td>
-                    <td>{formatDate(entry.createdByDate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </DocSection>
-
-          <DocSection title="Change approvals" show={sop.approvals.some((a) => a.name || a.date)}>
-            <table className="sop-doc-table">
-              <thead>
-                <tr>
-                  <th>Approval</th>
-                  <th>Name</th>
-                  <th>Position</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sop.approvals.map((approval, index) => (
-                  <tr key={index}>
-                    <td>{approval.role}</td>
-                    <td>{approval.name}</td>
-                    <td>{approval.position}</td>
-                    <td>{formatDate(approval.date)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </DocSection>
-        </article>
+          <DocumentPage sop={sop} page={backMatterPage} total={totalPages}>
+            <Section title="Annexes & Forms">
+              {sop.annexes.length ? sop.annexes.map((annex, index) => (
+                <p className="sop-export-annex" key={index}><strong>{annex.label}: </strong>{annex.description}</p>
+              )) : <EmptyAwareText value="" />}
+            </Section>
+            <Section title="Change History">
+              <table className="sop-export-table">
+                <colgroup><col style={{ width: "14%" }} /><col style={{ width: "56%" }} /><col style={{ width: "30%" }} /></colgroup>
+                <thead><tr><th>Version</th><th>Changes</th><th>Created By</th></tr></thead>
+                <tbody>
+                  {sop.changeHistory.map((entry, index) => (
+                    <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[entry.createdByName, entry.createdByPosition, formatDate(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </Section>
+            <Section title="Change Approvals">
+              <table className="sop-export-table">
+                <colgroup><col style={{ width: "28%" }} /><col style={{ width: "26%" }} /><col style={{ width: "26%" }} /><col style={{ width: "20%" }} /></colgroup>
+                <thead><tr><th>Approval</th><th>Name</th><th>Position</th><th>Date</th></tr></thead>
+                <tbody>{sop.approvals.map((row, index) => <tr key={index}><td>{row.role}</td><td>{row.name}</td><td>{row.position}</td><td>{formatDate(row.date)}</td></tr>)}</tbody>
+              </table>
+            </Section>
+          </DocumentPage>
+        </div>
       </div>
     </div>
   );

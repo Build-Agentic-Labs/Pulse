@@ -2,7 +2,15 @@
 
 import { Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type FormEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import type { Department } from "@/domain/departments";
 import { rasicLegend, SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
@@ -52,6 +60,43 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 /** Debounce for autosave: persist this long after the last edit settles. */
 const AUTOSAVE_DELAY_MS = 2000;
 
+const SOP_FIELD_EXAMPLES: Record<string, string> = {
+  QMS: "Quality Management System",
+  "1.0": "1.0",
+  "Define the purpose of this process": "Ensure urgent orders are reviewed and approved consistently.",
+  "For which products, processes or areas this applies": "Applies to rush orders that require a production schedule change.",
+  Term: "Lead time",
+  Definition: "Time between order approval and the start of production.",
+  "e.g. ISO 9001:2015": "ISO 9001:2015",
+  "Function / role": "Production Manager",
+  "e.g. % of released SOPs": "Urgent-order approvals completed within 24 hours.",
+  "Describe the process flow": "Request received → capacity reviewed → approval issued.",
+  Role: "Quality Manager",
+  Input: "Customer escalation request",
+  Step: "Review order priority and available capacity",
+  Output: "Approved escalation decision",
+  "Describe the activity": "Confirm order details, production impact, and required approval.",
+  Label: "Appendix A",
+  Description: "Order escalation approval form",
+  Version: "1.1",
+  "Description of changes": "Added the Quality approval step.",
+  "Created by": "Jane Smith",
+  Position: "Quality Manager",
+  Name: "Jane Smith",
+};
+
+type FieldHint = { text: string; left: number; top: number; above: boolean };
+
+function getEmptyFieldExample(target: EventTarget): { element: HTMLInputElement | HTMLTextAreaElement; text: string } | null {
+  if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return null;
+  if (target.disabled || target.readOnly || target.value.trim()) return null;
+  const text =
+    target.dataset.example?.trim() ||
+    SOP_FIELD_EXAMPLES[target.placeholder] ||
+    (target instanceof HTMLInputElement && target.type === "date" ? "12/31/2026" : "");
+  return text ? { element: target, text } : null;
+}
+
 /** The changeHistory row auto-appended when a save carries a status transition. */
 function statusChangeEntry(sop: Sop, from: SopStatus): Sop["changeHistory"][number] {
   return {
@@ -66,12 +111,15 @@ function statusChangeEntry(sop: Sop, from: SopStatus): Sop["changeHistory"][numb
 export function SopEditor({
   initial,
   workspaceId,
+  owningDepartment,
   canEdit = true,
   isNew = false,
   authoringDepartments,
 }: {
   initial: Sop;
   workspaceId?: string;
+  /** Persisted owner for an existing SOP. New SOPs derive this from authoringDepartments. */
+  owningDepartment?: Department;
   canEdit?: boolean;
   /** True when the SOP has never been persisted (autosave stays off until the first save). */
   isNew?: boolean;
@@ -88,13 +136,14 @@ export function SopEditor({
     if (authMode?.kind === "choose") return authMode.departments[0]?.id ?? "";
     return "";
   });
-  const selectedDept = authoringDepartments?.find((d) => d.id === deptId) ?? null;
+  const selectedDept = owningDepartment ?? authoringDepartments?.find((d) => d.id === deptId) ?? null;
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [reviewDismissed, setReviewDismissed] = useState(false);
+  const [fieldHint, setFieldHint] = useState<FieldHint | null>(null);
   // People with access to this workspace, offered as name suggestions on the approvals table so
   // approvers are picked from the real roster instead of retyped (and misspelled) each time.
   const [approverOptions, setApproverOptions] = useState<{ name: string; email?: string }[]>([]);
@@ -116,12 +165,40 @@ export function SopEditor({
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === STEPS.length - 1;
   const saveDisabled = !canEdit || !workspaceId || saveStatus === "saving";
+  const displaySopNumber = /^<unknown>$/i.test(sop.meta.sopNumber.trim())
+    ? "Unnumbered"
+    : sop.meta.sopNumber || "—";
 
   function update(patch: Partial<Sop>) {
     setSop((current) => ({ ...current, ...patch }));
     editVersionRef.current += 1;
     setDirty(true);
     setSaveStatus("idle");
+  }
+
+  function revealFieldHint(target: EventTarget) {
+    const match = getEmptyFieldExample(target);
+    if (!match) {
+      setFieldHint(null);
+      return;
+    }
+    const rect = match.element.getBoundingClientRect();
+    const width = Math.min(288, window.innerWidth - 24);
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+    const above = window.innerHeight - rect.bottom < 76;
+    setFieldHint({ text: match.text, left, top: above ? rect.top - 6 : rect.bottom + 6, above });
+  }
+
+  function handleFieldMouseOver(event: MouseEvent<HTMLDivElement>) {
+    revealFieldHint(event.target);
+  }
+
+  function handleFieldFocus(event: FocusEvent<HTMLDivElement>) {
+    revealFieldHint(event.target);
+  }
+
+  function handleFieldInput(event: FormEvent<HTMLDivElement>) {
+    revealFieldHint(event.target);
   }
 
   // Persist the current SOP, returning whether it succeeded. Callers that navigate or export
@@ -375,40 +452,51 @@ export function SopEditor({
       back={{ href: "/sops", label: "All SOPs" }}
       confirmLeave={confirmLeave}
     >
-      <div className="sop-editor">
-        <div className="mx-auto max-w-4xl space-y-5 pb-16">
-            {/* Always-on title block: what is being made, its control number, state, and progress. */}
-            <SopMasthead
-              sop={sop}
-              department={selectedDept ?? undefined}
-              saveState={saveStatus}
-              dirty={dirty}
-              isNew={isNew && !persistedUpdatedAt}
-              sectionsComplete={STEPS.filter((entry) => stepFilled(sop, entry.id)).length}
-              sectionsTotal={STEPS.length}
-              onPreview={() => setPreviewing(true)}
-              onStartApproval={() => void handleStartApproval()}
-            />
+      <div
+        className="sop-editor"
+        onMouseOver={handleFieldMouseOver}
+        onMouseOut={() => setFieldHint(null)}
+        onFocusCapture={handleFieldFocus}
+        onBlurCapture={() => setFieldHint(null)}
+        onInputCapture={handleFieldInput}
+        onScrollCapture={() => setFieldHint(null)}
+      >
+        <div className="mx-auto max-w-6xl pb-16">
+          <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_19rem]">
+            {/* Persistent document summary on wide screens; first above the form on smaller screens. */}
+            <aside className="min-w-0 xl:order-2 xl:sticky xl:top-0">
+              <SopMasthead
+                sop={sop}
+                department={selectedDept ?? undefined}
+                variant="sidebar"
+                saveState={saveStatus}
+                dirty={dirty}
+                isNew={isNew && !persistedUpdatedAt}
+                onPreview={() => setPreviewing(true)}
+                onStartApproval={() => void handleStartApproval()}
+              />
+            </aside>
+
+            <div className="min-w-0 space-y-5 xl:order-1">
 
             {sop.source === "converted" && !reviewDismissed ? (
-              <div className="ui-notice ui-notice-warn flex items-start gap-3">
-                <Sparkles size={16} className="mt-0.5 shrink-0 text-ink-secondary" />
+              <div className="ui-notice ui-notice-warn sticky top-0 z-20 flex items-start gap-2 px-3 py-2">
+                <Sparkles size={14} className="mt-0.5 shrink-0 text-ink-secondary" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-ink">Review your converted SOP</p>
-                  <p className="ui-section-subtitle mt-1 text-ink-secondary">
-                    We mapped your uploaded document into the standard format with AI. It can miss or misplace
-                    details, so step through each section in the left nav, fix anything that looks off, then Save
-                    or Export to Word.
+                  <p className="text-xs font-medium leading-4 text-ink">Review your converted SOP</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">
+                    AI mapped your upload into the standard. Review each section, fix anything that looks off,
+                    then save or export.
                   </p>
                 </div>
                 <button
                   type="button"
-                  className="ui-btn-ghost h-7 w-7 shrink-0 px-0 text-ink-tertiary"
+                  className="ui-btn-ghost h-6 w-6 shrink-0 px-0 text-ink-tertiary"
                   onClick={() => setReviewDismissed(true)}
                   title="Dismiss"
                   aria-label="Dismiss review notice"
                 >
-                  <X size={14} />
+                  <X size={12} />
                 </button>
               </div>
             ) : null}
@@ -456,7 +544,7 @@ export function SopEditor({
                           ? selectedDept
                             ? previewSopNumber(selectedDept.code, DEFAULT_DOC_TYPE)
                             : "Assigned on save"
-                          : sop.meta.sopNumber || "—"}
+                          : displaySopNumber}
                       </span>
                     </div>
                   </Field>
@@ -612,6 +700,8 @@ export function SopEditor({
                     rows={sop.annexes}
                     keyLabel="Label"
                     valueLabel="Description"
+                    keyExample="Appendix A"
+                    valueExample="Order escalation approval form"
                     keyName="label"
                     valueName="description"
                     disabled={!canEdit}
@@ -681,6 +771,21 @@ export function SopEditor({
             </div>
           </div>
         </div>
+      </div>
+      </div>
+        {fieldHint ? (
+          <div
+            role="tooltip"
+            className="pointer-events-none fixed z-[70] w-max max-w-72 rounded-md border border-line bg-surface-raised px-2.5 py-1.5 text-[11px] leading-4 text-ink-secondary shadow-lg"
+            style={{
+              left: fieldHint.left,
+              top: fieldHint.top,
+              transform: fieldHint.above ? "translateY(-100%)" : undefined,
+            }}
+          >
+            Example: <span className="font-medium text-ink">{fieldHint.text}</span>
+          </div>
+        ) : null}
         {previewing ? <SopPrintPreview sop={sop} onClose={() => setPreviewing(false)} /> : null}
       </SopShell>
   );
@@ -776,6 +881,8 @@ function PairListEditor<K extends string, V extends string>({
   rows,
   keyLabel,
   valueLabel,
+  keyExample,
+  valueExample,
   keyName,
   valueName,
   disabled = false,
@@ -784,6 +891,8 @@ function PairListEditor<K extends string, V extends string>({
   rows: Array<PairRow<K, V>>;
   keyLabel: string;
   valueLabel: string;
+  keyExample?: string;
+  valueExample?: string;
   keyName: K;
   valueName: V;
   disabled?: boolean;
@@ -802,6 +911,7 @@ function PairListEditor<K extends string, V extends string>({
             className="ui-field-standalone min-w-0"
             value={row[keyName]}
             placeholder={keyLabel}
+            data-example={keyExample}
             disabled={disabled}
             onChange={(event) => patch(index, keyName, event.target.value)}
           />
@@ -809,6 +919,7 @@ function PairListEditor<K extends string, V extends string>({
             className="ui-field-standalone min-w-0"
             value={row[valueName]}
             placeholder={valueLabel}
+            data-example={valueExample}
             disabled={disabled}
             onChange={(event) => patch(index, valueName, event.target.value)}
           />

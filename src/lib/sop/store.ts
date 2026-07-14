@@ -16,7 +16,8 @@ import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supaba
 const STORAGE_KEY = "pulse:sops:v1";
 
 // Exact columns consumed by the mappers below -- avoid select('*'), matching the planner store.
-const SOP_COLUMNS = "id, workspace_id, sop_number, title, version, source, status, document, created_at, updated_at";
+const SOP_COLUMNS =
+  "id, workspace_id, department_id, sop_number, title, version, source, status, document, created_at, updated_at";
 
 // Slim projection for the list surface: promoted columns only, never the full jsonb document.
 const SOP_LIST_COLUMNS =
@@ -25,6 +26,7 @@ const SOP_LIST_COLUMNS =
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
   workspaceId: string;
+  departmentId: string | null;
   sop: Sop;
 }
 
@@ -142,7 +144,11 @@ export async function getSop(id: string): Promise<SopRecord | undefined> {
   if (!row) {
     return undefined;
   }
-  return { workspaceId: String(row.workspace_id), sop: mapSop(row) };
+  return {
+    workspaceId: String(row.workspace_id),
+    departmentId: (row.department_id as string | null) ?? null,
+    sop: mapSop(row),
+  };
 }
 
 export interface SaveSopOptions {

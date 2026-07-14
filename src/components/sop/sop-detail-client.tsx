@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NothingSpinner } from "@/components/nothing-ui";
+import type { Department } from "@/domain/departments";
+import { listDepartments } from "@/lib/departments/store";
 import { getSop, type SopRecord } from "@/lib/sop/store";
 import { SopEditor } from "./sop-editor";
 import { SopShell } from "./sop-shell";
@@ -29,7 +31,7 @@ const browseSidebar = (
 
 type DetailState =
   | { status: "pending" }
-  | { status: "loaded"; record: SopRecord }
+  | { status: "loaded"; record: SopRecord; department?: Department }
   | { status: "missing" }
   | { status: "error"; message: string };
 
@@ -42,9 +44,19 @@ export function SopDetailClient() {
     let active = true;
     setState({ status: "pending" });
     getSop(params.sopId)
-      .then((record) => {
+      .then(async (record) => {
         if (!active) return;
-        setState(record ? { status: "loaded", record } : { status: "missing" });
+        if (!record) {
+          setState({ status: "missing" });
+          return;
+        }
+        const departments = record.departmentId ? await listDepartments(record.workspaceId) : [];
+        if (!active) return;
+        setState({
+          status: "loaded",
+          record,
+          department: departments.find((item) => item.id === record.departmentId),
+        });
       })
       .catch((error) => {
         if (!active) return;
@@ -61,6 +73,7 @@ export function SopDetailClient() {
         key={state.record.sop.id}
         initial={state.record.sop}
         workspaceId={state.record.workspaceId}
+        owningDepartment={state.department}
         canEdit={canEditSops}
       />
     );

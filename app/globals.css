@@ -3647,6 +3647,50 @@ body {
     color: var(--color-ink-tertiary);
   }
 
+  /* SOP approval control: preserve the existing panels and status system while
+     giving operational text a calmer document-control hierarchy. Mono remains
+     reserved for compact chips and identifiers instead of every label/value. */
+  .sop-control {
+    font-family: var(--type-sans);
+  }
+
+  .sop-control .ui-section-title {
+    font-family: var(--type-sans);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+
+  .sop-control .ui-mono-label {
+    font-family: var(--type-sans);
+    font-size: 0.6875rem;
+    line-height: 1.35;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0.01em;
+  }
+
+  .sop-control .ui-section-subtitle {
+    font-size: 0.75rem;
+    line-height: 1.45;
+  }
+
+  .sop-control .ui-field-standalone {
+    font-family: var(--type-sans);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    box-shadow: none;
+  }
+
+  .sop-control-meta-value {
+    margin-top: 0.25rem;
+    color: var(--color-ink);
+    font-family: var(--type-sans);
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    font-weight: 500;
+  }
+
   /* Departments admin: squared, document-control geometry. A QMS surface reads
      better as stamped tags and datasheet cards than consumer pills, so inside
      .ui-depts every control/label squares to 4px and containers to 6px. Scoped

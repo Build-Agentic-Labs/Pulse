@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, FileText, Loader2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, FileText, Loader2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
@@ -131,7 +131,11 @@ function LifecycleStepper({ status }: { status: SopStatus }) {
                       : "border-border-strong text-transparent"
                 }`}
               >
-                {done ? <Check size={11} strokeWidth={2.5} /> : current ? "●" : ""}
+                {done ? (
+                  <Check size={11} strokeWidth={2.5} />
+                ) : current ? (
+                  <span className="h-1.5 w-1.5 rounded-full bg-canvas" />
+                ) : null}
               </span>
               {SOP_STATUS_LABELS[step]}
             </span>
@@ -304,6 +308,10 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
   const isSubmitter = Boolean(userId && control.submittedBy && control.submittedBy === userId);
   const isAuthor = Boolean(userId && control.createdBy && control.createdBy === userId);
   const badge = statusBadge(control.status);
+  const displaySopNumber =
+    !control.sopNumber.trim() || /^<unknown>$/i.test(control.sopNumber.trim())
+      ? "Unnumbered"
+      : control.sopNumber;
 
   // The seat is the authorization: a person signs the department they were designated for,
   // and one person may legitimately hold seats for two departments.
@@ -413,8 +421,16 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
   };
 
   return (
-    <SopShell sidebar={sidebar} back={back} crumb={control.sopNumber || "Control"}>
-      <div className="mx-auto max-w-3xl space-y-3.5">
+    <SopShell sidebar={sidebar} back={back} crumb={displaySopNumber}>
+      <div className="sop-control mx-auto max-w-3xl space-y-3.5">
+        <Link
+          href={`/sops/${sopId}`}
+          className="ui-btn-ghost inline-flex h-8 items-center gap-1.5 px-0 font-sans normal-case tracking-normal text-ink-secondary"
+        >
+          <ChevronLeft size={14} strokeWidth={1.75} />
+          Back to SOP
+        </Link>
+
         {banner ? (
           <div className="ui-notice ui-notice-warn flex items-start gap-2 px-4 py-3">
             <AlertTriangle size={15} className="mt-0.5 shrink-0 text-ink-secondary" />
@@ -428,32 +444,32 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
         {/* Control header */}
         <section className="ui-panel space-y-3 p-4 md:p-5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="ui-chip-accent">{control.sopNumber || "Unnumbered"}</span>
+            <span className="ui-chip-accent">{displaySopNumber}</span>
             <span className={`ui-chip ${badge.className}`} style={badge.style}>
               {SOP_STATUS_LABELS[control.status]}
             </span>
           </div>
-          <h1 className="ui-section-title text-lg">{title || "Untitled SOP"}</h1>
+          <h1 className="ui-section-title text-xl leading-snug">{title || "Untitled SOP"}</h1>
           <div className="flex flex-wrap gap-x-8 gap-y-3">
             <div>
               <div className="ui-mono-label text-ink-tertiary">Owning dept</div>
-              <div className="mt-1 text-sm text-ink">{dept ? `${dept.code} · ${dept.name}` : "Unassigned"}</div>
+              <div className="sop-control-meta-value">{dept ? `${dept.code} · ${dept.name}` : "Unassigned"}</div>
             </div>
             <div>
               <div className="ui-mono-label text-ink-tertiary">Version</div>
-              <div className="mt-1 font-mono text-sm text-ink">{control.version || "—"}</div>
+              <div className="sop-control-meta-value tabular-nums">{control.version || "—"}</div>
             </div>
             <div>
               <div className="ui-mono-label text-ink-tertiary">Effective date</div>
-              <div className="mt-1 font-mono text-sm text-ink">{formatDate(control.effectiveDate) || "On approval"}</div>
+              <div className="sop-control-meta-value tabular-nums">{formatDate(control.effectiveDate) || "On approval"}</div>
             </div>
             <div>
               <div className="ui-mono-label text-ink-tertiary">Next review</div>
-              <div className="mt-1 font-mono text-sm text-ink">{formatDate(control.nextReviewDate) || "—"}</div>
+              <div className="sop-control-meta-value tabular-nums">{formatDate(control.nextReviewDate) || "—"}</div>
             </div>
             <div>
               <div className="ui-mono-label text-ink-tertiary">Used by</div>
-              <div className="mt-1 text-sm text-ink">
+              <div className="sop-control-meta-value">
                 {whereUsed} task{whereUsed === 1 ? "" : "s"}
               </div>
             </div>
@@ -619,7 +635,7 @@ export function SopApprovalPanel({ sopId }: { sopId: string }) {
                         className="shrink-0 ui-mono-label"
                         style={{ color: signed ? "var(--color-success)" : "var(--color-warn)" }}
                       >
-                        {signed ? "SIGNED" : "PENDING"}
+                        {signed ? "Signed" : "Pending"}
                       </span>
                     ) : null}
                   </div>

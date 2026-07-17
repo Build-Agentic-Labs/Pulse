@@ -1,7 +1,7 @@
 "use client";
 
 import { Archive, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listSops, type SopListItem } from "@/lib/sop/store";
 import { listHistoricalRevisions } from "@/lib/sop/review";
 import { useSopWorkspace } from "./sop-workspace-provider";
@@ -24,20 +24,24 @@ function formatDate(iso: string): string {
 }
 
 /** Read-only archive of SOPs explicitly retired through the document-control lifecycle. */
-export function RetiredSops() {
+export function RetiredSops({ active = true }: { active?: boolean }) {
   const { workspaceId } = useSopWorkspace();
   const [entries, setEntries] = useState<RetiredEntry[]>([]);
   const [status, setStatus] = useState<ListStatus>("loading");
   const [error, setError] = useState("");
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) {
       setEntries([]);
       setStatus("ready");
+      freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return;
     }
-    setStatus("loading");
-    setError("");
+    if (!options.background) {
+      setStatus("loading");
+      setError("");
+    }
     try {
       const [rows, revisions] = await Promise.all([
         listSops(workspaceId),
@@ -62,19 +66,27 @@ export function RetiredSops() {
         reason: "Older version",
       }));
       setEntries([...retiredSops, ...olderVersions].sort((a, b) => b.archivedAt.localeCompare(a.archivedAt)));
+      setError("");
       setStatus("ready");
+      freshnessRef.current = { workspaceId, loadedAt: Date.now() };
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load retired SOPs.");
-      setStatus("error");
+      if (!options.background) {
+        setError(caught instanceof Error ? caught.message : "Could not load retired SOPs.");
+        setStatus("error");
+      }
     }
   }, [workspaceId]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (!active) return;
+    const hasCurrentData =
+      freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
+    if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 30_000) return;
+    void refresh({ background: hasCurrentData });
+  }, [active, refresh, workspaceId]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <h1 className="ui-section-title">Retired</h1>
         <p className="ui-section-subtitle">Older versions retained as a list for traceability. They cannot be opened or downloaded.</p>
@@ -83,22 +95,22 @@ export function RetiredSops() {
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {status === "loading" ? (
-        <section className="ui-panel flex items-center justify-center px-4 py-12">
+        <section className="flex min-h-40 items-center justify-center border-t border-line px-4">
           <Loader2 size={18} className="animate-spin text-ink-tertiary" />
         </section>
       ) : status === "error" ? (
-        <section className="ui-panel px-4 py-12 text-center">
+        <section className="flex min-h-40 items-center justify-center border-t border-line px-4 text-center">
           <button type="button" className="ui-btn-ghost inline-flex h-9 px-3" onClick={() => void refresh()}>
             Retry
           </button>
         </section>
       ) : entries.length === 0 ? (
-        <section className="ui-panel px-4 py-12 text-center">
+        <section className="flex min-h-40 flex-col items-center justify-center border-t border-line px-4 text-center">
           <Archive size={20} className="mx-auto text-ink-tertiary" />
           <p className="mt-2 ui-section-subtitle text-ink-tertiary">No retired SOPs.</p>
         </section>
       ) : (
-        <section className="ui-panel overflow-hidden">
+        <section className="overflow-hidden border-y border-line bg-surface">
           <div className="ui-table-scroll">
             <table className="w-full min-w-[640px] border-collapse text-left">
               <thead>

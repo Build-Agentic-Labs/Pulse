@@ -1,7 +1,16 @@
 "use client";
 
 import { Check, ChevronDown } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { createPortal } from "react-dom";
 
 export type ThemedSelectOption = {
@@ -20,6 +29,7 @@ type ThemedSelectProps = {
   menuAlign?: "left" | "right";
   placeholder?: string;
   triggerClassName?: string;
+  variant?: "default" | "sop";
 };
 
 export function ThemedSelect({
@@ -32,6 +42,7 @@ export function ThemedSelect({
   menuAlign = "left",
   placeholder,
   triggerClassName = "",
+  variant = "default",
 }: ThemedSelectProps) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -41,6 +52,7 @@ export function ThemedSelect({
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
   const selected = useMemo(() => options.find((option) => option.value === value), [options, value]);
   const visibleLabel = selected?.label ?? placeholder ?? options[0]?.label ?? "Select";
+  const isSop = variant === "sop";
 
   useEffect(() => {
     if (!open) {
@@ -115,24 +127,62 @@ export function ThemedSelect({
     };
   }, [menuAlign, open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      const availableOptions = Array.from(
+        menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [],
+      );
+      const selectedIndex = options.filter((option) => !option.disabled).findIndex((option) => option.value === value);
+      (availableOptions[selectedIndex >= 0 ? selectedIndex : 0] ?? availableOptions[0])?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, options, value]);
+
   function commit(nextValue: string) {
-    onChange(nextValue);
+    if (nextValue !== value) onChange(nextValue);
     setOpen(false);
     buttonRef.current?.focus();
   }
 
+  function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    setOpen(true);
+  }
+
+  function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const optionButtons = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [],
+    );
+    if (!optionButtons.length) return;
+
+    const activeIndex = optionButtons.indexOf(document.activeElement as HTMLButtonElement);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown") nextIndex = (activeIndex + 1) % optionButtons.length;
+    if (event.key === "ArrowUp") nextIndex = (activeIndex - 1 + optionButtons.length) % optionButtons.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = optionButtons.length - 1;
+    if (event.key === "Tab") setOpen(false);
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    optionButtons[nextIndex]?.focus();
+  }
+
   return (
-    <div ref={rootRef} className={`ui-themed-select ${className}`}>
+    <div ref={rootRef} className={`ui-themed-select ${isSop ? "ui-themed-select-sop" : ""} ${className}`}>
       <button
         ref={buttonRef}
         type="button"
-        className={`ui-themed-select-trigger ${triggerClassName}`}
+        className={`ui-themed-select-trigger ${isSop ? "ui-themed-select-trigger-sop" : ""} ${triggerClassName}`}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={`${id}-menu`}
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
+        onKeyDown={handleTriggerKeyDown}
       >
         <span className="ui-themed-select-value">{visibleLabel}</span>
         <ChevronDown size={14} className="ui-themed-select-icon" aria-hidden="true" />
@@ -142,10 +192,11 @@ export function ThemedSelect({
         <div
           ref={menuRef}
           id={`${id}-menu`}
-          className={`ui-themed-select-menu ui-themed-select-menu-portal ${menuAlign === "right" ? "ui-themed-select-menu-right" : ""}`}
+          className={`ui-themed-select-menu ui-themed-select-menu-portal ${isSop ? "ui-themed-select-menu-sop" : ""} ${menuAlign === "right" ? "ui-themed-select-menu-right" : ""}`}
           role="listbox"
           aria-label={ariaLabel}
           style={menuStyle ?? undefined}
+          onKeyDown={handleMenuKeyDown}
         >
           {options.map((option) => {
             const selectedOption = option.value === value;
@@ -153,7 +204,7 @@ export function ThemedSelect({
               <button
                 key={option.value}
                 type="button"
-                className="ui-themed-select-option"
+                className={`ui-themed-select-option ${isSop ? "ui-themed-select-option-sop" : ""}`}
                 role="option"
                 aria-selected={selectedOption}
                 disabled={option.disabled}

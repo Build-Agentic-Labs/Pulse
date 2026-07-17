@@ -375,7 +375,7 @@ async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
     blocks.push(bodyText(""));
   }
 
-  blocks.push(sectionHeading("Responsible Person(s)"), ...bulletList(sop.responsiblePersons));
+  blocks.push(sectionHeading("Responsible Person(s)"), bodyText(sop.responsiblePersons.filter(Boolean).join("; ")));
   blocks.push(sectionHeading("References"), ...bulletList(sop.references));
   blocks.push(sectionHeading("Measurement"), ...bulletList(sop.measurements));
 

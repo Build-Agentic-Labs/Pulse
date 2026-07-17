@@ -2,7 +2,7 @@
 
 import { FileText, Inbox, Loader2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listDepartments, fetchMyDeptRoles } from "@/lib/departments/store";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { SOP_STATUS_LABELS, type SopStatus } from "@/domain/sop/schema";
@@ -34,15 +34,6 @@ type ListStatus = "loading" | "ready" | "error";
 /** A seat awaiting this user's signature, with the department it speaks for. */
 interface PendingSeat extends MySeatItem {
   departmentCode: string;
-}
-
-function departmentAccent(code: string): string {
-  let hash = 0;
-  for (let index = 0; index < code.length; index += 1) {
-    hash = (hash * 31 + code.charCodeAt(index)) >>> 0;
-  }
-  const hues = [208, 162, 28, 286, 338, 188, 48, 132, 304, 12, 248];
-  return `hsl(${hues[hash % hues.length]} 42% 40%)`;
 }
 
 interface QualityQueueItem extends SopListItem {
@@ -78,22 +69,26 @@ const EMPTY: QueueData = {
  * where the person already looks — derived from the roster, so there is no notifications table
  * to keep in sync with reality.
  */
-export function ReviewQueue() {
+export function ReviewQueue({ active = true }: { active?: boolean }) {
   const { workspaceId } = useSopWorkspace();
   const [data, setData] = useState<QueueData>(EMPTY);
   const [listStatus, setListStatus] = useState<ListStatus>("loading");
   const [error, setError] = useState("");
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [selectedFinalApproval, setSelectedFinalApproval] = useState<PendingSeat | null>(null);
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
 
-  const refreshList = useCallback(async () => {
+  const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) {
       setData(EMPTY);
       setListStatus("ready");
+      freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return;
     }
-    setListStatus("loading");
-    setError("");
+    if (!options.background) {
+      setListStatus("loading");
+      setError("");
+    }
     try {
       const supabase = createPlannerSupabaseClient();
       const userResult = await getUserFromSession(supabase);
@@ -101,6 +96,7 @@ export function ReviewQueue() {
       if (!userId) {
         setData(EMPTY);
         setListStatus("ready");
+        freshnessRef.current = { workspaceId, loadedAt: Date.now() };
         return;
       }
 
@@ -174,16 +170,24 @@ export function ReviewQueue() {
         allInFlight: sops.filter((sop) => sop.status === "in_review" || sop.status === "approved"),
         isQualityApprover,
       });
+      setError("");
       setListStatus("ready");
+      freshnessRef.current = { workspaceId, loadedAt: Date.now() };
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load your review queue.");
-      setListStatus("error");
+      if (!options.background) {
+        setError(caught instanceof Error ? caught.message : "Could not load your review queue.");
+        setListStatus("error");
+      }
     }
   }, [workspaceId]);
 
   useEffect(() => {
-    void refreshList();
-  }, [refreshList]);
+    if (!active) return;
+    const hasCurrentData =
+      freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
+    if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 15_000) return;
+    void refreshList({ background: hasCurrentData });
+  }, [active, refreshList, workspaceId]);
 
   const pendingReviewIds = new Set(data.awaitingMe.map((seat) => seat.sopId));
   const draftReviews = data.allInFlight.filter(
@@ -215,7 +219,7 @@ export function ReviewQueue() {
   }, [data.awaitingQuality]);
 
   return (
-    <div className={`mx-auto space-y-5 ${data.isQualityApprover ? "max-w-4xl" : "max-w-3xl"}`}>
+    <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <h1 className="ui-section-title">{data.isQualityApprover ? "Quality review queue" : "Your reviews"}</h1>
         <p className="ui-section-subtitle">
@@ -228,14 +232,14 @@ export function ReviewQueue() {
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
-        <section className="ui-panel">
-          <div className="flex items-center justify-center px-4 py-10">
+        <section className="border-t border-line">
+          <div className="flex min-h-40 items-center justify-center px-4">
             <Loader2 size={18} className="animate-spin text-ink-tertiary" />
           </div>
         </section>
       ) : listStatus === "error" ? (
-        <section className="ui-panel">
-          <div className="px-4 py-10 text-center">
+        <section className="border-t border-line">
+          <div className="flex min-h-40 flex-col items-center justify-center px-4 text-center">
             <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load your review queue."}</p>
             <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
               Retry
@@ -243,8 +247,8 @@ export function ReviewQueue() {
           </div>
         </section>
       ) : nothingToDo ? (
-        <section className="ui-panel">
-          <div className="px-4 py-10 text-center">
+        <section className="border-t border-line">
+          <div className="flex min-h-40 flex-col items-center justify-center px-4 text-center">
             <Inbox size={20} className="mx-auto text-ink-tertiary" />
             <p className="mt-2 ui-section-subtitle text-ink-tertiary">Nothing is waiting on you.</p>
           </div>
@@ -252,9 +256,9 @@ export function ReviewQueue() {
       ) : (
         <>
           {data.sentBack.length > 0 ? (
-            <section className="ui-panel divide-y divide-line overflow-hidden">
+            <section className="divide-y divide-line overflow-hidden border-y border-line bg-surface">
               <div className="px-4 py-3">
-                <div className="ui-mono-label text-ink-tertiary">Sent back for rework</div>
+                <h2 className="text-sm font-semibold text-ink">Sent back for rework</h2>
               </div>
               {data.sentBack.map((sop) => (
                 <Link
@@ -282,20 +286,13 @@ export function ReviewQueue() {
                 return (
                   <section key={group.key} className="space-y-2.5">
                     <div className="flex items-baseline justify-between gap-3 px-0.5">
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: departmentAccent(group.code) }}
-                          aria-hidden
-                        />
-                        <h2 className="truncate text-[15px] font-semibold tracking-tight text-ink">{group.name}</h2>
-                      </div>
+                      <h2 className="truncate text-sm font-semibold text-ink">{group.name}</h2>
                       <span className="shrink-0 text-[12px] tabular-nums text-ink-tertiary">
                         {count} {count === 1 ? "SOP" : "SOPs"}
                       </span>
                     </div>
 
-                    <div className="overflow-hidden rounded-xl border border-line bg-surface">
+                    <div className="overflow-hidden border-y border-line bg-surface">
                       <div className="ui-table-scroll">
                         <table className="min-w-[720px] w-full border-collapse text-left">
                           <thead>
@@ -315,7 +312,7 @@ export function ReviewQueue() {
                                   className="group border-b border-line/70 transition-colors last:border-b-0 hover:bg-surface-hover"
                                 >
                                   <td className="px-5 py-3.5 align-middle">
-                                    <Link href={href} className="font-mono text-[12px] tracking-wide text-ink-secondary hover:text-ink">
+                                    <Link href={href} className="text-xs font-medium text-ink-secondary hover:text-ink">
                                       {sop.sopNumber || "—"}
                                     </Link>
                                   </td>
@@ -353,10 +350,10 @@ export function ReviewQueue() {
           ) : null}
 
           {data.finalApprovals.length > 0 ? (
-            <section className="ui-panel divide-y divide-line overflow-hidden border-l-2 border-l-emerald-600">
+            <section className="divide-y divide-line overflow-hidden border-y border-line bg-surface">
               <div className="flex items-center justify-between gap-2 px-4 py-3">
                 <div>
-                  <div className="ui-mono-label text-ink-tertiary">Final approval</div>
+                  <h2 className="text-sm font-semibold text-ink">Final approval</h2>
                   <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
                     Draft review is complete. Formally approve the current controlled document.
                   </p>
@@ -393,9 +390,9 @@ export function ReviewQueue() {
           ) : null}
 
           {draftReviews.length > 0 ? (
-            <section className="ui-panel divide-y divide-line overflow-hidden">
+            <section className="divide-y divide-line overflow-hidden border-y border-line bg-surface">
               <div className="px-4 py-3">
-                <div className="ui-mono-label text-ink-tertiary">Draft review</div>
+                <h2 className="text-sm font-semibold text-ink">Draft review</h2>
                 <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
                   Draft SOPs currently being reviewed by their responsible parties.
                 </p>
@@ -428,9 +425,9 @@ export function ReviewQueue() {
           ) : null}
 
           {awaitingRelease.length > 0 ? (
-            <section className="ui-panel divide-y divide-line overflow-hidden">
+            <section className="divide-y divide-line overflow-hidden border-y border-line bg-surface">
               <div className="px-4 py-3">
-                <div className="ui-mono-label text-ink-tertiary">Awaiting Quality release</div>
+                <h2 className="text-sm font-semibold text-ink">Awaiting Quality release</h2>
                 <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
                   Stakeholder approvals are complete. These SOPs are waiting for Quality signature and release.
                 </p>
@@ -468,7 +465,7 @@ export function ReviewQueue() {
           onClose={() => setSelectedReviewId(null)}
           onSubmitted={() => {
             setSelectedReviewId(null);
-            void refreshList();
+            void refreshList({ background: true });
           }}
         />
       ) : null}
@@ -478,7 +475,7 @@ export function ReviewQueue() {
           departmentId={selectedFinalApproval.departmentId}
           departmentCode={selectedFinalApproval.departmentCode}
           onClose={() => setSelectedFinalApproval(null)}
-          onSigned={() => void refreshList()}
+          onSigned={() => void refreshList({ background: true })}
         />
       ) : null}
     </div>

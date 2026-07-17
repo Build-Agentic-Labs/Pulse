@@ -9,6 +9,7 @@ import {
   type SopActivity,
   type SopShape,
 } from "@/domain/sop/schema";
+import { ThemedSelect } from "@/components/themed-select";
 import { AutoTextarea } from "./auto-textarea";
 
 type Props = {
@@ -445,19 +446,19 @@ function MatrixView({
               </td>
               {roles.map((role, roleIndex) => (
                 <td key={roleIndex} className="px-1 py-2 text-center">
-                  <select
-                    className="ui-field-standalone w-full px-1 text-center"
+                  <ThemedSelect
+                    variant="sop"
+                    className="w-full"
+                    triggerClassName="ui-sop-select-compact"
+                    ariaLabel={`RASIC assignment for ${role || `role ${roleIndex + 1}`}, activity ${index + 1}`}
                     value={activity.assignments[role] ?? ""}
                     disabled={disabled}
-                    onChange={(event) => onSetCell(index, role, event.target.value)}
-                  >
-                    <option value="">–</option>
-                    {RASIC_CODES.map((code) => (
-                      <option key={code} value={code}>
-                        {code}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "", label: "–" },
+                      ...RASIC_CODES.map((code) => ({ value: code, label: code })),
+                    ]}
+                    onChange={(value) => onSetCell(index, role, value)}
+                  />
                 </td>
               ))}
               <td className="py-2">

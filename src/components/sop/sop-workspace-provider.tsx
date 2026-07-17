@@ -3,6 +3,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
+import { ThemedSelect } from "@/components/themed-select";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrgToolAccess } from "@/domain/supabase-planner";
 import type { AccessLevel, WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
 import { useAuthFormActions } from "@/lib/auth-form-actions";
@@ -278,17 +279,17 @@ export function SopWorkspaceSwitcher() {
   return (
     <div className="px-2 pb-2 pt-1">
       <span className="ui-field-label">Organization</span>
-      <select
-        className="ui-field-standalone mt-1 w-full"
+      <ThemedSelect
+        variant="sop"
+        className="mt-1 w-full"
+        ariaLabel="Organization"
         value={workspaceId ?? ""}
-        onChange={(event) => setWorkspaceId(event.target.value)}
-      >
-        {workspaces.map((group) => (
-          <option key={group.workspace.id} value={group.workspace.id}>
-            {group.workspace.name}
-          </option>
-        ))}
-      </select>
+        options={workspaces.map((group) => ({
+          value: group.workspace.id,
+          label: group.workspace.name,
+        }))}
+        onChange={setWorkspaceId}
+      />
     </div>
   );
 }

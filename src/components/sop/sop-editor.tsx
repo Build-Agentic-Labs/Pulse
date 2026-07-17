@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Unlink, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -15,14 +15,13 @@ import {
   type ReactNode,
 } from "react";
 import { useConfirm } from "@/components/confirm-provider";
-import { standardPositionTitlesForDepartment, type Department } from "@/domain/departments";
+import { ThemedSelect } from "@/components/themed-select";
+import type { Department } from "@/domain/departments";
 import { rasicLegend, SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
-import { deriveApprovalRouting } from "@/domain/sop/approval-routing";
-import { formatResponsibleParty, parseResponsibleParty } from "@/domain/sop/responsible-parties";
 import { applySampleData } from "@/domain/sop/sample";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
-import { fetchMyDeptRoles, listDepartments, listMembers } from "@/lib/departments/store";
+import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
 import {
   enableSopSelfReviewTest,
   getSopControl,
@@ -35,7 +34,6 @@ import {
   requestSopFinalApproval,
   signSop,
   transitionSop,
-  upsertSeat,
   type SopReviewSeat,
   type SopSignature,
 } from "@/lib/sop/review";
@@ -277,7 +275,7 @@ export function SopEditor({
   const [reloadingLatest, setReloadingLatest] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [previewing, setPreviewing] = useState(initialView === "pdf");
-  const [previewOnly, setPreviewOnly] = useState(initialView === "pdf");
+  const [previewOnly] = useState(initialView === "pdf");
   const [qualityApprovalOpen, setQualityApprovalOpen] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [showConvertedReview, setShowConvertedReview] = useState(false);
@@ -333,16 +331,14 @@ export function SopEditor({
   // Blocks overlapped saves from the same timer-vs-cleanup gap; a second in-flight save
   // would reuse the same expectedUpdatedAt and land as a false concurrency conflict.
   const saveInFlightRef = useRef(false);
-  const autoRoutingInFlightRef = useRef(false);
-  const autoRoutingAttemptKeyRef = useRef("");
   const reviewDismissTimerRef = useRef<number | null>(null);
   // The status as last persisted -- a save that changes it auto-appends a changeHistory row.
   const lastSavedStatusRef = useRef<SopStatus>(initial.status);
   const hasPersistedSop = !isNew || Boolean(persistedUpdatedAt);
 
-  const refreshApprovalRouting = useCallback(async () => {
+  const refreshApprovalRouting = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) return;
-    setApprovalRoutingLoading(true);
+    if (!options.background) setApprovalRoutingLoading(true);
     setApprovalRoutingError("");
     try {
       const supabase = createPlannerSupabaseClient();
@@ -378,7 +374,7 @@ export function SopEditor({
     } catch (error) {
       setApprovalRoutingError(error instanceof Error ? error.message : "Could not load approval routing.");
     } finally {
-      setApprovalRoutingLoading(false);
+      if (!options.background) setApprovalRoutingLoading(false);
     }
   }, [hasPersistedSop, sop.id, workspaceId]);
 
@@ -478,84 +474,6 @@ export function SopEditor({
     setReviewVisible(false);
     reviewDismissTimerRef.current = window.setTimeout(() => setReviewDismissed(true), 300);
   };
-
-  useEffect(() => {
-    if (
-      !hasPersistedSop ||
-      !canEdit ||
-      sop.status !== "draft" ||
-      !approvalAuthorId ||
-      approvalRoutingLoading ||
-      autoRoutingInFlightRef.current
-    ) return;
-
-    const candidates = deriveApprovalRouting(
-      sop.responsiblePersons,
-      sop.procedure,
-      approvalDepartments.filter((department) => !department.isQualityGate),
-    );
-    const seatedIds = new Set(approvalSeats.map((seat) => seat.departmentId));
-    const missing = candidates.filter((candidate) => !seatedIds.has(candidate.department.id));
-    if (!missing.length) return;
-
-    const attemptKey = JSON.stringify({
-      author: approvalAuthorId,
-      missing: missing.map((candidate) => [candidate.department.id, candidate.rasic]),
-    });
-    if (autoRoutingAttemptKeyRef.current === attemptKey) return;
-    autoRoutingAttemptKeyRef.current = attemptKey;
-    autoRoutingInFlightRef.current = true;
-
-    void (async () => {
-      const failures: string[] = [];
-      let accountableTaken = approvalSeats.some((seat) => seat.rasic === "accountable");
-      const rolePriority = { author: 1, reviewer: 2, approver: 3 } as const;
-
-      try {
-        for (const candidate of missing) {
-          const rasic = candidate.rasic === "accountable" && !accountableTaken
-            ? "accountable"
-            : "responsible";
-          const members = (await listMembers(candidate.department.id))
-            .filter((member) => member.userId !== approvalAuthorId)
-            .sort((a, b) => rolePriority[b.deptRole] - rolePriority[a.deptRole]);
-          const signer = members[0];
-
-          await upsertSeat({
-            sopId: sop.id,
-            departmentId: candidate.department.id,
-            rasic,
-            signerId: signer?.userId ?? null,
-          });
-          if (!signer) failures.push(candidate.department.name);
-          if (rasic === "accountable") accountableTaken = true;
-        }
-
-        await refreshApprovalRouting();
-        if (failures.length) {
-          setApprovalRoutingError(
-            `${failures.join(", ")} were added automatically. Choose an eligible reviewer for each department.`,
-          );
-        }
-      } catch (error) {
-        setApprovalRoutingError(error instanceof Error ? error.message : "Could not create approval routing.");
-      } finally {
-        autoRoutingInFlightRef.current = false;
-      }
-    })();
-  }, [
-    approvalAuthorId,
-    approvalDepartments,
-    approvalRoutingLoading,
-    approvalSeats,
-    canEdit,
-    hasPersistedSop,
-    refreshApprovalRouting,
-    sop.id,
-    sop.procedure,
-    sop.responsiblePersons,
-    sop.status,
-  ]);
 
   const hasReviewHistory =
     reviewAnnotations.length > 0 ||
@@ -722,7 +640,7 @@ export function SopEditor({
 
   useEffect(() => {
     if (!showFinalApproval) return;
-    const refresh = () => void refreshApprovalRouting();
+    const refresh = () => void refreshApprovalRouting({ background: true });
     const interval = window.setInterval(refresh, 5_000);
     return () => window.clearInterval(interval);
   }, [refreshApprovalRouting, showFinalApproval]);
@@ -1074,11 +992,11 @@ export function SopEditor({
       const latest = await getSopControl(sop.id);
       if (!latest) throw new Error("The SOP could not be loaded before recalling it.");
       if (latest.status !== "in_review") {
-        window.location.assign(`/sops/${sop.id}?step=draft-review`);
+        router.replace(`/sops/${sop.id}?step=draft-review`);
         return;
       }
       await transitionSop(sop.id, "draft", latest.updatedAt);
-      window.location.assign(`/sops/${sop.id}?step=draft-review`);
+      router.replace(`/sops/${sop.id}?step=draft-review`);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The SOP could not be recalled for changes.");
       setSaveStatus("error");
@@ -1189,51 +1107,56 @@ export function SopEditor({
       {canEdit ? (
         <button
           type="button"
-          className="ui-btn-ghost h-10 gap-2"
+          className="ui-btn-ghost h-9 w-9 px-0"
           onClick={handleLoadSample}
           title="Fill every step with sample data"
+          aria-label="Fill with sample data"
         >
           <Sparkles size={15} />
-          <span className="hidden sm:inline">Sample</span>
         </button>
       ) : null}
       <button
         type="button"
-        className="ui-btn-ghost h-10 gap-2"
+        className="ui-btn-ghost h-9 w-9 gap-2 px-0 sm:w-auto sm:px-2.5"
         onClick={() => setPreviewing(true)}
         title="Preview the PDF"
+        aria-label="Preview the PDF"
       >
         <FileText size={15} />
         <span className="hidden sm:inline">Preview PDF</span>
       </button>
       <button
         type="button"
-        className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"
+        className="ui-btn-ghost h-9 w-9 gap-2 px-0 disabled:opacity-50 sm:w-auto sm:px-2.5"
         onClick={handleExport}
         disabled={exporting}
         title="Export to Word (.docx)"
+        aria-label={exporting ? "Exporting to Word" : "Export to Word"}
       >
         <Download size={15} />
-        {exporting ? "Exporting…" : "Export"}
+        <span className="hidden sm:inline">{exporting ? "Exporting…" : "Export"}</span>
       </button>
       {canEdit ? (
         <button
           type="button"
-          className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"
+          className="ui-btn-ghost h-9 w-9 gap-2 px-0 disabled:opacity-50 sm:w-auto sm:px-2.5"
           onClick={handleSave}
           disabled={saveDisabled}
           title={dirty ? "Unsaved changes" : undefined}
+          aria-label={saveStatus === "saving" ? "Saving SOP" : saveStatus === "error" ? "Retry saving SOP" : "Save SOP"}
         >
           <Check size={15} />
-          {saveStatus === "saving"
-            ? "Saving…"
-            : saveStatus === "saved"
-              ? "Saved"
-              : saveStatus === "error"
-                ? "Retry save"
-                : dirty
-                  ? "Save*"
-                  : "Save"}
+          <span className="hidden sm:inline">
+            {saveStatus === "saving"
+              ? "Saving…"
+              : saveStatus === "saved"
+                ? "Saved"
+                : saveStatus === "error"
+                  ? "Retry save"
+                  : dirty
+                    ? "Save*"
+                    : "Save"}
+          </span>
         </button>
       ) : null}
     </>
@@ -1388,7 +1311,7 @@ export function SopEditor({
             </div>
 
             {showDraftReview && step.id !== "draftReview" && stepReviewAnnotations.length ? (
-              <section className="ui-panel overflow-hidden border-l-2 border-l-amber-500">
+              <section className="ui-panel overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
                   <div className="flex items-center gap-2">
                     <MessageSquare size={14} className="text-amber-700" />
@@ -1448,22 +1371,21 @@ export function SopEditor({
                   {authMode && authMode.kind !== "blocked" ? (
                     <Field label="Owning department">
                       {authMode.kind === "choose" && !persistedUpdatedAt ? (
-                        <select
-                          className="ui-field-standalone"
+                        <ThemedSelect
+                          variant="sop"
+                          ariaLabel="Owning department"
                           value={deptId}
                           disabled={!canEdit}
-                          onChange={(event) => setDeptId(event.target.value)}
-                        >
-                          {authMode.departments.map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.code} · {d.name}
-                            </option>
-                          ))}
-                        </select>
+                          options={authMode.departments.map((department) => ({
+                            value: department.id,
+                            label: `${department.code} · ${department.name}`,
+                          }))}
+                          onChange={setDeptId}
+                        />
                       ) : (
                         <div className="flex h-9 items-center">
-                          <span className="ui-chip">
-                            {selectedDept ? `${selectedDept.code} · ${selectedDept.name}` : "—"}
+                          <span className="text-sm text-ink">
+                            {selectedDept?.name ?? "—"}
                           </span>
                         </div>
                       )}
@@ -1471,7 +1393,7 @@ export function SopEditor({
                   ) : null}
                   <Field label="SOP number">
                     <div className="flex h-9 items-center">
-                      <span className="font-mono text-sm text-ink">
+                      <span className="text-sm text-ink">
                         {isNew && !persistedUpdatedAt && !selectedDept ? "Assigned on save" : displaySopNumber}
                       </span>
                     </div>
@@ -1487,7 +1409,7 @@ export function SopEditor({
                   </Field>
                   <Field label="Version">
                     <div className="flex h-9 items-center">
-                      <span className="font-mono text-sm text-ink">{controlledVersion}</span>
+                      <span className="text-sm text-ink">{controlledVersion}</span>
                     </div>
                   </Field>
                   <Field label="Status">
@@ -1496,12 +1418,12 @@ export function SopEditor({
                         "Review & approve", so no duplicate control lives in this field. */}
                     <div className="flex h-9 items-center gap-2">
                       <span
-                        className={`ui-chip ${
+                        className={`inline-flex items-center rounded bg-surface-muted px-2 py-1 text-xs font-medium ${
                           sop.status === "approved"
-                            ? "border-accent text-accent"
+                            ? "text-accent"
                             : sop.status === "obsolete"
-                              ? "border-danger text-danger"
-                              : ""
+                              ? "text-danger"
+                              : "text-ink-secondary"
                         }`}
                       >
                         {SOP_STATUS_LABELS[sop.status]}
@@ -1572,11 +1494,17 @@ export function SopEditor({
                   title="Responsible person(s)"
                   reviewAttention={reviewCategoriesNeedingAttention.has("responsible")}
                 >
-                  <ResponsiblePartiesEditor
-                    items={sop.responsiblePersons}
-                    departments={approvalDepartments}
+                  <input
+                    type="text"
+                    className="ui-field-standalone"
+                    aria-label="Responsible person or role"
+                    placeholder="e.g. Quality Manager"
+                    value={sop.responsiblePersons.join("; ")}
                     disabled={!canEdit}
-                    onChange={(responsiblePersons) => update({ responsiblePersons })}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      update({ responsiblePersons: value ? [value] : [] });
+                    }}
                   />
                 </Section>
                 <Section
@@ -1660,7 +1588,7 @@ export function SopEditor({
                     departments={approvalDepartments}
                     seats={approvalSeats}
                     authorId={approvalAuthorId}
-                    onChanged={refreshApprovalRouting}
+                    onChanged={() => refreshApprovalRouting({ background: true })}
                   />
                 ) : (
                   <section className="ui-panel overflow-hidden">
@@ -1750,7 +1678,7 @@ export function SopEditor({
                 </section>
 
                 {finalApprovalReady || finalApprovalRequested ? (
-                  <section className="ui-panel overflow-hidden border-l-2 border-l-emerald-600">
+                  <section className="ui-panel overflow-hidden">
                     <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-4">
                       <div className="flex min-w-0 items-start gap-3">
                         <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
@@ -1897,9 +1825,7 @@ export function SopEditor({
 
             {step.id === "qualityApproval" ? (
               <div className="space-y-5">
-                <section className={`ui-panel overflow-hidden border-l-2 ${
-                  sop.status === "effective" ? "border-l-emerald-600" : "border-l-sky-600"
-                }`}>
+                <section className="ui-panel overflow-hidden">
                   <div className="flex flex-wrap items-start justify-between gap-4 px-4 py-4">
                     <div className="flex min-w-0 items-start gap-3">
                       {sop.status === "effective" ? (
@@ -1968,7 +1894,7 @@ export function SopEditor({
             ) : null}
 
             {/* Footer nav */}
-            <div className="flex items-center justify-between border-t border-line pt-4">
+            <div className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -1993,12 +1919,12 @@ export function SopEditor({
                 ) : null}
               </div>
               {isLast ? (
-                <div className="flex items-center gap-2">
+                <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
                   {canEdit ? (
                     <>
                       <button
                         type="button"
-                        className="ui-btn-ghost h-9 gap-1.5 px-4 disabled:opacity-50"
+                        className="ui-btn-ghost h-9 gap-1.5 whitespace-nowrap px-4 disabled:opacity-50"
                         onClick={handleSaveAndClose}
                         disabled={saveDisabled}
                         title="Save this draft and return to the SOP list"
@@ -2008,7 +1934,7 @@ export function SopEditor({
                       </button>
                       <button
                         type="button"
-                        className="ui-btn-primary h-9 gap-1.5 px-4 disabled:opacity-50"
+                        className="ui-btn-primary h-9 gap-1.5 whitespace-nowrap px-4 disabled:opacity-50"
                         onClick={handleStartApproval}
                         disabled={saveDisabled || submittingForApproval || approvalRoutingLoading || !approvalRoutingReady}
                         title={
@@ -2143,7 +2069,7 @@ export function SopEditor({
           <SopQualityApprovalWorkspace
             sopId={sop.id}
             onClose={() => setQualityApprovalOpen(false)}
-            onReleased={() => void refreshApprovalRouting()}
+            onReleased={() => void refreshApprovalRouting({ background: true })}
             returnLabel="Back to Quality Approval"
           />
         ) : null}
@@ -2165,10 +2091,10 @@ function Section({
 }) {
   return (
     <section
-      className="ui-panel px-4 py-3 transition-[border-color,box-shadow] duration-200"
+      className="border-y border-line bg-surface px-5 py-4 transition-[border-color,background-color] duration-200"
       style={reviewAttention ? {
         borderColor: "var(--color-warn)",
-        boxShadow: "inset 3px 0 0 var(--color-warn), 0 0 0 1px color-mix(in srgb, var(--color-warn) 28%, transparent)",
+        backgroundColor: "color-mix(in srgb, var(--color-warn) 5%, var(--color-surface))",
       } : undefined}
       data-review-attention={reviewAttention ? "true" : undefined}
     >
@@ -2191,6 +2117,7 @@ function RowDeleteButton({ onClick, title }: { onClick: () => void; title: strin
       type="button"
       className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary hover:text-danger"
       title={title}
+      aria-label={title}
       onClick={onClick}
     >
       <Trash2 size={13} />
@@ -2245,106 +2172,6 @@ function StringListEditor({
   );
 }
 
-function ResponsiblePartiesEditor({
-  items,
-  departments,
-  disabled = false,
-  onChange,
-}: {
-  items: string[];
-  departments: Department[];
-  disabled?: boolean;
-  onChange: (items: string[]) => void;
-}) {
-  function replace(index: number, value: string) {
-    const next = [...items];
-    next[index] = value;
-    onChange(next);
-  }
-
-  return (
-    <div>
-      <p className="ui-section-subtitle mb-3 text-ink-secondary">
-        Select the department and organizational position responsible for this SOP. Departments selected here are
-        carried into approval routing.
-      </p>
-      {items.length ? (
-        <div className="mb-1 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 px-1 ui-mono-label text-ink-tertiary">
-          <span>Department</span>
-          <span>Responsible position</span>
-          <span className="sr-only">Actions</span>
-        </div>
-      ) : null}
-      <div className="space-y-2">
-        {items.map((item, index) => {
-          const selection = parseResponsibleParty(item, departments);
-          const department = departments.find((candidate) => candidate.id === selection.departmentId);
-          const standardTitles = department
-            ? standardPositionTitlesForDepartment(department.code)
-            : [];
-          const hasImportedTitle = Boolean(
-            selection.positionTitle && !standardTitles.includes(selection.positionTitle),
-          );
-
-          return (
-            <div key={index}>
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
-                <select
-                  aria-label={`Department for responsible party ${index + 1}`}
-                  className="ui-field-standalone min-w-0"
-                  value={selection.departmentId}
-                  disabled={disabled}
-                  onChange={(event) => {
-                    const nextDepartment = departments.find((candidate) => candidate.id === event.target.value);
-                    replace(index, nextDepartment ? formatResponsibleParty(nextDepartment, "") : "");
-                  }}
-                >
-                  <option value="">Select department…</option>
-                  {departments.map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.code} · {candidate.name}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  aria-label={`Position for responsible party ${index + 1}`}
-                  className="ui-field-standalone min-w-0"
-                  value={selection.positionTitle}
-                  disabled={disabled || !department}
-                  onChange={(event) => {
-                    if (department) replace(index, formatResponsibleParty(department, event.target.value));
-                  }}
-                >
-                  <option value="">Select position…</option>
-                  {hasImportedTitle ? (
-                    <option value={selection.positionTitle}>{selection.positionTitle} (imported)</option>
-                  ) : null}
-                  {standardTitles.map((title) => (
-                    <option key={title} value={title}>{title}</option>
-                  ))}
-                </select>
-
-                {disabled ? null : (
-                  <RowDeleteButton
-                    title="Remove responsible party"
-                    onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}
-                  />
-                )}
-              </div>
-              {selection.importedValue ? (
-                <p className="mt-1 px-1 ui-section-subtitle text-warn">
-                  Imported value “{selection.importedValue}” needs a department and position.
-                </p>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      {disabled ? null : <AddButton label="Add responsible party" onClick={() => onChange([...items, ""])} />}
-    </div>
-  );
-}
 type PairRow<K extends string, V extends string> = Record<K | V, string>;
 
 function PairListEditor<K extends string, V extends string>({
@@ -2445,51 +2272,61 @@ function AnnexesEditor({
   }
 
   return (
-    <div className="space-y-3">
+    <div>
       {rows.length ? (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2 px-2.5">
+        <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2 px-1 pb-2 sm:grid">
           <span className="ui-field-label">Form name</span>
           <span className="ui-field-label">Description</span>
           <span className="w-9" aria-hidden="true" />
         </div>
       ) : null}
-      {rows.map((row, index) => {
-        const file = files.find((item) => item.annexId === row.id);
-        const uploading = uploadingAnnexId === row.id;
-        const rowStatus = uploadStatus?.annexId === row.id ? uploadStatus : null;
-        return (
-          <div key={row.id ?? index} className="rounded-md border border-line p-2.5">
-            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2">
-              <input
-                className="ui-field-standalone min-w-0"
-                value={row.label}
-                aria-label="Form name"
-                data-example="Appendix A"
-                disabled={disabled}
-                onChange={(event) => patch(index, "label", event.target.value)}
-              />
-              <input
-                className="ui-field-standalone min-w-0"
-                value={row.description}
-                aria-label="Form description"
-                data-example="Order escalation approval form"
-                disabled={disabled}
-                onChange={(event) => patch(index, "description", event.target.value)}
-              />
-              {disabled ? <span className="w-9" /> : (
-                <RowDeleteButton title="Remove annex" onClick={() => onRemoveRow(index)} />
-              )}
-            </div>
-            <div className="mt-2.5 rounded-lg border border-line/70 bg-surface-muted/35 px-3 py-2.5">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className={rows.length ? "divide-y divide-line border-y border-line" : ""}>
+        {rows.map((row, index) => {
+          const file = files.find((item) => item.annexId === row.id);
+          const uploading = uploadingAnnexId === row.id;
+          const rowStatus = uploadStatus?.annexId === row.id ? uploadStatus : null;
+          const uploadLabel = uploading
+            ? rowStatus?.phase === "saving"
+              ? "Saving attachment"
+              : "Uploading attachment"
+            : file
+              ? "Replace attachment"
+              : "Upload attachment";
+          return (
+            <div key={row.id ?? index} className="py-3 first:pt-2 last:pb-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
+                <input
+                  className="ui-field-standalone col-start-1 row-start-1 min-w-0 sm:col-start-auto sm:row-start-auto"
+                  value={row.label}
+                  aria-label="Form name"
+                  data-example="Appendix A"
+                  disabled={disabled}
+                  onChange={(event) => patch(index, "label", event.target.value)}
+                />
+                <input
+                  className="ui-field-standalone col-span-2 row-start-2 min-w-0 sm:col-span-1 sm:row-start-auto"
+                  value={row.description}
+                  aria-label="Form description"
+                  data-example="Order escalation approval form"
+                  disabled={disabled}
+                  onChange={(event) => patch(index, "description", event.target.value)}
+                />
+                <div className="col-start-2 row-start-1 sm:col-start-auto sm:row-start-auto">
+                  {disabled ? <span className="block w-9" /> : (
+                    <RowDeleteButton title="Delete annex row" onClick={() => onRemoveRow(index)} />
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-2 flex min-h-9 items-center gap-2 border-t border-line/70 pt-2">
                 {file ? (
                   <button
                     type="button"
-                    className="group flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                    className="group flex min-w-0 flex-1 items-center gap-2 text-left"
                     title={`Open ${file.originalName}`}
                     onClick={() => onOpen(file)}
                   >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-ink-secondary">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center text-ink-secondary">
                       <Paperclip size={14} />
                     </span>
                     <span className="min-w-0 flex-1">
@@ -2502,32 +2339,29 @@ function AnnexesEditor({
                     </span>
                   </button>
                 ) : (
-                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-dashed border-line bg-surface text-ink-tertiary">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center text-ink-tertiary">
                       <Paperclip size={14} />
                     </span>
                     <span className="text-xs text-ink-tertiary">No form attached</span>
                   </div>
                 )}
                 {disabled ? null : (
-                  <div className="flex shrink-0 items-center gap-1.5 sm:justify-end">
+                  <div className="flex shrink-0 items-center gap-1">
                     <label
-                      className={`ui-btn-ghost h-8 gap-1.5 border border-line px-2.5 ${
+                      className={`ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 ${
                         uploading ? "pointer-events-none cursor-wait opacity-60" : "cursor-pointer"
                       }`}
                       aria-disabled={uploading}
+                      aria-label={uploadLabel}
+                      title={uploadLabel}
                     >
                       {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                      {uploading
-                        ? rowStatus?.phase === "saving"
-                          ? "Saving…"
-                          : "Uploading…"
-                        : file
-                          ? "Replace"
-                          : "Upload"}
+                      <span className="sr-only">{uploadLabel}</span>
                       <input
                         type="file"
                         className="sr-only"
+                        aria-label={uploadLabel}
                         accept={SOP_ANNEX_FILE_ACCEPT}
                         disabled={uploading}
                         onChange={(event) => {
@@ -2540,11 +2374,12 @@ function AnnexesEditor({
                     {file ? (
                       <button
                         type="button"
-                        className="ui-btn-ghost h-8 gap-1.5 px-2.5 text-ink-tertiary hover:text-danger"
+                        className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
+                        title="Remove attachment"
+                        aria-label="Remove attachment"
                         onClick={() => onRemoveFile(file)}
                       >
-                        <Trash2 size={13} />
-                        Remove
+                        <Unlink size={13} />
                       </button>
                     ) : null}
                   </div>
@@ -2554,7 +2389,7 @@ function AnnexesEditor({
                 <div
                   role="status"
                   aria-live="polite"
-                  className={`mt-2 flex items-center gap-1.5 border-t border-line/70 pt-2 text-[11px] ${
+                  className={`mt-2 flex items-center gap-1.5 text-[11px] ${
                     rowStatus.phase === "error"
                       ? "text-danger"
                       : rowStatus.phase === "success"
@@ -2573,12 +2408,12 @@ function AnnexesEditor({
                 </div>
               ) : null}
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
       {disabled ? null : (
         <AddButton
-          label="Add"
+          label="Add form"
           onClick={() =>
             onChange((current) => [
               ...current,

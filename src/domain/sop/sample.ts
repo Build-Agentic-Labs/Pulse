@@ -96,7 +96,7 @@ export function applySampleData(sop: Sop): Sop {
       { term: "WI", definition: "Work Instruction; a detailed addendum that supports an SOP." },
       { term: "HoD", definition: "Head of Department." },
     ],
-    responsiblePersons: ["Quality Manager", "Department Managers / Heads of Department", "Process Owners"],
+    responsiblePersons: ["Quality Manager; Department Managers / Heads of Department; Process Owners"],
     references: ["ISO 9001:2015", "Quality Manual QM-01"],
     measurements: ["% of released SOPs", "Average SOP approval cycle time (days)"],
     procedure: {

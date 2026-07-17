@@ -123,6 +123,20 @@ export async function listMembers(departmentId: string): Promise<DepartmentMembe
   return (rows ?? []).map(mapMember);
 }
 
+/** Load the complete roster for a department list in one request. */
+export async function listMembersForDepartments(
+  departmentIds: readonly string[],
+): Promise<DepartmentMember[]> {
+  const ids = [...new Set(departmentIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+
+  const supabase = createPlannerSupabaseClient();
+  const rows = await throwIfError(
+    supabase.from("department_members").select(MEMBER_COLUMNS).in("department_id", ids),
+  );
+  return (rows ?? []).map(mapMember);
+}
+
 export async function setMember(departmentId: string, userId: string, role: DeptRole): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   const { data: userData } = await getUserFromSession(supabase);

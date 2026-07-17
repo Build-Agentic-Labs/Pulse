@@ -1,7 +1,7 @@
 "use client";
 
-import { Building2, ChevronDown, Flag, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Building2, ChevronDown, Flag, Loader2, Plus, Trash2, UserPlus, UsersRound } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import { standardPositionTitlesForDepartment, type Department, type DepartmentMember, type DeptRole } from "@/domain/departments";
 import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
@@ -9,7 +9,7 @@ import type { MemberAccess } from "@/domain/types";
 import {
   deleteDepartment,
   listDepartments,
-  listMembers,
+  listMembersForDepartments,
   removeMember,
   saveDepartment,
   setMember,
@@ -18,8 +18,6 @@ import {
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
 
 const DEPT_ROLES: readonly DeptRole[] = ["author", "reviewer", "approver"];
-const QA_GATE_NOTE =
-  "Quality approvers can approve SOPs in any department — the independent gate.";
 
 interface DepartmentDraft {
   code: string;
@@ -36,13 +34,13 @@ function memberLabel(member: MemberAccess): string {
   return member.fullName || member.email || member.userId;
 }
 
-export function DepartmentsAdmin() {
+export function DepartmentsAdmin({ active = true }: { active?: boolean }) {
   const confirm = useConfirm();
   const { workspaceId, role } = useSopWorkspace();
   const manage = canManage(role);
 
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [membersByDepartment, setMembersByDepartment] = useState<Record<string, DepartmentMember[]>>({});
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
@@ -50,47 +48,57 @@ export function DepartmentsAdmin() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [directory, setDirectory] = useState<MemberAccess[]>([]);
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
 
   const handleError = useCallback((message: string) => setError(message), []);
-  const handleCountChange = useCallback((departmentId: string, count: number) => {
-    setCounts((prev) => (prev[departmentId] === count ? prev : { ...prev, [departmentId]: count }));
+  const handleMembersChange = useCallback((departmentId: string, members: DepartmentMember[]) => {
+    setMembersByDepartment((current) => ({ ...current, [departmentId]: members }));
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) {
       setDepartments([]);
+      setMembersByDepartment({});
       setStatus("ready");
+      freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return;
     }
-    setStatus("loading");
-    setError("");
+    if (!options.background) {
+      setStatus("loading");
+      setError("");
+    }
     try {
       const next = await listDepartments(workspaceId);
+      const members = await listMembersForDepartments(next.map((department) => department.id));
+      const nextMembers = Object.fromEntries(
+        next.map((department) => [department.id, [] as DepartmentMember[]]),
+      );
+      for (const member of members) {
+        nextMembers[member.departmentId]?.push(member);
+      }
       setDepartments(next);
+      setMembersByDepartment(nextMembers);
       setSelectedId((current) =>
         current && next.some((dept) => dept.id === current) ? current : next[0]?.id,
       );
+      setError("");
       setStatus("ready");
-      // Member counts are secondary: a failure here surfaces a banner but keeps the list usable.
-      try {
-        const lists = await Promise.all(next.map((dept) => listMembers(dept.id)));
-        const nextCounts: Record<string, number> = {};
-        next.forEach((dept, index) => {
-          nextCounts[dept.id] = lists[index].length;
-        });
-        setCounts(nextCounts);
-      } catch (caught) {
-        setError(messageFrom(caught, "Could not load member counts."));
-      }
+      freshnessRef.current = { workspaceId, loadedAt: Date.now() };
     } catch (caught) {
-      setError(messageFrom(caught, "Could not load departments."));
-      setStatus("error");
+      if (!options.background) {
+        setError(messageFrom(caught, "Could not load departments and members."));
+        setStatus("error");
+      }
     }
   }, [workspaceId]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (!active) return;
+    const hasCurrentData =
+      freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
+    if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 30_000) return;
+    void refresh({ background: hasCurrentData });
+  }, [active, refresh, workspaceId]);
 
   // The workspace member directory powers the name/email member picker (no raw UUIDs).
   useEffect(() => {
@@ -128,7 +136,7 @@ export function DepartmentsAdmin() {
           : [...prev, saved];
         return [...withSaved].sort((a, b) => a.code.localeCompare(b.code));
       });
-      setCounts((prev) => ({ ...prev, [saved.id]: prev[saved.id] ?? 0 }));
+      setMembersByDepartment((current) => ({ ...current, [saved.id]: current[saved.id] ?? [] }));
       setSelectedId(saved.id);
       setShowForm(false);
     } catch (caught) {
@@ -147,24 +155,29 @@ export function DepartmentsAdmin() {
     });
     if (!ok) return;
     const previous = departments;
+    const previousMembers = membersByDepartment;
     const remaining = previous.filter((entry) => entry.id !== dept.id);
+    const remainingMembers = { ...previousMembers };
+    delete remainingMembers[dept.id];
     setDepartments(remaining);
+    setMembersByDepartment(remainingMembers);
     if (selectedId === dept.id) setSelectedId(remaining[0]?.id);
     try {
       await deleteDepartment(dept.id);
     } catch (caught) {
       setDepartments(previous);
+      setMembersByDepartment(previousMembers);
       setError(messageFrom(caught, "Could not delete the department."));
     }
   }
 
   return (
-    <div className="ui-depts mx-auto max-w-5xl space-y-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="ui-depts mx-auto max-w-6xl space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="ui-section-title">Departments</h1>
             <p className="ui-section-subtitle">
-              Each department authors and owns its SOPs. Roles here decide who can draft, review and approve.
+              Assign ownership and control who can author, review, and approve SOPs.
             </p>
           </div>
           {manage ? (
@@ -195,8 +208,8 @@ export function DepartmentsAdmin() {
           />
         ) : null}
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px]">
-          <section className="ui-panel overflow-hidden">
+        <div className="ui-dept-workbench grid grid-cols-1 lg:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)]">
+          <section className="min-w-0 overflow-hidden">
             {status === "loading" ? (
               <div className="flex items-center justify-center px-4 py-12">
                 <Loader2 size={18} className="animate-spin text-ink-tertiary" />
@@ -233,21 +246,24 @@ export function DepartmentsAdmin() {
                           key={dept.id}
                           onClick={() => setSelectedId(dept.id)}
                           aria-selected={active}
-                          className={`cursor-pointer border-b border-line transition-colors last:border-b-0 ${
-                            active ? "bg-surface-muted" : "hover:bg-surface-hover"
+                          className={`ui-dept-row cursor-pointer border-b border-line transition-colors last:border-b-0 ${
+                            active ? "ui-dept-row-active" : "hover:bg-surface-hover"
                           }`}
                         >
                           <td className="px-4 py-3">
-                            <span className="ui-chip-accent">{dept.code}</span>
+                            <span className="ui-dept-code">{dept.code}</span>
                           </td>
                           <td className="px-4 py-3">
                             <span className="text-sm font-medium text-ink">{dept.name}</span>
                             {dept.isQualityGate ? (
-                              <span className="ui-chip ml-2 border-danger text-danger">QA gate</span>
+                              <span className="ui-dept-gate ml-2">
+                                <Flag size={11} strokeWidth={1.8} />
+                                Quality gate
+                              </span>
                             ) : null}
                           </td>
                           <td className="px-4 py-3 text-right ui-mono-label text-ink-secondary">
-                            {counts[dept.id] ?? "—"}
+                            {membersByDepartment[dept.id]?.length ?? 0}
                           </td>
                         </tr>
                       );
@@ -259,49 +275,48 @@ export function DepartmentsAdmin() {
           </section>
 
           {selected ? (
-            <section className="ui-panel space-y-4 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="ui-chip-accent">{selected.code}</span>
-                  <span className="ui-mono-label text-ink-secondary">{selected.name}</span>
+            <section className="flex min-h-[28rem] min-w-0 flex-col border-t border-line p-5 lg:border-l lg:border-t-0 lg:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="truncate text-lg font-semibold leading-tight text-ink">{selected.name}</h2>
                 </div>
-                {selected.isQualityGate ? (
-                  <span className="ui-chip border-danger text-danger">QA gate</span>
-                ) : null}
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="text-xs text-ink-tertiary">
+                    {membersByDepartment[selected.id]?.length ?? 0}{" "}
+                    {(membersByDepartment[selected.id]?.length ?? 0) === 1 ? "member" : "members"}
+                  </span>
+                  {selected.isQualityGate ? (
+                    <span className="ui-dept-gate">
+                      <Flag size={11} strokeWidth={1.8} />
+                      Quality gate
+                    </span>
+                  ) : null}
+                  {manage ? (
+                    <button
+                      type="button"
+                      className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger"
+                      title="Delete department"
+                      aria-label={`Delete ${selected.name} department`}
+                      onClick={() => void handleDeleteDepartment(selected)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
-              {selected.isQualityGate ? (
-                <div className="ui-notice ui-notice-warn flex gap-2 px-3 py-2.5 text-[11.5px] text-ink-secondary">
-                  <Flag size={14} className="mt-0.5 shrink-0 text-danger" strokeWidth={1.75} />
-                  <span>
-                    <span className="font-medium text-ink">Independent QA gate.</span> {QA_GATE_NOTE}
-                  </span>
-                </div>
-              ) : null}
-
               <MembersPanel
+                key={selected.id}
                 department={selected}
                 manage={manage}
                 directory={directory}
+                members={membersByDepartment[selected.id] ?? []}
                 onError={handleError}
-                onCountChange={handleCountChange}
+                onMembersChange={handleMembersChange}
               />
-
-              {manage ? (
-                <div className="border-t border-line pt-3">
-                  <button
-                    type="button"
-                    className="ui-btn-ghost h-8 gap-1.5 px-3 text-ink-tertiary hover:text-danger"
-                    onClick={() => void handleDeleteDepartment(selected)}
-                  >
-                    <Trash2 size={13} />
-                    Delete department
-                  </button>
-                </div>
-              ) : null}
             </section>
           ) : (
-            <section className="ui-panel flex items-center justify-center p-6 text-center">
+            <section className="flex min-h-64 items-center justify-center border-t border-line p-6 text-center lg:border-l lg:border-t-0">
               <p className="ui-section-subtitle text-ink-tertiary">Select a department to view its members.</p>
             </section>
           )}
@@ -326,7 +341,7 @@ function NewDepartmentForm({ saving, onSubmit, onCancel }: NewDepartmentFormProp
   }
 
   return (
-    <section className="ui-panel space-y-3 p-4">
+    <section className="space-y-3 border-y border-line bg-surface px-5 py-4">
       <div className="ui-mono-label text-ink-secondary">New department</div>
       <div className="grid gap-3 sm:grid-cols-[120px_1fr]">
         <input
@@ -372,13 +387,19 @@ interface MembersPanelProps {
   department: Department;
   manage: boolean;
   directory: MemberAccess[];
+  members: DepartmentMember[];
   onError: (message: string) => void;
-  onCountChange: (departmentId: string, count: number) => void;
+  onMembersChange: (departmentId: string, members: DepartmentMember[]) => void;
 }
 
-function MembersPanel({ department, manage, directory, onError, onCountChange }: MembersPanelProps) {
-  const [members, setMembers] = useState<DepartmentMember[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+function MembersPanel({
+  department,
+  manage,
+  directory,
+  members,
+  onError,
+  onMembersChange,
+}: MembersPanelProps) {
   const [pick, setPick] = useState("");
   const [adding, setAdding] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
@@ -398,31 +419,17 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
     [directory, members],
   );
 
-  const load = useCallback(async () => {
-    setStatus("loading");
-    try {
-      const next = await listMembers(department.id);
-      setMembers(next);
-      onCountChange(department.id, next.length);
-      setStatus("ready");
-    } catch (caught) {
-      onError(messageFrom(caught, "Could not load members."));
-      setStatus("error");
-    }
-  }, [department.id, onCountChange, onError]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   async function handleRoleChange(userId: string, nextRole: DeptRole) {
     const previous = members;
     setBusyUserId(userId);
-    setMembers((current) => current.map((m) => (m.userId === userId ? { ...m, deptRole: nextRole } : m)));
+    onMembersChange(
+      department.id,
+      members.map((member) => (member.userId === userId ? { ...member, deptRole: nextRole } : member)),
+    );
     try {
       await setMember(department.id, userId, nextRole);
     } catch (caught) {
-      setMembers(previous);
+      onMembersChange(department.id, previous);
       onError(messageFrom(caught, "Could not change the member's role."));
     } finally {
       setBusyUserId(null);
@@ -432,13 +439,14 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
   async function handlePositionChange(userId: string, positionTitle: string) {
     const previous = members;
     setBusyUserId(userId);
-    setMembers((current) => current.map((member) =>
-      member.userId === userId ? { ...member, positionTitle } : member
-    ));
+    onMembersChange(
+      department.id,
+      members.map((member) => (member.userId === userId ? { ...member, positionTitle } : member)),
+    );
     try {
       await setMemberPosition(department.id, userId, positionTitle);
     } catch (caught) {
-      setMembers(previous);
+      onMembersChange(department.id, previous);
       onError(messageFrom(caught, "Could not save the member's position."));
     } finally {
       setBusyUserId(null);
@@ -453,9 +461,15 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
     setAdding(true);
     try {
       await setMember(department.id, userId, "author");
-      const next = await listMembers(department.id);
-      setMembers(next);
-      onCountChange(department.id, next.length);
+      onMembersChange(department.id, [
+        ...members,
+        {
+          departmentId: department.id,
+          userId,
+          deptRole: "author",
+          positionTitle: "",
+        },
+      ]);
       setPick("");
     } catch (caught) {
       onError(messageFrom(caught, "Could not add the member."));
@@ -468,13 +482,11 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
     const previous = members;
     const next = previous.filter((m) => m.userId !== userId);
     setBusyUserId(userId);
-    setMembers(next);
-    onCountChange(department.id, next.length);
+    onMembersChange(department.id, next);
     try {
       await removeMember(department.id, userId);
     } catch (caught) {
-      setMembers(previous);
-      onCountChange(department.id, previous.length);
+      onMembersChange(department.id, previous);
       onError(messageFrom(caught, "Could not remove the member."));
     } finally {
       setBusyUserId(null);
@@ -482,25 +494,22 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
   }
 
   return (
-    <div className="space-y-3">
-      <div>
-        <div className="ui-mono-label text-ink-secondary">People, positions &amp; SOP access</div>
-        <p className="ui-section-subtitle mt-1 text-ink-tertiary">
-          Position is the employee&rsquo;s job title. SOP access controls what they can do in the workflow.
-        </p>
+    <div className="mt-5 flex min-h-0 flex-1 flex-col gap-4">
+      <div className="border-b border-line pb-3">
+        <h3 className="text-sm font-semibold text-ink">Members and SOP access</h3>
       </div>
 
-      {status === "loading" ? (
-        <div className="flex items-center gap-2 py-2 ui-section-subtitle text-ink-tertiary">
-          <Loader2 size={14} className="animate-spin" />
-          Loading members…
+      {members.length === 0 ? (
+        <div className="flex min-h-40 items-center justify-center border-y border-line text-center text-ink-tertiary">
+          <div>
+            <UsersRound size={20} className="mx-auto" strokeWidth={1.5} />
+            <p className="mt-2 text-sm">No department members</p>
+          </div>
         </div>
-      ) : members.length === 0 ? (
-        <p className="ui-section-subtitle text-ink-tertiary">No members yet.</p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="min-h-40 divide-y divide-line border-y border-line">
           {members.map((member) => (
-            <li key={member.userId} className="rounded-md border border-line p-3">
+            <li key={member.userId} className="py-4">
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-ink" title={member.userId}>
@@ -583,7 +592,7 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
       )}
 
       {manage ? (
-        <div className="space-y-1.5 border-t border-line pt-3">
+        <div className="mt-auto border-t border-line pt-4">
           <div className="flex items-center gap-2">
             <div className="relative min-w-0 flex-1">
               <select
@@ -622,9 +631,6 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
               Add
             </button>
           </div>
-          <p className="ui-mono-label text-ink-tertiary">
-            Added as author — adjust the role above. Members come from your organization&rsquo;s people.
-          </p>
         </div>
       ) : null}
     </div>

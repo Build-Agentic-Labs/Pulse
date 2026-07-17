@@ -1,7 +1,8 @@
 "use client";
 
-import { LockKeyhole, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Check, LockKeyhole, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { listMembers } from "@/lib/departments/store";
 import {
@@ -16,8 +17,8 @@ const RASIC_OPTIONS: { value: SopRasic; label: string; hint: string }[] = [
   { value: "responsible", label: "Responsible", hint: "Does the work. Signature required." },
   { value: "accountable", label: "Accountable", hint: "Owns the outcome. Signature required. Exactly one." },
   { value: "support", label: "Support", hint: "Supplies resources. Signs; does not block." },
-  { value: "consulted", label: "Consulted", hint: "Gives input. Signs or comments; does not block." },
   { value: "informed", label: "Informed", hint: "Notified on release. Never signs." },
+  { value: "consulted", label: "Consulted", hint: "Gives input. Signs or comments; does not block." },
 ];
 
 function getErrorMessage(error: unknown): string {
@@ -45,6 +46,7 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
   const [members, setMembers] = useState<Map<string, { userId: string; name: string; positionTitle: string }[]>>(new Map());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<{ departmentId: string; rasic: SopRasic; signerId: string }>({
     departmentId: "",
     rasic: "responsible",
@@ -125,10 +127,23 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
   }
 
   return (
-    <section className="ui-panel overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
-        <div className="ui-mono-label text-ink-tertiary">Assign responsible parties</div>
-        <div className="ui-mono-label text-ink-tertiary">RASIC · one reviewer per department</div>
+    <section className="overflow-hidden border-y border-line bg-surface">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+        <h2 className="text-sm font-semibold text-ink">Department approvals</h2>
+        {available.length > 0 ? (
+          <button
+            type="button"
+            className="ui-btn-ghost h-8 gap-1.5 px-2"
+            aria-expanded={adding}
+            onClick={() => {
+              setAdding((current) => !current);
+              setDraft({ departmentId: "", rasic: "responsible", signerId: "" });
+            }}
+          >
+            {adding ? <X size={14} /> : <Plus size={14} />}
+            {adding ? "Cancel" : "Add reviewer"}
+          </button>
+        ) : null}
       </div>
 
       {error ? (
@@ -137,198 +152,206 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
         </div>
       ) : null}
 
-      <div className="divide-y divide-line">
-        {workflowSeats.map((seat) => {
-          const department = departments.find((item) => item.id === seat.departmentId);
-          const options = members.get(seat.departmentId) ?? [];
-          return (
-            <div key={seat.departmentId} className="flex flex-wrap items-center gap-2 px-4 py-3">
-              <span className="ui-chip shrink-0">{department?.code ?? "—"}</span>
-              <span className="min-w-32 flex-1 truncate text-sm text-ink">{department?.name ?? "Unknown"}</span>
+      <div className="ui-table-scroll">
+        <table className="w-full min-w-[720px] table-fixed border-collapse text-left">
+          <colgroup>
+            <col className="w-[34%]" />
+            <col className="w-40" />
+            <col />
+            <col className="w-14" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-line">
+              <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Department</th>
+              <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Duty</th>
+              <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Reviewer</th>
+              <th scope="col" className="px-2 py-3"><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {workflowSeats.map((seat) => {
+              const department = departments.find((item) => item.id === seat.departmentId);
+              const options = members.get(seat.departmentId) ?? [];
+              const reviewerOptions = [
+                { value: "", label: seat.rasic === "informed" ? "No signer" : "Choose a reviewer…" },
+                ...options.map((member) => ({
+                  value: member.userId,
+                  label: `${member.name}${member.positionTitle ? ` — ${member.positionTitle}` : ""}`,
+                })),
+              ];
+              return (
+                <tr
+                  key={seat.departmentId}
+                  className="group border-b border-line/70 transition-colors hover:bg-surface-hover"
+                >
+                  <td className="px-5 py-3.5 align-middle text-[13px] font-medium text-ink">
+                    <span className="block truncate">{department?.name ?? "Unknown"}</span>
+                  </td>
+                  <td className="px-5 py-2.5 align-middle">
+                    <ThemedSelect
+                      variant="sop"
+                      className="w-full"
+                      triggerClassName="ui-sop-select-inline"
+                      ariaLabel={`RASIC duty for ${department?.code ?? "department"}`}
+                      value={seat.rasic}
+                      options={RASIC_OPTIONS}
+                      disabled={busy !== null}
+                      onChange={(value) =>
+                        void guarded(`rasic-${seat.departmentId}`, () =>
+                          upsertSeat({
+                            ...seat,
+                            rasic: value as SopRasic,
+                            signerId: value === "informed" ? null : seat.signerId,
+                          }),
+                        )
+                      }
+                    />
+                  </td>
+                  <td className="px-5 py-2.5 align-middle">
+                    <ThemedSelect
+                      variant="sop"
+                      className="w-full"
+                      triggerClassName="ui-sop-select-inline"
+                      ariaLabel={`Designated reviewer for ${department?.code ?? "department"}`}
+                      value={seat.signerId ?? ""}
+                      options={reviewerOptions}
+                      disabled={busy !== null || seat.rasic === "informed"}
+                      onChange={(value) =>
+                        void guarded(`signer-${seat.departmentId}`, () =>
+                          upsertSeat({ ...seat, signerId: value || null }),
+                        )
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2.5 align-middle">
+                    <button
+                      type="button"
+                      aria-label={`Remove ${department?.code ?? "department"} from the roster`}
+                      className="ui-btn-ghost h-8 w-8 p-0 text-ink-tertiary opacity-50 hover:text-danger group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-40"
+                      title="Remove department"
+                      disabled={busy !== null}
+                      onClick={() => void guarded(`remove-${seat.departmentId}`, () => removeSeat(sopId, seat.departmentId))}
+                    >
+                      {busy === `remove-${seat.departmentId}` ? (
+                        <Loader2 size={14} className="mx-auto animate-spin" />
+                      ) : (
+                        <Trash2 size={14} className="mx-auto" />
+                      )}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
 
-              <select
-                aria-label={`RASIC duty for ${department?.code ?? "department"}`}
-                className="ui-field-standalone h-9 w-36 shrink-0"
-                value={seat.rasic}
-                disabled={busy !== null}
-                onChange={(event) =>
-                  void guarded(`rasic-${seat.departmentId}`, () =>
-                    upsertSeat({
-                      ...seat,
-                      rasic: event.target.value as SopRasic,
-                      signerId: event.target.value === "informed" ? null : seat.signerId,
-                    }),
-                  )
-                }
-              >
-                {RASIC_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+            <tr className="border-b border-line/70">
+              <td className="px-5 py-3.5 align-middle">
+                <span className={`block truncate text-[13px] font-medium ${
+                  qualityDepartment ? "text-ink" : "text-danger"
+                }`}>
+                  {qualityDepartment?.name ?? "Quality department not assigned"}
+                </span>
+              </td>
+              <td className="px-5 py-3.5 align-middle text-[13px] text-ink-secondary">Approver</td>
+              <td className="px-5 py-3.5 align-middle text-[13px] text-ink-secondary">Quality approvers</td>
+              <td className="px-2 py-3.5 align-middle text-center">
+                <LockKeyhole size={14} className="mx-auto text-ink-tertiary" aria-label="Managed automatically" />
+              </td>
+            </tr>
 
-              <select
-                aria-label={`Designated reviewer for ${department?.code ?? "department"}`}
-                className="ui-field-standalone h-9 w-44 shrink-0"
-                value={seat.signerId ?? ""}
-                disabled={busy !== null || seat.rasic === "informed"}
-                onChange={(event) =>
-                  void guarded(`signer-${seat.departmentId}`, () =>
-                    upsertSeat({ ...seat, signerId: event.target.value || null }),
-                  )
-                }
-              >
-                <option value="">{seat.rasic === "informed" ? "No signer" : "Choose a reviewer…"}</option>
-                {options.map((member) => (
-                  <option key={member.userId} value={member.userId}>
-                    {member.name}{member.positionTitle ? ` — ${member.positionTitle}` : ""}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                type="button"
-                aria-label={`Remove ${department?.code ?? "department"} from the roster`}
-                className="ui-btn-ghost h-9 w-9 shrink-0 rounded border border-border-strong p-0 text-danger disabled:opacity-40"
-                disabled={busy !== null}
-                onClick={() => void guarded(`remove-${seat.departmentId}`, () => removeSeat(sopId, seat.departmentId))}
-              >
-                {busy === `remove-${seat.departmentId}` ? (
-                  <Loader2 size={14} className="mx-auto animate-spin" />
-                ) : (
-                  <Trash2 size={14} className="mx-auto" />
-                )}
-              </button>
-            </div>
-          );
-        })}
+            {adding && available.length > 0 ? (
+              <tr className="bg-canvas/55">
+                <td className="px-5 py-2.5 align-middle">
+                  <ThemedSelect
+                    variant="sop"
+                    ariaLabel="Department to add"
+                    value={draft.departmentId}
+                    disabled={busy !== null}
+                    options={[
+                      { value: "", label: "Add a department…" },
+                      ...available.map((department) => ({
+                        value: department.id,
+                        label: `${department.code} · ${department.name}`,
+                      })),
+                    ]}
+                    onChange={(departmentId) => {
+                      setDraft((prev) => ({ ...prev, departmentId, signerId: "" }));
+                      void loadMembers(departmentId);
+                    }}
+                  />
+                </td>
+                <td className="px-3 py-2.5 align-middle">
+                  <ThemedSelect
+                    variant="sop"
+                    ariaLabel="RASIC duty"
+                    value={draft.rasic}
+                    disabled={busy !== null || !draft.departmentId}
+                    options={RASIC_OPTIONS}
+                    onChange={(value) => setDraft((prev) => ({ ...prev, rasic: value as SopRasic }))}
+                  />
+                </td>
+                <td className="px-3 py-2.5 align-middle">
+                  <ThemedSelect
+                    variant="sop"
+                    ariaLabel="Designated reviewer"
+                    value={draft.signerId}
+                    disabled={busy !== null || !draft.departmentId || draft.rasic === "informed"}
+                    options={[
+                      { value: "", label: draft.rasic === "informed" ? "No signer" : "Select reviewer…" },
+                      ...(members.get(draft.departmentId) ?? []).map((member) => ({
+                        value: member.userId,
+                        label: `${member.name}${member.positionTitle ? ` — ${member.positionTitle}` : ""}`,
+                      })),
+                    ]}
+                    onChange={(signerId) => setDraft((prev) => ({ ...prev, signerId }))}
+                  />
+                </td>
+                <td className="px-2 py-2.5 align-middle">
+                  <button
+                    type="button"
+                    className="ui-btn-primary h-8 w-8 p-0 disabled:opacity-40"
+                    aria-label="Add department reviewer"
+                    title="Add department reviewer"
+                    disabled={
+                      busy !== null ||
+                      !draft.departmentId ||
+                      (draft.rasic !== "informed" && !draft.signerId)
+                    }
+                    onClick={() =>
+                      void guarded("add", async () => {
+                        await upsertSeat({
+                          sopId,
+                          departmentId: draft.departmentId,
+                          rasic: draft.rasic,
+                          signerId: draft.rasic === "informed" ? null : draft.signerId,
+                        });
+                        setAdding(false);
+                        setDraft({ departmentId: "", rasic: "responsible", signerId: "" });
+                      })
+                    }
+                  >
+                    {busy === "add" ? (
+                      <Loader2 size={14} className="mx-auto animate-spin" />
+                    ) : (
+                      <Check size={14} className="mx-auto" />
+                    )}
+                  </button>
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
-
-      <div className="border-t border-line bg-surface-subtle px-4 py-3">
-        {qualityDepartment ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="ui-chip shrink-0">{qualityDepartment.code}</span>
-            <div className="min-w-40 flex-1">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink">
-                <ShieldCheck size={15} className="text-success" aria-hidden="true" />
-                <span>{qualityDepartment.name}</span>
-              </div>
-              <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
-                Independent release gate after stakeholder approval
-              </p>
-            </div>
-            <span className="ui-chip shrink-0 border-success/30 text-success">Final approval</span>
-            <span className="ui-mono-label shrink-0 text-ink-tertiary">Assigned automatically</span>
-            <LockKeyhole size={14} className="shrink-0 text-ink-tertiary" aria-label="System controlled" />
-          </div>
-        ) : (
-          <div className="flex items-start gap-2 text-danger">
-            <ShieldCheck size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <div>
-              <p className="text-sm font-medium">Quality final approval is not configured</p>
-              <p className="ui-section-subtitle mt-0.5">
-                Mark a department as the independent Quality gate before this SOP can be released.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {available.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
-          <select
-            aria-label="Department to add"
-            className="ui-field-standalone h-9 w-44"
-            value={draft.departmentId}
-            disabled={busy !== null}
-            onChange={(event) => {
-              const departmentId = event.target.value;
-              setDraft((prev) => ({ ...prev, departmentId, signerId: "" }));
-              void loadMembers(departmentId);
-            }}
-          >
-            <option value="">Add a department…</option>
-            {available.map((department) => (
-              <option key={department.id} value={department.id}>
-                {department.code} · {department.name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            aria-label="RASIC duty"
-            className="ui-field-standalone h-9 w-36"
-            value={draft.rasic}
-            disabled={busy !== null || !draft.departmentId}
-            onChange={(event) => setDraft((prev) => ({ ...prev, rasic: event.target.value as SopRasic }))}
-          >
-            {RASIC_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <select
-            aria-label="Designated reviewer"
-            className="ui-field-standalone h-9 w-44"
-            value={draft.signerId}
-            disabled={busy !== null || !draft.departmentId || draft.rasic === "informed"}
-            onChange={(event) => setDraft((prev) => ({ ...prev, signerId: event.target.value }))}
-          >
-            <option value="">{draft.rasic === "informed" ? "No signer" : "Choose a reviewer…"}</option>
-            {(members.get(draft.departmentId) ?? []).map((member) => (
-              <option key={member.userId} value={member.userId}>
-                {member.name}{member.positionTitle ? ` — ${member.positionTitle}` : ""}
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            className="ui-btn-ghost h-9 rounded border border-border-strong px-3 disabled:opacity-40"
-            disabled={
-              busy !== null ||
-              !draft.departmentId ||
-              (draft.rasic !== "informed" && !draft.signerId)
-            }
-            onClick={() =>
-              void guarded("add", async () => {
-                await upsertSeat({
-                  sopId,
-                  departmentId: draft.departmentId,
-                  rasic: draft.rasic,
-                  signerId: draft.rasic === "informed" ? null : draft.signerId,
-                });
-                setDraft({ departmentId: "", rasic: "responsible", signerId: "" });
-              })
-            }
-          >
-            {busy === "add" ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            <span className="ml-1.5">Add</span>
-          </button>
-        </div>
-      ) : null}
 
       {problems.length > 0 ? (
-        <div className="border-t border-line px-4 py-3">
-          <div className="ui-mono-label text-ink-tertiary">Before this SOP can be submitted</div>
-          <ul className="mt-1.5 space-y-1">
-            {problems.map((problem) => (
-              <li key={problem} className="ui-section-subtitle text-ink-secondary">
-                {problem}
-              </li>
-            ))}
-          </ul>
+        <div className="flex gap-3 border-t border-line px-5 py-2.5 text-xs">
+          <span className="shrink-0 font-medium text-warn">Setup required</span>
+          <span className="text-ink-secondary">{problems.join(" ")}</span>
         </div>
       ) : null}
+
       {soloSelfReview ? (
-        <div className="border-t border-line px-4 py-3">
-          <div className="ui-mono-label text-warn">Temporary solo test mode</div>
-          <p className="ui-section-subtitle mt-1 text-ink-secondary">
-            You can submit, review, approve, and release this test SOP yourself.
-          </p>
+        <div className="border-t border-line px-5 py-2.5 text-xs text-ink-tertiary">
+          Author self-review is enabled for this test SOP.
         </div>
       ) : null}
     </section>

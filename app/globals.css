@@ -3614,22 +3614,13 @@ body {
   /* SOP authoring: lighter, smaller, flatter fields read as a refined document
      editor rather than the dense planner forms. Scoped so nothing else changes. */
   .sop-editor .ui-field-standalone {
-    font-family: var(--type-sans); /* document-like, not mono dev-tool */
+    font-family: inherit;
     font-weight: 400;
     font-size: 0.8125rem; /* 13px */
     height: 2.25rem; /* tighter, uniform field height */
     border-radius: 0.375rem;
     border-color: color-mix(in srgb, var(--color-border) 80%, transparent);
     box-shadow: none; /* drop the sunken inset shadow for a flat, premium look */
-  }
-
-  /* Empty ("unknown") fields get a soft red flag so reviewers can spot gaps.
-     :placeholder-shown covers text inputs/textareas; :required:invalid covers
-     date inputs (which have no text placeholder). */
-  .sop-editor .ui-field-standalone:placeholder-shown,
-  .sop-editor .ui-field-standalone:required:invalid {
-    border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
-    background-color: color-mix(in srgb, var(--color-danger) 7%, transparent);
   }
 
   .sop-editor .ui-field-standalone:focus {
@@ -3642,18 +3633,14 @@ body {
      to delete. Ghost the hint hard, and hide it entirely while the field is focused — the
      field-hint tooltip already shows the example during editing. */
   .sop-editor .ui-field-standalone::placeholder {
-    color: color-mix(in srgb, var(--color-ink-tertiary) 45%, transparent);
-    font-style: italic;
-  }
-
-  .sop-editor .ui-field-standalone:focus::placeholder {
-    color: transparent;
+    color: color-mix(in srgb, var(--color-ink-tertiary) 62%, transparent);
+    font-style: normal;
   }
 
   /* Review remarks are prose, not identifiers. Keep the compact field shell while
      using the document font, normal weight, and comfortable reading rhythm. */
   .sop-review-remark-field {
-    font-family: var(--type-sans);
+    font-family: inherit;
     font-size: 0.8125rem;
     font-weight: 400;
     line-height: 1.55;
@@ -3664,7 +3651,7 @@ body {
   }
 
   .sop-review-remark-field::placeholder {
-    font-family: var(--type-sans);
+    font-family: inherit;
     font-weight: 400;
     letter-spacing: 0;
   }
@@ -3672,33 +3659,33 @@ body {
   /* Softer labels: calm sentence-case sans instead of hard uppercase mono. */
   .sop-editor .ui-field-label,
   .sop-editor .ui-mono-label {
-    font-family: var(--type-sans);
+    font-family: inherit;
     text-transform: none;
     letter-spacing: 0;
-    font-weight: 400;
-    color: var(--color-ink-tertiary);
+    font-weight: 500;
+    color: var(--color-ink-secondary);
   }
 
   /* SOP approval control: preserve the existing panels and status system while
      giving operational text a calmer document-control hierarchy. Mono remains
      reserved for compact chips and identifiers instead of every label/value. */
   .sop-control {
-    font-family: var(--type-sans);
+    font-family: inherit;
   }
 
   .sop-control .ui-section-title {
-    font-family: var(--type-sans);
+    font-family: inherit;
     font-weight: 600;
-    letter-spacing: -0.015em;
+    letter-spacing: 0;
   }
 
   .sop-control .ui-mono-label {
-    font-family: var(--type-sans);
+    font-family: inherit;
     font-size: 0.6875rem;
     line-height: 1.35;
     font-weight: 500;
     text-transform: none;
-    letter-spacing: 0.01em;
+    letter-spacing: 0;
   }
 
   .sop-control .ui-section-subtitle {
@@ -3707,7 +3694,7 @@ body {
   }
 
   .sop-control .ui-field-standalone {
-    font-family: var(--type-sans);
+    font-family: inherit;
     font-size: 0.8125rem;
     font-weight: 500;
     border-radius: 0.5rem;
@@ -3717,27 +3704,143 @@ body {
   .sop-control-meta-value {
     margin-top: 0.25rem;
     color: var(--color-ink);
-    font-family: var(--type-sans);
+    font-family: inherit;
     font-size: 0.8125rem;
     line-height: 1.4;
     font-weight: 500;
   }
 
-  /* Departments admin: squared, document-control geometry. A QMS surface reads
-     better as stamped tags and datasheet cards than consumer pills, so inside
-     .ui-depts every control/label squares to 4px and containers to 6px. Scoped
-     overrides (same pattern as .sop-editor above) so the rest of the app keeps
-     its rounded language. */
-  .ui-depts .ui-panel {
+  /* SOP module: one quiet system-sans hierarchy across lists, administration,
+     authoring, and review. Keep the change scoped to the module while the rest
+     of the application retains its existing type system. */
+  .ui-sop-shell {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+      "Helvetica Neue", Arial, sans-serif;
+    font-size: 0.875rem;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .ui-section-title {
+    font-family: inherit;
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .ui-section-subtitle {
+    font-family: inherit;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .ui-mono-label,
+  .ui-sop-shell .ui-eyebrow {
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.35;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .ui-btn-primary,
+  .ui-sop-shell .ui-btn-ghost {
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .ui-chip,
+  .ui-sop-shell .ui-chip-accent {
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .ui-field-standalone {
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .ui-field-standalone::placeholder {
+    font-family: inherit;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .ui-nav-item,
+  .ui-sop-shell .ui-nav-footer-item,
+  .ui-sop-shell .ui-nav-section,
+  .ui-sop-shell .ui-settings-back {
+    border-radius: 4px;
+    font-family: inherit;
+    letter-spacing: 0;
+  }
+
+  .ui-sop-shell .font-mono,
+  .ui-sop-shell .tracking-wide,
+  .ui-sop-shell .tracking-tight {
+    font-family: inherit;
+    letter-spacing: 0;
+  }
+
+  .ui-dept-workbench {
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+
+  .ui-dept-row {
+    position: relative;
+  }
+
+  .ui-dept-row-active {
+    background: var(--color-surface-muted);
+  }
+
+  .ui-dept-code {
+    display: inline-flex;
+    min-width: 2.25rem;
+    align-items: center;
+    color: var(--color-ink-secondary);
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ui-dept-gate {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--color-danger);
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  .ui-sop-shell .ui-panel {
     border-radius: 6px;
   }
 
-  .ui-depts .ui-btn-primary,
-  .ui-depts .ui-btn-ghost,
-  .ui-depts .ui-chip,
-  .ui-depts .ui-chip-accent,
-  .ui-depts .ui-notice,
-  .ui-depts .ui-field-standalone {
+  .ui-sop-shell .ui-btn-primary,
+  .ui-sop-shell .ui-btn-ghost,
+  .ui-sop-shell .ui-chip,
+  .ui-sop-shell .ui-chip-accent,
+  .ui-sop-shell .ui-notice,
+  .ui-sop-shell .ui-field-standalone {
     border-radius: 4px;
   }
 
@@ -3979,6 +4082,139 @@ body {
   .ui-themed-select-check {
     flex-shrink: 0;
     color: var(--color-accent);
+  }
+
+  /* SOP authoring uses one controlled dropdown treatment instead of browser-native
+     menus, so field, inline-table, and compact matrix selects share the same surface. */
+  .ui-sop-shell .ui-themed-select-sop {
+    width: 100%;
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop {
+    height: 2.25rem;
+    border-color: color-mix(in srgb, var(--color-border) 80%, transparent);
+    border-radius: 0.375rem;
+    background: var(--color-surface);
+    padding: 0 0.625rem;
+    box-shadow: none;
+    color: var(--color-ink);
+    font-family: var(--type-sans);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    transition:
+      border-color 140ms var(--ease-ui),
+      background-color 140ms var(--ease-ui),
+      box-shadow 140ms var(--ease-ui);
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop:hover {
+    border-color: color-mix(in srgb, var(--color-ink) 22%, var(--color-border));
+    background: var(--color-surface-hover);
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop:focus-visible,
+  .ui-sop-shell .ui-themed-select-trigger-sop[aria-expanded="true"] {
+    border-color: color-mix(in srgb, var(--color-ink) 36%, var(--color-border));
+    background: var(--color-surface);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-ink) 7%, transparent);
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop .ui-themed-select-icon {
+    color: var(--color-ink-tertiary);
+    transition: transform 140ms var(--ease-ui), color 140ms var(--ease-ui);
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop[aria-expanded="true"] .ui-themed-select-icon {
+    color: var(--color-ink-secondary);
+    transform: rotate(180deg);
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop.ui-sop-select-inline {
+    height: 2rem;
+    border-color: transparent;
+    background: transparent;
+    padding-left: 0;
+    padding-right: 0.25rem;
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop.ui-sop-select-inline:hover {
+    border-color: transparent;
+    background: var(--color-surface-hover);
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop.ui-sop-select-inline:focus-visible,
+  .ui-sop-shell .ui-themed-select-trigger-sop.ui-sop-select-inline[aria-expanded="true"] {
+    border-color: transparent;
+    background: var(--color-surface-muted);
+  }
+
+  .ui-sop-shell .ui-themed-select-trigger-sop.ui-sop-select-compact {
+    height: 2.25rem;
+    padding: 0 0.375rem;
+    font-size: 0.75rem;
+  }
+
+  .ui-sop-shell .ui-sop-select-compact .ui-themed-select-value {
+    flex: 1;
+    text-align: center;
+  }
+
+  .ui-themed-select-menu-sop {
+    border-color: var(--color-border);
+    border-radius: 0.5rem;
+    background: var(--color-surface);
+    box-shadow:
+      0 14px 32px color-mix(in srgb, #000 12%, transparent),
+      0 2px 8px color-mix(in srgb, #000 6%, transparent);
+    padding: 0.25rem;
+    transform-origin: top center;
+    animation: ui-sop-select-menu-in 140ms var(--ease-ui) both;
+  }
+
+  .ui-themed-select-menu-sop.ui-themed-select-menu-right {
+    transform-origin: top right;
+  }
+
+  .ui-themed-select-option-sop {
+    min-height: 2.125rem;
+    border-radius: 0.375rem;
+    padding: 0.45rem 0.625rem;
+    color: var(--color-ink-secondary);
+    font-family: var(--type-sans);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .ui-themed-select-option-sop:hover,
+  .ui-themed-select-option-sop:focus-visible,
+  .ui-themed-select-option-sop[aria-selected="true"] {
+    background: var(--color-surface-muted);
+    color: var(--color-ink);
+  }
+
+  .ui-themed-select-option-sop[aria-selected="true"] {
+    font-weight: 500;
+  }
+
+  @keyframes ui-sop-select-menu-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-themed-select-menu-sop {
+      animation: none;
+    }
   }
 
   .ui-flow-shell {

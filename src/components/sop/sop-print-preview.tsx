@@ -566,11 +566,21 @@ export function SopPrintPreview({
           position: fixed; inset: 0; z-index: 60;
           display: flex; flex-direction: column;
           background: rgba(15, 18, 21, 0.62);
+          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
         }
         .sop-preview-bar {
           display: flex; align-items: center; justify-content: space-between;
           gap: 12px; padding: 10px 16px; flex: none;
           background: var(--color-surface, #fff); border-bottom: 1px solid var(--color-line, #ddd);
+        }
+        .sop-preview-bar .ui-mono-label,
+        .sop-review-panel .ui-mono-label {
+          font-family: inherit; font-weight: 500; letter-spacing: 0; text-transform: none;
+        }
+        .sop-preview-overlay .ui-btn-primary,
+        .sop-preview-overlay .ui-btn-ghost,
+        .sop-preview-overlay .ui-chip {
+          border-radius: 4px; font-family: inherit; letter-spacing: 0; text-transform: none;
         }
         .sop-preview-content { display: flex; flex: 1; min-height: 0; }
         .sop-preview-scroll { flex: 1; min-width: 0; overflow: auto; padding: 24px 16px 64px; }
@@ -710,15 +720,13 @@ export function SopPrintPreview({
       `}</style>
 
       <div className="sop-preview-bar">
-        <span className="ui-mono-label text-ink-tertiary">
-          {mode === "review"
-            ? "Draft PDF review · add section remarks in the review panel"
-            : mode === "approval"
-              ? "Final approval · review the controlled PDF and add your digital signature"
-              : canDownloadPdf
-                ? "Export preview"
-                : "PDF preview"}
-        </span>
+        {mode === "review" || mode === "approval" ? (
+          <span className="ui-mono-label text-ink-tertiary">
+            {mode === "review"
+              ? "Draft PDF review · add section remarks in the review panel"
+              : "Final approval · review the controlled PDF and add your digital signature"}
+          </span>
+        ) : <span />}
         <div className="flex items-center gap-2">
           {canDownloadPdf ? (
             <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" onClick={() => window.print()}>
@@ -748,7 +756,7 @@ export function SopPrintPreview({
               ) : <EmptyAwareText value="" />}
             </Section>
             <Section title="Responsible Person(s)" reviewCategory="responsible">
-              {sop.responsiblePersons.length ? <ul className="sop-export-list">{sop.responsiblePersons.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
+              <EmptyAwareText value={sop.responsiblePersons.filter(Boolean).join("; ")} />
             </Section>
             <Section title="References" reviewCategory="references">
               {sop.references.length ? <ul className="sop-export-list">{sop.references.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}

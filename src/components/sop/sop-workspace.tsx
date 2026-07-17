@@ -2,7 +2,7 @@
 
 import { Archive, Building2, FileText, Inbox, Library } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { DepartmentsAdmin } from "./departments-admin";
 import { EffectiveLibrary } from "./effective-library";
 import { ReviewQueue } from "./review-queue";
@@ -38,8 +38,19 @@ export function SopWorkspace() {
   const manage = canManage(role);
   const params = useSearchParams();
   const [tab, setTab] = useState<Tab>(() => parseTab(params.get("tab"), manage));
+  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set([tab]));
+
+  useEffect(() => {
+    setMountedTabs((current) => {
+      if (current.has(tab)) return current;
+      const next = new Set(current);
+      next.add(tab);
+      return next;
+    });
+  }, [tab]);
 
   function select(next: Tab) {
+    setMountedTabs((current) => (current.has(next) ? current : new Set(current).add(next)));
     setTab(next);
     // Keep the URL shareable/refresh-safe, but WITHOUT a Next navigation (so nothing re-mounts).
     if (typeof window !== "undefined") {
@@ -51,17 +62,21 @@ export function SopWorkspace() {
 
   return (
     <SopShell sidebar={sidebar} crumb={CRUMB[tab]}>
-      {tab === "all" ? (
-        <SopList />
-      ) : tab === "review" ? (
-        <ReviewQueue />
-      ) : tab === "library" ? (
-        <EffectiveLibrary />
-      ) : tab === "retired" ? (
-        <RetiredSops />
-      ) : (
-        <DepartmentsAdmin />
-      )}
+      <div hidden={tab !== "all"} aria-hidden={tab !== "all"}>
+        {mountedTabs.has("all") ? <SopList active={tab === "all"} /> : null}
+      </div>
+      <div hidden={tab !== "review"} aria-hidden={tab !== "review"}>
+        {mountedTabs.has("review") ? <ReviewQueue active={tab === "review"} /> : null}
+      </div>
+      <div hidden={tab !== "library"} aria-hidden={tab !== "library"}>
+        {mountedTabs.has("library") ? <EffectiveLibrary active={tab === "library"} /> : null}
+      </div>
+      <div hidden={tab !== "retired"} aria-hidden={tab !== "retired"}>
+        {mountedTabs.has("retired") ? <RetiredSops active={tab === "retired"} /> : null}
+      </div>
+      <div hidden={tab !== "departments"} aria-hidden={tab !== "departments"}>
+        {mountedTabs.has("departments") ? <DepartmentsAdmin active={tab === "departments"} /> : null}
+      </div>
     </SopShell>
   );
 }

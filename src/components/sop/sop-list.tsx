@@ -3,7 +3,7 @@
 import { FileText, Loader2, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import type { Department } from "@/domain/departments";
 import { DEFAULT_DOC_TYPE } from "@/domain/sop/authoring";
@@ -45,17 +45,6 @@ function reviewFlag(iso: string | null): { label: string; className: string } | 
   if (days < 0) return { label: "overdue", className: "text-danger" };
   if (days <= 30) return { label: "due soon", className: "text-warn" };
   return null;
-}
-
-/** Stable soft accent for a department code so filters read as distinct, not identical pills. */
-function departmentAccent(code: string): string {
-  let hash = 0;
-  for (let i = 0; i < code.length; i += 1) {
-    hash = (hash * 31 + code.charCodeAt(i)) >>> 0;
-  }
-  const hues = [208, 162, 28, 286, 338, 188, 48, 132, 304, 12, 248];
-  const hue = hues[hash % hues.length];
-  return `hsl(${hue} 42% 40%)`;
 }
 
 function importDoneKey(workspaceId: string): string {
@@ -105,7 +94,7 @@ function reviewerInitials(name: string): string {
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
 }
 
-export function SopList() {
+export function SopList({ active = true }: { active?: boolean }) {
   const router = useRouter();
   const confirm = useConfirm();
   const { workspaceId, canEditSops } = useSopWorkspace();
@@ -128,6 +117,7 @@ export function SopList() {
   const [feedbackAnnotations, setFeedbackAnnotations] = useState<SopReviewAnnotation[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
   const converting = convert !== null;
 
   const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
@@ -137,6 +127,7 @@ export function SopList() {
       setReviewResults(new Map());
       setReviewParticipants(new Map());
       setListStatus("ready");
+      freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return [] as SopListItem[];
     }
     if (!options.background) {
@@ -184,6 +175,7 @@ export function SopList() {
       setReviewResults(bySop);
       setReviewParticipants(participantsBySop);
       setListStatus("ready");
+      freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return next;
     } catch (caught) {
       if (!options.background) {
@@ -235,11 +227,13 @@ export function SopList() {
       if (departments.some((dept) => dept.id === departmentId)) continue;
       ordered.push({ key: departmentId, department: null, sops: list });
     }
-    if (query.trim()) {
-      return ordered.filter((group) => group.sops.length > 0);
-    }
-    return ordered;
-  }, [filteredSops, departments, query]);
+    return ordered.filter((group) => group.sops.length > 0);
+  }, [filteredSops, departments]);
+
+  const showReviewStatus = useMemo(
+    () => filteredSops.some((sop) => sop.status === "in_review"),
+    [filteredSops],
+  );
 
   // Departments power the grouped sections.
   useEffect(() => {
@@ -288,9 +282,14 @@ export function SopList() {
   // Load the workspace's SOPs, then surface any legacy localStorage SOPs not yet in this
   // workspace as a one-time import offer (id-deduped; skipped once dismissed/imported).
   useEffect(() => {
-    let active = true;
-    void refreshList().then((loaded) => {
-      if (!active || !workspaceId) return;
+    if (!active) return;
+    const hasCurrentData =
+      freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
+    if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 15_000) return;
+
+    let alive = true;
+    void refreshList({ background: hasCurrentData }).then((loaded) => {
+      if (!alive || !workspaceId) return;
       if (!editable || isImportDone(workspaceId)) {
         setPendingImport([]);
         return;
@@ -299,15 +298,15 @@ export function SopList() {
       setPendingImport(readLegacyLocalSops().filter((sop) => !existingIds.has(sop.id)));
     });
     return () => {
-      active = false;
+      alive = false;
     };
-  }, [refreshList, workspaceId, editable]);
+  }, [active, refreshList, workspaceId, editable]);
 
   // Workflow actions often finish in another tab (review/signature workspaces). Refresh this
   // list as soon as the user returns, with a visible-tab interval as a fallback for long-lived
   // list tabs. Background refreshes preserve the current table instead of flashing a loader.
   useEffect(() => {
-    if (!workspaceId) return;
+    if (!active || !workspaceId) return;
 
     const refreshInBackground = () => {
       if (document.visibilityState === "visible") void refreshList({ background: true });
@@ -321,7 +320,7 @@ export function SopList() {
       window.removeEventListener("focus", refreshInBackground);
       document.removeEventListener("visibilitychange", refreshInBackground);
     };
-  }, [refreshList, workspaceId]);
+  }, [active, refreshList, workspaceId]);
 
   async function handleUpload(file: File) {
     if (!workspaceId) return;
@@ -433,7 +432,7 @@ export function SopList() {
       }
       markImportDone(workspaceId);
       setPendingImport([]);
-      await refreshList();
+      await refreshList({ background: true });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Import failed.");
     } finally {
@@ -464,8 +463,8 @@ export function SopList() {
         }}
       />
 
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="ui-section-title">SOPs</h1>
             <p className="ui-section-subtitle">
@@ -515,11 +514,15 @@ export function SopList() {
         {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
         {listStatus === "ready" && activeSops.length > 0 ? (
-          <div className="flex items-center gap-2 border-b border-line pb-2 focus-within:border-ink/40">
-            <Search size={14} className="shrink-0 text-ink-tertiary" strokeWidth={1.75} />
+          <div className="relative max-w-sm">
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
+              strokeWidth={1.75}
+            />
             <input
               type="search"
-              className="min-w-0 flex-1 bg-transparent text-[13px] font-normal text-ink outline-none placeholder:text-ink-tertiary"
+              className="ui-field-standalone h-9 w-full pl-9 pr-3 font-normal"
               placeholder="Search by SOP number or title"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -548,55 +551,31 @@ export function SopList() {
         ) : null}
 
         {listStatus === "loading" ? (
-          <section className="ui-panel flex items-center justify-center px-4 py-10">
+          <section className="flex min-h-40 items-center justify-center border-t border-line px-4">
             <Loader2 size={18} className="animate-spin text-ink-tertiary" />
           </section>
         ) : listStatus === "error" ? (
-          <section className="ui-panel px-4 py-10 text-center">
+          <section className="flex min-h-40 flex-col items-center justify-center border-t border-line px-4 text-center">
             <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load SOPs."}</p>
             <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
               Retry
             </button>
           </section>
         ) : activeSops.length === 0 ? (
-          <section className="ui-panel px-4 py-10 text-center">
+          <section className="flex min-h-40 flex-col items-center justify-center border-t border-line px-4 text-center">
             <FileText size={20} className="mx-auto text-ink-tertiary" />
             <p className="mt-2 ui-section-subtitle text-ink-tertiary">
               No draft SOPs. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
             </p>
           </section>
         ) : filteredSops.length === 0 ? (
-          <section className="ui-panel px-4 py-10 text-center">
+          <section className="flex min-h-40 items-center justify-center border-t border-line px-4 text-center">
             <p className="ui-section-subtitle text-ink-tertiary">No SOPs match &ldquo;{query.trim()}&rdquo;.</p>
           </section>
         ) : (
-          <div className="space-y-8">
-            {groups.map((group) => {
-              const name =
-                group.department?.name ?? (group.key === "unassigned" ? "Unassigned" : "Unknown department");
-              const accent = departmentAccent(group.department?.code ?? group.key);
-              const count = group.sops.length;
-              const showReviewStatus = group.sops.some((sop) => sop.status === "in_review");
-
-              return (
-                <section key={group.key} className="space-y-2.5">
-                  <div className="flex items-baseline justify-between gap-3 px-0.5">
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: accent }}
-                        aria-hidden
-                      />
-                      <h2 className="truncate text-[15px] font-semibold tracking-tight text-ink">{name}</h2>
-                    </div>
-                    <span className="shrink-0 text-[12px] tabular-nums text-ink-tertiary">
-                      {count} {count === 1 ? "SOP" : "SOPs"}
-                    </span>
-                  </div>
-
-                  <div className="overflow-hidden rounded-xl border border-line bg-surface">
-                    <div className="ui-table-scroll">
-                      <table className={`w-full border-collapse text-left ${showReviewStatus ? "min-w-[780px]" : "min-w-[680px]"}`}>
+          <div className="overflow-hidden border-y border-line bg-surface">
+            <div className="ui-table-scroll">
+              <table className={`w-full border-collapse text-left ${showReviewStatus ? "min-w-[780px]" : "min-w-[680px]"}`}>
                         <thead>
                           <tr className="border-b border-line">
                             <th className="w-36 px-5 py-3 text-[11px] font-medium text-ink-secondary">Number</th>
@@ -610,14 +589,27 @@ export function SopList() {
                           </tr>
                         </thead>
                         <tbody>
-                          {count === 0 ? (
-                            <tr>
-                              <td colSpan={showReviewStatus ? 6 : 5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
-                                No SOPs yet
-                              </td>
-                            </tr>
-                          ) : (
-                            group.sops.map((sop) => {
+                          {groups.map((group) => {
+                            const name =
+                              group.department?.name ??
+                              (group.key === "unassigned" ? "Unassigned" : "Unknown department");
+                            const count = group.sops.length;
+                            return (
+                              <Fragment key={group.key}>
+                                <tr className="border-b border-line bg-canvas/70">
+                                  <th
+                                    colSpan={showReviewStatus ? 6 : 5}
+                                    className="px-5 py-2.5 text-left"
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <span className="truncate text-sm font-semibold text-ink">{name}</span>
+                                      <span className="shrink-0 text-xs font-normal tabular-nums text-ink-tertiary">
+                                        {count} {count === 1 ? "SOP" : "SOPs"}
+                                      </span>
+                                    </div>
+                                  </th>
+                                </tr>
+                                {group.sops.map((sop) => {
                               const processState = getSopProcessState(sop);
                               const flag = reviewFlag(sop.nextReviewDate);
                               const rowReviewResults = reviewResults.get(sop.id) ?? [];
@@ -654,7 +646,7 @@ export function SopList() {
                                     href={editorHref}
                                     target={openInNewTab ? "_blank" : undefined}
                                     rel={openInNewTab ? "noopener noreferrer" : undefined}
-                                    className="font-mono text-[12px] tracking-wide text-ink-secondary hover:text-ink"
+                                    className="text-xs font-medium text-ink-secondary hover:text-ink"
                                   >
                                     {sop.sopNumber || "—"}
                                   </Link>
@@ -676,7 +668,7 @@ export function SopList() {
                                 </td>
                                 <td className="px-5 py-3.5 align-middle">
                                   <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">
-                                    <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-medium text-ink-secondary">
+                                    <span className="inline-flex shrink-0 items-center rounded bg-surface-muted px-2 py-1 text-[11px] font-medium text-ink-secondary">
                                       {SOP_PROCESS_STATE_LABELS[processState]}
                                     </span>
                                   </div>
@@ -742,17 +734,14 @@ export function SopList() {
                                   </div>
                                 </td>
                                 </tr>
-                              );
-                            })
-                          )}
+                                  );
+                                })}
+                              </Fragment>
+                            );
+                          })}
                         </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </section>
-              );
-            })}
-
+              </table>
+            </div>
           </div>
         )}
       </div>

@@ -3637,6 +3637,38 @@ body {
     background-color: transparent;
   }
 
+  /* An emptied field must LOOK empty while it's being edited: several placeholders are
+     value-like ("1.0", "QMS"), and at near-text contrast they read as content that refused
+     to delete. Ghost the hint hard, and hide it entirely while the field is focused — the
+     field-hint tooltip already shows the example during editing. */
+  .sop-editor .ui-field-standalone::placeholder {
+    color: color-mix(in srgb, var(--color-ink-tertiary) 45%, transparent);
+    font-style: italic;
+  }
+
+  .sop-editor .ui-field-standalone:focus::placeholder {
+    color: transparent;
+  }
+
+  /* Review remarks are prose, not identifiers. Keep the compact field shell while
+     using the document font, normal weight, and comfortable reading rhythm. */
+  .sop-review-remark-field {
+    font-family: var(--type-sans);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: 1.55;
+    letter-spacing: 0;
+    height: auto;
+    padding: 0.625rem 0.75rem;
+    box-shadow: none;
+  }
+
+  .sop-review-remark-field::placeholder {
+    font-family: var(--type-sans);
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+
   /* Softer labels: calm sentence-case sans instead of hard uppercase mono. */
   .sop-editor .ui-field-label,
   .sop-editor .ui-mono-label {

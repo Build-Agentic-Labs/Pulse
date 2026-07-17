@@ -3,7 +3,7 @@
 import { Building2, ChevronDown, Flag, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
-import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
+import { standardPositionTitlesForDepartment, type Department, type DepartmentMember, type DeptRole } from "@/domain/departments";
 import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
 import type { MemberAccess } from "@/domain/types";
 import {
@@ -13,6 +13,7 @@ import {
   removeMember,
   saveDepartment,
   setMember,
+  setMemberPosition,
 } from "@/lib/departments/store";
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
 
@@ -194,7 +195,7 @@ export function DepartmentsAdmin() {
           />
         ) : null}
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_440px]">
           <section className="ui-panel overflow-hidden">
             {status === "loading" ? (
               <div className="flex items-center justify-center px-4 py-12">
@@ -428,6 +429,24 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
     }
   }
 
+  async function handlePositionChange(userId: string, positionTitle: string) {
+    const previous = members;
+    setBusyUserId(userId);
+    setMembers((current) => current.map((member) =>
+      member.userId === userId ? { ...member, positionTitle } : member
+    ));
+    try {
+      await setMemberPosition(department.id, userId, positionTitle);
+    } catch (caught) {
+      setMembers(previous);
+      onError(messageFrom(caught, "Could not save the member's position."));
+    } finally {
+      setBusyUserId(null);
+    }
+  }
+
+  const positionOptions = standardPositionTitlesForDepartment(department.code);
+
   async function handleAdd() {
     const userId = pick.trim();
     if (!userId) return;
@@ -464,7 +483,12 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
 
   return (
     <div className="space-y-3">
-      <div className="ui-mono-label text-ink-secondary">Members &amp; roles</div>
+      <div>
+        <div className="ui-mono-label text-ink-secondary">People, positions &amp; SOP access</div>
+        <p className="ui-section-subtitle mt-1 text-ink-tertiary">
+          Position is the employee&rsquo;s job title. SOP access controls what they can do in the workflow.
+        </p>
+      </div>
 
       {status === "loading" ? (
         <div className="flex items-center gap-2 py-2 ui-section-subtitle text-ink-tertiary">
@@ -476,20 +500,59 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
       ) : (
         <ul className="space-y-2">
           {members.map((member) => (
-            <li key={member.userId} className="flex items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm text-ink" title={member.userId}>
-                  {labelFor(member.userId)}
+            <li key={member.userId} className="rounded-md border border-line p-3">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-ink" title={member.userId}>
+                    {labelFor(member.userId)}
+                  </div>
+                  {emailFor(member.userId) ? (
+                    <div className="ui-mono-label truncate text-ink-tertiary">{emailFor(member.userId)}</div>
+                  ) : null}
                 </div>
-                {emailFor(member.userId) ? (
-                  <div className="ui-mono-label truncate text-ink-tertiary">{emailFor(member.userId)}</div>
+                {manage ? (
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger disabled:opacity-50"
+                    title="Remove member"
+                    disabled={busyUserId === member.userId}
+                    onClick={() => void handleRemove(member.userId)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 ) : null}
               </div>
               {manage ? (
-                <>
-                  <div className="relative shrink-0">
+                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_128px]">
+                  <label className="block min-w-0">
+                    <span className="ui-mono-label mb-1 block text-ink-tertiary">Position / job title</span>
+                    <div className="relative">
+                      <select
+                        className="ui-field-standalone h-8 w-full cursor-pointer appearance-none pl-2.5 pr-7 text-xs shadow-none transition-colors hover:border-border-strong focus:border-border-strong disabled:opacity-50"
+                        value={member.positionTitle}
+                        disabled={busyUserId === member.userId}
+                        onChange={(event) => void handlePositionChange(member.userId, event.target.value)}
+                      >
+                        <option value="">Select a position…</option>
+                        {member.positionTitle && !positionOptions.includes(member.positionTitle) ? (
+                          <option value={member.positionTitle}>{member.positionTitle} (existing)</option>
+                        ) : null}
+                        {positionOptions.map((positionTitle) => (
+                          <option key={positionTitle} value={positionTitle}>{positionTitle}</option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        strokeWidth={2}
+                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+                      />
+                    </div>
+                  </label>
+                  <label className="block">
+                    <span className="ui-mono-label mb-1 block text-ink-tertiary">SOP access</span>
+                    <div className="relative">
                     <select
-                      className="ui-field-standalone h-8 w-28 cursor-pointer appearance-none pl-2.5 pr-7 text-xs shadow-none transition-colors hover:border-border-strong focus:border-border-strong disabled:opacity-50"
+                      className="ui-field-standalone h-8 w-full cursor-pointer appearance-none pl-2.5 pr-7 text-xs shadow-none transition-colors hover:border-border-strong focus:border-border-strong disabled:opacity-50"
                       value={member.deptRole}
                       disabled={busyUserId === member.userId}
                       onChange={(event) => void handleRoleChange(member.userId, event.target.value as DeptRole)}
@@ -506,18 +569,13 @@ function MembersPanel({ department, manage, directory, onError, onCountChange }:
                       className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
                     />
                   </div>
-                  <button
-                    type="button"
-                    className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger disabled:opacity-50"
-                    title="Remove member"
-                    disabled={busyUserId === member.userId}
-                    onClick={() => void handleRemove(member.userId)}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </>
+                  </label>
+                </div>
               ) : (
-                <span className="ui-chip shrink-0">{member.deptRole}</span>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-ink-secondary">{member.positionTitle || "Position not assigned"}</span>
+                  <span className="ui-chip shrink-0">{member.deptRole}</span>
+                </div>
               )}
             </li>
           ))}

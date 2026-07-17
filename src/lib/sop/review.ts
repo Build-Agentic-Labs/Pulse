@@ -6,13 +6,15 @@
  */
 
 import type { SopStatus } from "@/domain/sop/schema";
+import { parseSignatureStrokes, type SignatureStrokes } from "@/domain/sop/signature";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { SopConflictError } from "./store";
 
 const CONTROL_COLUMNS =
   "id, workspace_id, department_id, status, sop_number, doc_type, version, major_version, minor_version, " +
   "submitted_by, approved_by, approved_at, effective_date, next_review_date, effective_revision_id, " +
-  "rejected_reason, created_by, updated_at, content_hash, review_cycle, revision_reason";
+  "rejected_reason, created_by, updated_at, content_hash, review_cycle, revision_reason, self_review_test, " +
+  "final_approval_requested_at, final_approval_content_hash, final_approval_requested_by";
 
 export interface SopControl {
   id: string;
@@ -36,6 +38,11 @@ export interface SopControl {
   /** Bumps on every revision (effective → draft). Signatures bind to this too. */
   reviewCycle: number;
   revisionReason: string | null;
+  /** Temporary, per-SOP flow-test bypass for a sole author/reviewer. */
+  selfReviewTest: boolean;
+  finalApprovalRequestedAt: string | null;
+  finalApprovalContentHash: string | null;
+  finalApprovalRequestedBy: string | null;
 }
 
 export type SignatureMeaning =
@@ -71,6 +78,13 @@ export interface SopSignature {
   resolvesSignatureId: string | null;
   /** The document hash this signature is bound to. Compare against SopControl.contentHash. */
   signedContentHash: string;
+  /** Immutable snapshot of the signer's saved handwritten signature at signing time. */
+  signatureStrokes: SignatureStrokes;
+}
+
+export interface UserSignatureProfile {
+  strokes: SignatureStrokes;
+  updatedAt: string;
 }
 
 /** One responsible department and the single person designated to sign for it. */
@@ -88,6 +102,15 @@ export interface SopRevisionSummary {
   contentHash: string;
   createdAt: string;
   createdBy: string | null;
+}
+
+export interface HistoricalSopRevision {
+  id: string;
+  sopId: string;
+  sopNumber: string;
+  title: string;
+  versionLabel: string;
+  createdAt: string;
 }
 
 async function throwIfError<T>(
@@ -119,7 +142,22 @@ function mapControl(row: Record<string, unknown>): SopControl {
     contentHash: (row.content_hash as string | null) ?? null,
     reviewCycle: Number(row.review_cycle ?? 0),
     revisionReason: (row.revision_reason as string | null) ?? null,
+    selfReviewTest: Boolean(row.self_review_test),
+    finalApprovalRequestedAt: (row.final_approval_requested_at as string | null) ?? null,
+    finalApprovalContentHash: (row.final_approval_content_hash as string | null) ?? null,
+    finalApprovalRequestedBy: (row.final_approval_requested_by as string | null) ?? null,
   };
+}
+
+/** Enable the narrow solo-author review path after its roster has been validated by the DB. */
+export async function enableSopSelfReviewTest(sopId: string): Promise<void> {
+  const supabase = createPlannerSupabaseClient();
+  await throwIfError(supabase.rpc("enable_sop_self_review_test", { p_sop: sopId }));
+}
+
+export async function requestSopFinalApproval(sopId: string): Promise<void> {
+  const supabase = createPlannerSupabaseClient();
+  await throwIfError(supabase.rpc("request_sop_final_approval", { p_sop: sopId }));
 }
 
 export async function getSopControl(id: string): Promise<SopControl | undefined> {
@@ -128,6 +166,15 @@ export async function getSopControl(id: string): Promise<SopControl | undefined>
     supabase.from("sops").select(CONTROL_COLUMNS).eq("id", id).is("deleted_at", null).maybeSingle(),
   );
   return row ? mapControl(row as unknown as Record<string, unknown>) : undefined;
+}
+
+/** The system-recorded author name, exposed without granting broad colleague profile access. */
+export async function getSopAuthorDisplayName(sopId: string): Promise<string> {
+  const supabase = createPlannerSupabaseClient();
+  const value = await throwIfError(
+    supabase.rpc("sop_author_display_name", { p_sop: sopId }),
+  );
+  return String(value ?? "").trim();
 }
 
 /** Mint the next DEPT-TYPE-NNN number for a department (transactional, DB-authorized). */
@@ -176,6 +223,37 @@ export async function signSop(
   return String(value);
 }
 
+export async function getMySignatureProfile(): Promise<UserSignatureProfile | null> {
+  const supabase = createPlannerSupabaseClient();
+  const row = await throwIfError(
+    supabase.from("user_signature_profiles").select("signature_strokes, updated_at").maybeSingle(),
+  );
+  if (!row) return null;
+  return {
+    strokes: parseSignatureStrokes((row as Record<string, unknown>).signature_strokes),
+    updatedAt: String((row as Record<string, unknown>).updated_at ?? ""),
+  };
+}
+
+export async function saveMySignatureProfile(strokes: SignatureStrokes): Promise<UserSignatureProfile> {
+  const supabase = createPlannerSupabaseClient();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError) throw new Error(userError.message);
+  const userId = userData.user?.id;
+  if (!userId) throw new Error("Sign in before saving a signature.");
+  const row = await throwIfError(
+    supabase
+      .from("user_signature_profiles")
+      .upsert({ user_id: userId, signature_strokes: strokes }, { onConflict: "user_id" })
+      .select("signature_strokes, updated_at")
+      .single(),
+  );
+  return {
+    strokes: parseSignatureStrokes((row as Record<string, unknown>).signature_strokes),
+    updatedAt: String((row as Record<string, unknown>).updated_at ?? ""),
+  };
+}
+
 /** A seat this user holds, with just enough of its SOP to render a queue row. */
 export interface MySeatItem {
   sopId: string;
@@ -186,6 +264,8 @@ export interface MySeatItem {
   version: string;
   status: SopStatus;
   contentHash: string | null;
+  finalApprovalRequestedAt: string | null;
+  finalApprovalContentHash: string | null;
   reviewCycle: number;
   updatedAt: string;
 }
@@ -201,7 +281,7 @@ export async function listMySeats(workspaceId: string, userId: string): Promise<
     supabase
       .from("sop_review_seats")
       .select(
-        "sop_id, department_id, rasic, sops!inner(id, workspace_id, title, sop_number, version, status, content_hash, review_cycle, updated_at, deleted_at)",
+        "sop_id, department_id, rasic, sops!inner(id, workspace_id, title, sop_number, version, status, content_hash, review_cycle, updated_at, deleted_at, final_approval_requested_at, final_approval_content_hash)",
       )
       .eq("signer_id", userId)
       .eq("sops.workspace_id", workspaceId)
@@ -218,6 +298,8 @@ export async function listMySeats(workspaceId: string, userId: string): Promise<
       version: String(sop.version ?? ""),
       status: sop.status as SopStatus,
       contentHash: (sop.content_hash as string | null) ?? null,
+      finalApprovalRequestedAt: (sop.final_approval_requested_at as string | null) ?? null,
+      finalApprovalContentHash: (sop.final_approval_content_hash as string | null) ?? null,
       reviewCycle: Number(sop.review_cycle ?? 0),
       updatedAt: String(sop.updated_at ?? ""),
     };
@@ -233,7 +315,7 @@ export async function listMySignaturesFor(sopIds: readonly string[], userId: str
     supabase
       .from("sop_signatures")
       .select(
-        "id, signer_id, signer_printed_name, meaning, rejected_reason, signed_at, seat_department_id, review_cycle, resolves_signature_id, signed_content_hash",
+        "id, signer_id, signer_printed_name, meaning, rejected_reason, signed_at, seat_department_id, review_cycle, resolves_signature_id, signed_content_hash, signature_strokes",
       )
       .in("sop_id", unique)
       .eq("signer_id", userId),
@@ -249,6 +331,7 @@ export async function listMySignaturesFor(sopIds: readonly string[], userId: str
     reviewCycle: Number(row.review_cycle ?? 0),
     resolvesSignatureId: (row.resolves_signature_id as string | null) ?? null,
     signedContentHash: String(row.signed_content_hash ?? ""),
+    signatureStrokes: parseSignatureStrokes(row.signature_strokes),
   }));
 }
 
@@ -365,7 +448,7 @@ export async function listSignatures(sopId: string): Promise<SopSignature[]> {
       // Must stay a single string literal: supabase-js parses it at the type level, and a
       // concatenated expression degrades the row type to GenericStringError.
       .select(
-        "id, signer_id, signer_printed_name, meaning, rejected_reason, signed_at, seat_department_id, review_cycle, resolves_signature_id, signed_content_hash",
+        "id, signer_id, signer_printed_name, meaning, rejected_reason, signed_at, seat_department_id, review_cycle, resolves_signature_id, signed_content_hash, signature_strokes",
       )
       .eq("sop_id", sopId)
       .order("signed_at", { ascending: true }),
@@ -381,6 +464,7 @@ export async function listSignatures(sopId: string): Promise<SopSignature[]> {
     reviewCycle: Number(row.review_cycle ?? 0),
     resolvesSignatureId: (row.resolves_signature_id as string | null) ?? null,
     signedContentHash: String(row.signed_content_hash ?? ""),
+    signatureStrokes: parseSignatureStrokes(row.signature_strokes),
   }));
 }
 
@@ -440,4 +524,37 @@ export async function listRevisions(sopId: string): Promise<SopRevisionSummary[]
     createdAt: String(row.created_at ?? ""),
     createdBy: (row.created_by as string | null) ?? null,
   }));
+}
+
+/**
+ * Frozen versions superseded by a later release. The current effective revision is excluded;
+ * only list metadata crosses this boundary, so the Retired surface cannot open or download the
+ * immutable document payload.
+ */
+export async function listHistoricalRevisions(workspaceId: string): Promise<HistoricalSopRevision[]> {
+  const supabase = createPlannerSupabaseClient();
+  const rows = await throwIfError(
+    supabase
+      .from("sop_revisions")
+      .select(
+        "id, sop_id, version_label, created_at, parent:sops!sop_revisions_sop_id_fkey!inner(sop_number, title, effective_revision_id, deleted_at)",
+      )
+      .eq("workspace_id", workspaceId)
+      .is("parent.deleted_at", null)
+      .order("created_at", { ascending: false }),
+  );
+
+  return (rows ?? []).flatMap((row: Record<string, unknown>) => {
+    const relation = row.parent;
+    const parent = (Array.isArray(relation) ? relation[0] : relation) as Record<string, unknown> | undefined;
+    if (!parent || String(parent.effective_revision_id ?? "") === String(row.id)) return [];
+    return [{
+      id: String(row.id),
+      sopId: String(row.sop_id),
+      sopNumber: String(parent.sop_number ?? ""),
+      title: String(parent.title ?? ""),
+      versionLabel: String(row.version_label ?? ""),
+      createdAt: String(row.created_at ?? ""),
+    }];
+  });
 }

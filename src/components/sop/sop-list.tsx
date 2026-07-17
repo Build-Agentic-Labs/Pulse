@@ -1,15 +1,17 @@
 "use client";
 
-import { FileText, Loader2, Plus, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { FileText, Loader2, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import type { Department } from "@/domain/departments";
-import { SOP_STATUS_LABELS, type Sop } from "@/domain/sop/schema";
+import { DEFAULT_DOC_TYPE } from "@/domain/sop/authoring";
+import { getSopProcessState, SOP_PROCESS_STATE_LABELS } from "@/domain/sop/process-state";
+import type { Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
-import { listDepartments } from "@/lib/departments/store";
-import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { listDepartments, listMyDepartments } from "@/lib/departments/store";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import {
   deleteSop,
   listSops,
@@ -18,6 +20,13 @@ import {
   sopFromExtraction,
   type SopListItem,
 } from "@/lib/sop/store";
+import { listProfileNames, listSeats, mintSopNumber } from "@/lib/sop/review";
+import {
+  listSopReviewAnnotations,
+  listSopReviewSubmissions,
+  type SopReviewAnnotation,
+  type SopReviewSubmission,
+} from "@/lib/sop/review-annotations";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { useSopWorkspace } from "./sop-workspace-provider";
 
@@ -71,6 +80,31 @@ function markImportDone(workspaceId: string) {
   }
 }
 
+const REVIEW_FEEDBACK_LABELS: Record<string, string> = {
+  document: "Document control",
+  purpose: "Purpose",
+  scope: "Scope",
+  definitions: "Definitions",
+  responsible: "Responsible parties",
+  references: "References",
+  measurements: "Measurements",
+  procedure: "Procedure & process flow",
+  annexes: "Annexes & forms",
+  history: "Change history",
+  overall: "Overall remarks",
+};
+
+interface ReviewParticipant {
+  userId: string;
+  name: string;
+}
+
+function reviewerInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+}
+
 export function SopList() {
   const router = useRouter();
   const confirm = useConfirm();
@@ -85,49 +119,112 @@ export function SopList() {
   const [pendingImport, setPendingImport] = useState<Sop[]>([]);
   const [importing, setImporting] = useState(false);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [convertDepartments, setConvertDepartments] = useState<Department[] | null>(null);
+  const [convertDepartmentId, setConvertDepartmentId] = useState("");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [reviewResults, setReviewResults] = useState<Map<string, SopReviewSubmission[]>>(new Map());
+  const [reviewParticipants, setReviewParticipants] = useState<Map<string, ReviewParticipant[]>>(new Map());
+  const [feedbackSop, setFeedbackSop] = useState<SopListItem | null>(null);
+  const [feedbackAnnotations, setFeedbackAnnotations] = useState<SopReviewAnnotation[]>([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
   const converting = convert !== null;
 
-  const refreshList = useCallback(async () => {
+  const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) {
       setSops([]);
+      setCurrentUserId(null);
+      setReviewResults(new Map());
+      setReviewParticipants(new Map());
       setListStatus("ready");
       return [] as SopListItem[];
     }
-    setListStatus("loading");
-    setError("");
+    if (!options.background) {
+      setListStatus("loading");
+      setError("");
+    }
     try {
       const next = await listSops(workspaceId);
+      const supabase = createPlannerSupabaseClient();
+      const userResult = await getUserFromSession(supabase);
+      const userId = userResult.data.user?.id ?? null;
+      const authored = userId ? next.filter((sop) => sop.createdBy === userId) : [];
+      const authoredInReview = authored.filter((sop) => sop.status === "in_review");
+      const [submissions, seatGroups] = await Promise.all([
+        listSopReviewSubmissions(authored.map((sop) => sop.id)),
+        Promise.all(authoredInReview.map(async (sop) => ({ sopId: sop.id, seats: await listSeats(sop.id) }))),
+      ]);
+      const profileNames = await listProfileNames(
+        seatGroups.flatMap(({ seats }) => seats.flatMap((seat) => seat.signerId ? [seat.signerId] : [])),
+      );
+      const bySop = new Map<string, SopReviewSubmission[]>();
+      for (const submission of submissions) {
+        const sop = authored.find((item) => item.id === submission.sopId);
+        if (
+          !sop ||
+          submission.reviewCycle !== sop.reviewCycle ||
+          submission.contentHash !== (sop.contentHash ?? "")
+        ) continue;
+        bySop.set(submission.sopId, [...(bySop.get(submission.sopId) ?? []), submission]);
+      }
+      const participantsBySop = new Map<string, ReviewParticipant[]>();
+      for (const { sopId, seats } of seatGroups) {
+        const unique = new Map<string, ReviewParticipant>();
+        for (const seat of seats) {
+          if (!seat.signerId || unique.has(seat.signerId)) continue;
+          unique.set(seat.signerId, {
+            userId: seat.signerId,
+            name: profileNames.get(seat.signerId) || "Assigned reviewer",
+          });
+        }
+        participantsBySop.set(sopId, Array.from(unique.values()));
+      }
       setSops(next);
+      setCurrentUserId(userId);
+      setReviewResults(bySop);
+      setReviewParticipants(participantsBySop);
       setListStatus("ready");
       return next;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load SOPs.");
-      setListStatus("error");
+      if (!options.background) {
+        setError(caught instanceof Error ? caught.message : "Could not load SOPs.");
+        setListStatus("error");
+      }
       return [] as SopListItem[];
     }
   }, [workspaceId]);
 
+  const activeSops = useMemo(
+    () => sops.filter(
+      (sop) => sop.status === "draft" || sop.status === "in_review" || sop.status === "approved",
+    ),
+    [sops],
+  );
+  const memberDepartmentIds = useMemo(
+    () => new Set((convertDepartments ?? []).map((department) => department.id)),
+    [convertDepartments],
+  );
+
   const filteredSops = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return sops;
-    return sops.filter(
+    if (!needle) return activeSops;
+    return activeSops.filter(
       (sop) => sop.title.toLowerCase().includes(needle) || sop.sopNumber.toLowerCase().includes(needle),
     );
-  }, [sops, query]);
+  }, [activeSops, query]);
 
   const groups = useMemo(() => {
     const byDept = new Map<string, SopListItem[]>();
-    const unassigned: SopListItem[] = [];
     for (const sop of filteredSops) {
-      if (!sop.departmentId) {
-        unassigned.push(sop);
-        continue;
-      }
+      if (!sop.departmentId) continue;
       const list = byDept.get(sop.departmentId) ?? [];
       list.push(sop);
       byDept.set(sop.departmentId, list);
     }
-    const ordered: { key: string; department: Department | null; sops: SopListItem[] }[] = departments.map(
+    const visibleDepartments = departments.filter(
+      (department) => department.code.trim().toUpperCase() !== "UNA" && department.name.trim().toLowerCase() !== "unassigned",
+    );
+    const ordered: { key: string; department: Department | null; sops: SopListItem[] }[] = visibleDepartments.map(
       (department) => ({
         key: department.id,
         department,
@@ -137,9 +234,6 @@ export function SopList() {
     for (const [departmentId, list] of byDept) {
       if (departments.some((dept) => dept.id === departmentId)) continue;
       ordered.push({ key: departmentId, department: null, sops: list });
-    }
-    if (unassigned.length > 0 || departments.length === 0) {
-      ordered.push({ key: "unassigned", department: null, sops: unassigned });
     }
     if (query.trim()) {
       return ordered.filter((group) => group.sops.length > 0);
@@ -157,6 +251,34 @@ export function SopList() {
       })
       .catch(() => {
         /* non-fatal: the list still works without department grouping */
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  // Conversion ownership follows the converter's explicit department membership, matching
+  // new-SOP authoring. One department is automatic; several are selected in the toolbar.
+  useEffect(() => {
+    if (!workspaceId) {
+      setConvertDepartments([]);
+      setConvertDepartmentId("");
+      return;
+    }
+    let active = true;
+    setConvertDepartments(null);
+    void listMyDepartments(workspaceId)
+      .then((rows) => {
+        if (!active) return;
+        setConvertDepartments(rows);
+        setConvertDepartmentId((current) =>
+          rows.some((department) => department.id === current) ? current : (rows[0]?.id ?? ""),
+        );
+      })
+      .catch(() => {
+        if (!active) return;
+        setConvertDepartments([]);
+        setConvertDepartmentId("");
       });
     return () => {
       active = false;
@@ -181,16 +303,46 @@ export function SopList() {
     };
   }, [refreshList, workspaceId, editable]);
 
+  // Workflow actions often finish in another tab (review/signature workspaces). Refresh this
+  // list as soon as the user returns, with a visible-tab interval as a fallback for long-lived
+  // list tabs. Background refreshes preserve the current table instead of flashing a loader.
+  useEffect(() => {
+    if (!workspaceId) return;
+
+    const refreshInBackground = () => {
+      if (document.visibilityState === "visible") void refreshList({ background: true });
+    };
+    const interval = window.setInterval(refreshInBackground, 15_000);
+    window.addEventListener("focus", refreshInBackground);
+    document.addEventListener("visibilitychange", refreshInBackground);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshInBackground);
+      document.removeEventListener("visibilitychange", refreshInBackground);
+    };
+  }, [refreshList, workspaceId]);
+
   async function handleUpload(file: File) {
     if (!workspaceId) return;
     setConvert({ fileName: file.name, phase: "working" });
     setError("");
     try {
+      const owningDepartment = convertDepartments?.find(
+        (department) => department.id === convertDepartmentId,
+      );
+      if (!owningDepartment) {
+        throw new Error("Choose one of your departments before converting this SOP.");
+      }
+
       const supabase = createPlannerSupabaseClient();
-      const { data: sessionData } = await supabase.auth.getSession();
+      // Conversion calls our own API route with an explicit bearer token. Unlike normal
+      // Supabase queries, that fetch cannot auto-refresh a cached token after it is attached,
+      // so refresh immediately before starting the long upload/extraction request.
+      const { data: sessionData, error: refreshError } = await supabase.auth.refreshSession();
       const accessToken = sessionData.session?.access_token;
-      if (!accessToken) {
-        throw new Error("Sign in before converting SOPs.");
+      if (refreshError || !accessToken) {
+        throw new Error("Your session expired. Sign in again, then retry the conversion.");
       }
 
       const body = new FormData();
@@ -205,11 +357,18 @@ export function SopList() {
         throw new Error(payload.error || "Conversion failed.");
       }
       const created = sopFromExtraction(payload.sop);
-      await saveSop(created, workspaceId);
+      // The uploaded document's number is legacy source content. Converted SOPs enter this
+      // system under the converter's department sequence, just like hand-authored SOPs.
+      const sopNumber = await mintSopNumber(workspaceId, owningDepartment.id, DEFAULT_DOC_TYPE);
+      const numbered = { ...created, meta: { ...created.meta, sopNumber } };
+      await saveSop(numbered, workspaceId, {
+        departmentId: owningDepartment.id,
+        docType: DEFAULT_DOC_TYPE,
+      });
       // Flip the overlay to its completed state for a beat before opening the editor.
       setConvert((current) => (current ? { ...current, phase: "done" } : current));
       await new Promise((resolve) => setTimeout(resolve, 700));
-      router.push(`/sops/${created.id}`);
+      router.push(`/sops/${created.id}?converted=1`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Conversion failed.");
       setConvert(null);
@@ -240,13 +399,37 @@ export function SopList() {
     }
   }
 
+  async function openFeedback(sop: SopListItem) {
+    setFeedbackSop(sop);
+    setFeedbackAnnotations([]);
+    setFeedbackError("");
+    setFeedbackLoading(true);
+    try {
+      const annotations = await listSopReviewAnnotations(sop.id);
+      setFeedbackAnnotations(annotations.filter((item) => item.reviewCycle === sop.reviewCycle && !item.resolvedAt));
+    } catch (caught) {
+      setFeedbackError(caught instanceof Error ? caught.message : "Could not load the review feedback.");
+    } finally {
+      setFeedbackLoading(false);
+    }
+  }
+
   async function handleImport() {
     if (!workspaceId || pendingImport.length === 0) return;
     setImporting(true);
     setError("");
     try {
+      const owningDepartment = convertDepartments?.find(
+        (department) => department.id === convertDepartmentId,
+      );
+      if (!owningDepartment) {
+        throw new Error("Choose one of your departments before importing SOPs.");
+      }
       for (const sop of pendingImport) {
-        await saveSop(sop, workspaceId);
+        await saveSop(sop, workspaceId, {
+          departmentId: owningDepartment.id,
+          docType: DEFAULT_DOC_TYPE,
+        });
       }
       markImportDone(workspaceId);
       setPendingImport([]);
@@ -291,11 +474,32 @@ export function SopList() {
           </div>
           {editable ? (
             <div className="flex items-center gap-2">
+              {convertDepartments && convertDepartments.length > 1 ? (
+                <select
+                  className="ui-field-standalone h-9 w-auto min-w-44"
+                  value={convertDepartmentId}
+                  disabled={converting}
+                  onChange={(event) => setConvertDepartmentId(event.target.value)}
+                  aria-label="Owning department for converted SOP"
+                  title="Owning department"
+                >
+                  {convertDepartments.map((department) => (
+                    <option key={department.id} value={department.id}>
+                      {department.code} · {department.name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <button
                 type="button"
                 className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-50"
-                disabled={converting || !workspaceId}
+                disabled={converting || !workspaceId || !convertDepartmentId}
                 onClick={() => fileInputRef.current?.click()}
+                title={
+                  convertDepartments?.length === 0
+                    ? "Join a department before converting SOPs"
+                    : "Convert an existing document"
+                }
               >
                 {converting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                 {converting ? "Converting…" : "Convert"}
@@ -310,7 +514,7 @@ export function SopList() {
 
         {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
-        {listStatus === "ready" && sops.length > 0 ? (
+        {listStatus === "ready" && activeSops.length > 0 ? (
           <div className="flex items-center gap-2 border-b border-line pb-2 focus-within:border-ink/40">
             <Search size={14} className="shrink-0 text-ink-tertiary" strokeWidth={1.75} />
             <input
@@ -354,11 +558,11 @@ export function SopList() {
               Retry
             </button>
           </section>
-        ) : sops.length === 0 ? (
+        ) : activeSops.length === 0 ? (
           <section className="ui-panel px-4 py-10 text-center">
             <FileText size={20} className="mx-auto text-ink-tertiary" />
             <p className="mt-2 ui-section-subtitle text-ink-tertiary">
-              No SOPs yet. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
+              No draft SOPs. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
             </p>
           </section>
         ) : filteredSops.length === 0 ? (
@@ -372,6 +576,7 @@ export function SopList() {
                 group.department?.name ?? (group.key === "unassigned" ? "Unassigned" : "Unknown department");
               const accent = departmentAccent(group.department?.code ?? group.key);
               const count = group.sops.length;
+              const showReviewStatus = group.sops.some((sop) => sop.status === "in_review");
 
               return (
                 <section key={group.key} className="space-y-2.5">
@@ -391,26 +596,54 @@ export function SopList() {
 
                   <div className="overflow-hidden rounded-xl border border-line bg-surface">
                     <div className="ui-table-scroll">
-                      <table className="w-full min-w-[680px] border-collapse text-left">
+                      <table className={`w-full border-collapse text-left ${showReviewStatus ? "min-w-[780px]" : "min-w-[680px]"}`}>
                         <thead>
                           <tr className="border-b border-line">
                             <th className="w-36 px-5 py-3 text-[11px] font-medium text-ink-secondary">Number</th>
                             <th className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Title</th>
                             <th className="w-32 px-5 py-3 text-[11px] font-medium text-ink-secondary">Status</th>
                             <th className="w-28 px-5 py-3 text-[11px] font-medium text-ink-secondary">Updated</th>
+                            {showReviewStatus ? (
+                              <th className="w-36 px-3 py-3 text-[11px] font-medium text-ink-secondary">Review Status</th>
+                            ) : null}
                             <th className="w-24 px-3 py-3"><span className="sr-only">Actions</span></th>
                           </tr>
                         </thead>
                         <tbody>
                           {count === 0 ? (
                             <tr>
-                              <td colSpan={5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                              <td colSpan={showReviewStatus ? 6 : 5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
                                 No SOPs yet
                               </td>
                             </tr>
                           ) : (
                             group.sops.map((sop) => {
+                              const processState = getSopProcessState(sop);
                               const flag = reviewFlag(sop.nextReviewDate);
+                              const rowReviewResults = reviewResults.get(sop.id) ?? [];
+                              const rowReviewers = reviewParticipants.get(sop.id) ?? [];
+                              const isViewOnly = Boolean(
+                                sop.departmentId && !memberDepartmentIds.has(sop.departmentId),
+                              );
+                              const editorHref = isViewOnly
+                                ? `/sops/${sop.id}?preview=pdf`
+                                : processState === "draft_review"
+                                  ? `/sops/${sop.id}?step=draft-review`
+                                  : processState === "final_approval"
+                                    ? `/sops/${sop.id}?step=final-approval`
+                                    : processState === "awaiting_quality"
+                                      ? `/sops/${sop.id}?step=quality-approval`
+                                    : `/sops/${sop.id}`;
+                              const openInNewTab =
+                                !isViewOnly && (
+                                  processState === "draft_review" ||
+                                  processState === "final_approval" ||
+                                  processState === "awaiting_quality"
+                                );
+                              const canEditRow =
+                                editable &&
+                                sop.status === "draft" &&
+                                (!sop.departmentId || memberDepartmentIds.has(sop.departmentId));
                               return (
                                 <tr
                                   key={sop.id}
@@ -418,14 +651,21 @@ export function SopList() {
                                 >
                                 <td className="px-5 py-3.5 align-middle">
                                   <Link
-                                    href={`/sops/${sop.id}`}
+                                    href={editorHref}
+                                    target={openInNewTab ? "_blank" : undefined}
+                                    rel={openInNewTab ? "noopener noreferrer" : undefined}
                                     className="font-mono text-[12px] tracking-wide text-ink-secondary hover:text-ink"
                                   >
                                     {sop.sopNumber || "—"}
                                   </Link>
                                 </td>
                                 <td className="max-w-0 px-5 py-3.5 align-middle">
-                                  <Link href={`/sops/${sop.id}`} className="block min-w-0">
+                                  <Link
+                                    href={editorHref}
+                                    target={openInNewTab ? "_blank" : undefined}
+                                    rel={openInNewTab ? "noopener noreferrer" : undefined}
+                                    className="block min-w-0"
+                                  >
                                     <span className="block truncate text-[13px] font-medium leading-snug text-ink">
                                       {sop.title || sop.sopNumber || "Untitled SOP"}
                                     </span>
@@ -435,42 +675,70 @@ export function SopList() {
                                   </Link>
                                 </td>
                                 <td className="px-5 py-3.5 align-middle">
-                                  <span
-                                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                                      sop.status === "approved"
-                                        ? "bg-accent/10 text-accent"
-                                        : sop.status === "effective"
-                                          ? "bg-success/10 text-success"
-                                          : sop.status === "obsolete"
-                                            ? "bg-danger/10 text-danger"
-                                            : "bg-surface-muted text-ink-secondary"
-                                    }`}
-                                  >
-                                    {SOP_STATUS_LABELS[sop.status]}
-                                  </span>
+                                  <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">
+                                    <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-medium text-ink-secondary">
+                                      {SOP_PROCESS_STATE_LABELS[processState]}
+                                    </span>
+                                  </div>
                                 </td>
                                 <td className="px-5 py-3.5 align-middle text-[12px] tabular-nums text-ink-tertiary">
                                   {formatDate(sop.updatedAt) || "—"}
                                 </td>
-                                <td className="px-2 py-2.5 align-middle">
-                                  <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                                    <Link
-                                      href={`/sops/${sop.id}/control`}
-                                      className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-ink"
-                                      title="Document control & approval"
-                                    >
-                                      <ShieldCheck size={14} />
-                                    </Link>
-                                    {editable ? (
+                                {showReviewStatus ? (
+                                  <td className="px-3 py-2.5 align-middle">
+                                    {sop.status === "in_review" && sop.createdBy === currentUserId && rowReviewers.length ? (
                                       <button
                                         type="button"
-                                        className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
-                                        title="Delete SOP"
-                                        onClick={() => void handleDelete(sop)}
+                                        className="flex -space-x-1.5 rounded-full p-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                                        aria-label={`View review status for ${sop.title || sop.sopNumber}`}
+                                        onClick={() => void openFeedback(sop)}
                                       >
-                                        <Trash2 size={13} />
+                                        {rowReviewers.slice(0, 4).map((reviewer) => {
+                                          const result = rowReviewResults.find((item) => item.reviewerId === reviewer.userId);
+                                          const label = !result
+                                            ? `${reviewer.name}: still reviewing`
+                                            : result.noChanges
+                                              ? `${reviewer.name}: no changes needed`
+                                              : `${reviewer.name}: feedback returned`;
+                                          return (
+                                            <span
+                                              key={reviewer.userId}
+                                              className={`inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-surface text-[9px] font-semibold ${
+                                                !result
+                                                  ? "bg-zinc-400 text-white"
+                                                  : result.noChanges
+                                                    ? "bg-emerald-600 text-white"
+                                                    : "bg-red-600 text-white"
+                                              }`}
+                                              title={label}
+                                            >
+                                              {reviewerInitials(reviewer.name)}
+                                            </span>
+                                          );
+                                        })}
+                                        {rowReviewers.length > 4 ? (
+                                          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-surface bg-surface-muted text-[9px] font-semibold text-ink-secondary">
+                                            +{rowReviewers.length - 4}
+                                          </span>
+                                        ) : null}
                                       </button>
                                     ) : null}
+                                  </td>
+                                ) : null}
+                                <td className="px-2 py-2.5 align-middle">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                                      {canEditRow ? (
+                                        <button
+                                          type="button"
+                                          className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
+                                          title="Delete SOP"
+                                          onClick={() => void handleDelete(sop)}
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      ) : null}
+                                    </div>
                                   </div>
                                 </td>
                                 </tr>
@@ -488,6 +756,101 @@ export function SopList() {
           </div>
         )}
       </div>
+
+      {feedbackSop ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Review feedback for ${feedbackSop.title || feedbackSop.sopNumber}`}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setFeedbackSop(null);
+          }}
+        >
+          <section className="ui-panel flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden shadow-2xl">
+            <div className="flex flex-none items-start justify-between gap-4 border-b border-line px-5 py-4">
+              <div className="min-w-0">
+                <div className="ui-mono-label text-ink-tertiary">Review feedback</div>
+                <h2 className="mt-1 truncate text-base font-semibold text-ink">
+                  {feedbackSop.title || feedbackSop.sopNumber || "Untitled SOP"}
+                </h2>
+                <p className="ui-section-subtitle mt-0.5 text-ink-secondary">
+                  {[feedbackSop.sopNumber, feedbackSop.version ? `v${feedbackSop.version}` : ""]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ui-btn-ghost h-9 w-9 shrink-0 px-0"
+                aria-label="Close review feedback"
+                onClick={() => setFeedbackSop(null)}
+              >
+                <X size={16} className="mx-auto" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-auto p-5">
+              {feedbackLoading ? (
+                <div className="flex justify-center py-10">
+                  <Loader2 size={18} className="animate-spin text-ink-tertiary" />
+                </div>
+              ) : feedbackError ? (
+                <div className="ui-notice ui-notice-warn px-3 py-2 text-xs">{feedbackError}</div>
+              ) : (
+                (reviewParticipants.get(feedbackSop.id) ?? []).map((reviewer) => {
+                  const result = (reviewResults.get(feedbackSop.id) ?? []).find(
+                    (item) => item.reviewerId === reviewer.userId,
+                  );
+                  const remarks = result ? feedbackAnnotations.filter(
+                    (annotation) => annotation.createdBy === reviewer.userId,
+                  ) : [];
+                  return (
+                    <article key={reviewer.userId} className="rounded-lg border border-line p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium text-ink">{reviewer.name}</div>
+                          <div className="ui-section-subtitle mt-0.5 text-ink-tertiary">
+                            {result ? `Returned ${formatDate(result.submittedAt)}` : "Review in progress"}
+                          </div>
+                        </div>
+                        <span className={`ui-chip ${
+                          !result
+                            ? "border-line text-ink-tertiary"
+                            : result.noChanges
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-red-200 bg-red-50 text-red-700"
+                        }`}>
+                          {!result ? "Still reviewing" : result.noChanges ? "No changes needed" : "Feedback returned"}
+                        </span>
+                      </div>
+
+                      {!result ? (
+                        <p className="mt-3 text-sm text-ink-secondary">This reviewer has not returned their review yet.</p>
+                      ) : result.noChanges ? (
+                        <p className="mt-3 text-sm text-ink-secondary">The reviewer returned this SOP without remarks.</p>
+                      ) : remarks.length ? (
+                        <div className="mt-3 space-y-3 border-t border-line pt-3">
+                          {remarks.map((remark) => (
+                            <div key={remark.id}>
+                              <div className="text-xs font-medium text-ink">
+                                {REVIEW_FEEDBACK_LABELS[remark.category] ?? "Overall remarks"}
+                              </div>
+                              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-ink-secondary">{remark.body}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-ink-secondary">No section remarks were found.</p>
+                      )}
+                    </article>
+                  );
+                })
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </>
   );
 }

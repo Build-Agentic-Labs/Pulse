@@ -9,7 +9,7 @@ import { pickMemberDepartments } from "@/domain/departments";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 
 const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate";
-const MEMBER_COLUMNS = "department_id, user_id, dept_role";
+const MEMBER_COLUMNS = "department_id, user_id, dept_role, position_title";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -52,6 +52,7 @@ function mapMember(row: Record<string, unknown>): DepartmentMember {
     departmentId: String(row.department_id),
     userId: String(row.user_id),
     deptRole: (row.dept_role as DeptRole | null) ?? "author",
+    positionTitle: String(row.position_title ?? ""),
   };
 }
 
@@ -129,6 +130,23 @@ export async function setMember(departmentId: string, userId: string, role: Dept
     supabase
       .from("department_members")
       .upsert({ department_id: departmentId, user_id: userId, dept_role: role, granted_by: userData.user?.id ?? null })
+      .select(MEMBER_COLUMNS)
+      .single(),
+  );
+}
+
+export async function setMemberPosition(
+  departmentId: string,
+  userId: string,
+  positionTitle: string,
+): Promise<void> {
+  const supabase = createPlannerSupabaseClient();
+  await throwIfError(
+    supabase
+      .from("department_members")
+      .update({ position_title: positionTitle.trim() })
+      .eq("department_id", departmentId)
+      .eq("user_id", userId)
       .select(MEMBER_COLUMNS)
       .single(),
   );

@@ -78,8 +78,8 @@ export function applySampleData(sop: Sop): Sop {
       sopNumber: "SOP-QA-001",
       title: "QMS",
       version: "1.0",
-      revisionDate: "2026-05-01",
-      effectiveDate: "2026-05-15",
+      revisionDate: "",
+      effectiveDate: "",
     },
     purpose:
       "Define and standardize the process for creating, reviewing, approving, and controlling Standard Operating Procedures across the organization in alignment with ISO 9001:2015.",
@@ -115,8 +115,16 @@ export function applySampleData(sop: Sop): Sop {
       })),
     },
     annexes: [
-      { label: "Appendix A", description: "Required information for the document header and footer." },
-      { label: "Appendix B", description: "Work Instruction attributes and template proposal across teams." },
+      {
+        id: `${sop.id}-annex-sample-0`,
+        label: "Appendix A",
+        description: "Required information for the document header and footer.",
+      },
+      {
+        id: `${sop.id}-annex-sample-1`,
+        label: "Appendix B",
+        description: "Work Instruction attributes and template proposal across teams.",
+      },
     ],
     changeHistory: [
       {

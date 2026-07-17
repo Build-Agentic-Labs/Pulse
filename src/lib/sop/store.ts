@@ -17,11 +17,11 @@ const STORAGE_KEY = "pulse:sops:v1";
 
 // Exact columns consumed by the mappers below -- avoid select('*'), matching the planner store.
 const SOP_COLUMNS =
-  "id, workspace_id, department_id, sop_number, title, version, source, status, document, created_at, updated_at";
+  "id, workspace_id, department_id, sop_number, title, version, source, status, effective_date, document, created_at, updated_at";
 
 // Slim projection for the list surface: promoted columns only, never the full jsonb document.
 const SOP_LIST_COLUMNS =
-  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, rejected_reason";
+  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash";
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
@@ -45,6 +45,10 @@ export interface SopListItem {
   createdBy: string | null;
   /** Mirror of the objection that sent this SOP back; the signature is the source of truth. */
   rejectedReason: string | null;
+  reviewCycle: number;
+  contentHash: string | null;
+  finalApprovalRequestedAt: string | null;
+  finalApprovalContentHash: string | null;
 }
 
 /**
@@ -55,7 +59,7 @@ export class SopConflictError extends Error {
   readonly code = "SOP_CONFLICT";
 
   constructor() {
-    super("This SOP was changed by someone else since you opened it — copy your changes and reload.");
+    super("This SOP has a newer saved version. Reload the latest copy to continue.");
     this.name = "SopConflictError";
   }
 }
@@ -89,15 +93,20 @@ async function throwIfError<T>(operation: PromiseLike<{ data: T; error: { messag
 // are overlaid on top so the columns stay authoritative for those four fields.
 function mapSop(row: Record<string, unknown>): Sop {
   const document = (row.document ?? {}) as Sop;
+  const status = (row.status as SopStatus | null) ?? "draft";
   return {
     ...document,
     id: String(row.id),
-    status: (row.status as SopStatus | null) ?? "draft",
+    status,
     // The promoted `sop_number` column is authoritative (the list reads it); overlay it onto the
     // jsonb copy so the editor and list never disagree.
     meta: {
       ...document.meta,
       sopNumber: effectiveSopNumber(row.sop_number as string | null | undefined, document.meta?.sopNumber ?? ""),
+      version: String(row.version ?? document.meta?.version ?? ""),
+      // The lifecycle trigger owns this date. Draft/review documents stay blank; the
+      // promoted column is exposed only after Quality makes the SOP effective.
+      effectiveDate: status === "effective" ? String(row.effective_date ?? "") : "",
     },
     createdAt: String(row.created_at ?? document.createdAt ?? ""),
     updatedAt: String(row.updated_at ?? document.updatedAt ?? ""),
@@ -118,6 +127,10 @@ function mapSopListItem(row: Record<string, unknown>): SopListItem {
     nextReviewDate: (row.next_review_date as string | null) ?? null,
     createdBy: (row.created_by as string | null) ?? null,
     rejectedReason: (row.rejected_reason as string | null) ?? null,
+    reviewCycle: Number(row.review_cycle ?? 0),
+    contentHash: (row.content_hash as string | null) ?? null,
+    finalApprovalRequestedAt: (row.final_approval_requested_at as string | null) ?? null,
+    finalApprovalContentHash: (row.final_approval_content_hash as string | null) ?? null,
   };
 }
 
@@ -305,6 +318,10 @@ export function sopFromExtraction(extracted: ExtractedSop): Sop {
         assignments: activity.assignments ?? {},
       })),
     },
+    annexes: (extracted.annexes ?? []).map((annex, index) => ({
+      ...annex,
+      id: `${base.id}-annex-${index}`,
+    })),
     // If the legacy doc had no approval rows, keep the standard template rows.
     approvals: approvals.length > 0 ? approvals : base.approvals,
   };

@@ -1,26 +1,28 @@
 "use client";
 
-import { Building2, FileText, Inbox, Library } from "lucide-react";
+import { Archive, Building2, FileText, Inbox, Library } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { DepartmentsAdmin } from "./departments-admin";
 import { EffectiveLibrary } from "./effective-library";
 import { ReviewQueue } from "./review-queue";
+import { RetiredSops } from "./retired-sops";
 import { SopList } from "./sop-list";
 import { SopShell } from "./sop-shell";
 import { canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
-type Tab = "all" | "library" | "review" | "departments";
+type Tab = "all" | "review" | "library" | "retired" | "departments";
 
 const CRUMB: Record<Tab, string> = {
   all: "Quality / SOPs",
   library: "Quality / Effective library",
   review: "Quality / Review queue",
+  retired: "Quality / Retired",
   departments: "Quality / Departments",
 };
 
 function parseTab(raw: string | null, manage: boolean): Tab {
-  if (raw === "library" || raw === "review") return raw;
+  if (raw === "review" || raw === "library" || raw === "retired") return raw;
   if (raw === "departments" && manage) return "departments";
   return "all";
 }
@@ -28,8 +30,8 @@ function parseTab(raw: string | null, manage: boolean): Tab {
 /**
  * The persistent SOP workspace: one shell (header + sidebar) that stays mounted while the tabs
  * swap the content panel client-side — no route change, no provider re-mount, no reload. This is
- * the same model as the planner (Product) space. Drill-ins (the editor and control page) remain
- * their own routes but share this section's provider (mounted in app/sops/layout.tsx).
+ * the same model as the planner (Product) space. The editor remains its own route and shares
+ * this section's provider (mounted in app/sops/layout.tsx).
  */
 export function SopWorkspace() {
   const { role } = useSopWorkspace();
@@ -51,10 +53,12 @@ export function SopWorkspace() {
     <SopShell sidebar={sidebar} crumb={CRUMB[tab]}>
       {tab === "all" ? (
         <SopList />
-      ) : tab === "library" ? (
-        <EffectiveLibrary />
       ) : tab === "review" ? (
         <ReviewQueue />
+      ) : tab === "library" ? (
+        <EffectiveLibrary />
+      ) : tab === "retired" ? (
+        <RetiredSops />
       ) : (
         <DepartmentsAdmin />
       )}
@@ -89,8 +93,9 @@ function SopTabNav({
       <div className="ui-nav-section">SOPs</div>
       <div className="space-y-0.5">
         {item("all", <FileText size={15} strokeWidth={1.75} />, "All SOPs")}
-        {item("library", <Library size={15} strokeWidth={1.75} />, "Effective library")}
         {item("review", <Inbox size={15} strokeWidth={1.75} />, "Review queue")}
+        {item("library", <Library size={15} strokeWidth={1.75} />, "Effective library")}
+        {item("retired", <Archive size={15} strokeWidth={1.75} />, "Retired")}
       </div>
       {manage ? (
         <>

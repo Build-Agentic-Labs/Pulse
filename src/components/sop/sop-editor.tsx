@@ -1,9 +1,12 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight, Download, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
+  useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type FocusEvent,
@@ -12,27 +15,110 @@ import {
   type ReactNode,
 } from "react";
 import { useConfirm } from "@/components/confirm-provider";
-import type { Department } from "@/domain/departments";
+import { standardPositionTitlesForDepartment, type Department } from "@/domain/departments";
 import { rasicLegend, SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
-import { mintSopNumber } from "@/lib/sop/review";
-import { loadWorkspaceMembersFromSupabase } from "@/domain/supabase-planner";
-import { saveSop, SopConflictError, type SaveSopOptions } from "@/lib/sop/store";
+import { deriveApprovalRouting } from "@/domain/sop/approval-routing";
+import { formatResponsibleParty, parseResponsibleParty } from "@/domain/sop/responsible-parties";
+import { applySampleData } from "@/domain/sop/sample";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import { fetchMyDeptRoles, listDepartments, listMembers } from "@/lib/departments/store";
+import {
+  enableSopSelfReviewTest,
+  getSopControl,
+  isBlockingSeat,
+  isSignatureCurrent,
+  listSeats,
+  listSignatures,
+  listProfileNames,
+  mintSopNumber,
+  requestSopFinalApproval,
+  signSop,
+  transitionSop,
+  upsertSeat,
+  type SopReviewSeat,
+  type SopSignature,
+} from "@/lib/sop/review";
+import { getSop, saveSop, SopConflictError, type SaveSopOptions } from "@/lib/sop/store";
+import {
+  listSopReviewAnnotations,
+  listSopReviewSubmissions,
+  resolveSopReviewAnnotation,
+  type SopReviewAnnotation,
+  type SopReviewSubmission,
+} from "@/lib/sop/review-annotations";
+import { listSopAuditEvents, type SopAuditEvent } from "@/lib/sop/audit-events";
+import {
+  listSopAnnexFiles,
+  openSopAnnexFile,
+  removeSopAnnexFile,
+  SOP_ANNEX_FILE_ACCEPT,
+  uploadSopAnnexFile,
+  type SopAnnexFile,
+} from "@/lib/sop/annex-files";
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
 import { ProcessFlowchart } from "./process-flowchart";
-import { SopMasthead } from "./sop-masthead";
 import { SopPrintPreview } from "./sop-print-preview";
+import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
+import { SopRosterEditor } from "./sop-roster-editor";
 
-type StepId = "document" | "overview" | "procedure" | "annexes" | "approvals";
+type StepId =
+  | "document"
+  | "overview"
+  | "procedure"
+  | "annexes"
+  | "approvals"
+  | "draftReview"
+  | "finalApproval"
+  | "qualityApproval";
 
-const STEPS: Array<{ id: StepId; label: string }> = [
+export type SopEditorInitialView = "pdf" | "draft-review" | "final-approval" | "quality-approval";
+
+const CREATOR_STEPS: Array<{ id: StepId; label: string }> = [
   { id: "document", label: "Document" },
   { id: "overview", label: "Overview" },
   { id: "procedure", label: "Procedure" },
   { id: "annexes", label: "Annexes & history" },
   { id: "approvals", label: "Approvals" },
 ];
+
+const DRAFT_REVIEW_STEP: { id: StepId; label: string } = { id: "draftReview", label: "Draft Review" };
+const FINAL_APPROVAL_STEP: { id: StepId; label: string } = { id: "finalApproval", label: "Final Approval" };
+const QUALITY_APPROVAL_STEP: { id: StepId; label: string } = { id: "qualityApproval", label: "Quality Approval" };
+
+const REVIEW_CATEGORY_STEPS: Record<string, StepId> = {
+  document: "document",
+  purpose: "overview",
+  scope: "overview",
+  definitions: "overview",
+  references: "overview",
+  responsible: "procedure",
+  measurements: "procedure",
+  procedure: "procedure",
+  annexes: "annexes",
+  history: "annexes",
+  overall: "document",
+};
+
+const STEP_REVIEW_CATEGORIES: Partial<Record<StepId, string[]>> = {
+  document: ["document", "overall"],
+  overview: ["purpose", "scope", "definitions", "references"],
+  procedure: ["responsible", "measurements", "procedure"],
+  annexes: ["annexes", "history"],
+};
+
+const AUDIT_EVENT_LABELS: Record<string, string> = {
+  review_sent: "Sent for review",
+  review_recalled: "Recalled for changes",
+  review_returned: "Review returned",
+  remark_added: "Remark added",
+  remark_updated: "Remark updated",
+  remark_resolved: "Remark marked addressed",
+  remark_deleted: "Remark deleted",
+  final_approval_requested: "Sent for final approval",
+  status_changed: "Status changed",
+};
 
 /** Whether a step has any content yet — drives the ✓ marker in the step nav. */
 function stepFilled(sop: Sop, id: StepId): boolean {
@@ -52,13 +138,45 @@ function stepFilled(sop: Sop, id: StepId): boolean {
       return Boolean(sop.annexes.length || sop.changeHistory.length);
     case "approvals":
       return sop.approvals.some((row) => row.name || row.position || row.date);
+    case "draftReview":
+    case "finalApproval":
+    case "qualityApproval":
+      return false;
   }
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+type SopPatch = Partial<Sop> | ((current: Sop) => Partial<Sop>);
+
+type AnnexUploadStatus = {
+  annexId: string;
+  phase: "saving" | "uploading" | "success" | "error";
+  message: string;
+};
 
 /** Debounce for autosave: persist this long after the last edit settles. */
 const AUTOSAVE_DELAY_MS = 2000;
+
+function newAnnexId(sopId: string): string {
+  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${sopId}-annex-${suffix}`;
+}
+function formatReviewDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+}
+
+function withAnnexIds(sop: Sop): Sop {
+  return {
+    ...sop,
+    annexes: sop.annexes.map((annex, index) => ({
+      ...annex,
+      id: annex.id || `${sop.id}-annex-${index}`,
+    })),
+  };
+}
 
 const SOP_FIELD_EXAMPLES: Record<string, string> = {
   QMS: "Quality Management System",
@@ -83,6 +201,20 @@ const SOP_FIELD_EXAMPLES: Record<string, string> = {
   "Created by": "Jane Smith",
   Position: "Quality Manager",
   Name: "Jane Smith",
+};
+
+const REVIEW_CATEGORY_LABELS: Record<string, string> = {
+  document: "Document control",
+  purpose: "Purpose",
+  scope: "Scope",
+  definitions: "Definitions",
+  responsible: "Responsible parties",
+  references: "References",
+  measurements: "Measurements",
+  procedure: "Procedure & process flow",
+  annexes: "Annexes & forms",
+  history: "Change history",
+  overall: "Overall remarks",
 };
 
 type FieldHint = { text: string; left: number; top: number; above: boolean };
@@ -115,6 +247,7 @@ export function SopEditor({
   canEdit = true,
   isNew = false,
   authoringDepartments,
+  initialView,
 }: {
   initial: Sop;
   workspaceId?: string;
@@ -125,10 +258,12 @@ export function SopEditor({
   isNew?: boolean;
   /** The departments the author may own this SOP with. Present only for new SOPs (length >= 1). */
   authoringDepartments?: Department[];
+  /** Deep-linked view supplied by the route before the editor's first render. */
+  initialView?: SopEditorInitialView;
 }) {
   const router = useRouter();
   const confirm = useConfirm();
-  const [sop, setSop] = useState<Sop>(initial);
+  const [sop, setSop] = useState<Sop>(() => withAnnexIds(initial));
   // Owning-department selection for a new SOP (undefined mode => not the create flow).
   const authMode = isNew && authoringDepartments ? authoringMode(authoringDepartments) : null;
   const [deptId, setDeptId] = useState<string>(() => {
@@ -139,14 +274,42 @@ export function SopEditor({
   const selectedDept = owningDepartment ?? authoringDepartments?.find((d) => d.id === deptId) ?? null;
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
+  const [reloadingLatest, setReloadingLatest] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
+  const [previewing, setPreviewing] = useState(initialView === "pdf");
+  const [previewOnly, setPreviewOnly] = useState(initialView === "pdf");
+  const [qualityApprovalOpen, setQualityApprovalOpen] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
+  const [showConvertedReview, setShowConvertedReview] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
+  const [reviewVisible, setReviewVisible] = useState(false);
   const [fieldHint, setFieldHint] = useState<FieldHint | null>(null);
-  // People with access to this workspace, offered as name suggestions on the approvals table so
-  // approvers are picked from the real roster instead of retyped (and misspelled) each time.
-  const [approverOptions, setApproverOptions] = useState<{ name: string; email?: string }[]>([]);
+  const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
+  const [annexFileError, setAnnexFileError] = useState("");
+  const [uploadingAnnexId, setUploadingAnnexId] = useState<string | null>(null);
+  const [annexUploadStatus, setAnnexUploadStatus] = useState<AnnexUploadStatus | null>(null);
+  const [approvalDepartments, setApprovalDepartments] = useState<Department[]>([]);
+  const [approvalSeats, setApprovalSeats] = useState<SopReviewSeat[]>([]);
+  const [approvalSignatures, setApprovalSignatures] = useState<SopSignature[]>([]);
+  const [approvalReviewerNames, setApprovalReviewerNames] = useState<Map<string, string>>(new Map());
+  const [approvalAuthorId, setApprovalAuthorId] = useState<string | null>(null);
+  const [approvalReviewCycle, setApprovalReviewCycle] = useState(0);
+  const [approvalContentHash, setApprovalContentHash] = useState<string | null>(null);
+  const [finalApprovalRequestedAt, setFinalApprovalRequestedAt] = useState<string | null>(null);
+  const [finalApprovalContentHash, setFinalApprovalContentHash] = useState<string | null>(null);
+  const [isCurrentUserAuthor, setIsCurrentUserAuthor] = useState(false);
+  const [isCurrentUserQualityApprover, setIsCurrentUserQualityApprover] = useState(false);
+  const [approvalRoutingLoading, setApprovalRoutingLoading] = useState(false);
+  const [approvalRoutingError, setApprovalRoutingError] = useState("");
+  const [reviewAnnotations, setReviewAnnotations] = useState<SopReviewAnnotation[]>([]);
+  const [reviewSubmissions, setReviewSubmissions] = useState<SopReviewSubmission[]>([]);
+  const [auditEvents, setAuditEvents] = useState<SopAuditEvent[]>([]);
+  const [auditError, setAuditError] = useState("");
+  const [auditPanelOpen, setAuditPanelOpen] = useState(false);
+  const [recallingReview, setRecallingReview] = useState(false);
+  const [requestingFinalApproval, setRequestingFinalApproval] = useState(false);
+  const [resolvingAnnotationId, setResolvingAnnotationId] = useState<string | null>(null);
+  const [submittingForApproval, setSubmittingForApproval] = useState(false);
   // Edits since the last successful save -- drives the leave guards and autosave.
   const [dirty, setDirty] = useState(false);
   // A save lost the concurrency check: freeze autosave so we never loop against the conflict.
@@ -158,19 +321,430 @@ export function SopEditor({
   );
   // Bumped on every user edit so a save that raced with typing doesn't clobber newer edits.
   const editVersionRef = useRef(0);
+  const persistedAnnexIdsRef = useRef(
+    new Set(withAnnexIds(initial).annexes.flatMap((annex) => (annex.id ? [annex.id] : []))),
+  );
+  // The edit version reflected in this render's `sop`. persist() closes over this snapshot
+  // rather than reading the ref when it runs: a stale autosave timer can fire after a
+  // keystroke but before its effect cleanup cancels it, and reading the ref at call time
+  // would count that keystroke as "already saved" -- the server copy of the older text
+  // would then be adopted, resurrecting the deleted characters.
+  const sopEditVersion = editVersionRef.current;
+  // Blocks overlapped saves from the same timer-vs-cleanup gap; a second in-flight save
+  // would reuse the same expectedUpdatedAt and land as a false concurrency conflict.
+  const saveInFlightRef = useRef(false);
+  const autoRoutingInFlightRef = useRef(false);
+  const autoRoutingAttemptKeyRef = useRef("");
+  const reviewDismissTimerRef = useRef<number | null>(null);
   // The status as last persisted -- a save that changes it auto-appends a changeHistory row.
   const lastSavedStatusRef = useRef<SopStatus>(initial.status);
+  const hasPersistedSop = !isNew || Boolean(persistedUpdatedAt);
 
-  const step = STEPS[stepIndex];
+  const refreshApprovalRouting = useCallback(async () => {
+    if (!workspaceId) return;
+    setApprovalRoutingLoading(true);
+    setApprovalRoutingError("");
+    try {
+      const supabase = createPlannerSupabaseClient();
+      const [departments, seats, signatures, control, userResult, departmentRoles] = await Promise.all([
+        listDepartments(workspaceId),
+        hasPersistedSop ? listSeats(sop.id) : Promise.resolve([] as SopReviewSeat[]),
+        hasPersistedSop ? listSignatures(sop.id) : Promise.resolve([] as SopSignature[]),
+        hasPersistedSop ? getSopControl(sop.id) : Promise.resolve(undefined),
+        getUserFromSession(supabase),
+        fetchMyDeptRoles(workspaceId),
+      ]);
+      const reviewerNames = await listProfileNames(
+        seats.flatMap((seat) => seat.signerId ? [seat.signerId] : []),
+      );
+      setApprovalDepartments(departments);
+      setApprovalSeats(seats);
+      setApprovalSignatures(signatures);
+      setApprovalReviewerNames(reviewerNames);
+      setApprovalAuthorId(control?.createdBy ?? null);
+      setApprovalReviewCycle(control?.reviewCycle ?? 0);
+      setApprovalContentHash(control?.contentHash ?? null);
+      setFinalApprovalRequestedAt(control?.finalApprovalRequestedAt ?? null);
+      setFinalApprovalContentHash(control?.finalApprovalContentHash ?? null);
+      setIsCurrentUserAuthor(Boolean(control?.createdBy && control.createdBy === userResult.data.user?.id));
+      setIsCurrentUserQualityApprover(
+        departments.some(
+          (department) => department.isQualityGate && departmentRoles.get(department.id) === "approver",
+        ),
+      );
+      if (control) {
+        setSop((current) => current.status === control.status ? current : { ...current, status: control.status });
+      }
+    } catch (error) {
+      setApprovalRoutingError(error instanceof Error ? error.message : "Could not load approval routing.");
+    } finally {
+      setApprovalRoutingLoading(false);
+    }
+  }, [hasPersistedSop, sop.id, workspaceId]);
+
+  useEffect(() => {
+    void refreshApprovalRouting();
+  }, [refreshApprovalRouting]);
+
+  useEffect(() => {
+    if (!hasPersistedSop) return;
+    let active = true;
+    Promise.all([
+      listSopReviewAnnotations(sop.id),
+      listSopReviewSubmissions([sop.id]),
+    ])
+      .then(([annotations, submissions]) => {
+        if (!active) return;
+        setReviewAnnotations(
+          annotations.filter(
+            (annotation) => annotation.reviewCycle === approvalReviewCycle && !annotation.resolvedAt,
+          ),
+        );
+        setReviewSubmissions(
+          submissions.filter(
+            (submission) =>
+              submission.reviewCycle === approvalReviewCycle &&
+              submission.contentHash === (approvalContentHash ?? ""),
+          ),
+        );
+      })
+      .catch(() => {
+        if (!active) return;
+        setReviewAnnotations([]);
+        setReviewSubmissions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [approvalContentHash, approvalReviewCycle, hasPersistedSop, sop.id]);
+
+  useEffect(() => {
+    if (!hasPersistedSop) return;
+    let active = true;
+    setAuditError("");
+    void listSopAuditEvents(sop.id)
+      .then((events) => {
+        if (active) setAuditEvents(events);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setAuditEvents([]);
+        setAuditError(error instanceof Error ? error.message : "The audit trail could not be loaded.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasPersistedSop, sop.id]);
+
+  useEffect(() => {
+    if (sop.source !== "converted") return;
+
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("converted") !== "1") return;
+
+    setShowConvertedReview(true);
+    url.searchParams.delete("converted");
+    const query = url.searchParams.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${query ? `?${query}` : ""}${url.hash}`,
+    );
+  }, [sop.source]);
+
+  useEffect(() => {
+    if (!showConvertedReview || reviewDismissed) return;
+
+    const showFrame = window.requestAnimationFrame(() => setReviewVisible(true));
+    const hideTimer = window.setTimeout(() => setReviewVisible(false), 5_700);
+    const removeTimer = window.setTimeout(() => setReviewDismissed(true), 6_000);
+
+    return () => {
+      window.cancelAnimationFrame(showFrame);
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(removeTimer);
+    };
+  }, [reviewDismissed, showConvertedReview]);
+
+  useEffect(() => {
+    return () => {
+      if (reviewDismissTimerRef.current !== null) {
+        window.clearTimeout(reviewDismissTimerRef.current);
+      }
+    };
+  }, []);
+
+  const dismissReviewToast = () => {
+    setReviewVisible(false);
+    reviewDismissTimerRef.current = window.setTimeout(() => setReviewDismissed(true), 300);
+  };
+
+  useEffect(() => {
+    if (
+      !hasPersistedSop ||
+      !canEdit ||
+      sop.status !== "draft" ||
+      !approvalAuthorId ||
+      approvalRoutingLoading ||
+      autoRoutingInFlightRef.current
+    ) return;
+
+    const candidates = deriveApprovalRouting(
+      sop.responsiblePersons,
+      sop.procedure,
+      approvalDepartments.filter((department) => !department.isQualityGate),
+    );
+    const seatedIds = new Set(approvalSeats.map((seat) => seat.departmentId));
+    const missing = candidates.filter((candidate) => !seatedIds.has(candidate.department.id));
+    if (!missing.length) return;
+
+    const attemptKey = JSON.stringify({
+      author: approvalAuthorId,
+      missing: missing.map((candidate) => [candidate.department.id, candidate.rasic]),
+    });
+    if (autoRoutingAttemptKeyRef.current === attemptKey) return;
+    autoRoutingAttemptKeyRef.current = attemptKey;
+    autoRoutingInFlightRef.current = true;
+
+    void (async () => {
+      const failures: string[] = [];
+      let accountableTaken = approvalSeats.some((seat) => seat.rasic === "accountable");
+      const rolePriority = { author: 1, reviewer: 2, approver: 3 } as const;
+
+      try {
+        for (const candidate of missing) {
+          const rasic = candidate.rasic === "accountable" && !accountableTaken
+            ? "accountable"
+            : "responsible";
+          const members = (await listMembers(candidate.department.id))
+            .filter((member) => member.userId !== approvalAuthorId)
+            .sort((a, b) => rolePriority[b.deptRole] - rolePriority[a.deptRole]);
+          const signer = members[0];
+
+          await upsertSeat({
+            sopId: sop.id,
+            departmentId: candidate.department.id,
+            rasic,
+            signerId: signer?.userId ?? null,
+          });
+          if (!signer) failures.push(candidate.department.name);
+          if (rasic === "accountable") accountableTaken = true;
+        }
+
+        await refreshApprovalRouting();
+        if (failures.length) {
+          setApprovalRoutingError(
+            `${failures.join(", ")} were added automatically. Choose an eligible reviewer for each department.`,
+          );
+        }
+      } catch (error) {
+        setApprovalRoutingError(error instanceof Error ? error.message : "Could not create approval routing.");
+      } finally {
+        autoRoutingInFlightRef.current = false;
+      }
+    })();
+  }, [
+    approvalAuthorId,
+    approvalDepartments,
+    approvalRoutingLoading,
+    approvalSeats,
+    canEdit,
+    hasPersistedSop,
+    refreshApprovalRouting,
+    sop.id,
+    sop.procedure,
+    sop.responsiblePersons,
+    sop.status,
+  ]);
+
+  const hasReviewHistory =
+    reviewAnnotations.length > 0 ||
+    reviewSubmissions.length > 0 ||
+    auditEvents.some((event) => event.eventType.startsWith("review_") || event.eventType.startsWith("remark_"));
+  const showDraftReview = isCurrentUserAuthor && (sop.status === "in_review" || hasReviewHistory);
+  const finalApprovalRequested =
+    Boolean(finalApprovalRequestedAt) &&
+    finalApprovalContentHash === (approvalContentHash ?? "");
+  const showFinalApproval = isCurrentUserAuthor && (
+    finalApprovalRequested ||
+    sop.status === "approved" ||
+    sop.status === "effective"
+  );
+  const showQualityApproval =
+    (isCurrentUserAuthor || isCurrentUserQualityApprover) &&
+    (sop.status === "approved" ||
+      sop.status === "effective" ||
+      approvalSignatures.some(
+        (signature) =>
+          signature.meaning === "quality_approval" &&
+          signature.reviewCycle === approvalReviewCycle &&
+          signature.signedContentHash === (approvalContentHash ?? ""),
+      ));
+  const steps = useMemo(
+    () => [
+      ...CREATOR_STEPS,
+      ...(showDraftReview ? [DRAFT_REVIEW_STEP] : []),
+      ...(showFinalApproval ? [FINAL_APPROVAL_STEP] : []),
+      ...(showQualityApproval ? [QUALITY_APPROVAL_STEP] : []),
+    ],
+    [showDraftReview, showFinalApproval, showQualityApproval],
+  );
+  const requestedStepId: StepId | null = initialView === "draft-review"
+    ? "draftReview"
+    : initialView === "final-approval"
+      ? "finalApproval"
+      : initialView === "quality-approval"
+        ? "qualityApproval"
+        : null;
+  const requestedStepIndex = requestedStepId
+    ? steps.findIndex((entry) => entry.id === requestedStepId)
+    : -1;
+  const draftReviewers = useMemo(() => {
+    const reviewers = new Map<string, { userId: string; name: string; submission?: SopReviewSubmission }>();
+    for (const seat of approvalSeats) {
+      if (!seat.signerId || reviewers.has(seat.signerId)) continue;
+      reviewers.set(seat.signerId, {
+        userId: seat.signerId,
+        name: approvalReviewerNames.get(seat.signerId) || "Assigned reviewer",
+        submission: reviewSubmissions.find((submission) => submission.reviewerId === seat.signerId),
+      });
+    }
+    for (const submission of reviewSubmissions) {
+      if (reviewers.has(submission.reviewerId)) continue;
+      reviewers.set(submission.reviewerId, {
+        userId: submission.reviewerId,
+        name: submission.reviewerName,
+        submission,
+      });
+    }
+    return Array.from(reviewers.values());
+  }, [approvalReviewerNames, approvalSeats, reviewSubmissions]);
+  const finalApprovalReady =
+    sop.status === "in_review" &&
+    draftReviewers.length > 0 &&
+    draftReviewers.every((reviewer) => reviewer.submission?.noChanges === true) &&
+    reviewAnnotations.length === 0;
+  const finalApprovalStakeholders = useMemo(() => approvalSeats
+    .filter((seat) => isBlockingSeat(seat.rasic))
+    .map((seat) => {
+      const department = approvalDepartments.find((item) => item.id === seat.departmentId);
+      const signature = approvalSignatures.find(
+        (item) =>
+          item.meaning === "dept_approval" &&
+          item.seatDepartmentId === seat.departmentId &&
+          item.signerId === seat.signerId &&
+          item.reviewCycle === approvalReviewCycle &&
+          item.signedContentHash === (approvalContentHash ?? ""),
+      );
+      return {
+        seat,
+        department,
+        name: seat.signerId ? approvalReviewerNames.get(seat.signerId) || "Assigned approver" : "Unassigned",
+        signature,
+      };
+    }), [
+      approvalContentHash,
+      approvalDepartments,
+      approvalReviewerNames,
+      approvalReviewCycle,
+      approvalSeats,
+      approvalSignatures,
+    ]);
+  const allFinalApprovalsSigned =
+    finalApprovalStakeholders.length > 0 &&
+    finalApprovalStakeholders.every((stakeholder) => Boolean(stakeholder.signature));
+  const qualitySignature = approvalSignatures.find(
+    (signature) =>
+      signature.meaning === "quality_approval" &&
+      signature.reviewCycle === approvalReviewCycle &&
+      signature.signedContentHash === (approvalContentHash ?? ""),
+  );
+  const step = steps[stepIndex] ?? steps[0];
+  const stepReviewAnnotations = useMemo(() => {
+    const categories = STEP_REVIEW_CATEGORIES[step.id] ?? [];
+    return reviewAnnotations.filter((annotation) => categories.includes(annotation.category));
+  }, [reviewAnnotations, step.id]);
+  const reviewCategoriesNeedingAttention = useMemo(
+    () => new Set(reviewAnnotations.map((annotation) => annotation.category)),
+    [reviewAnnotations],
+  );
   const isFirst = stepIndex === 0;
-  const isLast = stepIndex === STEPS.length - 1;
+  const isLast = stepIndex === steps.length - 1;
   const saveDisabled = !canEdit || !workspaceId || saveStatus === "saving";
-  const displaySopNumber = /^<unknown>$/i.test(sop.meta.sopNumber.trim())
+  const routingSeatsStaffed = approvalSeats.every(
+    (seat) => seat.rasic === "informed" || Boolean(seat.signerId),
+  );
+  const responsibleSeats = approvalSeats.filter((seat) => seat.rasic === "responsible");
+  const soloSelfReviewReady =
+    Boolean(approvalAuthorId) &&
+    responsibleSeats.length === 1 &&
+    responsibleSeats[0]?.signerId === approvalAuthorId &&
+    approvalSeats.every((seat) => seat.rasic !== "accountable") &&
+    routingSeatsStaffed;
+  const standardApprovalRoutingReady =
+    approvalSeats.some((seat) => seat.rasic === "responsible") &&
+    approvalSeats.filter((seat) => seat.rasic === "accountable").length === 1 &&
+    routingSeatsStaffed &&
+    !approvalSeats.some(
+      (seat) =>
+        (seat.rasic === "responsible" || seat.rasic === "accountable") &&
+        seat.signerId === approvalAuthorId,
+    );
+  const approvalRoutingReady = standardApprovalRoutingReady || soloSelfReviewReady;
+  const provisionalSopNumber =
+    isNew && !persistedUpdatedAt && selectedDept
+      ? previewSopNumber(selectedDept.code, DEFAULT_DOC_TYPE)
+      : null;
+  // Version is lifecycle-owned: a new SOP is always 1.0 and only the database's
+  // effective -> draft revision transition may increment it. Never trust typed/imported text.
+  const controlledVersion = approvalReviewCycle > 0
+    ? /^\d+\.\d+$/.test(sop.meta.version.trim())
+      ? sop.meta.version.trim()
+      : `1.${approvalReviewCycle}`
+    : "1.0";
+  // Before the first save there is no numeric sequence yet. Keep every rendered document
+  // (masthead, PDF preview, and Word export) aligned with the provisional number in the form.
+  const renderedSop: Sop = {
+    ...sop,
+    meta: {
+      ...sop.meta,
+      version: controlledVersion,
+      ...(provisionalSopNumber ? { sopNumber: provisionalSopNumber } : {}),
+    },
+  };
+  const displaySopNumber = /^<unknown>$/i.test(renderedSop.meta.sopNumber.trim())
     ? "Unnumbered"
-    : sop.meta.sopNumber || "—";
+    : renderedSop.meta.sopNumber || "—";
 
-  function update(patch: Partial<Sop>) {
-    setSop((current) => ({ ...current, ...patch }));
+  useLayoutEffect(() => {
+    if (requestedStepIndex >= 0) setStepIndex(requestedStepIndex);
+  }, [requestedStepIndex]);
+
+  useEffect(() => {
+    if (!showFinalApproval) return;
+    const refresh = () => void refreshApprovalRouting();
+    const interval = window.setInterval(refresh, 5_000);
+    return () => window.clearInterval(interval);
+  }, [refreshApprovalRouting, showFinalApproval]);
+
+  useEffect(() => {
+    if (step.id !== "draftReview") setAuditPanelOpen(false);
+  }, [step.id]);
+
+  useEffect(() => {
+    if (!auditPanelOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAuditPanelOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [auditPanelOpen]);
+
+  function update(patch: SopPatch) {
+    setSop((current) => ({
+      ...current,
+      ...(typeof patch === "function" ? patch(current) : patch),
+    }));
     editVersionRef.current += 1;
     setDirty(true);
     setSaveStatus("idle");
@@ -198,7 +772,14 @@ export function SopEditor({
   }
 
   function handleFieldInput(event: FormEvent<HTMLDivElement>) {
-    revealFieldHint(event.target);
+    const target = event.target;
+    // Deferred on purpose: this handler runs in the CAPTURE phase of the same native event
+    // that drives the field's controlled onChange. When the hint state actually changes
+    // (exactly the keystroke that empties a field), a synchronous setState here makes React
+    // flush mid-dispatch and restore the input to its rendered value BEFORE the change
+    // plugin compares values -- that keystroke's onChange never fires and the last
+    // character visibly refuses to delete.
+    window.setTimeout(() => revealFieldHint(target), 0);
   }
 
   // Persist the current SOP, returning whether it succeeded. Callers that navigate or export
@@ -218,62 +799,193 @@ export function SopEditor({
       return false;
     }
 
+    if (saveInFlightRef.current) return false;
+
     setSaveStatus("saving");
     setSaveError("");
+    saveInFlightRef.current = true;
+    try {
+      let working: Sop = { ...sop, meta: { ...sop.meta, version: controlledVersion } };
+      const saveOptions: SaveSopOptions = { expectedUpdatedAt: persistedUpdatedAt };
+      if (firstSave) {
+        try {
+          // A failed INSERT can be retried with the number already reserved by the first mint.
+          // Re-minting here would create a gap every time a transient save error is retried.
+          const reservedNumber = sop.meta.sopNumber.trim();
+          const minted = reservedNumber || (await mintSopNumber(workspaceId, deptId, DEFAULT_DOC_TYPE));
+          working = { ...working, meta: { ...working.meta, sopNumber: minted } };
+          // Patch only the number: edits typed while the mint was in flight must survive.
+          setSop((current) => ({ ...current, meta: { ...current.meta, sopNumber: minted } }));
+          saveOptions.departmentId = deptId;
+          saveOptions.docType = DEFAULT_DOC_TYPE;
+        } catch (error) {
+          setSaveError(error instanceof Error ? error.message : "Could not assign a SOP number.");
+          setSaveStatus("error");
+          return false;
+        }
+      }
 
-    let working = sop;
-    const saveOptions: SaveSopOptions = { expectedUpdatedAt: persistedUpdatedAt };
-    if (firstSave) {
+      const statusChanged = working.status !== lastSavedStatusRef.current;
+      const historyEntry = statusChanged ? statusChangeEntry(working, lastSavedStatusRef.current) : undefined;
+      const toSave: Sop = historyEntry ? { ...working, changeHistory: [...working.changeHistory, historyEntry] } : working;
       try {
-        const minted = await mintSopNumber(workspaceId, deptId, DEFAULT_DOC_TYPE);
-        working = { ...sop, meta: { ...sop.meta, sopNumber: minted } };
-        setSop(working);
-        saveOptions.departmentId = deptId;
-        saveOptions.docType = DEFAULT_DOC_TYPE;
+        const next = await saveSop(toSave, workspaceId, saveOptions);
+        persistedAnnexIdsRef.current = new Set(next.annexes.flatMap((annex) => (annex.id ? [annex.id] : [])));
+        setPersistedUpdatedAt(next.updatedAt);
+        lastSavedStatusRef.current = next.status;
+        if (editVersionRef.current === sopEditVersion) {
+          // Nothing changed since the render that produced `sop` -- adopt the server copy wholesale.
+          setSop(next);
+          setDirty(false);
+          setSaveStatus("saved");
+        } else {
+          // Edits landed after that render: keep them (still dirty, so autosave picks them up)
+          // and only fold in the server timestamp plus the auto-appended history row.
+          setSop((current) => ({
+            ...current,
+            updatedAt: next.updatedAt,
+            changeHistory: historyEntry ? [...current.changeHistory, historyEntry] : current.changeHistory,
+          }));
+          setSaveStatus("idle");
+        }
+        return true;
       } catch (error) {
-        setSaveError(error instanceof Error ? error.message : "Could not assign a SOP number.");
+        if (error instanceof SopConflictError) {
+          // Never retry into a conflict -- the user copies their changes and reloads.
+          setConflicted(true);
+        }
+        setSaveError(error instanceof Error ? error.message : "Save failed.");
         setSaveStatus("error");
         return false;
       }
-    }
-
-    const statusChanged = working.status !== lastSavedStatusRef.current;
-    const historyEntry = statusChanged ? statusChangeEntry(working, lastSavedStatusRef.current) : undefined;
-    const toSave: Sop = historyEntry ? { ...working, changeHistory: [...working.changeHistory, historyEntry] } : working;
-    const editVersion = editVersionRef.current;
-    try {
-      const next = await saveSop(toSave, workspaceId, saveOptions);
-      setPersistedUpdatedAt(next.updatedAt);
-      lastSavedStatusRef.current = next.status;
-      if (editVersionRef.current === editVersion) {
-        // Nothing changed while the save was in flight -- adopt the server copy wholesale.
-        setSop(next);
-        setDirty(false);
-        setSaveStatus("saved");
-      } else {
-        // Edits landed mid-save: keep them (still dirty, so autosave picks them up) and only
-        // fold in the server timestamp plus the auto-appended history row.
-        setSop((current) => ({
-          ...current,
-          updatedAt: next.updatedAt,
-          changeHistory: historyEntry ? [...current.changeHistory, historyEntry] : current.changeHistory,
-        }));
-        setSaveStatus("idle");
-      }
-      return true;
-    } catch (error) {
-      if (error instanceof SopConflictError) {
-        // Never retry into a conflict -- the user copies their changes and reloads.
-        setConflicted(true);
-      }
-      setSaveError(error instanceof Error ? error.message : "Save failed.");
-      setSaveStatus("error");
-      return false;
+    } finally {
+      saveInFlightRef.current = false;
     }
   }
 
   function handleSave() {
     void persist();
+  }
+
+  async function handleReloadLatest() {
+    const proceed = !dirty || await confirm({
+      title: "Reload the latest saved version?",
+      body: "This replaces the unsaved changes in this tab with the newest saved copy.",
+      tone: "warning",
+      confirmLabel: "Reload latest",
+      cancelLabel: "Keep editing",
+    });
+    if (!proceed) return;
+
+    setReloadingLatest(true);
+    try {
+      const latest = await getSop(sop.id);
+      if (!latest) throw new Error("The latest SOP could not be loaded.");
+      const next = withAnnexIds(latest.sop);
+      persistedAnnexIdsRef.current = new Set(next.annexes.flatMap((annex) => (annex.id ? [annex.id] : [])));
+      editVersionRef.current += 1;
+      lastSavedStatusRef.current = next.status;
+      setSop(next);
+      setPersistedUpdatedAt(next.updatedAt);
+      setDirty(false);
+      setConflicted(false);
+      setSaveError("");
+      setSaveStatus("saved");
+      setAnnexUploadStatus(null);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not reload the latest SOP.");
+      setSaveStatus("error");
+    } finally {
+      setReloadingLatest(false);
+    }
+  }
+
+  function handleLoadSample() {
+    setSop((current) => {
+      const sample = withAnnexIds(applySampleData(current));
+      // Sample content must never replace an existing controlled identity. New SOPs keep an
+      // empty stored number until the first save mints the real department sequence.
+      return { ...sample, meta: { ...sample.meta, sopNumber: current.meta.sopNumber } };
+    });
+    editVersionRef.current += 1;
+    setDirty(true);
+    setSaveStatus("idle");
+  }
+
+  async function handleAnnexUpload(index: number, file: File) {
+    const annex = sop.annexes[index];
+    if (!annex?.id || !workspaceId) {
+      setAnnexFileError("Save this SOP before uploading a form.");
+      return;
+    }
+    const requiresSopSave = !persistedAnnexIdsRef.current.has(annex.id);
+    setUploadingAnnexId(annex.id);
+    setAnnexFileError("");
+    setAnnexUploadStatus({
+      annexId: annex.id,
+      phase: requiresSopSave ? "saving" : "uploading",
+      message: requiresSopSave ? "Saving this new form row before upload…" : `Uploading ${file.name}…`,
+    });
+    try {
+      if (requiresSopSave && !(await persist())) {
+        setAnnexUploadStatus({
+          annexId: annex.id,
+          phase: "error",
+          message: "Upload paused because the SOP could not be saved. Resolve the save warning above, then try again.",
+        });
+        return;
+      }
+      setAnnexUploadStatus({ annexId: annex.id, phase: "uploading", message: `Uploading ${file.name}…` });
+      const saved = await uploadSopAnnexFile({ workspaceId, sopId: sop.id, annexId: annex.id, file });
+      setAnnexFiles((current) => [...current.filter((item) => item.annexId !== annex.id), saved]);
+      setAnnexUploadStatus({
+        annexId: annex.id,
+        phase: "success",
+        message: "Upload complete.",
+      });
+    } catch (error) {
+      setAnnexUploadStatus({
+        annexId: annex.id,
+        phase: "error",
+        message: error instanceof Error ? error.message : "Could not upload the form.",
+      });
+    } finally {
+      setUploadingAnnexId(null);
+    }
+  }
+
+  async function handleAnnexOpen(file: SopAnnexFile) {
+    setAnnexFileError("");
+    try {
+      await openSopAnnexFile(file);
+    } catch (error) {
+      setAnnexFileError(error instanceof Error ? error.message : "Could not open the form.");
+    }
+  }
+
+  async function handleAnnexFileRemove(file: SopAnnexFile) {
+    setAnnexFileError("");
+    try {
+      await removeSopAnnexFile(file);
+      setAnnexFiles((current) => current.filter((item) => item.id !== file.id));
+    } catch (error) {
+      setAnnexFileError(error instanceof Error ? error.message : "Could not remove the form.");
+    }
+  }
+
+  async function handleAnnexRowRemove(index: number) {
+    const annex = sop.annexes[index];
+    const file = annex?.id ? annexFiles.find((item) => item.annexId === annex.id) : undefined;
+    if (file) {
+      try {
+        await removeSopAnnexFile(file);
+        setAnnexFiles((current) => current.filter((item) => item.id !== file.id));
+      } catch (error) {
+        setAnnexFileError(error instanceof Error ? error.message : "Could not remove the attached form.");
+        return;
+      }
+    }
+    update({ annexes: sop.annexes.filter((_, rowIndex) => rowIndex !== index) });
   }
 
   // Warn on tab close / hard navigation while there are unsaved edits.
@@ -303,27 +1015,23 @@ export function SopEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autosaveArmed, sop]);
 
-  // Load the workspace roster once to suggest approver names. Read-only and non-blocking: if it
-  // fails, the approvals table just falls back to free typing.
   useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId || !persistedUpdatedAt) {
+      setAnnexFiles([]);
+      return;
+    }
     let active = true;
-    loadWorkspaceMembersFromSupabase(workspaceId)
-      .then((members) => {
-        if (!active) return;
-        const options = members
-          .filter((member) => member.fullName?.trim())
-          .map((member) => ({ name: member.fullName!.trim(), email: member.email }))
-          .sort((a, b) => a.name.localeCompare(b.name));
-        setApproverOptions(options);
+    listSopAnnexFiles(sop.id)
+      .then((files) => {
+        if (active) setAnnexFiles(files);
       })
-      .catch(() => {
-        /* suggestions are a convenience; leave the field as free text on failure */
+      .catch((error: unknown) => {
+        if (active) setAnnexFileError(error instanceof Error ? error.message : "Could not load attached forms.");
       });
     return () => {
       active = false;
     };
-  }, [workspaceId]);
+  }, [persistedUpdatedAt, sop.id, workspaceId]);
 
   // Confirm in-app exits (shell back link / brand link) while edits are unsaved. The shell
   // awaits this, so an unsaved-changes exit resolves through the themed dialog instead of a
@@ -340,23 +1048,121 @@ export function SopEditor({
     });
   }
 
-  async function handleFinish() {
+  async function handleSaveAndClose() {
     if (await persist()) {
       router.push("/sops");
     }
   }
 
-  // The approval flow needs a saved row, so a never-saved SOP is persisted first, then opened
-  // on its control page. This is what the masthead's primary action calls before first save.
-  async function handleStartApproval() {
-    if (await persist()) {
-      router.push(`/sops/${sop.id}/control`);
+  async function handleStepSelect(index: number) {
+    const nextStep = steps[index];
+    if (nextStep?.id === "approvals" && !hasPersistedSop && !(await persist())) return;
+    setStepIndex(index);
+  }
+
+  function openRemarkSection(category: string) {
+    const target = REVIEW_CATEGORY_STEPS[category] ?? "document";
+    const targetIndex = steps.findIndex((item) => item.id === target);
+    if (targetIndex >= 0) void handleStepSelect(targetIndex);
+  }
+
+  async function handleRecallForChanges() {
+    if (recallingReview) return;
+    setRecallingReview(true);
+    setSaveError("");
+    try {
+      const latest = await getSopControl(sop.id);
+      if (!latest) throw new Error("The SOP could not be loaded before recalling it.");
+      if (latest.status !== "in_review") {
+        window.location.assign(`/sops/${sop.id}?step=draft-review`);
+        return;
+      }
+      await transitionSop(sop.id, "draft", latest.updatedAt);
+      window.location.assign(`/sops/${sop.id}?step=draft-review`);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The SOP could not be recalled for changes.");
+      setSaveStatus("error");
+      setRecallingReview(false);
     }
   }
 
-  async function handleSaveAndExport() {
-    if (await persist()) {
-      await handleExport();
+  async function handleMarkRemarkAddressed(annotationId: string) {
+    if (resolvingAnnotationId) return;
+    setResolvingAnnotationId(annotationId);
+    setSaveError("");
+    try {
+      await resolveSopReviewAnnotation(annotationId);
+      setReviewAnnotations((current) => current.filter((item) => item.id !== annotationId));
+      setAuditEvents(await listSopAuditEvents(sop.id));
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The remark could not be marked addressed.");
+      setSaveStatus("error");
+    } finally {
+      setResolvingAnnotationId(null);
+    }
+  }
+
+  async function handleRequestFinalApproval() {
+    if (requestingFinalApproval || finalApprovalRequested) return;
+    setRequestingFinalApproval(true);
+    setSaveError("");
+    try {
+      await requestSopFinalApproval(sop.id);
+      await refreshApprovalRouting();
+      setAuditEvents(await listSopAuditEvents(sop.id));
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The SOP could not be sent for final approval.");
+      setSaveStatus("error");
+    } finally {
+      setRequestingFinalApproval(false);
+    }
+  }
+
+  // Submission is one action from the editor: save the current draft, bind the author's
+  // declaration to that exact content, then let the database validate the department roster
+  // and move the SOP into draft review. Assigned seat holders see it in their review queue.
+  async function handleStartApproval() {
+    if (submittingForApproval) return;
+    const useSoloSelfReview = soloSelfReviewReady;
+    setSubmittingForApproval(true);
+    setSaveError("");
+    try {
+      if (!(await persist())) return;
+
+      if (useSoloSelfReview) {
+        await enableSopSelfReviewTest(sop.id);
+      }
+
+      const control = await getSopControl(sop.id);
+      if (!control) throw new Error("The saved SOP could not be loaded for submission.");
+      if (control.status !== "draft") {
+        router.push("/sops?tab=review");
+        return;
+      }
+
+      const supabase = createPlannerSupabaseClient();
+      const userResult = await getUserFromSession(supabase);
+      const userId = userResult.data.user?.id;
+      if (!userId) throw new Error("Your session expired. Sign in again before submitting this SOP.");
+
+      const signatures = await listSignatures(sop.id);
+      const hasCurrentAuthorship = signatures.some(
+        (signature) =>
+          signature.meaning === "authorship" &&
+          signature.signerId === userId &&
+          isSignatureCurrent(signature, control),
+      );
+      if (!hasCurrentAuthorship) await signSop(sop.id, "authorship");
+
+      const latest = await getSopControl(sop.id);
+      if (!latest) throw new Error("The SOP could not be reloaded after signing.");
+      await transitionSop(sop.id, "in_review", latest.updatedAt);
+      router.push("/sops?tab=review");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The SOP could not be sent for review.");
+      setSaveStatus("error");
+    } finally {
+      setSubmittingForApproval(false);
     }
   }
 
@@ -366,11 +1172,11 @@ export function SopEditor({
       // The docx library is heavy and only needed for export — pull it in on demand
       // so it stays out of the editor's initial bundle.
       const { exportFileName, exportSopToDocx } = await import("@/lib/sop/export-docx");
-      const blob = await exportSopToDocx(sop);
+      const blob = await exportSopToDocx(renderedSop);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = exportFileName(sop);
+      anchor.download = exportFileName(renderedSop);
       anchor.click();
       URL.revokeObjectURL(url);
     } finally {
@@ -380,6 +1186,26 @@ export function SopEditor({
 
   const actions = (
     <>
+      {canEdit ? (
+        <button
+          type="button"
+          className="ui-btn-ghost h-10 gap-2"
+          onClick={handleLoadSample}
+          title="Fill every step with sample data"
+        >
+          <Sparkles size={15} />
+          <span className="hidden sm:inline">Sample</span>
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="ui-btn-ghost h-10 gap-2"
+        onClick={() => setPreviewing(true)}
+        title="Preview the PDF"
+      >
+        <FileText size={15} />
+        <span className="hidden sm:inline">Preview PDF</span>
+      </button>
       <button
         type="button"
         className="ui-btn-ghost h-10 gap-2 disabled:opacity-50"
@@ -415,17 +1241,30 @@ export function SopEditor({
 
   const sidebar = (
     <>
-      <div className="ui-nav-section">Steps</div>
+      <div className="ui-nav-section">SOP Builder</div>
       <div className="space-y-0.5">
-        {STEPS.map((entry, index) => {
+        {steps.map((entry, index) => {
           const active = index === stepIndex;
-          const filled = stepFilled(sop, entry.id);
-          return (
+          const reviewStep =
+            entry.id === "draftReview" || entry.id === "finalApproval" || entry.id === "qualityApproval";
+          const firstReviewStepIndex = steps.findIndex(
+            (item) =>
+              item.id === "draftReview" || item.id === "finalApproval" || item.id === "qualityApproval",
+          );
+          const filled = entry.id === "approvals"
+            ? approvalSeats.length > 0
+            : entry.id === "draftReview"
+              ? reviewSubmissions.length > 0 || reviewAnnotations.length > 0
+              : entry.id === "finalApproval"
+                ? allFinalApprovalsSigned
+                : entry.id === "qualityApproval"
+                  ? sop.status === "effective" || Boolean(qualitySignature)
+              : stepFilled(sop, entry.id);
+          const stepButton = (
             <button
-              key={entry.id}
               type="button"
               className={`ui-nav-item w-full ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
-              onClick={() => setStepIndex(index)}
+              onClick={() => void handleStepSelect(index)}
             >
               <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                 {active ? (
@@ -439,10 +1278,44 @@ export function SopEditor({
               <span className="min-w-0 flex-1 truncate text-left">{entry.label}</span>
             </button>
           );
+          return reviewStep && index === firstReviewStepIndex ? (
+            <div key={entry.id} className="mt-3 border-t border-line pt-3">
+              <div className="ui-nav-section">Review</div>
+              {stepButton}
+            </div>
+          ) : (
+            <div key={entry.id}>{stepButton}</div>
+          );
         })}
       </div>
     </>
   );
+
+  function closePreview() {
+    if (previewOnly) {
+      router.push("/sops");
+      return;
+    }
+    setPreviewing(false);
+  }
+
+  if (previewOnly && previewing) {
+    return <SopPrintPreview sop={renderedSop} annexFiles={annexFiles} onClose={closePreview} />;
+  }
+
+  if (requestedStepId && requestedStepIndex < 0) {
+    return (
+      <SopShell
+        crumb={sop.meta.title || sop.meta.sopNumber || "Untitled"}
+        sidebar={sidebar}
+        back={{ href: "/sops?tab=review", label: "Review queue" }}
+      >
+        <div className="flex h-full items-center justify-center p-4">
+          <Loader2 size={20} className="animate-spin text-ink-tertiary" />
+        </div>
+      </SopShell>
+    );
+  }
 
   return (
     <SopShell
@@ -461,38 +1334,29 @@ export function SopEditor({
         onInputCapture={handleFieldInput}
         onScrollCapture={() => setFieldHint(null)}
       >
-        <div className="mx-auto max-w-6xl pb-16">
-          <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_19rem]">
-            {/* Persistent document summary on wide screens; first above the form on smaller screens. */}
-            <aside className="min-w-0 xl:order-2 xl:sticky xl:top-0">
-              <SopMasthead
-                sop={sop}
-                department={selectedDept ?? undefined}
-                variant="sidebar"
-                saveState={saveStatus}
-                dirty={dirty}
-                isNew={isNew && !persistedUpdatedAt}
-                onPreview={() => setPreviewing(true)}
-                onStartApproval={() => void handleStartApproval()}
-              />
-            </aside>
+        <div className="mx-auto max-w-4xl pb-16">
+          <div className="min-w-0 space-y-5">
 
-            <div className="min-w-0 space-y-5 xl:order-1">
-
-            {sop.source === "converted" && !reviewDismissed ? (
-              <div className="ui-notice ui-notice-warn sticky top-0 z-20 flex items-start gap-2 px-3 py-2">
+            {showConvertedReview && !reviewDismissed ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className={`ui-notice ui-notice-warn fixed right-4 top-16 z-[55] flex w-[min(24rem,calc(100vw-2rem))] items-start gap-2 px-3 py-2 transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
+                  reviewVisible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
+                }`}
+              >
                 <Sparkles size={14} className="mt-0.5 shrink-0 text-ink-secondary" />
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium leading-4 text-ink">Review your converted SOP</p>
                   <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">
                     AI mapped your upload into the standard. Review each section, fix anything that looks off,
-                    then save or export.
+                    then save it or send it for review.
                   </p>
                 </div>
                 <button
                   type="button"
                   className="ui-btn-ghost h-6 w-6 shrink-0 px-0 text-ink-tertiary"
-                  onClick={() => setReviewDismissed(true)}
+                  onClick={dismissReviewToast}
                   title="Dismiss"
                   aria-label="Dismiss review notice"
                 >
@@ -502,16 +1366,84 @@ export function SopEditor({
             ) : null}
 
             {saveStatus === "error" && saveError ? (
-              <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{saveError}</div>
+              <div className="ui-notice ui-notice-warn flex items-center gap-3 px-4 py-3 ui-section-subtitle">
+                <span className="min-w-0 flex-1">{saveError}</span>
+                {conflicted ? (
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-8 shrink-0 gap-1.5 border border-line px-3"
+                    onClick={() => void handleReloadLatest()}
+                    disabled={reloadingLatest}
+                  >
+                    {reloadingLatest ? <Loader2 size={13} className="animate-spin" /> : null}
+                    {reloadingLatest ? "Reloading…" : "Reload latest"}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
 
             {/* Compact step indicator on mobile */}
             <div className="ui-mono-label text-ink-tertiary sm:hidden">
-              Step {stepIndex + 1} of {STEPS.length} · {step.label}
+              Step {stepIndex + 1} of {steps.length} · {step.label}
             </div>
 
+            {showDraftReview && step.id !== "draftReview" && stepReviewAnnotations.length ? (
+              <section className="ui-panel overflow-hidden border-l-2 border-l-amber-500">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare size={14} className="text-amber-700" />
+                    <div>
+                      <h2 className="text-sm font-medium text-ink">Review feedback for {step.label}</h2>
+                      <p className="mt-0.5 text-xs text-ink-tertiary">
+                        Update this section using the reviewer remarks below.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-8 px-3"
+                    onClick={() => void handleStepSelect(steps.findIndex((item) => item.id === "draftReview"))}
+                  >
+                    View all feedback
+                  </button>
+                </div>
+                <div className="divide-y divide-line">
+                  {stepReviewAnnotations.map((annotation) => (
+                    <div key={annotation.id} className="flex flex-wrap items-start gap-3 px-4 py-3">
+                      <span className="ui-chip mt-0.5 shrink-0">
+                        {REVIEW_CATEGORY_LABELS[annotation.category] ?? "Overall remarks"}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm leading-5 text-ink">{annotation.body}</p>
+                        <p className="mt-1 text-[11px] text-ink-tertiary">Requested by {annotation.authorName}</p>
+                      </div>
+                      {sop.status === "draft" && canEdit ? (
+                        <button
+                          type="button"
+                          className="ui-btn-ghost h-8 shrink-0 gap-1.5 px-3 text-emerald-700 disabled:opacity-50"
+                          onClick={() => void handleMarkRemarkAddressed(annotation.id)}
+                          disabled={Boolean(resolvingAnnotationId)}
+                        >
+                          {resolvingAnnotationId === annotation.id
+                            ? <Loader2 size={13} className="animate-spin" />
+                            : <CircleCheck size={13} />}
+                          Addressed
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
             {step.id === "document" ? (
-              <Section title="Document">
+              <Section
+                title="Document"
+                reviewAttention={
+                  reviewCategoriesNeedingAttention.has("document") ||
+                  reviewCategoriesNeedingAttention.has("overall")
+                }
+              >
                 <div className="grid gap-3 sm:grid-cols-2">
                   {authMode && authMode.kind !== "blocked" ? (
                     <Field label="Owning department">
@@ -540,11 +1472,7 @@ export function SopEditor({
                   <Field label="SOP number">
                     <div className="flex h-9 items-center">
                       <span className="font-mono text-sm text-ink">
-                        {isNew && !persistedUpdatedAt
-                          ? selectedDept
-                            ? previewSopNumber(selectedDept.code, DEFAULT_DOC_TYPE)
-                            : "Assigned on save"
-                          : displaySopNumber}
+                        {isNew && !persistedUpdatedAt && !selectedDept ? "Assigned on save" : displaySopNumber}
                       </span>
                     </div>
                   </Field>
@@ -558,13 +1486,9 @@ export function SopEditor({
                     />
                   </Field>
                   <Field label="Version">
-                    <input
-                      className="ui-field-standalone"
-                      value={sop.meta.version}
-                      placeholder="1.0"
-                      disabled={!canEdit}
-                      onChange={(event) => update({ meta: { ...sop.meta, version: event.target.value } })}
-                    />
+                    <div className="flex h-9 items-center">
+                      <span className="font-mono text-sm text-ink">{controlledVersion}</span>
+                    </div>
                   </Field>
                   <Field label="Status">
                     {/* Read-only here; lifecycle transitions run from the control page (they need
@@ -584,33 +1508,25 @@ export function SopEditor({
                       </span>
                     </div>
                   </Field>
-                  <Field label="Revision date">
-                    <input
-                      type="date"
-                      required
-                      className="ui-field-standalone"
-                      value={sop.meta.revisionDate}
-                      disabled={!canEdit}
-                      onChange={(event) => update({ meta: { ...sop.meta, revisionDate: event.target.value } })}
-                    />
-                  </Field>
-                  <Field label="Effective date">
-                    <input
-                      type="date"
-                      required
-                      className="ui-field-standalone"
-                      value={sop.meta.effectiveDate}
-                      disabled={!canEdit}
-                      onChange={(event) => update({ meta: { ...sop.meta, effectiveDate: event.target.value } })}
-                    />
-                  </Field>
+                  {approvalReviewCycle > 0 ? (
+                    <Field label="Revision date">
+                      <input
+                        type="date"
+                        required
+                        className="ui-field-standalone"
+                        value={sop.meta.revisionDate}
+                        disabled={!canEdit}
+                        onChange={(event) => update({ meta: { ...sop.meta, revisionDate: event.target.value } })}
+                      />
+                    </Field>
+                  ) : null}
                 </div>
               </Section>
             ) : null}
 
             {step.id === "overview" ? (
               <>
-                <Section title="Purpose">
+                <Section title="Purpose" reviewAttention={reviewCategoriesNeedingAttention.has("purpose")}>
                   <AutoTextarea
                     className="ui-field-standalone min-h-20 py-2"
                     value={sop.purpose}
@@ -619,7 +1535,7 @@ export function SopEditor({
                     onChange={(event) => update({ purpose: event.target.value })}
                   />
                 </Section>
-                <Section title="Scope">
+                <Section title="Scope" reviewAttention={reviewCategoriesNeedingAttention.has("scope")}>
                   <AutoTextarea
                     className="ui-field-standalone min-h-20 py-2"
                     value={sop.scope}
@@ -628,7 +1544,7 @@ export function SopEditor({
                     onChange={(event) => update({ scope: event.target.value })}
                   />
                 </Section>
-                <Section title="Definitions">
+                <Section title="Definitions" reviewAttention={reviewCategoriesNeedingAttention.has("definitions")}>
                   <PairListEditor
                     rows={sop.definitions}
                     keyLabel="Term"
@@ -639,7 +1555,7 @@ export function SopEditor({
                     onChange={(definitions) => update({ definitions })}
                   />
                 </Section>
-                <Section title="References">
+                <Section title="References" reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
                   <StringListEditor
                     items={sop.references}
                     placeholder="e.g. ISO 9001:2015"
@@ -652,15 +1568,21 @@ export function SopEditor({
 
             {step.id === "procedure" ? (
               <>
-                <Section title="Responsible person(s)">
-                  <StringListEditor
+                <Section
+                  title="Responsible person(s)"
+                  reviewAttention={reviewCategoriesNeedingAttention.has("responsible")}
+                >
+                  <ResponsiblePartiesEditor
                     items={sop.responsiblePersons}
-                    placeholder="Function / role"
+                    departments={approvalDepartments}
                     disabled={!canEdit}
                     onChange={(responsiblePersons) => update({ responsiblePersons })}
                   />
                 </Section>
-                <Section title="Measurement (KPIs)">
+                <Section
+                  title="Measurement (KPIs)"
+                  reviewAttention={reviewCategoriesNeedingAttention.has("measurements")}
+                >
                   <StringListEditor
                     items={sop.measurements}
                     placeholder="e.g. % of released SOPs"
@@ -668,7 +1590,7 @@ export function SopEditor({
                     onChange={(measurements) => update({ measurements })}
                   />
                 </Section>
-                <Section title="Procedure">
+                <Section title="Procedure" reviewAttention={reviewCategoriesNeedingAttention.has("procedure")}>
                   <Field label="Process flow description">
                     <AutoTextarea
                       className="ui-field-standalone min-h-16 py-2"
@@ -695,20 +1617,25 @@ export function SopEditor({
 
             {step.id === "annexes" ? (
               <>
-                <Section title="Annexes & forms">
-                  <PairListEditor
+                <Section title="Annexes & forms" reviewAttention={reviewCategoriesNeedingAttention.has("annexes")}>
+                  <AnnexesEditor
+                    sopId={sop.id}
                     rows={sop.annexes}
-                    keyLabel="Label"
-                    valueLabel="Description"
-                    keyExample="Appendix A"
-                    valueExample="Order escalation approval form"
-                    keyName="label"
-                    valueName="description"
+                    files={annexFiles}
                     disabled={!canEdit}
-                    onChange={(annexes) => update({ annexes })}
+                    uploadingAnnexId={uploadingAnnexId}
+                    uploadStatus={annexUploadStatus}
+                    onChange={(changeAnnexes) =>
+                      update((current) => ({ annexes: changeAnnexes(current.annexes) }))
+                    }
+                    onUpload={handleAnnexUpload}
+                    onOpen={(file) => void handleAnnexOpen(file)}
+                    onRemoveFile={(file) => void handleAnnexFileRemove(file)}
+                    onRemoveRow={(index) => void handleAnnexRowRemove(index)}
                   />
+                  {annexFileError ? <p className="mt-2 text-xs text-danger">{annexFileError}</p> : null}
                 </Section>
-                <Section title="Change history">
+                <Section title="Change history" reviewAttention={reviewCategoriesNeedingAttention.has("history")}>
                   <ChangeHistoryEditor
                     rows={sop.changeHistory}
                     disabled={!canEdit}
@@ -719,60 +1646,483 @@ export function SopEditor({
             ) : null}
 
             {step.id === "approvals" ? (
-              <Section title="Change approvals">
-                <ApprovalsEditor rows={sop.approvals} disabled={!canEdit} approvers={approverOptions} onChange={(approvals) => update({ approvals })} />
-              </Section>
+              <>
+                {approvalRoutingError ? (
+                  <div className="ui-notice ui-notice-warn px-4 py-3 text-xs">{approvalRoutingError}</div>
+                ) : null}
+                {approvalRoutingLoading ? (
+                  <section className="ui-panel flex min-h-32 items-center justify-center">
+                    <Loader2 size={18} className="animate-spin text-ink-tertiary" />
+                  </section>
+                ) : hasPersistedSop && canEdit ? (
+                  <SopRosterEditor
+                    sopId={sop.id}
+                    departments={approvalDepartments}
+                    seats={approvalSeats}
+                    authorId={approvalAuthorId}
+                    onChanged={refreshApprovalRouting}
+                  />
+                ) : (
+                  <section className="ui-panel overflow-hidden">
+                    <div className="border-b border-line px-4 py-3 ui-mono-label text-ink-tertiary">
+                      Approval routing
+                    </div>
+                    <div className="divide-y divide-line">
+                      {approvalSeats.length ? approvalSeats.map((seat) => {
+                        const department = approvalDepartments.find((item) => item.id === seat.departmentId);
+                        return (
+                          <div key={seat.departmentId} className="flex items-center gap-3 px-4 py-3 text-sm">
+                            <span className="ui-chip">{department?.code ?? "—"}</span>
+                            <span className="min-w-0 flex-1 truncate">{department?.name ?? "Unknown department"}</span>
+                            <span className="ui-mono-label text-ink-tertiary">{seat.rasic}</span>
+                          </div>
+                        );
+                      }) : (
+                        <p className="px-4 py-8 text-center text-xs text-ink-tertiary">
+                          Save the draft to configure department routing.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                )}
+              </>
+            ) : null}
+
+            {step.id === "draftReview" ? (
+              <div className="space-y-5">
+                <section className="ui-panel overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <MessageSquare size={14} className="text-ink-secondary" />
+                        <h2 className="text-sm font-medium text-ink">Draft review</h2>
+                      </div>
+                      <p className="mt-1 text-xs text-ink-tertiary">
+                        {sop.status === "in_review"
+                          ? "Track each reviewer and read the remarks returned on this draft."
+                          : "Work through the returned remarks, then send the updated draft for a new review."}
+                      </p>
+                    </div>
+                    {sop.status === "in_review" && reviewSubmissions.length ? (
+                      <button
+                        type="button"
+                        className="ui-btn-primary h-9 gap-2 px-4 disabled:opacity-50"
+                        onClick={() => void handleRecallForChanges()}
+                        disabled={recallingReview}
+                      >
+                        {recallingReview ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                        {recallingReview ? "Recalling…" : "Make changes"}
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="divide-y divide-line">
+                    {draftReviewers.length ? draftReviewers.map((reviewer) => {
+                      const status = !reviewer.submission
+                        ? "Reviewing"
+                        : reviewer.submission.noChanges
+                          ? "No changes needed"
+                          : "Changes requested";
+                      const statusClass = !reviewer.submission
+                        ? "bg-zinc-400"
+                        : reviewer.submission.noChanges
+                          ? "bg-emerald-600"
+                          : "bg-red-600";
+                      return (
+                        <div key={reviewer.userId} className="flex items-center gap-3 px-4 py-3">
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusClass}`} aria-hidden />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-ink">{reviewer.name}</p>
+                            <p className="mt-0.5 text-xs text-ink-tertiary">{status}</p>
+                          </div>
+                          {reviewer.submission ? (
+                            <span className="shrink-0 text-xs tabular-nums text-ink-tertiary">
+                              {formatReviewDate(reviewer.submission.submittedAt)}
+                            </span>
+                          ) : null}
+                        </div>
+                      );
+                    }) : (
+                      <p className="px-4 py-8 text-center text-xs text-ink-tertiary">
+                        Reviewer assignments are still being prepared.
+                      </p>
+                    )}
+                  </div>
+                </section>
+
+                {finalApprovalReady || finalApprovalRequested ? (
+                  <section className="ui-panel overflow-hidden border-l-2 border-l-emerald-600">
+                    <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-4">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
+                        <div>
+                          <h2 className="text-sm font-medium text-ink">
+                            {finalApprovalRequested ? "Final approval requested" : "Draft review complete"}
+                          </h2>
+                          <p className="mt-1 text-xs leading-5 text-ink-tertiary">
+                            {finalApprovalRequested
+                              ? "The required approvers can now find this SOP under Final approval in their Review Queue."
+                              : "Every reviewer returned No changes needed. Send the current document to its formal approvers."}
+                          </p>
+                        </div>
+                      </div>
+                      {finalApprovalRequested ? (
+                        <span className="ui-chip shrink-0 border-emerald-600 text-emerald-700">Sent</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="ui-btn-primary h-9 shrink-0 gap-2 px-4 disabled:opacity-50"
+                          onClick={() => void handleRequestFinalApproval()}
+                          disabled={requestingFinalApproval}
+                        >
+                          {requestingFinalApproval
+                            ? <Loader2 size={14} className="animate-spin" />
+                            : <ShieldCheck size={14} />}
+                          {requestingFinalApproval ? "Sending…" : "Send for final approval"}
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                ) : null}
+
+                <section className="ui-panel overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+                    <h2 className="text-sm font-medium text-ink">Returned remarks</h2>
+                    {reviewAnnotations.length ? (
+                      <span className="ui-chip">{reviewAnnotations.length}</span>
+                    ) : null}
+                  </div>
+                  {reviewAnnotations.length ? (
+                    <div className="divide-y divide-line">
+                      {reviewAnnotations.map((annotation) => (
+                        <div key={annotation.id} className="grid gap-3 px-4 py-3 sm:grid-cols-[10rem_1fr_auto] sm:items-center">
+                          <span className="ui-chip w-fit">
+                            {REVIEW_CATEGORY_LABELS[annotation.category] ?? "Overall remarks"}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs leading-5 text-ink">{annotation.body}</p>
+                            <p className="mt-1 text-[11px] text-ink-tertiary">{annotation.authorName}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                            <button
+                              type="button"
+                              className="ui-btn-ghost h-8 px-3"
+                              onClick={() => openRemarkSection(annotation.category)}
+                            >
+                              Open section
+                            </button>
+                            {sop.status === "draft" && canEdit ? (
+                              <button
+                                type="button"
+                                className="ui-btn-ghost h-8 gap-1.5 px-3 text-emerald-700 disabled:opacity-50"
+                                onClick={() => void handleMarkRemarkAddressed(annotation.id)}
+                                disabled={Boolean(resolvingAnnotationId)}
+                              >
+                                {resolvingAnnotationId === annotation.id
+                                  ? <Loader2 size={13} className="animate-spin" />
+                                  : <CircleCheck size={13} />}
+                                Addressed
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-8 text-center">
+                      <p className="text-sm font-medium text-ink">No remarks returned</p>
+                      <p className="mt-1 text-xs text-ink-tertiary">
+                        Reviewer progress will continue to update here while the SOP is in review.
+                      </p>
+                    </div>
+                  )}
+                </section>
+
+              </div>
+            ) : null}
+
+            {step.id === "finalApproval" ? (
+              <div className="space-y-5">
+                <section className="ui-panel overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-4 py-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
+                      <div>
+                        <h2 className="text-sm font-medium text-ink">Final approval</h2>
+                        <p className="mt-1 text-xs leading-5 text-ink-tertiary">
+                          Review the controlled document and track every required stakeholder signature before Quality release.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="ui-btn-ghost h-9 gap-2 border border-line px-3"
+                      onClick={() => setPreviewing(true)}
+                    >
+                      <FileText size={14} />
+                      Preview signed PDF
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-line">
+                    {finalApprovalStakeholders.map(({ seat, department, name, signature }) => (
+                      <div key={seat.departmentId} className="flex items-center gap-3 px-4 py-3">
+                        <span
+                          className={`h-2.5 w-2.5 shrink-0 rounded-full ${signature ? "bg-emerald-600" : "bg-zinc-400"}`}
+                          aria-hidden
+                        />
+                        <span className="ui-chip shrink-0">{department?.code ?? "—"}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-ink">{name}</p>
+                          <p className="mt-0.5 truncate text-xs text-ink-tertiary">
+                            {department?.name ?? "Unknown department"} · {seat.rasic}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className={`text-xs font-medium ${signature ? "text-emerald-700" : "text-ink-tertiary"}`}>
+                            {signature ? "Signed" : "Waiting for signature"}
+                          </p>
+                          {signature ? (
+                            <p className="mt-0.5 text-[11px] tabular-nums text-ink-tertiary">
+                              {formatReviewDate(signature.signedAt)}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+              </div>
+            ) : null}
+
+            {step.id === "qualityApproval" ? (
+              <div className="space-y-5">
+                <section className={`ui-panel overflow-hidden border-l-2 ${
+                  sop.status === "effective" ? "border-l-emerald-600" : "border-l-sky-600"
+                }`}>
+                  <div className="flex flex-wrap items-start justify-between gap-4 px-4 py-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      {sop.status === "effective" ? (
+                        <CircleCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
+                      ) : (
+                        <ShieldCheck size={17} className="mt-0.5 shrink-0 text-sky-700" />
+                      )}
+                      <div>
+                        <h2 className="text-sm font-medium text-ink">Quality approval</h2>
+                        <p className="mt-1 text-xs leading-5 text-ink-tertiary">
+                          {sop.status === "effective"
+                            ? "Quality signed the controlled document and released it to the Effective Library."
+                            : "Every stakeholder has signed. Quality must verify the controlled PDF, add the final signature, and release it."}
+                        </p>
+                      </div>
+                    </div>
+                    <span className={`ui-chip shrink-0 ${
+                      sop.status === "effective"
+                        ? "border-emerald-600 text-emerald-700"
+                        : "border-sky-600 text-sky-700"
+                    }`}>
+                      {sop.status === "effective" ? "Effective" : "Awaiting Quality"}
+                    </span>
+                  </div>
+
+                  {qualitySignature ? (
+                    <div className="flex items-center gap-3 border-t border-line px-4 py-3">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-600" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-ink">
+                          {qualitySignature.signerName || "Quality approver"}
+                        </p>
+                        <p className="mt-0.5 text-xs text-ink-tertiary">Quality final signature</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-xs font-medium text-emerald-700">Signed</p>
+                        <p className="mt-0.5 text-[11px] tabular-nums text-ink-tertiary">
+                          {formatReviewDate(qualitySignature.signedAt)}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-9 gap-2 border border-line px-3"
+                    onClick={() => setPreviewing(true)}
+                  >
+                    <FileText size={14} />
+                    Preview signed PDF
+                  </button>
+                  {isCurrentUserQualityApprover && sop.status === "approved" ? (
+                    <button
+                      type="button"
+                      className="ui-btn-primary h-9 gap-2 px-4"
+                      onClick={() => setQualityApprovalOpen(true)}
+                    >
+                      <ShieldCheck size={14} />
+                      Review, sign & release
+                    </button>
+                  ) : null}
+                </div>
+              </div>
             ) : null}
 
             {/* Footer nav */}
             <div className="flex items-center justify-between border-t border-line pt-4">
-              <button
-                type="button"
-                className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-40"
-                disabled={isFirst}
-                onClick={() => setStepIndex((index) => Math.max(0, index - 1))}
-              >
-                <ChevronLeft size={14} />
-                Back
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-40"
+                  disabled={isFirst}
+                  onClick={() => setStepIndex((index) => Math.max(0, index - 1))}
+                >
+                  <ChevronLeft size={14} />
+                  Back
+                </button>
+                {showDraftReview &&
+                stepReviewAnnotations.length > 0 &&
+                CREATOR_STEPS.some((creatorStep) => creatorStep.id === step.id) ? (
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-9 gap-1.5 px-3"
+                    onClick={() => void handleStepSelect(steps.findIndex((item) => item.id === "draftReview"))}
+                  >
+                    <MessageSquare size={14} />
+                    Back to Draft Review
+                  </button>
+                ) : null}
+              </div>
               {isLast ? (
                 <div className="flex items-center gap-2">
                   {canEdit ? (
-                    <button
-                      type="button"
-                      className="ui-btn-ghost h-9 gap-1.5 px-4 disabled:opacity-50"
-                      onClick={handleFinish}
-                      disabled={saveDisabled}
-                    >
-                      <Check size={14} />
-                      {saveStatus === "saving" ? "Saving…" : "Save & finish"}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="ui-btn-ghost h-9 gap-1.5 px-4 disabled:opacity-50"
+                        onClick={handleSaveAndClose}
+                        disabled={saveDisabled}
+                        title="Save this draft and return to the SOP list"
+                      >
+                        <Check size={14} />
+                        {saveStatus === "saving" ? "Saving…" : "Save & close"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ui-btn-primary h-9 gap-1.5 px-4 disabled:opacity-50"
+                        onClick={handleStartApproval}
+                        disabled={saveDisabled || submittingForApproval || approvalRoutingLoading || !approvalRoutingReady}
+                        title={
+                          approvalRoutingReady
+                            ? soloSelfReviewReady
+                              ? "Temporary test mode: send this draft to yourself for review"
+                              : "Save this draft and send it to the assigned responsible reviewers"
+                            : "Assign at least one Responsible department and exactly one Accountable department"
+                        }
+                      >
+                        <ShieldCheck size={14} />
+                        {submittingForApproval ? "Sending…" : saveStatus === "saving" ? "Saving…" : "Send for review"}
+                      </button>
+                    </>
                   ) : null}
-                  <button
-                    type="button"
-                    className="ui-btn-primary h-9 gap-1.5 px-4 disabled:opacity-50"
-                    onClick={canEdit ? handleSaveAndExport : handleExport}
-                    disabled={exporting || (canEdit && saveStatus === "saving")}
-                  >
-                    <Download size={14} />
-                    {exporting ? "Exporting…" : canEdit ? "Save & export" : "Export"}
-                  </button>
                 </div>
               ) : (
                 <button
                   type="button"
                   className="ui-btn-ghost h-9 gap-1.5 px-4"
-                  onClick={() => setStepIndex((index) => Math.min(STEPS.length - 1, index + 1))}
+                  onClick={() => void handleStepSelect(Math.min(steps.length - 1, stepIndex + 1))}
                 >
                   Next
                   <ChevronRight size={14} />
                 </button>
               )}
             </div>
-          </div>
         </div>
       </div>
       </div>
+        {showDraftReview && step.id === "draftReview" ? (
+          <>
+            <button
+              type="button"
+              className={`fixed right-0 top-24 z-[58] flex items-center gap-2 rounded-l-md border border-r-0 border-line bg-surface-raised px-3 py-2.5 text-xs font-medium text-ink shadow-lg transition-[transform,opacity] duration-200 ease-out hover:bg-surface-subtle motion-reduce:transition-none ${
+                auditPanelOpen ? "pointer-events-none translate-x-full opacity-0" : "translate-x-0 opacity-100"
+              }`}
+              onClick={() => setAuditPanelOpen(true)}
+              aria-expanded={auditPanelOpen}
+              aria-controls="sop-audit-panel"
+            >
+              <History size={14} className="text-ink-secondary" />
+              Audit trail
+              <span className="ui-chip min-w-6 justify-center tabular-nums">{auditEvents.length}</span>
+            </button>
+
+            <aside
+              id="sop-audit-panel"
+              role="dialog"
+              aria-modal="false"
+              aria-label="SOP audit trail"
+              aria-hidden={!auditPanelOpen}
+              className={`fixed bottom-0 right-0 top-12 z-[60] flex w-[min(28rem,calc(100vw-1rem))] flex-col border-l border-line bg-surface-raised shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${
+                auditPanelOpen ? "translate-x-0" : "pointer-events-none translate-x-full"
+              }`}
+            >
+              <div className="flex flex-none items-start justify-between gap-4 border-b border-line px-5 py-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-subtle text-ink-secondary">
+                    <History size={15} />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-sm font-medium text-ink">Audit trail</h2>
+                      <span className="ui-chip tabular-nums">{auditEvents.length}</span>
+                    </div>
+                    <p className="mt-1 text-xs leading-4 text-ink-tertiary">
+                      Immutable review and workflow events.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="ui-btn-ghost h-8 w-8 shrink-0 p-0"
+                  onClick={() => setAuditPanelOpen(false)}
+                  disabled={!auditPanelOpen}
+                  tabIndex={auditPanelOpen ? 0 : -1}
+                  aria-label="Close audit trail"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                {auditEvents.length ? (
+                  <div className="divide-y divide-line">
+                    {auditEvents.map((event) => (
+                      <div key={event.id} className="flex items-start gap-3 px-5 py-3.5">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-ink-tertiary" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-ink">
+                            {AUDIT_EVENT_LABELS[event.eventType] ?? event.eventType.replaceAll("_", " ")}
+                          </p>
+                          <p className="mt-1 text-[11px] leading-4 text-ink-tertiary">
+                            {event.actorName || "System"} · Review cycle {event.reviewCycle + 1}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-[11px] tabular-nums text-ink-tertiary">
+                          {formatReviewDate(event.createdAt)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : auditError ? (
+                  <p className="px-5 py-10 text-center text-xs text-red-600">{auditError}</p>
+                ) : (
+                  <p className="px-5 py-10 text-center text-xs leading-5 text-ink-tertiary">
+                    Workflow events will appear here as this SOP moves through review.
+                  </p>
+                )}
+              </div>
+            </aside>
+          </>
+        ) : null}
         {fieldHint ? (
           <div
             role="tooltip"
@@ -786,24 +2136,47 @@ export function SopEditor({
             Example: <span className="font-medium text-ink">{fieldHint.text}</span>
           </div>
         ) : null}
-        {previewing ? <SopPrintPreview sop={sop} onClose={() => setPreviewing(false)} /> : null}
+        {previewing ? (
+          <SopPrintPreview sop={renderedSop} annexFiles={annexFiles} onClose={closePreview} />
+        ) : null}
+        {qualityApprovalOpen ? (
+          <SopQualityApprovalWorkspace
+            sopId={sop.id}
+            onClose={() => setQualityApprovalOpen(false)}
+            onReleased={() => void refreshApprovalRouting()}
+            returnLabel="Back to Quality Approval"
+          />
+        ) : null}
       </SopShell>
   );
 }
-
 // ---------------------------------------------------------------------------
 // Layout helpers
 // ---------------------------------------------------------------------------
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({
+  title,
+  children,
+  reviewAttention = false,
+}: {
+  title: string;
+  children: ReactNode;
+  reviewAttention?: boolean;
+}) {
   return (
-    <section className="ui-panel px-4 py-3">
+    <section
+      className="ui-panel px-4 py-3 transition-[border-color,box-shadow] duration-200"
+      style={reviewAttention ? {
+        borderColor: "var(--color-warn)",
+        boxShadow: "inset 3px 0 0 var(--color-warn), 0 0 0 1px color-mix(in srgb, var(--color-warn) 28%, transparent)",
+      } : undefined}
+      data-review-attention={reviewAttention ? "true" : undefined}
+    >
       <h2 className="ui-setup-section-title mb-3">{title}</h2>
       {children}
     </section>
   );
 }
-
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
@@ -812,7 +2185,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     </label>
   );
 }
-
 function RowDeleteButton({ onClick, title }: { onClick: () => void; title: string }) {
   return (
     <button
@@ -825,7 +2197,6 @@ function RowDeleteButton({ onClick, title }: { onClick: () => void; title: strin
     </button>
   );
 }
-
 function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button type="button" className="ui-btn-ghost mt-2 h-8 gap-1.5 px-3" onClick={onClick}>
@@ -834,7 +2205,6 @@ function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
     </button>
   );
 }
-
 // ---------------------------------------------------------------------------
 // List editors
 // ---------------------------------------------------------------------------
@@ -875,6 +2245,106 @@ function StringListEditor({
   );
 }
 
+function ResponsiblePartiesEditor({
+  items,
+  departments,
+  disabled = false,
+  onChange,
+}: {
+  items: string[];
+  departments: Department[];
+  disabled?: boolean;
+  onChange: (items: string[]) => void;
+}) {
+  function replace(index: number, value: string) {
+    const next = [...items];
+    next[index] = value;
+    onChange(next);
+  }
+
+  return (
+    <div>
+      <p className="ui-section-subtitle mb-3 text-ink-secondary">
+        Select the department and organizational position responsible for this SOP. Departments selected here are
+        carried into approval routing.
+      </p>
+      {items.length ? (
+        <div className="mb-1 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 px-1 ui-mono-label text-ink-tertiary">
+          <span>Department</span>
+          <span>Responsible position</span>
+          <span className="sr-only">Actions</span>
+        </div>
+      ) : null}
+      <div className="space-y-2">
+        {items.map((item, index) => {
+          const selection = parseResponsibleParty(item, departments);
+          const department = departments.find((candidate) => candidate.id === selection.departmentId);
+          const standardTitles = department
+            ? standardPositionTitlesForDepartment(department.code)
+            : [];
+          const hasImportedTitle = Boolean(
+            selection.positionTitle && !standardTitles.includes(selection.positionTitle),
+          );
+
+          return (
+            <div key={index}>
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
+                <select
+                  aria-label={`Department for responsible party ${index + 1}`}
+                  className="ui-field-standalone min-w-0"
+                  value={selection.departmentId}
+                  disabled={disabled}
+                  onChange={(event) => {
+                    const nextDepartment = departments.find((candidate) => candidate.id === event.target.value);
+                    replace(index, nextDepartment ? formatResponsibleParty(nextDepartment, "") : "");
+                  }}
+                >
+                  <option value="">Select department…</option>
+                  {departments.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.code} · {candidate.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  aria-label={`Position for responsible party ${index + 1}`}
+                  className="ui-field-standalone min-w-0"
+                  value={selection.positionTitle}
+                  disabled={disabled || !department}
+                  onChange={(event) => {
+                    if (department) replace(index, formatResponsibleParty(department, event.target.value));
+                  }}
+                >
+                  <option value="">Select position…</option>
+                  {hasImportedTitle ? (
+                    <option value={selection.positionTitle}>{selection.positionTitle} (imported)</option>
+                  ) : null}
+                  {standardTitles.map((title) => (
+                    <option key={title} value={title}>{title}</option>
+                  ))}
+                </select>
+
+                {disabled ? null : (
+                  <RowDeleteButton
+                    title="Remove responsible party"
+                    onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}
+                  />
+                )}
+              </div>
+              {selection.importedValue ? (
+                <p className="mt-1 px-1 ui-section-subtitle text-warn">
+                  Imported value “{selection.importedValue}” needs a department and position.
+                </p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {disabled ? null : <AddButton label="Add responsible party" onClick={() => onChange([...items, ""])} />}
+    </div>
+  );
+}
 type PairRow<K extends string, V extends string> = Record<K | V, string>;
 
 function PairListEditor<K extends string, V extends string>({
@@ -937,7 +2407,189 @@ function PairListEditor<K extends string, V extends string>({
     </div>
   );
 }
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
+function AnnexesEditor({
+  sopId,
+  rows,
+  files,
+  disabled = false,
+  uploadingAnnexId,
+  uploadStatus,
+  onChange,
+  onUpload,
+  onOpen,
+  onRemoveFile,
+  onRemoveRow,
+}: {
+  sopId: string;
+  rows: Sop["annexes"];
+  files: SopAnnexFile[];
+  disabled?: boolean;
+  uploadingAnnexId: string | null;
+  uploadStatus: AnnexUploadStatus | null;
+  onChange: (changeRows: (current: Sop["annexes"]) => Sop["annexes"]) => void;
+  onUpload: (index: number, file: File) => void | Promise<void>;
+  onOpen: (file: SopAnnexFile) => void;
+  onRemoveFile: (file: SopAnnexFile) => void;
+  onRemoveRow: (index: number) => void;
+}) {
+  function patch(index: number, field: "label" | "description", value: string) {
+    onChange((current) =>
+      current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {rows.length ? (
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2 px-2.5">
+          <span className="ui-field-label">Form name</span>
+          <span className="ui-field-label">Description</span>
+          <span className="w-9" aria-hidden="true" />
+        </div>
+      ) : null}
+      {rows.map((row, index) => {
+        const file = files.find((item) => item.annexId === row.id);
+        const uploading = uploadingAnnexId === row.id;
+        const rowStatus = uploadStatus?.annexId === row.id ? uploadStatus : null;
+        return (
+          <div key={row.id ?? index} className="rounded-md border border-line p-2.5">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2">
+              <input
+                className="ui-field-standalone min-w-0"
+                value={row.label}
+                aria-label="Form name"
+                data-example="Appendix A"
+                disabled={disabled}
+                onChange={(event) => patch(index, "label", event.target.value)}
+              />
+              <input
+                className="ui-field-standalone min-w-0"
+                value={row.description}
+                aria-label="Form description"
+                data-example="Order escalation approval form"
+                disabled={disabled}
+                onChange={(event) => patch(index, "description", event.target.value)}
+              />
+              {disabled ? <span className="w-9" /> : (
+                <RowDeleteButton title="Remove annex" onClick={() => onRemoveRow(index)} />
+              )}
+            </div>
+            <div className="mt-2.5 rounded-lg border border-line/70 bg-surface-muted/35 px-3 py-2.5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                {file ? (
+                  <button
+                    type="button"
+                    className="group flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                    title={`Open ${file.originalName}`}
+                    onClick={() => onOpen(file)}
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-ink-secondary">
+                      <Paperclip size={14} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium text-ink group-hover:underline">
+                        {file.originalName}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-ink-tertiary">
+                        PDF · {formatFileSize(file.sizeBytes)}
+                      </span>
+                    </span>
+                  </button>
+                ) : (
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-dashed border-line bg-surface text-ink-tertiary">
+                      <Paperclip size={14} />
+                    </span>
+                    <span className="text-xs text-ink-tertiary">No form attached</span>
+                  </div>
+                )}
+                {disabled ? null : (
+                  <div className="flex shrink-0 items-center gap-1.5 sm:justify-end">
+                    <label
+                      className={`ui-btn-ghost h-8 gap-1.5 border border-line px-2.5 ${
+                        uploading ? "pointer-events-none cursor-wait opacity-60" : "cursor-pointer"
+                      }`}
+                      aria-disabled={uploading}
+                    >
+                      {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                      {uploading
+                        ? rowStatus?.phase === "saving"
+                          ? "Saving…"
+                          : "Uploading…"
+                        : file
+                          ? "Replace"
+                          : "Upload"}
+                      <input
+                        type="file"
+                        className="sr-only"
+                        accept={SOP_ANNEX_FILE_ACCEPT}
+                        disabled={uploading}
+                        onChange={(event) => {
+                          const selected = event.target.files?.[0];
+                          if (selected) void onUpload(index, selected);
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                    {file ? (
+                      <button
+                        type="button"
+                        className="ui-btn-ghost h-8 gap-1.5 px-2.5 text-ink-tertiary hover:text-danger"
+                        onClick={() => onRemoveFile(file)}
+                      >
+                        <Trash2 size={13} />
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+              {rowStatus ? (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className={`mt-2 flex items-center gap-1.5 border-t border-line/70 pt-2 text-[11px] ${
+                    rowStatus.phase === "error"
+                      ? "text-danger"
+                      : rowStatus.phase === "success"
+                        ? "text-success"
+                        : "text-ink-secondary"
+                  }`}
+                >
+                  {rowStatus.phase === "saving" || rowStatus.phase === "uploading" ? (
+                    <Loader2 size={12} className="shrink-0 animate-spin" />
+                  ) : rowStatus.phase === "success" ? (
+                    <Check size={12} className="shrink-0" />
+                  ) : (
+                    <X size={12} className="shrink-0" />
+                  )}
+                  <span>{rowStatus.phase === "success" ? "Upload complete." : rowStatus.message}</span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+      {disabled ? null : (
+        <AddButton
+          label="Add"
+          onClick={() =>
+            onChange((current) => [
+              ...current,
+              { id: newAnnexId(sopId), label: "", description: "" },
+            ])
+          }
+        />
+      )}
+    </div>
+  );
+}
 function ChangeHistoryEditor({
   rows,
   disabled = false,
@@ -1009,84 +2661,6 @@ function ChangeHistoryEditor({
               { version: "", changes: "", createdByName: "", createdByPosition: "", createdByDate: "" },
             ])
           }
-        />
-      )}
-    </div>
-  );
-}
-
-function ApprovalsEditor({
-  rows,
-  disabled = false,
-  approvers = [],
-  onChange,
-}: {
-  rows: Sop["approvals"];
-  disabled?: boolean;
-  /** Workspace roster offered as name suggestions on each approval row. */
-  approvers?: { name: string; email?: string }[];
-  onChange: (rows: Sop["approvals"]) => void;
-}) {
-  function patch(index: number, field: keyof Sop["approvals"][number], value: string) {
-    onChange(rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
-  }
-
-  const namesListId = "sop-approver-names";
-
-  return (
-    <div className="space-y-2">
-      {/* Shared suggestion list of everyone with workspace access; the Name inputs reference it
-          so approvers are picked from the real roster while still allowing an occasional
-          external name to be typed. */}
-      <datalist id={namesListId}>
-        {approvers.map((person) => (
-          <option key={person.name} value={person.name}>
-            {person.email ?? ""}
-          </option>
-        ))}
-      </datalist>
-      {rows.map((row, index) => (
-        <div key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_10rem_auto]">
-          <input
-            className="ui-field-standalone"
-            value={row.role}
-            placeholder="Role"
-            disabled={disabled}
-            onChange={(event) => patch(index, "role", event.target.value)}
-          />
-          <input
-            className="ui-field-standalone"
-            value={row.name}
-            placeholder="Name"
-            list={namesListId}
-            autoComplete="off"
-            disabled={disabled}
-            onChange={(event) => patch(index, "name", event.target.value)}
-          />
-          <input
-            className="ui-field-standalone"
-            value={row.position}
-            placeholder="Position"
-            disabled={disabled}
-            onChange={(event) => patch(index, "position", event.target.value)}
-          />
-          <input
-            type="date"
-            required
-            className="ui-field-standalone"
-            value={row.date}
-            disabled={disabled}
-            onChange={(event) => patch(index, "date", event.target.value)}
-          />
-          {disabled ? null : (
-            <RowDeleteButton title="Remove row" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
-          )}
-        </div>
-      ))}
-      {disabled ? null : (
-        <AddButton
-          label="Add approver"
-          onClick={() => onChange([...rows, { role: "", name: "", position: "", date: "" }])}
         />
       )}
     </div>

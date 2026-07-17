@@ -106,6 +106,8 @@ export interface SopProcedure {
 
 /** An appendix / attached form referenced by the SOP. */
 export interface SopAnnex {
+  /** Stable editor identity used to link a private uploaded form to this row. */
+  id?: string;
   /** e.g. "Appendix A". */
   label: string;
   description: string;

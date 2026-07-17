@@ -1,7 +1,7 @@
 "use client";
 
-import { Loader2, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { LockKeyhole, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Department } from "@/domain/departments";
 import { listMembers } from "@/lib/departments/store";
 import {
@@ -42,7 +42,7 @@ interface RosterEditorProps {
  * trigger; we surface the database's own message when it refuses.
  */
 export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged }: RosterEditorProps) {
-  const [members, setMembers] = useState<Map<string, { userId: string; name: string }[]>>(new Map());
+  const [members, setMembers] = useState<Map<string, { userId: string; name: string; positionTitle: string }[]>>(new Map());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<{ departmentId: string; rasic: SopRasic; signerId: string }>({
@@ -51,8 +51,17 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
     signerId: "",
   });
 
-  const seatedIds = new Set(seats.map((seat) => seat.departmentId));
-  const available = departments.filter((department) => !seatedIds.has(department.id));
+  const qualityDepartment = departments.find((department) => department.isQualityGate);
+  const workflowSeats = useMemo(
+    () => seats.filter(
+      (seat) => !departments.find((department) => department.id === seat.departmentId)?.isQualityGate,
+    ),
+    [departments, seats],
+  );
+  const seatedIds = new Set(workflowSeats.map((seat) => seat.departmentId));
+  const available = departments.filter(
+    (department) => !department.isQualityGate && !seatedIds.has(department.id),
+  );
 
   const loadMembers = useCallback(async (departmentId: string) => {
     if (!departmentId) return;
@@ -63,7 +72,11 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
         const next = new Map(prev);
         next.set(
           departmentId,
-          rows.map((row) => ({ userId: row.userId, name: names.get(row.userId) || "Unnamed member" })),
+          rows.map((row) => ({
+            userId: row.userId,
+            name: names.get(row.userId) || "Unnamed member",
+            positionTitle: row.positionTitle,
+          })),
         );
         return next;
       });
@@ -73,8 +86,8 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
   }, []);
 
   useEffect(() => {
-    for (const seat of seats) void loadMembers(seat.departmentId);
-  }, [seats, loadMembers]);
+    for (const seat of workflowSeats) void loadMembers(seat.departmentId);
+  }, [workflowSeats, loadMembers]);
 
   async function guarded(key: string, fn: () => Promise<unknown>) {
     if (busy) return;
@@ -89,16 +102,27 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
     setBusy(null);
   }
 
-  const responsibleCount = seats.filter((seat) => seat.rasic === "responsible").length;
-  const accountableCount = seats.filter((seat) => seat.rasic === "accountable").length;
-  const authorHoldsBlockingSeat = seats.some(
+  const responsibleCount = workflowSeats.filter((seat) => seat.rasic === "responsible").length;
+  const accountableCount = workflowSeats.filter((seat) => seat.rasic === "accountable").length;
+  const authorHoldsBlockingSeat = workflowSeats.some(
     (seat) => (seat.rasic === "responsible" || seat.rasic === "accountable") && seat.signerId === authorId,
   );
+  const soloSelfReview =
+    Boolean(authorId) &&
+    responsibleCount === 1 &&
+    workflowSeats.find((seat) => seat.rasic === "responsible")?.signerId === authorId &&
+    accountableCount === 0 &&
+    workflowSeats.every((seat) => seat.rasic === "informed" || Boolean(seat.signerId));
 
   const problems: string[] = [];
   if (responsibleCount === 0) problems.push("Name at least one Responsible department.");
-  if (accountableCount !== 1) problems.push("Name exactly one Accountable department.");
-  if (authorHoldsBlockingSeat) problems.push("The author cannot hold a Responsible or Accountable seat.");
+  if (!soloSelfReview && accountableCount !== 1) problems.push("Name exactly one Accountable department.");
+  if (workflowSeats.some((seat) => seat.rasic !== "informed" && !seat.signerId)) {
+    problems.push("Choose a reviewer for every department that must sign or review.");
+  }
+  if (!soloSelfReview && authorHoldsBlockingSeat) {
+    problems.push("The author cannot hold a Responsible or Accountable seat.");
+  }
 
   return (
     <section className="ui-panel overflow-hidden">
@@ -114,7 +138,7 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
       ) : null}
 
       <div className="divide-y divide-line">
-        {seats.map((seat) => {
+        {workflowSeats.map((seat) => {
           const department = departments.find((item) => item.id === seat.departmentId);
           const options = members.get(seat.departmentId) ?? [];
           return (
@@ -158,7 +182,7 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
                 <option value="">{seat.rasic === "informed" ? "No signer" : "Choose a reviewer…"}</option>
                 {options.map((member) => (
                   <option key={member.userId} value={member.userId}>
-                    {member.name}
+                    {member.name}{member.positionTitle ? ` — ${member.positionTitle}` : ""}
                   </option>
                 ))}
               </select>
@@ -179,6 +203,36 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
             </div>
           );
         })}
+      </div>
+
+      <div className="border-t border-line bg-surface-subtle px-4 py-3">
+        {qualityDepartment ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="ui-chip shrink-0">{qualityDepartment.code}</span>
+            <div className="min-w-40 flex-1">
+              <div className="flex items-center gap-2 text-sm font-medium text-ink">
+                <ShieldCheck size={15} className="text-success" aria-hidden="true" />
+                <span>{qualityDepartment.name}</span>
+              </div>
+              <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
+                Independent release gate after stakeholder approval
+              </p>
+            </div>
+            <span className="ui-chip shrink-0 border-success/30 text-success">Final approval</span>
+            <span className="ui-mono-label shrink-0 text-ink-tertiary">Assigned automatically</span>
+            <LockKeyhole size={14} className="shrink-0 text-ink-tertiary" aria-label="System controlled" />
+          </div>
+        ) : (
+          <div className="flex items-start gap-2 text-danger">
+            <ShieldCheck size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-medium">Quality final approval is not configured</p>
+              <p className="ui-section-subtitle mt-0.5">
+                Mark a department as the independent Quality gate before this SOP can be released.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {available.length > 0 ? (
@@ -226,7 +280,7 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
             <option value="">{draft.rasic === "informed" ? "No signer" : "Choose a reviewer…"}</option>
             {(members.get(draft.departmentId) ?? []).map((member) => (
               <option key={member.userId} value={member.userId}>
-                {member.name}
+                {member.name}{member.positionTitle ? ` — ${member.positionTitle}` : ""}
               </option>
             ))}
           </select>
@@ -267,6 +321,14 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {soloSelfReview ? (
+        <div className="border-t border-line px-4 py-3">
+          <div className="ui-mono-label text-warn">Temporary solo test mode</div>
+          <p className="ui-section-subtitle mt-1 text-ink-secondary">
+            You can submit, review, approve, and release this test SOP yourself.
+          </p>
         </div>
       ) : null}
     </section>

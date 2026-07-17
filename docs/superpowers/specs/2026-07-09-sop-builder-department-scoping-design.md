@@ -13,9 +13,8 @@ scoped to the departments they belong to, so that:
 - The `DEPT-TYPE-NNN` number is minted from that department automatically and is read-only.
 - A user who belongs to **no** department cannot create SOPs.
 
-Today none of this is reachable from the builder: the editor creates SOPs with `department_id = null`
-and a free-text number, and department assignment lives only on the separate control page
-(`/sops/[sopId]/control`).
+This work originally moved department assignment into the builder. The legacy separate control
+route has since been removed; review and approval now run through the editor and review queue.
 
 ## 2. Ground truth (already in the codebase)
 

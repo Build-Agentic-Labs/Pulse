@@ -6,9 +6,9 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NothingSpinner } from "@/components/nothing-ui";
 import type { Department } from "@/domain/departments";
-import { listDepartments } from "@/lib/departments/store";
+import { listDepartments, listMyDepartments } from "@/lib/departments/store";
 import { getSop, type SopRecord } from "@/lib/sop/store";
-import { SopEditor } from "./sop-editor";
+import { SopEditor, type SopEditorInitialView } from "./sop-editor";
 import { SopShell } from "./sop-shell";
 import { SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
@@ -31,11 +31,11 @@ const browseSidebar = (
 
 type DetailState =
   | { status: "pending" }
-  | { status: "loaded"; record: SopRecord; department?: Department }
+  | { status: "loaded"; record: SopRecord; department?: Department; canEdit: boolean }
   | { status: "missing" }
   | { status: "error"; message: string };
 
-export function SopDetailClient() {
+export function SopDetailClient({ initialView }: { initialView?: SopEditorInitialView }) {
   const params = useParams<{ sopId: string }>();
   const { canEditSops } = useSopWorkspace();
   const [state, setState] = useState<DetailState>({ status: "pending" });
@@ -50,12 +50,18 @@ export function SopDetailClient() {
           setState({ status: "missing" });
           return;
         }
-        const departments = record.departmentId ? await listDepartments(record.workspaceId) : [];
+        const [departments, myDepartments] = record.departmentId
+          ? await Promise.all([listDepartments(record.workspaceId), listMyDepartments(record.workspaceId)])
+          : [[], []];
         if (!active) return;
         setState({
           status: "loaded",
           record,
           department: departments.find((item) => item.id === record.departmentId),
+          canEdit:
+            canEditSops &&
+            record.sop.status === "draft" &&
+            (!record.departmentId || myDepartments.some((item) => item.id === record.departmentId)),
         });
       })
       .catch((error) => {
@@ -65,7 +71,7 @@ export function SopDetailClient() {
     return () => {
       active = false;
     };
-  }, [params.sopId]);
+  }, [params.sopId, canEditSops]);
 
   if (state.status === "loaded") {
     return (
@@ -74,7 +80,8 @@ export function SopDetailClient() {
         initial={state.record.sop}
         workspaceId={state.record.workspaceId}
         owningDepartment={state.department}
-        canEdit={canEditSops}
+        canEdit={state.canEdit}
+        initialView={initialView}
       />
     );
   }

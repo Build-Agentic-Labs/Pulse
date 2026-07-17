@@ -1,7 +1,6 @@
 "use client";
 
 import { FileText, Loader2, ShieldCheck } from "lucide-react";
-import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type { Department } from "@/domain/departments";
 import { SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
@@ -17,7 +16,6 @@ interface SopMastheadProps {
   dirty: boolean;
   /** True until the SOP has been persisted once; the approval flow needs a saved row. */
   isNew: boolean;
-  onPreview: () => void;
   /** Save first, then go to the control page — used before the SOP has ever been saved. */
   onStartApproval: () => void;
 }
@@ -78,7 +76,6 @@ export function SopMasthead({
   saveState,
   dirty,
   isNew,
-  onPreview,
   onStartApproval,
 }: SopMastheadProps) {
   const badge = statusStyle(sop.status);
@@ -126,39 +123,23 @@ export function SopMasthead({
         <Cell label="Revision date">{formatDate(sop.meta.revisionDate) || "—"}</Cell>
       </div>
 
-      <div
-        className={`gap-2 border-t border-line px-3 py-3 ${
-          sidebar ? "grid sm:flex sm:items-center sm:justify-between xl:grid" : "flex flex-wrap items-center justify-between"
-        }`}
-      >
-        <button
-          type="button"
-          className={`ui-btn-ghost h-9 gap-2 px-3 ${sidebar ? "w-full border border-line sm:w-auto xl:w-full" : ""}`}
-          onClick={onPreview}
+      {isNew ? (
+        <div
+          className={`gap-2 border-t border-line px-3 py-3 ${
+            sidebar ? "grid sm:flex sm:items-center sm:justify-between xl:grid" : "flex flex-wrap items-center justify-between"
+          }`}
         >
-          <FileText size={15} />
-          Preview PDF
-        </button>
-        {isNew ? (
           <button
             type="button"
             className={`ui-btn-ghost h-9 gap-2 px-3 ${sidebar ? "w-full border border-line sm:w-auto xl:w-full" : ""}`}
             onClick={onStartApproval}
-            title="Saves first, then opens the approval flow"
+            title="Saves first, then begins review"
           >
             <ShieldCheck size={15} />
-            Save to start approval
+            Save to start review
           </button>
-        ) : (
-          <Link
-            href={`/sops/${sop.id}/control`}
-            className={`ui-btn-primary inline-flex h-9 items-center gap-2 px-4 ${sidebar ? "w-full sm:w-auto xl:w-full" : ""}`}
-          >
-            <ShieldCheck size={15} />
-            Review &amp; approve
-          </Link>
-        )}
-      </div>
+        </div>
+      ) : null}
     </section>
   );
 }

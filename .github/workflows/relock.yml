@@ -8,6 +8,11 @@ name: Regenerate lockfile (Linux)
 
 on:
   workflow_dispatch:
+  # Also runs when this file itself is pushed — dispatch-from-branch is not
+  # possible until the workflow exists on the default branch.
+  push:
+    paths:
+      - ".github/workflows/relock.yml"
 
 jobs:
   relock:

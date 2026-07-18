@@ -107,21 +107,27 @@ interacts with item 1: the pre-check must respect solo test mode.
 
 ## 4. Complete backup coverage
 
-**Status: planned, deferred by decision. Do before real production data lands.**
+**Status: database fully covered as of 2026-07-18 evening; storage partially.**
 
-Done today: `scripts/backup-flexboost.mjs` — 147.4 MB, 918 files, 898 photo assets,
-verified. Covers planner data for one project.
+Done:
+- `scripts/backup-flexboost.mjs` — 147.4 MB, 918 files, 898 photo assets.
+  Planner data + step photos for the FlexBoost project.
+- **Full database dump** (Docker + WSL2 now installed): `backups/db-data-*.sql`
+  (all 46 populated tables — SOPs, signatures, departments, work orders, access
+  control included; row counts verified), `db-schema-*.sql`, `db-roles-*.sql`.
+  Command: `npx supabase db dump --db-url $DATABASE_URL [--data-only|--role-only]`.
+  Note pg_dump's own hint: restore of a data-only dump needs `--disable-triggers`
+  or constraint handling — another reason to test restore before relying on it.
 
 Not covered:
 
+Remaining gaps:
+
 | Gap | Detail |
 |---|---|
-| SOP module | `sops`, `sop_revisions`, `sop_signatures`, `sop_review_seats`, `departments`, `department_members`, annex files |
-| Planning | `work_orders`, trailer configs, item master, lines |
-| Access control | `workspace_members`, `project_access`, `org_tool_access` |
-| Storage | Only the `step-photos` bucket is downloaded (`backup-flexboost.mjs:12`). `task-videos` and SOP annexes are not |
-| Scope | Hardcoded to one project (`project-flexboost`) |
-| Restore | No general restore script exists, and no restore has been tested |
+| Storage files | pg_dump captures file *metadata* rows only. `step-photos` bucket files are covered by the FlexBoost script; **`task-videos` and SOP annex files have no file-level backup** |
+| Restore | No restore has been tested, and the data-only dump needs `--disable-triggers` handling. An untested backup is a guess |
+| Cadence | Dumps are manual. Before real data: schedule them (or confirm Supabase plan PITR) |
 
 **Recommended approach:** a script using the `pg` npm package against `DATABASE_URL`
 — no Docker or Postgres server install needed (the Supabase CLI's `db dump`

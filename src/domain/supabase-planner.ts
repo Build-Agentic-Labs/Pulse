@@ -331,16 +331,31 @@ function plannerClient() {
     return globalScope.__buildlogicPlannerSupabaseClient;
   }
 
-  // Server-side there is deliberately NO default client (refactor plan, Stage 4).
+  // Server-side there is deliberately NO working client (refactor plan, Stage 4).
   // The old fallback here was a sessionless anon singleton: every RLS-scoped read
   // through it returned zero rows, so a page accidentally calling this from the
   // server rendered EMPTY instead of erroring — the silent failure that becomes a
-  // data-loss chain once full-state saves are involved. Server code must pass an
-  // explicit per-request client (src/lib/supabase/server.ts) to the data functions.
-  throw new Error(
-    "createPlannerSupabaseClient() is browser-only. On the server, create a per-request client " +
-      "with createSupabaseServerClient() and pass it to the data function explicitly.",
-  );
+  // data-loss chain once full-state saves are involved.
+  //
+  // CONSTRUCTING is allowed, because client components run on the server for the
+  // initial HTML and several build a client in render-time useMemo, using it only
+  // inside effects/handlers that never run during SSR. USING it on the server is
+  // what throws: any property access (auth, from, rpc, ...) fails loudly with
+  // guidance. Server code must pass an explicit per-request client
+  // (src/lib/supabase/server.ts) to the data functions.
+  return new Proxy({} as SupabaseClient<Database>, {
+    get(_target, prop) {
+      if (typeof prop === "symbol" || prop === "then") {
+        // Benign framework probes (thenable checks, React internals) — not real use.
+        return undefined;
+      }
+      throw new Error(
+        `createPlannerSupabaseClient() is browser-only: '${String(prop)}' was accessed during a server ` +
+          "render. Create a per-request client with createSupabaseServerClient() and pass it to the " +
+          "data function explicitly.",
+      );
+    },
+  });
 }
 
 export function createPlannerSupabaseClient() {

@@ -8,9 +8,9 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-space-grotesk)", "DM Sans", "system-ui", "sans-serif"],
-        mono: ["var(--font-space-mono)", "JetBrains Mono", "monospace"],
-        display: ["var(--font-doto)", "var(--font-space-mono)", "monospace"],
+        sans: ["var(--font-ui-family)"],
+        mono: ["var(--font-ui-family)"],
+        display: ["var(--font-ui-family)"],
       },
       colors: {
         canvas: "var(--color-canvas)",

@@ -87,9 +87,10 @@
   --chart-contrast: #ffffff;
   --chart-success: var(--color-success);
 
-  --type-sans: var(--font-space-grotesk), "DM Sans", system-ui, sans-serif;
-  --type-mono: var(--font-space-mono), "JetBrains Mono", "SF Mono", monospace;
-  --type-display: var(--font-space-mono), "JetBrains Mono", "SF Mono", monospace;
+  --font-ui-family: var(--font-inter), Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --type-sans: var(--font-ui-family);
+  --type-mono: var(--font-ui-family);
+  --type-display: var(--font-ui-family);
 
   --type-hero: 1.375rem;
   --type-title: 1rem;
@@ -3710,12 +3711,10 @@ body {
     font-weight: 500;
   }
 
-  /* SOP module: one quiet system-sans hierarchy across lists, administration,
-     authoring, and review. Keep the change scoped to the module while the rest
-     of the application retains its existing type system. */
+  /* SOP module: one quiet hierarchy across lists, administration, authoring,
+     and review, sourced from the application-wide font token. */
   .ui-sop-shell {
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-      "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-ui-family);
     font-size: 0.875rem;
     letter-spacing: 0;
   }

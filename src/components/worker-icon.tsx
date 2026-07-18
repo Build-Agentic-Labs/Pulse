@@ -39,7 +39,7 @@ export function WorkerIcon({
         x="24"
         y="37.5"
         fill="#fff"
-        fontFamily="Arial, Helvetica, sans-serif"
+        fontFamily="var(--font-ui-family)"
         fontSize="16"
         fontWeight="900"
         textAnchor="middle"

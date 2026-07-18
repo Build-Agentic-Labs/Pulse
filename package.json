@@ -13,9 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
-    "@fontsource/doto": "^5.2.10",
-    "@fontsource/space-grotesk": "^5.2.10",
-    "@fontsource/space-mono": "^5.2.9",
+    "@fontsource/inter": "^5.2.8",
     "@supabase/supabase-js": "^2.105.3",
     "@types/node": "^22.10.2",
     "@types/qrcode": "^1.5.6",

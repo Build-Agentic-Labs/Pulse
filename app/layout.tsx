@@ -10,44 +10,27 @@ const supabaseOrigin = process.env.NEXT_PUBLIC_SUPABASE_URL
   ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
   : "https://neaadefipcpxxcqszpud.supabase.co";
 
-const grotesk = localFont({
-  variable: "--font-space-grotesk",
+const inter = localFont({
+  variable: "--font-inter",
   display: "swap",
   src: [
     {
-      path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-300-normal.woff2",
-      weight: "300",
-      style: "normal",
-    },
-    {
-      path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-400-normal.woff2",
+      path: "../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2",
       weight: "400",
       style: "normal",
     },
     {
-      path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-500-normal.woff2",
+      path: "../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2",
       weight: "500",
       style: "normal",
     },
     {
-      path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-700-normal.woff2",
-      weight: "700",
-      style: "normal",
-    },
-  ],
-});
-
-const mono = localFont({
-  variable: "--font-space-mono",
-  display: "swap",
-  src: [
-    {
-      path: "../node_modules/@fontsource/space-mono/files/space-mono-latin-400-normal.woff2",
-      weight: "400",
+      path: "../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2",
+      weight: "600",
       style: "normal",
     },
     {
-      path: "../node_modules/@fontsource/space-mono/files/space-mono-latin-700-normal.woff2",
+      path: "../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2",
       weight: "700",
       style: "normal",
     },
@@ -79,7 +62,8 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${grotesk.variable} ${mono.variable} h-full overflow-hidden`}
+      data-font="inter"
+      className={`${inter.variable} h-full overflow-hidden`}
       suppressHydrationWarning
     >
       <head>
@@ -89,7 +73,7 @@ export default function RootLayout({
         <style
           dangerouslySetInnerHTML={{
             __html:
-              ".ui-loading-status-shell{height:12px;overflow:hidden;display:flex;align-items:center}.ui-loading-status,.nd-status{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;line-height:12px;letter-spacing:.04em;white-space:nowrap}",
+              ".ui-loading-status-shell{height:12px;overflow:hidden;display:flex;align-items:center}.ui-loading-status,.nd-status{font-family:var(--font-ui-family);font-size:12px;line-height:12px;letter-spacing:.04em;white-space:nowrap}",
           }}
         />
       </head>

@@ -91,7 +91,7 @@ function canRasterize(): boolean {
 /** Word-wrap `text` to `maxWidth` px using canvas text measurement. */
 function makeTextWrapper(fontPx: number): (text: string, maxWidth: number) => string[] {
   const ctx = document.createElement("canvas").getContext("2d");
-  if (ctx) ctx.font = `${fontPx}px Arial, sans-serif`;
+  if (ctx) ctx.font = `${fontPx}px Inter, Arial, sans-serif`;
   return (text, maxWidth) => {
     const words = (text || "").trim().split(/\s+/).filter(Boolean);
     if (!words.length) return [];
@@ -118,7 +118,7 @@ function textBlock(x: number, vCenter: number, lines: string[], anchor: "start" 
   return lines
     .map(
       (ln, i) =>
-        `<text x="${x}" y="${top + i * lh}" font-family="Arial, sans-serif" font-size="${fontPx}" fill="${color}" text-anchor="${anchor}">${escapeXml(ln)}</text>`,
+        `<text x="${x}" y="${top + i * lh}" font-family="Inter, Arial, sans-serif" font-size="${fontPx}" fill="${color}" text-anchor="${anchor}">${escapeXml(ln)}</text>`,
     )
     .join("");
 }
@@ -193,7 +193,7 @@ function renderPageSvg(pageRows: RowLayout[], continued: boolean): { svg: string
 
   if (continued) {
     parts.push(
-      `<text x="${PAD}" y="15" font-family="Arial, sans-serif" font-size="11" font-style="italic" fill="${COLOR.muted}" text-anchor="start">Process flow (continued)</text>`,
+      `<text x="${PAD}" y="15" font-family="Inter, Arial, sans-serif" font-size="11" font-style="italic" fill="${COLOR.muted}" text-anchor="start">Process flow (continued)</text>`,
     );
   }
 
@@ -206,7 +206,7 @@ function renderPageSvg(pageRows: RowLayout[], continued: boolean): { svg: string
   ];
   headers.forEach(([label, x, anchor]) => {
     parts.push(
-      `<text x="${x}" y="${headerY}" font-family="Arial, sans-serif" font-size="${headerFont}" font-weight="bold" fill="${COLOR.muted}" text-anchor="${anchor}">${escapeXml(label)}</text>`,
+      `<text x="${x}" y="${headerY}" font-family="Inter, Arial, sans-serif" font-size="${headerFont}" font-weight="bold" fill="${COLOR.muted}" text-anchor="${anchor}">${escapeXml(label)}</text>`,
     );
   });
 

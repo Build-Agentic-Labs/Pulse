@@ -121,7 +121,7 @@ export function NothingDesignShowcase() {
               <span className="nd-label mb-3">GB/s</span>
             </div>
             <p className="nd-body mt-6 max-w-lg text-[var(--nd-text-secondary)]">
-              Throughput readout uses Space Mono at display scale. One hero number per screen — everything else steps down.
+              Throughput readout uses the shared UI font at display scale. One hero number per screen; everything else steps down.
             </p>
 
             <div className="mt-10">
@@ -316,7 +316,7 @@ export function NothingDesignShowcase() {
           </div>
 
           <p className="nd-caption mt-12 text-[var(--nd-text-disabled)]">
-            Nothing-inspired UI tokens · Space Grotesk · Space Mono · No shadows · No toasts
+            Nothing-inspired UI tokens | Inter | No shadows | No toasts
           </p>
         </section>
       </div>

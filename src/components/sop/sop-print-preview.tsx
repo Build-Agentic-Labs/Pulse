@@ -567,7 +567,7 @@ export function SopPrintPreview({
           position: fixed; inset: 0; z-index: 60;
           display: flex; flex-direction: column;
           background: rgba(15, 18, 21, 0.62);
-          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+          font-family: var(--font-ui-family);
         }
         .sop-preview-bar {
           display: flex; align-items: center; justify-content: space-between;
@@ -596,7 +596,7 @@ export function SopPrintPreview({
           padding: 0.52in 0.75in 0.42in;
           background: #fff; color: #1a1a1a;
           box-shadow: 0 8px 40px rgba(0,0,0,0.25);
-          font-family: Arial, Helvetica, sans-serif;
+          font-family: var(--font-ui-family);
           font-size: 10pt; line-height: 1.35;
         }
         .sop-print-page-annotatable { cursor: crosshair; }
@@ -604,7 +604,7 @@ export function SopPrintPreview({
           position: absolute; z-index: 4; width: 25px; height: 25px;
           transform: translate(-50%, -50%); border: 2px solid #fff; border-radius: 999px;
           background: #111; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.32);
-          font: 700 10px/21px Arial, sans-serif; text-align: center; cursor: pointer;
+          font-family: var(--font-ui-family); font-size: 10px; font-weight: 700; line-height: 21px; text-align: center; cursor: pointer;
         }
         .sop-export-header {
           flex: none; display: grid; grid-template-columns: 75% 25%;
@@ -626,7 +626,7 @@ export function SopPrintPreview({
         .sop-export-section:first-child { margin-top: 0; }
         .sop-export-section h2 {
           margin: 0 0 4px; color: #1a1a1a;
-          font: 700 12pt/1.3 Arial, Helvetica, sans-serif;
+          font-family: var(--font-ui-family); font-size: 12pt; font-weight: 700; line-height: 1.3;
         }
         .sop-export-section p { margin: 0 0 4px; white-space: pre-wrap; }
         .sop-export-empty { color: #666; }
@@ -679,7 +679,7 @@ export function SopPrintPreview({
           padding: 3px 7px;
           border: 1px solid rgba(0, 0, 0, 0.24); border-radius: 3px;
           background: rgba(255, 255, 255, 0.94); color: #333;
-          font: 600 7pt/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+          font-family: var(--font-ui-family); font-size: 7pt; font-weight: 600; line-height: 1.2;
           letter-spacing: 0.03em; text-transform: uppercase;
         }
         .sop-export-flow-page .sop-print-page-body {

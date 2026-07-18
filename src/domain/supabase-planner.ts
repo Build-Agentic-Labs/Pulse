@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Database, Json, TablesUpdate } from "@/lib/database.types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
@@ -313,8 +313,6 @@ function migrateLocalStorageSessionToCookies(client: SupabaseClient<Database>) {
   }
 }
 
-let serverPlannerSupabaseClient: SupabaseClient<Database> | undefined;
-
 function plannerClient() {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY.");
@@ -333,12 +331,16 @@ function plannerClient() {
     return globalScope.__buildlogicPlannerSupabaseClient;
   }
 
-  // Server-side: never persist or refresh a session (there's no browser storage, and
-  // authenticated server work uses a per-request, bearer-scoped client instead).
-  serverPlannerSupabaseClient ??= createClient<Database>(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  return serverPlannerSupabaseClient;
+  // Server-side there is deliberately NO default client (refactor plan, Stage 4).
+  // The old fallback here was a sessionless anon singleton: every RLS-scoped read
+  // through it returned zero rows, so a page accidentally calling this from the
+  // server rendered EMPTY instead of erroring — the silent failure that becomes a
+  // data-loss chain once full-state saves are involved. Server code must pass an
+  // explicit per-request client (src/lib/supabase/server.ts) to the data functions.
+  throw new Error(
+    "createPlannerSupabaseClient() is browser-only. On the server, create a per-request client " +
+      "with createSupabaseServerClient() and pass it to the data function explicitly.",
+  );
 }
 
 export function createPlannerSupabaseClient() {
@@ -352,6 +354,12 @@ export function createPlannerSupabaseClient() {
  * (GoTrue) rate limit; under heavy navigation that burst can trip the limit and boot the user to
  * login. `getSession()` reads the already-verified JWT locally. Returns the same
  * `{ data: { user }, error }` shape so call sites don't change how they read the result.
+ *
+ * SERVER CALLERS (Stage 4+): pass a per-request cookie client and note the semantics —
+ * on the server, getSession() reads the UNVERIFIED cookie payload, which is acceptable
+ * only because middleware.ts already ran getUser() for the request. And this function
+ * returns `user: null` rather than throwing when signed out: a server caller that
+ * ignores the null renders an EMPTY page, not an error. Check the null explicitly.
  */
 export async function getUserFromSession(
   supabase: SupabaseClient,
@@ -1794,19 +1802,28 @@ export async function fetchOrgToolAccess(
 // The profile upsert + grant redemption only need to run once per signed-in user per tab:
 // both are idempotent, and a full page reload re-runs them. Repeat mounts (auth gate,
 // sidebar, SOP provider, client-side navigations) skip the two write round-trips.
-const bootstrappedMembershipUserIds = new Set<string>();
-// Those same consumers mount together, so concurrent callers share one in-flight load
-// instead of issuing duplicate query chains. The promise is cleared on settle: later
-// calls (e.g. sidebar refresh after creating a project) still fetch fresh data.
-let inflightMembershipLoad: Promise<WorkspaceProjectGroup[]> | null = null;
+//
+// Both dedupe structures are keyed BY CLIENT (WeakMap, same pattern as
+// inflightSuperAdminChecks): in the browser the client is a tab-wide singleton so
+// behavior is unchanged, while on a server a per-request client gets fresh state —
+// an unkeyed module-level promise there would hand one user's workspace groups to
+// a concurrently-loading different user (refactor plan, Stage 4).
+const bootstrappedMembershipUserIdsByClient = new WeakMap<SupabaseClient, Set<string>>();
+// Concurrent callers on the same client share one in-flight load instead of issuing
+// duplicate query chains. The promise is cleared on settle: later calls (e.g. sidebar
+// refresh after creating a project) still fetch fresh data.
+const inflightMembershipLoads = new WeakMap<SupabaseClient, Promise<WorkspaceProjectGroup[]>>();
 
-export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProjectGroup[]> {
-  if (inflightMembershipLoad) {
-    return inflightMembershipLoad;
+export async function ensureDefaultWorkspaceMembership(
+  client?: ReturnType<typeof plannerClient>,
+): Promise<WorkspaceProjectGroup[]> {
+  const supabase = client ?? plannerClient();
+  const inflight = inflightMembershipLoads.get(supabase);
+  if (inflight) {
+    return inflight;
   }
 
   const load = (async () => {
-    const supabase = plannerClient();
     const { data: userData } = await getUserFromSession(supabase);
 
     if (!userData.user) {
@@ -1814,7 +1831,12 @@ export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProje
     }
 
     const user = userData.user;
-    if (!bootstrappedMembershipUserIds.has(user.id)) {
+    let bootstrappedUserIds = bootstrappedMembershipUserIdsByClient.get(supabase);
+    if (!bootstrappedUserIds) {
+      bootstrappedUserIds = new Set<string>();
+      bootstrappedMembershipUserIdsByClient.set(supabase, bootstrappedUserIds);
+    }
+    if (!bootstrappedUserIds.has(user.id)) {
       // The two writes are independent of each other, but grant redemption must land
       // before memberships are read -- it can mint the membership rows a new user's
       // first load depends on -- so both complete before loadWorkspaceProjectGroups.
@@ -1841,21 +1863,25 @@ export async function ensureDefaultWorkspaceMembership(): Promise<WorkspaceProje
         );
       }
 
-      bootstrappedMembershipUserIds.add(user.id);
+      bootstrappedUserIds.add(user.id);
     }
 
-    return loadWorkspaceProjectGroups(user.id);
+    return loadWorkspaceProjectGroups(user.id, supabase);
   })();
 
-  inflightMembershipLoad = load.finally(() => {
-    inflightMembershipLoad = null;
+  const tracked = load.finally(() => {
+    inflightMembershipLoads.delete(supabase);
   });
+  inflightMembershipLoads.set(supabase, tracked);
 
-  return inflightMembershipLoad;
+  return tracked;
 }
 
-export async function loadWorkspaceProjectGroups(knownUserId?: string): Promise<WorkspaceProjectGroup[]> {
-  const supabase = plannerClient();
+export async function loadWorkspaceProjectGroups(
+  knownUserId?: string,
+  client?: ReturnType<typeof plannerClient>,
+): Promise<WorkspaceProjectGroup[]> {
+  const supabase = client ?? plannerClient();
   let userId = knownUserId;
 
   if (!userId) {
@@ -2379,11 +2405,12 @@ export async function setOrgToolAccessInSupabase(userId: string, level: AccessLe
 export async function loadPlannerStateWithProjectFromSupabase(
   projectId?: string,
   scenarioId?: string,
+  client?: ReturnType<typeof plannerClient>,
 ): Promise<{
   state: PlannerState;
   project: PlannerProjectContext;
 } | null> {
-  const supabase = plannerClient();
+  const supabase = client ?? plannerClient();
   let project: PlannerProjectContext | undefined;
   const product = projectId
     ? await throwIfError(
@@ -2543,8 +2570,9 @@ export async function loadPlannerStateWithProjectFromSupabase(
 export async function loadPlannerStateFromSupabase(
   projectId?: string,
   scenarioId?: string,
+  client?: ReturnType<typeof plannerClient>,
 ): Promise<PlannerState | null> {
-  const loaded = await loadPlannerStateWithProjectFromSupabase(projectId, scenarioId);
+  const loaded = await loadPlannerStateWithProjectFromSupabase(projectId, scenarioId, client);
   return loaded?.state ?? null;
 }
 

@@ -35,6 +35,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import NextImage from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -316,7 +317,6 @@ type StepPhotoAttachmentEditorProps = {
   isUploading?: boolean;
   onFilesSelected: (files: File[]) => void;
   onRequestRemove: (photo: StepPhotoAttachment) => void;
-  onRemove: (photoId: string) => void;
   onUpdatePhoto?: (photoId: string, patch: Partial<StepPhotoAttachment>) => void;
 };
 
@@ -432,8 +432,6 @@ type ProcedureFieldDraftSnapshot = {
   fields: ProcedureDraftField[];
   savedAt: string;
 };
-
-type ProcedureDraftSnapshot = LegacyProcedureDraftSnapshot | ProcedureFieldDraftSnapshot;
 
 function makeProcedureDraftKey(taskId: string, stepId: string, fieldName: ProcedureDraftFieldName) {
   return `${taskId}:${stepId}:${fieldName}`;
@@ -628,24 +626,6 @@ function readProcedureDraftSnapshot(projectId?: string) {
     return parsed as LegacyProcedureDraftSnapshot;
   } catch {
     return undefined;
-  }
-}
-
-function writeProcedureDraftSnapshot(projectId: string | undefined, task: Task) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  const draft: ProcedureDraftSnapshot = {
-    taskId: task.id,
-    task,
-    savedAt: new Date().toISOString(),
-  };
-
-  try {
-    window.localStorage.setItem(procedureDraftStorageKey(projectId), JSON.stringify(draft));
-  } catch {
-    // The in-memory editor state remains the immediate source of truth if local storage is unavailable.
   }
 }
 
@@ -862,7 +842,6 @@ function StepPhotoAttachmentEditor({
   isUploading = false,
   onFilesSelected,
   onRequestRemove,
-  onRemove,
   onUpdatePhoto,
 }: StepPhotoAttachmentEditorProps) {
   const thumbnailClass = compact ? "h-24 w-28" : "h-36 w-48";
@@ -911,11 +890,13 @@ function StepPhotoAttachmentEditor({
                   aria-label={`Open step ${step.sequence} photo ${photo.name}`}
                   title="Open photo"
                 >
-                  <img
+                  <NextImage
                     src={photo.thumbnailUrl ?? photo.dataUrl}
                     alt={`Step ${step.sequence} photo`}
+                    width={192}
+                    height={144}
+                    unoptimized
                     loading="lazy"
-                    decoding="async"
                     className={`${thumbnailClass} rounded border border-line object-cover transition group-hover:border-accent`}
                   />
                 </button>
@@ -2592,7 +2573,6 @@ function ProcedureWorkspace({
                             isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
                             onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
-                            onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
                             onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                           />
                         </div>
@@ -3885,7 +3865,6 @@ function CrewReadinessCard({
 
       {!embedded ? (
         <PlanningRecommendationsPanel
-          compact={compact}
           onClear={onClearPlanningRecommendations}
           recommendations={planningRecommendations}
           onOpenTaskDetail={onOpenTaskDetail}
@@ -3925,7 +3904,6 @@ function CrewReadinessCard({
         </div>
         {planningRecommendations.length > 0 ? (
           <PlanningRecommendationsPanel
-            compact
             embedded
             onClear={onClearPlanningRecommendations}
             recommendations={planningRecommendations}
@@ -3983,13 +3961,11 @@ function CrewReadinessCard({
 }
 
 function PlanningRecommendationsPanel({
-  compact = false,
   embedded = false,
   onClear,
   onOpenTaskDetail,
   recommendations,
 }: {
-  compact?: boolean;
   embedded?: boolean;
   onClear?: () => void;
   onOpenTaskDetail?: (taskId: string) => void;
@@ -4238,7 +4214,7 @@ function LineReadinessPanel({
   return <section className="ui-readiness-workspace">{content}</section>;
 }
 
-function StationBalance({
+function _StationBalance({
   stations,
   taktMinutes,
   selectedStationId,
@@ -5037,7 +5013,6 @@ function DetailDrawer({
                             isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
                             onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
-                            onRemove={(photoId) => removeManufacturingStepPhoto(step.id, photoId)}
                             onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                           />
                         </div>
@@ -5461,6 +5436,22 @@ export function LineWorkspace({
   const pendingRemoteRefreshRef = useRef(false);
   const remoteTaskRefreshTimerRef = useRef<number | null>(null);
   const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
+  const flushPendingPlannerSaveRef = useRef(flushPendingPlannerSave);
+  const applyProcedureDraftsToTaskRef = useRef(applyProcedureDraftsToTask);
+  const scheduleProcedureTaskSaveRef = useRef(scheduleProcedureTaskSave);
+  const requestRemotePlannerRefreshRef = useRef(requestRemotePlannerRefresh);
+  const requestRemoteTaskRefreshRef = useRef(requestRemoteTaskRefresh);
+  const startProcedureTaskSaveRef = useRef(startProcedureTaskSave);
+  const persistPlannerStateRef = useRef(persistPlannerState);
+  const urlWorkspaceSnapshotRef = useRef(urlWorkspaceSnapshot);
+  flushPendingPlannerSaveRef.current = flushPendingPlannerSave;
+  applyProcedureDraftsToTaskRef.current = applyProcedureDraftsToTask;
+  scheduleProcedureTaskSaveRef.current = scheduleProcedureTaskSave;
+  requestRemotePlannerRefreshRef.current = requestRemotePlannerRefresh;
+  requestRemoteTaskRefreshRef.current = requestRemoteTaskRefresh;
+  startProcedureTaskSaveRef.current = startProcedureTaskSave;
+  persistPlannerStateRef.current = persistPlannerState;
+  urlWorkspaceSnapshotRef.current = urlWorkspaceSnapshot;
   const loadedProjectIdRef = useRef<string | undefined>(undefined);
   // True only once the REMOTE planner load has applied for the loaded project. A cached IndexedDB
   // snapshot alone must never enable the shell autosave: savePlannerShellToSupabase is a destructive
@@ -5558,13 +5549,13 @@ export function LineWorkspace({
 
   useEffect(() => {
     function handlePageHide() {
-      flushPendingPlannerSave();
+      flushPendingPlannerSaveRef.current();
     }
 
     window.addEventListener("pagehide", handlePageHide);
     return () => {
       window.removeEventListener("pagehide", handlePageHide);
-      flushPendingPlannerSave();
+      flushPendingPlannerSaveRef.current();
     };
   }, []);
 
@@ -5685,22 +5676,18 @@ export function LineWorkspace({
   const realtimeTaskIdSetRef = useRef(realtimeTaskIdSet);
   realtimeTaskIdSetRef.current = realtimeTaskIdSet;
 
-  const [toolLibraryLoaded, setToolLibraryLoaded] = useState(false);
   useEffect(() => {
     let active = true;
-    setToolLibraryLoaded(false);
 
     loadToolLibraryFromSupabase(activeProjectContext?.projectId)
       .then((tools) => {
         if (active) {
           setToolLibraryItems(tools);
-          setToolLibraryLoaded(true);
         }
       })
       .catch(() => {
         if (active) {
           setToolLibraryItems([]);
-          setToolLibraryLoaded(true);
         }
       });
 
@@ -5803,10 +5790,6 @@ export function LineWorkspace({
 
   function getProcedureDraftsForTask(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
     return Object.values(drafts).filter((draft) => draft.taskId === taskId);
-  }
-
-  function getDirtyProcedureDraftsForTask(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
-    return getProcedureDraftsForTask(taskId, drafts).filter((draft) => draft.dirty);
   }
 
   function hasDirtyOrActiveProcedureDrafts(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
@@ -6715,7 +6698,10 @@ export function LineWorkspace({
       delete document.documentElement.dataset.pulseProcedureAutosaveHarnessReady;
       delete document.documentElement.dataset.pulseProcedureAutosaveHarnessResult;
     };
-  }, [hasAutosaveHarnessParam]);
+    // The development-only harness intentionally installs one snapshot per project. Its helpers
+    // read mutable procedure refs, while re-registering on every render would reset test state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAutosaveHarnessParam, projectId]);
 
   function flushPendingPlannerSave() {
     // Until the remote load has confirmed the state we're editing, the shell diff-save must never
@@ -7248,6 +7234,7 @@ export function LineWorkspace({
     let mounted = true;
     let remoteLoaded = false;
     const currentProjectId = projectId ?? "";
+    const initialUrlWorkspaceSnapshot = urlWorkspaceSnapshotRef.current;
     const isSwitchingProject = hasLoadedAnyProjectRef.current && loadedProjectIdRef.current !== currentProjectId;
 
     if (isSwitchingProject && !projectSwitchStartedAtRef.current) {
@@ -7296,7 +7283,7 @@ export function LineWorkspace({
         hasUnmatchedRecoveredDrafts = recoveredTaskIds.length < recoveredDraftTaskIds.length;
         hydratedState = {
           ...normalizedSavedState,
-          tasks: normalizedSavedState.tasks.map((task) => applyProcedureDraftsToTask(task, recoveredDrafts)),
+          tasks: normalizedSavedState.tasks.map((task) => applyProcedureDraftsToTaskRef.current(task, recoveredDrafts)),
         };
         recoveredTask = hydratedState.tasks.find((task) => recoveredTaskIds.includes(task.id));
       } else if (procedureDraft && "taskId" in procedureDraft) {
@@ -7316,7 +7303,6 @@ export function LineWorkspace({
       const snapshotTask = workspaceSnapshot?.selectedTaskId
         ? hydratedState.tasks.find((task) => task.id === workspaceSnapshot.selectedTaskId)
         : undefined;
-      const initialUrlWorkspaceSnapshot = urlWorkspaceSnapshot;
       const urlTask = initialUrlWorkspaceSnapshot.selectedTaskId
         ? hydratedState.tasks.find((task) => task.id === initialUrlWorkspaceSnapshot.selectedTaskId)
         : undefined;
@@ -7382,7 +7368,7 @@ export function LineWorkspace({
           recoveredTaskIds.forEach((taskId) => {
             const taskToSave = hydratedState.tasks.find((task) => task.id === taskId);
             if (taskToSave) {
-              scheduleProcedureTaskSave(taskToSave, hydratedState.tasks);
+              scheduleProcedureTaskSaveRef.current(taskToSave, hydratedState.tasks);
             }
           });
         }, 250);
@@ -7427,7 +7413,6 @@ export function LineWorkspace({
           return;
         }
 
-        const initialUrlWorkspaceSnapshot = urlWorkspaceSnapshot;
         if (initialUrlWorkspaceSnapshot.activeModule) {
           setActiveModule(initialUrlWorkspaceSnapshot.activeModule);
         }
@@ -7499,16 +7484,17 @@ export function LineWorkspace({
     if (!hasLoadedRemoteState) {
       return undefined;
     }
+    const pendingRemoteTaskIds = pendingRemoteTaskIdsRef.current;
 
     const unsubscribe = subscribePlannerStateChanges(
       (payload) => {
         const taskId = taskIdFromRealtimePayload(payload);
         if (taskId && canPatchTaskFromRealtimePayload(payload)) {
-          requestRemoteTaskRefresh(taskId);
+          requestRemoteTaskRefreshRef.current(taskId);
           return;
         }
 
-        requestRemotePlannerRefresh();
+        requestRemotePlannerRefreshRef.current();
       },
       {
         productId: derivedState.product.id,
@@ -7527,14 +7513,14 @@ export function LineWorkspace({
       }
       // Drop any task ids still queued for the scenario we're leaving -- otherwise a same-project
       // scenario switch would refresh them into (and contaminate) the next scenario's task list.
-      pendingRemoteTaskIdsRef.current.clear();
+      pendingRemoteTaskIds.clear();
       // FLUSH -- don't drop -- debounced procedure saves for the scope we're leaving; clearing the
       // timers alone would silently discard the user's last keystrokes. Best effort: the queue
       // snapshots were prepared when the save was scheduled, and startProcedureTaskSave no-ops if
       // they are gone. (Scenario switches drain saves beforehand, so this mostly fires on unmount.)
       Object.entries(procedureSaveTimersRef.current).forEach(([taskId, timerId]) => {
         window.clearTimeout(timerId);
-        void startProcedureTaskSave(taskId);
+        void startProcedureTaskSaveRef.current(taskId);
       });
       procedureSaveTimersRef.current = {};
       Object.values(procedureRetryTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
@@ -7645,7 +7631,7 @@ export function LineWorkspace({
       if (plannerSaveTimerRef.current === timeout) {
         plannerSaveTimerRef.current = null;
       }
-      void persistPlannerState(derivedState);
+      void persistPlannerStateRef.current(derivedState);
     }, 900);
     plannerSaveTimerRef.current = timeout;
 
@@ -9244,7 +9230,7 @@ export function LineWorkspace({
   // time) and balance the crew with the fewest operators, leveling only within free float so the
   // finish never slips. The proposal is written into a fresh duplicated scenario (sandbox) so the
   // source plan is never touched. Replaces the old in-place IE headcount allocation on this button;
-  // smartAllocateHeadcount is kept dormant for the later LLM-strategist phase.
+  // _smartAllocateHeadcount is kept dormant for the later LLM-strategist phase.
   async function optimizeLineIntoScenario() {
     if (smartAllocationPending || isSwitchingScenario) {
       return;
@@ -9321,7 +9307,7 @@ export function LineWorkspace({
     }
   }
 
-  async function smartAllocateHeadcount() {
+  async function _smartAllocateHeadcount() {
     if (smartAllocationPending) {
       return;
     }
@@ -9810,7 +9796,7 @@ export function LineWorkspace({
     }
   }
 
-  function updateStationOperators(stationId: string, operators: number) {
+  function _updateStationOperators(stationId: string, operators: number) {
     markDirty();
     setPlannerState((current) => ({
       ...current,

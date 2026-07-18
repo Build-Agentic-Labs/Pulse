@@ -1,7 +1,7 @@
 "use client";
 
 import type { Session } from "@supabase/supabase-js";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
 import { ThemedSelect } from "@/components/themed-select";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrgToolAccess } from "@/domain/supabase-planner";
@@ -124,35 +124,43 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
     statusRef.current = status;
   }, [status]);
 
-  async function refreshWorkspaces(nextSession: Session | null, options: { showLoading?: boolean } = {}) {
-    if (!nextSession) {
-      setGroups([]);
-      setWorkspaceIdState(undefined);
-      setStatus("auth");
-      return;
-    }
+  const refreshWorkspaces = useCallback(
+    async (nextSession: Session | null, options: { showLoading?: boolean } = {}) => {
+      if (!nextSession) {
+        setGroups([]);
+        setWorkspaceIdState(undefined);
+        setOrgToolAccess(undefined);
+        setStatus("auth");
+        return;
+      }
 
-    if (options.showLoading ?? statusRef.current !== "ready") {
-      setStatus("loading");
-    }
-    setMessage("");
+      if (options.showLoading ?? statusRef.current !== "ready") {
+        setStatus("loading");
+      }
+      setMessage("");
 
-    try {
-      const nextGroups = await ensureDefaultWorkspaceMembership();
-      setGroups(nextGroups);
-      setWorkspaceIdState((current) => {
-        // Keep a still-valid current selection across re-hydrations; otherwise re-pick.
-        if (current && nextGroups.some((group) => group.workspace.id === current)) {
-          return current;
-        }
-        return pickWorkspaceId(nextGroups);
-      });
-      setStatus("ready");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load organizations.");
-      setStatus("error");
-    }
-  }
+      try {
+        const [nextGroups, nextOrgToolAccess] = await Promise.all([
+          ensureDefaultWorkspaceMembership(),
+          fetchOrgToolAccess(supabase).catch(() => "none" as const),
+        ]);
+        setGroups(nextGroups);
+        setOrgToolAccess(nextOrgToolAccess);
+        setWorkspaceIdState((current) => {
+          // Keep a still-valid current selection across re-hydrations; otherwise re-pick.
+          if (current && nextGroups.some((group) => group.workspace.id === current)) {
+            return current;
+          }
+          return pickWorkspaceId(nextGroups);
+        });
+        setStatus("ready");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Unable to load organizations.");
+        setStatus("error");
+      }
+    },
+    [supabase],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -187,28 +195,7 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
       mounted = false;
       listener.subscription.unsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase]);
-
-  // The user's org-tool (SOP) access level. Org-wide (per user, not per workspace), so it tracks
-  // the session rather than the selected workspace. Falls back to "none" if it can't be read.
-  useEffect(() => {
-    if (!session) {
-      setOrgToolAccess(undefined);
-      return;
-    }
-    let active = true;
-    fetchOrgToolAccess(supabase)
-      .then((level) => {
-        if (active) setOrgToolAccess(level);
-      })
-      .catch(() => {
-        if (active) setOrgToolAccess("none");
-      });
-    return () => {
-      active = false;
-    };
-  }, [session, supabase]);
+  }, [refreshWorkspaces, supabase]);
 
   function setWorkspaceId(nextId: string) {
     setWorkspaceIdState(nextId);

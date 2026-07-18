@@ -1,5 +1,6 @@
 "use client";
 
+import NextImage from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import type { PlannerProjectContext } from "@/domain/types";
@@ -207,7 +208,14 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
         <div className="grid gap-4 md:grid-cols-[200px_minmax(0,1fr)] md:items-start">
           <div className="flex justify-center rounded-xl border border-line bg-surface-muted p-3">
             {phonePortalQrDataUrl ? (
-              <img src={phonePortalQrDataUrl} alt="Phone photo portal QR code" className="h-48 w-48" />
+              <NextImage
+                src={phonePortalQrDataUrl}
+                alt="Phone photo portal QR code"
+                width={192}
+                height={192}
+                unoptimized
+                className="h-48 w-48"
+              />
             ) : (
               <div className="flex h-48 w-48 items-center justify-center text-[11px] text-ink-tertiary">
                 Building QR code...

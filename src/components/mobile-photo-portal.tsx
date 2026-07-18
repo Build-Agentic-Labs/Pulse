@@ -21,6 +21,7 @@ import {
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import NextImage from "next/image";
 import { applyCalculatedFields, formatMinutes, getTopLevelTasks } from "@/domain/calculations";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
 import {
@@ -59,7 +60,6 @@ import {
   subscribePlannerStateChanges,
   taskIdFromRealtimePayload,
   updateStepPhotoCaptionInSupabase,
-  uploadToolLibraryImage,
   uploadStepPhotoAttachment,
   type ToolLibraryItem,
 } from "@/domain/supabase-planner";
@@ -194,15 +194,6 @@ const EMPTY_CAPTURE_TIMER: CaptureTimerState = {
   activeStepId: null,
   taskId: null,
   taskName: "",
-};
-
-const EMPTY_CAPTURE_SESSION: MobileCaptureSessionSnapshot = {
-  captureTimer: EMPTY_CAPTURE_TIMER,
-  parkedCaptureByTaskId: {},
-  activeScreen: "list",
-  selectedTaskId: "",
-  showNewStepForm: false,
-  newStepId: null,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -403,19 +394,6 @@ function writeMobileCaptureSession(
   }
 }
 
-function clearMobileCaptureSession(projectId?: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(mobileCaptureSessionStorageKey(projectId));
-    window.localStorage.removeItem(legacyCaptureTimerStorageKey(projectId));
-  } catch {
-    // Ignore storage cleanup failures.
-  }
-}
-
 function restoreRunningCaptureTimer(snapshot: CaptureTimerState, now: number): CaptureTimerState {
   return {
     ...snapshot,
@@ -423,25 +401,6 @@ function restoreRunningCaptureTimer(snapshot: CaptureTimerState, now: number): C
     storedElapsedMs: getCaptureTimerElapsed(snapshot, now),
     startedAt: now,
   };
-}
-
-function readCaptureTimerSnapshot(projectId?: string): CaptureTimerState | null {
-  return readMobileCaptureSession(projectId)?.captureTimer ?? null;
-}
-
-function writeCaptureTimerSnapshot(projectId: string | undefined, timer: CaptureTimerState, now: number) {
-  writeMobileCaptureSession(
-    projectId,
-    {
-      ...EMPTY_CAPTURE_SESSION,
-      captureTimer: timer,
-    },
-    now,
-  );
-}
-
-function clearCaptureTimerSnapshot(projectId?: string) {
-  clearMobileCaptureSession(projectId);
 }
 
 function getCaptureTimerElapsed(timer: CaptureTimerState, now: number) {
@@ -543,19 +502,6 @@ function removeStepScopedCustomFields(task: Task, stepId: string): Task {
     ...task,
     customFields: nextCustomFields,
   };
-}
-
-function taskDependencyRefBelongsTo(ref: string, taskIds: Set<string>) {
-  if (taskIds.has(ref)) {
-    return true;
-  }
-
-  if (!ref.startsWith("step:")) {
-    return false;
-  }
-
-  const [, taskId] = ref.split(":");
-  return taskId ? taskIds.has(taskId) : false;
 }
 
 const MOBILE_TEXTAREA_MAX_HEIGHT_PX = 224;
@@ -887,7 +833,6 @@ export function MobilePhotoPortal({
   const [dragTargetPlacement, setDragTargetPlacement] = useState<"before" | "after">("after");
   const [dragPreview, setDragPreview] = useState<{ x: number; y: number; width: number } | null>(null);
   const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
-  const [toolImageBusyKey, setToolImageBusyKey] = useState<string | null>(null);
   const [revealedPhotoDeleteId, setRevealedPhotoDeleteId] = useState<string | null>(null);
   const [revealedToolDeleteKey, setRevealedToolDeleteKey] = useState<string | null>(null);
   const [showNewStepForm, setShowNewStepForm] = useState(false);
@@ -944,6 +889,14 @@ export function MobilePhotoPortal({
   const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
   const pendingRemoteRefreshRef = useRef(false);
   const sessionHydratedRef = useRef(false);
+  const hasDraftStepContentRef = useRef(hasDraftStepContent);
+  const persistNewStepDraftRef = useRef(persistNewStepDraft);
+  const requestRemotePlannerRefreshRef = useRef(requestRemotePlannerRefresh);
+  const requestRemoteTaskRefreshRef = useRef(requestRemoteTaskRefresh);
+  hasDraftStepContentRef.current = hasDraftStepContent;
+  persistNewStepDraftRef.current = persistNewStepDraft;
+  requestRemotePlannerRefreshRef.current = requestRemotePlannerRefresh;
+  requestRemoteTaskRefreshRef.current = requestRemoteTaskRefresh;
 
   const derivedState = useMemo<PlannerState | null>(() => {
     if (!plannerState) {
@@ -1738,7 +1691,7 @@ export function MobilePhotoPortal({
           checks,
         };
 
-        if (!hasDraftStepContent(snapshot)) {
+        if (!hasDraftStepContentRef.current(snapshot)) {
           void clearMobileNewStepRecoveryDraft().catch(() => undefined);
           return;
         }
@@ -1759,7 +1712,7 @@ export function MobilePhotoPortal({
 
         window.setTimeout(() => {
           selectedTaskIdRef.current = draft.taskId;
-          persistNewStepDraft(snapshot, { saveTask: true, showSaving: true });
+          persistNewStepDraftRef.current(snapshot, { saveTask: true, showSaving: true });
         }, 250);
       })
       .catch(() => undefined);
@@ -1769,16 +1722,17 @@ export function MobilePhotoPortal({
     if (!plannerState?.scenario.id) {
       return undefined;
     }
+    const pendingRemoteTaskIds = pendingRemoteTaskIdsRef.current;
 
     const unsubscribe = subscribePlannerStateChanges(
       (payload) => {
         const taskId = taskIdFromRealtimePayload(payload);
         if (taskId && canPatchTaskFromRealtimePayload(payload)) {
-          requestRemoteTaskRefresh(taskId);
+          requestRemoteTaskRefreshRef.current(taskId);
           return;
         }
 
-        requestRemotePlannerRefresh();
+        requestRemotePlannerRefreshRef.current();
       },
       {
         productId: plannerState.product.id,
@@ -1797,7 +1751,7 @@ export function MobilePhotoPortal({
       }
       // Drop task ids queued for the scenario we're leaving so a same-project scenario switch can't
       // refresh them into the next scenario's task list.
-      pendingRemoteTaskIdsRef.current.clear();
+      pendingRemoteTaskIds.clear();
       unsubscribe();
     };
   }, [plannerState?.product.id, plannerState?.scenario.id]);
@@ -3087,32 +3041,6 @@ export function MobilePhotoPortal({
     persistNewStepDraft(getNewStepDraftSnapshot({ tools: nextTools }), { saveTask: true, showSaving: true });
   }
 
-  async function handleToolImageFile(toolName: string, file: File | undefined) {
-    if (!file) {
-      return;
-    }
-
-    const toolKey = toolName.toLocaleLowerCase();
-    setToolImageBusyKey(toolKey);
-    setSaveState("saving");
-    setErrorMessage(null);
-
-    try {
-      const photo = await buildPhotoAttachment(file);
-      const savedTool = await uploadToolLibraryImage(toolName, photo, activeProjectContext);
-      setToolLibraryItems((current) => {
-        const nextItems = current.filter((tool) => tool.toolName.toLocaleLowerCase() !== toolKey);
-        return [...nextItems, savedTool].sort((left, right) => left.toolName.localeCompare(right.toolName, undefined, { sensitivity: "base" }));
-      });
-      setSaveState("saved");
-    } catch (error) {
-      setSaveState("error");
-      setErrorMessage(error instanceof Error ? error.message : "Unable to upload the tool image.");
-    } finally {
-      setToolImageBusyKey(null);
-    }
-  }
-
   function clearPhotoHoldTimer() {
     if (photoHoldTimerRef.current) {
       window.clearTimeout(photoHoldTimerRef.current);
@@ -3157,7 +3085,14 @@ export function MobilePhotoPortal({
     if (toolImage?.imageUrl) {
       return (
         <div className="relative aspect-[4/3] overflow-hidden rounded bg-surface">
-          <img src={toolImage.imageUrl} alt={toolName} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+          <NextImage
+            src={toolImage.imageUrl}
+            alt={toolName}
+            fill
+            sizes="(max-width: 768px) 50vw, 160px"
+            unoptimized
+            className="object-cover"
+          />
         </div>
       );
     }
@@ -3179,7 +3114,13 @@ export function MobilePhotoPortal({
 
     return (
       <div className="relative aspect-[4/3] overflow-hidden rounded bg-surface">
-        <img src={`/tool-images/${toolType}.png`} alt={toolName} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+        <NextImage
+          src={`/tool-images/${toolType}.png`}
+          alt={toolName}
+          fill
+          sizes="(max-width: 768px) 50vw, 160px"
+          className="object-cover"
+        />
       </div>
     );
   }
@@ -3286,11 +3227,6 @@ export function MobilePhotoPortal({
                 >
                   <div className="relative">
                     {renderToolVisual(tool)}
-                    {toolImageBusyKey === toolKey ? (
-                      <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-surface text-steel">
-                        <NothingSpinner inline />
-                      </span>
-                    ) : null}
                     <span
                       className={`absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-danger text-canvas transition md:opacity-0 md:group-hover:opacity-100 ${
                         revealedToolDeleteKey === toolKey ? "opacity-100" : "opacity-0"
@@ -3782,7 +3718,6 @@ export function MobilePhotoPortal({
           <div>
             {taskRows.map((task, index) => {
               const stepCount = task.manufacturingSteps?.length ?? 0;
-              const selected = task.id === selectedTask?.id;
               const zoneName = task.zoneId ? zoneById.get(task.zoneId) : undefined;
               const zoneLabel = zoneName ?? "No zone";
               const previousTask = taskRows[index - 1];
@@ -3884,8 +3819,6 @@ export function MobilePhotoPortal({
                 return null;
               }
 
-              const draggingZoneName = draggingTask.zoneId ? zoneById.get(draggingTask.zoneId) : undefined;
-              const draggingZoneLabel = draggingZoneName ?? "No zone";
               const draggingStepCount = draggingTask.manufacturingSteps?.length ?? 0;
               const draggingPhotoCount = (draggingTask.manufacturingSteps ?? []).reduce(
                 (total, step) => total + getStepPhotoAttachments(draggingTask, step.id).length,
@@ -4147,11 +4080,13 @@ export function MobilePhotoPortal({
                         <div className="ui-photo-mobile-step-photo-grid mt-2">
                           {newStepDraftPhotos.map((photo) => (
                             <div key={photo.id} className="ui-photo-mobile-step-photo-card bg-surface-raised">
-                              <img
+                              <NextImage
                                 src={photo.thumbnailUrl ?? photo.dataUrl}
                                 alt="New step photo"
+                                width={480}
+                                height={640}
+                                unoptimized
                                 loading="lazy"
-                                decoding="async"
                                 className="ui-photo-mobile-step-photo-image"
                               />
                               <div className="ui-photo-mobile-step-photo-meta">
@@ -4470,11 +4405,13 @@ export function MobilePhotoPortal({
                                 onPointerLeave={cancelPhotoHold}
                                 onContextMenu={(event) => event.preventDefault()}
                               >
-                                <img
+                                <NextImage
                                   src={photo.thumbnailUrl ?? photo.dataUrl}
                                   alt={`${selectedTask.name} step ${step.sequence}`}
+                                  width={480}
+                                  height={640}
+                                  unoptimized
                                   loading="lazy"
-                                  decoding="async"
                                   className="ui-photo-mobile-step-photo-image"
                                 />
                                 {revealedPhotoDeleteId === photo.id ? (

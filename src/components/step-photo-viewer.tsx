@@ -10,6 +10,7 @@ import {
   Type,
   X,
 } from "lucide-react";
+import NextImage from "next/image";
 import {
   useCallback,
   useEffect,
@@ -345,6 +346,8 @@ export function StepPhotoViewer({
   const overlayRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
   const pendingFocusIdRef = useRef<string | null>(null);
+  const selectedPhotoRef = useRef(photo);
+  selectedPhotoRef.current = photo;
   const [activeTool, setActiveTool] = useState<PhotoAnnotationTool>("select");
   const [activeColor, setActiveColor] = useState<string>(PHOTO_ANNOTATION_COLORS[0].value);
   const [activeFontSize, setActiveFontSize] = useState<number>(14);
@@ -540,7 +543,7 @@ export function StepPhotoViewer({
   }
 
   useEffect(() => {
-    setAnnotations(annotationDocumentFromPhoto(photo).items);
+    setAnnotations(annotationDocumentFromPhoto(selectedPhotoRef.current).items);
     setSelectedId(null);
     setDraftArrow(null);
     setDraftCallout(null);
@@ -1368,10 +1371,12 @@ export function StepPhotoViewer({
     >
       <div className="ui-photo-viewer-frame" onClick={(event) => event.stopPropagation()}>
         {resolvePhotoSource(photo.storagePath, photo.dataUrl) ? (
-          <img
+          <NextImage
             src={resolvePhotoSource(photo.storagePath, photo.dataUrl)}
             alt={`Step ${stepSequence} photo ${photo.name}`}
-            decoding="async"
+            width={photo.width ?? 1280}
+            height={photo.height ?? 960}
+            unoptimized
             fetchPriority="high"
             className="ui-photo-viewer-image"
             onError={() => void handlePhotoError(photo.storagePath)}

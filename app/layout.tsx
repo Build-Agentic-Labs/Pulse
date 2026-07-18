@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { ConfirmProvider } from "@/components/confirm-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { WebVitalsReporter } from "@/components/web-vitals-reporter";
 import { themeInitScript } from "@/lib/theme-init";
 import "./globals.css";
 
@@ -70,8 +71,6 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export const dynamic = "force-dynamic";
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -98,6 +97,7 @@ export default function RootLayout({
         <ThemeProvider>
           <ConfirmProvider>{children}</ConfirmProvider>
         </ThemeProvider>
+        <WebVitalsReporter />
       </body>
     </html>
   );

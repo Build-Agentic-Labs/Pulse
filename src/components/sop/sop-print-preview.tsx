@@ -1,6 +1,7 @@
 "use client";
 
 import { Printer, X } from "lucide-react";
+import NextImage from "next/image";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
 import { rasicLegend, type Sop } from "@/domain/sop/schema";
 import {
@@ -77,7 +78,7 @@ function DocumentHeader({ sop, reviewCategory }: { sop: Sop; reviewCategory?: st
   return (
     <header className="sop-export-header" data-review-category={reviewCategory}>
       <div className="sop-export-header-main">
-        <img src="/sop/ana-logo.png" alt="ANA Inc." />
+        <NextImage src="/sop/ana-logo.png" alt="ANA Inc." width={150} height={42} />
         <div>{`${sop.meta.sopNumber || "SOP-QA-00X"}: ${sop.meta.title || ""}`.trim()}</div>
       </div>
       <div className="sop-export-header-info">
@@ -855,10 +856,13 @@ export function SopPrintPreview({
                   );
                 }}
               >
-                <img
+                <NextImage
                   className="sop-export-attachment-image"
                   src={attachment.url}
                   alt={`${annex?.label || "Attached form"}, page ${attachment.sourcePage}`}
+                  width={816}
+                  height={1056}
+                  unoptimized
                 />
                 <div className="sop-export-attachment-label">
                   {appendixReference} &middot; Page {attachment.sourcePage} of {attachment.sourcePageCount}

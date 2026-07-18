@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDate } from "@/domain/formatting";
 import { FileText, Loader2, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -30,11 +31,6 @@ import {
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { useSopWorkspace } from "./sop-workspace-provider";
 
-function formatDate(iso: string): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
-}
 
 /** Periodic-review flag for a next-review date: overdue (past) or due soon (within 30 days). */
 function reviewFlag(iso: string | null): { label: string; className: string } | null {

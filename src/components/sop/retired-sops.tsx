@@ -2,6 +2,7 @@
 
 import { Archive, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatDate } from "@/domain/formatting";
 import { listSops, type SopListItem } from "@/lib/sop/store";
 import { listHistoricalRevisions } from "@/lib/sop/review";
 import { useSopWorkspace } from "./sop-workspace-provider";
@@ -17,11 +18,6 @@ interface RetiredEntry {
   reason: "Older version" | "Retired SOP";
 }
 
-function formatDate(iso: string): string {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
-}
 
 /** Read-only archive of SOPs explicitly retired through the document-control lifecycle. */
 export function RetiredSops({ active = true }: { active?: boolean }) {
@@ -130,7 +126,7 @@ export function RetiredSops({ active = true }: { active?: boolean }) {
                     </td>
                     <td className="px-4 py-3.5 ui-mono-label text-ink-secondary">{entry.version || "—"}</td>
                     <td className="px-4 py-3.5"><span className="ui-chip">{entry.reason}</span></td>
-                    <td className="px-4 py-3.5 text-[12px] tabular-nums text-ink-tertiary">{formatDate(entry.archivedAt)}</td>
+                    <td className="px-4 py-3.5 text-[12px] tabular-nums text-ink-tertiary">{formatDate(entry.archivedAt) || "—"}</td>
                   </tr>
                 ))}
               </tbody>

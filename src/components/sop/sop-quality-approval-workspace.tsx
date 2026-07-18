@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTime } from "@/domain/formatting";
 import { CheckCircle2, Loader2, Save, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
@@ -21,18 +22,6 @@ import { getSop, type SopRecord } from "@/lib/sop/store";
 import { SignaturePad } from "./signature-pad";
 import { SopPrintPreview } from "./sop-print-preview";
 
-function formatDateTime(value: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 export function SopQualityApprovalWorkspace({
   sopId,

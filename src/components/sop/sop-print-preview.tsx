@@ -1,6 +1,7 @@
 "use client";
 
 import { Printer, X } from "lucide-react";
+import { formatDateControlled, formatDateTime } from "@/domain/formatting";
 import NextImage from "next/image";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
 import { rasicLegend, type Sop } from "@/domain/sop/schema";
@@ -65,14 +66,6 @@ function isImage(file: SopAnnexFile): boolean {
   return file.contentType.startsWith("image/");
 }
 
-function formatDate(iso: string): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${mm}/${dd}/${date.getFullYear()}`;
-}
 
 function DocumentHeader({ sop, reviewCategory }: { sop: Sop; reviewCategory?: string }) {
   return (
@@ -83,8 +76,8 @@ function DocumentHeader({ sop, reviewCategory }: { sop: Sop; reviewCategory?: st
       </div>
       <div className="sop-export-header-info">
         <div>Version: {sop.meta.version || "1.0"}</div>
-        <div>Revision date: {formatDate(sop.meta.revisionDate) || "MM/DD/YY"}</div>
-        <div>Effective date: {formatDate(sop.meta.effectiveDate) || "MM/DD/YY"}</div>
+        <div>Revision date: {formatDateControlled(sop.meta.revisionDate) || "MM/DD/YY"}</div>
+        <div>Effective date: {formatDateControlled(sop.meta.effectiveDate) || "MM/DD/YY"}</div>
       </div>
     </header>
   );
@@ -156,18 +149,6 @@ function DocumentPage({
   );
 }
 
-function formatDateTime(iso: string): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString([], {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function Section({ title, children, reviewCategory }: { title: string; children: ReactNode; reviewCategory?: string }) {
   return (
@@ -801,7 +782,7 @@ export function SopPrintPreview({
                     <thead><tr><th>Version</th><th>Changes</th><th>Author</th></tr></thead>
                     <tbody>
                       {sop.changeHistory.map((entry, index) => (
-                        <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[systemAuthorName, formatDate(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
+                        <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[systemAuthorName, formatDateControlled(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
                       ))}
                     </tbody>
                   </table>
@@ -821,7 +802,7 @@ export function SopPrintPreview({
                 <thead><tr><th>Version</th><th>Changes</th><th>Author</th></tr></thead>
                 <tbody>
                   {sop.changeHistory.map((entry, index) => (
-                    <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[systemAuthorName, formatDate(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
+                    <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[systemAuthorName, formatDateControlled(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
                   ))}
                 </tbody>
               </table>

@@ -27,6 +27,7 @@ import {
   VerticalAlign,
   WidthType,
 } from "docx";
+import { formatDateControlled } from "@/domain/formatting";
 import { rasicLegend, type Sop } from "@/domain/sop/schema";
 import { renderProcedureFlowImages } from "./procedure-flow-image";
 
@@ -35,14 +36,6 @@ const MUTED = "666666";
 const LINE = "CCCCCC";
 const FONT = "Arial";
 
-function formatDate(iso: string): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${mm}/${dd}/${date.getFullYear()}`;
-}
 
 function sectionHeading(text: string, opts: { pageBreakBefore?: boolean } = {}): Paragraph {
   return new Paragraph({
@@ -315,10 +308,10 @@ function buildHeader(sop: Sop, logo: Uint8Array | null): Header {
         rows: [
           new TableRow({ children: [logoCell, infoCell(`Version: ${sop.meta.version || "1.0"}`)] }),
           new TableRow({
-            children: [infoCell(`Revision date: ${formatDate(sop.meta.revisionDate) || "MM/DD/YY"}`)],
+            children: [infoCell(`Revision date: ${formatDateControlled(sop.meta.revisionDate) || "MM/DD/YY"}`)],
           }),
           new TableRow({
-            children: [infoCell(`Effective date: ${formatDate(sop.meta.effectiveDate) || "MM/DD/YY"}`)],
+            children: [infoCell(`Effective date: ${formatDateControlled(sop.meta.effectiveDate) || "MM/DD/YY"}`)],
           }),
         ],
       }),
@@ -412,7 +405,7 @@ async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
       sop.changeHistory.map((entry) => [
         entry.version,
         entry.changes,
-        [entry.createdByName, entry.createdByPosition, formatDate(entry.createdByDate)].filter(Boolean).join("\n"),
+        [entry.createdByName, entry.createdByPosition, formatDateControlled(entry.createdByDate)].filter(Boolean).join("\n"),
       ]),
       [14, 56, 30],
     ),
@@ -422,7 +415,7 @@ async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
   blocks.push(
     dataTable(
       ["Approval", "Name", "Position", "Date"],
-      sop.approvals.map((row) => [row.role, row.name, row.position, formatDate(row.date)]),
+      sop.approvals.map((row) => [row.role, row.name, row.position, formatDateControlled(row.date)]),
       [28, 26, 26, 20],
     ),
   );

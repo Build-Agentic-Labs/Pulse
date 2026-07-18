@@ -25,11 +25,12 @@ import {
   updateWorkOrderHeader,
   type WorkOrderDetail as WorkOrderRecord,
   type WorkOrderLine,
+  type WorkOrderMatchInfo,
 } from "@/lib/planning/store";
 import { PlanningShell } from "./planning-shell";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 import { WorkOrderLineRow } from "./work-order-line-row";
-import { WorkOrderPrintDocument, type WorkOrderMatchInfo } from "./work-order-print";
+import { WorkOrderPrintDocument } from "./work-order-print";
 
 // US Letter at the sheet's natural 820px width (820 × 11 / 8.5).
 const SHEET_NATURAL_WIDTH = 820;

@@ -57,3 +57,43 @@ export function formatRelativeFromBounds(iso: string, startMs: number) {
 
   return formatMinutes((valueMs - startMs) / 60000);
 }
+
+/**
+ * Locale-aware date for UI surfaces (lists, tables, settings). Empty or invalid
+ * input renders as "" — call sites wanting a placeholder use `formatDate(x) || "—"`.
+ * Consolidates 7 previously divergent per-component copies that rendered the same
+ * date differently on different screens.
+ */
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+}
+
+/** Locale-aware date + time (2-digit date, hh:mm) for UI surfaces. */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Fixed MM/DD/YYYY for controlled documents (SOP print sheets, DOCX exports).
+ * Deliberately locale-INDEPENDENT: a controlled document must render identically
+ * on every machine. Do not "simplify" this into formatDate.
+ */
+export function formatDateControlled(iso: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${mm}/${dd}/${date.getFullYear()}`;
+}

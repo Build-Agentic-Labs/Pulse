@@ -17,7 +17,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NothingLoadingBlock } from "@/components/nothing-ui";
 import { WORK_ORDER_TYPE_LABELS } from "@/domain/work-orders";
-import { getWorkOrder, getWorkOrderMatch, type WorkOrderDetail, type WorkOrderLine } from "@/lib/planning/store";
+import {
+  getWorkOrder,
+  getWorkOrderMatch,
+  type WorkOrderDetail,
+  type WorkOrderLine,
+  type WorkOrderMatchInfo,
+} from "@/lib/planning/store";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
 // ── formatting helpers ───────────────────────────────────────────────────
@@ -261,18 +267,6 @@ const PRINT_STYLES = `
   margin: 14mm;
 }
 `;
-
-/** Set/letter pairing shown in the final-assembly match block on a Main work order. */
-export interface WorkOrderMatchInfo {
-  /** The short set number both married documents carry, e.g. "01". */
-  setNo: string;
-  /** The paired power-module order number, e.g. "PM-0726-01". Null = no PM in this set. */
-  pmOrderNo: string | null;
-  /** Trailer configuration letter from the config catalog, e.g. "A". Null = no trailer. */
-  trailerLetter: string | null;
-  /** Human name of the trailer configuration, e.g. "Dual axle · electric brakes". */
-  trailerConfigName?: string | null;
-}
 
 export interface WorkOrderPrintDocumentProps {
   order: WorkOrderDetail;

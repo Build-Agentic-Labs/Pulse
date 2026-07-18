@@ -1,5 +1,6 @@
 import { calculateProductKpis, formatMinutes, getTimelineBounds, round } from "./calculations";
 import { getStoredTaskOperatorIds } from "./operator-assignments";
+import { compareTasksByWbs } from "./task-planning";
 import { countTaskStepPhotoAttachments } from "./step-photos";
 import { countTaskStepTools } from "./step-tools";
 import type { PlannerState, Station, Task } from "./types";
@@ -30,22 +31,6 @@ function isSummaryReportTask(task: Task, tasks: Task[]) {
   return tasks.some((candidate) => candidate.id !== task.id && candidate.wbs.startsWith(childPrefix));
 }
 
-function compareTasksByWbs(left: Task, right: Task) {
-  const leftParts = left.wbs.split(".").map((part) => Number.parseInt(part, 10));
-  const rightParts = right.wbs.split(".").map((part) => Number.parseInt(part, 10));
-  const length = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const leftPart = Number.isFinite(leftParts[index]) ? leftParts[index] : 0;
-    const rightPart = Number.isFinite(rightParts[index]) ? rightParts[index] : 0;
-
-    if (leftPart !== rightPart) {
-      return leftPart - rightPart;
-    }
-  }
-
-  return left.name.localeCompare(right.name);
-}
 
 function documentTable(headers: string[], rows: string[][], alignments: Array<"left" | "right" | "center"> = []) {
   const header = headers

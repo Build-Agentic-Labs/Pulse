@@ -20,6 +20,7 @@ import {
   type WorkOrderType,
 } from "@/domain/work-orders";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import type { TablesUpdate } from "@/lib/database.types";
 import type { WorkOrderMatchInfo } from "@/components/planning/work-order-print";
 import { diffItemMaster, type ParsedItemMasterRow } from "./parse-item-master";
 
@@ -585,7 +586,7 @@ export async function updateWorkOrderHeader(
   patch: { customer?: string; model?: string; orderDate?: string; notes?: string; orderNo?: string },
 ): Promise<void> {
   const supabase = createPlannerSupabaseClient();
-  const row: Record<string, unknown> = {};
+  const row: TablesUpdate<"work_orders"> = {};
   if (patch.customer !== undefined) row.customer = patch.customer;
   if (patch.model !== undefined) row.model = patch.model;
   if (patch.orderDate !== undefined) row.order_date = patch.orderDate;
@@ -604,7 +605,7 @@ export async function saveWorkOrderLine(
   patch: Partial<Omit<WorkOrderLine, "id">>,
 ): Promise<void> {
   const supabase = createPlannerSupabaseClient();
-  const row: Record<string, unknown> = {};
+  const row: TablesUpdate<"work_order_lines"> = {};
   if (patch.itemNo !== undefined) row.item_no = patch.itemNo;
   if (patch.description !== undefined) row.description = patch.description;
   if (patch.buildQty !== undefined) row.build_qty = patch.buildQty;
@@ -693,7 +694,9 @@ export async function transitionWorkOrder(
   const supabase = createPlannerSupabaseClient();
   const { data, error } = await supabase
     .from("work_orders")
-    .update(buildTransitionPatch(to, new Date().toISOString()))
+    // buildTransitionPatch is domain-pure (tested in work-orders.test.ts) and must not
+    // import database types; its columns are asserted against the schema here instead.
+    .update(buildTransitionPatch(to, new Date().toISOString()) as TablesUpdate<"work_orders">)
     .eq("workspace_id", workspaceId)
     .eq("id", id)
     .eq("status", from)

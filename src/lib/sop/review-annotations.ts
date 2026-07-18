@@ -1,4 +1,5 @@
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import type { TablesInsert } from "@/lib/database.types";
 
 export interface SopReviewAnnotation {
   id: string;
@@ -120,6 +121,9 @@ export async function addSopReviewAnnotation(input: {
   const supabase = createPlannerSupabaseClient();
   const { data, error } = await supabase
     .from("sop_review_annotations")
+    // created_by and review_cycle are stamped by the stamp_sop_review_annotation
+    // BEFORE INSERT trigger (migration 20260715150000); the generated Insert type
+    // cannot see triggers, hence the cast.
     .insert({
       sop_id: input.sopId,
       review_cycle: 0,
@@ -128,7 +132,7 @@ export async function addSopReviewAnnotation(input: {
       x_percent: input.xPercent,
       y_percent: input.yPercent,
       body: input.body.trim(),
-    })
+    } as TablesInsert<"sop_review_annotations">)
     .select("*")
     .single();
   if (error) throw new Error(error.message);
@@ -176,7 +180,8 @@ export async function saveSopReviewRemark(input: {
         review_cycle: 0,
         category: input.category,
         body,
-      }).select("*").single();
+        // created_by/coordinates stamped or defaulted by the DB trigger — see above.
+      } as TablesInsert<"sop_review_annotations">).select("*").single();
   const { data, error } = await operation;
   if (error) throw new Error(error.message);
   return mapAnnotation(data as Record<string, unknown>);

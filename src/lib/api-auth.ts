@@ -8,6 +8,7 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import type { Database } from "./database.types";
 
 export function getBearerToken(request: Request) {
   const header = request.headers.get("authorization") ?? "";
@@ -20,10 +21,10 @@ export function getBearerToken(request: Request) {
  * read/write to what that user (or service account) may actually see. Use this in API routes that
  * need user-scoped data — the shared planner client is an anon singleton with no session.
  */
-export function callerScopedSupabase(token: string): SupabaseClient {
+export function callerScopedSupabase(token: string): SupabaseClient<Database> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-  return createClient(supabaseUrl, supabaseAnonKey, {
+  return createClient<Database>(supabaseUrl, supabaseAnonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
@@ -50,7 +51,7 @@ export async function requireApiUser(request: Request): Promise<ApiUserResult> {
     };
   }
 
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   const { data, error } = await supabase.auth.getUser(token);

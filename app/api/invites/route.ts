@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
+import type { Database } from "@/lib/database.types";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 
 export const dynamic = "force-dynamic";
@@ -105,7 +106,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const admin = createClient(supabaseUrl, serviceRoleKey, {
+  const admin = createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   const redirectTo = new URL(request.url).origin;

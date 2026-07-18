@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
+import type { Database, Json, TablesUpdate } from "@/lib/database.types";
 import type {
   AccessLevel,
   ActualEvent,
@@ -194,10 +195,11 @@ type StepPhotoRow = {
   width?: number | null;
   height?: number | null;
   caption?: string | null;
-  captured_at?: string | null;
+  // NOT NULL with defaults in the schema: may be omitted, but never written as null.
+  captured_at?: string;
   uploaded_by?: string | null;
   deleted_at?: string | null;
-  created_at?: string | null;
+  created_at?: string;
 };
 
 type StepExplodedViewRow = {
@@ -257,10 +259,10 @@ export type ToolLibraryItem = {
 export type SaveState = "idle" | "loading" | "saving" | "saved" | "draft" | "retrying" | "conflict" | "error";
 
 type PlannerSupabaseGlobal = typeof globalThis & {
-  __buildlogicPlannerSupabaseClient?: SupabaseClient;
+  __buildlogicPlannerSupabaseClient?: SupabaseClient<Database>;
 };
 
-let serverPlannerSupabaseClient: SupabaseClient | undefined;
+let serverPlannerSupabaseClient: SupabaseClient<Database> | undefined;
 
 function plannerClient() {
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -269,7 +271,7 @@ function plannerClient() {
 
   if (typeof window !== "undefined") {
     const globalScope = globalThis as PlannerSupabaseGlobal;
-    globalScope.__buildlogicPlannerSupabaseClient ??= createClient(supabaseUrl, supabaseAnonKey, {
+    globalScope.__buildlogicPlannerSupabaseClient ??= createClient<Database>(supabaseUrl, supabaseAnonKey, {
       auth: {
         // One persistent browser session that auto-refreshes its token in the background.
         // Keep auth traffic low elsewhere (see getUserFromSession) so the /token refresh
@@ -285,7 +287,7 @@ function plannerClient() {
 
   // Server-side: never persist or refresh a session (there's no browser storage, and
   // authenticated server work uses a per-request, bearer-scoped client instead).
-  serverPlannerSupabaseClient ??= createClient(supabaseUrl, supabaseAnonKey, {
+  serverPlannerSupabaseClient ??= createClient<Database>(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   return serverPlannerSupabaseClient;
@@ -688,7 +690,9 @@ function productRow(product: Product) {
     calculated_takt_minutes: product.calculatedTaktMinutes,
     manual_takt_minutes: product.manualTaktMinutes ?? null,
     active_takt_minutes: product.activeTaktMinutes,
-    custom_fields: product.customFields ?? {},
+    // Runtime contract unchanged: custom fields have always been JSON-serialized by
+    // supabase-js. The cast states that contract at the serialization boundary.
+    custom_fields: (product.customFields ?? {}) as Json,
     created_at: product.createdAt,
     updated_at: product.updatedAt,
   };
@@ -860,7 +864,8 @@ function customFieldsRow(customFields: Task["customFields"]) {
   delete nextCustomFields[EXPLODED_VIEWS_FIELD];
   delete nextCustomFields[TASK_VIDEOS_FIELD];
   delete nextCustomFields[STEP_TOOL_LISTS_FIELD];
-  return nextCustomFields;
+  // Same serialization-boundary contract as productRow's custom_fields.
+  return nextCustomFields as Json;
 }
 
 function dependencyRow(dependency: Dependency) {
@@ -1427,7 +1432,7 @@ function customColumnRow(column: CustomColumn) {
     type: column.type,
     applies_to: column.appliesTo,
     required: column.required,
-    default_value: column.defaultValue ?? null,
+    default_value: (column.defaultValue ?? null) as Json,
     options: column.options ?? [],
     formula: column.formula ?? null,
     unit: column.unit ?? null,
@@ -1996,7 +2001,7 @@ export async function updateProjectInSupabase(
     status?: Project["status"];
   },
 ) {
-  const row: Record<string, unknown> = {};
+  const row: TablesUpdate<"projects"> = {};
 
   if (patch.name !== undefined) {
     const name = patch.name.trim();
@@ -2955,7 +2960,9 @@ type TaskFieldPatch = Partial<
 
 function taskFieldPatchRow(patch: TaskFieldPatch) {
   const row: Record<string, unknown> = {};
-  const setters: [keyof TaskFieldPatch, string][] = [
+  // Column names are constrained to the generated schema: a renamed or typo'd
+  // column now fails to compile instead of silently no-oping at runtime.
+  const setters: [keyof TaskFieldPatch, keyof TablesUpdate<"tasks"> & string][] = [
     ["name", "name"],
     ["description", "description"],
     ["plannedStart", "planned_start"],
@@ -2992,7 +2999,9 @@ function taskFieldPatchRow(patch: TaskFieldPatch) {
     }
   });
 
-  return row;
+  // Dynamic build above; the cast is safe because every key came from the
+  // schema-constrained setters table.
+  return row as TablesUpdate<"tasks">;
 }
 
 export async function updateTaskFields(taskId: string, patch: TaskFieldPatch, expectedVersion?: number, projectId?: string) {

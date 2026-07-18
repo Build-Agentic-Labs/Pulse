@@ -265,6 +265,7 @@ body {
   background: color-mix(in srgb, var(--color-ink-secondary) 45%, transparent);
 }
 
+@layer components {
 .ui-photo-viewer {
   background: transparent;
 }
@@ -799,6 +800,7 @@ body {
   outline: 2px solid var(--color-border-strong);
   outline-offset: 2px;
 }
+}
 
 @layer base {
   button,
@@ -818,6 +820,7 @@ body {
   }
 }
 
+@layer components {
 .mobile-photo-portal input,
 .mobile-photo-portal textarea,
 .mobile-photo-portal select {
@@ -1862,12 +1865,14 @@ body {
     background-color: var(--color-surface);
   }
 }
+}
 
 ::-webkit-scrollbar {
   width: 0;
   height: 0;
 }
 
+@layer components {
 .number-input {
   appearance: textfield;
 }
@@ -2110,6 +2115,7 @@ body {
   width: 3px;
 }
 
+}
 @layer components {
   .ui-dot-canvas {
     background-color: var(--color-canvas);
@@ -5077,6 +5083,7 @@ body {
   }
 }
 
+@layer components {
 /* ===================================================================
    Split sign-in screen: brand panel (line-balance art + glossary) on
    the left, refined form on the right. Raw CSS (token-driven) so it
@@ -5433,4 +5440,5 @@ body {
   .ui-auth-term {
     transition: none;
   }
+}
 }

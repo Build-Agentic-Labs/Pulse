@@ -1,12 +1,37 @@
 "use client";
 
+import dynamic from "next/dynamic";
+import { AppLoadingShell } from "./app-flow-panels";
 import { AuthProjectGate } from "./auth-project-gate";
-import { CompanyDashboard } from "./company-dashboard";
-import { LineWorkspace } from "./line-workspace";
-import { MobilePhotoPortal } from "./mobile-photo-portal";
-import { PlanningRoute } from "./planning/planning-route";
-import { WorkOrderBoard } from "./planning/work-order-board";
-import { SpacePlaceholder } from "./space-placeholder";
+
+function RouteChunkLoading() {
+  return <AppLoadingShell title="Loading workspace" />;
+}
+
+const CompanyDashboard = dynamic(
+  () => import("./company-dashboard").then((module) => module.CompanyDashboard),
+  { loading: RouteChunkLoading },
+);
+const LineWorkspace = dynamic(
+  () => import("./line-workspace").then((module) => module.LineWorkspace),
+  { loading: RouteChunkLoading },
+);
+const MobilePhotoPortal = dynamic(
+  () => import("./mobile-photo-portal").then((module) => module.MobilePhotoPortal),
+  { loading: RouteChunkLoading },
+);
+const PlanningRoute = dynamic(
+  () => import("./planning/planning-route").then((module) => module.PlanningRoute),
+  { loading: RouteChunkLoading },
+);
+const WorkOrderBoard = dynamic(
+  () => import("./planning/work-order-board").then((module) => module.WorkOrderBoard),
+  { loading: RouteChunkLoading },
+);
+const SpacePlaceholder = dynamic(
+  () => import("./space-placeholder").then((module) => module.SpacePlaceholder),
+  { loading: RouteChunkLoading },
+);
 
 /** The post-login landing page: company-space cards instead of an auto-redirect. */
 export function HomeRouteShell() {

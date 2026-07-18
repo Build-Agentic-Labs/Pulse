@@ -74,25 +74,24 @@ function rememberSignedUrl(storagePath: string, url: string) {
   }
   signedUrlCache.set(storagePath, { url, expiresAt: Date.now() + STORAGE_SIGNED_URL_SECONDS * 1000 });
 }
-const realtimePlannerTables = [
-  "products",
-  "scenarios",
-  "stations",
-  "zones",
-  "tasks",
-  "task_dependencies",
-  "manufacturing_components",
-  "document_type_codes",
-  "manufacturing_steps",
-  "part_references",
-  "actual_events",
-  "custom_columns",
-  "step_photos",
-  "step_exploded_views",
-  "task_videos",
-  "step_tools",
-  "tool_library",
-] as const;
+type RealtimePlannerTable =
+  | "products"
+  | "scenarios"
+  | "stations"
+  | "zones"
+  | "tasks"
+  | "task_dependencies"
+  | "manufacturing_components"
+  | "document_type_codes"
+  | "manufacturing_steps"
+  | "part_references"
+  | "actual_events"
+  | "custom_columns"
+  | "step_photos"
+  | "step_exploded_views"
+  | "task_videos"
+  | "step_tools"
+  | "tool_library";
 
 type PlannerRealtimeScope = {
   productId?: string;
@@ -105,7 +104,7 @@ type PlannerRealtimeScope = {
 };
 
 export type PlannerRealtimePayload = {
-  table: (typeof realtimePlannerTables)[number];
+  table: RealtimePlannerTable;
   eventType: "INSERT" | "UPDATE" | "DELETE" | "*";
   new?: Record<string, unknown>;
   old?: Record<string, unknown>;
@@ -1641,19 +1640,34 @@ async function loadProjectContext(
   };
 }
 
-// Whether the signed-in user is a platform superadmin. Returns false (rather than throwing)
-// when the migration has not been applied yet, so the app degrades gracefully.
-export async function fetchIsSuperAdmin(
+const inflightSuperAdminChecks = new WeakMap<SupabaseClient, Promise<boolean>>();
+
+// Whether the signed-in user is a platform superadmin. Concurrent workspace/access loads share
+// one RPC per client, while later refreshes still perform a fresh permission check.
+export function fetchIsSuperAdmin(
   supabase: ReturnType<typeof plannerClient> = plannerClient(),
 ): Promise<boolean> {
-  const { data, error } = await supabase.rpc("is_super_admin");
-  if (error) {
-    if (error.code === "PGRST202") {
-      return false;
-    }
-    throw error;
+  const pending = inflightSuperAdminChecks.get(supabase);
+  if (pending) {
+    return pending;
   }
-  return data === true;
+
+  const check = Promise.resolve(supabase.rpc("is_super_admin")).then(({ data, error }) => {
+    if (error) {
+      if (error.code === "PGRST202") {
+        return false;
+      }
+      throw error;
+    }
+    return data === true;
+  });
+  const trackedCheck = check.finally(() => {
+    if (inflightSuperAdminChecks.get(supabase) === trackedCheck) {
+      inflightSuperAdminChecks.delete(supabase);
+    }
+  });
+  inflightSuperAdminChecks.set(supabase, trackedCheck);
+  return trackedCheck;
 }
 
 // The signed-in user's access level for a single project. Returns undefined when the
@@ -1699,10 +1713,13 @@ async function fetchUserProjectAccessMap(
 export async function fetchOrgToolAccess(
   supabase: ReturnType<typeof plannerClient> = plannerClient(),
 ): Promise<AccessLevel> {
-  if (await fetchIsSuperAdmin(supabase)) {
+  const [isSuperAdmin, { data: userData }] = await Promise.all([
+    fetchIsSuperAdmin(supabase),
+    getUserFromSession(supabase),
+  ]);
+  if (isSuperAdmin) {
     return "edit";
   }
-  const { data: userData } = await getUserFromSession(supabase);
   if (!userData.user) {
     return "none";
   }
@@ -4179,7 +4196,7 @@ export function subscribePlannerStateChanges(onChange: (payload: PlannerRealtime
     onChange(payload);
   }
 
-  function listen(table: (typeof realtimePlannerTables)[number], filter?: string) {
+  function listen(table: RealtimePlannerTable, filter?: string) {
     channel.on("postgres_changes", { event: "*", schema: "public", table, ...(filter ? { filter } : {}) }, (payload) => {
       emit({
         table,

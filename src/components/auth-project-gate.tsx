@@ -2,7 +2,7 @@
 
 import type { Session } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel, PasswordUpdatePanel } from "@/components/app-flow-panels";
 import {
   createPlannerSupabaseClient,
@@ -239,30 +239,33 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
     [groups],
   );
 
-  async function refreshWorkspaceProjects(nextSession = session, options: { showLoading?: boolean } = {}) {
-    if (!nextSession) {
-      setGroups([]);
-      setStatus("auth");
-      clearWorkspaceGroupsCache();
-      return;
-    }
+  const refreshWorkspaceProjects = useCallback(
+    async (nextSession: Session | null, options: { showLoading?: boolean } = {}) => {
+      if (!nextSession) {
+        setGroups([]);
+        setStatus("auth");
+        clearWorkspaceGroupsCache();
+        return;
+      }
 
-    const shouldShowWorkspaceLoading = options.showLoading ?? (statusRef.current !== "ready" && !projectId);
-    if (shouldShowWorkspaceLoading) {
-      setStatus("loading");
-    }
-    setMessage("");
+      const shouldShowWorkspaceLoading = options.showLoading ?? (statusRef.current !== "ready" && !projectId);
+      if (shouldShowWorkspaceLoading) {
+        setStatus("loading");
+      }
+      setMessage("");
 
-    try {
-      const nextGroups = await ensureDefaultWorkspaceMembership();
-      setGroups(nextGroups);
-      writeWorkspaceGroupsCache(nextGroups);
-      setStatus("ready");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load organization workspaces.");
-      setStatus("error");
-    }
-  }
+      try {
+        const nextGroups = await ensureDefaultWorkspaceMembership();
+        setGroups(nextGroups);
+        writeWorkspaceGroupsCache(nextGroups);
+        setStatus("ready");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Unable to load organization workspaces.");
+        setStatus("error");
+      }
+    },
+    [projectId],
+  );
 
   // Cache-then-revalidate (same pattern as the sidebar's project cache): paint the last
   // known workspace groups immediately while the session resolve + fresh load below run.
@@ -325,16 +328,14 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
         return;
       }
 
-      void refreshWorkspaceProjects(nextSession, {
-        showLoading: statusRef.current !== "ready" && !projectId,
-      });
+      void refreshWorkspaceProjects(nextSession);
     });
 
     return () => {
       mounted = false;
       listener.subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, [refreshWorkspaceProjects, supabase]);
 
   const homeMode = Boolean(renderHome);
 

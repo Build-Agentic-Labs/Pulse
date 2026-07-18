@@ -1,15 +1,36 @@
 "use client";
 
 import { Archive, Building2, FileText, Inbox, Library } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { DepartmentsAdmin } from "./departments-admin";
-import { EffectiveLibrary } from "./effective-library";
-import { ReviewQueue } from "./review-queue";
-import { RetiredSops } from "./retired-sops";
-import { SopList } from "./sop-list";
 import { SopShell } from "./sop-shell";
 import { canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
+
+function SopTabChunkLoading() {
+  return <div className="min-h-[560px]" aria-hidden="true" />;
+}
+
+const DepartmentsAdmin = dynamic(
+  () => import("./departments-admin").then((module) => module.DepartmentsAdmin),
+  { loading: SopTabChunkLoading },
+);
+const EffectiveLibrary = dynamic(
+  () => import("./effective-library").then((module) => module.EffectiveLibrary),
+  { loading: SopTabChunkLoading },
+);
+const ReviewQueue = dynamic(
+  () => import("./review-queue").then((module) => module.ReviewQueue),
+  { loading: SopTabChunkLoading },
+);
+const RetiredSops = dynamic(
+  () => import("./retired-sops").then((module) => module.RetiredSops),
+  { loading: SopTabChunkLoading },
+);
+const SopList = dynamic(
+  () => import("./sop-list").then((module) => module.SopList),
+  { loading: SopTabChunkLoading },
+);
 
 type Tab = "all" | "review" | "library" | "retired" | "departments";
 

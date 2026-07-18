@@ -57,11 +57,14 @@ const nextConfig = (phase) => ({
     return [
       {
         source: "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+        headers: securityHeaders,
+      },
+      {
+        source: "/api/:path*",
         headers: [
-          ...securityHeaders,
           {
             key: "Cache-Control",
-            value: "no-store, no-cache, must-revalidate, proxy-revalidate",
+            value: "private, no-store, max-age=0",
           },
         ],
       },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, type ComponentProps } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type ComponentProps } from "react";
 
 /**
  * Textarea that grows to fit its content so the full body text stays visible.
@@ -15,7 +15,7 @@ export function AutoTextarea({
 }: ComponentProps<"textarea"> & { maxHeight?: number }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  function resize() {
+  const resize = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     // border-box + 1px borders: scrollHeight omits the border, so add it back
@@ -31,13 +31,13 @@ export function AutoTextarea({
       el.style.height = `${next}px`;
       el.style.overflowY = "hidden";
     }
-  }
+  }, [maxHeight]);
 
-  useLayoutEffect(resize, [value, maxHeight]);
+  useLayoutEffect(resize, [resize, value]);
   useEffect(() => {
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
-  }, []);
+  }, [resize]);
 
   return (
     <textarea

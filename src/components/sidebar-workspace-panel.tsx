@@ -3,7 +3,7 @@
 import { Check, FolderKanban, MoreHorizontal, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   createPlannerSupabaseClient,
   createProjectWithStarterPlan,
@@ -152,29 +152,41 @@ export function SidebarWorkspacePanel({
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
 
+  const activeProjectId = activeProject?.projectId;
+  const activeProjectName = activeProject?.projectName;
+  const activeWorkspaceId = activeProject?.workspaceId;
+  const activeProjectRole = activeProject?.role;
+
   useEffect(() => {
-    if (!activeProject) return;
-    const fallbackProject = projectFromContext(activeProject);
-    setWorkspaceId(activeProject.workspaceId);
-    setRole(activeProject.role);
-    if (activeProject.role) {
-      setRoleByWorkspaceId((current) => ({ ...current, [activeProject.workspaceId]: activeProject.role as WorkspaceRole }));
+    if (!activeProjectId || !activeWorkspaceId) return;
+    const fallbackProject: Project = {
+      id: activeProjectId,
+      workspaceId: activeWorkspaceId,
+      name: activeProjectName ?? "",
+      status: "active",
+      createdAt: "",
+      updatedAt: "",
+    };
+    setWorkspaceId(activeWorkspaceId);
+    setRole(activeProjectRole);
+    if (activeProjectRole) {
+      setRoleByWorkspaceId((current) => ({ ...current, [activeWorkspaceId]: activeProjectRole }));
     }
     setStatus((current) => (current === "loading" ? "ready" : current));
     setProjects((current) => {
-      if (current.some((project) => project.id === activeProject.projectId)) {
+      if (current.some((project) => project.id === activeProjectId)) {
         return current.map((project) =>
-          project.id === activeProject.projectId ? { ...fallbackProject, ...project, name: activeProject.projectName } : project,
+          project.id === activeProjectId ? { ...fallbackProject, ...project, name: activeProjectName ?? "" } : project,
         );
       }
-      return mergeProjects(current, activeProject);
+      return [...current, fallbackProject];
     });
-  }, [activeProject?.projectId, activeProject?.projectName, activeProject?.workspaceId, activeProject?.role]);
+  }, [activeProjectId, activeProjectName, activeProjectRole, activeWorkspaceId]);
 
-  async function hydrate() {
+  const hydrate = useCallback(async () => {
     try {
       const groups = await ensureDefaultWorkspaceMembership();
-      const activeGroup = groups.find((entry) => entry.workspace.id === activeProject?.workspaceId) ?? groups[0];
+      const activeGroup = groups.find((entry) => entry.workspace.id === activeWorkspaceId) ?? groups[0];
 
       if (!activeGroup) {
         setProjects([]);
@@ -204,7 +216,7 @@ export function SidebarWorkspacePanel({
       setStatus("error");
       return [];
     }
-  }
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     let mounted = true;
@@ -231,7 +243,7 @@ export function SidebarWorkspacePanel({
       mounted = false;
       listener.subscription.unsubscribe();
     };
-  }, [supabase, activeProject?.workspaceId]);
+  }, [hydrate, supabase]);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

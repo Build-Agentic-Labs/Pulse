@@ -1,5 +1,10 @@
 "use client";
 
+// Route-scoped styles: ~24 kB of .mobile-photo-* / .ui-photo-mobile-* rules that
+// previously shipped to every route via globals.css. Loading them with this
+// dynamically-imported component keeps them off every other page.
+import "./mobile-photo-portal.css";
+
 import {
   Camera,
   ChevronLeft,

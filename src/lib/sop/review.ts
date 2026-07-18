@@ -8,6 +8,7 @@
 import type { SopStatus } from "@/domain/sop/schema";
 import { parseSignatureStrokes, type SignatureStrokes } from "@/domain/sop/signature";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import type { Json, TablesUpdate } from "@/lib/database.types";
 import { SopConflictError } from "./store";
 
 const CONTROL_COLUMNS =
@@ -215,9 +216,11 @@ export async function signSop(
     supabase.rpc("sign_sop", {
       p_sop: sopId,
       p_meaning: meaning,
-      p_reason: options.reason ?? null,
-      p_seat_department: options.seatDepartmentId ?? null,
-      p_resolves: options.resolvesSignatureId ?? null,
+      // Omitted (undefined) args fall through to the SQL defaults, which are null —
+      // same result as the explicit nulls previously passed.
+      p_reason: options.reason ?? undefined,
+      p_seat_department: options.seatDepartmentId ?? undefined,
+      p_resolves: options.resolvesSignatureId ?? undefined,
     }),
   );
   return String(value);
@@ -244,7 +247,7 @@ export async function saveMySignatureProfile(strokes: SignatureStrokes): Promise
   const row = await throwIfError(
     supabase
       .from("user_signature_profiles")
-      .upsert({ user_id: userId, signature_strokes: strokes }, { onConflict: "user_id" })
+      .upsert({ user_id: userId, signature_strokes: strokes as unknown as Json }, { onConflict: "user_id" })
       .select("signature_strokes, updated_at")
       .single(),
   );
@@ -419,7 +422,7 @@ export async function transitionSop(
   patch: TransitionPatch = {},
 ): Promise<SopControl> {
   const supabase = createPlannerSupabaseClient();
-  const row: Record<string, unknown> = { status: to };
+  const row: TablesUpdate<"sops"> = { status: to };
   if (patch.rejectedReason !== undefined) row.rejected_reason = patch.rejectedReason;
   if (patch.effectiveDate !== undefined) row.effective_date = patch.effectiveDate;
   if (patch.departmentId !== undefined) row.department_id = patch.departmentId;

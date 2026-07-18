@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { createApiRateLimiter } from "@/lib/api-auth";
+import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
 import { calculateTaskManHours, formatMinutes, getTimelineBounds, round } from "@/domain/calculations";
 import type {
   IeSmartAllocationAssignment,
@@ -118,36 +117,16 @@ function finiteNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function getBearerToken(request: Request) {
-  const header = request.headers.get("authorization") ?? "";
-  const [scheme, token] = header.split(" ");
-  return scheme?.toLowerCase() === "bearer" && token ? token : "";
-}
-
 async function authorizeSmartAllocationRequest(request: Request, body: IeSmartAllocationRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const token = getBearerToken(request);
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return NextResponse.json({ error: "Supabase auth is not configured." }, { status: 503 });
+  // Shared auth gate (env check -> bearer token -> Supabase verification). This route
+  // previously re-implemented the same flow inline; api-auth.ts was extracted FROM it,
+  // so any future auth change (e.g. cookie sessions) lands in exactly one place.
+  const { userId, failure } = await requireApiUser(request);
+  if (failure) {
+    return failure;
   }
 
-  if (!token) {
-    return NextResponse.json({ error: "Sign in before running smart allocation." }, { status: 401 });
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-
-  if (userError || !userData.user) {
-    return NextResponse.json({ error: "Invalid or expired session." }, { status: 401 });
-  }
-
-  if (!checkSmartAllocationRateLimit(userData.user.id)) {
+  if (!checkSmartAllocationRateLimit(userId)) {
     return NextResponse.json({ error: "Smart allocation rate limit exceeded. Try again in a minute." }, { status: 429 });
   }
 
@@ -156,6 +135,8 @@ async function authorizeSmartAllocationRequest(request: Request, body: IeSmartAl
     return NextResponse.json({ error: "Smart allocation requires a workspace-scoped planner state." }, { status: 400 });
   }
 
+  // RLS-scoped access check: acting AS the caller, can they see this project?
+  const supabase = callerScopedSupabase(getBearerToken(request));
   const { data: project, error: projectError } = await supabase
     .from("projects")
     .select("id")

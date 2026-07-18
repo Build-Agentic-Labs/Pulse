@@ -1,0 +1,38 @@
+name: Regenerate lockfile (Linux)
+
+# Manual utility: npm cannot write a cross-platform-complete package-lock.json
+# from Windows (npm/cli#4828 — deps reachable only through platform-excluded
+# optional packages get dropped, e.g. sharp's @emnapi chain). Whenever the
+# lockfile needs regenerating after adding/updating packages on a Windows
+# machine, dispatch this workflow and commit the artifact it produces.
+
+on:
+  workflow_dispatch:
+  # Also runs when this file itself is pushed — dispatch-from-branch is not
+  # possible until the workflow exists on the default branch.
+  push:
+    paths:
+      - ".github/workflows/relock.yml"
+
+jobs:
+  relock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Regenerate package-lock.json from registry
+        run: |
+          rm -f package-lock.json
+          npm install --package-lock-only
+
+      - name: Verify npm ci accepts the result
+        run: npm ci
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-lock
+          path: package-lock.json

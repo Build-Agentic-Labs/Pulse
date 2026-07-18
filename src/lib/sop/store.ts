@@ -12,6 +12,7 @@ import { createEmptySop, type Sop, type SopStatus } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
 import { DEFAULT_DOC_TYPE, effectiveSopNumber } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import type { Json } from "@/lib/database.types";
 
 const STORAGE_KEY = "pulse:sops:v1";
 
@@ -197,7 +198,9 @@ export async function saveSop(sop: Sop, workspaceId: string, options: SaveSopOpt
     version: next.meta.version || null,
     source: next.source,
     status,
-    document: documentBody,
+    // The document tree is JSON-serialized by supabase-js into the jsonb column; the
+    // cast states that contract (interfaces lack the index signature Json wants).
+    document: documentBody as unknown as Json,
     updated_by: userId,
   };
 

@@ -1,5 +1,10 @@
 "use client";
 
+// Route-scoped styles: the split sign-in screen (~8 kB of .ui-auth-* rules)
+// previously shipped to every route via globals.css. Loading them with this
+// component keeps them off pages that never render the auth panels.
+import "./app-flow-panels.css";
+
 import { Moon, RefreshCw, Sun } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { NothingLoadingBlock, NothingSpinner, NothingStatus } from "@/components/nothing-ui";

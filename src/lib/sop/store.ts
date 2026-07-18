@@ -11,8 +11,9 @@
 import { createEmptySop, type Sop, type SopStatus } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
 import { DEFAULT_DOC_TYPE, effectiveSopNumber } from "@/domain/sop/authoring";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
-import type { Json } from "@/lib/database.types";
+import type { Database, Json } from "@/lib/database.types";
 import { throwIfError as throwIfSupabaseError, type SupabaseResultError } from "@/lib/supabase-errors";
 
 const STORAGE_KEY = "pulse:sops:v1";
@@ -136,8 +137,11 @@ function mapSopListItem(row: Record<string, unknown>): SopListItem {
   };
 }
 
-export async function listSops(workspaceId: string): Promise<SopListItem[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listSops(
+  workspaceId: string,
+  client?: SupabaseClient<Database>,
+): Promise<SopListItem[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase
       .from("sops")

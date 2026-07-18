@@ -90,14 +90,33 @@ function reviewerInitials(name: string): string {
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
 }
 
-export function SopList({ active = true }: { active?: boolean }) {
+export function SopList({
+  active = true,
+  initialSops,
+  initialWorkspaceId,
+}: {
+  active?: boolean;
+  /**
+   * Server-fetched first paint (refactor plan, Stage 5): when app/sops/page.tsx could
+   * resolve the workspace cookie and session, the list arrives with the document and
+   * renders immediately; the mount effect then revalidates in the BACKGROUND (review
+   * metadata included) instead of showing a loader. Ignored when the active workspace
+   * no longer matches the one the server fetched for.
+   */
+  initialSops?: SopListItem[];
+  initialWorkspaceId?: string;
+}) {
   const router = useRouter();
   const confirm = useConfirm();
   const { workspaceId, canEditSops } = useSopWorkspace();
   const editable = canEditSops;
+  const seededFromServer =
+    initialSops !== undefined && initialWorkspaceId !== undefined && initialWorkspaceId === workspaceId;
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [sops, setSops] = useState<SopListItem[]>([]);
-  const [listStatus, setListStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [sops, setSops] = useState<SopListItem[]>(seededFromServer ? initialSops : []);
+  const [listStatus, setListStatus] = useState<"loading" | "ready" | "error">(
+    seededFromServer ? "ready" : "loading",
+  );
   const [convert, setConvert] = useState<{ fileName: string; phase: ConvertPhase } | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -113,7 +132,11 @@ export function SopList({ active = true }: { active?: boolean }) {
   const [feedbackAnnotations, setFeedbackAnnotations] = useState<SopReviewAnnotation[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
-  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
+  // Server-seeded data marks itself as loaded-but-stale (loadedAt: 1): the mount effect
+  // sees current data and refreshes in the background instead of flashing a loader.
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
+    seededFromServer ? { workspaceId, loadedAt: 1 } : { loadedAt: 0 },
+  );
   const converting = convert !== null;
 
   const refreshList = useCallback(async (options: { background?: boolean } = {}) => {

@@ -54,7 +54,14 @@ function parseTab(raw: string | null, manage: boolean): Tab {
  * the same model as the planner (Product) space. The editor remains its own route and shares
  * this section's provider (mounted in app/sops/layout.tsx).
  */
-export function SopWorkspace() {
+export function SopWorkspace({
+  initialSops,
+  initialWorkspaceId,
+}: {
+  /** Server-fetched SOP list for the all-SOPs tab; see app/sops/page.tsx. */
+  initialSops?: import("@/lib/sop/store").SopListItem[];
+  initialWorkspaceId?: string;
+} = {}) {
   const { role } = useSopWorkspace();
   const manage = canManage(role);
   const params = useSearchParams();
@@ -84,7 +91,9 @@ export function SopWorkspace() {
   return (
     <SopShell sidebar={sidebar} crumb={CRUMB[tab]}>
       <div hidden={tab !== "all"} aria-hidden={tab !== "all"}>
-        {mountedTabs.has("all") ? <SopList active={tab === "all"} /> : null}
+        {mountedTabs.has("all") ? (
+          <SopList active={tab === "all"} initialSops={initialSops} initialWorkspaceId={initialWorkspaceId} />
+        ) : null}
       </div>
       <div hidden={tab !== "review"} aria-hidden={tab !== "review"}>
         {mountedTabs.has("review") ? <ReviewQueue active={tab === "review"} /> : null}

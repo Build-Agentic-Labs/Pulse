@@ -5,12 +5,22 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
 import { ThemedSelect } from "@/components/themed-select";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrgToolAccess } from "@/domain/supabase-planner";
+import { SOP_WORKSPACE_COOKIE } from "@/lib/sop/workspace-cookie";
 import type { AccessLevel, WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
 import { useAuthFormActions } from "@/lib/auth-form-actions";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 const WORKSPACE_STORAGE_KEY = "pulse:sops:workspace-id";
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
+
+function writeWorkspaceCookie(workspaceId: string) {
+  if (typeof document === "undefined") return;
+  try {
+    document.cookie = `${SOP_WORKSPACE_COOKIE}=${encodeURIComponent(workspaceId)}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {
+    // Cookie writes can fail in exotic embedding contexts; server-fetch just skips.
+  }
+}
 
 /** Roles allowed to create/edit/delete SOPs. Viewers get a read-only surface. */
 export function canEdit(role?: WorkspaceRole): boolean {
@@ -201,6 +211,14 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
     setWorkspaceIdState(nextId);
     writeStoredWorkspaceId(nextId);
   }
+
+  // Mirror every settled workspace choice (explicit pick OR automatic default) into
+  // the cookie the server page reads for its first-paint fetch.
+  useEffect(() => {
+    if (workspaceId) {
+      writeWorkspaceCookie(workspaceId);
+    }
+  }, [workspaceId]);
 
   const role = useMemo(
     () => groups.find((group) => group.workspace.id === workspaceId)?.role,

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import type { Database, Json, TablesUpdate } from "@/lib/database.types";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
   AccessLevel,
   ActualEvent,
@@ -262,6 +263,56 @@ type PlannerSupabaseGlobal = typeof globalThis & {
   __buildlogicPlannerSupabaseClient?: SupabaseClient<Database>;
 };
 
+/**
+ * One-time bridge from the pre-Stage-3 localStorage session to cookie storage:
+ * signed-in users keep their session across the cutover instead of being forced
+ * to sign in again. The localStorage key is removed BEFORE the async setSession
+ * resolves so the bridge can never run twice, and it is skipped entirely when a
+ * cookie session already exists (never overwrite a newer session with an older
+ * token). Failure mode is benign: the user signs in once, fresh.
+ */
+function migrateLocalStorageSessionToCookies(client: SupabaseClient<Database>) {
+  try {
+    const hasCookieSession = document.cookie
+      .split(";")
+      .some((part) => /^\s*sb-[^=]*-auth-token(?:\.\d+)?=/.test(part));
+    if (hasCookieSession) return;
+
+    const legacyKey = Object.keys(window.localStorage).find(
+      (key) => key.startsWith("sb-") && key.includes("-auth-token"),
+    );
+    if (!legacyKey) return;
+
+    const raw = window.localStorage.getItem(legacyKey);
+    if (!raw) return;
+
+    // supabase-js may store the payload base64url-encoded with a "base64-" prefix.
+    const json = raw.startsWith("base64-")
+      ? new TextDecoder().decode(
+          Uint8Array.from(atob(raw.slice("base64-".length).replace(/-/g, "+").replace(/_/g, "/")), (c) =>
+            c.charCodeAt(0),
+          ),
+        )
+      : raw;
+
+    const parsed = JSON.parse(json) as { access_token?: unknown; refresh_token?: unknown };
+    if (typeof parsed.access_token !== "string" || typeof parsed.refresh_token !== "string") {
+      return; // Unrecognized shape: leave the key alone rather than destroy it.
+    }
+
+    // Remove only once the tokens are safely extracted. Re-running after a failed
+    // setSession is harmless (a used refresh token just rejects), and the
+    // cookie-present guard above prevents re-running after success.
+    window.localStorage.removeItem(legacyKey);
+    void client.auth.setSession({
+      access_token: parsed.access_token,
+      refresh_token: parsed.refresh_token,
+    });
+  } catch {
+    // Corrupt or unreadable legacy token: fall through to a normal sign-in.
+  }
+}
+
 let serverPlannerSupabaseClient: SupabaseClient<Database> | undefined;
 
 function plannerClient() {
@@ -271,17 +322,14 @@ function plannerClient() {
 
   if (typeof window !== "undefined") {
     const globalScope = globalThis as PlannerSupabaseGlobal;
-    globalScope.__buildlogicPlannerSupabaseClient ??= createClient<Database>(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        // One persistent browser session that auto-refreshes its token in the background.
-        // Keep auth traffic low elsewhere (see getUserFromSession) so the /token refresh
-        // endpoint stays under Supabase's rate limit — a throttled refresh silently logs the
-        // user out.
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    });
+    if (!globalScope.__buildlogicPlannerSupabaseClient) {
+      // Cookie-backed sessions (@supabase/ssr) replace the previous localStorage
+      // sessions so the server can identify the user too (refactor plan, Stage 3).
+      // Auth behavior is unchanged: one persistent session, background token
+      // refresh, low auth traffic elsewhere (see getUserFromSession).
+      globalScope.__buildlogicPlannerSupabaseClient = createSupabaseBrowserClient();
+      migrateLocalStorageSessionToCookies(globalScope.__buildlogicPlannerSupabaseClient);
+    }
     return globalScope.__buildlogicPlannerSupabaseClient;
   }
 

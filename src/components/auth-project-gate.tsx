@@ -119,15 +119,25 @@ function writeLastProjectId(projectId: string) {
   }
 }
 
-// True when supabase-js has a persisted session in this browser (its storage key is
-// sb-<project-ref>-auth-token). Painting cached workspace data before the async session
-// resolve is gated on this so a signed-out browser never flashes another user's cache.
+// True when a persisted Supabase session exists in this browser. Sessions moved
+// from localStorage to @supabase/ssr auth COOKIES (sb-<ref>-auth-token, possibly
+// chunked as .0/.1) in Stage 3; the localStorage check remains only for the
+// first load after the cutover, before the one-time migration bridge has run.
+// Painting cached workspace data before the async session resolve is gated on
+// this so a signed-out browser never flashes another user's cache.
 function hasLocalSupabaseSession() {
   if (typeof window === "undefined") {
     return false;
   }
 
   try {
+    const hasCookieSession = document.cookie
+      .split(";")
+      .some((part) => /^\s*sb-[^=]*-auth-token(?:\.\d+)?=/.test(part));
+    if (hasCookieSession) {
+      return true;
+    }
+
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index);
       if (key && key.startsWith("sb-") && key.includes("auth-token")) {

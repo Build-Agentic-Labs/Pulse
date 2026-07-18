@@ -6,9 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // losing it downgrades every RLS-scoped query to anon and blanks or leaks data.
 
 const createClientMock = vi.fn();
+const createServerClientMock = vi.fn();
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (...args: unknown[]) => createClientMock(...args),
+}));
+
+vi.mock("@supabase/ssr", () => ({
+  createServerClient: (...args: unknown[]) => createServerClientMock(...args),
 }));
 
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "./api-auth";
@@ -23,6 +28,7 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
   createClientMock.mockReset();
+  createServerClientMock.mockReset();
 });
 
 afterEach(() => {
@@ -128,6 +134,40 @@ describe("requireApiUser", () => {
     expect(getUser).toHaveBeenCalledWith("good-token");
     expect(result.userId).toBe("user-42");
     expect(result.failure).toBeNull();
+  });
+
+  it("falls back to a cookie session when no bearer header is present", async () => {
+    const getUser = vi.fn().mockResolvedValue({ data: { user: { id: "cookie-user" } }, error: null });
+    createServerClientMock.mockReturnValue({ auth: { getUser } });
+
+    const request = new Request("http://localhost/api/test", {
+      headers: { cookie: "sb-ref-auth-token.0=abc; sb-ref-auth-token.1=def; other=1" },
+    });
+    const result = await requireApiUser(request);
+
+    expect(result.userId).toBe("cookie-user");
+    expect(result.failure).toBeNull();
+    // The cookie client received the parsed request cookies.
+    const options = createServerClientMock.mock.calls[0][2] as {
+      cookies: { getAll: () => Array<{ name: string; value: string }> };
+    };
+    expect(options.cookies.getAll()).toContainEqual({ name: "sb-ref-auth-token.0", value: "abc" });
+  });
+
+  it("does NOT substitute a cookie session for an explicitly-presented invalid bearer token", async () => {
+    const bearerGetUser = vi.fn().mockResolvedValue({ data: { user: null }, error: { message: "bad" } });
+    createClientMock.mockReturnValue({ auth: { getUser: bearerGetUser } });
+    const cookieGetUser = vi.fn().mockResolvedValue({ data: { user: { id: "cookie-user" } }, error: null });
+    createServerClientMock.mockReturnValue({ auth: { getUser: cookieGetUser } });
+
+    const request = new Request("http://localhost/api/test", {
+      headers: { authorization: "Bearer expired", cookie: "sb-ref-auth-token.0=abc" },
+    });
+    const result = await requireApiUser(request);
+
+    expect(result.userId).toBeNull();
+    expect(result.failure?.status).toBe(401);
+    expect(cookieGetUser).not.toHaveBeenCalled();
   });
 });
 

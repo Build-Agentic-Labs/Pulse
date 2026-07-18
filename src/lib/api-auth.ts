@@ -1,11 +1,17 @@
 /**
- * Server-side auth for Next.js API routes. The browser attaches the user's Supabase
- * access token as a Bearer header; we verify it against Supabase auth before doing any
- * work. Mirrors the pattern proven in /api/smart-allocation — RLS remains the data
- * authorization layer, this gate just keeps anonymous callers off server resources
- * (LLM spend, host network details).
+ * Server-side auth for Next.js API routes. Dual-mode (refactor plan, Stage 3):
+ *
+ * 1. Bearer token — checked FIRST. The SolidWorks plugin authenticates this way
+ *    from outside a browser (no cookie jar), so bearer support is permanent.
+ *    Browser callers that attach the token manually keep working unchanged.
+ * 2. Cookie session — fallback when no Authorization header is present, for
+ *    browser callers relying on the @supabase/ssr auth cookies riding along.
+ *
+ * Either way the token is verified against Supabase auth before any work; RLS
+ * remains the data authorization layer.
  */
 
+import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import type { Database } from "./database.types";
@@ -45,6 +51,13 @@ export async function requireApiUser(request: Request): Promise<ApiUserResult> {
 
   const token = getBearerToken(request);
   if (!token) {
+    // No bearer header: fall back to the @supabase/ssr auth cookies. An
+    // explicitly-presented bearer token is never silently substituted — if one
+    // was sent and is invalid, the caller gets a 401, not a cookie session.
+    const cookieUserId = await userIdFromRequestCookies(request, supabaseUrl, supabaseAnonKey);
+    if (cookieUserId) {
+      return { userId: cookieUserId, failure: null };
+    }
     return {
       userId: null,
       failure: NextResponse.json({ error: "Sign in to use this endpoint." }, { status: 401 }),
@@ -64,6 +77,36 @@ export async function requireApiUser(request: Request): Promise<ApiUserResult> {
   }
 
   return { userId: data.user.id, failure: null };
+}
+
+/** Verify a cookie-borne session. Read-only: token rotation belongs to middleware, not API routes. */
+async function userIdFromRequestCookies(
+  request: Request,
+  supabaseUrl: string,
+  supabaseAnonKey: string,
+): Promise<string | null> {
+  const cookieHeader = request.headers.get("cookie");
+  if (!cookieHeader || !cookieHeader.includes("-auth-token")) {
+    return null;
+  }
+
+  const parsed = cookieHeader
+    .split(";")
+    .map((part) => {
+      const separator = part.indexOf("=");
+      if (separator === -1) return null;
+      return { name: part.slice(0, separator).trim(), value: part.slice(separator + 1).trim() };
+    })
+    .filter((cookie): cookie is { name: string; value: string } => cookie !== null);
+
+  const supabase = createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll: () => parsed,
+      setAll: () => {},
+    },
+  });
+  const { data, error } = await supabase.auth.getUser();
+  return error || !data.user ? null : data.user.id;
 }
 
 /**

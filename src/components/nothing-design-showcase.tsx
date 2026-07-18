@@ -76,7 +76,9 @@ export function NothingDesignShowcase() {
   const [saved, setSaved] = useState(false);
 
   return (
-    <div className="min-h-full bg-canvas text-ink">
+    // nothing-design.css scopes every nd-* rule under .nothing-theme[data-theme]; this
+    // wrapper is what activates the stylesheet (imported by the /design/nothing layout).
+    <div className="nothing-theme min-h-full bg-canvas text-ink" data-theme={theme}>
       <div className="mx-auto max-w-6xl px-6 py-8 md:px-10 md:py-12">
         <header className="flex flex-col gap-8 border-b border-[var(--nd-border)] pb-8 md:flex-row md:items-start md:justify-between">
           <div>

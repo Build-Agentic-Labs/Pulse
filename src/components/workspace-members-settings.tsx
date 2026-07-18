@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronRight, MailPlus, Plus, RotateCw, Search, ShieldCheck, Trash2, UserMinus } from "lucide-react";
+import { formatDate } from "@/domain/formatting";
+import { ChevronRight, MailPlus, Plus, RotateCw, Search, ShieldCheck,Trash2, UserMinus } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ThemedSelect } from "@/components/themed-select";
 import { SIGNUP_DOMAIN_MESSAGE, isAllowedSignupEmail } from "@/lib/allowed-signup-domain";
@@ -76,13 +77,6 @@ function isManagerRole(role?: WorkspaceRole) {
   return role === "owner" || role === "admin";
 }
 
-function formatDate(value?: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
 
 function memberLabel(member: MemberAccess) {
   return member.fullName || member.email || member.userId;

@@ -7,6 +7,7 @@
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
 import { pickMemberDepartments } from "@/domain/departments";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import { throwIfError as throwIfSupabaseError, type SupabaseResultError } from "@/lib/supabase-errors";
 
 const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate";
 const MEMBER_COLUMNS = "department_id, user_id, dept_role, position_title";
@@ -18,23 +19,21 @@ function newId(): string {
   return `dept_${Date.now().toString(36)}`;
 }
 
-async function throwIfError<T>(
-  operation: PromiseLike<{ data: T; error: { message: string; code?: string } | null }>,
-): Promise<T> {
-  const { data, error } = await operation;
-  if (error) {
-    if (error.code === "23505" && error.message.includes("quality_gate")) {
-      throw new Error("Only one Quality department is allowed per organization.");
-    }
-    if (error.code === "23505" && !error.message.includes("pkey")) {
-      throw new Error("A department with this code already exists in this organization.");
-    }
-    if (error.code === "23503") {
-      throw new Error("This department still owns SOPs — reassign or retire them before deleting it.");
-    }
-    throw new Error(error.message);
+function departmentConstraintMessage(error: SupabaseResultError): string | undefined {
+  if (error.code === "23505" && error.message.includes("quality_gate")) {
+    return "Only one Quality department is allowed per organization.";
   }
-  return data;
+  if (error.code === "23505" && !error.message.includes("pkey")) {
+    return "A department with this code already exists in this organization.";
+  }
+  if (error.code === "23503") {
+    return "This department still owns SOPs — reassign or retire them before deleting it.";
+  }
+  return undefined;
+}
+
+function throwIfError<T>(operation: PromiseLike<{ data: T; error: SupabaseResultError | null }>): Promise<T> {
+  return throwIfSupabaseError(operation, departmentConstraintMessage);
 }
 
 function mapDepartment(row: Record<string, unknown>): Department {

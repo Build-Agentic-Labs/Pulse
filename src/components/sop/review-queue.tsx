@@ -1,6 +1,7 @@
 "use client";
 
 import { FileText, Inbox, Loader2, ShieldCheck } from "lucide-react";
+import { formatDate } from "@/domain/formatting";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listDepartments, fetchMyDeptRoles } from "@/lib/departments/store";
@@ -17,11 +18,6 @@ import { useSopWorkspace } from "./sop-workspace-provider";
 import { SopFinalApprovalWorkspace } from "./sop-final-approval-workspace";
 import { SopReviewWorkspace } from "./sop-review-workspace";
 
-function formatDate(iso: string): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
-}
 
 function statusChipClass(status: SopStatus): string {
   if (status === "approved") return "border-accent text-accent";

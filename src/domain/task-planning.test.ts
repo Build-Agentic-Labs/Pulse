@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildProcessStationForTask,
+  compareTasksByWbs,
+  compareWbsValues,
   getTaskProcessNumber,
   getTaskWbsSuffix,
   normalizeTaskGroupZones,
@@ -118,5 +120,42 @@ describe("buildProcessStationForTask", () => {
     expect(station.plannedManHours).toBe(1.5); // 0.5h*2 + 0.5h*1
     expect(station.plannedOperators).toBe(2); // from top-level task
     expect(station.bottleneckFlag).toBe(true); // id matches bottleneckStationId
+  });
+});
+
+describe("compareWbsValues", () => {
+  it("collates numerically per segment, not lexically", () => {
+    expect(compareWbsValues("2", "10")).toBeLessThan(0);
+    expect(compareWbsValues("1.2", "1.10")).toBeLessThan(0);
+    expect(compareWbsValues("1.10", "1.2")).toBeGreaterThan(0);
+  });
+
+  it("sorts a parent before its children", () => {
+    expect(compareWbsValues("1", "1.1")).toBeLessThan(0);
+    expect(compareWbsValues("1.1.1", "1.1")).toBeGreaterThan(0);
+  });
+
+  it("returns 0 for identical values", () => {
+    expect(compareWbsValues("3.2.1", "3.2.1")).toBe(0);
+  });
+
+  it("orders non-numeric segments with numeric-aware comparison", () => {
+    expect(compareWbsValues("1.a2", "1.a10")).toBeLessThan(0);
+    expect(compareWbsValues("1.A", "1.b")).toBeLessThan(0);
+  });
+});
+
+describe("compareTasksByWbs", () => {
+  it("orders by WBS first", () => {
+    const a = makeTask({ id: "a", wbs: "2", name: "Zeta" });
+    const b = makeTask({ id: "b", wbs: "10", name: "Alpha" });
+    expect(compareTasksByWbs(a, b)).toBeLessThan(0);
+  });
+
+  it("breaks WBS ties by task name", () => {
+    const a = makeTask({ id: "a", wbs: "1.1", name: "Assemble" });
+    const b = makeTask({ id: "b", wbs: "1.1", name: "Weld" });
+    expect(compareTasksByWbs(a, b)).toBeLessThan(0);
+    expect(compareTasksByWbs(b, a)).toBeGreaterThan(0);
   });
 });

@@ -1,4 +1,5 @@
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import { throwIfError } from "@/lib/supabase-errors";
 
 export const SOP_ANNEX_FILE_MAX_BYTES = 20 * 1024 * 1024;
 export const SOP_ANNEX_FILE_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png";
@@ -21,11 +22,6 @@ export interface SopAnnexFile {
   updatedAt: string;
 }
 
-async function throwIfError<T>(operation: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
-  const { data, error } = await operation;
-  if (error) throw new Error(error.message);
-  return data;
-}
 
 function mapFile(row: Record<string, unknown>): SopAnnexFile {
   return {

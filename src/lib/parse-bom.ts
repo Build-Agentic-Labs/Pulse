@@ -43,8 +43,12 @@ function rowsToMasterBom(matrix: RawRow[], fileName: string): MasterBom {
   return { fileName, uploadedAt: new Date().toISOString(), columns, rows };
 }
 
-/** Minimal RFC-4180-ish CSV parser: handles quoted fields, escaped quotes, and newlines inside quotes. */
-function parseCsv(text: string): RawRow[] {
+/**
+ * Minimal RFC-4180-ish CSV parser: handles quoted fields, escaped quotes, and newlines inside
+ * quotes. Exported for the planning imports (`src/lib/planning/read-files.ts`) — previously a
+ * verbatim copy lived there with a "keep the two in sync" comment.
+ */
+export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";

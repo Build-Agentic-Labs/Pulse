@@ -1,6 +1,7 @@
 "use client";
 
 import { Library, Loader2 } from "lucide-react";
+import { formatDate } from "@/domain/formatting";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Department } from "@/domain/departments";
@@ -11,12 +12,6 @@ import { useSopWorkspace } from "./sop-workspace-provider";
 
 type ListStatus = "loading" | "ready" | "error";
 
-function formatDate(iso: string): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString([], { year: "numeric", month: "numeric", day: "numeric" });
-}
 
 /** The controlled, in-force SOP library, organized exactly like the All SOPs table. */
 export function EffectiveLibrary({ active = true }: { active?: boolean }) {

@@ -13,6 +13,7 @@ import type { ExtractedSop } from "@/domain/sop/extraction";
 import { DEFAULT_DOC_TYPE, effectiveSopNumber } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import type { Json } from "@/lib/database.types";
+import { throwIfError as throwIfSupabaseError, type SupabaseResultError } from "@/lib/supabase-errors";
 
 const STORAGE_KEY = "pulse:sops:v1";
 
@@ -76,18 +77,18 @@ export function newSopId(): string {
   return `sop_${Date.now().toString(36)}`;
 }
 
-async function throwIfError<T>(operation: PromiseLike<{ data: T; error: { message: string; code?: string } | null }>) {
-  const { data, error } = await operation;
-  if (error) {
-    // 23505 = Postgres unique violation. Aside from the primary key, the only unique
-    // constraint on `sops` is the per-workspace SOP-number index, so translate it into
-    // an actionable message instead of the raw constraint name.
-    if (error.code === "23505" && !error.message.includes("pkey")) {
-      throw new Error("An SOP with this number already exists in this workspace.");
-    }
-    throw new Error(error.message);
+// 23505 = Postgres unique violation. Aside from the primary key, the only unique
+// constraint on `sops` is the per-workspace SOP-number index, so translate it into
+// an actionable message instead of the raw constraint name.
+function sopConstraintMessage(error: SupabaseResultError): string | undefined {
+  if (error.code === "23505" && !error.message.includes("pkey")) {
+    return "An SOP with this number already exists in this workspace.";
   }
-  return data;
+  return undefined;
+}
+
+function throwIfError<T>(operation: PromiseLike<{ data: T; error: SupabaseResultError | null }>): Promise<T> {
+  return throwIfSupabaseError(operation, sopConstraintMessage);
 }
 
 // The jsonb `document` is canonical for the body; the row's own id/status/created_at/updated_at

@@ -9,6 +9,42 @@ import type { Station, Task, Zone } from "./types";
  * objects rather than mutating its inputs.
  */
 
+/**
+ * Segment-wise WBS comparison with numeric collation: "1.2" < "1.10", and
+ * non-numeric segments fall back to a numeric-aware localeCompare. Promoted from
+ * gantt-timeline.tsx — it was the only one of three per-component copies that
+ * ordered non-numeric segments correctly, and the app now sorts identically on
+ * every screen.
+ */
+export function compareWbsValues(left: string, right: string): number {
+  const leftParts = left.split(".");
+  const rightParts = right.split(".");
+  const partCount = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < partCount; index += 1) {
+    const leftPart = leftParts[index] ?? "";
+    const rightPart = rightParts[index] ?? "";
+    const leftNumber = Number.parseInt(leftPart, 10);
+    const rightNumber = Number.parseInt(rightPart, 10);
+
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) {
+      return leftNumber - rightNumber;
+    }
+
+    if (leftPart !== rightPart) {
+      return leftPart.localeCompare(rightPart, undefined, { numeric: true, sensitivity: "base" });
+    }
+  }
+
+  return 0;
+}
+
+/** Canonical task ordering: WBS first, task name as the tiebreaker. */
+export function compareTasksByWbs(left: Task, right: Task): number {
+  const wbsComparison = compareWbsValues(left.wbs, right.wbs);
+  return wbsComparison === 0 ? left.name.localeCompare(right.name) : wbsComparison;
+}
+
 export function getTaskProcessNumber(task: Task) {
   return task.wbs.split(".")[0] || task.wbs;
 }

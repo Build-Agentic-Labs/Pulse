@@ -13,6 +13,7 @@ import {
 import { calculatePeakManpower, formatMinutes, getTaskWindow, getTimelineBounds, round } from "@/domain/calculations";
 import { generateTaskCode, nextTaskNumberForComponent, stepDisplayCode, taskDisplayCode, taskDisplayLabel } from "@/domain/nomenclature";
 import { getOperatorAssignmentBlockState } from "@/domain/operator-allocation";
+import { compareTasksByWbs, compareWbsValues } from "@/domain/task-planning";
 import { getTaskOperatorIds, getTaskOperatorPatch } from "@/domain/operator-assignments";
 import type { ManufacturingComponent, ManufacturingStep, Station, Task, Zone } from "@/domain/types";
 import {
@@ -251,29 +252,6 @@ function copyTextWithSelection(text: string) {
   }
 }
 
-function compareWbsValues(left: string, right: string) {
-  const leftParts = left.split(".");
-  const rightParts = right.split(".");
-  const partCount = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < partCount; index += 1) {
-    const leftPart = leftParts[index] ?? "";
-    const rightPart = rightParts[index] ?? "";
-    const leftNumber = Number.parseInt(leftPart, 10);
-    const rightNumber = Number.parseInt(rightPart, 10);
-
-    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) {
-      return leftNumber - rightNumber;
-    }
-
-    if (leftPart !== rightPart) {
-      return leftPart.localeCompare(rightPart, undefined, { numeric: true, sensitivity: "base" });
-    }
-  }
-
-  return 0;
-}
-
 function manufacturingStepLabel(step: ManufacturingStep) {
   return step.name?.trim() || `Unnamed step ${step.sequence}`;
 }
@@ -285,11 +263,6 @@ function frontTruncateStepCode(code: string) {
   }
 
   return code;
-}
-
-function compareTasksByWbs(left: Task, right: Task) {
-  const wbsComparison = compareWbsValues(left.wbs, right.wbs);
-  return wbsComparison === 0 ? left.name.localeCompare(right.name) : wbsComparison;
 }
 
 function parseRelativeHours(value: string) {

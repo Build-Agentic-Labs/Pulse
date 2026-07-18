@@ -1,6 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
+import { formatDate } from "@/domain/formatting";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import {
@@ -23,11 +24,6 @@ function Block({ title, description, children }: { title: string; description?: 
   );
 }
 
-function formatDate(iso?: string): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
-}
 
 // Only owners/admins (and superadmins) can rename a workspace — mirrors the
 // "workspaces admin update" RLS policy, so the listed rows are always editable.

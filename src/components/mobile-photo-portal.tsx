@@ -39,6 +39,7 @@ import {
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
 import { getTaskExplodedViews } from "@/domain/step-exploded-views";
+import { compareTasksByWbs } from "@/domain/task-planning";
 import { getTaskVideos } from "@/domain/task-videos";
 import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import {
@@ -103,22 +104,6 @@ type ConfirmPrompt = {
   onConfirm: () => Promise<void>;
 };
 
-function compareTasksByWbs(left: Task, right: Task) {
-  const leftParts = left.wbs.split(".").map((part) => Number.parseInt(part, 10));
-  const rightParts = right.wbs.split(".").map((part) => Number.parseInt(part, 10));
-  const length = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const leftPart = Number.isFinite(leftParts[index]) ? leftParts[index] : 0;
-    const rightPart = Number.isFinite(rightParts[index]) ? rightParts[index] : 0;
-
-    if (leftPart !== rightPart) {
-      return leftPart - rightPart;
-    }
-  }
-
-  return left.wbs.localeCompare(right.wbs);
-}
 
 function sortManufacturingSteps(steps: ManufacturingStep[]) {
   return [...steps].sort((left, right) => left.sequence - right.sequence);

@@ -21,7 +21,18 @@ import {
 } from "@/domain/work-orders";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import type { TablesUpdate } from "@/lib/database.types";
-import type { WorkOrderMatchInfo } from "@/components/planning/work-order-print";
+
+/** Set/letter pairing shown in the final-assembly match block on a Main work order. */
+export interface WorkOrderMatchInfo {
+  /** The short set number both married documents carry, e.g. "01". */
+  setNo: string;
+  /** The paired power-module order number, e.g. "PM-0726-01". Null = no PM in this set. */
+  pmOrderNo: string | null;
+  /** Trailer configuration letter from the config catalog, e.g. "A". Null = no trailer. */
+  trailerLetter: string | null;
+  /** Human name of the trailer configuration, e.g. "Dual axle · electric brakes". */
+  trailerConfigName?: string | null;
+}
 import { diffItemMaster, type ParsedItemMasterRow } from "./parse-item-master";
 
 type PlannerSupabaseClient = ReturnType<typeof createPlannerSupabaseClient>;

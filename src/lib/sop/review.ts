@@ -9,6 +9,7 @@ import type { SopStatus } from "@/domain/sop/schema";
 import { parseSignatureStrokes, type SignatureStrokes } from "@/domain/sop/signature";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import type { Json, TablesUpdate } from "@/lib/database.types";
+import { throwIfError } from "@/lib/supabase-errors";
 import { SopConflictError } from "./store";
 
 const CONTROL_COLUMNS =
@@ -114,13 +115,6 @@ export interface HistoricalSopRevision {
   createdAt: string;
 }
 
-async function throwIfError<T>(
-  operation: PromiseLike<{ data: T; error: { message: string; code?: string } | null }>,
-): Promise<T> {
-  const { data, error } = await operation;
-  if (error) throw new Error(error.message);
-  return data;
-}
 
 function mapControl(row: Record<string, unknown>): SopControl {
   return {

@@ -30,6 +30,14 @@ type AuthProjectGateProps = {
    * render this once workspaces are ready (auth/loading/error handling unchanged).
    */
   renderHome?: (home: DashboardHomeContext) => ReactNode;
+  /**
+   * Server-fetched workspace groups (refactor plan, Stage 5): authoritative
+   * first paint through the same slot the localStorage cache-then-revalidate
+   * uses, so the shell renders content on the first frame. The session resolve
+   * and the client bootstrap (including its writes) still run and background-
+   * refresh as before.
+   */
+  initialGroups?: WorkspaceProjectGroup[];
 };
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
@@ -209,13 +217,24 @@ function resolveDisplayName(session: Session | null): string {
   return metadata.full_name?.trim() || session?.user.email?.split("@")[0] || "";
 }
 
-export function AuthProjectGate({ children, projectId, routeKind = "planner", renderHome }: AuthProjectGateProps) {
+export function AuthProjectGate({
+  children,
+  projectId,
+  routeKind = "planner",
+  renderHome,
+  initialGroups,
+}: AuthProjectGateProps) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
-  const [groups, setGroups] = useState<WorkspaceProjectGroup[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
+  // Server-seeded groups take the same fast-paint path as the localStorage cache
+  // below (hasCachedPaint) — but they are authoritative rather than possibly stale.
+  const seededFromServer = (initialGroups?.length ?? 0) > 0;
+  const [groups, setGroups] = useState<WorkspaceProjectGroup[]>(initialGroups ?? []);
+  const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">(
+    seededFromServer ? "ready" : "loading",
+  );
   const [message, setMessage] = useState("");
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [childReady, setChildReady] = useState(false);

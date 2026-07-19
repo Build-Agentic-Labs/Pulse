@@ -4,7 +4,7 @@ import { Check, LockKeyhole, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
-import { listMembers } from "@/lib/departments/store";
+import { listMembersForDepartments } from "@/lib/departments/store";
 import {
   listProfileNames,
   removeSeat,
@@ -65,21 +65,28 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
     (department) => !department.isQualityGate && !seatedIds.has(department.id),
   );
 
-  const loadMembers = useCallback(async (departmentId: string) => {
-    if (!departmentId) return;
+  // One batched pass for any number of departments: a single department_members
+  // query + a single profiles query, instead of 2 round trips per seat (N+1).
+  const loadMembersForDepartmentIds = useCallback(async (departmentIds: readonly string[]) => {
+    const ids = [...new Set(departmentIds.filter(Boolean))];
+    if (ids.length === 0) return;
     try {
-      const rows = await listMembers(departmentId);
+      const rows = await listMembersForDepartments(ids);
       const names = await listProfileNames(rows.map((row) => row.userId));
       setMembers((prev) => {
         const next = new Map(prev);
-        next.set(
-          departmentId,
-          rows.map((row) => ({
-            userId: row.userId,
-            name: names.get(row.userId) || "Unnamed member",
-            positionTitle: row.positionTitle,
-          })),
-        );
+        for (const departmentId of ids) {
+          next.set(
+            departmentId,
+            rows
+              .filter((row) => row.departmentId === departmentId)
+              .map((row) => ({
+                userId: row.userId,
+                name: names.get(row.userId) || "Unnamed member",
+                positionTitle: row.positionTitle,
+              })),
+          );
+        }
         return next;
       });
     } catch (caught) {
@@ -87,9 +94,14 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
     }
   }, []);
 
+  const loadMembers = useCallback(
+    (departmentId: string) => loadMembersForDepartmentIds([departmentId]),
+    [loadMembersForDepartmentIds],
+  );
+
   useEffect(() => {
-    for (const seat of workflowSeats) void loadMembers(seat.departmentId);
-  }, [workflowSeats, loadMembers]);
+    void loadMembersForDepartmentIds(workflowSeats.map((seat) => seat.departmentId));
+  }, [workflowSeats, loadMembersForDepartmentIds]);
 
   async function guarded(key: string, fn: () => Promise<unknown>) {
     if (busy) return;

@@ -21,7 +21,7 @@ import {
   sopFromExtraction,
   type SopListItem,
 } from "@/lib/sop/store";
-import { listProfileNames, listSeats, mintSopNumber } from "@/lib/sop/review";
+import { listProfileNames, listSeatsForSops, mintSopNumber } from "@/lib/sop/review";
 import {
   listSopReviewAnnotations,
   listSopReviewSubmissions,
@@ -160,10 +160,15 @@ export function SopList({
       const userId = userResult.data.user?.id ?? null;
       const authored = userId ? next.filter((sop) => sop.createdBy === userId) : [];
       const authoredInReview = authored.filter((sop) => sop.status === "in_review");
-      const [submissions, seatGroups] = await Promise.all([
+      const [submissions, allSeats] = await Promise.all([
         listSopReviewSubmissions(authored.map((sop) => sop.id)),
-        Promise.all(authoredInReview.map(async (sop) => ({ sopId: sop.id, seats: await listSeats(sop.id) }))),
+        listSeatsForSops(authoredInReview.map((sop) => sop.id)),
       ]);
+      // One batched query instead of one per SOP; regroup to the previous shape.
+      const seatGroups = authoredInReview.map((sop) => ({
+        sopId: sop.id,
+        seats: allSeats.filter((seat) => seat.sopId === sop.id),
+      }));
       const profileNames = await listProfileNames(
         seatGroups.flatMap(({ seats }) => seats.flatMap((seat) => seat.signerId ? [seat.signerId] : [])),
       );

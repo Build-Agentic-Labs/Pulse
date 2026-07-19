@@ -35,12 +35,55 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  // No session cookie -> nothing to refresh, skip the auth round-trip entirely.
-  if (request.cookies.getAll().some((cookie) => cookie.name.startsWith("sb-") && cookie.name.includes("-auth-token"))) {
+  // Refresh ONLY when the access token is missing/near expiry, decided by parsing
+  // the cookie locally — no auth round-trip on normal navigation. This matters for
+  // two reasons: (1) GoTrue rate limits — a getUser() per navigation can trip them;
+  // (2) the refresh-token STAMPEDE: parallel requests arriving after idle all carry
+  // the same expired token, race concurrent refreshes of a single-use refresh
+  // token, trip reuse detection, and get the whole session revoked. Expiry gating
+  // narrows refreshing to the one moment it is actually needed.
+  if (sessionNeedsRefresh(request)) {
     await supabase.auth.getUser();
   }
 
   return response;
+}
+
+const REFRESH_MARGIN_SECONDS = 300;
+
+/** base64url -> utf8 without Buffer, so this also runs on the edge runtime. */
+function decodeBase64Url(value: string): string {
+  const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
+  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+}
+
+function sessionNeedsRefresh(request: NextRequest): boolean {
+  const chunks = request.cookies
+    .getAll()
+    .filter((cookie) => cookie.name.startsWith("sb-") && cookie.name.includes("-auth-token"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (chunks.length === 0) {
+    return false; // Signed out: nothing to refresh.
+  }
+
+  try {
+    let joined = decodeURIComponent(chunks.map((cookie) => cookie.value).join(""));
+    if (joined.startsWith("base64-")) {
+      joined = decodeBase64Url(joined.slice("base64-".length));
+    }
+    const session = JSON.parse(joined) as { access_token?: string };
+    if (typeof session.access_token !== "string") {
+      return true;
+    }
+    const payload = JSON.parse(decodeBase64Url(session.access_token.split(".")[1] ?? "")) as { exp?: number };
+    if (typeof payload.exp !== "number") {
+      return true;
+    }
+    return payload.exp - Date.now() / 1000 < REFRESH_MARGIN_SECONDS;
+  } catch {
+    // Unparseable cookie: let getUser() decide (it may repair or clear it).
+    return true;
+  }
 }
 
 export const config = {

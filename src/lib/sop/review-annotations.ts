@@ -1,5 +1,6 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
-import type { TablesInsert } from "@/lib/database.types";
+import type { Database, TablesInsert } from "@/lib/database.types";
 
 export interface SopReviewAnnotation {
   id: string;
@@ -77,10 +78,11 @@ function mapSubmission(row: Record<string, unknown>): SopReviewSubmission {
 
 export async function listSopReviewSubmissions(
   sopIds: readonly string[],
+  client?: SupabaseClient<Database>,
 ): Promise<SopReviewSubmission[]> {
   const unique = Array.from(new Set(sopIds));
   if (unique.length === 0) return [];
-  const supabase = createPlannerSupabaseClient();
+  const supabase = client ?? createPlannerSupabaseClient();
   const { data, error } = await supabase
     .from("sop_review_submissions")
     .select("id, sop_id, review_cycle, reviewer_id, reviewer_name, no_changes, content_hash, submitted_at")

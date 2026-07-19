@@ -4,7 +4,7 @@ import { Archive, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatDate } from "@/domain/formatting";
 import { listSops, type SopListItem } from "@/lib/sop/store";
-import { listHistoricalRevisions } from "@/lib/sop/review";
+import { listHistoricalRevisions, type HistoricalSopRevision } from "@/lib/sop/review";
 import { useSopWorkspace } from "./sop-workspace-provider";
 
 type ListStatus = "loading" | "ready" | "error";
@@ -19,13 +19,56 @@ interface RetiredEntry {
 }
 
 
+/** Pure assembly shared by the client refresh and the server-seeded first paint. */
+function buildRetiredEntries(rows: SopListItem[], revisions: HistoricalSopRevision[]): RetiredEntry[] {
+  const retiredSops = rows
+    .filter((sop): sop is SopListItem => sop.status === "obsolete")
+    .map<RetiredEntry>((sop) => ({
+      id: `sop:${sop.id}`,
+      sopNumber: sop.sopNumber,
+      title: sop.title,
+      version: sop.version,
+      archivedAt: sop.updatedAt,
+      reason: "Retired SOP",
+    }));
+  const olderVersions = revisions.map<RetiredEntry>((revision) => ({
+    id: `revision:${revision.id}`,
+    sopNumber: revision.sopNumber,
+    title: revision.title,
+    version: revision.versionLabel,
+    archivedAt: revision.createdAt,
+    reason: "Older version",
+  }));
+  return [...retiredSops, ...olderVersions].sort((a, b) => b.archivedAt.localeCompare(a.archivedAt));
+}
+
 /** Read-only archive of SOPs explicitly retired through the document-control lifecycle. */
-export function RetiredSops({ active = true }: { active?: boolean }) {
+export function RetiredSops({
+  active = true,
+  initialSops,
+  initialRevisions,
+  initialWorkspaceId,
+}: {
+  active?: boolean;
+  /** Server-fetched first paint (Stage 5): seeds the archive, then background-revalidates. */
+  initialSops?: SopListItem[];
+  initialRevisions?: HistoricalSopRevision[];
+  initialWorkspaceId?: string;
+}) {
   const { workspaceId } = useSopWorkspace();
-  const [entries, setEntries] = useState<RetiredEntry[]>([]);
-  const [status, setStatus] = useState<ListStatus>("loading");
+  const seededFromServer =
+    initialSops !== undefined &&
+    initialRevisions !== undefined &&
+    initialWorkspaceId !== undefined &&
+    initialWorkspaceId === workspaceId;
+  const [entries, setEntries] = useState<RetiredEntry[]>(
+    seededFromServer ? buildRetiredEntries(initialSops, initialRevisions) : [],
+  );
+  const [status, setStatus] = useState<ListStatus>(seededFromServer ? "ready" : "loading");
   const [error, setError] = useState("");
-  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
+    seededFromServer ? { workspaceId, loadedAt: 1 } : { loadedAt: 0 },
+  );
 
   const refresh = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) {
@@ -43,25 +86,7 @@ export function RetiredSops({ active = true }: { active?: boolean }) {
         listSops(workspaceId),
         listHistoricalRevisions(workspaceId),
       ]);
-      const retiredSops = rows
-        .filter((sop): sop is SopListItem => sop.status === "obsolete")
-        .map<RetiredEntry>((sop) => ({
-          id: `sop:${sop.id}`,
-          sopNumber: sop.sopNumber,
-          title: sop.title,
-          version: sop.version,
-          archivedAt: sop.updatedAt,
-          reason: "Retired SOP",
-        }));
-      const olderVersions = revisions.map<RetiredEntry>((revision) => ({
-        id: `revision:${revision.id}`,
-        sopNumber: revision.sopNumber,
-        title: revision.title,
-        version: revision.versionLabel,
-        archivedAt: revision.createdAt,
-        reason: "Older version",
-      }));
-      setEntries([...retiredSops, ...olderVersions].sort((a, b) => b.archivedAt.localeCompare(a.archivedAt)));
+      setEntries(buildRetiredEntries(rows, revisions));
       setError("");
       setStatus("ready");
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };

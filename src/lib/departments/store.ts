@@ -6,7 +6,9 @@
 
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
 import { pickMemberDepartments } from "@/domain/departments";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import type { Database } from "@/lib/database.types";
 import { throwIfError as throwIfSupabaseError, type SupabaseResultError } from "@/lib/supabase-errors";
 
 const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate";
@@ -55,8 +57,11 @@ function mapMember(row: Record<string, unknown>): DepartmentMember {
   };
 }
 
-export async function listDepartments(workspaceId: string): Promise<Department[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listDepartments(
+  workspaceId: string,
+  client?: SupabaseClient<Database>,
+): Promise<Department[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase.from("departments").select(DEPT_COLUMNS).eq("workspace_id", workspaceId).order("code"),
   );
@@ -173,12 +178,15 @@ export async function removeMember(departmentId: string, userId: string): Promis
 }
 
 /** My department roles across the workspace — powers UI enable/disable (DB still enforces). */
-export async function fetchMyDeptRoles(workspaceId: string): Promise<Map<string, DeptRole>> {
-  const supabase = createPlannerSupabaseClient();
+export async function fetchMyDeptRoles(
+  workspaceId: string,
+  client?: SupabaseClient<Database>,
+): Promise<Map<string, DeptRole>> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const { data: userData } = await getUserFromSession(supabase);
   const userId = userData.user?.id;
   if (!userId) return new Map();
-  const depts = await listDepartments(workspaceId);
+  const depts = await listDepartments(workspaceId, supabase);
   const deptIds = new Set(depts.map((d) => d.id));
   const rows = await throwIfError(
     supabase.from("department_members").select(MEMBER_COLUMNS).eq("user_id", userId),

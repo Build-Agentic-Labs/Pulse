@@ -5,10 +5,11 @@
  * this layer only shapes calls and surfaces the trigger's readable error messages.
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SopStatus } from "@/domain/sop/schema";
 import { parseSignatureStrokes, type SignatureStrokes } from "@/domain/sop/signature";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
-import type { Json, TablesUpdate } from "@/lib/database.types";
+import type { Database, Json, TablesUpdate } from "@/lib/database.types";
 import { throwIfError } from "@/lib/supabase-errors";
 import { SopConflictError } from "./store";
 
@@ -272,8 +273,12 @@ export interface MySeatItem {
  * "notification" — no notifications table, just the roster asked the other way round.
  * RLS already restricts the join to SOPs the user is allowed to see.
  */
-export async function listMySeats(workspaceId: string, userId: string): Promise<MySeatItem[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listMySeats(
+  workspaceId: string,
+  userId: string,
+  client?: SupabaseClient<Database>,
+): Promise<MySeatItem[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase
       .from("sop_review_seats")
@@ -304,10 +309,14 @@ export async function listMySeats(workspaceId: string, userId: string): Promise<
 }
 
 /** Has this user already signed for this seat, against the SOP's current content and cycle? */
-export async function listMySignaturesFor(sopIds: readonly string[], userId: string): Promise<SopSignature[]> {
+export async function listMySignaturesFor(
+  sopIds: readonly string[],
+  userId: string,
+  client?: SupabaseClient<Database>,
+): Promise<SopSignature[]> {
   const unique = Array.from(new Set(sopIds));
   if (unique.length === 0) return [];
-  const supabase = createPlannerSupabaseClient();
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase
       .from("sop_signatures")
@@ -528,8 +537,11 @@ export async function listRevisions(sopId: string): Promise<SopRevisionSummary[]
  * only list metadata crosses this boundary, so the Retired surface cannot open or download the
  * immutable document payload.
  */
-export async function listHistoricalRevisions(workspaceId: string): Promise<HistoricalSopRevision[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listHistoricalRevisions(
+  workspaceId: string,
+  client?: SupabaseClient<Database>,
+): Promise<HistoricalSopRevision[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase
       .from("sop_revisions")

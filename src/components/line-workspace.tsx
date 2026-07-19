@@ -1,5 +1,9 @@
 "use client";
 
+// Route-scoped styles: ~37 kB of planner-only rules (procedure, gantt, scenarios,
+// setup, dashboard) that previously shipped to every route via globals.css.
+import "./line-workspace.css";
+
 import {
   Activity,
   AlertTriangle,

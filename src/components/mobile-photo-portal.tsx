@@ -803,10 +803,17 @@ export function MobilePhotoPortal({
   projectId,
   projectContext,
   onReady,
+  initialPlannerState,
 }: {
   projectId?: string;
   projectContext?: PlannerProjectContext;
   onReady?: () => void;
+  /**
+   * Server-fetched planner state (Stage 5 pattern): the capture list paints from
+   * the document; the client's own load still runs and replaces it, keeping the
+   * remote as the authority. Consumed once per project.
+   */
+  initialPlannerState?: PlannerState;
 }) {
   const [plannerState, setPlannerState] = useState<PlannerState | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState("");
@@ -1560,33 +1567,31 @@ export function MobilePhotoPortal({
     }, 1600);
   }
 
+  // Ref-captured so the load effect keys on [projectId] alone (same pattern as
+  // LineWorkspace's server seed).
+  const initialPlannerStateRef = useRef(initialPlannerState);
+  initialPlannerStateRef.current = initialPlannerState;
+  const consumedInitialPlannerStateForRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     let mounted = true;
 
-    loadPlannerStateFromSupabase(projectId)
-      .then((savedState) => {
-        if (!mounted) {
-          return;
-        }
+    // Server-fetched seed paints the capture list immediately; the remote load
+    // below still runs and re-applies as the authority (also picking up any
+    // changes between the server snapshot and now).
+    const serverSeedState = initialPlannerStateRef.current;
+    const currentProjectKey = projectId ?? "";
+    if (
+      serverSeedState &&
+      consumedInitialPlannerStateForRef.current !== currentProjectKey &&
+      String(serverSeedState.product.projectId ?? "") === currentProjectKey
+    ) {
+      consumedInitialPlannerStateForRef.current = currentProjectKey;
+      applySavedState(serverSeedState);
+    }
 
-        if (!savedState) {
-          if (projectId) {
-            setErrorMessage("Unable to load this project's line plan. Confirm you are signed in and have access.");
-            setSaveState("error");
-            return;
-          }
-
-          setPlannerState(emptyPlannerState);
-          setSelectedTaskId(
-            getTopLevelTasks(emptyPlannerState.tasks)
-              .filter((task) => task.rowType === "task")
-              .sort(compareTasksByWbs)[0]?.id ?? "",
-          );
-          setSaveState("idle");
-          return;
-        }
-
-        const firstTask = getTopLevelTasks(savedState.tasks)
+    function applySavedState(savedState: PlannerState) {
+      const firstTask = getTopLevelTasks(savedState.tasks)
           .filter((task) => task.rowType === "task")
           .sort(compareTasksByWbs)[0];
         const session = readMobileCaptureSession(projectId);
@@ -1643,6 +1648,32 @@ export function MobilePhotoPortal({
         }
 
         setSaveState("idle");
+    }
+
+    loadPlannerStateFromSupabase(projectId)
+      .then((savedState) => {
+        if (!mounted) {
+          return;
+        }
+
+        if (!savedState) {
+          if (projectId) {
+            setErrorMessage("Unable to load this project's line plan. Confirm you are signed in and have access.");
+            setSaveState("error");
+            return;
+          }
+
+          setPlannerState(emptyPlannerState);
+          setSelectedTaskId(
+            getTopLevelTasks(emptyPlannerState.tasks)
+              .filter((task) => task.rowType === "task")
+              .sort(compareTasksByWbs)[0]?.id ?? "",
+          );
+          setSaveState("idle");
+          return;
+        }
+
+        applySavedState(savedState);
       })
       .catch((error: unknown) => {
         if (!mounted) {

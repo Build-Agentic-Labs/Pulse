@@ -11,7 +11,7 @@ import {
   signatureStrokePath,
   type SignatureStrokes,
 } from "@/domain/sop/signature";
-import { listDepartments, listMembers } from "@/lib/departments/store";
+import { listDepartments, listMembersForDepartments } from "@/lib/departments/store";
 import { createSopAnnexFileUrl, type SopAnnexFile } from "@/lib/sop/annex-files";
 import { buildProcedureSvgPages } from "@/lib/sop/procedure-flow-image";
 import {
@@ -294,15 +294,14 @@ export function SopPrintPreview({
       .then(async ([control, seats, signatures, authorDisplayName]) => {
         if (!control) return;
         const departments = await listDepartments(control.workspaceId);
-        const memberLists = await Promise.all(departments.map((department) => listMembers(department.id)));
+        // One batched query for all departments' members instead of one per department.
+        const allMembers = await listMembersForDepartments(departments.map((department) => department.id));
         const memberPositionByDepartmentAndUser = new Map<string, string>();
-        departments.forEach((department, index) => {
-          memberLists[index].forEach((member) => {
-            memberPositionByDepartmentAndUser.set(
-              `${department.id}:${member.userId}`,
-              member.positionTitle,
-            );
-          });
+        allMembers.forEach((member) => {
+          memberPositionByDepartmentAndUser.set(
+            `${member.departmentId}:${member.userId}`,
+            member.positionTitle,
+          );
         });
         const profileIds = seats.flatMap((seat) => seat.signerId ? [seat.signerId] : []);
         const authorId = control.createdBy ?? control.submittedBy ?? control.finalApprovalRequestedBy;

@@ -1086,86 +1086,25 @@ body {
     min-height: var(--shell-header);
   }
 
-  .ui-chrome-planner {
-    --planner-gutter: 1rem;
-    --planner-content-rail: 1rem;
-    display: grid;
-    width: 100%;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-  }
+  
 
-  @media (min-width: 640px) {
-    .ui-chrome-planner {
-      --planner-gutter: 1.25rem;
-      --planner-content-rail: 1.25rem;
-    }
-  }
+  
 
-  @media (min-width: 1024px) {
-    .ui-chrome-planner {
-      grid-template-columns: var(--shell-sidebar) minmax(0, 1fr) auto;
-    }
-  }
+  
 
-  .ui-chrome-planner-brand {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 0.25rem;
-    grid-column: 1;
-    position: relative;
-    z-index: 2;
-    padding-inline: 0.75rem;
-  }
+  
 
-  @media (min-width: 640px) {
-    .ui-chrome-planner-brand {
-      padding-inline: 1rem;
-    }
-  }
+  
 
-  @media (min-width: 1024px) {
-    .ui-chrome-planner-brand {
-      width: var(--shell-sidebar);
-      box-sizing: border-box;
-      flex-shrink: 0;
-      padding-inline: 0.5rem 0.75rem;
-    }
-  }
+  
 
-  .ui-chrome-planner-context {
-    display: flex;
-    min-width: 0;
-    align-items: baseline;
-    gap: 0.5rem;
-    grid-column: 2;
-    padding-left: calc(var(--planner-gutter) + var(--planner-content-rail));
-    padding-right: 0.75rem;
-  }
+  
 
-  @media (min-width: 640px) {
-    .ui-chrome-planner-context {
-      padding-right: 1rem;
-    }
-  }
+  
 
-  .ui-chrome-planner-actions {
-    display: flex;
-    shrink: 0;
-    align-items: center;
-    justify-self: end;
-    grid-column: 3;
-    gap: 0.125rem;
-    padding-right: 0.75rem;
-  }
+  
 
-  @media (min-width: 640px) {
-    .ui-chrome-planner-actions {
-      gap: 0.25rem;
-      padding-right: 1rem;
-    }
-  }
+  
 
   .ui-chrome-context-title {
     @apply truncate text-sm font-medium text-ink;
@@ -1293,80 +1232,33 @@ body {
     @apply mb-1.5 px-2 uppercase tracking-[0.12em] text-ink-tertiary;
   }
 
-  .ui-procedure-zone-heading {
-    font-size: var(--type-nav);
-    @apply text-ink-secondary;
-  }
+  
 
-  .ui-procedure-workspace {
-    font-size: 12px;
-  }
+  
 
-  .ui-procedure-sidebar > .sticky,
-  .ui-procedure-sidebar > .px-2 {
-    padding-left: 1rem;
-    padding-right: 0.75rem;
-  }
+  
 
-  .ui-procedure-sidebar > .sticky .ui-nav-section,
-  .ui-procedure-sidebar > .sticky .text-\[11px\] {
-    font-weight: 600;
-  }
+  
 
-  .ui-procedure-main .ui-section-title {
-    font-size: 0.9375rem;
-    font-weight: 800;
-    line-height: 1.2;
-  }
+  
 
-  .ui-procedure-title {
-    padding-top: 1.65rem;
-  }
+  
 
-  .ui-procedure-main .ui-setup-section-title {
-    font-size: 0.9375rem;
-    font-weight: 800;
-    line-height: 1.2;
-  }
+  
 
-  .ui-procedure-main .ui-section-subtitle,
-  .ui-procedure-main .ui-setup-section-desc {
-    font-size: 0.6875rem;
-    line-height: 1.35;
-  }
+  
 
-  .ui-procedure-main .ui-field-label,
-  .ui-procedure-main .ui-eyebrow,
-  .ui-procedure-sidebar .ui-nav-section {
-    font-size: 0.625rem;
-  }
+  
 
-  .ui-procedure-step .ui-field-label {
-    font-size: 0.75rem;
-    color: var(--color-ink);
-  }
+  
 
-  .ui-procedure-main .ui-field-standalone,
-  .ui-procedure-main .ui-field-control,
-  .ui-procedure-main .ui-themed-select-trigger,
-  .ui-procedure-main textarea,
-  .ui-procedure-main input {
-    font-size: 0.75rem;
-    font-weight: 400;
-  }
+  
 
-  .ui-procedure-main .ui-metric-strip .ui-metric-card-label {
-    font-size: 0.625rem;
-  }
+  
 
-  .ui-procedure-main .ui-metric-strip .ui-metric-card-value {
-    font-size: 0.75rem;
-    font-weight: 400;
-  }
+  
 
-  .ui-procedure-main .ui-metric-strip .ui-metric-card-meta {
-    font-size: 0.6875rem;
-  }
+  
 
   .ui-nav-item {
     font-family: var(--type-sans);
@@ -1378,9 +1270,7 @@ body {
     @apply bg-surface-muted text-ink;
   }
 
-  .ui-workspace-content .ui-nav-item-active {
-    @apply bg-surface text-ink;
-  }
+  
 
   .ui-nav-item-idle {
     @apply hover:bg-surface-muted hover:text-ink;
@@ -1500,13 +1390,9 @@ body {
     @apply mb-2 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[11px] font-medium text-ink-secondary transition duration-200 ease-ui hover:bg-surface-muted hover:text-ink;
   }
 
-  .ui-workspace-content {
-    @apply min-h-0 min-w-0 overflow-auto rounded-l-xl bg-surface-raised transition-[border-radius] duration-300 ease-out;
-  }
+  
 
-  .ui-workspace-content-flush {
-    @apply rounded-l-none;
-  }
+  
 
   .ui-settings-content {
     @apply ui-dot-canvas min-h-0 min-w-0 flex-1 overflow-auto rounded-l-xl p-4 transition-[border-radius] duration-300 ease-out md:p-6;
@@ -1536,29 +1422,15 @@ body {
     @apply ui-panel px-4 py-3;
   }
 
-  .ui-workspace-content .ui-metric-card {
-    @apply rounded-none border-0 bg-transparent px-0 py-1 shadow-none;
-    box-shadow: none;
-  }
+  
 
-  .ui-workspace-content .ui-metric-card-label {
-    @apply text-ink-tertiary;
-  }
+  
 
-  .ui-workspace-content .ui-metric-card-value {
-    font-size: 0.9375rem;
-    @apply mt-1 font-medium leading-tight text-ink;
-  }
+  
 
-  .ui-workspace-content .ui-metric-card-meta {
-    @apply mt-0.5 text-ink-tertiary;
-  }
+  
 
-  .ui-workspace-content .ui-metric-card-good,
-  .ui-workspace-content .ui-metric-card-warn,
-  .ui-workspace-content .ui-metric-card-bad {
-    @apply pl-2.5;
-  }
+  
 
   .ui-metric-strip {
     @apply grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-4;
@@ -1588,490 +1460,150 @@ body {
     }
   }
 
-  .ui-procedure-steps {
-    @apply space-y-2;
-  }
+  
 
-  .ui-procedure-manufacturing-section {
-    position: relative;
-    margin-top: 1.625rem;
-    padding-top: 1.625rem;
-  }
+  
 
-  .ui-procedure-manufacturing-section::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    border-radius: 9999px;
-    background: color-mix(in srgb, var(--color-border-strong) 82%, var(--color-ink) 18%);
-  }
+  
 
-  .ui-procedure-step {
-    position: relative;
-    @apply rounded-xl px-4 py-3.5;
-  }
+  
 
-  .ui-procedure-step + .ui-procedure-step {
-    margin-top: 1.625rem;
-    padding-top: 1.625rem;
-  }
+  
 
-  .ui-procedure-step + .ui-procedure-step::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    border-radius: 9999px;
-    background: color-mix(in srgb, var(--color-border-strong) 82%, var(--color-ink) 18%);
-  }
+  
 
-  .ui-workspace-content .ui-procedure-step {
-    @apply px-0;
-  }
+  
 
-  .ui-procedure-empty {
-    @apply rounded-xl px-4 py-5 text-sm text-ink-secondary;
-    border: 1px dashed color-mix(in srgb, var(--color-border) 65%, transparent);
-  }
+  
 
-  .ui-procedure-step .ui-field-standalone.ui-procedure-step-field-compact {
-    height: 2.25rem;
-    padding-left: 0.25rem;
-    padding-right: 0.25rem;
-    font-size: 0.75rem;
-    font-weight: 500;
-    text-align: center;
-  }
+  
 
-  .ui-procedure-step .ui-field-standalone:not(.ui-procedure-step-instruction):not(.ui-procedure-step-field-compact) {
-    font-size: 0.75rem;
-    font-weight: 400;
-  }
+  
 
-  .ui-procedure-step-instruction-field {
-    margin-top: 0.75rem;
-  }
+  
 
   .ui-procedure-step-divider {
     border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
     padding-top: 0.75rem;
   }
 
-  .ui-procedure-step-toolbar {
-    @apply flex items-center gap-0.5;
-  }
+  
 
-  .ui-procedure-step-header {
-    @apply flex flex-wrap items-end justify-between gap-x-4 gap-y-2;
-  }
+  
 
-  .ui-procedure-step-header-fields {
-    @apply flex flex-1 flex-nowrap items-baseline gap-5;
-    min-width: 0;
-  }
+  
 
-  .ui-procedure-step-inline-field {
-    @apply flex shrink-0 items-baseline gap-2;
-  }
+  
 
-  .ui-procedure-step-title-field {
-    flex: 1 1 34rem;
-    min-width: 13rem;
-    max-width: min(100%, 52rem);
-    display: flex;
-    flex-direction: row;
-    align-items: baseline;
-    gap: 1rem;
-  }
+  
 
-  .ui-procedure-step-title {
-    flex: 0 0 auto;
-    font-family: var(--type-sans);
-    font-size: 0.9375rem;
-    font-weight: 800;
-    line-height: 1.2;
-    color: var(--color-ink);
-    white-space: nowrap;
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-value,
-  .ui-procedure-part-editor .ui-procedure-step-inline-value,
-  .ui-procedure-catalog .ui-procedure-step-inline-value {
-    width: 2.25rem;
-    height: auto;
-    min-height: 0;
-    border: 0;
-    border-radius: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
-    background: transparent;
-    box-shadow: none;
-    padding: 0 0 1px;
-    font-family: var(--type-mono);
-    font-size: 0.8125rem;
-    font-weight: 500;
-    line-height: 1.2;
-    text-align: center;
-    color: var(--color-ink);
-    outline: none;
-    transition: border-color 200ms var(--ease-ui);
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-value:hover,
-  .ui-procedure-part-editor .ui-procedure-step-inline-value:hover,
-  .ui-procedure-catalog .ui-procedure-step-inline-value:hover {
-    border-bottom-color: color-mix(in srgb, var(--color-ink-secondary) 70%, transparent);
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-value:focus,
-  .ui-procedure-part-editor .ui-procedure-step-inline-value:focus,
-  .ui-procedure-catalog .ui-procedure-step-inline-value:focus {
-    border-bottom-color: var(--color-ink);
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-value.ui-procedure-step-inline-value-wide {
-    width: 2.75rem;
-  }
+  
 
-  .ui-procedure-step-details {
-    @apply space-y-4 border-t pt-4;
-    border-top-color: color-mix(in srgb, var(--color-border) 55%, transparent);
-  }
+  
 
-  .ui-procedure-step-detail {
-    @apply space-y-2;
-  }
+  
 
-  .ui-procedure-step-add-row {
-    @apply flex flex-wrap items-center gap-x-3 gap-y-2;
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-text,
-  .ui-procedure-step .ui-procedure-step-inline-select,
-  .ui-procedure-part-editor .ui-procedure-step-inline-text,
-  .ui-procedure-catalog .ui-procedure-step-inline-text,
-  .ui-procedure-catalog .ui-procedure-step-inline-select {
-    height: auto;
-    min-height: 0;
-    border: 0;
-    border-radius: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
-    background: transparent;
-    box-shadow: none;
-    padding: 0 0 2px;
-    font-size: 0.75rem;
-    font-weight: 400;
-    line-height: 1.3;
-    color: var(--color-ink);
-    outline: none;
-    transition: border-color 200ms var(--ease-ui);
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-text,
-  .ui-procedure-part-editor .ui-procedure-step-inline-text,
-  .ui-procedure-catalog .ui-procedure-step-inline-text {
-    flex: 1 1 12rem;
-    min-width: 10rem;
-    text-align: left;
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-name-input {
-    flex: 1 1 28rem;
-    width: auto;
-    min-width: 0;
-    margin-top: 0;
-    border-bottom: 0;
-    padding-bottom: 0;
-    font-size: 1rem;
-    font-weight: 800;
-    line-height: 1.35;
-    color: var(--color-ink);
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-select,
-  .ui-procedure-catalog .ui-procedure-step-inline-select {
-    width: auto;
-    max-width: 100%;
-    min-width: 9rem;
-    padding-right: 1.25rem;
-    cursor: pointer;
-    appearance: none;
-    background-image: linear-gradient(45deg, transparent 50%, var(--color-ink-secondary) 50%),
-      linear-gradient(135deg, var(--color-ink-secondary) 50%, transparent 50%);
-    background-position: calc(100% - 10px) calc(50% + 1px), calc(100% - 5px) calc(50% + 1px);
-    background-size: 5px 5px, 5px 5px;
-    background-repeat: no-repeat;
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-text::placeholder,
-  .ui-procedure-part-editor .ui-procedure-step-inline-text::placeholder,
-  .ui-procedure-catalog .ui-procedure-step-inline-text::placeholder {
-    color: color-mix(in srgb, var(--color-ink-tertiary) 65%, transparent);
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-text:hover,
-  .ui-procedure-step .ui-procedure-step-inline-select:hover,
-  .ui-procedure-part-editor .ui-procedure-step-inline-text:hover,
-  .ui-procedure-part-editor .ui-procedure-step-inline-value:hover,
-  .ui-procedure-catalog .ui-procedure-step-inline-text:hover,
-  .ui-procedure-catalog .ui-procedure-step-inline-select:hover,
-  .ui-procedure-catalog .ui-procedure-step-inline-value:hover {
-    border-bottom-color: color-mix(in srgb, var(--color-ink-secondary) 70%, transparent);
-  }
+  
 
-  .ui-procedure-step .ui-procedure-step-inline-text:focus,
-  .ui-procedure-step .ui-procedure-step-inline-select:focus,
-  .ui-procedure-part-editor .ui-procedure-step-inline-text:focus,
-  .ui-procedure-part-editor .ui-procedure-step-inline-value:focus,
-  .ui-procedure-catalog .ui-procedure-step-inline-text:focus,
-  .ui-procedure-catalog .ui-procedure-step-inline-select:focus,
-  .ui-procedure-catalog .ui-procedure-step-inline-value:focus {
-    border-bottom-color: var(--color-ink);
-  }
+  
 
-  .ui-procedure-part-editor {
-    @apply divide-y;
-    border-color: color-mix(in srgb, var(--color-border) 55%, transparent);
-    border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  }
+  
 
-  .ui-procedure-checks {
-    display: flex;
-    flex-direction: column;
-    margin-top: 0.25rem;
-    border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  }
+  
 
-  .ui-procedure-checks-row {
-    padding: 0.875rem 0.25rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-    transition: background 120ms ease;
-  }
+  
 
-  .ui-procedure-checks-row:hover {
-    background: color-mix(in srgb, var(--color-surface-raised) 55%, transparent);
-  }
+  
 
-  .ui-procedure-checks-row[data-enabled="false"] {
-    opacity: 0.5;
-  }
+  
 
-  .ui-procedure-checks input[type="checkbox"] {
-    appearance: none;
-    -webkit-appearance: none;
-    position: relative;
-    flex: none;
-    width: 1.9rem;
-    height: 1.05rem;
-    border-radius: 9999px;
-    background: color-mix(in srgb, var(--color-border-strong) 65%, transparent);
-    cursor: pointer;
-    transition: background 140ms ease;
-  }
+  
 
-  .ui-procedure-checks input[type="checkbox"]::after {
-    content: "";
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 0.8rem;
-    height: 0.8rem;
-    border-radius: 9999px;
-    background: var(--color-surface);
-    box-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent);
-    transition: transform 140ms ease;
-  }
+  
 
-  .ui-procedure-checks input[type="checkbox"]:checked {
-    background: var(--color-accent);
-  }
+  
 
-  .ui-procedure-checks input[type="checkbox"]:checked::after {
-    transform: translateX(0.85rem);
-  }
+  
 
-  .ui-procedure-checks input[type="checkbox"]:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
-    outline-offset: 2px;
-  }
+  
 
-  .ui-procedure-checks .ui-procedure-step-inline-text {
-    height: auto;
-    min-height: 0;
-    width: 100%;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    outline: none;
-    padding: 0;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    line-height: 1.3;
-    color: var(--color-ink);
-  }
+  
 
-  .ui-procedure-checks .ui-procedure-step-inline-text:focus,
-  .ui-procedure-checks .ui-procedure-step-inline-text:focus-visible {
-    outline: none;
-    box-shadow: none;
-  }
+  
 
-  .ui-procedure-checks .ui-procedure-step-inline-text::placeholder {
-    color: color-mix(in srgb, var(--color-ink-tertiary) 65%, transparent);
-  }
+  
 
-  .ui-procedure-catalog .ui-procedure-tool-table-cell .ui-procedure-step-inline-text,
-  .ui-procedure-catalog .ui-procedure-tool-table-cell .ui-procedure-step-inline-select {
-    flex: none;
-    min-width: 0;
-    width: 100%;
-  }
+  
 
-  .ui-procedure-catalog-part-meta {
-    @apply col-span-full flex items-center justify-between gap-3 pb-1;
-  }
+  
 
-  .ui-procedure-part-row {
-    @apply grid gap-x-4 gap-y-2 py-3 first:pt-0 md:grid-cols-[minmax(140px,0.42fr)_56px_minmax(0,1fr)_minmax(0,1fr)_24px];
-  }
+  
 
-  .ui-procedure-part-editor .ui-procedure-step-inline-value {
-    width: 100%;
-    max-width: 3.5rem;
-    text-align: left;
-  }
+  
 
-  .ui-procedure-step-chip-list {
-    @apply flex flex-wrap gap-x-3 gap-y-1;
-  }
+  
 
-  .ui-procedure-tag {
-    font-family: var(--type-sans);
-    font-size: 0.75rem;
-    line-height: 1.35;
-    @apply inline-flex max-w-full min-w-0 items-center font-normal normal-case tracking-normal text-ink-secondary transition duration-200 ease-ui hover:text-ink;
-  }
+  
 
-  .ui-procedure-tag-remove {
-    @apply ml-0 inline-flex h-4 w-0 shrink-0 items-center justify-center overflow-hidden opacity-0 transition-all duration-200 ease-ui group-hover:ml-1 group-hover:w-4 group-hover:opacity-100 hover:text-danger focus-visible:ml-1 focus-visible:w-4 focus-visible:opacity-100;
-  }
+  
 
-  .ui-procedure-tool-table-wrap {
-    @apply overflow-x-auto;
-  }
+  
 
-  .ui-procedure-tool-table {
-    @apply w-full min-w-[420px] border-collapse;
-  }
+  
 
-  .ui-procedure-tool-table-head {
-    font-family: var(--type-mono);
-    font-size: var(--type-label);
-    @apply pb-2 text-left uppercase tracking-[0.1em] text-ink-tertiary;
-  }
+  
 
-  .ui-procedure-tool-table-row {
-    border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  }
+  
 
-  .ui-procedure-tool-table-cell {
-    @apply py-2 pr-3 align-middle;
-  }
+  
 
-  .ui-procedure-tool-table-remove {
-    @apply inline-flex h-6 w-6 items-center justify-center text-ink-tertiary opacity-0 transition duration-200 ease-ui hover:text-danger group-hover:opacity-100 focus-visible:opacity-100;
-  }
+  
 
-  .ui-procedure-tool-table-group {
-    border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  }
+  
 
-  .ui-procedure-tool-table-group:first-of-type {
-    border-top: 0;
-  }
+  
 
-  .ui-procedure-tool-table-subhead-cell {
-    font-family: var(--type-mono);
-    font-size: var(--type-label);
-    @apply pb-1.5 pt-3 text-left uppercase tracking-[0.1em] text-ink-secondary;
-  }
+  
 
-  .ui-procedure-tool-table-subhead-count {
-    @apply ml-2 inline-flex items-center rounded-full bg-surface-muted px-1.5 text-[10px] font-medium normal-case tracking-normal text-ink-tertiary;
-  }
+  
 
-  .ui-procedure-step-checks {
-    @apply flex flex-wrap gap-1;
-  }
+  
 
-  .ui-procedure-step-check {
-    @apply inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11px] font-medium normal-case tracking-normal text-ink-secondary transition duration-200 ease-ui hover:text-ink;
-  }
+  
 
-  .ui-procedure-step-check input[type="checkbox"] {
-    appearance: none;
-    width: 0.875rem;
-    height: 0.875rem;
-    margin: 0;
-    flex-shrink: 0;
-    cursor: pointer;
-    border: 1px solid var(--color-border-strong);
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--color-surface-raised) 88%, var(--color-border));
-    transition: background 200ms var(--ease-ui), border-color 200ms var(--ease-ui);
-  }
+  
 
-  .ui-procedure-step-check input[type="checkbox"]:checked {
-    border-color: var(--color-ink);
-    background-color: var(--color-ink);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.1 5.1 8.7 9.5 3.8' fill='none' stroke='%23f5f5f5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: 0.75rem 0.75rem;
-  }
+  
 
-  [data-theme="dark"] .ui-procedure-step-check input[type="checkbox"]:checked {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.1 5.1 8.7 9.5 3.8' fill='none' stroke='%23000000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  }
+  
 
-  .ui-procedure-step-check input[type="checkbox"]:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-ink) 35%, transparent);
-    outline-offset: 1px;
-  }
+  
 
-  .ui-procedure-step-check-active {
-    @apply bg-surface-muted text-ink;
-  }
+  
 
-  .ui-procedure-step .ui-field-standalone.ui-procedure-step-instruction {
-    margin-top: 0.375rem;
-    min-height: 10rem;
-    width: 100%;
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
-    font-size: 0.75rem;
-    font-weight: 400;
-    line-height: 1.55;
-    color: var(--color-ink-secondary);
-  }
+  
 
-  .ui-procedure-main .ui-procedure-step .ui-procedure-step-inline-value,
-  .ui-procedure-main .ui-procedure-part-editor .ui-procedure-step-inline-value,
-  .ui-procedure-main .ui-procedure-step .ui-procedure-step-inline-text,
-  .ui-procedure-main .ui-procedure-step .ui-procedure-step-inline-select,
-  .ui-procedure-main .ui-procedure-part-editor .ui-procedure-step-inline-text,
-  .ui-procedure-main .ui-procedure-catalog .ui-procedure-step-inline-text,
-  .ui-procedure-main .ui-procedure-catalog .ui-procedure-step-inline-select,
-  .ui-procedure-main .ui-procedure-tag,
-  .ui-procedure-main .ui-procedure-step-check {
-    font-size: 0.75rem;
-    font-weight: 400;
-  }
+  
 
   .ui-metric-card-label {
     font-family: var(--type-mono);
@@ -2176,21 +1708,11 @@ body {
     @apply space-y-3;
   }
 
-  .ui-setup-page > .ui-kpi-strip,
-  .ui-workspace-content > .ui-kpi-strip,
-  .ui-setup-page > .ui-metric-strip,
-  .ui-setup-page .ui-procedure-catalog {
-    padding-inline: 1rem;
-  }
+  
 
-  .ui-workspace-content > .ui-kpi-strip {
-    padding-inline: 1.25rem;
-  }
+  
 
-  .ui-setup-page .ui-procedure-catalog {
-    border-top: 2px solid color-mix(in srgb, var(--color-border-strong) 72%, transparent);
-    padding-top: 1.25rem;
-  }
+  
 
   .ui-catalog-collapse-trigger {
     display: flex;
@@ -2219,14 +1741,7 @@ body {
     color: var(--color-ink-secondary);
   }
 
-  @media (min-width: 640px) {
-    .ui-setup-page > .ui-kpi-strip,
-    .ui-workspace-content > .ui-kpi-strip,
-    .ui-setup-page > .ui-metric-strip,
-    .ui-setup-page .ui-procedure-catalog {
-      padding-inline: 1.25rem;
-    }
-  }
+  
 
   .ui-kpi-strip {
     display: grid;
@@ -2251,248 +1766,68 @@ body {
       column-gap: 1.25rem;
     }
 
-    .ui-setup-page > .ui-kpi-strip {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 0;
-    }
+    
 
-    .ui-workspace-content > .ui-kpi-strip {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 0;
-    }
+    
 
-    .ui-setup-page > .ui-kpi-strip .ui-metric-card {
-      flex: 1 1 0;
-      text-align: center;
-    }
+    
 
-    .ui-workspace-content > .ui-kpi-strip .ui-metric-card {
-      flex: 1 1 0;
-      text-align: left;
-    }
+    
   }
 
-  .ui-product-setup {
-    @apply p-0;
-    border-radius: 0;
-    border: 0;
-    background: transparent;
-    overflow: visible;
-  }
+  
 
-  .ui-product-setup-head {
-    @apply border-b border-line px-4 py-4 sm:px-5;
-    border-bottom-width: 2px;
-    border-bottom-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
+  
 
-  .ui-product-setup-body {
-    @apply px-4 pb-1 sm:px-5;
-  }
+  
 
-  .ui-nomenclature-legend {
-    margin-top: 1rem;
-    margin-bottom: 1.5rem;
-    padding: 1.1rem 1.25rem 1.2rem;
-    border: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
-    border-radius: 0.75rem;
-    background-color: var(--color-surface-raised);
-    background-image:
-      linear-gradient(color-mix(in srgb, var(--color-border) 45%, transparent) 1px, transparent 1px),
-      linear-gradient(90deg, color-mix(in srgb, var(--color-border) 45%, transparent) 1px, transparent 1px);
-    background-size: 18px 18px;
-    background-position: -1px -1px;
-  }
+  
 
-  .ui-nomenclature-legend-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1rem;
-    padding-bottom: 0.7rem;
-    border-bottom: 1px dashed color-mix(in srgb, var(--color-border-strong) 50%, transparent);
-  }
+  
 
-  .ui-nomenclature-legend-eyebrow {
-    font-family: var(--type-mono);
-    font-size: 0.625rem;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--color-ink-tertiary);
-  }
+  
 
-  .ui-nomenclature-legend-program {
-    font-family: var(--type-mono);
-    font-size: 0.6875rem;
-    letter-spacing: 0.08em;
-    color: var(--color-ink-secondary);
-  }
+  
 
-  .ui-nomenclature-legend-code {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 0.4rem 0.6rem;
-  }
+  
 
-  .ui-nomenclature-seg {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.4rem;
-  }
+  
 
-  .ui-nomenclature-seg-value {
-    font-family: var(--type-mono);
-    font-size: clamp(1.4rem, 2.6vw, 2rem);
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: 0.02em;
-    color: var(--color-ink);
-  }
+  
 
-  .ui-nomenclature-seg-label {
-    font-family: var(--type-mono);
-    font-size: 0.5625rem;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--color-ink-tertiary);
-  }
+  
 
-  .ui-nomenclature-legend-sep {
-    font-family: var(--type-mono);
-    font-size: clamp(1.4rem, 2.6vw, 2rem);
-    font-weight: 400;
-    line-height: 1;
-    color: color-mix(in srgb, var(--color-ink-tertiary) 65%, transparent);
-  }
+  
 
-  .ui-nomenclature-legend-list {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.7rem 1.75rem;
-    margin-top: 1.1rem;
-    padding-top: 1rem;
-    border-top: 1px dashed color-mix(in srgb, var(--color-border-strong) 50%, transparent);
-  }
+  
 
-  @media (min-width: 768px) {
-    .ui-nomenclature-legend-list {
-      grid-template-columns: 1fr 1fr;
-    }
-  }
+  
 
-  .ui-nomenclature-legend-item {
-    display: grid;
-    grid-template-columns: 1.5rem 1fr;
-    align-items: start;
-    gap: 0.65rem;
-  }
+  
 
-  .ui-nomenclature-legend-num {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.4rem;
-    height: 1.4rem;
-    border-radius: 9999px;
-    border: 1px solid color-mix(in srgb, var(--color-border-strong) 60%, transparent);
-    font-family: var(--type-mono);
-    font-size: 0.625rem;
-    font-weight: 700;
-    color: var(--color-ink-secondary);
-  }
+  
 
-  .ui-nomenclature-legend-term {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--color-ink);
-  }
+  
 
-  .ui-nomenclature-legend-chip {
-    font-family: var(--type-mono);
-    font-size: 0.6875rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    padding: 0.1rem 0.4rem;
-    border-radius: 0.3rem;
-    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-    color: var(--color-ink);
-  }
+  
 
-  .ui-nomenclature-legend-desc {
-    margin: 0.25rem 0 0;
-    font-size: 0.6875rem;
-    line-height: 1.4;
-    color: var(--color-ink-secondary);
-  }
+  
 
-  .ui-nomenclature-legend-source {
-    display: block;
-    margin-top: 0.2rem;
-    font-family: var(--type-mono);
-    font-size: 0.5625rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--color-ink-tertiary);
-  }
+  
 
-  .ui-nomenclature-legend-note {
-    margin-top: 1.1rem;
-    padding-top: 0.9rem;
-    border-top: 1px dashed color-mix(in srgb, var(--color-border-strong) 50%, transparent);
-    font-size: 0.6875rem;
-    line-height: 1.5;
-    color: var(--color-ink-secondary);
-  }
+  
 
-  .ui-nomenclature-legend-note-label {
-    display: block;
-    margin-bottom: 0.3rem;
-    font-family: var(--type-mono);
-    font-size: 0.5625rem;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--color-ink-tertiary);
-  }
+  
 
-  .ui-nomenclature-legend-path {
-    font-family: var(--type-mono);
-    font-size: 0.6875rem;
-    color: var(--color-ink);
-    background: color-mix(in srgb, var(--color-border) 45%, transparent);
-    padding: 0.12rem 0.4rem;
-    border-radius: 0.25rem;
-    white-space: nowrap;
-  }
+  
 
-  .ui-product-setup-split {
-    @apply grid gap-0 border-t border-line xl:grid-cols-2;
-    border-top-width: 2px;
-    border-top-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
+  
 
-  .ui-product-setup-split .ui-setup-section {
-    @apply border-t-0;
-  }
+  
 
-  .ui-product-setup-split .ui-setup-section:first-child {
-    @apply xl:pr-5;
-  }
+  
 
-  .ui-product-setup-split .ui-setup-section + .ui-setup-section {
-    @apply border-t border-line xl:border-t-0 xl:pl-5;
-    border-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-    border-top-width: 2px;
-  }
+  
 
   .ui-setup-section {
     @apply border-t border-line py-5 first:border-t-0;
@@ -2500,11 +1835,7 @@ body {
     border-top-color: color-mix(in srgb, var(--color-border) 68%, transparent);
   }
 
-  @media (min-width: 1280px) {
-    .ui-product-setup-split .ui-setup-section + .ui-setup-section {
-      border-top-width: 0;
-    }
-  }
+  
 
   .ui-setup-section-head {
     @apply mb-4;
@@ -2835,65 +2166,21 @@ body {
     border-radius: 4px;
   }
 
-  .ui-product-setup .ui-field-shell,
-  .ui-product-setup .ui-field-standalone {
-    background: color-mix(in srgb, var(--color-surface-raised) 36%, transparent);
-  }
+  
 
-  .ui-product-setup .ui-field-control,
-  .ui-product-setup .ui-field-standalone,
-  .ui-product-setup .ui-themed-select-trigger {
-    font-size: 12px;
-    font-weight: 400;
-  }
+  
 
-  .ui-product-setup select.ui-field-standalone,
-  .ui-product-setup .ui-field-addon {
-    -webkit-appearance: none;
-    appearance: none;
-    cursor: pointer;
-    padding-right: 2rem;
-    border-color: color-mix(in srgb, var(--color-border-strong) 42%, transparent);
-    background-color: color-mix(in srgb, var(--color-surface-raised) 54%, transparent);
-    background-image:
-      linear-gradient(45deg, transparent 50%, var(--color-ink-secondary) 50%),
-      linear-gradient(135deg, var(--color-ink-secondary) 50%, transparent 50%);
-    background-position: calc(100% - 15px) calc(50% + 1px), calc(100% - 10px) calc(50% + 1px);
-    background-size: 5px 5px, 5px 5px;
-    background-repeat: no-repeat;
-    box-shadow: none;
-  }
+  
 
-  .ui-product-setup select.ui-field-standalone::-ms-expand,
-  .ui-product-setup .ui-field-addon::-ms-expand {
-    display: none;
-  }
+  
 
-  .ui-product-setup .ui-field-addon {
-    min-width: 6.25rem;
-    border-left-color: color-mix(in srgb, var(--color-border-strong) 42%, transparent);
-    color: var(--color-ink-secondary);
-    font-weight: 500;
-    letter-spacing: 0.08em;
-  }
+  
 
-  .ui-product-setup select.ui-field-standalone:hover,
-  .ui-product-setup .ui-field-addon:hover {
-    border-color: color-mix(in srgb, var(--color-border-strong) 80%, transparent);
-    background-color: color-mix(in srgb, var(--color-surface-raised) 72%, transparent);
-    color: var(--color-ink);
-  }
+  
 
-  .ui-product-setup select.ui-field-standalone:focus,
-  .ui-product-setup .ui-field-addon:focus {
-    border-color: var(--color-border-strong);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-ink) 8%, transparent);
-  }
+  
 
-  .ui-product-setup select option {
-    background: var(--color-surface);
-    color: var(--color-ink);
-  }
+  
 
   .ui-field-standalone::placeholder {
     font-family: var(--type-mono);
@@ -3254,24 +2541,11 @@ body {
     @apply text-ink-secondary;
   }
 
-  .ui-planner-dashboard {
-    --planner-gutter: 1rem;
-    --planner-content-rail: 1rem;
-    padding: var(--planner-gutter);
-    padding-bottom: 0.5rem;
-    @apply space-y-4;
-  }
+  
 
-  .ui-gantt-chart {
-    display: block;
-  }
+  
 
-  .ui-gantt-workspace {
-    overflow: visible;
-    border-top: 2px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    border-bottom: 2px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    background: transparent;
-  }
+  
 
   .ui-coming-soon-module {
     position: relative;
@@ -3309,585 +2583,163 @@ body {
     box-shadow: 0 18px 44px color-mix(in srgb, #000 12%, transparent);
   }
 
-  .ui-gantt-workspace-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    border-bottom: 2px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    padding: 1rem;
-  }
-
-  .ui-scenario-tabs {
-    --scenario-tab-bar: 1px;
-    --scenario-tab-active-bg: color-mix(in srgb, var(--color-surface-raised) 28%, transparent);
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 0.25rem;
-    border-bottom: var(--scenario-tab-bar) solid color-mix(in srgb, var(--color-border) 72%, transparent);
-    padding: 0.5rem 1rem 0;
-    background: transparent;
-  }
-
-  .ui-scenario-tabs-strip {
-    display: inline-flex;
-    max-width: 100%;
-    align-items: flex-end;
-    gap: 0.125rem;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .ui-scenario-tabs-strip::-webkit-scrollbar {
-    display: none;
-  }
-
-  .ui-scenario-tab {
-    position: relative;
-    display: inline-flex;
-    align-items: stretch;
-    margin-bottom: calc(var(--scenario-tab-bar) * -1);
-    border: 1px solid color-mix(in srgb, var(--color-border) 58%, transparent);
-    border-bottom: 0;
-    border-radius: 0.5rem 0.5rem 0 0;
-    background: color-mix(in srgb, var(--color-surface-muted) 52%, transparent);
-    transition:
-      background 200ms var(--ease-ui),
-      border-color 200ms var(--ease-ui),
-      transform 200ms var(--ease-ui),
-      box-shadow 200ms var(--ease-ui);
-  }
-
-  .ui-scenario-tab-btn {
-    display: inline-flex;
-    min-height: 1.75rem;
-    max-width: 10.5rem;
-    align-items: center;
-    gap: 0.375rem;
-    border: 0;
-    background: transparent;
-    padding: 0 0.6875rem;
-    font-family: var(--type-mono);
-    font-size: 10px;
-    font-weight: 500;
-    letter-spacing: 0.07em;
-    line-height: 1;
-    text-transform: uppercase;
-    color: color-mix(in srgb, var(--color-ink-secondary) 88%, transparent);
-    transition: color 200ms var(--ease-ui);
-  }
-
-  .ui-scenario-tab-btn:disabled {
-    cursor: default;
-    opacity: 0.6;
-  }
-
-  .ui-scenario-tab-btn span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .ui-scenario-tab-idle {
-    transform: translateY(2px);
-  }
-
-  .ui-scenario-tab-idle .ui-scenario-tab-btn {
-    min-height: 1.625rem;
-    padding-bottom: 0.125rem;
-  }
-
-  .ui-scenario-tab-idle:hover {
-    transform: translateY(1px);
-    border-color: color-mix(in srgb, var(--color-border-strong) 44%, transparent);
-    background: color-mix(in srgb, var(--color-surface-raised) 42%, transparent);
-  }
-
-  .ui-scenario-tab-idle .ui-scenario-tab-btn:hover:not(:disabled) {
-    color: var(--color-ink);
-  }
-
-  .ui-scenario-tab-main.ui-scenario-tab-idle .ui-scenario-tab-btn {
-    color: color-mix(in srgb, var(--color-ink) 72%, var(--color-ink-secondary));
-  }
-
-  .ui-scenario-tab-active {
-    z-index: 2;
-    transform: translateY(0);
-    border-color: color-mix(in srgb, var(--color-border-strong) 54%, transparent);
-    background: var(--scenario-tab-active-bg);
-    box-shadow:
-      0 1px 0 color-mix(in srgb, var(--color-surface) 88%, transparent),
-      0 6px 14px color-mix(in srgb, #000 5%, transparent);
-  }
-
-  .ui-scenario-tab-active .ui-scenario-tab-btn {
-    min-height: 2rem;
-    font-weight: 600;
-    color: var(--color-ink);
-  }
-
-  .ui-scenario-tab-active::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    right: 0.625rem;
-    left: 0.625rem;
-    height: 1px;
-    border-radius: 1px;
-    background: color-mix(in srgb, var(--color-surface) 92%, transparent);
-    pointer-events: none;
-  }
-
-  .ui-scenario-tab-active::after {
-    content: "";
-    position: absolute;
-    right: -1px;
-    bottom: calc(var(--scenario-tab-bar) * -1);
-    left: -1px;
-    height: calc(var(--scenario-tab-bar) + 1px);
-    background: var(--scenario-tab-active-bg);
-    pointer-events: none;
-  }
-
-  .ui-scenario-tab-close {
-    display: inline-flex;
-    height: 1rem;
-    width: 1rem;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    align-self: center;
-    margin-right: 0.375rem;
-    border: 0;
-    border-radius: 0.2rem;
-    background: transparent;
-    color: color-mix(in srgb, var(--color-steel) 82%, transparent);
-    opacity: 0;
-    transition: opacity 160ms var(--ease-ui), background 160ms var(--ease-ui), color 160ms var(--ease-ui);
-  }
-
-  .ui-scenario-tab-edit {
-    display: inline-flex;
-    height: 1rem;
-    width: 1rem;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    align-self: center;
-    margin-right: 0.125rem;
-    border: 0;
-    border-radius: 0.2rem;
-    background: transparent;
-    color: color-mix(in srgb, var(--color-steel) 82%, transparent);
-    opacity: 0;
-    transition: opacity 160ms var(--ease-ui), background 160ms var(--ease-ui), color 160ms var(--ease-ui);
-  }
-
-  .ui-scenario-tab:hover .ui-scenario-tab-close,
-  .ui-scenario-tab-active .ui-scenario-tab-close,
-  .ui-scenario-tab:hover .ui-scenario-tab-edit,
-  .ui-scenario-tab-active .ui-scenario-tab-edit,
-  .ui-scenario-tab-close:focus-visible,
-  .ui-scenario-tab-edit:focus-visible {
-    opacity: 1;
-  }
-
-  .ui-scenario-tab-close:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-surface-hover) 72%, transparent);
-    color: var(--color-ink);
-  }
-
-  .ui-scenario-tab-rename {
-    min-height: 2rem;
-    width: 9rem;
-    border: 0;
-    border-radius: 0.5rem 0.5rem 0 0;
-    background: transparent;
-    padding: 0 0.6875rem;
-    font-family: var(--type-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-ink);
-    outline: none;
-  }
-
-  .ui-scenario-tabs-add {
-    display: inline-flex;
-    height: 1.625rem;
-    width: 1.625rem;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: calc(var(--scenario-tab-bar) * -1);
-    transform: translateY(2px);
-    border: 1px solid transparent;
-    border-bottom: 0;
-    border-radius: 0.5rem 0.5rem 0 0;
-    background: transparent;
-    color: color-mix(in srgb, var(--color-steel) 88%, transparent);
-    transition:
-      color 200ms var(--ease-ui),
-      border-color 200ms var(--ease-ui),
-      background 200ms var(--ease-ui),
-      transform 200ms var(--ease-ui);
-  }
-
-  .ui-scenario-tabs-add:hover:not(:disabled) {
-    transform: translateY(1px);
-    border-color: color-mix(in srgb, var(--color-border) 58%, transparent);
-    background: color-mix(in srgb, var(--color-surface-muted) 48%, transparent);
-    color: var(--color-ink);
-  }
-
-  .ui-scenario-tabs-add:disabled {
-    opacity: 0.45;
-  }
-
-  .ui-scenario-tabs-target {
-    display: flex;
-    margin-left: auto;
-    align-self: center;
-    align-items: center;
-    padding-bottom: 0.4375rem;
-  }
-
-  .ui-scenario-tabs-target-note {
-    font-family: var(--type-mono);
-    font-size: 10px;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    color: color-mix(in srgb, var(--color-steel) 92%, transparent);
-  }
-
-  .ui-scenario-tabs-target-fields {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 58%, transparent);
-    border-radius: 0.375rem;
-    background: color-mix(in srgb, var(--color-surface-muted) 36%, transparent);
-    padding: 0.1875rem 0.4375rem;
-    font-family: var(--type-mono);
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-ink-secondary);
-  }
-
-  .ui-scenario-tabs-target-label {
-    color: color-mix(in srgb, var(--color-steel) 90%, transparent);
-  }
-
-  .ui-scenario-tabs-target-divider {
-    color: color-mix(in srgb, var(--color-steel) 72%, transparent);
-  }
-
-  .ui-scenario-tabs-target-input {
-    width: 2.75rem;
-    border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 42%, transparent);
-    background: transparent;
-    padding: 0.125rem 0;
-    text-align: right;
-    font-family: var(--type-mono);
-    font-size: 10px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: var(--color-ink);
-    outline: none;
-    transition: border-color 200ms var(--ease-ui);
-  }
-
-  .ui-scenario-tabs-target-input:focus {
-    border-bottom-color: var(--color-ink);
-  }
-
-  .ui-scenario-tabs-target-select {
-    appearance: none;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    padding-right: 0.875rem;
-    font-family: var(--type-mono);
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    color: var(--color-ink);
-    outline: none;
-    background-image:
-      linear-gradient(45deg, transparent 50%, var(--color-steel) 50%),
-      linear-gradient(135deg, var(--color-steel) 50%, transparent 50%);
-    background-position:
-      calc(100% - 5px) calc(50% + 1px),
-      calc(100% - 2px) calc(50% + 1px);
-    background-size: 3px 3px, 3px 3px;
-    background-repeat: no-repeat;
-    cursor: pointer;
-  }
-
-  .ui-gantt-timeline {
-    overflow: hidden;
-    background: transparent;
-  }
-
-  .ui-gantt-timeline-grid {
-    display: grid;
-    min-height: 560px;
-  }
-
-  .ui-gantt-table-pane {
-    position: relative;
-    border-right: 2px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    background: color-mix(in srgb, var(--color-surface-raised) 28%, transparent);
-  }
-
-  .ui-gantt-canvas-pane {
-    background: color-mix(in srgb, var(--color-surface-raised) 24%, transparent);
-  }
-
-  .ui-gantt-page .ui-section-title {
-    font-size: 0.875rem;
-    line-height: 1.3;
-  }
-
-  .ui-gantt-page .ui-section-subtitle,
-  .ui-gantt-page .ui-setup-section-desc,
-  .ui-gantt-page .ui-planner-recommendations-subtitle,
-  .ui-gantt-page .ui-planner-recommendation-condition,
-  .ui-gantt-page .ui-planner-recommendation-copy {
-    font-size: 0.6875rem;
-    line-height: 1.35;
-  }
-
-  .ui-gantt-page .ui-metric-card-label,
-  .ui-gantt-page .ui-row-label,
-  .ui-gantt-page .ui-field-label,
-  .ui-gantt-page .ui-planner-recommendations-more {
-    font-size: 0.625rem;
-  }
-
-  .ui-gantt-page .ui-metric-card-value,
-  .ui-gantt-page .ui-row-value,
-  .ui-gantt-page .ui-planner-zone-metric .ui-row-value,
-  .ui-gantt-page .ui-planner-recommendation-title {
-    font-size: 0.75rem;
-    line-height: 1.3;
-  }
-
-  .ui-gantt-page > .ui-kpi-strip .ui-metric-card-value {
-    font-size: 0.9375rem;
-    line-height: 1.25;
-  }
-
-  .ui-gantt-page .ui-planner-readiness-section-title,
-  .ui-gantt-page .ui-planner-recommendations-title {
-    font-size: 0.8125rem;
-    line-height: 1.3;
-  }
-
-  .ui-gantt-page .ui-planner-crew .ui-metric-card-value {
-    font-size: 0.875rem;
-  }
-
-  .ui-gantt-page .ui-planner-crew > .rounded-md .text-sm,
-  .ui-gantt-page .ui-planner-crew > .rounded-md .text-xs {
-    font-size: 0.75rem;
-    line-height: 1.35;
-  }
-
-  .ui-gantt-page .ui-planner-crew > .rounded-md .text-\[11px\] {
-    font-size: 0.6875rem;
-  }
-
-  .ui-gantt-page .ui-planner-crew > .rounded-md .text-\[10px\],
-  .ui-gantt-page .ui-planner-crew > .rounded-md .text-\[9px\] {
-    font-size: 0.625rem;
-  }
-
-  .ui-gantt-page .ui-planner-crew > .rounded-md .font-bold,
-  .ui-gantt-page .ui-planner-crew > .rounded-md .font-semibold {
-    font-weight: 500;
-  }
-
-  .ui-gantt-page .ui-planner-crew > .ui-crew-card {
-    border-radius: 0;
-    border-left-width: 2px;
-    border-right-width: 0;
-    border-top-width: 1px;
-    border-bottom-width: 1px;
-    border-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-    background: transparent;
-    padding-left: 0.875rem;
-    padding-right: 0;
-  }
-
-  .ui-gantt-page .ui-planner-crew > .ui-crew-card > .border-b {
-    border-bottom-width: 1px;
-    border-bottom-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
-
-  .ui-gantt-page .ui-planner-crew > .ui-crew-card .bg-surface,
-  .ui-gantt-page .ui-planner-crew > .ui-crew-card .bg-surface-raised {
-    background: transparent;
-  }
-
-  .ui-gantt-page .ui-planner-crew > .ui-crew-card .divide-y > div {
-    background: transparent;
-  }
-
-  .ui-gantt-page .ui-planner-crew > .ui-crew-card .ui-btn-primary {
-    min-height: 2rem;
-    border: 1px solid var(--color-border-strong);
-    background: transparent;
-    color: var(--color-ink);
-  }
-
-  .ui-gantt-page .ui-planner-crew > .ui-crew-card .ui-btn-primary:hover {
-    background: color-mix(in srgb, var(--color-surface-muted) 80%, transparent);
-  }
-
-  .ui-gantt-page .ui-crew-card .text-xl {
-    font-size: 0.9375rem;
-    line-height: 1.2;
-  }
-
-  .ui-gantt-page .ui-planner-recommendations-compact .ui-btn-ghost {
-    min-height: 1.75rem;
-    font-size: 0.625rem;
-  }
-
-  .ui-gantt-page .ui-gantt-workspace .ui-btn-ghost,
-  .ui-gantt-page .ui-gantt-table-pane {
-    font-size: 0.75rem;
-  }
-
-  .ui-gantt-page .ui-gantt-table-pane input,
-  .ui-gantt-page .ui-gantt-table-pane button {
-    font-size: 0.75rem;
-  }
-
-  .ui-gantt-chart .ui-gantt-chart-axis-label,
-  .ui-gantt-chart .ui-gantt-chart-zone-label,
-  .ui-gantt-chart .ui-gantt-chart-bar-label,
-  .ui-gantt-chart .ui-gantt-chart-step-label,
-  .ui-gantt-chart .ui-gantt-chart-flag-label {
-    font-family: var(--type-mono);
-    letter-spacing: 0.06em;
-  }
-
-  .ui-gantt-chart .ui-gantt-chart-axis-label,
-  .ui-gantt-chart .ui-gantt-chart-zone-label {
-    font-size: var(--type-caption);
-    font-weight: 500;
-    text-transform: uppercase;
-  }
-
-  .ui-gantt-chart .ui-gantt-chart-bar-label,
-  .ui-gantt-chart .ui-gantt-chart-step-label {
-    font-size: var(--type-caption);
-    font-weight: 600;
-  }
-
-  .ui-gantt-chart .ui-gantt-chart-flag-label {
-    font-size: var(--type-caption);
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-
-  @media (min-width: 640px) {
-    .ui-planner-dashboard {
-      --planner-gutter: 1.25rem;
-      --planner-content-rail: 1.25rem;
-    }
-  }
-
-  .ui-planner-dashboard-header {
-    @apply border-b border-line pb-4;
-    padding-inline: var(--planner-content-rail);
-    border-bottom-width: 2px;
-    border-bottom-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
-
-  .ui-planner-notice {
-    @apply border-y border-line bg-transparent py-3;
-    padding-inline: var(--planner-content-rail);
-  }
-
-  .ui-planner-notice-good {
-    box-shadow: inset 2px 0 0 var(--color-success);
-  }
-
-  .ui-planner-notice-warn {
-    box-shadow: inset 2px 0 0 var(--color-warn);
-  }
-
-  .ui-planner-notice-bad {
-    box-shadow: inset 2px 0 0 var(--color-danger);
-  }
-
-  .ui-planner-dashboard-kpis {
-    @apply border-y border-line py-4;
-    padding-inline: var(--planner-content-rail);
-    border-top-width: 2px;
-    border-bottom-width: 2px;
-    border-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
-
-  .ui-planner-dashboard-kpis.ui-metric-strip {
-    @apply gap-x-5 gap-y-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6;
-  }
-
-  .ui-planner-dashboard .ui-planner-dashboard-kpis.ui-metric-strip .ui-metric-card {
-    border-left: 0;
-    padding-left: 0;
-  }
-
-  .ui-planner-dashboard .ui-planner-dashboard-kpis .ui-metric-card-good,
-  .ui-planner-dashboard .ui-planner-dashboard-kpis .ui-metric-card-warn,
-  .ui-planner-dashboard .ui-planner-dashboard-kpis .ui-metric-card-bad {
-    padding-left: 0.625rem;
-  }
-
-  .ui-planner-dashboard-grid {
-    @apply grid gap-0 xl:grid-cols-[minmax(0,1fr)_240px];
-  }
-
-  .ui-planner-dashboard-main,
-  .ui-planner-dashboard-aside {
-    padding: var(--planner-content-rail);
-  }
-
-  .ui-planner-dashboard-main {
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .ui-planner-dashboard-aside {
-    border-top: 2px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    background: transparent;
-  }
-
-  @media (min-width: 1280px) {
-    .ui-planner-dashboard-aside {
-      border-top-width: 0;
-      border-left: 2px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    }
-  }
-
-  .ui-planner-snapshot-row {
-    @apply flex items-start justify-between gap-3 border-b border-line py-3 last:border-b-0;
-    border-bottom-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
-
-  .ui-planner-readiness {
-    @apply space-y-0;
-  }
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+  
 
   .ui-readiness-workspace {
     padding: var(--planner-content-rail, 1.25rem);
@@ -3896,145 +2748,54 @@ body {
     background: transparent;
   }
 
-  .ui-planner-readiness-head {
-    @apply mb-5 border-b border-line pb-4;
-    border-bottom-width: 2px;
-    border-bottom-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
+  
 
-  .ui-planner-readiness-section {
-    @apply pt-5;
-  }
+  
 
-  .ui-planner-readiness-section + .ui-planner-readiness-section {
-    @apply mt-5 border-t border-line;
-    border-top-width: 2px;
-    border-top-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
+  
 
-  .ui-planner-readiness-section-head {
-    @apply mb-4 flex flex-wrap items-start justify-between gap-3;
-  }
+  
 
-  .ui-planner-readiness-section-title {
-    font-size: var(--type-subtitle);
-    @apply font-medium text-ink;
-  }
+  
 
-  .ui-planner-crew-metrics.ui-metric-strip {
-    @apply gap-x-5 gap-y-4 sm:grid-cols-2 xl:grid-cols-4;
-  }
+  
 
-  .ui-planner-crew-metrics.ui-metric-strip .ui-metric-card {
-    border-left-width: 0;
-    padding-left: 0;
-  }
+  
 
-  .ui-planner-crew .ui-metric-card-label,
-  .ui-planner-crew .ui-metric-card-value,
-  .ui-planner-crew .ui-metric-card-meta {
-    @apply px-0 py-0;
-  }
+  
 
-  .ui-planner-crew .ui-metric-card-value {
-    font-size: 0.9375rem;
-    @apply mt-1;
-  }
+  
 
-  .ui-planner-crew .ui-metric-card-meta {
-    @apply mt-1;
-  }
+  
 
-  .ui-planner-recommendations {
-    @apply border-t border-line pt-4;
-    border-top-width: 2px;
-    border-top-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
+  
 
-  .ui-planner-recommendations-title {
-    font-size: var(--type-subtitle);
-    line-height: 1.25;
-    @apply font-medium text-ink;
-  }
+  
 
-  .ui-planner-recommendations-subtitle {
-    font-size: var(--type-caption);
-    line-height: 1.35;
-    @apply mt-1 text-ink-secondary;
-  }
+  
 
-  .ui-planner-recommendation-row {
-    @apply flex flex-wrap items-start justify-between gap-3 py-3;
-  }
+  
 
-  .ui-planner-recommendation-row + .ui-planner-recommendation-row {
-    @apply border-t border-line;
-    border-top-color: color-mix(in srgb, var(--color-border) 68%, transparent);
-  }
+  
 
-  .ui-planner-recommendation-title {
-    font-size: var(--type-body);
-    line-height: 1.35;
-    @apply font-medium text-ink;
-  }
+  
 
-  .ui-planner-recommendation-condition {
-    font-size: var(--type-caption);
-    line-height: 1.35;
-    @apply mt-1 text-ink-secondary;
-  }
+  
 
-  .ui-planner-recommendation-copy {
-    font-size: var(--type-caption);
-    line-height: 1.4;
-    @apply mt-1 font-medium text-ink-secondary;
-  }
+  
 
-  .ui-planner-recommendations-more {
-    font-size: var(--type-label);
-    font-family: var(--type-mono);
-    letter-spacing: 0.04em;
-    @apply mt-2 text-ink-tertiary;
-  }
+  
 
-  .ui-planner-zone-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1.5rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    padding-block: 0.75rem;
-  }
+  
 
-  .ui-planner-zone-row:last-child {
-    border-bottom-width: 0;
-  }
+  
 
-  .ui-planner-zone-name {
-    display: flex;
-    min-width: 0;
-    flex: 1;
-    align-items: center;
-    gap: 0.5rem;
-  }
+  
 
-  .ui-planner-zone-metrics {
-    display: grid;
-    flex-shrink: 0;
-    grid-template-columns: repeat(3, minmax(4.5rem, auto));
-    gap: 1.25rem;
-    text-align: right;
-  }
+  
 
-  .ui-planner-zone-metric {
-    min-width: 0;
-  }
+  
 
-  .ui-planner-zone-dot {
-    height: 0.5rem;
-    width: 0.5rem;
-    flex-shrink: 0;
-    border-radius: 9999px;
-  }
+  
 }
 

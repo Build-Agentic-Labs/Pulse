@@ -366,6 +366,25 @@ export async function listSeats(sopId: string): Promise<SopReviewSeat[]> {
   }));
 }
 
+/** Batched seat read for many SOPs in one query — replaces per-SOP listSeats loops (N+1). */
+export async function listSeatsForSops(
+  sopIds: readonly string[],
+  client?: SupabaseClient<Database>,
+): Promise<SopReviewSeat[]> {
+  const unique = [...new Set(sopIds.filter(Boolean))];
+  if (unique.length === 0) return [];
+  const supabase = client ?? createPlannerSupabaseClient();
+  const rows = await throwIfError(
+    supabase.from("sop_review_seats").select("sop_id, department_id, rasic, signer_id").in("sop_id", unique),
+  );
+  return (rows ?? []).map((row: Record<string, unknown>) => ({
+    sopId: String(row.sop_id),
+    departmentId: String(row.department_id),
+    rasic: row.rasic as SopRasic,
+    signerId: (row.signer_id as string | null) ?? null,
+  }));
+}
+
 /** Add or update a seat. Only legal while the SOP is a draft; the DB enforces the freeze. */
 export async function upsertSeat(seat: SopReviewSeat): Promise<void> {
   const supabase = createPlannerSupabaseClient();

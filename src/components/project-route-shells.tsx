@@ -97,7 +97,11 @@ export function PlannerRouteShell({
   );
 }
 
-export function MobilePhotoRouteShell({ projectId, initialGroups }: { projectId?: string } & ShellProps) {
+export function MobilePhotoRouteShell({
+  projectId,
+  initialGroups,
+  initialPlannerState,
+}: { projectId?: string; initialPlannerState?: PlannerState } & ShellProps) {
   return (
     <AuthProjectGate projectId={projectId} routeKind="mobile-photos" initialGroups={initialGroups}>
       {(project, onReady) => (
@@ -105,6 +109,7 @@ export function MobilePhotoRouteShell({ projectId, initialGroups }: { projectId?
           projectContext={project}
           projectId={project?.projectId ?? projectId}
           onReady={onReady}
+          initialPlannerState={initialPlannerState}
         />
       )}
     </AuthProjectGate>

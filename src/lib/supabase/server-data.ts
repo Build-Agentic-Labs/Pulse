@@ -1,5 +1,5 @@
-import { loadWorkspaceProjectGroups } from "@/domain/supabase-planner";
-import type { WorkspaceProjectGroup } from "@/domain/types";
+import { loadPlannerStateFromSupabase, loadWorkspaceProjectGroups } from "@/domain/supabase-planner";
+import type { PlannerState, WorkspaceProjectGroup } from "@/domain/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
@@ -29,5 +29,32 @@ export async function fetchInitialWorkspaceGroups(): Promise<WorkspaceProjectGro
     return await loadWorkspaceProjectGroups(data.user.id, supabase);
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * The planner route's combined first paint: workspace groups (shell) and the
+ * project's planner state (Main scenario) in one pass — one session
+ * verification, both reads in parallel under the caller's RLS scope. The state
+ * is painted through the planner's cache path, so the destructive shell
+ * autosave stays disabled until the client's own load confirms.
+ */
+export async function fetchInitialPlannerData(projectId: string): Promise<{
+  groups?: WorkspaceProjectGroup[];
+  plannerState?: PlannerState;
+}> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) {
+      return {};
+    }
+    const [groups, plannerState] = await Promise.all([
+      loadWorkspaceProjectGroups(data.user.id, supabase).catch(() => undefined),
+      loadPlannerStateFromSupabase(projectId, undefined, supabase).catch(() => undefined),
+    ]);
+    return { groups, plannerState: plannerState ?? undefined };
+  } catch {
+    return {};
   }
 }

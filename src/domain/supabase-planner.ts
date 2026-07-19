@@ -2688,6 +2688,30 @@ export async function deleteScenario(scenarioId: string): Promise<void> {
   await throwIfError(supabase.rpc("delete_scenario", { p_scenario_id: scenarioId }));
 }
 
+/**
+ * Data-loss tripwire (refactor plan §5). A full-state save hard-deletes every row
+ * absent from in-memory state across six tables, and the one credible data-loss
+ * chain is a TRUNCATED load: a partial read renders, the user edits, and the save
+ * would silently delete everything the read missed — no error anywhere, RLS
+ * permits all of it. This guard refuses any save that would delete more than half
+ * of an entity's existing rows (once there are enough rows for the fraction to
+ * mean anything). Genuine bulk deletions still work in smaller batches.
+ *
+ * Known limit: it guards row DELETION per entity, not per-task child replacement —
+ * a truncated steps array inside a surviving task is not detectable here.
+ */
+export function assertSaneStateDeletion(entity: string, existingCount: number, staleCount: number): void {
+  const MIN_ROWS_FOR_TRIPWIRE = 5;
+  const MAX_DELETE_FRACTION = 0.5;
+  if (existingCount >= MIN_ROWS_FOR_TRIPWIRE && staleCount > existingCount * MAX_DELETE_FRACTION) {
+    throw new Error(
+      `Refusing to save: this would delete ${staleCount} of ${existingCount} ${entity}. ` +
+        "A truncated planner load looks exactly like mass deletion, so large removals are blocked as a " +
+        "safety measure. If the deletion is intentional, remove items in smaller batches.",
+    );
+  }
+}
+
 export async function savePlannerStateToSupabase(state: PlannerState) {
   if (state.tasks.length === 0) {
     throw new Error("Refusing to save an empty Gantt. Add at least one task before saving.");
@@ -2742,6 +2766,14 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
   const staleCustomColumnIds = (existingCustomColumns ?? [])
     .map((column) => String(column.id))
     .filter((columnId) => !nextCustomColumnIds.includes(columnId));
+
+  // Tripwire BEFORE any write: refuse mass deletion that signals a truncated load.
+  assertSaneStateDeletion("tasks", (existingTasks ?? []).length, staleTaskIds.length);
+  assertSaneStateDeletion("stations", (existingStations ?? []).length, staleStationIds.length);
+  assertSaneStateDeletion("zones", (existingZones ?? []).length, staleZoneIds.length);
+  assertSaneStateDeletion("components", (existingComponents ?? []).length, staleComponentIds.length);
+  assertSaneStateDeletion("document types", (existingDocumentTypes ?? []).length, staleDocumentTypeIds.length);
+  assertSaneStateDeletion("custom columns", (existingCustomColumns ?? []).length, staleCustomColumnIds.length);
 
   await throwIfError(supabase.from("products").upsert(productRow(state.product)));
   await throwIfError(supabase.from("scenarios").upsert(scenarioRow(state.scenario)));
@@ -2861,6 +2893,14 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
   const staleCustomColumnIds = (existingCustomColumns ?? [])
     .map((column) => String(column.id))
     .filter((columnId) => !nextCustomColumnIds.includes(columnId));
+
+  // Tripwire BEFORE any write: refuse mass deletion that signals a truncated load.
+  assertSaneStateDeletion("tasks", (existingTasks ?? []).length, staleTaskIds.length);
+  assertSaneStateDeletion("stations", (existingStations ?? []).length, staleStationIds.length);
+  assertSaneStateDeletion("zones", (existingZones ?? []).length, staleZoneIds.length);
+  assertSaneStateDeletion("components", (existingComponents ?? []).length, staleComponentIds.length);
+  assertSaneStateDeletion("document types", (existingDocumentTypes ?? []).length, staleDocumentTypeIds.length);
+  assertSaneStateDeletion("custom columns", (existingCustomColumns ?? []).length, staleCustomColumnIds.length);
 
   await throwIfError(supabase.from("products").upsert(productRow(state.product)));
   await throwIfError(supabase.from("scenarios").upsert(scenarioRow(state.scenario)));

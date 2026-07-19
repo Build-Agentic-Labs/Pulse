@@ -5281,10 +5281,19 @@ export function LineWorkspace({
   projectId,
   projectContext,
   onReady,
+  initialPlannerState,
 }: {
   projectId?: string;
   projectContext?: PlannerProjectContext;
   onReady?: () => void;
+  /**
+   * Server-fetched planner state (refactor plan, Stage 5): painted through the
+   * same path as the IndexedDB cache — content on the first frame, destructive
+   * shell autosave stays DISABLED until this client's own remote load confirms
+   * the state (which also closes the realtime stale window). Consumed once, for
+   * the first project only.
+   */
+  initialPlannerState?: PlannerState;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -7150,9 +7159,18 @@ export function LineWorkspace({
     }, remaining);
   }
 
+  // Ref-captured so the load effect keys on [projectId] alone: a new RSC render of
+  // the same page must not restart the whole load flow just for a new prop identity.
+  const initialPlannerStateRef = useRef(initialPlannerState);
+  initialPlannerStateRef.current = initialPlannerState;
+  // Seed once per project: a project switch re-renders the server page with the new
+  // project's state, which is a legitimate fresh seed.
+  const consumedInitialPlannerStateForRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     let mounted = true;
     let remoteLoaded = false;
+    let serverSeededThisLoad = false;
     const currentProjectId = projectId ?? "";
     const initialUrlWorkspaceSnapshot = urlWorkspaceSnapshotRef.current;
     const isSwitchingProject = hasLoadedAnyProjectRef.current && loadedProjectIdRef.current !== currentProjectId;
@@ -7303,9 +7321,25 @@ export function LineWorkspace({
       setSaveState("saved");
     }
 
+    // Server-fetched state paints first when it matches this project (Stage 5).
+    // "cache" source: the destructive shell autosave stays disabled until the
+    // client's own remote load below confirms — that load also closes the window
+    // between the server snapshot and the realtime subscription.
+    const serverSeedState = initialPlannerStateRef.current;
+    if (
+      serverSeedState &&
+      consumedInitialPlannerStateForRef.current !== currentProjectId &&
+      String(serverSeedState.product.projectId ?? "") === currentProjectId
+    ) {
+      consumedInitialPlannerStateForRef.current = currentProjectId;
+      serverSeededThisLoad = true;
+      applyLoadedPlannerState(serverSeedState, "cache");
+    }
+
     void readCachedPlannerState(projectId)
       .then((cachedSnapshot) => {
-        if (!mounted || remoteLoaded || !cachedSnapshot) {
+        // Server-seeded data outranks any local cache snapshot — never repaint older data over it.
+        if (!mounted || remoteLoaded || !cachedSnapshot || serverSeededThisLoad) {
           return;
         }
 

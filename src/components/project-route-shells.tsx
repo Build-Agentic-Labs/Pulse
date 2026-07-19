@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { WorkspaceProjectGroup } from "@/domain/types";
+import type { PlannerState, WorkspaceProjectGroup } from "@/domain/types";
 import { AppLoadingShell } from "./app-flow-panels";
 import { AuthProjectGate } from "./auth-project-gate";
 
@@ -78,7 +78,11 @@ export function ProductionRouteShell({ initialGroups }: ShellProps = {}) {
   );
 }
 
-export function PlannerRouteShell({ projectId, initialGroups }: { projectId?: string } & ShellProps) {
+export function PlannerRouteShell({
+  projectId,
+  initialGroups,
+  initialPlannerState,
+}: { projectId?: string; initialPlannerState?: PlannerState } & ShellProps) {
   return (
     <AuthProjectGate projectId={projectId} routeKind="planner" initialGroups={initialGroups}>
       {(project, onReady) => (
@@ -86,6 +90,7 @@ export function PlannerRouteShell({ projectId, initialGroups }: { projectId?: st
           projectContext={project}
           projectId={project?.projectId ?? projectId}
           onReady={onReady}
+          initialPlannerState={initialPlannerState}
         />
       )}
     </AuthProjectGate>

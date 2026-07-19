@@ -14,13 +14,33 @@ type ListStatus = "loading" | "ready" | "error";
 
 
 /** The controlled, in-force SOP library, organized exactly like the All SOPs table. */
-export function EffectiveLibrary({ active = true }: { active?: boolean }) {
+export function EffectiveLibrary({
+  active = true,
+  initialSops,
+  initialDepartments,
+  initialWorkspaceId,
+}: {
+  active?: boolean;
+  /** Server-fetched first paint (Stage 5): seeds the list, then background-revalidates. */
+  initialSops?: SopListItem[];
+  initialDepartments?: Department[];
+  initialWorkspaceId?: string;
+}) {
   const { workspaceId } = useSopWorkspace();
-  const [sops, setSops] = useState<SopListItem[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [listStatus, setListStatus] = useState<ListStatus>("loading");
+  const seededFromServer =
+    initialSops !== undefined &&
+    initialDepartments !== undefined &&
+    initialWorkspaceId !== undefined &&
+    initialWorkspaceId === workspaceId;
+  const [sops, setSops] = useState<SopListItem[]>(
+    seededFromServer ? initialSops.filter((sop) => sop.status === "effective") : [],
+  );
+  const [departments, setDepartments] = useState<Department[]>(seededFromServer ? initialDepartments : []);
+  const [listStatus, setListStatus] = useState<ListStatus>(seededFromServer ? "ready" : "loading");
   const [error, setError] = useState("");
-  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
+    seededFromServer ? { workspaceId, loadedAt: 1 } : { loadedAt: 0 },
+  );
 
   const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) {

@@ -4,16 +4,15 @@ import { FileText, Inbox, Loader2, ShieldCheck } from "lucide-react";
 import { formatDate } from "@/domain/formatting";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listDepartments, fetchMyDeptRoles } from "@/lib/departments/store";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { SOP_STATUS_LABELS, type SopStatus } from "@/domain/sop/schema";
-import { listSops, type SopListItem } from "@/lib/sop/store";
 import {
-  listMySignaturesFor,
-  listMySeats,
-  type MySeatItem,
-} from "@/lib/sop/review";
-import { hasSubmittedSopReview, listSopReviewSubmissions } from "@/lib/sop/review-annotations";
+  EMPTY_QUEUE as EMPTY,
+  fetchReviewQueueData,
+  type PendingSeat,
+  type QualityQueueItem,
+  type QueueData,
+} from "@/lib/sop/review-queue-data";
 import { useSopWorkspace } from "./sop-workspace-provider";
 import { SopFinalApprovalWorkspace } from "./sop-final-approval-workspace";
 import { SopReviewWorkspace } from "./sop-review-workspace";
@@ -27,52 +26,37 @@ function statusChipClass(status: SopStatus): string {
 
 type ListStatus = "loading" | "ready" | "error";
 
-/** A seat awaiting this user's signature, with the department it speaks for. */
-interface PendingSeat extends MySeatItem {
-  departmentCode: string;
-}
-
-interface QualityQueueItem extends SopListItem {
-  departmentCode: string;
-  departmentName: string;
-}
-
-interface QueueData {
-  /** Seats I hold that are unsigned against the SOP's current content and cycle. */
-  awaitingMe: PendingSeat[];
-  /** Formal approvals requested after every draft reviewer accepted the content. */
-  finalApprovals: PendingSeat[];
-  /** SOPs I authored that a reviewer has sent back. */
-  sentBack: SopListItem[];
-  /** Department-approved SOPs waiting on the Quality gate. Only shown to Quality approvers. */
-  awaitingQuality: QualityQueueItem[];
-  /** The workspace-wide board this page used to be. Kept: nothing that was visible is removed. */
-  allInFlight: SopListItem[];
-  isQualityApprover: boolean;
-}
-
-const EMPTY: QueueData = {
-  awaitingMe: [],
-  finalApprovals: [],
-  sentBack: [],
-  awaitingQuality: [],
-  allInFlight: [],
-  isQualityApprover: false,
-};
+// PendingSeat / QualityQueueItem / QueueData / EMPTY_QUEUE and the queue assembly
+// live in @/lib/sop/review-queue-data, shared with the server page (Stage 5).
 
 /**
  * The reviewer's own queue, not a workspace board. "Notification" here means the SOP shows up
  * where the person already looks — derived from the roster, so there is no notifications table
  * to keep in sync with reality.
  */
-export function ReviewQueue({ active = true }: { active?: boolean }) {
+export function ReviewQueue({
+  active = true,
+  initialQueue,
+  initialWorkspaceId,
+}: {
+  active?: boolean;
+  /** Server-fetched first paint (Stage 5): seeds the queue, then background-revalidates. */
+  initialQueue?: QueueData;
+  initialWorkspaceId?: string;
+}) {
   const { workspaceId } = useSopWorkspace();
-  const [data, setData] = useState<QueueData>(EMPTY);
-  const [listStatus, setListStatus] = useState<ListStatus>("loading");
+  const seededFromServer =
+    initialQueue !== undefined && initialWorkspaceId !== undefined && initialWorkspaceId === workspaceId;
+  const [data, setData] = useState<QueueData>(seededFromServer ? initialQueue : EMPTY);
+  const [listStatus, setListStatus] = useState<ListStatus>(seededFromServer ? "ready" : "loading");
   const [error, setError] = useState("");
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [selectedFinalApproval, setSelectedFinalApproval] = useState<PendingSeat | null>(null);
-  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
+  // Server-seeded data marks itself loaded-but-stale (loadedAt: 1): the mount effect
+  // refreshes in the background instead of flashing a loader.
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
+    seededFromServer ? { workspaceId, loadedAt: 1 } : { loadedAt: 0 },
+  );
 
   const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) {
@@ -96,76 +80,7 @@ export function ReviewQueue({ active = true }: { active?: boolean }) {
         return;
       }
 
-      const [seats, sops, departments, deptRoles] = await Promise.all([
-        listMySeats(workspaceId, userId),
-        listSops(workspaceId),
-        listDepartments(workspaceId),
-        fetchMyDeptRoles(workspaceId),
-      ]);
-
-      const codeById = new Map(departments.map((department) => [department.id, department.code]));
-      const departmentById = new Map(departments.map((department) => [department.id, department]));
-      const isQualityApprover = departments.some(
-        (department) => department.isQualityGate && deptRoles.get(department.id) === "approver",
-      );
-
-      const inReviewSeats = seats.filter((seat) => seat.status === "in_review" && seat.rasic !== "informed");
-      const finalApprovalSeats = inReviewSeats.filter(
-        (seat) =>
-          (seat.rasic === "responsible" || seat.rasic === "accountable") &&
-          Boolean(seat.finalApprovalRequestedAt) &&
-          seat.finalApprovalContentHash === seat.contentHash,
-      );
-      const finalApprovalSopIds = new Set(finalApprovalSeats.map((seat) => seat.sopId));
-      const draftReviewSeats = inReviewSeats.filter((seat) => !finalApprovalSopIds.has(seat.sopId));
-      const [mySubmissions, mySignatures] = await Promise.all([
-        listSopReviewSubmissions(draftReviewSeats.map((seat) => seat.sopId)),
-        listMySignaturesFor(finalApprovalSeats.map((seat) => seat.sopId), userId),
-      ]);
-
-      const awaitingMe: PendingSeat[] = draftReviewSeats
-        .filter((seat) => !hasSubmittedSopReview(
-          mySubmissions,
-          seat.sopId,
-          seat.reviewCycle,
-          userId,
-          seat.contentHash,
-        ))
-        .map((seat) => ({ ...seat, departmentCode: codeById.get(seat.departmentId) ?? "—" }));
-
-      const finalApprovals: PendingSeat[] = finalApprovalSeats
-        .filter((seat) => !mySignatures.some(
-          (signature) =>
-            signature.meaning === "dept_approval" &&
-            signature.seatDepartmentId === seat.departmentId &&
-            signature.reviewCycle === seat.reviewCycle &&
-            signature.signedContentHash === (seat.contentHash ?? ""),
-        ))
-        .map((seat) => ({ ...seat, departmentCode: codeById.get(seat.departmentId) ?? "—" }));
-
-      setData({
-        awaitingMe,
-        finalApprovals,
-        // Mine, sent back by a reviewer. rejectedReason is the DB's mirror of the objection
-        // signature; a recall clears it, so a recalled SOP does not land here.
-        sentBack: sops.filter(
-          (sop) => sop.status === "draft" && sop.createdBy === userId && Boolean(sop.rejectedReason),
-        ),
-        awaitingQuality: isQualityApprover
-          ? sops
-              .filter((sop) => sop.status === "approved")
-              .map((sop) => {
-                const department = sop.departmentId ? departmentById.get(sop.departmentId) : undefined;
-                return {
-                  ...sop,
-                  departmentCode: department?.code ?? "—",
-                  departmentName: department?.name ?? "Unknown department",
-                };
-              })
-          : [],
-        allInFlight: sops.filter((sop) => sop.status === "in_review" || sop.status === "approved"),
-        isQualityApprover,
-      });
+      setData(await fetchReviewQueueData(workspaceId, userId));
       setError("");
       setListStatus("ready");
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };

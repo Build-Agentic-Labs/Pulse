@@ -4,6 +4,10 @@ import { Archive, Building2, FileText, Inbox, Library } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import type { Department } from "@/domain/departments";
+import type { HistoricalSopRevision } from "@/lib/sop/review";
+import type { QueueData } from "@/lib/sop/review-queue-data";
+import type { SopListItem } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
 import { canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
@@ -54,14 +58,19 @@ function parseTab(raw: string | null, manage: boolean): Tab {
  * the same model as the planner (Product) space. The editor remains its own route and shares
  * this section's provider (mounted in app/sops/layout.tsx).
  */
-export function SopWorkspace({
-  initialSops,
-  initialWorkspaceId,
-}: {
-  /** Server-fetched SOP list for the all-SOPs tab; see app/sops/page.tsx. */
-  initialSops?: import("@/lib/sop/store").SopListItem[];
-  initialWorkspaceId?: string;
-} = {}) {
+/**
+ * Server-fetched first paint for whichever tab the URL addressed (Stage 5): the
+ * server page fetches ONE tab's data and the matching child seeds from it. Only
+ * type imports cross the boundary here — runtime values imported from a client
+ * module into a server component become client-reference proxies.
+ */
+export type SopWorkspaceInitialData =
+  | { tab: "all"; workspaceId: string; sops: SopListItem[] }
+  | { tab: "library"; workspaceId: string; sops: SopListItem[]; departments: Department[] }
+  | { tab: "retired"; workspaceId: string; sops: SopListItem[]; revisions: HistoricalSopRevision[] }
+  | { tab: "review"; workspaceId: string; queue: QueueData };
+
+export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } = {}) {
   const { role } = useSopWorkspace();
   const manage = canManage(role);
   const params = useSearchParams();
@@ -92,17 +101,41 @@ export function SopWorkspace({
     <SopShell sidebar={sidebar} crumb={CRUMB[tab]}>
       <div hidden={tab !== "all"} aria-hidden={tab !== "all"}>
         {mountedTabs.has("all") ? (
-          <SopList active={tab === "all"} initialSops={initialSops} initialWorkspaceId={initialWorkspaceId} />
+          <SopList
+            active={tab === "all"}
+            initialSops={initial?.tab === "all" ? initial.sops : undefined}
+            initialWorkspaceId={initial?.tab === "all" ? initial.workspaceId : undefined}
+          />
         ) : null}
       </div>
       <div hidden={tab !== "review"} aria-hidden={tab !== "review"}>
-        {mountedTabs.has("review") ? <ReviewQueue active={tab === "review"} /> : null}
+        {mountedTabs.has("review") ? (
+          <ReviewQueue
+            active={tab === "review"}
+            initialQueue={initial?.tab === "review" ? initial.queue : undefined}
+            initialWorkspaceId={initial?.tab === "review" ? initial.workspaceId : undefined}
+          />
+        ) : null}
       </div>
       <div hidden={tab !== "library"} aria-hidden={tab !== "library"}>
-        {mountedTabs.has("library") ? <EffectiveLibrary active={tab === "library"} /> : null}
+        {mountedTabs.has("library") ? (
+          <EffectiveLibrary
+            active={tab === "library"}
+            initialSops={initial?.tab === "library" ? initial.sops : undefined}
+            initialDepartments={initial?.tab === "library" ? initial.departments : undefined}
+            initialWorkspaceId={initial?.tab === "library" ? initial.workspaceId : undefined}
+          />
+        ) : null}
       </div>
       <div hidden={tab !== "retired"} aria-hidden={tab !== "retired"}>
-        {mountedTabs.has("retired") ? <RetiredSops active={tab === "retired"} /> : null}
+        {mountedTabs.has("retired") ? (
+          <RetiredSops
+            active={tab === "retired"}
+            initialSops={initial?.tab === "retired" ? initial.sops : undefined}
+            initialRevisions={initial?.tab === "retired" ? initial.revisions : undefined}
+            initialWorkspaceId={initial?.tab === "retired" ? initial.workspaceId : undefined}
+          />
+        ) : null}
       </div>
       <div hidden={tab !== "departments"} aria-hidden={tab !== "departments"}>
         {mountedTabs.has("departments") ? <DepartmentsAdmin active={tab === "departments"} /> : null}

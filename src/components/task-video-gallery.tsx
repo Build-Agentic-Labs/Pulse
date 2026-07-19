@@ -183,7 +183,7 @@ export function TaskVideoGallery({
             </button>
           </div>
           {resolveMediaSource(active.storagePath, active.videoUrl) ? (
-            // eslint-disable-next-line jsx-a11y/media-has-caption
+             
             <video
               src={resolveMediaSource(active.storagePath, active.videoUrl)}
               poster={active.thumbnailUrl}

@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/database.types";
 
 /**
+ * Next 16 "proxy" (the renamed middleware convention).
  * Refreshes the Supabase auth cookies on navigation (refactor plan, Stage 3).
  * getUser() both verifies the token and rotates it when expired; the setAll
  * dance writes the rotated cookies onto BOTH the forwarded request (so anything
@@ -13,7 +14,7 @@ import type { Database } from "@/lib/database.types";
  * via requireApiUser (bearer token from the browser or the SolidWorks plugin,
  * with a cookie fallback) and must not depend on middleware ordering.
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

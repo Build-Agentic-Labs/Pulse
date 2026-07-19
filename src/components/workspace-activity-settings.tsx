@@ -144,7 +144,7 @@ export function WorkspaceActivitySettings({ project }: { project?: PlannerProjec
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [project?.workspaceId, supabase]);
 
   async function loadMore() {

@@ -1,6 +1,36 @@
 "use client";
 
+import { type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { resolveBulletEnter } from "@/domain/instruction-bullets";
 import { ClearableNumberInput } from "../clearable-number-input";
+
+export type ProcedureDraftFieldName = "instruction" | "name";
+
+function applyTextareaCursor(textarea: HTMLTextAreaElement, cursorPosition: number) {
+  window.requestAnimationFrame(() => {
+    textarea.setSelectionRange(cursorPosition, cursorPosition);
+  });
+}
+
+export function handleInstructionBulletKeyDown(
+  event: ReactKeyboardEvent<HTMLTextAreaElement>,
+  onValue: (value: string) => void,
+) {
+  if (event.key !== "Enter" || event.shiftKey) {
+    return;
+  }
+
+  const textarea = event.currentTarget;
+  const nextValue = resolveBulletEnter(textarea.value, textarea.selectionStart, textarea.selectionEnd);
+
+  if (!nextValue) {
+    return;
+  }
+
+  event.preventDefault();
+  onValue(nextValue.value);
+  applyTextareaCursor(textarea, nextValue.selectionStart);
+}
 
 export type ProductNumberField =
   | "targetManHours"

@@ -1,8 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { WorkspaceProjectGroup } from "@/domain/types";
 import { AppLoadingShell } from "./app-flow-panels";
 import { AuthProjectGate } from "./auth-project-gate";
+
+/** Server-fetched workspace groups forwarded into the gate (Stage 5). */
+type ShellProps = { initialGroups?: WorkspaceProjectGroup[] };
 
 function RouteChunkLoading() {
   return <AppLoadingShell title="Loading workspace" />;
@@ -34,23 +38,26 @@ const SpacePlaceholder = dynamic(
 );
 
 /** The post-login landing page: company-space cards instead of an auto-redirect. */
-export function HomeRouteShell() {
+export function HomeRouteShell({ initialGroups }: ShellProps = {}) {
   return (
-    <AuthProjectGate renderHome={(home) => <CompanyDashboard {...home} />}>{() => null}</AuthProjectGate>
+    <AuthProjectGate initialGroups={initialGroups} renderHome={(home) => <CompanyDashboard {...home} />}>
+      {() => null}
+    </AuthProjectGate>
   );
 }
 
-export function PlanningRouteShell() {
+export function PlanningRouteShell({ initialGroups }: ShellProps = {}) {
   return (
-    <PlanningRoute>
+    <PlanningRoute initialGroups={initialGroups}>
       <WorkOrderBoard />
     </PlanningRoute>
   );
 }
 
-export function ProductionRouteShell() {
+export function ProductionRouteShell({ initialGroups }: ShellProps = {}) {
   return (
     <AuthProjectGate
+      initialGroups={initialGroups}
       renderHome={() => (
         <SpacePlaceholder
           space="production"
@@ -71,9 +78,9 @@ export function ProductionRouteShell() {
   );
 }
 
-export function PlannerRouteShell({ projectId }: { projectId?: string }) {
+export function PlannerRouteShell({ projectId, initialGroups }: { projectId?: string } & ShellProps) {
   return (
-    <AuthProjectGate projectId={projectId} routeKind="planner">
+    <AuthProjectGate projectId={projectId} routeKind="planner" initialGroups={initialGroups}>
       {(project, onReady) => (
         <LineWorkspace
           projectContext={project}
@@ -85,9 +92,9 @@ export function PlannerRouteShell({ projectId }: { projectId?: string }) {
   );
 }
 
-export function MobilePhotoRouteShell({ projectId }: { projectId?: string }) {
+export function MobilePhotoRouteShell({ projectId, initialGroups }: { projectId?: string } & ShellProps) {
   return (
-    <AuthProjectGate projectId={projectId} routeKind="mobile-photos">
+    <AuthProjectGate projectId={projectId} routeKind="mobile-photos" initialGroups={initialGroups}>
       {(project, onReady) => (
         <MobilePhotoPortal
           projectContext={project}

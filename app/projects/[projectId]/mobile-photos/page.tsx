@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { MobilePhotoRouteShell } from "@/components/project-route-shells";
+import { fetchInitialWorkspaceGroups } from "@/lib/supabase/server-data";
 
 export const metadata: Metadata = {
   title: "Step Photo Capture | Pulse",
@@ -7,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default async function ProjectMobilePhotosPage({ params }: { params: Promise<{ projectId: string }> }) {
-  const { projectId } = await params;
+  const [{ projectId }, initialGroups] = await Promise.all([params, fetchInitialWorkspaceGroups()]);
 
-  return <MobilePhotoRouteShell projectId={projectId} />;
+  return <MobilePhotoRouteShell projectId={projectId} initialGroups={initialGroups} />;
 }

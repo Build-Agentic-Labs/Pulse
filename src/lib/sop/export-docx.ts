@@ -371,7 +371,11 @@ async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
   blocks.push(sectionHeading("Responsible Person(s)"), bodyText(sop.responsiblePersons.filter(Boolean).join("; ")));
   blocks.push(
     sectionHeading("References"),
-    ...bulletList([...sop.linkedSops.map(linkedSopLabel), ...sop.references]),
+    ...bulletList([
+      ...sop.linkedSops.map(linkedSopLabel),
+      ...(sop.referenceDocs ?? []).map((doc) => doc.name),
+      ...sop.references,
+    ]),
   );
   blocks.push(sectionHeading("Measurement"), ...bulletList(sop.measurements));
 

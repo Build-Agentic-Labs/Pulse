@@ -34,16 +34,18 @@ describe("exportSopToDocx — Procedure flowchart", () => {
 });
 
 describe("exportSopToDocx — References", () => {
-  it("renders linked SOPs ahead of the free-text references", async () => {
+  it("renders linked SOPs, then uploaded documents, then free-text references", async () => {
     const sop = applySampleData(createEmptySop("verify", "2026-01-01T00:00:00.000Z"));
     sop.linkedSops = [{ sopId: "other", sopNumber: "SOP-QA-002", title: "Document Control" }];
+    sop.referenceDocs = [{ id: "refdoc-1", name: "Supplier Quality Agreement.pdf" }];
     const blob = await exportSopToDocx(sop);
     const xml = new PizZip(Buffer.from(await blob.arrayBuffer())).file("word/document.xml")!.asText();
 
-    expect(xml).toContain("SOP-QA-002 — Document Control");
-    // Free-text references from the sample data still render after the linked SOPs.
     const linked = xml.indexOf("SOP-QA-002 — Document Control");
+    const uploaded = xml.indexOf("Supplier Quality Agreement.pdf");
     const freeText = xml.indexOf("Quality Manual QM-01");
-    expect(freeText).toBeGreaterThan(linked);
+    expect(linked).toBeGreaterThan(-1);
+    expect(uploaded).toBeGreaterThan(linked);
+    expect(freeText).toBeGreaterThan(uploaded);
   });
 });

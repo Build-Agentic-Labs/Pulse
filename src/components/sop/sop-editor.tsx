@@ -18,7 +18,7 @@ import {
 import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
-import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopStatus } from "@/domain/sop/schema";
+import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
 import { applySampleData } from "@/domain/sop/sample";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
@@ -125,7 +125,14 @@ function stepFilled(sop: Sop, id: StepId): boolean {
     case "document":
       return Boolean(sop.meta.sopNumber || sop.meta.title);
     case "overview":
-      return Boolean(sop.purpose || sop.scope || sop.definitions.length || sop.references.length);
+      return Boolean(
+        sop.purpose ||
+          sop.scope ||
+          sop.definitions.length ||
+          sop.references.length ||
+          sop.linkedSops.length ||
+          sop.referenceDocs.length,
+      );
     case "procedure":
       return Boolean(
         sop.responsiblePersons.length ||
@@ -134,7 +141,7 @@ function stepFilled(sop: Sop, id: StepId): boolean {
           sop.procedure.activities.length,
       );
     case "annexes":
-      return Boolean(sop.annexes.length || sop.linkedSops.length || sop.changeHistory.length);
+      return Boolean(sop.annexes.length || sop.changeHistory.length);
     case "approvals":
       return sop.approvals.some((row) => row.name || row.position || row.date);
     case "draftReview":
@@ -170,14 +177,21 @@ function formatReviewDate(value: string): string {
 function withAnnexIds(sop: Sop): Sop {
   return {
     ...sop,
-    // Documents authored before the linked-SOPs feature (e.g. restored local drafts)
-    // may lack the key entirely; the editor requires an array.
+    // Documents authored before the linked-SOPs / reference-docs features (e.g.
+    // restored local drafts) may lack the keys entirely; the editor requires arrays.
     linkedSops: Array.isArray(sop.linkedSops) ? sop.linkedSops : [],
+    referenceDocs: Array.isArray(sop.referenceDocs) ? sop.referenceDocs : [],
     annexes: sop.annexes.map((annex, index) => ({
       ...annex,
       id: annex.id || `${sop.id}-annex-${index}`,
     })),
   };
+}
+
+function newReferenceDocId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? `refdoc-${crypto.randomUUID()}`
+    : `refdoc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 const SOP_FIELD_EXAMPLES: Record<string, string> = {
@@ -288,9 +302,11 @@ export function SopEditor({
   const [fieldHint, setFieldHint] = useState<FieldHint | null>(null);
   const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
   const [annexFileError, setAnnexFileError] = useState("");
-  // Workspace SOPs offered by the "Referenced SOPs" picker; loaded lazily on the annexes step.
+  // Workspace SOPs offered by the References picker; loaded lazily on the overview step.
   const [linkableSops, setLinkableSops] = useState<SopListItem[] | undefined>(undefined);
   const [linkableSopsError, setLinkableSopsError] = useState("");
+  const [referenceDocError, setReferenceDocError] = useState("");
+  const [uploadingReferenceDoc, setUploadingReferenceDoc] = useState(false);
   const [uploadingAnnexId, setUploadingAnnexId] = useState<string | null>(null);
   const [annexUploadStatus, setAnnexUploadStatus] = useState<AnnexUploadStatus | null>(null);
   const [approvalDepartments, setApprovalDepartments] = useState<Department[]>([]);
@@ -586,10 +602,10 @@ export function SopEditor({
   );
   const step = steps[stepIndex] ?? steps[0];
 
-  // Load the workspace SOP list the first time the annexes step (which hosts the
-  // "Referenced SOPs" picker) becomes active; undefined = not loaded yet.
+  // Load the workspace SOP list the first time the overview step (which hosts the
+  // References picker) becomes active; undefined = not loaded yet.
   useEffect(() => {
-    if (step.id !== "annexes" || !workspaceId || linkableSops !== undefined) return;
+    if (step.id !== "overview" || !workspaceId || linkableSops !== undefined) return;
     let cancelled = false;
     listSops(workspaceId)
       .then((items) => {
@@ -604,6 +620,13 @@ export function SopEditor({
       cancelled = true;
     };
   }, [step.id, workspaceId, linkableSops]);
+
+  // Reference-doc uploads share the annex-file table (keyed by the reference row's id
+  // in the annex_id slot); this map serves the References UI's open/remove actions.
+  const referenceFileByDocId = useMemo(
+    () => new Map(annexFiles.map((file) => [file.annexId, file] as const)),
+    [annexFiles],
+  );
 
   const stepReviewAnnotations = useMemo(() => {
     const categories = STEP_REVIEW_CATEGORIES[step.id] ?? [];
@@ -915,6 +938,66 @@ export function SopEditor({
       setAnnexFiles((current) => current.filter((item) => item.id !== file.id));
     } catch (error) {
       setAnnexFileError(error instanceof Error ? error.message : "Could not remove the form.");
+    }
+  }
+
+  async function handleReferenceDocUpload(file: File) {
+    if (!workspaceId) {
+      setReferenceDocError("Select an organization before uploading.");
+      return;
+    }
+    setReferenceDocError("");
+    setUploadingReferenceDoc(true);
+    try {
+      // The file row's sop_id FK needs the SOP to exist server-side; persist() closes over
+      // this render's document, so it runs BEFORE the new reference row is added to state.
+      if (!hasPersistedSop && !(await persist())) {
+        setReferenceDocError(
+          "Upload paused because the SOP could not be saved. Resolve the save warning above, then try again.",
+        );
+        return;
+      }
+      const docId = newReferenceDocId();
+      const saved = await uploadSopAnnexFile({ workspaceId, sopId: sop.id, annexId: docId, file });
+      setAnnexFiles((current) => [...current.filter((item) => item.annexId !== docId), saved]);
+      // Added after the upload succeeds; autosave persists the document row.
+      update((current) => ({
+        referenceDocs: [...current.referenceDocs, { id: docId, name: file.name }],
+      }));
+    } catch (error) {
+      setReferenceDocError(error instanceof Error ? error.message : "Could not upload the document.");
+    } finally {
+      setUploadingReferenceDoc(false);
+    }
+  }
+
+  async function handleReferenceDocOpen(doc: SopReferenceDoc) {
+    const file = referenceFileByDocId.get(doc.id);
+    if (!file) {
+      setReferenceDocError("This document's file is missing. Remove the row and upload it again.");
+      return;
+    }
+    setReferenceDocError("");
+    try {
+      await openSopAnnexFile(file);
+    } catch (error) {
+      setReferenceDocError(error instanceof Error ? error.message : "Could not open the document.");
+    }
+  }
+
+  async function handleReferenceDocRemove(doc: SopReferenceDoc) {
+    setReferenceDocError("");
+    const file = referenceFileByDocId.get(doc.id);
+    try {
+      if (file) {
+        await removeSopAnnexFile(file);
+        setAnnexFiles((current) => current.filter((item) => item.id !== file.id));
+      }
+      update((current) => ({
+        referenceDocs: current.referenceDocs.filter((item) => item.id !== doc.id),
+      }));
+    } catch (error) {
+      setReferenceDocError(error instanceof Error ? error.message : "Could not remove the document.");
     }
   }
 
@@ -1505,12 +1588,38 @@ export function SopEditor({
                   />
                 </Section>
                 <Section title="References" reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
-                  <StringListEditor
-                    items={sop.references}
-                    placeholder="e.g. ISO 9001:2015"
-                    disabled={!canEdit}
-                    onChange={(references) => update({ references })}
-                  />
+                  <div className="space-y-5">
+                    <div>
+                      <p className="ui-field-label mb-2">Standards &amp; external references</p>
+                      <StringListEditor
+                        items={sop.references}
+                        placeholder="e.g. ISO 9001:2015"
+                        disabled={!canEdit}
+                        onChange={(references) => update({ references })}
+                      />
+                    </div>
+                    <div>
+                      <p className="ui-field-label mb-2">Referenced documents</p>
+                      <p className="mb-2 text-xs text-ink-tertiary">
+                        Link another SOP from this workspace, or upload a document. Both render in the
+                        References section of the printed SOP.
+                      </p>
+                      <ReferenceLibraryEditor
+                        links={sop.linkedSops}
+                        docs={sop.referenceDocs}
+                        files={referenceFileByDocId}
+                        options={(linkableSops ?? []).filter((item) => item.id !== sop.id)}
+                        loading={linkableSops === undefined && !linkableSopsError}
+                        error={linkableSopsError || referenceDocError}
+                        disabled={!canEdit}
+                        uploading={uploadingReferenceDoc}
+                        onChangeLinks={(linkedSops) => update({ linkedSops })}
+                        onUpload={(file) => void handleReferenceDocUpload(file)}
+                        onOpenDoc={(doc) => void handleReferenceDocOpen(doc)}
+                        onRemoveDoc={(doc) => void handleReferenceDocRemove(doc)}
+                      />
+                    </div>
+                  </div>
                 </Section>
               </>
             ) : null}
@@ -1589,20 +1698,6 @@ export function SopEditor({
                     onRemoveRow={(index) => void handleAnnexRowRemove(index)}
                   />
                   {annexFileError ? <p className="mt-2 text-xs text-danger">{annexFileError}</p> : null}
-                </Section>
-                <Section title="Referenced SOPs">
-                  <p className="mb-3 text-xs text-ink-tertiary">
-                    Link related SOPs from this workspace. They render under the References section of the
-                    document alongside the free-text references from the Overview step.
-                  </p>
-                  <LinkedSopsEditor
-                    links={sop.linkedSops}
-                    options={(linkableSops ?? []).filter((item) => item.id !== sop.id)}
-                    loading={linkableSops === undefined && !linkableSopsError}
-                    error={linkableSopsError}
-                    disabled={!canEdit}
-                    onChange={(linkedSops) => update({ linkedSops })}
-                  />
                 </Section>
                 <Section title="Change history" reviewAttention={reviewCategoriesNeedingAttention.has("history")}>
                   <ChangeHistoryEditor
@@ -2177,21 +2272,34 @@ function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
 // List editors
 // ---------------------------------------------------------------------------
 
-function LinkedSopsEditor({
+function ReferenceLibraryEditor({
   links,
+  docs,
+  files,
   options,
   loading,
   error,
   disabled = false,
-  onChange,
+  uploading = false,
+  onChangeLinks,
+  onUpload,
+  onOpenDoc,
+  onRemoveDoc,
 }: {
   links: SopLinkedSop[];
+  docs: SopReferenceDoc[];
+  /** Reference-doc id -> uploaded file (for open/remove and the "missing file" state). */
+  files: Map<string, SopAnnexFile>;
   /** Workspace SOPs offered by the picker (the current SOP already excluded). */
   options: SopListItem[];
   loading: boolean;
   error: string;
   disabled?: boolean;
-  onChange: (links: SopLinkedSop[]) => void;
+  uploading?: boolean;
+  onChangeLinks: (links: SopLinkedSop[]) => void;
+  onUpload: (file: File) => void;
+  onOpenDoc: (doc: SopReferenceDoc) => void;
+  onRemoveDoc: (doc: SopReferenceDoc) => void;
 }) {
   const available = options.filter((option) => !links.some((link) => link.sopId === option.id));
 
@@ -2199,7 +2307,7 @@ function LinkedSopsEditor({
     <div className="space-y-2">
       {links.map((link) => (
         <div key={link.sopId} className="flex min-h-9 items-center gap-2">
-          <span className="ui-chip shrink-0">{link.sopNumber || "—"}</span>
+          <span className="ui-chip shrink-0">{link.sopNumber || "SOP"}</span>
           <Link
             href={`/sops/${link.sopId}`}
             className="min-w-0 flex-1 truncate text-sm text-ink hover:underline"
@@ -2210,42 +2318,96 @@ function LinkedSopsEditor({
           {disabled ? null : (
             <RowDeleteButton
               title="Remove SOP reference"
-              onClick={() => onChange(links.filter((item) => item.sopId !== link.sopId))}
+              onClick={() => onChangeLinks(links.filter((item) => item.sopId !== link.sopId))}
             />
           )}
         </div>
       ))}
 
-      {links.length === 0 ? (
-        <p className="text-xs text-ink-tertiary">No SOPs referenced yet.</p>
+      {docs.map((doc) => {
+        const file = files.get(doc.id);
+        return (
+          <div key={doc.id} className="flex min-h-9 items-center gap-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center text-ink-tertiary">
+              <Paperclip size={14} />
+            </span>
+            <button
+              type="button"
+              className="min-w-0 flex-1 truncate text-left text-sm text-ink hover:underline"
+              title={file ? `Open ${doc.name}` : `${doc.name} (file missing)`}
+              onClick={() => onOpenDoc(doc)}
+            >
+              {doc.name}
+              {file ? (
+                <span className="ml-2 text-[11px] text-ink-tertiary">{formatFileSize(file.sizeBytes)}</span>
+              ) : (
+                <span className="ml-2 text-[11px] text-danger">file missing</span>
+              )}
+            </button>
+            {disabled ? null : (
+              <RowDeleteButton title="Remove document reference" onClick={() => onRemoveDoc(doc)} />
+            )}
+          </div>
+        );
+      })}
+
+      {links.length === 0 && docs.length === 0 ? (
+        <p className="text-xs text-ink-tertiary">No documents referenced yet.</p>
       ) : null}
 
       {error ? <p className="text-xs text-danger">{error}</p> : null}
 
-      {disabled ? null : loading ? (
-        <div className="flex min-h-9 items-center gap-2 text-xs text-ink-tertiary">
-          <Loader2 size={13} className="animate-spin" /> Loading workspace SOPs…
+      {disabled ? null : (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <div className="min-w-56">
+            {loading ? (
+              <div className="flex min-h-9 items-center gap-2 text-xs text-ink-tertiary">
+                <Loader2 size={13} className="animate-spin" /> Loading workspace SOPs…
+              </div>
+            ) : available.length ? (
+              <ThemedSelect
+                ariaLabel="Add SOP reference"
+                value=""
+                placeholder="Add SOP reference…"
+                options={available.map((option) => ({
+                  value: option.id,
+                  label: `${option.sopNumber || "—"} · ${option.title || "Untitled SOP"}`,
+                }))}
+                onChange={(sopId) => {
+                  const target = available.find((option) => option.id === sopId);
+                  if (!target) return;
+                  onChangeLinks([...links, { sopId: target.id, sopNumber: target.sopNumber, title: target.title }]);
+                }}
+              />
+            ) : (
+              <p className="text-xs text-ink-tertiary">
+                {options.length ? "Every workspace SOP is already referenced." : "No other SOPs to link yet."}
+              </p>
+            )}
+          </div>
+          <label
+            className={`ui-btn-ghost inline-flex h-9 items-center gap-2 px-3 ${
+              uploading ? "pointer-events-none cursor-wait opacity-60" : "cursor-pointer"
+            }`}
+            aria-disabled={uploading}
+          >
+            {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+            Upload document
+            <input
+              type="file"
+              className="sr-only"
+              aria-label="Upload reference document"
+              accept={SOP_ANNEX_FILE_ACCEPT}
+              disabled={uploading}
+              onChange={(event) => {
+                const selected = event.target.files?.[0];
+                if (selected) onUpload(selected);
+                event.target.value = "";
+              }}
+            />
+          </label>
         </div>
-      ) : available.length ? (
-        <ThemedSelect
-          ariaLabel="Add SOP reference"
-          value=""
-          placeholder="Add SOP reference…"
-          options={available.map((option) => ({
-            value: option.id,
-            label: `${option.sopNumber || "—"} · ${option.title || "Untitled SOP"}`,
-          }))}
-          onChange={(sopId) => {
-            const target = available.find((option) => option.id === sopId);
-            if (!target) return;
-            onChange([...links, { sopId: target.id, sopNumber: target.sopNumber, title: target.title }]);
-          }}
-        />
-      ) : !error ? (
-        <p className="text-xs text-ink-tertiary">
-          {options.length ? "Every workspace SOP is already referenced." : "No other SOPs exist in this workspace yet."}
-        </p>
-      ) : null}
+      )}
     </div>
   );
 }

@@ -264,6 +264,13 @@ export function SopPrintPreview({
   approvalRefreshKey?: number;
   revealSignatureId?: string | null;
 }) {
+  // Reference-doc uploads share the annex-file table; they belong to the References
+  // list (rendered by name), not to the attached-forms appendix pages, so strip them
+  // before any page-count or appendix logic sees them.
+  const formFiles = useMemo(() => {
+    const referenceDocIds = new Set((sop.referenceDocs ?? []).map((doc) => doc.id));
+    return annexFiles.filter((file) => !referenceDocIds.has(file.annexId));
+  }, [annexFiles, sop.referenceDocs]);
   const [annexPreview, setAnnexPreview] = useState<AnnexPreviewState>({ loading: false, pages: [], errors: {} });
   const [approvalEntries, setApprovalEntries] = useState<ApprovalSignatureEntry[] | null>(null);
   const [systemAuthorName, setSystemAuthorName] = useState("System author");
@@ -389,7 +396,7 @@ export function SopPrintPreview({
     () => new Map(sop.annexes.flatMap((annex) => (annex.id ? [[annex.id, annex] as const] : []))),
     [sop.annexes],
   );
-  const hasAttachedForms = annexFiles.length > 0;
+  const hasAttachedForms = formFiles.length > 0;
   const totalPages = (hasAttachedForms ? 3 : 2) + flowPages.length;
   const annexSummaryPage = flowPages.length + 2;
   const controlPage = totalPages;
@@ -454,7 +461,7 @@ export function SopPrintPreview({
     const objectUrls: string[] = [];
 
     async function renderAttachments() {
-      if (!annexFiles.length) {
+      if (!formFiles.length) {
         setAnnexPreview({ loading: false, pages: [], errors: {} });
         return;
       }
@@ -463,7 +470,7 @@ export function SopPrintPreview({
       const pages: RenderedAnnexPage[] = [];
       const errors: Record<string, string> = {};
 
-      for (const file of annexFiles) {
+      for (const file of formFiles) {
         try {
           const signedUrl = await createSopAnnexFileUrl(file);
           if (isImage(file)) {
@@ -538,7 +545,7 @@ export function SopPrintPreview({
       active = false;
       objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [annexFiles]);
+  }, [formFiles]);
 
   return (
     <div ref={previewRootRef} className="sop-preview-overlay" role="dialog" aria-modal="true" aria-label="SOP document preview">
@@ -740,9 +747,10 @@ export function SopPrintPreview({
               <EmptyAwareText value={sop.responsiblePersons.filter(Boolean).join("; ")} />
             </Section>
             <Section title="References" reviewCategory="references">
-              {sop.linkedSops.length || sop.references.length ? (
+              {sop.linkedSops.length || (sop.referenceDocs ?? []).length || sop.references.length ? (
                 <ul className="sop-export-list">
                   {sop.linkedSops.map((link) => <li key={link.sopId}>{linkedSopLabel(link)}</li>)}
+                  {(sop.referenceDocs ?? []).map((doc) => <li key={doc.id}>{doc.name}</li>)}
                   {sop.references.map((item, index) => <li key={index}>{item}</li>)}
                 </ul>
               ) : <EmptyAwareText value="" />}
@@ -763,7 +771,7 @@ export function SopPrintPreview({
           <DocumentPage sop={sop} page={annexSummaryPage} total={totalPages} annotations={annotationsForPage(annexSummaryPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
             <Section title="Annexes & Forms" reviewCategory="annexes">
               {sop.annexes.length ? sop.annexes.map((annex, index) => {
-                const file = annexFiles.find((item) => item.annexId === annex.id);
+                const file = formFiles.find((item) => item.annexId === annex.id);
                 const error = file ? annexPreview.errors[file.id] : "";
                 return (
                   <div key={annex.id ?? index}>

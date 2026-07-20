@@ -123,6 +123,18 @@ export function linkedSopLabel(link: SopLinkedSop): string {
   return link.sopNumber || link.title || link.sopId;
 }
 
+/**
+ * An uploaded document referenced by the SOP. The binary lives in the same
+ * storage/table as annex forms (`sop_annex_files`, keyed by this row's id in the
+ * `annex_id` slot); the document keeps only the id + display name so preview and
+ * export render without a lookup.
+ */
+export interface SopReferenceDoc {
+  id: string;
+  /** Display name, seeded from the uploaded file's name. */
+  name: string;
+}
+
 /** An appendix / attached form referenced by the SOP. */
 export interface SopAnnex {
   /** Stable editor identity used to link a private uploaded form to this row. */
@@ -181,6 +193,8 @@ export interface Sop {
   references: string[];
   /** Other SOPs this document references; rendered with `references` in preview/export. */
   linkedSops: SopLinkedSop[];
+  /** Uploaded documents this SOP references; rendered with `references` in preview/export. */
+  referenceDocs: SopReferenceDoc[];
   /** KPI lines, e.g. "% of released SOPs". */
   measurements: string[];
   procedure: SopProcedure;
@@ -211,6 +225,7 @@ export function createEmptySop(id: string, now: string): Sop {
     responsiblePersons: [],
     references: [],
     linkedSops: [],
+    referenceDocs: [],
     measurements: [],
     procedure: { processFlowDescription: "", roles: [], activities: [] },
     annexes: [],

@@ -17,7 +17,9 @@ describe("linkedSopLabel", () => {
 });
 
 describe("createEmptySop", () => {
-  it("seeds linkedSops as an empty list", () => {
-    expect(createEmptySop("id", "2026-01-01T00:00:00.000Z").linkedSops).toEqual([]);
+  it("seeds linkedSops and referenceDocs as empty lists", () => {
+    const sop = createEmptySop("id", "2026-01-01T00:00:00.000Z");
+    expect(sop.linkedSops).toEqual([]);
+    expect(sop.referenceDocs).toEqual([]);
   });
 });

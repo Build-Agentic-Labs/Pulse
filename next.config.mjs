@@ -48,6 +48,16 @@ const securityHeaders = [
 /** @type {(phase: string) => import('next').NextConfig} */
 const nextConfig = (phase) => ({
   distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
+  experimental: {
+    // Next 16.1 turned nested async chunking OFF in dev, which makes Turbopack's
+    // react-loadable-manifest reference chunk hashes that are never emitted — every
+    // next/dynamic entry (the whole planner) 404s and hangs on its loading shell
+    // (nextjs#87680; the upstream fix #88775 was reverted and has not shipped as of
+    // 16.2.10). Re-enabling the pre-16.1 dev behavior keeps manifest and chunk
+    // graph in agreement. Build already defaults to true. Remove once an upstream
+    // fix lands and `next dev` serves the planner without it.
+    turbopackClientSideNestedAsyncChunking: true,
+  },
   // Lint runs as a dedicated CI gate via `npm run lint`; Next 16 removed the
   // `eslint` config key (builds never lint anymore).
   async headers() {

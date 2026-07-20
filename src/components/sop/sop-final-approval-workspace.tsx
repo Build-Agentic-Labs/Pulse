@@ -255,14 +255,14 @@ export function SopFinalApprovalWorkspace({
 
       <div className="border-t border-line bg-surface p-4">
         {mySignature ? (
-          <button type="button" className="ui-btn-primary h-10 w-full gap-2 px-4" onClick={onClose}>
+          <button type="button" className="ui-btn-primary h-9 w-full gap-2 px-4" onClick={onClose}>
             <CheckCircle2 size={14} />
             Signed · back to review queue
           </button>
         ) : (
           <button
             type="button"
-            className="ui-btn-primary h-10 w-full gap-2 px-4 disabled:opacity-40"
+            className="ui-btn-primary h-9 w-full gap-2 px-4 disabled:opacity-40"
             disabled={status === "signing" || savingSignature || !signatureStrokes.length}
             onClick={() => void addSignature()}
           >

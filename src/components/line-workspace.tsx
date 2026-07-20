@@ -116,6 +116,7 @@ import {
   deleteScenario,
   duplicateScenario,
   listSopSummariesFromSupabase,
+  type SopSummary,
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
   loadWorkspaceProjectGroups,
@@ -139,7 +140,6 @@ import {
   taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
   type SaveState,
-  type SopSummary,
   type ToolLibraryItem,
 } from "@/domain/supabase-planner";
 import type {
@@ -161,13 +161,13 @@ import { OperatorUtilizationPanel } from "./operator-utilization-panel";
 import { ScenarioTabs } from "./scenario-tabs";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
-import { AppLoadingShell } from "./app-flow-panels";
 import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
 import { announceProjectSwitch, projectPlannerHref } from "./sidebar-workspace-panel";
+import { PlannerWorkspaceSkeleton, ProductLoadingState, SettingsLoadingState } from "./space-loading-states";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
 import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
-import { AppSettingsPanel, type SettingsSection } from "./app-settings-panel";
+import { AppSettingsPanel, embeddedSettingsSections, type SettingsSection } from "./app-settings-panel";
 import { ThemedSelect } from "./themed-select";
 import { KpiStrip, LineReadinessPanel } from "./line-workspace/analytics";
 import { DetailDrawer } from "./line-workspace/drawer";
@@ -176,7 +176,6 @@ import {
   Sidebar,
   SidebarReopenButton,
   TopNav,
-  WorkspaceSwitchSkeleton,
   comingSoonModuleIds,
   plannerModules,
   plannerSaveStatus,
@@ -413,7 +412,7 @@ function PlaybackPanel({
             <button
               type="button"
               onClick={onPlayPause}
-              className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-canvas hover:opacity-90"
+              className="flex h-8 w-8 items-center justify-center rounded bg-accent text-canvas hover:opacity-90"
               title={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? <Pause size={15} /> : <Play size={15} />}
@@ -560,7 +559,7 @@ export function LineWorkspace({
   // cache always matches what's saved; switching to a cached scenario is a pure in-memory setState.
   const scenarioCacheRef = useRef<Map<string, PlannerState>>(new Map());
   const [activeModule, setActiveModule] = useState("dashboard");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("account");
   const [setupSection, setSetupSection] = useState<SetupSection>("product");
   const [selectedTaskId, setSelectedTaskId] = useState(emptyPlannerState.tasks[0]?.id);
   const [focusedProcedureStepId, setFocusedProcedureStepId] = useState<string | undefined>();
@@ -3069,18 +3068,18 @@ export function LineWorkspace({
             action: () => navigateModule(module.id),
           })),
           {
-            id: "settings:general",
+            id: "settings:account",
             label: "Settings",
-            hint: "General",
+            hint: "Account",
             keywords: "account profile password theme",
-            action: () => openSettings("general"),
+            action: () => router.push("/settings"),
           },
           {
-            id: "settings:workspace",
+            id: "settings:organization",
             label: "Members & access",
             hint: "Settings",
             keywords: "invite user role organization access members",
-            action: () => openSettings("workspace"),
+            action: () => router.push("/settings?section=organization"),
           },
         ],
       },
@@ -3237,9 +3236,13 @@ export function LineWorkspace({
     "--detail-drawer-width": detailDrawerCollapsed ? "44px" : `${detailDrawerWidth}px`,
   } as CSSProperties;
 
+  if (urlWorkspaceSnapshot.activeModule === "settings" && (!hasLoadedRemoteState || isProjectSwitching)) {
+    return <SettingsLoadingState />;
+  }
+
   if (!hasLoadedRemoteState) {
     if (!isProjectSwitching) {
-      return <AppLoadingShell title="Loading project" />;
+      return <ProductLoadingState />;
     }
 
     return (
@@ -3269,7 +3272,7 @@ export function LineWorkspace({
               project={activeProjectContext}
             />
           </div>
-          <WorkspaceSwitchSkeleton />
+          <PlannerWorkspaceSkeleton />
         </div>
       </div>
     );
@@ -5500,7 +5503,7 @@ export function LineWorkspace({
     setActiveModule(moduleId);
   }
 
-  function openSettings(section: SettingsSection = "general") {
+  function openSettings(section: SettingsSection = "account") {
     setSettingsSection(section);
     setActiveModule("settings");
   }
@@ -5630,7 +5633,7 @@ export function LineWorkspace({
         </div>
 
         {isProjectSwitching ? (
-          <WorkspaceSwitchSkeleton />
+          <PlannerWorkspaceSkeleton />
         ) : isProcedureModule ? (
           <ProcedureWorkspace
             product={derivedState.product}
@@ -5662,6 +5665,7 @@ export function LineWorkspace({
               section={settingsSection}
               onSectionChange={setSettingsSection}
               project={activeProjectContext}
+              sections={embeddedSettingsSections}
             />
           </main>
         ) : (
@@ -5771,15 +5775,15 @@ export function LineWorkspace({
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
-                      <button type="button" onClick={exportGanttDocument} className="ui-btn-ghost h-10 gap-2">
+                      <button type="button" onClick={exportGanttDocument} className="ui-btn-ghost h-9 gap-2">
                         <Download size={16} />
                         Export Setup
                       </button>
-                      <button type="button" onClick={addZone} className="ui-btn-ghost h-10 gap-2">
+                      <button type="button" onClick={addZone} className="ui-btn-ghost h-9 gap-2">
                         <Plus size={16} />
                         Zone
                       </button>
-                      <button type="button" onClick={addTaskAtBottom} className="ui-btn-ghost h-10 gap-2">
+                      <button type="button" onClick={addTaskAtBottom} className="ui-btn-ghost h-9 gap-2">
                         <Plus size={16} />
                         Task
                       </button>
@@ -5790,7 +5794,7 @@ export function LineWorkspace({
                           setPlaybackCollapsed(false);
                           setIsPlaying(true);
                         }}
-                        className="ui-btn-ghost h-10 gap-2"
+                        className="ui-btn-ghost h-9 gap-2"
                       >
                         <Play size={16} />
                         Playback

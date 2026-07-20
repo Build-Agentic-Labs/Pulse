@@ -3,7 +3,7 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { NothingLoadingBlock } from "@/components/nothing-ui";
+import { PlanningLoadingState } from "@/components/space-loading-states";
 import { BackToDashboardButton, UserNav } from "@/components/user-nav";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
@@ -28,7 +28,7 @@ export function PlanningShell({ title, actions, backHref, backLabel = "Back to w
   // globals.css), so each space provides its own scroll container, like the SOP shell.
   return (
     <div className="flex h-[100dvh] flex-col bg-canvas text-ink">
-      <header className="relative z-10 flex h-12 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
+      <header className="ui-chrome relative z-10 flex h-12 shrink-0 items-center gap-3 px-4">
         {backHref ? (
           <Link
             href={backHref}
@@ -44,8 +44,8 @@ export function PlanningShell({ title, actions, backHref, backLabel = "Back to w
         <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
           Pulse
         </Link>
-        <span className="h-4 w-px bg-border-strong" />
-        <span className="ui-mono-label">
+        <span className="ui-chrome-divider" />
+        <span className="ui-chrome-context-label truncate">
           {backHref ? (
             <Link href="/planning" className="hover:text-ink" title="Work orders">
               Planning
@@ -75,11 +75,7 @@ export function PlanningAccessGate({ children }: { children: ReactNode }) {
   const { hasAccess } = usePlanningWorkspace();
 
   if (hasAccess === null) {
-    return (
-      <PlanningShell>
-        <NothingLoadingBlock title="Checking access" />
-      </PlanningShell>
-    );
+    return <PlanningLoadingState />;
   }
 
   if (!hasAccess) {

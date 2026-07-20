@@ -204,9 +204,9 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
           : "Scan the QR code on a phone to capture step photos in the procedure editor."}
       </p>
 
-      <div className="ui-settings-group p-4">
+      <div className="ui-settings-group">
         <div className="grid gap-4 md:grid-cols-[200px_minmax(0,1fr)] md:items-start">
-          <div className="flex justify-center rounded-xl border border-line bg-surface-muted p-3">
+          <div className="flex justify-center rounded-sm border border-line p-3">
             {phonePortalQrDataUrl ? (
               <NextImage
                 src={phonePortalQrDataUrl}
@@ -237,12 +237,12 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
               <button
                 type="button"
                 onClick={() => window.location.assign(openPortalHref)}
-                className="ui-btn-ghost inline-flex h-8 px-3 text-[10px]"
+                className="ui-btn-ghost inline-flex h-8 px-3"
               >
                 Open portal
               </button>
               {project?.projectId ? (
-                <span className="text-[10px] font-medium text-steel">
+                <span className="ui-settings-group-row-desc font-medium text-steel">
                   Opens `/projects/{project.projectId}/mobile-photos`
                 </span>
               ) : null}

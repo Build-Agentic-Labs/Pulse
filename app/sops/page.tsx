@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { Suspense } from "react";
-import { AppLoadingShell } from "@/components/app-flow-panels";
+import { QualityLoadingState } from "@/components/space-loading-states";
 import { SopWorkspace, type SopWorkspaceInitialData } from "@/components/sop/sop-workspace";
 import { listDepartments } from "@/lib/departments/store";
 import { listHistoricalRevisions } from "@/lib/sop/review";
@@ -85,7 +85,7 @@ export default async function SopsPage({
   }
 
   return (
-    <Suspense fallback={<AppLoadingShell title="Loading SOPs" />}>
+    <Suspense fallback={<QualityLoadingState />}>
       <SopWorkspace initial={initial} />
     </Suspense>
   );

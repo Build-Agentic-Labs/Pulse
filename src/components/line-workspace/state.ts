@@ -38,7 +38,7 @@ export const PROJECT_SWITCH_EVENT = "pulse:project-switch-start";
 export const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
 export const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
 export const PROJECT_SWITCH_SESSION_MAX_AGE_MS = 15_000;
-export const PROJECT_SWITCH_SKELETON_MIN_MS = 650;
+export const PROJECT_SWITCH_SKELETON_MIN_MS = 320;
 
 export type ProjectSwitchTarget = {
   projectId: string;

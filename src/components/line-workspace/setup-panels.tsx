@@ -146,7 +146,7 @@ export function ProductSetupPanel({
                   />
                   <ThemedSelect
                     className="w-28 shrink-0"
-                    triggerClassName="h-10 rounded-none rounded-r-lg border-0 border-l px-2 ui-mono-label"
+                    triggerClassName="h-9 rounded-none rounded-r border-0 border-l px-2"
                     value={product.demandPeriod}
                     options={demandPeriodOptions}
                     onChange={(value) => onProductText("demandPeriod", value as DemandPeriod)}
@@ -334,7 +334,7 @@ export function ProcedureChecksSetupPanel({
           <h2 className="ui-section-title">Procedure Checks</h2>
           <div className="ui-section-subtitle">Choose the checks shown on manufacturing steps</div>
         </div>
-        <button type="button" onClick={addCheckDefinition} className="ui-btn-ghost h-10 gap-2">
+        <button type="button" onClick={addCheckDefinition} className="ui-btn-ghost h-9 gap-2">
           <Plus size={15} strokeWidth={1.75} />
           Check
         </button>

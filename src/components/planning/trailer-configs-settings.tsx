@@ -29,8 +29,8 @@ function TrailerConfigRow({
   useEffect(() => setName(config.name), [config.name]);
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border border-line p-3">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line bg-surface-muted font-mono text-lg font-bold text-ink">
+    <div className="flex flex-wrap items-center gap-3 border-b border-line py-3 last:border-b-0">
+      <span className="grid h-9 w-9 shrink-0 place-items-center text-[13px] font-semibold text-ink">
         {config.letter}
       </span>
       <input
@@ -193,9 +193,9 @@ export function TrailerConfigsSettings({
   }
 
   return (
-    <section className="ui-panel p-5">
-      <div className="ui-setup-section-title">Trailer configurations</div>
-      <p className="ui-setup-section-desc">
+    <section className="ui-settings-section">
+      <h3 className="ui-settings-section-title">Trailer configurations</h3>
+      <p className="ui-settings-section-desc">
         Each letter is a standard trailer configuration for the supermarket. Generators reference a letter; final
         assembly matches it on the printed Main sheet.
       </p>

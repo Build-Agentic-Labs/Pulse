@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, LayoutGrid, LogOut, Moon, Sun } from "lucide-react";
+import { ArrowLeft, LayoutGrid, LogOut, Moon, Settings, Sun } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
@@ -23,8 +23,13 @@ function readLastProjectId(): string | undefined {
 }
 
 /** Hover/click menu on the spaces grid button — jump straight to any company space. */
-function SpacesMenu() {
-  const [open, setOpen] = useState(false);
+function SpacesMenu({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const [projectId, setProjectId] = useState<string>();
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -40,7 +45,7 @@ function SpacesMenu() {
   };
   const scheduleClose = () => {
     cancelClose();
-    closeTimer.current = setTimeout(() => setOpen(false), 140);
+    closeTimer.current = setTimeout(() => onOpenChange(false), 140);
   };
 
   useEffect(() => () => cancelClose(), []);
@@ -50,7 +55,7 @@ function SpacesMenu() {
       className="relative"
       onMouseEnter={() => {
         cancelClose();
-        setOpen(true);
+        onOpenChange(true);
       }}
       onMouseLeave={scheduleClose}
     >
@@ -61,7 +66,7 @@ function SpacesMenu() {
         aria-label="Go to the company dashboard"
         aria-haspopup="menu"
         aria-expanded={open}
-        onFocus={() => setOpen(true)}
+        onFocus={() => onOpenChange(true)}
         onBlur={scheduleClose}
       >
         <LayoutGrid size={15} strokeWidth={1.75} />
@@ -239,24 +244,25 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const { theme, toggleTheme } = useTheme();
   const profile = useUserProfile(supabase);
-  const [open, setOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<"spaces" | "account" | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const accountOpen = openMenu === "account";
 
   useEffect(() => {
-    if (!open) {
+    if (!openMenu) {
       return;
     }
 
     function onPointerDown(event: PointerEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
+        setOpenMenu(null);
       }
     }
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setOpen(false);
+        setOpenMenu(null);
       }
     }
 
@@ -266,13 +272,13 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open]);
+  }, [openMenu]);
 
   async function handleSignOut() {
     setIsSigningOut(true);
     try {
       await supabase.auth.signOut();
-      setOpen(false);
+      setOpenMenu(null);
       // Land on the root: it shows the sign-in form while signed out, and signing back
       // in reveals the company dashboard right there (not the last-visited project).
       router.push("/");
@@ -295,17 +301,24 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
         {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
       </button>
 
-      {showSpacesLink ? <SpacesMenu /> : null}
+      {showSpacesLink ? (
+        <SpacesMenu
+          open={openMenu === "spaces"}
+          onOpenChange={(nextOpen) => {
+            setOpenMenu((current) => nextOpen ? "spaces" : current === "spaces" ? null : current);
+          }}
+        />
+      ) : null}
 
       {profile?.email ? (
         <>
           <button
             type="button"
-            onClick={() => setOpen((value) => !value)}
+            onClick={() => setOpenMenu((current) => current === "account" ? null : "account")}
             className="grid h-[30px] w-[30px] shrink-0 place-items-center overflow-hidden rounded-full border border-border-strong bg-surface-raised font-mono text-[10px] text-ink transition hover:border-ink-secondary"
             title={displayName}
             aria-haspopup="menu"
-            aria-expanded={open}
+            aria-expanded={accountOpen}
             aria-label="Account menu"
           >
             {profile.avatarUrl ? (
@@ -316,7 +329,7 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
             )}
           </button>
 
-          {open ? (
+          {accountOpen ? (
             <div
               role="menu"
               className="absolute right-0 top-full z-50 mt-2 w-60 ui-panel p-1.5 shadow-modal"
@@ -326,6 +339,15 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
                 <div className="mt-0.5 truncate ui-mono-label text-ink-tertiary">{profile.email}</div>
               </div>
               <div className="my-1 h-px bg-line" />
+              <Link
+                href="/settings"
+                role="menuitem"
+                className="ui-btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2.5 text-[12px]"
+                onClick={() => setOpenMenu(null)}
+              >
+                <Settings size={13} strokeWidth={1.75} />
+                Account settings
+              </Link>
               <button
                 type="button"
                 role="menuitem"

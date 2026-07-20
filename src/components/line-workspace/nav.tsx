@@ -21,7 +21,8 @@ import Link from "next/link";
 import { type SaveState } from "@/domain/supabase-planner";
 import type { PlannerProjectContext } from "@/domain/types";
 import { type PresencePeer } from "@/lib/use-planner-presence";
-import { settingsSections, type SettingsSection } from "../app-settings-panel";
+import { embeddedSettingsSections, type SettingsSection } from "../app-settings-panel";
+import { NavSelectionTrack } from "../nav-selection-track";
 import { NothingStatus } from "../nothing-ui";
 import { buildPlannerChromeContext } from "../planner-dashboard-panel";
 import { SidebarWorkspacePanel } from "../sidebar-workspace-panel";
@@ -225,7 +226,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={onCollapse}
-          className="ui-btn-ghost inline-flex h-7 w-7 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
+          className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
           title="Hide sidebar"
           aria-label="Hide sidebar"
         >
@@ -246,8 +247,11 @@ export function Sidebar({
               <ChevronLeft size={14} strokeWidth={1.75} />
               Back to Product
             </button>
-            <div className="space-y-0.5">
-              {settingsSections.map((item) => {
+            <NavSelectionTrack
+              activeIndex={embeddedSettingsSections.findIndex((item) => item.id === settingsSection)}
+              className="space-y-0.5"
+            >
+              {embeddedSettingsSections.map((item) => {
                 const Icon = item.icon;
                 const active = settingsSection === item.id;
                 return (
@@ -263,7 +267,7 @@ export function Sidebar({
                   </button>
                 );
               })}
-            </div>
+            </NavSelectionTrack>
           </>
         ) : isSetupModule ? (
           <>
@@ -277,7 +281,10 @@ export function Sidebar({
               Back to Product
             </button>
             <div className="ui-nav-section">Setup</div>
-            <div className="space-y-0.5">
+            <NavSelectionTrack
+              activeIndex={setupSections.findIndex((item) => item.id === setupSection)}
+              className="space-y-0.5"
+            >
               {setupSections.map((item) => {
                 const Icon = item.icon;
                 const active = setupSection === item.id;
@@ -294,12 +301,15 @@ export function Sidebar({
                   </button>
                 );
               })}
-            </div>
+            </NavSelectionTrack>
           </>
         ) : (
           <>
             <div className="ui-nav-section">Planner</div>
-            <div className="space-y-0.5">
+            <NavSelectionTrack
+              activeIndex={plannerModules.findIndex((module) => module.id === activeModule)}
+              className="space-y-0.5"
+            >
               {plannerModules.map((module) => {
                 const Icon = module.icon;
                 const active = activeModule === module.id;
@@ -316,97 +326,20 @@ export function Sidebar({
                   </button>
                 );
               })}
-            </div>
+            </NavSelectionTrack>
           </>
         )}
       </nav>
 
       <div className="mt-auto space-y-2 px-2 py-2">
-        {/* Org-level tools — cross-department, not scoped to this project/workspace. */}
-        <div>
-          <div className="ui-nav-section">Org</div>
-          <Link href="/sops" className="ui-nav-item ui-nav-item-idle" title="SOPs">
-            <FileText size={15} strokeWidth={1.75} />
-            <span>SOPs</span>
-          </Link>
-        </div>
-
         {!isSettingsModule ? (
-          <button
-            type="button"
-            onClick={() => onOpenSettings("general")}
-            className="ui-nav-footer-item"
-          >
+          <Link href="/settings" className="ui-nav-footer-item">
             <Settings size={15} strokeWidth={1.75} />
             Settings
-          </button>
+          </Link>
         ) : null}
       </div>
     </aside>
   );
 }
 
-export function WorkspaceSwitchSkeleton() {
-  const metricWidths = ["w-28", "w-24", "w-32", "w-24", "w-28"];
-  const lineClass = "ui-skeleton-line";
-
-  return (
-    <main className="ui-workspace-content p-0 pb-6">
-      <div className="ui-planner-dashboard">
-        <section className="border-b border-line px-6 py-4">
-          <div className={`${lineClass} h-3 w-40`} />
-          <div className={`${lineClass} mt-3 h-2 w-72`} />
-        </section>
-
-        <section className="grid grid-cols-2 gap-6 border-b border-line px-6 py-4 md:grid-cols-5">
-          {metricWidths.map((width, index) => (
-            <div key={index} className="space-y-2">
-              <div className={`${lineClass} h-2 ${width}`} />
-              <div className={`${lineClass} h-5 w-20`} />
-              <div className={`${lineClass} h-2 w-28`} />
-            </div>
-          ))}
-        </section>
-
-        <section className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_240px]">
-          <div className="px-6 py-6">
-            <div className={`${lineClass} h-4 w-32`} />
-            <div className={`${lineClass} mt-2 h-2 w-48`} />
-
-            <div className="mt-8 grid grid-cols-4 gap-5">
-              {[0, 1, 2, 3].map((item) => (
-                <div key={item} className="space-y-2">
-                  <div className={`${lineClass} h-2 w-24`} />
-                  <div className={`${lineClass} h-5 w-12`} />
-                  <div className={`${lineClass} h-2 w-28`} />
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-8 space-y-4">
-              {[0, 1, 2].map((item) => (
-                <div key={item} className="border-t border-line pt-4">
-                  <div className={`${lineClass} h-3 w-48`} />
-                  <div className={`${lineClass} mt-2 h-2 w-80 max-w-full`} />
-                  <div className={`${lineClass} mt-2 h-2 w-[28rem] max-w-full`} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <aside className="border-l border-line px-5 py-6">
-            <div className={`${lineClass} h-4 w-28`} />
-            <div className="mt-6 space-y-4">
-              {[0, 1, 2, 3, 4].map((item) => (
-                <div key={item} className="border-b border-line pb-3">
-                  <div className={`${lineClass} h-2 w-24`} />
-                  <div className={`${lineClass} mt-2 h-3 w-32`} />
-                </div>
-              ))}
-            </div>
-          </aside>
-        </section>
-      </div>
-    </main>
-  );
-}

@@ -99,6 +99,8 @@ function mapSop(row: Record<string, unknown>): Sop {
   const status = (row.status as SopStatus | null) ?? "draft";
   return {
     ...document,
+    // Documents saved before the linked-SOPs feature have no such key in jsonb.
+    linkedSops: Array.isArray(document.linkedSops) ? document.linkedSops : [],
     id: String(row.id),
     status,
     // The promoted `sop_number` column is authoritative (the list reads it); overlay it onto the

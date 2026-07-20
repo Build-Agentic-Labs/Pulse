@@ -4,7 +4,7 @@ import { Printer, X } from "lucide-react";
 import { formatDateControlled, formatDateTime } from "@/domain/formatting";
 import NextImage from "next/image";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
-import { rasicLegend, type Sop } from "@/domain/sop/schema";
+import { linkedSopLabel, rasicLegend, type Sop } from "@/domain/sop/schema";
 import {
   SIGNATURE_VIEWBOX_HEIGHT,
   SIGNATURE_VIEWBOX_WIDTH,
@@ -740,7 +740,12 @@ export function SopPrintPreview({
               <EmptyAwareText value={sop.responsiblePersons.filter(Boolean).join("; ")} />
             </Section>
             <Section title="References" reviewCategory="references">
-              {sop.references.length ? <ul className="sop-export-list">{sop.references.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
+              {sop.linkedSops.length || sop.references.length ? (
+                <ul className="sop-export-list">
+                  {sop.linkedSops.map((link) => <li key={link.sopId}>{linkedSopLabel(link)}</li>)}
+                  {sop.references.map((item, index) => <li key={index}>{item}</li>)}
+                </ul>
+              ) : <EmptyAwareText value="" />}
             </Section>
             <Section title="Measurement" reviewCategory="measurements">
               {sop.measurements.length ? <ul className="sop-export-list">{sop.measurements.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}

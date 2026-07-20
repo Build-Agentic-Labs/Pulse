@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
+import { SopTableSkeleton } from "@/components/space-loading-states";
+import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { DEFAULT_DOC_TYPE } from "@/domain/sop/authoring";
 import { getSopProcessState, SOP_PROCESS_STATE_LABELS } from "@/domain/sop/process-state";
@@ -474,20 +476,19 @@ export function SopList({ active = true }: { active?: boolean }) {
           {editable ? (
             <div className="flex items-center gap-2">
               {convertDepartments && convertDepartments.length > 1 ? (
-                <select
-                  className="ui-field-standalone h-9 w-auto min-w-44"
+                <ThemedSelect
+                  variant="sop"
+                  className="w-auto min-w-44"
+                  triggerClassName="h-9"
                   value={convertDepartmentId}
                   disabled={converting}
-                  onChange={(event) => setConvertDepartmentId(event.target.value)}
-                  aria-label="Owning department for converted SOP"
-                  title="Owning department"
-                >
-                  {convertDepartments.map((department) => (
-                    <option key={department.id} value={department.id}>
-                      {department.code} · {department.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setConvertDepartmentId}
+                  ariaLabel="Owning department for converted SOP"
+                  options={convertDepartments.map((department) => ({
+                    value: department.id,
+                    label: `${department.code} · ${department.name}`,
+                  }))}
+                />
               ) : null}
               <button
                 type="button"
@@ -551,29 +552,27 @@ export function SopList({ active = true }: { active?: boolean }) {
         ) : null}
 
         {listStatus === "loading" ? (
-          <section className="flex min-h-40 items-center justify-center border-t border-line px-4">
-            <Loader2 size={18} className="animate-spin text-ink-tertiary" />
-          </section>
+          <SopTableSkeleton />
         ) : listStatus === "error" ? (
-          <section className="flex min-h-40 flex-col items-center justify-center border-t border-line px-4 text-center">
+          <section className="ui-empty-state">
             <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load SOPs."}</p>
             <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
               Retry
             </button>
           </section>
         ) : activeSops.length === 0 ? (
-          <section className="flex min-h-40 flex-col items-center justify-center border-t border-line px-4 text-center">
+          <section className="ui-empty-state">
             <FileText size={20} className="mx-auto text-ink-tertiary" />
             <p className="mt-2 ui-section-subtitle text-ink-tertiary">
               No draft SOPs. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
             </p>
           </section>
         ) : filteredSops.length === 0 ? (
-          <section className="flex min-h-40 items-center justify-center border-t border-line px-4 text-center">
+          <section className="ui-empty-state">
             <p className="ui-section-subtitle text-ink-tertiary">No SOPs match &ldquo;{query.trim()}&rdquo;.</p>
           </section>
         ) : (
-          <div className="overflow-hidden border-y border-line bg-surface">
+          <div className="ui-data-table-frame">
             <div className="ui-table-scroll">
               <table className={`w-full border-collapse text-left ${showReviewStatus ? "min-w-[780px]" : "min-w-[680px]"}`}>
                         <thead>

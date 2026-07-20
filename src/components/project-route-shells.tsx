@@ -1,42 +1,60 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 import { AppLoadingShell } from "./app-flow-panels";
 import { AuthProjectGate } from "./auth-project-gate";
+import {
+  DashboardLoadingState,
+  PlanningLoadingState,
+  ProductLoadingState,
+  ProductionLoadingState,
+  SettingsLoadingState,
+} from "./space-loading-states";
 
-function RouteChunkLoading() {
-  return <AppLoadingShell title="Loading workspace" />;
+function ProjectRouteLoading() {
+  const searchParams = useSearchParams();
+  return searchParams.get("view") === "settings" ? <SettingsLoadingState /> : <ProductLoadingState />;
 }
 
 const CompanyDashboard = dynamic(
   () => import("./company-dashboard").then((module) => module.CompanyDashboard),
-  { loading: RouteChunkLoading },
+  { loading: () => <DashboardLoadingState /> },
 );
 const LineWorkspace = dynamic(
   () => import("./line-workspace").then((module) => module.LineWorkspace),
-  { loading: RouteChunkLoading },
+  { loading: ProjectRouteLoading },
 );
 const MobilePhotoPortal = dynamic(
   () => import("./mobile-photo-portal").then((module) => module.MobilePhotoPortal),
-  { loading: RouteChunkLoading },
+  { loading: () => <AppLoadingShell title="Opening photos" /> },
 );
 const PlanningRoute = dynamic(
   () => import("./planning/planning-route").then((module) => module.PlanningRoute),
-  { loading: RouteChunkLoading },
+  { loading: () => <PlanningLoadingState /> },
 );
 const WorkOrderBoard = dynamic(
   () => import("./planning/work-order-board").then((module) => module.WorkOrderBoard),
-  { loading: RouteChunkLoading },
+  { loading: () => <PlanningLoadingState /> },
 );
 const SpacePlaceholder = dynamic(
   () => import("./space-placeholder").then((module) => module.SpacePlaceholder),
-  { loading: RouteChunkLoading },
+  { loading: () => <ProductionLoadingState /> },
+);
+const SettingsWorkspace = dynamic(
+  () => import("./settings-workspace").then((module) => module.SettingsWorkspace),
+  { loading: () => <SettingsLoadingState /> },
 );
 
 /** The post-login landing page: company-space cards instead of an auto-redirect. */
 export function HomeRouteShell() {
   return (
-    <AuthProjectGate renderHome={(home) => <CompanyDashboard {...home} />}>{() => null}</AuthProjectGate>
+    <AuthProjectGate
+      loadingFallback={<DashboardLoadingState />}
+      renderHome={(home) => <CompanyDashboard {...home} />}
+    >
+      {() => null}
+    </AuthProjectGate>
   );
 }
 
@@ -48,9 +66,21 @@ export function PlanningRouteShell() {
   );
 }
 
+export function SettingsRouteShell() {
+  return (
+    <AuthProjectGate
+      loadingFallback={<SettingsLoadingState />}
+      renderHome={(home) => <SettingsWorkspace {...home} />}
+    >
+      {() => null}
+    </AuthProjectGate>
+  );
+}
+
 export function ProductionRouteShell() {
   return (
     <AuthProjectGate
+      loadingFallback={<ProductionLoadingState />}
       renderHome={() => (
         <SpacePlaceholder
           space="production"
@@ -72,8 +102,11 @@ export function ProductionRouteShell() {
 }
 
 export function PlannerRouteShell({ projectId }: { projectId?: string }) {
+  const searchParams = useSearchParams();
+  const loadingFallback = searchParams.get("view") === "settings" ? <SettingsLoadingState /> : <ProductLoadingState />;
+
   return (
-    <AuthProjectGate projectId={projectId} routeKind="planner">
+    <AuthProjectGate projectId={projectId} routeKind="planner" loadingFallback={loadingFallback}>
       {(project, onReady) => (
         <LineWorkspace
           projectContext={project}

@@ -1,5 +1,5 @@
-import { RouteLoadingState } from "@/components/route-loading-state";
+import { QualityLoadingState } from "@/components/space-loading-states";
 
 export default function SopsLoading() {
-  return <RouteLoadingState label="Loading SOPs" />;
+  return <QualityLoadingState />;
 }

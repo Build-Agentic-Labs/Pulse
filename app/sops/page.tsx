@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { AppLoadingShell } from "@/components/app-flow-panels";
+import { QualityLoadingState } from "@/components/space-loading-states";
 import { SopWorkspace } from "@/components/sop/sop-workspace";
 
 export const metadata = {
@@ -12,7 +12,7 @@ export const metadata = {
 // requires inside a Suspense boundary.
 export default function SopsPage() {
   return (
-    <Suspense fallback={<AppLoadingShell title="Loading SOPs" />}>
+    <Suspense fallback={<QualityLoadingState />}>
       <SopWorkspace />
     </Suspense>
   );

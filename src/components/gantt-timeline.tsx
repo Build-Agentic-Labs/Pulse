@@ -25,6 +25,7 @@ import {
   zoneDefaultFill,
 } from "@/theme/chart-tokens";
 import { ClearableNumberInput } from "./clearable-number-input";
+import { ThemedSelect } from "./themed-select";
 import { WorkerIcon } from "./worker-icon";
 
 interface GanttTimelineProps {
@@ -2603,11 +2604,11 @@ export function GanttTimeline({
           <div className="grid gap-3 p-5">
             <label className="block">
               <span className="ui-field-label">Zone</span>
-              <select
-                className="h-10 w-full rounded-sm border border-line bg-surface px-3 text-[13px] text-ink outline-none"
+              <ThemedSelect
+                className="w-full"
                 value={mappingDraft.zoneId}
-                onChange={(event) => {
-                  const zoneId = event.target.value;
+                ariaLabel="Zone"
+                onChange={(zoneId) => {
                   const taskNumber = mappingDraft.componentId
                     ? nextTaskNumberForComponent(tasks, mappingDraft.componentId, zoneId || undefined)
                     : undefined;
@@ -2617,23 +2618,23 @@ export function GanttTimeline({
                     taskNumber: current.taskNumber || (taskNumber ? String(taskNumber) : ""),
                   }));
                 }}
-              >
-                <option value="">Unzoned</option>
-                {zones.map((zone) => (
-                  <option key={zone.id} value={zone.id}>
-                    {zone.code || zone.name} - {zone.name}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "Unzoned" },
+                  ...zones.map((zone) => ({
+                    value: zone.id,
+                    label: `${zone.code || zone.name} - ${zone.name}`,
+                  })),
+                ]}
+              />
             </label>
 
             <label className="block">
               <span className="ui-field-label">Component</span>
-              <select
-                className="h-10 w-full rounded-sm border border-line bg-surface px-3 text-[13px] text-ink outline-none"
+              <ThemedSelect
+                className="w-full"
                 value={mappingDraft.componentId}
-                onChange={(event) => {
-                  const componentId = event.target.value;
+                ariaLabel="Component"
+                onChange={(componentId) => {
                   const taskNumber = componentId
                     ? nextTaskNumberForComponent(tasks, componentId, mappingDraft.zoneId || undefined)
                     : undefined;
@@ -2643,14 +2644,14 @@ export function GanttTimeline({
                     taskNumber: componentId ? String(taskNumber ?? current.taskNumber) : "",
                   }));
                 }}
-              >
-                <option value="">No component</option>
-                {mappingComponentOptions.map((component) => (
-                  <option key={component.id} value={component.id}>
-                    {component.code || "CODE"} - {component.name || "Unnamed component"}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "No component" },
+                  ...mappingComponentOptions.map((component) => ({
+                    value: component.id,
+                    label: `${component.code || "CODE"} - ${component.name || "Unnamed component"}`,
+                  })),
+                ]}
+              />
             </label>
 
             <label className="block">
@@ -2688,7 +2689,7 @@ export function GanttTimeline({
               type="button"
               onClick={saveCodeMapping}
               disabled={Boolean(mappingDuplicateTask)}
-              className="ui-btn-primary h-10 min-w-32 disabled:cursor-not-allowed disabled:opacity-40"
+              className="ui-btn-primary h-9 min-w-32 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Save Code
             </button>
@@ -2800,7 +2801,7 @@ export function GanttTimeline({
             <button
               type="button"
               onClick={savePredecessors}
-              className="ui-btn-primary h-10 min-w-44"
+              className="ui-btn-primary h-9 min-w-44"
             >
               Save predecessors
             </button>

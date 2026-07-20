@@ -2,17 +2,15 @@
 
 
 
-import { FolderKanban, Moon, Palette, Settings, Sun } from "lucide-react";
+import { Check, CircleUserRound, ClipboardCheck, FolderKanban, Moon, Palette, Settings, Sun, UsersRound } from "lucide-react";
 
 import { useState, type ReactNode } from "react";
 
-import { useTheme } from "@/components/theme-provider";
+import { useTheme, type AppearanceColorKey, type AppearancePalette } from "@/components/theme-provider";
 
-import { displayWorkspaceName, projectContextLabel } from "@/lib/display-names";
+import { projectContextLabel } from "@/lib/display-names";
 
 import { AccountSettings } from "@/components/account-settings";
-
-import { PhonePhotoPortalPanel } from "@/components/phone-photo-portal-panel";
 
 import { WorkspaceActivitySettings } from "@/components/workspace-activity-settings";
 
@@ -20,19 +18,187 @@ import { WorkspaceMembersSettings } from "@/components/workspace-members-setting
 
 import { WorkspaceListSettings } from "@/components/workspace-list-settings";
 
-import type { PlannerProjectContext } from "@/domain/types";
+import { ProjectSettings } from "@/components/project-settings";
+
+import { PlanningSettings } from "@/components/planning/planning-settings";
+
+import { DepartmentsAdmin } from "@/components/sop/departments-admin";
+
+import { NavSelectionTrack } from "@/components/nav-selection-track";
+
+import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
+
+import type { ThemeMode } from "@/lib/theme-init";
 
 
 
 const settingsSections = [
 
-  { id: "general", label: "General", icon: Settings },
+  { id: "account", label: "Account", icon: CircleUserRound },
 
   { id: "appearance", label: "Appearance", icon: Palette },
 
-  { id: "workspace", label: "Organization", icon: FolderKanban },
+  { id: "organization", label: "Organization", icon: UsersRound },
+
+  { id: "projects", label: "Projects", icon: FolderKanban },
+
+  { id: "planning", label: "Planning", icon: Settings },
+
+  { id: "quality", label: "Quality", icon: ClipboardCheck },
 
 ] as const;
+
+const embeddedSettingsSections = settingsSections.slice(0, 3);
+
+const appearanceColorKeys: AppearanceColorKey[] = ["canvas", "surface", "raised", "accent"];
+
+type AppearanceThemePreset = {
+  id: string;
+  name: string;
+  tone: string;
+  palette: AppearancePalette;
+};
+
+const lightThemePresets: AppearanceThemePreset[] = [
+  {
+    id: "studio",
+    name: "Studio",
+    tone: "Crisp neutral",
+    palette: {
+      canvas: "#f0f0ee",
+      surface: "#ffffff",
+      raised: "#f3f3f1",
+      accent: "#1f2428",
+    },
+  },
+  {
+    id: "paper",
+    name: "Paper",
+    tone: "Warm editorial",
+    palette: {
+      canvas: "#efe9df",
+      surface: "#fbf8f2",
+      raised: "#f3ede4",
+      accent: "#a24f32",
+    },
+  },
+  {
+    id: "cloud",
+    name: "Cloud",
+    tone: "Cool and quiet",
+    palette: {
+      canvas: "#e8edf1",
+      surface: "#fcfdfe",
+      raised: "#f0f4f6",
+      accent: "#315f7a",
+    },
+  },
+  {
+    id: "sage",
+    name: "Sage",
+    tone: "Soft natural",
+    palette: {
+      canvas: "#e9eee9",
+      surface: "#fbfcfa",
+      raised: "#f0f3ef",
+      accent: "#41634f",
+    },
+  },
+];
+
+const darkThemePresets: AppearanceThemePreset[] = [
+  {
+    id: "oled",
+    name: "OLED",
+    tone: "True black",
+    palette: {
+      canvas: "#000000",
+      surface: "#0a0a0a",
+      raised: "#171717",
+      accent: "#ffffff",
+    },
+  },
+  {
+    id: "graphite",
+    name: "Graphite",
+    tone: "Soft charcoal",
+    palette: {
+      canvas: "#111214",
+      surface: "#181a1d",
+      raised: "#23262a",
+      accent: "#e3e6e8",
+    },
+  },
+  {
+    id: "midnight",
+    name: "Midnight",
+    tone: "Cool black",
+    palette: {
+      canvas: "#080b0f",
+      surface: "#10151c",
+      raised: "#18212c",
+      accent: "#8ab4f8",
+    },
+  },
+  {
+    id: "moss",
+    name: "Moss",
+    tone: "Natural black",
+    palette: {
+      canvas: "#0b0f0c",
+      surface: "#121814",
+      raised: "#1b241e",
+      accent: "#8fbe82",
+    },
+  },
+];
+
+function AppearancePresetGrid({
+  targetTheme,
+  currentTheme,
+  currentPalette,
+  presets,
+  onSelect,
+}: {
+  targetTheme: ThemeMode;
+  currentTheme: ThemeMode;
+  currentPalette: AppearancePalette;
+  presets: AppearanceThemePreset[];
+  onSelect: (theme: ThemeMode, palette: AppearancePalette) => void;
+}) {
+  return (
+    <div className="ui-appearance-preset-grid py-3">
+      {presets.map((preset) => {
+        const active = currentTheme === targetTheme && appearanceColorKeys.every(
+          (color) => currentPalette[color] === preset.palette[color],
+        );
+
+        return (
+          <button
+            key={preset.id}
+            type="button"
+            className={`ui-appearance-preset ${active ? "ui-appearance-preset-active" : ""}`}
+            onClick={() => onSelect(targetTheme, preset.palette)}
+            aria-pressed={active}
+          >
+            <span className="flex min-w-0 items-start justify-between gap-3">
+              <span className="min-w-0 text-left">
+                <span className="ui-appearance-preset-name block">{preset.name}</span>
+                <span className="ui-appearance-preset-tone block">{preset.tone}</span>
+              </span>
+              {active ? <Check size={14} strokeWidth={2} aria-hidden="true" /> : null}
+            </span>
+            <span className="ui-appearance-preset-swatches" aria-hidden="true">
+              {appearanceColorKeys.map((color) => (
+                <span key={color} style={{ backgroundColor: preset.palette[color] }} />
+              ))}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 
 
@@ -40,17 +206,27 @@ type SettingsSection = (typeof settingsSections)[number]["id"];
 
 
 
-export { settingsSections };
+export { embeddedSettingsSections, settingsSections };
 
 export type { SettingsSection };
 
 
 
-function SettingsPage({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+function SettingsPage({
+  title,
+  description,
+  wide = false,
+  children,
+}: {
+  title: string;
+  description: string;
+  wide?: boolean;
+  children: ReactNode;
+}) {
 
   return (
 
-    <div className="ui-settings-page">
+    <div className={`ui-settings-page ${wide ? "ui-settings-page-wide" : ""}`}>
 
       <h2 className="ui-settings-page-title">{title}</h2>
 
@@ -152,6 +328,10 @@ export function AppSettingsPanel({
 
   showSubnav = true,
 
+  groups = [],
+
+  sections = settingsSections,
+
 }: {
 
   project?: PlannerProjectContext;
@@ -162,13 +342,24 @@ export function AppSettingsPanel({
 
   showSubnav?: boolean;
 
+  groups?: WorkspaceProjectGroup[];
+
+  sections?: readonly (typeof settingsSections)[number][];
+
 }) {
 
-  const { theme, setTheme } = useTheme();
+  const {
+    theme,
+    appearance,
+    setTheme,
+    setSurfaceMode,
+    applyThemePreset,
+  } = useTheme();
 
-  const [internalSection, setInternalSection] = useState<SettingsSection>("general");
+  const [internalSection, setInternalSection] = useState<SettingsSection>("account");
 
   const activeSection = section ?? internalSection;
+  const activeSectionIndex = sections.findIndex((item) => item.id === activeSection);
 
 
 
@@ -188,7 +379,45 @@ export function AppSettingsPanel({
 
   return (
 
-    <div className="flex h-full min-h-0 overflow-hidden bg-surface">
+    <div className="ui-settings-layout flex h-full min-h-0 flex-col overflow-hidden bg-surface md:flex-row">
+
+      {showSubnav ? (
+
+        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-line bg-surface px-2 py-2 md:hidden" aria-label="Settings sections">
+
+          {sections.map((item) => {
+
+            const Icon = item.icon;
+
+            const active = activeSection === item.id;
+
+            return (
+
+              <button
+
+                key={item.id}
+
+                type="button"
+
+                onClick={() => setSection(item.id)}
+
+                className={`ui-settings-subnav-item mx-0 shrink-0 ${active ? "ui-settings-subnav-item-active" : "ui-settings-subnav-item-idle"}`}
+
+              >
+
+                <Icon size={14} strokeWidth={1.75} />
+
+                {item.label}
+
+              </button>
+
+            );
+
+          })}
+
+        </nav>
+
+      ) : null}
 
       {showSubnav ? (
 
@@ -196,9 +425,14 @@ export function AppSettingsPanel({
 
           <div className="ui-nav-section px-4">Settings</div>
 
-          <nav className="mt-1 space-y-0.5">
+          <NavSelectionTrack
+            activeIndex={activeSectionIndex}
+            as="nav"
+            inset
+            className="mt-1 flex flex-col gap-0.5"
+          >
 
-            {settingsSections.map((item) => {
+            {sections.map((item) => {
 
               const Icon = item.icon;
 
@@ -228,7 +462,7 @@ export function AppSettingsPanel({
 
             })}
 
-          </nav>
+          </NavSelectionTrack>
 
         </aside>
 
@@ -238,41 +472,11 @@ export function AppSettingsPanel({
 
       <div className="ui-settings-content">
 
-        {activeSection === "general" ? (
+        {activeSection === "account" ? (
 
-          <SettingsPage title="General" description="Account, organization access, and mobile photo capture.">
+          <SettingsPage title="Account" description="Your profile and sign-in credentials.">
 
-            <AccountSettings />
-
-            <SettingsSectionBlock title="Organization access">
-
-              <SettingsRow label="Project">
-
-                <span className="ui-settings-group-row-value">{project?.projectName ?? "None selected"}</span>
-
-              </SettingsRow>
-
-              <SettingsRow label="Organization">
-
-                <span className="ui-settings-group-row-value">
-
-                  {project ? displayWorkspaceName(project.workspaceName) : "—"}
-
-                </span>
-
-              </SettingsRow>
-
-              <SettingsRow label="Role">
-
-                <span className="ui-settings-group-row-value capitalize">{project?.role ?? "—"}</span>
-
-              </SettingsRow>
-
-            </SettingsSectionBlock>
-
-
-
-            <PhonePhotoPortalPanel project={project} />
+            <AccountSettings embedded />
 
           </SettingsPage>
 
@@ -282,11 +486,11 @@ export function AppSettingsPanel({
 
         {activeSection === "appearance" ? (
 
-          <SettingsPage title="Appearance" description="Theme preference for the Pulse interface.">
+          <SettingsPage title="Appearance" description="Theme, surface layout, and interface colors.">
 
             <SettingsSectionBlock title="Theme" description="Choose light or dark mode for the Pulse interface.">
 
-              <div className="p-3.5">
+              <div className="py-3">
 
                 <div className="ui-settings-choice-grid">
 
@@ -340,13 +544,99 @@ export function AppSettingsPanel({
 
             </SettingsSectionBlock>
 
+            {theme === "light" ? (
+
+              <SettingsSectionBlock title="Light themes" description="Choose a complete light palette.">
+
+                <AppearancePresetGrid
+
+                  targetTheme="light"
+
+                  currentTheme={theme}
+
+                  currentPalette={appearance.palettes.light}
+
+                  presets={lightThemePresets}
+
+                  onSelect={applyThemePreset}
+
+                />
+
+              </SettingsSectionBlock>
+
+            ) : (
+
+              <SettingsSectionBlock title="Dark themes" description="Choose a complete black palette.">
+
+                <AppearancePresetGrid
+
+                  targetTheme="dark"
+
+                  currentTheme={theme}
+
+                  currentPalette={appearance.palettes.dark}
+
+                  presets={darkThemePresets}
+
+                  onSelect={applyThemePreset}
+
+                />
+
+              </SettingsSectionBlock>
+
+            )}
+
+            <SettingsSectionBlock title="Surface layout" description="Apply the surface arrangement across every space.">
+
+              <div className="py-3">
+
+                <div className="ui-appearance-segmented" role="group" aria-label="Surface layout">
+
+                  <button
+
+                    type="button"
+
+                    onClick={() => setSurfaceMode("standard")}
+
+                    className={`ui-appearance-segment ${appearance.surfaceMode === "standard" ? "ui-appearance-segment-active" : ""}`}
+
+                    aria-pressed={appearance.surfaceMode === "standard"}
+
+                  >
+
+                    Standard
+
+                  </button>
+
+                  <button
+
+                    type="button"
+
+                    onClick={() => setSurfaceMode("flipped")}
+
+                    className={`ui-appearance-segment ${appearance.surfaceMode === "flipped" ? "ui-appearance-segment-active" : ""}`}
+
+                    aria-pressed={appearance.surfaceMode === "flipped"}
+
+                  >
+
+                    Flipped
+
+                  </button>
+
+                </div>
+
+              </div>
+
+            </SettingsSectionBlock>
+
           </SettingsPage>
 
         ) : null}
 
 
 
-        {activeSection === "workspace" ? (
+        {activeSection === "organization" ? (
 
           <SettingsPage title="Organization" description="Rename the organization, manage members, and control who can access each project.">
 
@@ -374,6 +664,42 @@ export function AppSettingsPanel({
 
         ) : null}
 
+
+
+        {activeSection === "projects" ? (
+
+          <SettingsPage title="Projects" description="Manage projects and project-specific tools.">
+
+            <ProjectSettings groups={groups} activeProject={project} embedded />
+
+          </SettingsPage>
+
+        ) : null}
+
+
+
+        {activeSection === "planning" ? (
+
+          <SettingsPage title="Planning" description="Catalog and production-planning configuration.">
+
+            <PlanningSettings />
+
+          </SettingsPage>
+
+        ) : null}
+
+
+
+        {activeSection === "quality" ? (
+
+          <SettingsPage title="Quality" description="Departments, SOP ownership, access, and release controls.">
+
+            <DepartmentsAdmin embedded />
+
+          </SettingsPage>
+
+        ) : null}
+
       </div>
 
     </div>
@@ -381,5 +707,3 @@ export function AppSettingsPanel({
   );
 
 }
-
-

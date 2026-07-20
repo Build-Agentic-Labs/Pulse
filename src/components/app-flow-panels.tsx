@@ -475,7 +475,7 @@ export function PasswordUpdatePanel({
             ) : null}
 
             <div className="pt-1">
-              <button className="ui-btn-primary font-mono h-11 w-full" type="submit" disabled={isSubmitting}>
+              <button className="ui-btn-primary h-9 w-full" type="submit" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <span className="flex items-center gap-3">
                     <NothingSpinner inline />

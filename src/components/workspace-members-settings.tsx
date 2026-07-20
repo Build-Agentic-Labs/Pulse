@@ -414,9 +414,8 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                     setSelectedUserId(active ? undefined : member.userId);
                     setConfirmRemoveUserId(undefined);
                   }}
-                  className={`ui-settings-group-row w-full text-left transition-colors hover:bg-surface-hover ${
-                    active ? "bg-surface-active" : ""
-                  }`}
+                  aria-expanded={active}
+                  className="ui-settings-group-row ui-settings-member-row"
                 >
                   <div className="ui-settings-group-row-copy">
                     <div className="ui-settings-group-row-label">
@@ -432,7 +431,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                       {joined ? ` · joined ${joined}` : ""}
                     </div>
                   </div>
-                  <div className="ui-settings-group-row-control">
+                  <div className="ui-settings-group-row-control ui-settings-member-row-chevron">
                     <ChevronRight
                       size={14}
                       className={`text-ink-tertiary transition-transform ${active ? "rotate-90" : ""}`}

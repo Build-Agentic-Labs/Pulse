@@ -164,7 +164,6 @@ import {
   deleteToolLibraryFromSupabase,
   deleteScenario,
   duplicateScenario,
-  listSopSummariesFromSupabase,
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
   loadWorkspaceProjectGroups,
@@ -188,7 +187,6 @@ import {
   taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
   type SaveState,
-  type SopSummary,
   type ToolLibraryItem,
 } from "@/domain/supabase-planner";
 import type {
@@ -215,10 +213,10 @@ import { OperatorUtilizationPanel } from "./operator-utilization-panel";
 import { ScenarioTabs } from "./scenario-tabs";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
-import { AppLoadingShell } from "./app-flow-panels";
 import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
 import { announceProjectSwitch, projectPlannerHref, SidebarWorkspacePanel } from "./sidebar-workspace-panel";
+import { PlannerWorkspaceSkeleton, ProductLoadingState, SettingsLoadingState } from "./space-loading-states";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
 import { BackToDashboardButton, UserNav } from "./user-nav";
 import { ProcedureStepToolTable } from "./procedure-step-tool-table";
@@ -226,7 +224,8 @@ import { StepPhotoViewer } from "./step-photo-viewer";
 import { StepExplodedViewGallery } from "./step-exploded-view-gallery";
 import { TaskVideoGallery } from "./task-video-gallery";
 import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
-import { AppSettingsPanel, settingsSections, type SettingsSection } from "./app-settings-panel";
+import { AppSettingsPanel, embeddedSettingsSections, type SettingsSection } from "./app-settings-panel";
+import { NavSelectionTrack } from "./nav-selection-track";
 import { ThemedSelect } from "./themed-select";
 
 type ProductNumberField =
@@ -404,7 +403,7 @@ const PROJECT_SWITCH_EVENT = "pulse:project-switch-start";
 const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
 const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
 const PROJECT_SWITCH_SESSION_MAX_AGE_MS = 15_000;
-const PROJECT_SWITCH_SKELETON_MIN_MS = 650;
+const PROJECT_SWITCH_SKELETON_MIN_MS = 320;
 
 type ProjectSwitchTarget = {
   projectId: string;
@@ -1432,7 +1431,7 @@ function Sidebar({
         <button
           type="button"
           onClick={onCollapse}
-          className="ui-btn-ghost inline-flex h-7 w-7 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
+          className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
           title="Hide sidebar"
           aria-label="Hide sidebar"
         >
@@ -1453,8 +1452,11 @@ function Sidebar({
               <ChevronLeft size={14} strokeWidth={1.75} />
               Back to Product
             </button>
-            <div className="space-y-0.5">
-              {settingsSections.map((item) => {
+            <NavSelectionTrack
+              activeIndex={embeddedSettingsSections.findIndex((item) => item.id === settingsSection)}
+              className="space-y-0.5"
+            >
+              {embeddedSettingsSections.map((item) => {
                 const Icon = item.icon;
                 const active = settingsSection === item.id;
                 return (
@@ -1470,7 +1472,7 @@ function Sidebar({
                   </button>
                 );
               })}
-            </div>
+            </NavSelectionTrack>
           </>
         ) : isSetupModule ? (
           <>
@@ -1484,7 +1486,10 @@ function Sidebar({
               Back to Product
             </button>
             <div className="ui-nav-section">Setup</div>
-            <div className="space-y-0.5">
+            <NavSelectionTrack
+              activeIndex={setupSections.findIndex((item) => item.id === setupSection)}
+              className="space-y-0.5"
+            >
               {setupSections.map((item) => {
                 const Icon = item.icon;
                 const active = setupSection === item.id;
@@ -1501,12 +1506,15 @@ function Sidebar({
                   </button>
                 );
               })}
-            </div>
+            </NavSelectionTrack>
           </>
         ) : (
           <>
             <div className="ui-nav-section">Planner</div>
-            <div className="space-y-0.5">
+            <NavSelectionTrack
+              activeIndex={plannerModules.findIndex((module) => module.id === activeModule)}
+              className="space-y-0.5"
+            >
               {plannerModules.map((module) => {
                 const Icon = module.icon;
                 const active = activeModule === module.id;
@@ -1523,98 +1531,20 @@ function Sidebar({
                   </button>
                 );
               })}
-            </div>
+            </NavSelectionTrack>
           </>
         )}
       </nav>
 
       <div className="mt-auto space-y-2 px-2 py-2">
-        {/* Org-level tools — cross-department, not scoped to this project/workspace. */}
-        <div>
-          <div className="ui-nav-section">Org</div>
-          <Link href="/sops" className="ui-nav-item ui-nav-item-idle" title="SOPs">
-            <FileText size={15} strokeWidth={1.75} />
-            <span>SOPs</span>
-          </Link>
-        </div>
-
         {!isSettingsModule ? (
-          <button
-            type="button"
-            onClick={() => onOpenSettings("general")}
-            className="ui-nav-footer-item"
-          >
+          <Link href="/settings" className="ui-nav-footer-item">
             <Settings size={15} strokeWidth={1.75} />
             Settings
-          </button>
+          </Link>
         ) : null}
       </div>
     </aside>
-  );
-}
-
-function WorkspaceSwitchSkeleton() {
-  const metricWidths = ["w-28", "w-24", "w-32", "w-24", "w-28"];
-  const lineClass = "ui-skeleton-line";
-
-  return (
-    <main className="ui-workspace-content p-0 pb-6">
-      <div className="ui-planner-dashboard">
-        <section className="border-b border-line px-6 py-4">
-          <div className={`${lineClass} h-3 w-40`} />
-          <div className={`${lineClass} mt-3 h-2 w-72`} />
-        </section>
-
-        <section className="grid grid-cols-2 gap-6 border-b border-line px-6 py-4 md:grid-cols-5">
-          {metricWidths.map((width, index) => (
-            <div key={index} className="space-y-2">
-              <div className={`${lineClass} h-2 ${width}`} />
-              <div className={`${lineClass} h-5 w-20`} />
-              <div className={`${lineClass} h-2 w-28`} />
-            </div>
-          ))}
-        </section>
-
-        <section className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_240px]">
-          <div className="px-6 py-6">
-            <div className={`${lineClass} h-4 w-32`} />
-            <div className={`${lineClass} mt-2 h-2 w-48`} />
-
-            <div className="mt-8 grid grid-cols-4 gap-5">
-              {[0, 1, 2, 3].map((item) => (
-                <div key={item} className="space-y-2">
-                  <div className={`${lineClass} h-2 w-24`} />
-                  <div className={`${lineClass} h-5 w-12`} />
-                  <div className={`${lineClass} h-2 w-28`} />
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-8 space-y-4">
-              {[0, 1, 2].map((item) => (
-                <div key={item} className="border-t border-line pt-4">
-                  <div className={`${lineClass} h-3 w-48`} />
-                  <div className={`${lineClass} mt-2 h-2 w-80 max-w-full`} />
-                  <div className={`${lineClass} mt-2 h-2 w-[28rem] max-w-full`} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <aside className="border-l border-line px-5 py-6">
-            <div className={`${lineClass} h-4 w-28`} />
-            <div className="mt-6 space-y-4">
-              {[0, 1, 2, 3, 4].map((item) => (
-                <div key={item} className="border-b border-line pb-3">
-                  <div className={`${lineClass} h-2 w-24`} />
-                  <div className={`${lineClass} mt-2 h-3 w-32`} />
-                </div>
-              ))}
-            </div>
-          </aside>
-        </section>
-      </div>
-    </main>
   );
 }
 
@@ -2418,7 +2348,7 @@ function ProcedureWorkspace({
                   {manufacturingSteps.length} step(s) · step total {formatMinutes(manufacturingStepDurationMinutes)} · {formatManHours(stepDerivedManHours)}
                 </p>
               </div>
-              <button type="button" onClick={addManufacturingStep} className="ui-btn-ghost h-10 gap-2">
+              <button type="button" onClick={addManufacturingStep} className="ui-btn-ghost h-9 gap-2">
                 <Plus size={14} strokeWidth={1.75} />
                 Add Step
               </button>
@@ -2686,7 +2616,7 @@ function ProcedureWorkspace({
                 <h2 className="ui-setup-section-title">Part References</h2>
                 <p className="ui-setup-section-desc">{partReferences.length} part reference(s)</p>
               </div>
-              <button type="button" onClick={addPartReference} className="ui-btn-ghost h-10 gap-2">
+              <button type="button" onClick={addPartReference} className="ui-btn-ghost h-9 gap-2">
                 <Plus size={14} strokeWidth={1.75} />
                 Part
               </button>
@@ -2867,7 +2797,7 @@ function ProductSetupPanel({
                   />
                   <ThemedSelect
                     className="w-28 shrink-0"
-                    triggerClassName="h-10 rounded-none rounded-r-lg border-0 border-l px-2 ui-mono-label"
+                    triggerClassName="h-9 rounded-none rounded-r border-0 border-l px-2"
                     value={product.demandPeriod}
                     options={demandPeriodOptions}
                     onChange={(value) => onProductText("demandPeriod", value as DemandPeriod)}
@@ -3055,7 +2985,7 @@ function ProcedureChecksSetupPanel({
           <h2 className="ui-section-title">Procedure Checks</h2>
           <div className="ui-section-subtitle">Choose the checks shown on manufacturing steps</div>
         </div>
-        <button type="button" onClick={addCheckDefinition} className="ui-btn-ghost h-10 gap-2">
+        <button type="button" onClick={addCheckDefinition} className="ui-btn-ghost h-9 gap-2">
           <Plus size={15} strokeWidth={1.75} />
           Check
         </button>
@@ -4294,44 +4224,6 @@ function _StationBalance({
   );
 }
 
-// SOP summaries for the task SOP picker, cached per browser session. The sops table is read-gated
-// by org-tools access, so planner users without it get an empty list back -- the picker simply
-// stays hidden. Cached at module scope (like signedUrlCache in supabase-planner) so reopening the
-// drawer or switching tasks never re-fetches within a session.
-let sopSummariesSessionCache: SopSummary[] | undefined;
-
-function sopSummaryLabel(sop: SopSummary): string {
-  const base =
-    sop.sopNumber && sop.title ? `${sop.sopNumber} — ${sop.title}` : sop.title ?? sop.sopNumber ?? sop.id;
-  return sop.status && sop.status !== "draft" ? `${base} (${sop.status})` : base;
-}
-
-// Lazily loads the SOP picker options the first time a task panel renders (not on workspace
-// mount), then serves the session cache. Returns [] until loaded or when the user has no SOPs.
-function useSopSummaries(enabled: boolean): SopSummary[] {
-  const [sopSummaries, setSopSummaries] = useState<SopSummary[]>(() => sopSummariesSessionCache ?? []);
-
-  useEffect(() => {
-    if (!enabled || sopSummariesSessionCache) {
-      return;
-    }
-
-    let cancelled = false;
-    void listSopSummariesFromSupabase().then((summaries) => {
-      sopSummariesSessionCache = summaries;
-      if (!cancelled && summaries.length > 0) {
-        setSopSummaries(summaries);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
-
-  return sopSummaries;
-}
-
 function DetailDrawer({
   task,
   station,
@@ -4410,7 +4302,6 @@ function DetailDrawer({
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [newStepPartNumbers, setNewStepPartNumbers] = useState<Record<string, string>>({});
   const [stepPhotoUploadCounts, setStepPhotoUploadCounts] = useState<Record<string, number>>({});
-  const sopSummaries = useSopSummaries(Boolean(task && station));
   const stepCheckDefinitions = getManufacturingStepCheckDefinitions();
   const collapsedRail = (
     <div aria-hidden={!collapsed} className={railClass}>
@@ -4803,21 +4694,6 @@ function DetailDrawer({
             <span>{station.bottleneckFlag ? "Bottleneck" : "Balanced"}</span>
           </div>
         </div>
-
-        {sopSummaries.length > 0 ? (
-          <label className="block">
-            <span className="ui-field-label">SOP</span>
-            <ThemedSelect
-              ariaLabel="Linked SOP"
-              value={task.sopId ?? ""}
-              options={[
-                { value: "", label: "None" },
-                ...sopSummaries.map((sop) => ({ value: sop.id, label: sopSummaryLabel(sop) })),
-              ]}
-              onChange={(sopId) => onUpdateTask(task.id, { sopId: sopId || undefined })}
-            />
-          </label>
-        ) : null}
 
         <label className="block">
           <span className="ui-field-label">Description</span>
@@ -5257,7 +5133,7 @@ function PlaybackPanel({
             <button
               type="button"
               onClick={onPlayPause}
-              className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-canvas hover:opacity-90"
+              className="flex h-8 w-8 items-center justify-center rounded bg-accent text-canvas hover:opacity-90"
               title={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? <Pause size={15} /> : <Play size={15} />}
@@ -5395,7 +5271,7 @@ export function LineWorkspace({
   // cache always matches what's saved; switching to a cached scenario is a pure in-memory setState.
   const scenarioCacheRef = useRef<Map<string, PlannerState>>(new Map());
   const [activeModule, setActiveModule] = useState("dashboard");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("account");
   const [setupSection, setSetupSection] = useState<SetupSection>("product");
   const [selectedTaskId, setSelectedTaskId] = useState(emptyPlannerState.tasks[0]?.id);
   const [focusedProcedureStepId, setFocusedProcedureStepId] = useState<string | undefined>();
@@ -5655,9 +5531,8 @@ export function LineWorkspace({
   const undoTrackingRef = useRef<{ state: PlannerState; dirtyVersion: number; scenarioId?: string } | null>(null);
   const skipHistoryCaptureRef = useRef(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  // Cross-app palette data, loaded lazily the first time the palette opens.
+  // Project-switcher data, loaded lazily the first time the palette opens.
   const [paletteProjects, setPaletteProjects] = useState<Array<{ project: Project; workspaceName: string }>>([]);
-  const [paletteSops, setPaletteSops] = useState<SopSummary[]>([]);
   const [bulkEditorOpen, setBulkEditorOpen] = useState(false);
   const presencePeers = usePlannerPresence(projectId);
   const presencePeersRef = useRef<PresencePeer[]>([]);
@@ -7850,9 +7725,6 @@ export function LineWorkspace({
         ),
       )
       .catch(() => undefined);
-    void listSopSummariesFromSupabase()
-      .then(setPaletteSops)
-      .catch(() => undefined);
   }, [commandPaletteOpen]);
 
   const commandPaletteGroups = useMemo<CommandPaletteGroup[]>(() => {
@@ -7879,18 +7751,18 @@ export function LineWorkspace({
             action: () => navigateModule(module.id),
           })),
           {
-            id: "settings:general",
+            id: "settings:account",
             label: "Settings",
-            hint: "General",
+            hint: "Account",
             keywords: "account profile password theme",
-            action: () => openSettings("general"),
+            action: () => router.push("/settings"),
           },
           {
-            id: "settings:workspace",
+            id: "settings:organization",
             label: "Members & access",
             hint: "Settings",
             keywords: "invite user role organization access members",
-            action: () => openSettings("workspace"),
+            action: () => router.push("/settings?section=organization"),
           },
         ],
       },
@@ -7975,16 +7847,6 @@ export function LineWorkspace({
           })),
       },
       {
-        label: "SOPs",
-        items: paletteSops.map((sop) => ({
-          id: `sop:${sop.id}`,
-          label: sop.title || sop.sopNumber || sop.id,
-          hint: sop.sopNumber && sop.title ? sop.sopNumber : "SOP",
-          keywords: "sop standard operating procedure document",
-          action: () => router.push(`/sops/${sop.id}`),
-        })),
-      },
-      {
         label: "Actions",
         items: [
           {
@@ -8018,7 +7880,6 @@ export function LineWorkspace({
     derivedState.tasks,
     derivedState.stations,
     paletteProjects,
-    paletteSops,
     projectId,
   ]);
 
@@ -8047,9 +7908,13 @@ export function LineWorkspace({
     "--detail-drawer-width": detailDrawerCollapsed ? "44px" : `${detailDrawerWidth}px`,
   } as CSSProperties;
 
+  if (urlWorkspaceSnapshot.activeModule === "settings" && (!hasLoadedRemoteState || isProjectSwitching)) {
+    return <SettingsLoadingState />;
+  }
+
   if (!hasLoadedRemoteState) {
     if (!isProjectSwitching) {
-      return <AppLoadingShell title="Loading project" />;
+      return <ProductLoadingState />;
     }
 
     return (
@@ -8079,7 +7944,7 @@ export function LineWorkspace({
               project={activeProjectContext}
             />
           </div>
-          <WorkspaceSwitchSkeleton />
+          <PlannerWorkspaceSkeleton />
         </div>
       </div>
     );
@@ -10310,7 +10175,7 @@ export function LineWorkspace({
     setActiveModule(moduleId);
   }
 
-  function openSettings(section: SettingsSection = "general") {
+  function openSettings(section: SettingsSection = "account") {
     setSettingsSection(section);
     setActiveModule("settings");
   }
@@ -10440,7 +10305,7 @@ export function LineWorkspace({
         </div>
 
         {isProjectSwitching ? (
-          <WorkspaceSwitchSkeleton />
+          <PlannerWorkspaceSkeleton />
         ) : isProcedureModule ? (
           <ProcedureWorkspace
             product={derivedState.product}
@@ -10472,6 +10337,7 @@ export function LineWorkspace({
               section={settingsSection}
               onSectionChange={setSettingsSection}
               project={activeProjectContext}
+              sections={embeddedSettingsSections}
             />
           </main>
         ) : (
@@ -10581,15 +10447,15 @@ export function LineWorkspace({
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
-                      <button type="button" onClick={exportGanttDocument} className="ui-btn-ghost h-10 gap-2">
+                      <button type="button" onClick={exportGanttDocument} className="ui-btn-ghost h-9 gap-2">
                         <Download size={16} />
                         Export Setup
                       </button>
-                      <button type="button" onClick={addZone} className="ui-btn-ghost h-10 gap-2">
+                      <button type="button" onClick={addZone} className="ui-btn-ghost h-9 gap-2">
                         <Plus size={16} />
                         Zone
                       </button>
-                      <button type="button" onClick={addTaskAtBottom} className="ui-btn-ghost h-10 gap-2">
+                      <button type="button" onClick={addTaskAtBottom} className="ui-btn-ghost h-9 gap-2">
                         <Plus size={16} />
                         Task
                       </button>
@@ -10600,7 +10466,7 @@ export function LineWorkspace({
                           setPlaybackCollapsed(false);
                           setIsPlaying(true);
                         }}
-                        className="ui-btn-ghost h-10 gap-2"
+                        className="ui-btn-ghost h-9 gap-2"
                       >
                         <Play size={16} />
                         Playback

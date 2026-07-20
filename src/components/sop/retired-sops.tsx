@@ -1,7 +1,8 @@
 "use client";
 
-import { Archive, Loader2 } from "lucide-react";
+import { Archive } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SopTableSkeleton } from "@/components/space-loading-states";
 import { listSops, type SopListItem } from "@/lib/sop/store";
 import { listHistoricalRevisions } from "@/lib/sop/review";
 import { useSopWorkspace } from "./sop-workspace-provider";
@@ -95,22 +96,20 @@ export function RetiredSops({ active = true }: { active?: boolean }) {
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {status === "loading" ? (
-        <section className="flex min-h-40 items-center justify-center border-t border-line px-4">
-          <Loader2 size={18} className="animate-spin text-ink-tertiary" />
-        </section>
+        <SopTableSkeleton />
       ) : status === "error" ? (
-        <section className="flex min-h-40 items-center justify-center border-t border-line px-4 text-center">
+        <section className="ui-empty-state">
           <button type="button" className="ui-btn-ghost inline-flex h-9 px-3" onClick={() => void refresh()}>
             Retry
           </button>
         </section>
       ) : entries.length === 0 ? (
-        <section className="flex min-h-40 flex-col items-center justify-center border-t border-line px-4 text-center">
+        <section className="ui-empty-state">
           <Archive size={20} className="mx-auto text-ink-tertiary" />
           <p className="mt-2 ui-section-subtitle text-ink-tertiary">No retired SOPs.</p>
         </section>
       ) : (
-        <section className="overflow-hidden border-y border-line bg-surface">
+        <section className="ui-data-table-frame">
           <div className="ui-table-scroll">
             <table className="w-full min-w-[640px] border-collapse text-left">
               <thead>

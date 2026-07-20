@@ -1,5 +1,5 @@
-import { RouteLoadingState } from "@/components/route-loading-state";
+import { PlanningLoadingState } from "@/components/space-loading-states";
 
 export default function PlanningLoading() {
-  return <RouteLoadingState label="Loading planning" />;
+  return <PlanningLoadingState />;
 }

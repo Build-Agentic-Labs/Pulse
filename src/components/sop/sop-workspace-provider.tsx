@@ -2,7 +2,8 @@
 
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AppLoadingShell, AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
+import { AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
+import { QualityLoadingState } from "@/components/space-loading-states";
 import { ThemedSelect } from "@/components/themed-select";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrgToolAccess } from "@/domain/supabase-planner";
 import type { AccessLevel, WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
@@ -197,10 +198,10 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshWorkspaces, supabase]);
 
-  function setWorkspaceId(nextId: string) {
+  const setWorkspaceId = useCallback((nextId: string) => {
     setWorkspaceIdState(nextId);
     writeStoredWorkspaceId(nextId);
-  }
+  }, []);
 
   const role = useMemo(
     () => groups.find((group) => group.workspace.id === workspaceId)?.role,
@@ -217,11 +218,11 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
       workspaces: groups,
       setWorkspaceId,
     }),
-    [workspaceId, role, orgToolAccess, groups],
+    [workspaceId, role, orgToolAccess, groups, setWorkspaceId],
   );
 
   if (!sessionReady || (session && status === "loading")) {
-    return <AppLoadingShell title="Loading SOPs" />;
+    return <QualityLoadingState />;
   }
 
   if (!session || status === "auth") {
@@ -248,6 +249,51 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
       />
     );
   }
+
+  return <SopWorkspaceContext.Provider value={contextValue}>{children}</SopWorkspaceContext.Provider>;
+}
+
+/**
+ * Reuses workspace groups already resolved by AuthProjectGate. The standalone Settings
+ * route uses this adapter so Quality administration does not authenticate and reload the
+ * same organization a second time.
+ */
+export function SopWorkspaceFromGroupsProvider({
+  groups,
+  children,
+}: {
+  groups: WorkspaceProjectGroup[];
+  children: ReactNode;
+}) {
+  const [workspaceId, setWorkspaceIdState] = useState<string | undefined>(() => pickWorkspaceId(groups));
+
+  useEffect(() => {
+    setWorkspaceIdState((current) => {
+      if (current && groups.some((group) => group.workspace.id === current)) {
+        return current;
+      }
+      return pickWorkspaceId(groups);
+    });
+  }, [groups]);
+
+  const setWorkspaceId = useCallback((nextId: string) => {
+    setWorkspaceIdState(nextId);
+    writeStoredWorkspaceId(nextId);
+  }, []);
+
+  const role = groups.find((group) => group.workspace.id === workspaceId)?.role;
+  const contextValue = useMemo<SopWorkspaceContextValue>(
+    () => ({
+      status: "ready",
+      workspaceId,
+      role,
+      orgToolAccess: undefined,
+      canEditSops: canEditSops(role),
+      workspaces: groups,
+      setWorkspaceId,
+    }),
+    [groups, role, setWorkspaceId, workspaceId],
+  );
 
   return <SopWorkspaceContext.Provider value={contextValue}>{children}</SopWorkspaceContext.Provider>;
 }

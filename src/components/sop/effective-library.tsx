@@ -1,8 +1,9 @@
 "use client";
 
-import { Library, Loader2 } from "lucide-react";
+import { Library } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SopTableSkeleton } from "@/components/space-loading-states";
 import type { Department } from "@/domain/departments";
 import { SOP_STATUS_LABELS } from "@/domain/sop/schema";
 import { listDepartments } from "@/lib/departments/store";
@@ -107,23 +108,21 @@ export function EffectiveLibrary({ active = true }: { active?: boolean }) {
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
-        <section className="flex min-h-40 items-center justify-center border-t border-line px-4">
-          <Loader2 size={18} className="animate-spin text-ink-tertiary" />
-        </section>
+        <SopTableSkeleton />
       ) : listStatus === "error" ? (
-        <section className="flex min-h-40 flex-col items-center justify-center border-t border-line px-4 text-center">
+        <section className="ui-empty-state">
           <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load effective SOPs."}</p>
           <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
             Retry
           </button>
         </section>
       ) : sops.length === 0 ? (
-        <section className="flex min-h-40 flex-col items-center justify-center border-t border-line px-4 text-center">
+        <section className="ui-empty-state">
           <Library size={20} className="mx-auto text-ink-tertiary" />
           <p className="mt-2 ui-section-subtitle text-ink-tertiary">No effective SOPs yet.</p>
         </section>
       ) : (
-        <div className="overflow-hidden border-y border-line bg-surface">
+        <div className="ui-data-table-frame">
           <div className="ui-table-scroll">
             <table className="w-full min-w-[680px] border-collapse text-left">
                       <thead>

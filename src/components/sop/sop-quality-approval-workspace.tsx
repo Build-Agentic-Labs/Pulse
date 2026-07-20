@@ -264,14 +264,14 @@ export function SopQualityApprovalWorkspace({
 
       <div className="border-t border-line bg-surface p-4">
         {released ? (
-          <button type="button" className="ui-btn-primary h-10 w-full gap-2 px-4" onClick={onClose}>
+          <button type="button" className="ui-btn-primary h-9 w-full gap-2 px-4" onClick={onClose}>
             <CheckCircle2 size={14} />
             Effective · {returnLabel.toLowerCase()}
           </button>
         ) : (
           <button
             type="button"
-            className="ui-btn-primary h-10 w-full gap-2 px-4 disabled:opacity-40"
+            className="ui-btn-primary h-9 w-full gap-2 px-4 disabled:opacity-40"
             disabled={status === "releasing" || savingSignature || (!qualitySignature && !signatureStrokes.length)}
             onClick={() => void releaseToEffectiveLibrary()}
           >

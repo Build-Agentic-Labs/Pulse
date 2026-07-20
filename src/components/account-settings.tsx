@@ -9,7 +9,7 @@ import { resolveSupabaseSession } from "@/lib/supabase-auth";
  * password change for email/password accounts. Email changes stay out of scope — the
  * signup-domain trigger re-validates them, but the flow needs its own confirmation UX.
  */
-export function AccountSettings() {
+export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [email, setEmail] = useState("");
   const [isPasswordAccount, setIsPasswordAccount] = useState(false);
@@ -94,9 +94,13 @@ export function AccountSettings() {
   const nameDirty = fullName.trim() !== savedFullName && fullName.trim().length > 0;
 
   return (
-    <section className="ui-settings-section">
-      <h3 className="ui-settings-section-title">Account</h3>
-      <p className="ui-settings-section-desc">Your profile as teammates see it, and your sign-in credentials.</p>
+    <section className={embedded ? "ui-settings-section ui-settings-section-embedded" : "ui-settings-section"}>
+      {!embedded ? (
+        <>
+          <h3 className="ui-settings-section-title">Account</h3>
+          <p className="ui-settings-section-desc">Your profile as teammates see it, and your sign-in credentials.</p>
+        </>
+      ) : null}
       <div className="ui-settings-group">
         <div className="ui-settings-group-row">
           <div className="ui-settings-group-row-copy">

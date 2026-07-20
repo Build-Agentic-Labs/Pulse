@@ -30,6 +30,8 @@ type AuthProjectGateProps = {
    * render this once workspaces are ready (auth/loading/error handling unchanged).
    */
   renderHome?: (home: DashboardHomeContext) => ReactNode;
+  /** Destination-shaped fallback used while auth and workspace access resolve. */
+  loadingFallback?: ReactNode;
 };
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
@@ -199,7 +201,13 @@ function resolveDisplayName(session: Session | null): string {
   return metadata.full_name?.trim() || session?.user.email?.split("@")[0] || "";
 }
 
-export function AuthProjectGate({ children, projectId, routeKind = "planner", renderHome }: AuthProjectGateProps) {
+export function AuthProjectGate({
+  children,
+  projectId,
+  routeKind = "planner",
+  renderHome,
+  loadingFallback,
+}: AuthProjectGateProps) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [session, setSession] = useState<Session | null>(null);
@@ -371,6 +379,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
 
   const isRedirectingToProject =
     !homeMode && !projectId && status === "ready" && flatProjects.length > 0;
+  const loadingState = loadingFallback ?? <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />;
 
   if (projectId && !sessionReady && hasRecentProjectSwitchSession()) {
     return <>{children(fallbackProjectContext(projectId), () => setChildReady(true))}</>;
@@ -382,9 +391,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
   const hasCachedPaint = status === "ready" && groups.length > 0;
 
   if (!sessionReady && !hasCachedPaint) {
-    return (
-      <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
-    );
+    return <>{loadingState}</>;
   }
 
   if (recoveryMode) {
@@ -439,7 +446,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
 
     return (
       <>
-        {!childReady && status !== "ready" && !hasRecentProjectSwitchSession() ? <AppLoadingShell title={WORKSPACE_LOADING_TITLE} /> : null}
+        {!childReady && status !== "ready" && !hasRecentProjectSwitchSession() ? loadingState : null}
         {children(selectedProject ?? fallbackProjectContext(projectId), () => setChildReady(true))}
       </>
     );
@@ -455,9 +462,7 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
   }
 
   if (status === "loading" || isRedirectingToProject) {
-    return (
-      <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
-    );
+    return <>{loadingState}</>;
   }
 
   if (flatProjects.length === 0) {
@@ -502,7 +507,5 @@ export function AuthProjectGate({ children, projectId, routeKind = "planner", re
     );
   }
 
-  return (
-    <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
-  );
+  return <>{loadingState}</>;
 }

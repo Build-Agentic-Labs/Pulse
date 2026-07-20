@@ -70,7 +70,10 @@ export function SopShell({
             {mobileOpen ? <PanelLeftClose size={16} strokeWidth={1.75} /> : <PanelLeft size={16} strokeWidth={1.75} />}
           </button>
           {crumb ? (
-            <span className="hidden min-w-0 truncate ui-section-subtitle text-ink-secondary sm:inline">{crumb}</span>
+            <>
+              <span className="ui-chrome-divider hidden sm:block" />
+              <span className="ui-chrome-context-label hidden truncate sm:inline">{crumb}</span>
+            </>
           ) : null}
         </div>
 

@@ -22,22 +22,22 @@ type SpacePlaceholderProps = {
 export function SpacePlaceholder({ space, name, description, planned, children }: SpacePlaceholderProps) {
   return (
     <div className="h-[100dvh] overflow-y-auto bg-canvas text-ink">
-      <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface px-4">
+      <header className="ui-chrome sticky top-0 z-10 flex h-12 items-center gap-3 px-4">
         <BackToDashboardButton />
         <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
           Pulse
         </Link>
-        <span className="h-4 w-px bg-border-strong" />
-        <span className="ui-mono-label">{name}</span>
+        <span className="ui-chrome-divider" />
+        <span className="ui-chrome-context-label truncate">{name}</span>
         <span className="flex-1" />
         <UserNav />
       </header>
 
       <main className="mx-auto max-w-[760px] px-8 py-16">
-        <span className="grid h-11 w-11 place-items-center rounded-xl border border-line bg-gradient-to-b from-surface-raised to-canvas text-ink-secondary">
+        <span className="grid h-11 w-11 place-items-center rounded-sm border border-line bg-gradient-to-b from-surface-raised to-canvas text-ink-secondary">
           <SpaceIcon space={space} />
         </span>
-        <h1 className="mt-5 text-[28px] font-medium tracking-tight text-ink">{name}</h1>
+        <h1 className="ui-page-title mt-5">{name}</h1>
         <p className="mt-2 max-w-[52ch] text-sm text-ink-secondary">{description}</p>
 
         <section className="ui-panel mt-8 p-5">

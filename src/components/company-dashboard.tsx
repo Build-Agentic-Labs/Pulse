@@ -1,11 +1,13 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { useEffect, useState } from "react";
+import type { Project } from "@/domain/types";
 import { fetchMySpaceAccess } from "@/lib/planning/store";
 import type { DashboardHomeContext } from "./auth-project-gate";
-import { SPACE_META, SPACE_ORDER, SpaceIcon, spaceDisabledLabel, spaceHref, type SpaceKey } from "./spaces";
+import { announceProjectSwitch } from "./sidebar-workspace-panel";
+import { SPACE_META, SPACE_ORDER, spaceDisabledLabel, spaceHref, type SpaceKey } from "./spaces";
 import { UserNav } from "./user-nav";
 
 type SpaceCard = {
@@ -14,9 +16,30 @@ type SpaceCard = {
   desc: string;
   href?: string;
   soonLabel?: string;
+  project?: Project;
   /** Overrides soonLabel and forces the disabled/locked rendering even when href is set. */
   lockedLabel?: string;
 };
+
+function SpaceLinkStatus({ name, forcePending }: { name: string; forcePending: boolean }) {
+  const { pending: linkPending } = useLinkStatus();
+  const pending = forcePending || linkPending;
+
+  if (!pending) {
+    return (
+      <span className="absolute bottom-5 right-5 z-10 -translate-x-1.5 text-ink opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100">
+        <ArrowRight size={16} strokeWidth={1.75} aria-hidden="true" />
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <span className="sr-only" role="status" aria-live="polite">Opening {name}</span>
+      <span className="ui-space-card-progress" aria-hidden="true" />
+    </>
+  );
+}
 
 function timeGreeting(): string {
   const hour = new Date().getHours();
@@ -25,34 +48,53 @@ function timeGreeting(): string {
   return "Good evening";
 }
 
-const ICON_TILE_CLASSES =
-  "grid h-11 w-11 place-items-center rounded-xl border border-line bg-gradient-to-b from-surface-raised to-canvas text-ink-secondary transition group-hover:border-border-strong group-hover:text-ink";
+const SPACE_ART: Record<SpaceKey, { light: string; dark: string }> = {
+  product: { light: "/space-art/product.webp", dark: "/space-art/product-dark.webp" },
+  planning: { light: "/space-art/planning.webp", dark: "/space-art/planning-dark.webp" },
+  production: { light: "/space-art/production.webp", dark: "/space-art/production-dark.webp" },
+  quality: { light: "/space-art/quality.webp", dark: "/space-art/quality-dark.webp" },
+  insights: { light: "/space-art/insights.webp", dark: "/space-art/insights-dark.webp" },
+  settings: { light: "/space-art/settings.webp", dark: "/space-art/settings-dark.webp" },
+};
 
-function DashboardCard({ card }: { card: SpaceCard }) {
+function DashboardCard({
+  card,
+  pending,
+  onNavigate,
+}: {
+  card: SpaceCard;
+  pending: boolean;
+  onNavigate: () => void;
+}) {
   const disabled = !card.href || Boolean(card.lockedLabel);
+  const artPosition = card.space === "production" ? "14px 18px" : undefined;
   const body = (
     <>
-      <span className={ICON_TILE_CLASSES}>
-        <SpaceIcon space={card.space} />
-      </span>
-      <div className="mt-auto">
+      <span
+        aria-hidden="true"
+        className="ui-space-card-art ui-space-card-art-light pointer-events-none absolute inset-0 bg-[length:110%_auto] bg-left-top bg-no-repeat transition-opacity duration-200"
+        style={{ backgroundImage: `url(${SPACE_ART[card.space].light})`, backgroundPosition: artPosition }}
+      />
+      <span
+        aria-hidden="true"
+        className="ui-space-card-art ui-space-card-art-dark pointer-events-none absolute inset-0 bg-[length:110%_auto] bg-left-top bg-no-repeat transition-opacity duration-200"
+        style={{ backgroundImage: `url(${SPACE_ART[card.space].dark})`, backgroundPosition: artPosition }}
+      />
+      <div className="relative z-10">
         <h3 className="ui-section-title flex items-center gap-2">
           {card.name}
           {disabled ? (
             <span className="ui-chip ml-auto">{card.lockedLabel ?? card.soonLabel ?? "Soon"}</span>
-          ) : (
-            <span className="ml-auto -translate-x-1.5 text-ink opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100">
-              <ArrowRight size={16} strokeWidth={1.75} aria-hidden="true" />
-            </span>
-          )}
+          ) : null}
         </h3>
         <p className="mt-1 max-w-[26ch] text-xs text-ink-secondary">{card.desc}</p>
       </div>
+      {!disabled ? <SpaceLinkStatus name={card.name} forcePending={pending} /> : null}
     </>
   );
 
   const baseClasses =
-    "group relative flex min-h-[172px] flex-col gap-4 rounded-xl border border-line bg-surface p-6 transition duration-200";
+    "group relative flex min-h-[172px] flex-col gap-4 overflow-hidden rounded-sm border border-line bg-surface p-6 transition duration-200";
 
   if (disabled) {
     return <div className={`${baseClasses} opacity-50`}>{body}</div>;
@@ -62,6 +104,11 @@ function DashboardCard({ card }: { card: SpaceCard }) {
     <Link
       href={card.href!}
       className={`${baseClasses} hover:-translate-y-0.5 hover:border-border-strong hover:shadow-float active:translate-y-0`}
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        onNavigate();
+        if (card.project) announceProjectSwitch(card.project);
+      }}
     >
       {body}
     </Link>
@@ -79,6 +126,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
   // `null` while unknown -- the card renders normally in that state, since the /planning route
   // gate is the real guard and we don't want a locked flash before the check completes.
   const [planningAccess, setPlanningAccess] = useState<boolean | null>(null);
+  const [openingSpace, setOpeningSpace] = useState<SpaceKey | null>(null);
 
   useEffect(() => {
     if (!workspaceId || isManager) {
@@ -100,6 +148,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
   }, [workspaceId, isManager]);
 
   const planningLocked = planningAccess === false;
+  const preferredProject = groups.flatMap((group) => group.projects).find((project) => project.id === preferredProjectId);
 
   const cards: SpaceCard[] = SPACE_ORDER.map((space) => ({
     space,
@@ -108,6 +157,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
     href: spaceHref(space, preferredProjectId),
     soonLabel: spaceDisabledLabel(space),
     lockedLabel: space === "planning" && planningLocked ? "Restricted" : undefined,
+    project: space === "product" ? preferredProject : undefined,
   }));
 
   const today = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(
@@ -122,14 +172,14 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
         className="pointer-events-none fixed inset-0 bg-[radial-gradient(720px_340px_at_50%_-120px,color-mix(in_srgb,var(--color-ink)_5%,transparent),transparent_70%)]"
       />
 
-      <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface px-4">
+      <header className="ui-chrome sticky top-0 z-10 flex h-12 items-center gap-3 px-4">
         <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
           Pulse
         </Link>
         {workspaceName ? (
           <>
-            <span className="h-4 w-px bg-border-strong" />
-            <span className="ui-mono-label">{workspaceName}</span>
+            <span className="ui-chrome-divider" />
+            <span className="ui-chrome-context-label truncate">{workspaceName}</span>
           </>
         ) : null}
         <span className="flex-1" />
@@ -148,7 +198,12 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {cards.map((card) => (
-            <DashboardCard key={card.space} card={card} />
+            <DashboardCard
+              key={card.space}
+              card={card}
+              pending={openingSpace === card.space}
+              onNavigate={() => setOpeningSpace(card.space)}
+            />
           ))}
         </div>
       </main>

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// Departments is a tab inside the persistent SOP workspace; keep the old path working.
+// Department and SOP-access administration now lives in the system Settings space.
 export default function DepartmentsPage() {
-  redirect("/sops?tab=departments");
+  redirect("/settings?section=quality");
 }

@@ -15,6 +15,7 @@ import type { PlannerProjectContext, Project, WorkspaceRole } from "@/domain/typ
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import { ThemedFeedbackLayer, type FeedbackConfirm } from "./themed-feedback";
 import { UiContextMenu } from "./ui-context-menu";
+import { NavSelectionTrack } from "./nav-selection-track";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 const SIDEBAR_PROJECT_CACHE_KEY = "pulse:sidebar-projects-v1";
@@ -151,6 +152,7 @@ export function SidebarWorkspacePanel({
   const [contextMenu, setContextMenu] = useState<{ project: Project; anchorRect: DOMRect } | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState(() => activeProject?.projectId);
 
   const activeProjectId = activeProject?.projectId;
   const activeProjectName = activeProject?.projectName;
@@ -159,6 +161,7 @@ export function SidebarWorkspacePanel({
 
   useEffect(() => {
     if (!activeProjectId || !activeWorkspaceId) return;
+    setSelectedProjectId(activeProjectId);
     const fallbackProject: Project = {
       id: activeProjectId,
       workspaceId: activeWorkspaceId,
@@ -387,8 +390,11 @@ export function SidebarWorkspacePanel({
       return;
     }
 
-    announceProjectSwitch(project);
-    router.push(projectPlannerHref(project.id));
+    setSelectedProjectId(project.id);
+    window.requestAnimationFrame(() => {
+      announceProjectSwitch(project);
+      router.push(projectPlannerHref(project.id));
+    });
   }
 
   return (
@@ -399,7 +405,7 @@ export function SidebarWorkspacePanel({
           {status === "ready" && canEdit(role) ? (
             <button
               type="button"
-              className="ui-btn-ghost h-6 w-6 shrink-0 px-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+              className="ui-btn-ghost h-8 w-8 shrink-0 px-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
               onClick={() => {
                 setIsAdding((open) => !open);
                 setCreateError("");
@@ -413,7 +419,10 @@ export function SidebarWorkspacePanel({
           ) : null}
         </div>
 
-        <div className="mt-1 space-y-0.5">
+        <NavSelectionTrack
+          activeIndex={status === "ready" ? projects.findIndex((project) => project.id === selectedProjectId) : -1}
+          className="mt-1 space-y-0.5"
+        >
           {status === "loading" ? (
             <div className="px-2 py-1.5 text-[11px] text-ink-tertiary">Loading projects…</div>
           ) : null}
@@ -434,7 +443,7 @@ export function SidebarWorkspacePanel({
 
           {status === "ready"
             ? projects.map((project) => {
-                const active = project.id === activeProject?.projectId;
+                const active = project.id === selectedProjectId;
                 const isRenaming = renamingProjectId === project.id;
                 const projectRole = roleByWorkspaceId[project.workspaceId] ?? role;
                 return (
@@ -517,7 +526,7 @@ export function SidebarWorkspacePanel({
                 );
               })
             : null}
-        </div>
+        </NavSelectionTrack>
 
         {isAdding ? (
           <form className="mt-1 flex items-center gap-0.5" onSubmit={handleCreate}>

@@ -1,30 +1,29 @@
 import type { ReactNode } from "react";
+import { Settings } from "lucide-react";
 
-export type SpaceKey = "product" | "planning" | "production" | "quality" | "people" | "insights";
+export type SpaceKey = "product" | "planning" | "production" | "quality" | "insights" | "settings";
 
 /** Canonical company spaces, in dashboard order, with their descriptions. */
-export const SPACE_ORDER: SpaceKey[] = ["product", "planning", "production", "quality", "people", "insights"];
+export const SPACE_ORDER: SpaceKey[] = ["product", "planning", "production", "quality", "insights", "settings"];
 
 export const SPACE_META: Record<SpaceKey, { name: string; desc: string }> = {
   product: { name: "Product", desc: "Line design, work instructions, exploded views and build animations." },
   planning: { name: "Planning", desc: "Work orders, schedules and capacity for the production plan." },
   production: { name: "Production", desc: "Live stations — documents, throughput, targets and travelers." },
   quality: { name: "Quality", desc: "SOPs, work instructions and document control." },
-  people: { name: "People", desc: "Members, roles and project access." },
   insights: { name: "Insights", desc: "Reporting across every space." },
+  settings: { name: "Settings", desc: "Account, appearance, organization and workspace configuration." },
 };
 
 /**
- * Destination for a space. Product and People live inside a project's planner, so they
- * need the caller's preferred project; without one they're unreachable (returns
- * undefined → rendered disabled). Insights is not built yet (always undefined).
+ * Destination for a space. Product needs the caller's preferred project; without one it
+ * is unreachable (returns undefined -> rendered disabled). Settings is organization-wide
+ * and remains available even when the organization has no projects.
  */
 export function spaceHref(space: SpaceKey, preferredProjectId?: string): string | undefined {
   switch (space) {
     case "product":
       return preferredProjectId ? `/projects/${preferredProjectId}/planner?view=dashboard` : undefined;
-    case "people":
-      return preferredProjectId ? `/projects/${preferredProjectId}/planner?view=settings` : undefined;
     case "planning":
       return "/planning";
     case "production":
@@ -33,6 +32,8 @@ export function spaceHref(space: SpaceKey, preferredProjectId?: string): string 
       return "/sops";
     case "insights":
       return undefined;
+    case "settings":
+      return "/settings";
   }
 }
 
@@ -76,14 +77,6 @@ export function SpaceIcon({ space, size = 21 }: { space: SpaceKey; size?: number
         <path d="m8.8 12.1 2.25 2.25L15.4 9.7" />
       </>
     ),
-    people: (
-      <>
-        <circle cx="9" cy="8.2" r="3.4" />
-        <path d="M3.2 19.4c.9-3.2 3.15-4.8 5.8-4.8s4.9 1.6 5.8 4.8" />
-        <circle cx="17.2" cy="9" r="2.4" fill="currentColor" stroke="none" />
-        <path d="M16.1 14.5c2.4.3 4.1 1.8 4.9 4.3" />
-      </>
-    ),
     insights: (
       <>
         <path d="M4.5 4.5v13.8a1.2 1.2 0 0 0 1.2 1.2h13.8" />
@@ -91,7 +84,12 @@ export function SpaceIcon({ space, size = 21 }: { space: SpaceKey; size?: number
         <circle cx="18.5" cy="7.5" r="1.6" fill="currentColor" stroke="none" />
       </>
     ),
+    settings: null,
   };
+
+  if (space === "settings") {
+    return <Settings size={size} strokeWidth={1.6} aria-hidden="true" />;
+  }
 
   return (
     <svg

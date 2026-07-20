@@ -117,13 +117,13 @@ function ConfirmActions({
 
   return (
     <div className="mt-5 flex justify-end gap-2">
-      <button type="button" onClick={onCancelConfirm} className="ui-btn-ghost h-10 px-4">
+      <button type="button" onClick={onCancelConfirm} className="ui-btn-ghost h-9 px-4">
         {confirm.cancelLabel ?? "Cancel"}
       </button>
       <button
         type="button"
         onClick={onConfirm}
-        className={confirm.tone === "danger" ? "ui-btn-destructive h-10 px-4" : "ui-btn-primary h-10 px-4"}
+        className={confirm.tone === "danger" ? "ui-btn-destructive h-9 px-4" : "ui-btn-primary h-9 px-4"}
       >
         {confirm.confirmLabel ?? "Continue"}
       </button>
@@ -226,7 +226,7 @@ export function ThemedFeedbackLayer({
                   <div className="min-h-0 overflow-y-auto p-4">
                     {toast.content ?? <BodyText body={toast.body} />}
                     <div className="mt-4 flex justify-end border-t border-line pt-4">
-                      <button type="button" onClick={() => onDismissToast(toast.id)} className="ui-btn-primary h-10 px-4">
+                      <button type="button" onClick={() => onDismissToast(toast.id)} className="ui-btn-primary h-9 px-4">
                         Dismiss
                       </button>
                     </div>

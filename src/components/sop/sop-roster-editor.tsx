@@ -139,7 +139,7 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
   }
 
   return (
-    <section className="overflow-hidden border-y border-line bg-surface">
+    <section className="ui-data-table-frame">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
         <h2 className="text-sm font-semibold text-ink">Department approvals</h2>
         {available.length > 0 ? (

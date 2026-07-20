@@ -1,9 +1,10 @@
 "use client";
 
-import { FileText, Inbox, Loader2, ShieldCheck } from "lucide-react";
-import { formatDate } from "@/domain/formatting";
+import { FileText, Inbox, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SopTableSkeleton } from "@/components/space-loading-states";
+import { formatDate } from "@/domain/formatting";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { SOP_STATUS_LABELS, type SopStatus } from "@/domain/sop/schema";
 import {
@@ -143,31 +144,23 @@ export function ReviewQueue({
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
-        <section className="border-t border-line">
-          <div className="flex min-h-40 items-center justify-center px-4">
-            <Loader2 size={18} className="animate-spin text-ink-tertiary" />
-          </div>
-        </section>
+        <SopTableSkeleton />
       ) : listStatus === "error" ? (
-        <section className="border-t border-line">
-          <div className="flex min-h-40 flex-col items-center justify-center px-4 text-center">
-            <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load your review queue."}</p>
-            <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
-              Retry
-            </button>
-          </div>
+        <section className="ui-empty-state">
+          <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load your review queue."}</p>
+          <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
+            Retry
+          </button>
         </section>
       ) : nothingToDo ? (
-        <section className="border-t border-line">
-          <div className="flex min-h-40 flex-col items-center justify-center px-4 text-center">
-            <Inbox size={20} className="mx-auto text-ink-tertiary" />
-            <p className="mt-2 ui-section-subtitle text-ink-tertiary">Nothing is waiting on you.</p>
-          </div>
+        <section className="ui-empty-state">
+          <Inbox size={20} className="mx-auto text-ink-tertiary" />
+          <p className="mt-2 ui-section-subtitle text-ink-tertiary">Nothing is waiting on you.</p>
         </section>
       ) : (
         <>
           {data.sentBack.length > 0 ? (
-            <section className="divide-y divide-line overflow-hidden border-y border-line bg-surface">
+            <section className="ui-data-table-frame divide-y divide-line">
               <div className="px-4 py-3">
                 <h2 className="text-sm font-semibold text-ink">Sent back for rework</h2>
               </div>
@@ -203,7 +196,7 @@ export function ReviewQueue({
                       </span>
                     </div>
 
-                    <div className="overflow-hidden border-y border-line bg-surface">
+                    <div className="ui-data-table-frame">
                       <div className="ui-table-scroll">
                         <table className="min-w-[720px] w-full border-collapse text-left">
                           <thead>
@@ -261,7 +254,7 @@ export function ReviewQueue({
           ) : null}
 
           {data.finalApprovals.length > 0 ? (
-            <section className="divide-y divide-line overflow-hidden border-y border-line bg-surface">
+            <section className="ui-data-table-frame divide-y divide-line">
               <div className="flex items-center justify-between gap-2 px-4 py-3">
                 <div>
                   <h2 className="text-sm font-semibold text-ink">Final approval</h2>
@@ -301,7 +294,7 @@ export function ReviewQueue({
           ) : null}
 
           {draftReviews.length > 0 ? (
-            <section className="divide-y divide-line overflow-hidden border-y border-line bg-surface">
+            <section className="ui-data-table-frame divide-y divide-line">
               <div className="px-4 py-3">
                 <h2 className="text-sm font-semibold text-ink">Draft review</h2>
                 <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
@@ -336,7 +329,7 @@ export function ReviewQueue({
           ) : null}
 
           {awaitingRelease.length > 0 ? (
-            <section className="divide-y divide-line overflow-hidden border-y border-line bg-surface">
+            <section className="ui-data-table-frame divide-y divide-line">
               <div className="px-4 py-3">
                 <h2 className="text-sm font-semibold text-ink">Awaiting Quality release</h2>
                 <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { AuthProjectGate } from "@/components/auth-project-gate";
+import { PlanningLoadingState } from "@/components/space-loading-states";
 import type { WorkspaceProjectGroup } from "@/domain/types";
 import { PlanningAccessGate } from "./planning-shell";
 import { PlanningWorkspaceProvider } from "./planning-workspace-provider";
@@ -23,6 +24,7 @@ export function PlanningRoute({
   return (
     <AuthProjectGate
       initialGroups={initialGroups}
+      loadingFallback={<PlanningLoadingState />}
       renderHome={(home) => (
         <PlanningWorkspaceProvider groups={home.groups}>
           <PlanningAccessGate>{children}</PlanningAccessGate>

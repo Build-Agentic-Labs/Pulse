@@ -100,7 +100,7 @@
   }
 
 .ui-workspace-content {
-    @apply min-h-0 min-w-0 overflow-auto rounded-l-xl bg-surface-raised transition-[border-radius] duration-300 ease-out;
+    @apply min-h-0 min-w-0 overflow-auto rounded-l-xl bg-canvas transition-[border-radius] duration-300 ease-out;
   }
 
 .ui-workspace-content-flush {
@@ -130,7 +130,8 @@
 
 .ui-procedure-step {
     position: relative;
-    @apply rounded-xl px-4 py-3.5;
+    @apply px-4 py-3.5;
+    border-radius: var(--radius-panel);
   }
 
 .ui-procedure-step + .ui-procedure-step {
@@ -154,7 +155,8 @@
   }
 
 .ui-procedure-empty {
-    @apply rounded-xl px-4 py-5 text-sm text-ink-secondary;
+    @apply px-4 py-5 text-sm text-ink-secondary;
+    border-radius: var(--radius-panel);
     border: 1px dashed color-mix(in srgb, var(--color-border) 65%, transparent);
   }
 
@@ -1431,7 +1433,8 @@
   }
 
 .ui-workspace-content .ui-nav-item-active {
-    @apply bg-surface text-ink;
+    background: var(--color-accent-muted);
+    color: var(--color-accent);
   }
 
 .ui-workspace-content .ui-metric-card {

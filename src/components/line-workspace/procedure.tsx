@@ -848,7 +848,7 @@ export function ProcedureWorkspace({
                   {manufacturingSteps.length} step(s) · step total {formatMinutes(manufacturingStepDurationMinutes)} · {formatManHours(stepDerivedManHours)}
                 </p>
               </div>
-              <button type="button" onClick={addManufacturingStep} className="ui-btn-ghost h-10 gap-2">
+              <button type="button" onClick={addManufacturingStep} className="ui-btn-ghost h-9 gap-2">
                 <Plus size={14} strokeWidth={1.75} />
                 Add Step
               </button>
@@ -1116,7 +1116,7 @@ export function ProcedureWorkspace({
                 <h2 className="ui-setup-section-title">Part References</h2>
                 <p className="ui-setup-section-desc">{partReferences.length} part reference(s)</p>
               </div>
-              <button type="button" onClick={addPartReference} className="ui-btn-ghost h-10 gap-2">
+              <button type="button" onClick={addPartReference} className="ui-btn-ghost h-9 gap-2">
                 <Plus size={14} strokeWidth={1.75} />
                 Part
               </button>

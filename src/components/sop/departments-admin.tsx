@@ -1,8 +1,9 @@
 "use client";
 
-import { Building2, ChevronDown, Flag, Loader2, Plus, Trash2, UserPlus, UsersRound } from "lucide-react";
+import { Building2, Flag, Loader2, Plus, Trash2, UserPlus, UsersRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
+import { ThemedSelect } from "@/components/themed-select";
 import { standardPositionTitlesForDepartment, type Department, type DepartmentMember, type DeptRole } from "@/domain/departments";
 import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
 import type { MemberAccess } from "@/domain/types";
@@ -34,7 +35,7 @@ function memberLabel(member: MemberAccess): string {
   return member.fullName || member.email || member.userId;
 }
 
-export function DepartmentsAdmin({ active = true }: { active?: boolean }) {
+export function DepartmentsAdmin({ active = true, embedded = false }: { active?: boolean; embedded?: boolean }) {
   const confirm = useConfirm();
   const { workspaceId, role } = useSopWorkspace();
   const manage = canManage(role);
@@ -172,14 +173,16 @@ export function DepartmentsAdmin({ active = true }: { active?: boolean }) {
   }
 
   return (
-    <div className="ui-depts mx-auto max-w-6xl space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="ui-section-title">Departments</h1>
-            <p className="ui-section-subtitle">
-              Assign ownership and control who can author, review, and approve SOPs.
-            </p>
-          </div>
+    <div className={`ui-depts space-y-6 ${embedded ? "" : "mx-auto max-w-6xl"}`}>
+        <div className={`flex flex-wrap items-start gap-4 ${embedded ? "justify-end" : "justify-between"}`}>
+          {!embedded ? (
+            <div>
+              <h1 className="ui-section-title">Departments</h1>
+              <p className="ui-section-subtitle">
+                Assign ownership and control who can author, review, and approve SOPs.
+              </p>
+            </div>
+          ) : null}
           {manage ? (
             <button
               type="button"
@@ -233,9 +236,9 @@ export function DepartmentsAdmin({ active = true }: { active?: boolean }) {
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="border-b border-line">
-                      <th className="ui-mono-label px-4 py-2.5 text-left text-ink-tertiary">Code</th>
-                      <th className="ui-mono-label px-4 py-2.5 text-left text-ink-tertiary">Department</th>
-                      <th className="ui-mono-label px-4 py-2.5 text-right text-ink-tertiary">Members</th>
+                      <th className="ui-settings-table-label px-4 py-2.5 text-left">Code</th>
+                      <th className="ui-settings-table-label px-4 py-2.5 text-left">Department</th>
+                      <th className="ui-settings-table-label px-4 py-2.5 text-right">Members</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -254,7 +257,7 @@ export function DepartmentsAdmin({ active = true }: { active?: boolean }) {
                             <span className="ui-dept-code">{dept.code}</span>
                           </td>
                           <td className="px-4 py-3">
-                            <span className="text-sm font-medium text-ink">{dept.name}</span>
+                            <span className="text-[13px] font-medium text-ink">{dept.name}</span>
                             {dept.isQualityGate ? (
                               <span className="ui-dept-gate ml-2">
                                 <Flag size={11} strokeWidth={1.8} />
@@ -278,7 +281,7 @@ export function DepartmentsAdmin({ active = true }: { active?: boolean }) {
             <section className="flex min-h-[28rem] min-w-0 flex-col border-t border-line p-5 lg:border-l lg:border-t-0 lg:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <h2 className="truncate text-lg font-semibold leading-tight text-ink">{selected.name}</h2>
+                  <h2 className="ui-settings-section-title truncate">{selected.name}</h2>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="text-xs text-ink-tertiary">
@@ -495,24 +498,22 @@ function MembersPanel({
 
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col gap-4">
-      <div className="border-b border-line pb-3">
-        <h3 className="text-sm font-semibold text-ink">Members and SOP access</h3>
-      </div>
+      <h3 className="ui-settings-section-title">Members and SOP access</h3>
 
       {members.length === 0 ? (
-        <div className="flex min-h-40 items-center justify-center border-y border-line text-center text-ink-tertiary">
+        <div className="flex min-h-40 items-center justify-center text-center text-ink-tertiary">
           <div>
             <UsersRound size={20} className="mx-auto" strokeWidth={1.5} />
-            <p className="mt-2 text-sm">No department members</p>
+            <p className="mt-2 text-[12px]">No department members</p>
           </div>
         </div>
       ) : (
-        <ul className="min-h-40 divide-y divide-line border-y border-line">
+        <ul className="min-h-40 space-y-5">
           {members.map((member) => (
-            <li key={member.userId} className="py-4">
+            <li key={member.userId}>
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-ink" title={member.userId}>
+                  <div className="truncate text-[13px] font-medium text-ink" title={member.userId}>
                     {labelFor(member.userId)}
                   </div>
                   {emailFor(member.userId) ? (
@@ -533,52 +534,38 @@ function MembersPanel({
               </div>
               {manage ? (
                 <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_128px]">
-                  <label className="block min-w-0">
+                  <div className="block min-w-0">
                     <span className="ui-mono-label mb-1 block text-ink-tertiary">Position / job title</span>
-                    <div className="relative">
-                      <select
-                        className="ui-field-standalone h-8 w-full cursor-pointer appearance-none pl-2.5 pr-7 text-xs shadow-none transition-colors hover:border-border-strong focus:border-border-strong disabled:opacity-50"
-                        value={member.positionTitle}
-                        disabled={busyUserId === member.userId}
-                        onChange={(event) => void handlePositionChange(member.userId, event.target.value)}
-                      >
-                        <option value="">Select a position…</option>
-                        {member.positionTitle && !positionOptions.includes(member.positionTitle) ? (
-                          <option value={member.positionTitle}>{member.positionTitle} (existing)</option>
-                        ) : null}
-                        {positionOptions.map((positionTitle) => (
-                          <option key={positionTitle} value={positionTitle}>{positionTitle}</option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={13}
-                        strokeWidth={2}
-                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
-                      />
-                    </div>
-                  </label>
-                  <label className="block">
-                    <span className="ui-mono-label mb-1 block text-ink-tertiary">SOP access</span>
-                    <div className="relative">
-                    <select
-                      className="ui-field-standalone h-8 w-full cursor-pointer appearance-none pl-2.5 pr-7 text-xs shadow-none transition-colors hover:border-border-strong focus:border-border-strong disabled:opacity-50"
-                      value={member.deptRole}
+                    <ThemedSelect
+                      variant="sop"
+                      className="w-full"
+                      triggerClassName="ui-themed-select-trigger-compact px-2.5 text-xs"
+                      ariaLabel="Position or job title"
+                      value={member.positionTitle}
                       disabled={busyUserId === member.userId}
-                      onChange={(event) => void handleRoleChange(member.userId, event.target.value as DeptRole)}
-                    >
-                      {DEPT_ROLES.map((deptRole) => (
-                        <option key={deptRole} value={deptRole}>
-                          {deptRole}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={13}
-                      strokeWidth={2}
-                      className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+                      onChange={(value) => void handlePositionChange(member.userId, value)}
+                      options={[
+                        { value: "", label: "Select a position…" },
+                        ...(member.positionTitle && !positionOptions.includes(member.positionTitle)
+                          ? [{ value: member.positionTitle, label: `${member.positionTitle} (existing)` }]
+                          : []),
+                        ...positionOptions.map((positionTitle) => ({ value: positionTitle, label: positionTitle })),
+                      ]}
                     />
                   </div>
-                  </label>
+                  <div className="block">
+                    <span className="ui-mono-label mb-1 block text-ink-tertiary">SOP access</span>
+                    <ThemedSelect
+                      variant="sop"
+                      className="w-full"
+                      triggerClassName="ui-themed-select-trigger-compact px-2.5 text-xs"
+                      ariaLabel="SOP access"
+                      value={member.deptRole}
+                      disabled={busyUserId === member.userId}
+                      onChange={(value) => void handleRoleChange(member.userId, value as DeptRole)}
+                      options={DEPT_ROLES.map((deptRole) => ({ value: deptRole, label: deptRole }))}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -592,33 +579,31 @@ function MembersPanel({
       )}
 
       {manage ? (
-        <div className="mt-auto border-t border-line pt-4">
+        <div className="mt-auto pt-3">
           <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1">
-              <select
-                className="ui-field-standalone h-8 w-full cursor-pointer appearance-none pl-2.5 pr-8 text-xs shadow-none transition-colors hover:border-border-strong focus:border-border-strong disabled:opacity-50"
+            <div className="min-w-0 flex-1">
+              <ThemedSelect
+                variant="sop"
+                className="w-full"
+                triggerClassName="ui-themed-select-trigger-compact px-2.5 text-xs"
+                ariaLabel="Add a department member"
                 value={pick}
                 disabled={adding || available.length === 0}
-                onChange={(event) => setPick(event.target.value)}
-              >
-                <option value="">
-                  {directory.length === 0
-                    ? "No workspace members found"
-                    : available.length === 0
-                      ? "Everyone is already a member"
-                      : "Add a member…"}
-                </option>
-                {available.map((member) => (
-                  <option key={member.userId} value={member.userId}>
-                    {memberLabel(member)}
-                    {member.fullName && member.email ? ` · ${member.email}` : ""}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={14}
-                strokeWidth={2}
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
+                onChange={setPick}
+                options={[
+                  {
+                    value: "",
+                    label: directory.length === 0
+                      ? "No workspace members found"
+                      : available.length === 0
+                        ? "Everyone is already a member"
+                        : "Add a member…",
+                  },
+                  ...available.map((member) => ({
+                    value: member.userId,
+                    label: `${memberLabel(member)}${member.fullName && member.email ? ` · ${member.email}` : ""}`,
+                  })),
+                ]}
               />
             </div>
             <button

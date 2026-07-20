@@ -38,6 +38,8 @@ type AuthProjectGateProps = {
    * refresh as before.
    */
   initialGroups?: WorkspaceProjectGroup[];
+  /** Destination-shaped fallback used while auth and workspace access resolve. */
+  loadingFallback?: ReactNode;
 };
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
@@ -223,6 +225,7 @@ export function AuthProjectGate({
   routeKind = "planner",
   renderHome,
   initialGroups,
+  loadingFallback,
 }: AuthProjectGateProps) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
@@ -400,6 +403,7 @@ export function AuthProjectGate({
 
   const isRedirectingToProject =
     !homeMode && !projectId && status === "ready" && flatProjects.length > 0;
+  const loadingState = loadingFallback ?? <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />;
 
   if (projectId && !sessionReady && hasRecentProjectSwitchSession()) {
     return <>{children(fallbackProjectContext(projectId), () => setChildReady(true))}</>;
@@ -411,9 +415,7 @@ export function AuthProjectGate({
   const hasCachedPaint = status === "ready" && groups.length > 0;
 
   if (!sessionReady && !hasCachedPaint) {
-    return (
-      <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
-    );
+    return <>{loadingState}</>;
   }
 
   if (recoveryMode) {
@@ -468,7 +470,7 @@ export function AuthProjectGate({
 
     return (
       <>
-        {!childReady && status !== "ready" && !hasRecentProjectSwitchSession() ? <AppLoadingShell title={WORKSPACE_LOADING_TITLE} /> : null}
+        {!childReady && status !== "ready" && !hasRecentProjectSwitchSession() ? loadingState : null}
         {children(selectedProject ?? fallbackProjectContext(projectId), () => setChildReady(true))}
       </>
     );
@@ -484,9 +486,7 @@ export function AuthProjectGate({
   }
 
   if (status === "loading" || isRedirectingToProject) {
-    return (
-      <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
-    );
+    return <>{loadingState}</>;
   }
 
   if (flatProjects.length === 0) {
@@ -531,7 +531,5 @@ export function AuthProjectGate({
     );
   }
 
-  return (
-    <AppLoadingShell title={WORKSPACE_LOADING_TITLE} />
-  );
+  return <>{loadingState}</>;
 }

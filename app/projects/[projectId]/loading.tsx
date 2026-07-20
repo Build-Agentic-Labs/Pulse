@@ -1,5 +1,9 @@
-import { RouteLoadingState } from "@/components/route-loading-state";
+"use client";
+
+import { useSearchParams } from "next/navigation";
+import { ProductLoadingState, SettingsLoadingState } from "@/components/space-loading-states";
 
 export default function ProjectLoading() {
-  return <RouteLoadingState label="Loading project" />;
+  const searchParams = useSearchParams();
+  return searchParams.get("view") === "settings" ? <SettingsLoadingState /> : <ProductLoadingState />;
 }

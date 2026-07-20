@@ -1,0 +1,105 @@
+/* Appearance settings panel styles extracted from app/globals.css (feature CSS
+   stays component-scoped per the refactor conventions). Plain CSS by necessity
+   (Tailwind v3 intercepts @layer in standalone files); loads after globals.css.
+   Only app-settings-panel.tsx renders these classes. */
+
+.ui-appearance-segmented {
+  display: inline-grid;
+  min-width: 240px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.ui-appearance-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ui-appearance-preset {
+  display: grid;
+  min-height: 92px;
+  align-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  transition: border-color var(--motion-fast) var(--ease-ui), background var(--motion-fast) var(--ease-ui);
+}
+
+.ui-appearance-preset:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-hover);
+}
+
+.ui-appearance-preset:focus-visible,
+.ui-appearance-segment:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.ui-appearance-preset-active {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.ui-appearance-preset-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ui-appearance-preset-tone {
+  margin-top: 2px;
+  color: var(--color-ink-secondary);
+  font-size: 11px;
+}
+
+.ui-appearance-preset-swatches {
+  display: grid;
+  height: 18px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 14%, transparent);
+  border-radius: 3px;
+}
+
+.ui-appearance-preset-swatches > span + span {
+  border-left: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+
+.ui-appearance-segment {
+  min-height: var(--control-height-standard);
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-ink-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background var(--motion-fast) var(--ease-ui), color var(--motion-fast) var(--ease-ui);
+}
+
+.ui-appearance-segment:last-child {
+  border-right: 0;
+}
+
+.ui-appearance-segment:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-ink);
+}
+
+.ui-appearance-segment-active,
+.ui-appearance-segment-active:hover {
+  background: var(--color-accent);
+  color: var(--color-canvas);
+}
+
+@media (max-width: 720px) {
+  .ui-appearance-preset-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

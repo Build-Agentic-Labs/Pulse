@@ -129,20 +129,20 @@ export function PlanningSettings() {
 
   if (!canWrite) {
     return (
-      <section className="ui-panel p-5">
-        <div className="ui-mono-label">Settings</div>
-        <p className="ui-section-subtitle mt-2">You have read-only access to Planning.</p>
+      <section className="ui-settings-section">
+        <h3 className="ui-settings-section-title">Planning access</h3>
+        <p className="ui-settings-section-desc">You have read-only access to Planning.</p>
       </section>
     );
   }
 
   return (
-    <div ref={rootRef} className="scroll-mt-4 space-y-5">
-      <section className="ui-panel p-5">
+    <div ref={rootRef} className="scroll-mt-4">
+      <section className="ui-settings-section">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="ui-setup-section-title">Item master</div>
-            <p className="ui-setup-section-desc">
+            <h3 className="ui-settings-section-title">Item master</h3>
+            <p className="ui-settings-section-desc">
               Upload a Business Central item export (.xlsx, .xls, or .csv). Used for item-number autocomplete
               and descriptions when building work-order lines.
             </p>

@@ -1,9 +1,15 @@
 # line-workspace.tsx decomposition — execution plan
 
-Status: NOT STARTED. Parked by design after the 2026-07 refactor (no forcing
-seam, no performance payoff — the file is already its own lazy chunk). This is
-a maintainability-only change. Run it as a dedicated session with nothing else
-in flight.
+Status: COMPLETE (2026-07-19, branch line-workspace-decomposition). All six
+families extracted as pure moves, one commit each, typecheck/lint/tests green
+per commit and every affected view live-verified against the prod build.
+Final layout: line-workspace.tsx 5,917 lines (imports + PlaybackPanel +
+ComingSoonModuleView + the LineWorkspace closure, which stayed out of scope
+by design) plus line-workspace/{analytics,setup-panels,drawer,step-editors,
+procedure,nav,shared}.tsx and state.ts. step-editors.tsx was added beyond the
+original six: the three step editors are shared by the drawer AND
+ProcedureWorkspace, so they got their own module instead of duplicating.
+The sections below are kept as the historical execution plan.
 
 ## Ground rules
 

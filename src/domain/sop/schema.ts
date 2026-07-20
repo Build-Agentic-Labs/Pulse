@@ -104,6 +104,25 @@ export interface SopProcedure {
   activities: SopActivity[];
 }
 
+/**
+ * A structured link to another SOP in the same workspace ("related documents").
+ * `sopId` is the live pointer; number/title are a display snapshot taken when the
+ * link is created so preview/export render without a lookup (and keep rendering
+ * if the target is later deleted).
+ */
+export interface SopLinkedSop {
+  /** App-internal id of the referenced SOP row (`sops.id`). */
+  sopId: string;
+  sopNumber: string;
+  title: string;
+}
+
+/** "SOP-QA-001 — QMS" (degrades gracefully when either half is blank). */
+export function linkedSopLabel(link: SopLinkedSop): string {
+  if (link.sopNumber && link.title) return `${link.sopNumber} — ${link.title}`;
+  return link.sopNumber || link.title || link.sopId;
+}
+
 /** An appendix / attached form referenced by the SOP. */
 export interface SopAnnex {
   /** Stable editor identity used to link a private uploaded form to this row. */
@@ -160,6 +179,8 @@ export interface Sop {
   /** Functions responsible to carry out this process. */
   responsiblePersons: string[];
   references: string[];
+  /** Other SOPs this document references; rendered with `references` in preview/export. */
+  linkedSops: SopLinkedSop[];
   /** KPI lines, e.g. "% of released SOPs". */
   measurements: string[];
   procedure: SopProcedure;
@@ -189,6 +210,7 @@ export function createEmptySop(id: string, now: string): Sop {
     definitions: [],
     responsiblePersons: [],
     references: [],
+    linkedSops: [],
     measurements: [],
     procedure: { processFlowDescription: "", roles: [], activities: [] },
     annexes: [],

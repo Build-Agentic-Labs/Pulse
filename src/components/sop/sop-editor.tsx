@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Unlink, Upload, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -17,7 +18,7 @@ import {
 import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
-import { rasicLegend, SOP_STATUS_LABELS, type Sop, type SopStatus } from "@/domain/sop/schema";
+import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
 import { applySampleData } from "@/domain/sop/sample";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
@@ -37,7 +38,7 @@ import {
   type SopReviewSeat,
   type SopSignature,
 } from "@/lib/sop/review";
-import { getSop, saveSop, SopConflictError, type SaveSopOptions } from "@/lib/sop/store";
+import { getSop, listSops, saveSop, SopConflictError, type SaveSopOptions, type SopListItem } from "@/lib/sop/store";
 import {
   listSopReviewAnnotations,
   listSopReviewSubmissions,
@@ -133,7 +134,7 @@ function stepFilled(sop: Sop, id: StepId): boolean {
           sop.procedure.activities.length,
       );
     case "annexes":
-      return Boolean(sop.annexes.length || sop.changeHistory.length);
+      return Boolean(sop.annexes.length || sop.linkedSops.length || sop.changeHistory.length);
     case "approvals":
       return sop.approvals.some((row) => row.name || row.position || row.date);
     case "draftReview":
@@ -169,6 +170,9 @@ function formatReviewDate(value: string): string {
 function withAnnexIds(sop: Sop): Sop {
   return {
     ...sop,
+    // Documents authored before the linked-SOPs feature (e.g. restored local drafts)
+    // may lack the key entirely; the editor requires an array.
+    linkedSops: Array.isArray(sop.linkedSops) ? sop.linkedSops : [],
     annexes: sop.annexes.map((annex, index) => ({
       ...annex,
       id: annex.id || `${sop.id}-annex-${index}`,
@@ -284,6 +288,9 @@ export function SopEditor({
   const [fieldHint, setFieldHint] = useState<FieldHint | null>(null);
   const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
   const [annexFileError, setAnnexFileError] = useState("");
+  // Workspace SOPs offered by the "Referenced SOPs" picker; loaded lazily on the annexes step.
+  const [linkableSops, setLinkableSops] = useState<SopListItem[] | undefined>(undefined);
+  const [linkableSopsError, setLinkableSopsError] = useState("");
   const [uploadingAnnexId, setUploadingAnnexId] = useState<string | null>(null);
   const [annexUploadStatus, setAnnexUploadStatus] = useState<AnnexUploadStatus | null>(null);
   const [approvalDepartments, setApprovalDepartments] = useState<Department[]>([]);
@@ -578,6 +585,26 @@ export function SopEditor({
       signature.signedContentHash === (approvalContentHash ?? ""),
   );
   const step = steps[stepIndex] ?? steps[0];
+
+  // Load the workspace SOP list the first time the annexes step (which hosts the
+  // "Referenced SOPs" picker) becomes active; undefined = not loaded yet.
+  useEffect(() => {
+    if (step.id !== "annexes" || !workspaceId || linkableSops !== undefined) return;
+    let cancelled = false;
+    listSops(workspaceId)
+      .then((items) => {
+        if (!cancelled) setLinkableSops(items);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLinkableSopsError(error instanceof Error ? error.message : "Could not load workspace SOPs.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [step.id, workspaceId, linkableSops]);
+
   const stepReviewAnnotations = useMemo(() => {
     const categories = STEP_REVIEW_CATEGORIES[step.id] ?? [];
     return reviewAnnotations.filter((annotation) => categories.includes(annotation.category));
@@ -1563,6 +1590,20 @@ export function SopEditor({
                   />
                   {annexFileError ? <p className="mt-2 text-xs text-danger">{annexFileError}</p> : null}
                 </Section>
+                <Section title="Referenced SOPs">
+                  <p className="mb-3 text-xs text-ink-tertiary">
+                    Link related SOPs from this workspace. They render under the References section of the
+                    document alongside the free-text references from the Overview step.
+                  </p>
+                  <LinkedSopsEditor
+                    links={sop.linkedSops}
+                    options={(linkableSops ?? []).filter((item) => item.id !== sop.id)}
+                    loading={linkableSops === undefined && !linkableSopsError}
+                    error={linkableSopsError}
+                    disabled={!canEdit}
+                    onChange={(linkedSops) => update({ linkedSops })}
+                  />
+                </Section>
                 <Section title="Change history" reviewAttention={reviewCategoriesNeedingAttention.has("history")}>
                   <ChangeHistoryEditor
                     rows={sop.changeHistory}
@@ -2135,6 +2176,79 @@ function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
 // ---------------------------------------------------------------------------
 // List editors
 // ---------------------------------------------------------------------------
+
+function LinkedSopsEditor({
+  links,
+  options,
+  loading,
+  error,
+  disabled = false,
+  onChange,
+}: {
+  links: SopLinkedSop[];
+  /** Workspace SOPs offered by the picker (the current SOP already excluded). */
+  options: SopListItem[];
+  loading: boolean;
+  error: string;
+  disabled?: boolean;
+  onChange: (links: SopLinkedSop[]) => void;
+}) {
+  const available = options.filter((option) => !links.some((link) => link.sopId === option.id));
+
+  return (
+    <div className="space-y-2">
+      {links.map((link) => (
+        <div key={link.sopId} className="flex min-h-9 items-center gap-2">
+          <span className="ui-chip shrink-0">{link.sopNumber || "—"}</span>
+          <Link
+            href={`/sops/${link.sopId}`}
+            className="min-w-0 flex-1 truncate text-sm text-ink hover:underline"
+            title={linkedSopLabel(link)}
+          >
+            {link.title || "Untitled SOP"}
+          </Link>
+          {disabled ? null : (
+            <RowDeleteButton
+              title="Remove SOP reference"
+              onClick={() => onChange(links.filter((item) => item.sopId !== link.sopId))}
+            />
+          )}
+        </div>
+      ))}
+
+      {links.length === 0 ? (
+        <p className="text-xs text-ink-tertiary">No SOPs referenced yet.</p>
+      ) : null}
+
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+
+      {disabled ? null : loading ? (
+        <div className="flex min-h-9 items-center gap-2 text-xs text-ink-tertiary">
+          <Loader2 size={13} className="animate-spin" /> Loading workspace SOPs…
+        </div>
+      ) : available.length ? (
+        <ThemedSelect
+          ariaLabel="Add SOP reference"
+          value=""
+          placeholder="Add SOP reference…"
+          options={available.map((option) => ({
+            value: option.id,
+            label: `${option.sopNumber || "—"} · ${option.title || "Untitled SOP"}`,
+          }))}
+          onChange={(sopId) => {
+            const target = available.find((option) => option.id === sopId);
+            if (!target) return;
+            onChange([...links, { sopId: target.id, sopNumber: target.sopNumber, title: target.title }]);
+          }}
+        />
+      ) : !error ? (
+        <p className="text-xs text-ink-tertiary">
+          {options.length ? "Every workspace SOP is already referenced." : "No other SOPs exist in this workspace yet."}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function StringListEditor({
   items,

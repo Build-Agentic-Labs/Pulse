@@ -28,7 +28,7 @@ import {
   WidthType,
 } from "docx";
 import { formatDateControlled } from "@/domain/formatting";
-import { rasicLegend, type Sop } from "@/domain/sop/schema";
+import { linkedSopLabel, rasicLegend, type Sop } from "@/domain/sop/schema";
 import { renderProcedureFlowImages } from "./procedure-flow-image";
 
 const INK = "1A1A1A";
@@ -369,7 +369,10 @@ async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
   }
 
   blocks.push(sectionHeading("Responsible Person(s)"), bodyText(sop.responsiblePersons.filter(Boolean).join("; ")));
-  blocks.push(sectionHeading("References"), ...bulletList(sop.references));
+  blocks.push(
+    sectionHeading("References"),
+    ...bulletList([...sop.linkedSops.map(linkedSopLabel), ...sop.references]),
+  );
   blocks.push(sectionHeading("Measurement"), ...bulletList(sop.measurements));
 
   blocks.push(sectionHeading("Procedure"));

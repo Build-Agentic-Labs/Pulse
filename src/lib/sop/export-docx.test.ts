@@ -32,3 +32,18 @@ describe("exportSopToDocx — Procedure flowchart", () => {
     expect(paraBefore("Annexes")).toContain("pageBreakBefore");
   });
 });
+
+describe("exportSopToDocx — References", () => {
+  it("renders linked SOPs ahead of the free-text references", async () => {
+    const sop = applySampleData(createEmptySop("verify", "2026-01-01T00:00:00.000Z"));
+    sop.linkedSops = [{ sopId: "other", sopNumber: "SOP-QA-002", title: "Document Control" }];
+    const blob = await exportSopToDocx(sop);
+    const xml = new PizZip(Buffer.from(await blob.arrayBuffer())).file("word/document.xml")!.asText();
+
+    expect(xml).toContain("SOP-QA-002 — Document Control");
+    // Free-text references from the sample data still render after the linked SOPs.
+    const linked = xml.indexOf("SOP-QA-002 — Document Control");
+    const freeText = xml.indexOf("Quality Manual QM-01");
+    expect(freeText).toBeGreaterThan(linked);
+  });
+});

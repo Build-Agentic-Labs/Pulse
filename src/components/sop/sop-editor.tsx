@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Unlink, Upload, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -304,6 +304,7 @@ export function SopEditor({
   const [previewOnly] = useState(initialView === "pdf");
   const [qualityApprovalOpen, setQualityApprovalOpen] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
   const [showConvertedReview, setShowConvertedReview] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [reviewVisible, setReviewVisible] = useState(false);
@@ -696,6 +697,10 @@ export function SopEditor({
   useLayoutEffect(() => {
     if (requestedStepIndex >= 0) setStepIndex(requestedStepIndex);
   }, [requestedStepIndex]);
+
+  useLayoutEffect(() => {
+    if (contentScrollRef.current) contentScrollRef.current.scrollTop = 0;
+  }, [stepIndex]);
 
   useEffect(() => {
     if (!showFinalApproval) return;
@@ -1383,6 +1388,7 @@ export function SopEditor({
       sidebar={sidebar}
       back={{ href: "/sops", label: "All SOPs" }}
       confirmLeave={confirmLeave}
+      contentRef={contentScrollRef}
     >
       <div
         className="sop-editor"
@@ -1393,7 +1399,7 @@ export function SopEditor({
         onInputCapture={handleFieldInput}
         onScrollCapture={() => setFieldHint(null)}
       >
-        <div className="mx-auto max-w-4xl pb-16">
+        <div className={`mx-auto max-w-4xl ${step.id === "document" ? "" : "pb-16"}`}>
           <div className="min-w-0 space-y-5">
 
             {showConvertedReview && !reviewDismissed ? (
@@ -1452,7 +1458,7 @@ export function SopEditor({
                   <div className="flex items-center gap-2">
                     <MessageSquare size={14} className="text-amber-700" />
                     <div>
-                      <h2 className="text-sm font-medium text-ink">Review feedback for {step.label}</h2>
+                      <h2 className="ui-setup-section-title">Review feedback for {step.label}</h2>
                       <p className="mt-0.5 text-xs text-ink-tertiary">
                         Update this section using the reviewer remarks below.
                       </p>
@@ -1496,90 +1502,133 @@ export function SopEditor({
             ) : null}
 
             {step.id === "document" ? (
-              <Section
-                title="Document"
-                reviewAttention={
-                  reviewCategoriesNeedingAttention.has("document") ||
-                  reviewCategoriesNeedingAttention.has("overall")
-                }
-              >
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {authMode && authMode.kind !== "blocked" ? (
-                    <Field label="Owning department">
-                      {authMode.kind === "choose" && !persistedUpdatedAt ? (
-                        <ThemedSelect
-                          variant="sop"
-                          ariaLabel="Owning department"
-                          value={deptId}
-                          disabled={!canEdit}
-                          options={authMode.departments.map((department) => ({
-                            value: department.id,
-                            label: `${department.code} · ${department.name}`,
-                          }))}
-                          onChange={setDeptId}
-                        />
-                      ) : (
-                        <div className="flex h-9 items-center">
-                          <span className="text-sm text-ink">
-                            {selectedDept?.name ?? "—"}
-                          </span>
-                        </div>
-                      )}
-                    </Field>
-                  ) : null}
-                  <Field label="SOP number">
-                    <div className="flex h-9 items-center">
-                      <span className="text-sm text-ink">
-                        {isNew && !persistedUpdatedAt && !selectedDept ? "Assigned on save" : displaySopNumber}
-                      </span>
-                    </div>
-                  </Field>
-                  <Field label="Title">
-                    <input
-                      className="ui-field-standalone"
-                      value={sop.meta.title}
-                      placeholder="QMS"
-                      disabled={!canEdit}
-                      onChange={(event) => update({ meta: { ...sop.meta, title: event.target.value } })}
-                    />
-                  </Field>
-                  <Field label="Version">
-                    <div className="flex h-9 items-center">
-                      <span className="text-sm text-ink">{controlledVersion}</span>
-                    </div>
-                  </Field>
-                  <Field label="Status">
-                    {/* Read-only here; lifecycle transitions run from the control page (they need
-                        department roles + e-signatures). The way in is the masthead's
-                        "Review & approve", so no duplicate control lives in this field. */}
-                    <div className="flex h-9 items-center gap-2">
-                      <span
-                        className={`inline-flex items-center rounded bg-surface-muted px-2 py-1 text-xs font-medium ${
-                          sop.status === "approved"
-                            ? "text-accent"
-                            : sop.status === "obsolete"
-                              ? "text-danger"
-                              : "text-ink-secondary"
-                        }`}
-                      >
-                        {SOP_STATUS_LABELS[sop.status]}
-                      </span>
-                    </div>
-                  </Field>
-                  {approvalReviewCycle > 0 ? (
-                    <Field label="Revision date">
+              <div className="flex min-h-[calc(100dvh-8rem)] py-8">
+                <section
+                  className="flex w-full flex-col px-2 py-4 sm:px-5 sm:py-8"
+                  data-review-attention={
+                    reviewCategoriesNeedingAttention.has("document") ||
+                    reviewCategoriesNeedingAttention.has("overall")
+                      ? "true"
+                      : undefined
+                  }
+                >
+                  <h2 className="border-b border-line pb-4 text-lg font-semibold leading-7 text-ink">Document</h2>
+                  <div className="mt-8 grid gap-x-12 gap-y-9 sm:grid-cols-2">
+                    {authMode && authMode.kind !== "blocked" ? (
+                      <DocumentField label="Owning department" className="sm:col-span-2">
+                        {authMode.kind === "choose" && !persistedUpdatedAt ? (
+                          <div
+                            className={canEdit ? "sop-document-select-shell" : "border-b border-line"}
+                          >
+                            <ThemedSelect
+                              variant="sop"
+                              ariaLabel="Owning department"
+                              value={deptId}
+                              disabled={!canEdit}
+                              triggerClassName="ui-sop-select-inline"
+                              options={authMode.departments.map((department) => ({
+                                value: department.id,
+                                label: `${department.code} · ${department.name}`,
+                              }))}
+                              onChange={setDeptId}
+                            />
+                          </div>
+                        ) : (
+                          <div className="sop-document-field flex items-center" aria-readonly="true">
+                            <span className="truncate">{selectedDept?.name ?? "—"}</span>
+                          </div>
+                        )}
+                      </DocumentField>
+                    ) : null}
+
+                    <DocumentField label="SOP number">
+                      <div className="sop-document-field flex items-center" aria-readonly="true">
+                        <span className="truncate">
+                          {isNew && !persistedUpdatedAt && !selectedDept ? "Assigned on save" : displaySopNumber}
+                        </span>
+                      </div>
+                    </DocumentField>
+
+                    <DocumentField label="Title">
                       <input
-                        type="date"
-                        required
-                        className="ui-field-standalone"
-                        value={sop.meta.revisionDate}
+                        className={`ui-field-standalone sop-document-field ${canEdit ? "sop-document-input" : ""}`}
+                        value={sop.meta.title}
+                        placeholder="QMS"
                         disabled={!canEdit}
-                        onChange={(event) => update({ meta: { ...sop.meta, revisionDate: event.target.value } })}
+                        onChange={(event) => update({ meta: { ...sop.meta, title: event.target.value } })}
                       />
-                    </Field>
-                  ) : null}
-                </div>
-              </Section>
+                    </DocumentField>
+
+                    <DocumentField label="Version">
+                      <div className="sop-document-field flex items-center" aria-readonly="true">
+                        <span className="truncate">{controlledVersion}</span>
+                      </div>
+                    </DocumentField>
+
+                    <DocumentField label="Status">
+                      <div className="flex h-11 items-center">
+                        <span
+                          className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${
+                            sop.status === "approved"
+                              ? "bg-accent-subtle text-accent"
+                              : sop.status === "obsolete"
+                                ? "bg-danger-muted text-danger"
+                                : "bg-surface-muted text-ink-secondary"
+                          }`}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+                          {SOP_STATUS_LABELS[sop.status]}
+                        </span>
+                      </div>
+                    </DocumentField>
+
+                    {approvalReviewCycle > 0 ? (
+                      <DocumentField label="Revision date">
+                        <input
+                          type="date"
+                          required
+                          className={`ui-field-standalone sop-document-field ${canEdit ? "sop-document-input" : ""}`}
+                          value={sop.meta.revisionDate}
+                          disabled={!canEdit}
+                          onChange={(event) => update({ meta: { ...sop.meta, revisionDate: event.target.value } })}
+                        />
+                      </DocumentField>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-40"
+                        disabled={isFirst}
+                        onClick={() => void handleStepSelect(Math.max(0, stepIndex - 1))}
+                      >
+                        <ChevronLeft size={14} />
+                        Back
+                      </button>
+                      {showDraftReview && stepReviewAnnotations.length > 0 ? (
+                        <button
+                          type="button"
+                          className="ui-btn-ghost h-9 gap-1.5 px-3"
+                          onClick={() => void handleStepSelect(steps.findIndex((item) => item.id === "draftReview"))}
+                        >
+                          <MessageSquare size={14} />
+                          Back to Draft Review
+                        </button>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="ui-btn-ghost h-9 gap-1.5 px-4"
+                      onClick={() => void handleStepSelect(Math.min(steps.length - 1, stepIndex + 1))}
+                    >
+                      Next
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </section>
+              </div>
             ) : null}
 
             {step.id === "overview" ? (
@@ -1785,7 +1834,7 @@ export function SopEditor({
                     <div>
                       <div className="flex items-center gap-2">
                         <MessageSquare size={14} className="text-ink-secondary" />
-                        <h2 className="text-sm font-medium text-ink">Draft review</h2>
+                        <h2 className="ui-setup-section-title">Draft review</h2>
                       </div>
                       <p className="mt-1 text-xs text-ink-tertiary">
                         {sop.status === "in_review"
@@ -1852,7 +1901,7 @@ export function SopEditor({
                       <div className="flex min-w-0 items-start gap-3">
                         <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
                         <div>
-                          <h2 className="text-sm font-medium text-ink">
+                          <h2 className="ui-setup-section-title">
                             {finalApprovalRequested ? "Final approval requested" : "Draft review complete"}
                           </h2>
                           <p className="mt-1 text-xs leading-5 text-ink-tertiary">
@@ -1885,7 +1934,7 @@ export function SopEditor({
 
                 <section className="ui-panel overflow-hidden">
                   <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-                    <h2 className="text-sm font-medium text-ink">Returned remarks</h2>
+                    <h2 className="ui-setup-section-title">Returned remarks</h2>
                     {reviewAnnotations.length ? (
                       <span className="ui-chip">{reviewAnnotations.length}</span>
                     ) : null}
@@ -1946,7 +1995,7 @@ export function SopEditor({
                     <div className="flex min-w-0 items-start gap-3">
                       <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
                       <div>
-                        <h2 className="text-sm font-medium text-ink">Final approval</h2>
+                        <h2 className="ui-setup-section-title">Final approval</h2>
                         <p className="mt-1 text-xs leading-5 text-ink-tertiary">
                           Review the controlled document and track every required stakeholder signature before Quality release.
                         </p>
@@ -2005,7 +2054,7 @@ export function SopEditor({
                         <ShieldCheck size={17} className="mt-0.5 shrink-0 text-sky-700" />
                       )}
                       <div>
-                        <h2 className="text-sm font-medium text-ink">Quality approval</h2>
+                        <h2 className="ui-setup-section-title">Quality approval</h2>
                         <p className="mt-1 text-xs leading-5 text-ink-tertiary">
                           {sop.status === "effective"
                             ? "Quality signed the controlled document and released it to the Effective Library."
@@ -2065,13 +2114,14 @@ export function SopEditor({
             ) : null}
 
             {/* Footer nav */}
-            <div className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
+            {step.id !== "document" ? (
+              <div className="flex flex-col gap-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-40"
                   disabled={isFirst}
-                  onClick={() => setStepIndex((index) => Math.max(0, index - 1))}
+                  onClick={() => void handleStepSelect(Math.max(0, stepIndex - 1))}
                 >
                   <ChevronLeft size={14} />
                   Back
@@ -2140,7 +2190,8 @@ export function SopEditor({
                   <ChevronRight size={14} />
                 </button>
               )}
-            </div>
+              </div>
+            ) : null}
         </div>
       </div>
       </div>
@@ -2177,7 +2228,7 @@ export function SopEditor({
                   </span>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <h2 className="text-sm font-medium text-ink">Audit trail</h2>
+                      <h2 className="ui-setup-section-title">Audit trail</h2>
                       <span className="ui-chip tabular-nums">{auditEvents.length}</span>
                     </div>
                     <p className="mt-1 text-xs leading-4 text-ink-tertiary">
@@ -2270,10 +2321,10 @@ function Section({
 }) {
   return (
     <section
-      className="border-y border-line bg-surface px-5 py-4 transition-[border-color,background-color] duration-200"
+      className="border-b border-line bg-transparent px-5 py-4 transition-[border-color,background-color] duration-200"
       style={reviewAttention ? {
         borderColor: "var(--color-warn)",
-        backgroundColor: "color-mix(in srgb, var(--color-warn) 5%, var(--color-surface))",
+        backgroundColor: "color-mix(in srgb, var(--color-warn) 5%, var(--color-canvas))",
       } : undefined}
       data-review-attention={reviewAttention ? "true" : undefined}
     >
@@ -2286,6 +2337,22 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
       <span className="ui-field-label">{label}</span>
+      {children}
+    </label>
+  );
+}
+function DocumentField({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={`block min-w-0 ${className}`}>
+      <span className="ui-setup-section-title mb-2 block">{label}</span>
       {children}
     </label>
   );
@@ -2698,7 +2765,7 @@ function AnnexesEditor({
                         aria-label="Remove attachment"
                         onClick={() => onRemoveFile(file)}
                       >
-                        <Unlink size={13} />
+                        <X size={14} />
                       </button>
                     ) : null}
                   </div>

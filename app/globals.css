@@ -2044,6 +2044,10 @@ body {
     background: var(--color-surface);
   }
 
+  .ui-data-table-frame-canvas {
+    background: var(--color-canvas);
+  }
+
   .ui-data-table-frame thead th {
     color: var(--color-ink-secondary);
     font-family: var(--type-sans);
@@ -2064,6 +2068,11 @@ body {
     background: var(--color-surface);
     padding: 1rem;
     text-align: center;
+  }
+
+  .ui-empty-state-flat {
+    border: 0;
+    background: transparent;
   }
 
   .ui-table-cell {
@@ -2282,6 +2291,11 @@ body {
 
   /* SOP authoring: lighter, smaller, flatter fields read as a refined document
      editor rather than the dense planner forms. Scoped so nothing else changes. */
+  .sop-editor .ui-panel,
+  .sop-editor .ui-data-table-frame {
+    background: var(--color-canvas);
+  }
+
   .sop-editor .ui-field-standalone {
     font-family: inherit;
     font-weight: 400;
@@ -2295,6 +2309,83 @@ body {
   .sop-editor .ui-field-standalone:focus {
     border-color: color-mix(in srgb, var(--color-ink) 38%, transparent);
     background-color: transparent;
+  }
+
+  .sop-editor input.ui-field-standalone:not(:disabled):not([type="file"]),
+  .sop-editor textarea.ui-field-standalone:not(:disabled) {
+    border-color: color-mix(in srgb, var(--color-ink) 16%, var(--color-border));
+    background: color-mix(in srgb, var(--color-ink) 2.5%, transparent);
+    transition:
+      border-color 160ms var(--ease-ui),
+      background-color 160ms var(--ease-ui);
+  }
+
+  .sop-editor input.ui-field-standalone:not(:disabled):not([type="file"]):hover,
+  .sop-editor textarea.ui-field-standalone:not(:disabled):hover {
+    background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  }
+
+  .sop-editor input.ui-field-standalone:not(:disabled):not([type="file"]):focus,
+  .sop-editor textarea.ui-field-standalone:not(:disabled):focus {
+    border-color: color-mix(in srgb, var(--color-ink) 40%, var(--color-border));
+    background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  }
+
+  .sop-editor .sop-document-field {
+    width: 100%;
+    height: 2.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+    border-radius: var(--radius-control);
+    background: transparent;
+    padding: 0.5rem 0.75rem;
+    color: var(--color-ink);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.5;
+    outline: none;
+    box-shadow: none;
+    transition: border-color 160ms var(--ease-ui);
+  }
+
+  .sop-editor .sop-document-field:focus {
+    border-color: color-mix(in srgb, var(--color-ink) 40%, var(--color-border));
+    box-shadow: none;
+  }
+
+  .sop-editor .sop-document-field:disabled {
+    color: var(--color-ink);
+    opacity: 1;
+  }
+
+  .sop-editor .sop-document-input,
+  .sop-editor .sop-document-select-shell {
+    border-color: color-mix(in srgb, var(--color-ink) 16%, var(--color-border));
+    background: color-mix(in srgb, var(--color-ink) 2.5%, transparent);
+    padding-inline: 0.625rem;
+    transition:
+      border-color 160ms var(--ease-ui),
+      background-color 160ms var(--ease-ui);
+  }
+
+  .sop-editor .sop-document-input:hover,
+  .sop-editor .sop-document-select-shell:hover {
+    background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  }
+
+  .sop-editor .sop-document-input:focus,
+  .sop-editor .sop-document-select-shell:focus-within {
+    border-color: color-mix(in srgb, var(--color-ink) 40%, var(--color-border));
+    background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  }
+
+  .sop-editor .sop-document-select-shell {
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
+    border-style: solid;
+    border-width: 1px;
+    border-radius: var(--radius-control);
   }
 
   /* An emptied field must LOOK empty while it's being edited: several placeholders are

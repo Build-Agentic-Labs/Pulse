@@ -125,12 +125,12 @@ export function RetiredSops({
           </button>
         </section>
       ) : entries.length === 0 ? (
-        <section className="ui-empty-state">
+        <section className="ui-empty-state ui-empty-state-flat">
           <Archive size={20} className="mx-auto text-ink-tertiary" />
           <p className="mt-2 ui-section-subtitle text-ink-tertiary">No retired SOPs.</p>
         </section>
       ) : (
-        <section className="ui-data-table-frame">
+        <section className="ui-data-table-frame ui-data-table-frame-canvas">
           <div className="ui-table-scroll">
             <table className="w-full min-w-[640px] border-collapse text-left">
               <thead>

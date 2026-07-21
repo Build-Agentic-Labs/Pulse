@@ -3,7 +3,7 @@
 import { ChevronLeft, PanelLeft, PanelLeftClose } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode, type Ref } from "react";
 import { BackToDashboardButton, UserNav } from "@/components/user-nav";
 
 /**
@@ -18,6 +18,7 @@ export function SopShell({
   crumb,
   actions,
   confirmLeave,
+  contentRef,
   children,
 }: {
   sidebar: ReactNode;
@@ -30,6 +31,7 @@ export function SopShell({
    * async so the guard can await the themed confirm dialog before navigating.
    */
   confirmLeave?: () => boolean | Promise<boolean>;
+  contentRef?: Ref<HTMLDivElement>;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -137,7 +139,9 @@ export function SopShell({
         </aside>
 
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          <div className="h-full overflow-auto bg-canvas p-4 md:p-6 lg:rounded-tl-2xl">{children}</div>
+          <div ref={contentRef} className="h-full overflow-auto bg-canvas p-4 md:p-6 lg:rounded-tl-2xl">
+            {children}
+          </div>
         </main>
       </div>
     </div>

@@ -577,18 +577,18 @@ export function SopList({
             </button>
           </section>
         ) : activeSops.length === 0 ? (
-          <section className="ui-empty-state">
+          <section className="ui-empty-state ui-empty-state-flat">
             <FileText size={20} className="mx-auto text-ink-tertiary" />
             <p className="mt-2 ui-section-subtitle text-ink-tertiary">
               No draft SOPs. {editable ? "Create one or convert an existing .docx / .pdf." : "Ask an editor to add one."}
             </p>
           </section>
         ) : filteredSops.length === 0 ? (
-          <section className="ui-empty-state">
-            <p className="ui-section-subtitle text-ink-tertiary">No SOPs match &ldquo;{query.trim()}&rdquo;.</p>
-          </section>
+          <p className="py-12 text-center ui-section-subtitle text-ink-tertiary">
+            No SOPs match &ldquo;{query.trim()}&rdquo;.
+          </p>
         ) : (
-          <div className="ui-data-table-frame">
+          <div className="ui-data-table-frame ui-data-table-frame-canvas">
             <div className="ui-table-scroll">
               <table className={`w-full border-collapse text-left ${showReviewStatus ? "min-w-[780px]" : "min-w-[680px]"}`}>
                         <thead>

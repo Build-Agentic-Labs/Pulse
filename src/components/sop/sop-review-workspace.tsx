@@ -265,7 +265,7 @@ export function SopReviewWorkspace({
     <div className="flex h-full min-h-0 flex-col">
       <div
         data-review-panel-header
-        className="flex-none border-b border-line bg-surface px-4 py-3"
+        className="flex-none border-b border-line bg-canvas px-4 py-3"
       >
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -347,7 +347,7 @@ export function SopReviewWorkspace({
         );
       })}
       </div>
-      <div className="flex-none border-t border-line bg-surface p-4">
+      <div className="flex-none border-t border-line bg-canvas p-4">
         <label className="flex cursor-pointer items-start gap-2.5 text-sm text-ink">
           <input
             type="checkbox"

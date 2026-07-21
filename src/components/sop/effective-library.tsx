@@ -117,12 +117,12 @@ export function EffectiveLibrary({ active = true }: { active?: boolean }) {
           </button>
         </section>
       ) : sops.length === 0 ? (
-        <section className="ui-empty-state">
+        <section className="ui-empty-state ui-empty-state-flat">
           <Library size={20} className="mx-auto text-ink-tertiary" />
           <p className="mt-2 ui-section-subtitle text-ink-tertiary">No effective SOPs yet.</p>
         </section>
       ) : (
-        <div className="ui-data-table-frame">
+        <div className="ui-data-table-frame ui-data-table-frame-canvas">
           <div className="ui-table-scroll">
             <table className="w-full min-w-[680px] border-collapse text-left">
                       <thead>

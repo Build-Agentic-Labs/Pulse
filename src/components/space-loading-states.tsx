@@ -306,7 +306,7 @@ export function ProductionLoadingState({ label = "Opening Production" }: { label
 
 export function SopTableSkeleton() {
   return (
-    <div className="ui-data-table-frame" aria-hidden="true">
+    <div className="ui-data-table-frame ui-data-table-frame-canvas" aria-hidden="true">
       <div className="ui-table-scroll">
         <table className="w-full min-w-[680px] border-collapse text-left">
           <thead>

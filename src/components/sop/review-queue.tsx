@@ -242,14 +242,14 @@ export function ReviewQueue({ active = true }: { active?: boolean }) {
           </button>
         </section>
       ) : nothingToDo ? (
-        <section className="ui-empty-state">
+        <section className="ui-empty-state ui-empty-state-flat">
           <Inbox size={20} className="mx-auto text-ink-tertiary" />
           <p className="mt-2 ui-section-subtitle text-ink-tertiary">Nothing is waiting on you.</p>
         </section>
       ) : (
         <>
           {data.sentBack.length > 0 ? (
-            <section className="ui-data-table-frame divide-y divide-line">
+            <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
               <div className="px-4 py-3">
                 <h2 className="text-sm font-semibold text-ink">Sent back for rework</h2>
               </div>
@@ -285,7 +285,7 @@ export function ReviewQueue({ active = true }: { active?: boolean }) {
                       </span>
                     </div>
 
-                    <div className="ui-data-table-frame">
+                    <div className="ui-data-table-frame ui-data-table-frame-canvas">
                       <div className="ui-table-scroll">
                         <table className="min-w-[720px] w-full border-collapse text-left">
                           <thead>
@@ -343,7 +343,7 @@ export function ReviewQueue({ active = true }: { active?: boolean }) {
           ) : null}
 
           {data.finalApprovals.length > 0 ? (
-            <section className="ui-data-table-frame divide-y divide-line">
+            <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
               <div className="flex items-center justify-between gap-2 px-4 py-3">
                 <div>
                   <h2 className="text-sm font-semibold text-ink">Final approval</h2>
@@ -383,7 +383,7 @@ export function ReviewQueue({ active = true }: { active?: boolean }) {
           ) : null}
 
           {draftReviews.length > 0 ? (
-            <section className="ui-data-table-frame divide-y divide-line">
+            <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
               <div className="px-4 py-3">
                 <h2 className="text-sm font-semibold text-ink">Draft review</h2>
                 <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
@@ -418,7 +418,7 @@ export function ReviewQueue({ active = true }: { active?: boolean }) {
           ) : null}
 
           {awaitingRelease.length > 0 ? (
-            <section className="ui-data-table-frame divide-y divide-line">
+            <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
               <div className="px-4 py-3">
                 <h2 className="text-sm font-semibold text-ink">Awaiting Quality release</h2>
                 <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">

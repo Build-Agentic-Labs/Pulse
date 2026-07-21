@@ -79,7 +79,7 @@ export async function fetchReviewQueueData(
   const awaitingMe: PendingSeat[] = draftReviewSeats
     .filter(
       (seat) =>
-        !hasSubmittedSopReview(mySubmissions, seat.sopId, seat.reviewCycle, userId, seat.contentHash),
+        !hasSubmittedSopReview(mySubmissions, seat.sopId, seat.reviewCycle, userId),
     )
     .map((seat) => ({ ...seat, departmentCode: codeById.get(seat.departmentId) ?? "—" }));
 

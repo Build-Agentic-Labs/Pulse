@@ -58,6 +58,13 @@ export function formatRelativeFromBounds(iso: string, startMs: number) {
   return formatMinutes((valueMs - startMs) / 60000);
 }
 
+/** Up to two uppercase initials for reviewer avatar chips ("Rosendo Lopez" → "RL"). */
+export function reviewerInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+}
+
 /**
  * Locale-aware date for UI surfaces (lists, tables, settings). Empty or invalid
  * input renders as "" — call sites wanting a placeholder use `formatDate(x) || "—"`.

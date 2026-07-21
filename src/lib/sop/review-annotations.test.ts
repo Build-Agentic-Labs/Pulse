@@ -14,13 +14,18 @@ const completedReview: SopReviewSubmission = {
 
 describe("hasSubmittedSopReview", () => {
   it("does not let a completed review hide another SOP in the same review cycle", () => {
-    expect(hasSubmittedSopReview([completedReview], "sop-new", 0, "reviewer-1", "hash-v1")).toBe(false);
+    expect(hasSubmittedSopReview([completedReview], "sop-new", 0, "reviewer-1")).toBe(false);
   });
 
-  it("matches the SOP, review cycle, reviewer, and draft content together", () => {
-    expect(hasSubmittedSopReview([completedReview], "sop-previous", 0, "reviewer-1", "hash-v1")).toBe(true);
-    expect(hasSubmittedSopReview([completedReview], "sop-previous", 1, "reviewer-1", "hash-v1")).toBe(false);
-    expect(hasSubmittedSopReview([completedReview], "sop-previous", 0, "reviewer-2", "hash-v1")).toBe(false);
-    expect(hasSubmittedSopReview([completedReview], "sop-previous", 0, "reviewer-1", "hash-v2")).toBe(false);
+  it("matches the SOP, review cycle, and reviewer together", () => {
+    expect(hasSubmittedSopReview([completedReview], "sop-previous", 0, "reviewer-1")).toBe(true);
+    expect(hasSubmittedSopReview([completedReview], "sop-previous", 1, "reviewer-1")).toBe(false);
+    expect(hasSubmittedSopReview([completedReview], "sop-previous", 0, "reviewer-2")).toBe(false);
+  });
+
+  it("still counts the round after the author edits the draft (one round per cycle)", () => {
+    // The author recalling and editing changes the content hash. Under the
+    // single-round policy the reviewer is NOT asked again for the same cycle.
+    expect(hasSubmittedSopReview([completedReview], "sop-previous", 0, "reviewer-1")).toBe(true);
   });
 });

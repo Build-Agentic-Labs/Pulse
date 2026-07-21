@@ -161,11 +161,30 @@ export async function removeSopAnnexFile(file: SopAnnexFile): Promise<void> {
   await throwIfError(supabase.from("sop_annex_files").delete().eq("id", file.id));
 }
 
-export async function createSopAnnexFileUrl(file: SopAnnexFile, expiresInSeconds = 600): Promise<string> {
+/**
+ * Attachment file name for types the browser cannot render inline. PDFs and
+ * images stay inline (undefined) so they open as a tab preview; everything
+ * else (Office docs, CSV) downloads under its original name instead of the
+ * UUID-prefixed storage object key.
+ */
+export function annexDownloadName(contentType: string, originalName: string): string | undefined {
+  if (contentType === "application/pdf" || contentType.startsWith("image/")) return undefined;
+  return originalName.trim() || "download";
+}
+
+export async function createSopAnnexFileUrl(
+  file: SopAnnexFile,
+  expiresInSeconds = 600,
+  options: { downloadName?: string } = {},
+): Promise<string> {
   const supabase = createPlannerSupabaseClient();
   const { data, error } = await supabase.storage
     .from(BUCKET)
-    .createSignedUrl(file.storagePath, expiresInSeconds);
+    .createSignedUrl(
+      file.storagePath,
+      expiresInSeconds,
+      options.downloadName ? { download: options.downloadName } : undefined,
+    );
   if (error) throw new Error(error.message);
   return data.signedUrl;
 }
@@ -174,7 +193,9 @@ export async function openSopAnnexFile(file: SopAnnexFile): Promise<void> {
   const preview = window.open("about:blank", "_blank");
   if (preview) preview.opener = null;
   try {
-    const signedUrl = await createSopAnnexFileUrl(file, 60);
+    const signedUrl = await createSopAnnexFileUrl(file, 60, {
+      downloadName: annexDownloadName(file.contentType, file.originalName),
+    });
     if (preview) preview.location.replace(signedUrl);
     else window.location.assign(signedUrl);
   } catch (error) {

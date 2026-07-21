@@ -81,11 +81,12 @@ export function SopReviewWorkspace({
         if (!active) return;
         if (!nextRecord) throw new Error("This SOP could not be loaded for review.");
         const userId = userResult.data.user?.id ?? null;
+        // One round per cycle: a submission counts even if the author has since
+        // recalled and edited the draft (content hash changed).
         const currentSubmission = submissions.find(
           (item) =>
             item.reviewerId === userId &&
-            item.reviewCycle === control?.reviewCycle &&
-            item.contentHash === (control?.contentHash ?? ""),
+            item.reviewCycle === control?.reviewCycle,
         ) ?? null;
         const activeComments = comments.filter(
           (comment) => comment.reviewCycle === (control?.reviewCycle ?? 0) && !comment.resolvedAt,

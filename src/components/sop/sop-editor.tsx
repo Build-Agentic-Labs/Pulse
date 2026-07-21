@@ -2,7 +2,7 @@
 
 import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Unlink, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -18,6 +18,7 @@ import {
 import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
+import { draftReviewGate } from "@/domain/sop/review-gate";
 import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
 import { applySampleData } from "@/domain/sop/sample";
@@ -278,6 +279,13 @@ export function SopEditor({
   initialView?: SopEditorInitialView;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // "?from=<sopId>&fromNumber=<label>" marks a preview reached via another SOP's
+  // References list; surface a Back button that returns to that SOP's preview.
+  const previewBackSopId = searchParams.get("from");
+  const previewBackLink = previewBackSopId
+    ? { href: `/sops/${encodeURIComponent(previewBackSopId)}?preview=pdf`, label: "Back" }
+    : undefined;
   const confirm = useConfirm();
   const [sop, setSop] = useState<Sop>(() => withAnnexIds(initial));
   // Owning-department selection for a new SOP (undefined mode => not the create flow).
@@ -419,12 +427,10 @@ export function SopEditor({
             (annotation) => annotation.reviewCycle === approvalReviewCycle && !annotation.resolvedAt,
           ),
         );
+        // Cycle-scoped, NOT hash-scoped: the draft review is a single round per
+        // cycle, so verdicts stay valid after the author recalls and edits.
         setReviewSubmissions(
-          submissions.filter(
-            (submission) =>
-              submission.reviewCycle === approvalReviewCycle &&
-              submission.contentHash === (approvalContentHash ?? ""),
-          ),
+          submissions.filter((submission) => submission.reviewCycle === approvalReviewCycle),
         );
       })
       .catch(() => {
@@ -560,10 +566,13 @@ export function SopEditor({
     }
     return Array.from(reviewers.values());
   }, [approvalReviewerNames, approvalSeats, reviewSubmissions]);
+  const reviewGate = draftReviewGate(draftReviewers);
+  // Single review round: once every reviewer has responded and the returned
+  // remarks are addressed, the only forward path is final approval (signatures),
+  // never another draft-review loop.
   const finalApprovalReady =
     sop.status === "in_review" &&
-    draftReviewers.length > 0 &&
-    draftReviewers.every((reviewer) => reviewer.submission?.noChanges === true) &&
+    reviewGate.allResponded &&
     reviewAnnotations.length === 0;
   const finalApprovalStakeholders = useMemo(() => approvalSeats
     .filter((seat) => isBlockingSeat(seat.rasic))
@@ -1095,7 +1104,7 @@ export function SopEditor({
   }
 
   async function handleRecallForChanges() {
-    if (recallingReview) return;
+    if (recallingReview || !reviewGate.canMakeChanges) return;
     setRecallingReview(true);
     setSaveError("");
     try {
@@ -1151,6 +1160,13 @@ export function SopEditor({
   // and move the SOP into draft review. Assigned seat holders see it in their review queue.
   async function handleStartApproval() {
     if (submittingForApproval) return;
+    // Single review round: after every reviewer has responded, resubmitting
+    // routes to final approval — the remarks must be addressed first.
+    if (reviewGate.allResponded && reviewAnnotations.length > 0) {
+      setSaveError("Mark every returned remark as addressed before sending for signatures.");
+      setSaveStatus("error");
+      return;
+    }
     const useSoloSelfReview = soloSelfReviewReady;
     setSubmittingForApproval(true);
     setSaveError("");
@@ -1185,6 +1201,9 @@ export function SopEditor({
       const latest = await getSopControl(sop.id);
       if (!latest) throw new Error("The SOP could not be reloaded after signing.");
       await transitionSop(sop.id, "in_review", latest.updatedAt);
+      // The review round already happened — go straight to the signature phase
+      // instead of reopening the reviewers' queue.
+      if (reviewGate.allResponded) await requestSopFinalApproval(sop.id);
       router.push("/sops?tab=review");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The SOP could not be sent for review.");
@@ -1333,7 +1352,14 @@ export function SopEditor({
   }
 
   if (previewOnly && previewing) {
-    return <SopPrintPreview sop={renderedSop} annexFiles={annexFiles} onClose={closePreview} />;
+    return (
+      <SopPrintPreview
+        sop={renderedSop}
+        annexFiles={annexFiles}
+        onClose={closePreview}
+        backLink={previewBackLink}
+      />
+    );
   }
 
   if (requestedStepId && requestedStepIndex < 0) {
@@ -1767,12 +1793,19 @@ export function SopEditor({
                           : "Work through the returned remarks, then send the updated draft for a new review."}
                       </p>
                     </div>
-                    {sop.status === "in_review" && reviewSubmissions.length ? (
+                    {sop.status === "in_review" && draftReviewers.length && !finalApprovalRequested ? (
                       <button
                         type="button"
                         className="ui-btn-primary h-9 gap-2 px-4 disabled:opacity-50"
                         onClick={() => void handleRecallForChanges()}
-                        disabled={recallingReview}
+                        disabled={recallingReview || !reviewGate.canMakeChanges}
+                        title={
+                          reviewGate.reason === "waiting"
+                            ? "Available once every reviewer has responded."
+                            : reviewGate.reason === "approved"
+                              ? "Every reviewer returned no changes needed — send for final approval instead."
+                              : "Recall the draft to address the returned feedback."
+                        }
                       >
                         {recallingReview ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
                         {recallingReview ? "Recalling…" : "Make changes"}
@@ -1825,7 +1858,9 @@ export function SopEditor({
                           <p className="mt-1 text-xs leading-5 text-ink-tertiary">
                             {finalApprovalRequested
                               ? "The required approvers can now find this SOP under Final approval in their Review Queue."
-                              : "Every reviewer returned No changes needed. Send the current document to its formal approvers."}
+                              : reviewGate.changesRequested
+                                ? "Every reviewer has responded and the returned remarks are addressed. Send the current document to its formal approvers."
+                                : "Every reviewer returned No changes needed. Send the current document to its formal approvers."}
                           </p>
                         </div>
                       </div>
@@ -2075,14 +2110,22 @@ export function SopEditor({
                         disabled={saveDisabled || submittingForApproval || approvalRoutingLoading || !approvalRoutingReady}
                         title={
                           approvalRoutingReady
-                            ? soloSelfReviewReady
-                              ? "Temporary test mode: send this draft to yourself for review"
-                              : "Save this draft and send it to the assigned responsible reviewers"
+                            ? reviewGate.allResponded
+                              ? "The review round is complete — save this draft and send it to the formal approvers for signature"
+                              : soloSelfReviewReady
+                                ? "Temporary test mode: send this draft to yourself for review"
+                                : "Save this draft and send it to the assigned responsible reviewers"
                             : "Assign at least one Responsible department and exactly one Accountable department"
                         }
                       >
                         <ShieldCheck size={14} />
-                        {submittingForApproval ? "Sending…" : saveStatus === "saving" ? "Saving…" : "Send for review"}
+                        {submittingForApproval
+                          ? "Sending…"
+                          : saveStatus === "saving"
+                            ? "Saving…"
+                            : reviewGate.allResponded
+                              ? "Send for signatures"
+                              : "Send for review"}
                       </button>
                     </>
                   ) : null}

@@ -29,19 +29,23 @@ export interface SopReviewSubmission {
   submittedAt: string;
 }
 
+/**
+ * One review round per cycle: a reviewer who has submitted for this SOP and
+ * review cycle is done, even if the author later recalls and edits the draft
+ * (which changes the content hash). Content integrity is enforced downstream
+ * by the final-approval signatures, which do bind to the exact content hash.
+ */
 export function hasSubmittedSopReview(
   submissions: readonly SopReviewSubmission[],
   sopId: string,
   reviewCycle: number,
   reviewerId: string,
-  contentHash: string | null,
 ): boolean {
   return submissions.some(
     (submission) =>
       submission.sopId === sopId &&
       submission.reviewCycle === reviewCycle &&
-      submission.reviewerId === reviewerId &&
-      submission.contentHash === (contentHash ?? ""),
+      submission.reviewerId === reviewerId,
   );
 }
 

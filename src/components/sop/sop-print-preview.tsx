@@ -1,6 +1,7 @@
 "use client";
 
-import { Printer, X } from "lucide-react";
+import { ArrowLeft, Printer, X } from "lucide-react";
+import Link from "next/link";
 import { formatDateControlled, formatDateTime } from "@/domain/formatting";
 import NextImage from "next/image";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
@@ -12,7 +13,7 @@ import {
   type SignatureStrokes,
 } from "@/domain/sop/signature";
 import { listDepartments, listMembersForDepartments } from "@/lib/departments/store";
-import { createSopAnnexFileUrl, type SopAnnexFile } from "@/lib/sop/annex-files";
+import { createSopAnnexFileUrl, openSopAnnexFile, type SopAnnexFile } from "@/lib/sop/annex-files";
 import { buildProcedureSvgPages } from "@/lib/sop/procedure-flow-image";
 import {
   isBlockingSeat,
@@ -251,6 +252,7 @@ export function SopPrintPreview({
   onReviewCategoryChange,
   approvalRefreshKey = 0,
   revealSignatureId,
+  backLink,
 }: {
   sop: Sop;
   annexFiles: SopAnnexFile[];
@@ -263,6 +265,8 @@ export function SopPrintPreview({
   onReviewCategoryChange?: (category: string) => void;
   approvalRefreshKey?: number;
   revealSignatureId?: string | null;
+  /** Rendered as a "← Back to …" toolbar button when this preview was reached from another SOP. */
+  backLink?: { href: string; label: string };
 }) {
   // Reference-doc uploads share the annex-file table; they belong to the References
   // list (rendered by name), not to the attached-forms appendix pages, so strip them
@@ -272,6 +276,9 @@ export function SopPrintPreview({
     return annexFiles.filter((file) => !referenceDocIds.has(file.annexId));
   }, [annexFiles, sop.referenceDocs]);
   const [annexPreview, setAnnexPreview] = useState<AnnexPreviewState>({ loading: false, pages: [], errors: {} });
+  const [referenceOpenError, setReferenceOpenError] = useState("");
+  // Referenced PDF opened inline over this preview (signed URL in an iframe).
+  const [inlineDoc, setInlineDoc] = useState<{ name: string; url: string } | null>(null);
   const [approvalEntries, setApprovalEntries] = useState<ApprovalSignatureEntry[] | null>(null);
   const [systemAuthorName, setSystemAuthorName] = useState("System author");
   const reviewScrollFrame = useRef<number | null>(null);
@@ -280,7 +287,14 @@ export function SopPrintPreview({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape") return;
+      // An inline referenced document sits on top: Escape peels that layer
+      // first and returns to the SOP, a second Escape closes the preview.
+      setInlineDoc((current) => {
+        if (current) return null;
+        onClose();
+        return current;
+      });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -561,6 +575,10 @@ export function SopPrintPreview({
           gap: 12px; padding: 10px 16px; flex: none;
           background: var(--color-surface, #fff); border-bottom: 1px solid var(--color-line, #ddd);
         }
+        .sop-preview-doc-id {
+          min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          font-size: 13px; font-weight: 600; color: var(--color-ink, #1a1a1a);
+        }
         .sop-preview-bar .ui-mono-label,
         .sop-review-panel .ui-mono-label {
           font-family: inherit; font-weight: 500; letter-spacing: 0; text-transform: none;
@@ -571,6 +589,22 @@ export function SopPrintPreview({
           border-radius: 4px; font-family: inherit; letter-spacing: 0; text-transform: none;
         }
         .sop-preview-content { display: flex; flex: 1; min-height: 0; }
+        .sop-inline-doc {
+          position: fixed; inset: 0; z-index: 70;
+          display: flex; flex-direction: column;
+          background: rgba(15, 18, 21, 0.62);
+        }
+        .sop-inline-doc-bar {
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 12px; padding: 10px 16px; flex: none;
+          background: var(--color-surface, #fff); border-bottom: 1px solid var(--color-line, #ddd);
+        }
+        .sop-inline-doc-name {
+          min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          font-size: 13px; color: var(--color-ink-secondary, #555);
+        }
+        .sop-inline-doc-frame { flex: 1; width: 100%; border: 0; background: #525659; }
+        @media print { .sop-inline-doc { display: none !important; } }
         .sop-preview-scroll { flex: 1; min-width: 0; overflow: auto; padding: 24px 16px 64px; }
         .sop-review-panel {
           width: clamp(520px, 38vw, 680px); flex: none; overflow: hidden;
@@ -619,6 +653,13 @@ export function SopPrintPreview({
         .sop-export-empty { color: #666; }
         .sop-export-list { margin: 0; padding-left: 20px; }
         .sop-export-list li { margin: 0 0 2px; }
+        .sop-export-link {
+          margin: 0; padding: 0; border: 0; background: none; cursor: pointer;
+          font: inherit; color: #1d4ed8; text-align: left;
+          text-decoration: underline; text-underline-offset: 2px;
+        }
+        .sop-export-link:hover { color: #1e40af; }
+        @media print { .sop-export-link { color: inherit; text-decoration: none; } }
         .sop-export-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         .sop-export-table th, .sop-export-table td {
           border: 1px solid #ccc; padding: 5px 7px; text-align: left; vertical-align: top;
@@ -708,13 +749,24 @@ export function SopPrintPreview({
       `}</style>
 
       <div className="sop-preview-bar">
-        {mode === "review" || mode === "approval" ? (
-          <span className="ui-mono-label text-ink-tertiary">
-            {mode === "review"
-              ? "Draft PDF review · add section remarks in the review panel"
-              : "Final approval · review the controlled PDF and add your digital signature"}
+        <div className="flex min-w-0 items-center gap-3">
+          {backLink ? (
+            <Link href={backLink.href} className="ui-btn-ghost inline-flex h-9 shrink-0 items-center gap-1.5 px-3">
+              <ArrowLeft size={15} />
+              {backLink.label}
+            </Link>
+          ) : null}
+          <span className="sop-preview-doc-id" title={[sop.meta.sopNumber, sop.meta.title].filter(Boolean).join(" — ")}>
+            {[sop.meta.sopNumber, sop.meta.title].filter(Boolean).join(" — ") || "Untitled SOP"}
           </span>
-        ) : <span />}
+          {mode === "review" || mode === "approval" ? (
+            <span className="ui-mono-label shrink-0 text-ink-tertiary">
+              {mode === "review"
+                ? "Draft PDF review · add section remarks in the review panel"
+                : "Final approval · review the controlled PDF and add your digital signature"}
+            </span>
+          ) : null}
+        </div>
         <div className="flex items-center gap-2">
           {canDownloadPdf ? (
             <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" onClick={() => window.print()}>
@@ -749,11 +801,56 @@ export function SopPrintPreview({
             <Section title="References" reviewCategory="references">
               {sop.linkedSops.length || (sop.referenceDocs ?? []).length || sop.references.length ? (
                 <ul className="sop-export-list">
-                  {sop.linkedSops.map((link) => <li key={link.sopId}>{linkedSopLabel(link)}</li>)}
-                  {(sop.referenceDocs ?? []).map((doc) => <li key={doc.id}>{doc.name}</li>)}
+                  {sop.linkedSops.map((link) => (
+                    <li key={link.sopId}>
+                      <Link
+                        className="sop-export-link"
+                        href={`/sops/${link.sopId}?preview=pdf&from=${encodeURIComponent(sop.id)}`}
+                        title="Open this SOP's document preview"
+                      >
+                        {linkedSopLabel(link)}
+                      </Link>
+                    </li>
+                  ))}
+                  {(sop.referenceDocs ?? []).map((doc) => {
+                    // The binary sits in the annex-file table keyed by this doc's id.
+                    // Storage URLs are short-lived signed URLs, so mint one on click.
+                    const file = annexFiles.find((item) => item.annexId === doc.id);
+                    return (
+                      <li key={doc.id}>
+                        {file ? (
+                          <button
+                            type="button"
+                            className="sop-export-link"
+                            onClick={() => {
+                              setReferenceOpenError("");
+                              // PDFs stay inside the app: an inline viewer over this
+                              // preview with a Back button. Other types download.
+                              const openTask = file.contentType === "application/pdf"
+                                ? createSopAnnexFileUrl(file, 600).then((url) =>
+                                    setInlineDoc({ name: doc.name, url }),
+                                  )
+                                : openSopAnnexFile(file);
+                              openTask.catch((error: unknown) => {
+                                setReferenceOpenError(
+                                  error instanceof Error ? error.message : "The referenced file could not be opened.",
+                                );
+                              });
+                            }}
+                            title="Open the referenced file"
+                          >
+                            {doc.name}
+                          </button>
+                        ) : (
+                          doc.name
+                        )}
+                      </li>
+                    );
+                  })}
                   {sop.references.map((item, index) => <li key={index}>{item}</li>)}
                 </ul>
               ) : <EmptyAwareText value="" />}
+              {referenceOpenError ? <p className="sop-export-annex-file-error">{referenceOpenError}</p> : null}
             </Section>
             <Section title="Measurement" reviewCategory="measurements">
               {sop.measurements.length ? <ul className="sop-export-list">{sop.measurements.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
@@ -884,6 +981,30 @@ export function SopPrintPreview({
         </div>
         {reviewPanel ? <aside className="sop-review-panel">{reviewPanel}</aside> : null}
       </div>
+      {inlineDoc ? (
+        <div className="sop-inline-doc" role="dialog" aria-label={`Referenced document ${inlineDoc.name}`}>
+          <div className="sop-inline-doc-bar">
+            <button
+              type="button"
+              className="ui-btn-ghost inline-flex h-9 items-center gap-1.5 px-3"
+              onClick={() => setInlineDoc(null)}
+            >
+              <ArrowLeft size={15} />
+              Back
+            </button>
+            <span className="sop-inline-doc-name">{inlineDoc.name}</span>
+            <button
+              type="button"
+              className="ui-btn-ghost h-9 w-9 px-0"
+              onClick={() => setInlineDoc(null)}
+              aria-label="Close referenced document"
+            >
+              <X size={16} className="mx-auto" />
+            </button>
+          </div>
+          <iframe className="sop-inline-doc-frame" src={inlineDoc.url} title={inlineDoc.name} />
+        </div>
+      ) : null}
     </div>
   );
 }

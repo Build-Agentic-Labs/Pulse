@@ -1,6 +1,6 @@
 "use client";
 
-import { formatDate } from "@/domain/formatting";
+import { formatDate, reviewerInitials } from "@/domain/formatting";
 import { FileText, Loader2, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -84,12 +84,6 @@ const REVIEW_FEEDBACK_LABELS: Record<string, string> = {
 interface ReviewParticipant {
   userId: string;
   name: string;
-}
-
-function reviewerInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
 }
 
 export function SopList({
@@ -177,11 +171,9 @@ export function SopList({
       const bySop = new Map<string, SopReviewSubmission[]>();
       for (const submission of submissions) {
         const sop = authored.find((item) => item.id === submission.sopId);
-        if (
-          !sop ||
-          submission.reviewCycle !== sop.reviewCycle ||
-          submission.contentHash !== (sop.contentHash ?? "")
-        ) continue;
+        // Cycle-scoped, not hash-scoped: one review round per cycle, so a
+        // verdict stays valid after the author recalls and edits the draft.
+        if (!sop || submission.reviewCycle !== sop.reviewCycle) continue;
         bySop.set(submission.sopId, [...(bySop.get(submission.sopId) ?? []), submission]);
       }
       const participantsBySop = new Map<string, ReviewParticipant[]>();

@@ -1,0 +1,37 @@
+/*
+ * Product configuration styles. Route-scoped: imported by the component that uses them, never
+ * added to app/globals.css — anything there would need to live inside @layer components or it
+ * silently outranks every Tailwind utility.
+ *
+ * Only the part-search dropdown needs real CSS; everything else composes existing ui-* classes.
+ */
+
+.planning-part-search-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 12%);
+  padding: 4px;
+}
+
+.planning-part-search-option {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.planning-part-search-option.is-highlighted {
+  background: var(--raised);
+}

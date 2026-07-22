@@ -775,6 +775,127 @@ export type Database = {
           },
         ]
       }
+      sales_order_lines: {
+        Row: {
+          acc_sku: string
+          assembly_order_no: string
+          created_at: string
+          customer_raw: string
+          fg_sku: string
+          flags: Json
+          id: string
+          import_id: string
+          model_raw: string
+          sales_order_id: string | null
+          source_row_no: number
+          status: string
+          trailer_letter: string
+          updated_at: string
+          work_order_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          acc_sku?: string
+          assembly_order_no?: string
+          created_at?: string
+          customer_raw?: string
+          fg_sku?: string
+          flags?: Json
+          id?: string
+          import_id: string
+          model_raw?: string
+          sales_order_id?: string | null
+          source_row_no: number
+          status?: string
+          trailer_letter?: string
+          updated_at?: string
+          work_order_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          acc_sku?: string
+          assembly_order_no?: string
+          created_at?: string
+          customer_raw?: string
+          fg_sku?: string
+          flags?: Json
+          id?: string
+          import_id?: string
+          model_raw?: string
+          sales_order_id?: string | null
+          source_row_no?: number
+          status?: string
+          trailer_letter?: string
+          updated_at?: string
+          work_order_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_order_lines_import_id_fkey"
+            columns: ["import_id"]
+            isOneToOne: false
+            referencedRelation: "schedule_imports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_lines_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_lines_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_lines_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales_orders: {
+        Row: {
+          created_at: string
+          customer: string
+          id: string
+          so_no: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          customer?: string
+          id?: string
+          so_no: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          customer?: string
+          id?: string
+          so_no?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_orders_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scenarios: {
         Row: {
           created_at: string
@@ -821,6 +942,50 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      schedule_imports: {
+        Row: {
+          file_name: string
+          first_row_no: number
+          id: string
+          imported_at: string
+          imported_by: string | null
+          last_row_no: number
+          row_count: number
+          sheet_name: string
+          workspace_id: string
+        }
+        Insert: {
+          file_name?: string
+          first_row_no?: number
+          id?: string
+          imported_at?: string
+          imported_by?: string | null
+          last_row_no?: number
+          row_count?: number
+          sheet_name?: string
+          workspace_id: string
+        }
+        Update: {
+          file_name?: string
+          first_row_no?: number
+          id?: string
+          imported_at?: string
+          imported_by?: string | null
+          last_row_no?: number
+          row_count?: number
+          sheet_name?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "schedule_imports_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -2321,6 +2486,7 @@ export type Database = {
           order_type: string
           pm_template_id: string | null
           retired_at: string | null
+          sku: string
           updated_at: string
           workspace_id: string
         }
@@ -2336,6 +2502,7 @@ export type Database = {
           order_type?: string
           pm_template_id?: string | null
           retired_at?: string | null
+          sku?: string
           updated_at?: string
           workspace_id: string
         }
@@ -2351,6 +2518,7 @@ export type Database = {
           order_type?: string
           pm_template_id?: string | null
           retired_at?: string | null
+          sku?: string
           updated_at?: string
           workspace_id?: string
         }
@@ -2377,15 +2545,18 @@ export type Database = {
           created_at: string
           created_by: string | null
           customer: string
+          draft_no: string
           id: string
           main_order_id: string | null
           model: string
           notes: string
           order_date: string
-          order_no: string
+          order_no: string | null
           order_type: string
           production_started_at: string | null
           released_at: string | null
+          sales_order_line_id: string | null
+          sales_order_no: string
           set_no: string
           shipped_at: string | null
           status: string
@@ -2399,15 +2570,18 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           customer?: string
+          draft_no?: string
           id?: string
           main_order_id?: string | null
           model?: string
           notes?: string
           order_date?: string
-          order_no: string
+          order_no?: string | null
           order_type?: string
           production_started_at?: string | null
           released_at?: string | null
+          sales_order_line_id?: string | null
+          sales_order_no?: string
           set_no?: string
           shipped_at?: string | null
           status?: string
@@ -2421,15 +2595,18 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           customer?: string
+          draft_no?: string
           id?: string
           main_order_id?: string | null
           model?: string
           notes?: string
           order_date?: string
-          order_no?: string
+          order_no?: string | null
           order_type?: string
           production_started_at?: string | null
           released_at?: string | null
+          sales_order_line_id?: string | null
+          sales_order_no?: string
           set_no?: string
           shipped_at?: string | null
           status?: string
@@ -2444,6 +2621,13 @@ export type Database = {
             columns: ["main_order_id"]
             isOneToOne: false
             referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_orders_sales_order_line_id_fkey"
+            columns: ["sales_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "sales_order_lines"
             referencedColumns: ["id"]
           },
           {
@@ -2760,6 +2944,14 @@ export type Database = {
       append_sop_event: {
         Args: { p_details?: Json; p_event_type: string; p_sop: string }
         Returns: undefined
+      }
+      approve_work_order_set: {
+        Args: { p_main_id: string; p_workspace_id: string }
+        Returns: {
+          order_no: string
+          pm_order_no: string
+          set_no: string
+        }[]
       }
       can_edit_sop_content: { Args: { p_sop: string }; Returns: boolean }
       can_edit_sop_roster: { Args: { p_sop: string }; Returns: boolean }

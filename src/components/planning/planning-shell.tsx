@@ -26,8 +26,10 @@ type PlanningShellProps = {
 export function PlanningShell({ title, actions, backHref, backLabel = "Back to work orders", wide = false, children }: PlanningShellProps) {
   // The app disables document scrolling globally (html/body overflow:hidden — see
   // globals.css), so each space provides its own scroll container, like the SOP shell.
+  // Viewport height is owned by `app/planning/layout.tsx` (which also holds the sidebar); this
+  // shell fills the content column beside it rather than claiming the screen itself.
   return (
-    <div className="flex h-[100dvh] flex-col bg-canvas text-ink">
+    <div className="flex min-h-0 flex-1 flex-col bg-canvas text-ink">
       <header className="ui-chrome relative z-10 flex h-12 shrink-0 items-center gap-3 px-4">
         {backHref ? (
           <Link
@@ -79,18 +81,22 @@ export function PlanningAccessGate({ children }: { children: ReactNode }) {
   }
 
   if (!hasAccess) {
+    // Rendered INSTEAD of the layout's sidebar row, so it supplies its own viewport height —
+    // `PlanningShell` only fills a flex column, it no longer claims the screen.
     return (
-      <PlanningShell>
-        <section className="ui-panel p-5">
-          <div className="ui-mono-label">Restricted</div>
-          <p className="mt-3 text-sm text-ink-secondary">
-            Planning requires access. Ask a workspace admin to grant it from Settings → Members.
-          </p>
-          <Link href="/" className="ui-btn-ghost mt-4 inline-flex h-8 items-center px-3 text-[12px]">
-            Back to dashboard
-          </Link>
-        </section>
-      </PlanningShell>
+      <div className="flex h-[100dvh] flex-col">
+        <PlanningShell>
+          <section className="ui-panel p-5">
+            <div className="ui-mono-label">Restricted</div>
+            <p className="mt-3 text-sm text-ink-secondary">
+              Planning requires access. Ask a workspace admin to grant it from Settings → Members.
+            </p>
+            <Link href="/" className="ui-btn-ghost mt-4 inline-flex h-8 items-center px-3 text-[12px]">
+              Back to dashboard
+            </Link>
+          </section>
+        </PlanningShell>
+      </div>
     );
   }
 

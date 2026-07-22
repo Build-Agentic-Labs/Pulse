@@ -17,6 +17,7 @@ import {
 } from "@/domain/work-orders";
 import {
   addWorkOrderLine,
+  approveWorkOrderSet,
   deleteWorkOrderLine,
   getWorkOrder,
   getWorkOrderMatch,
@@ -315,10 +316,29 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
     }
   }
 
+  /**
+   * Approve a draft: mints the official GEN number and releases the set. Routed through the RPC
+   * rather than a normal transition because the number allocation and the PM's release have to
+   * happen atomically — see approveWorkOrderSet.
+   */
+  async function handleApprove() {
+    if (!workspaceId || !order || transitioning) return;
+    setTransitioning(true);
+    setError("");
+    try {
+      await approveWorkOrderSet(workspaceId, order.id);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not approve the work order.");
+    } finally {
+      setTransitioning(false);
+    }
+  }
+
   async function handleCancel() {
     if (!order) return;
     const ok = await confirm({
-      title: `Cancel order ${order.orderNo}?`,
+      title: `Cancel order ${order.orderNo || order.draftNo}?`,
       body: "This stops the order from progressing further. A manager can restore it to draft afterward.",
       tone: "danger",
       confirmLabel: "Cancel order",
@@ -326,6 +346,11 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
     if (!ok) return;
     await handleTransition("cancelled");
   }
+
+  // A draft with no official number must go through APPROVAL, not the ordinary forward step —
+  // the database refuses to release an unnumbered order, so offering the plain transition here
+  // would surface a raw constraint error instead of the action the planner actually wants.
+  const needsApproval = Boolean(order && order.status === "draft" && !order.orderNo);
 
   const next = order ? nextForwardStatus(order.status) : null;
   const canForward =
@@ -359,7 +384,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
 
   return (
     <PlanningShell
-      title={order ? order.orderNo : "Work order"}
+      title={order ? order.orderNo || order.draftNo || "Draft work order" : "Work order"}
       backHref="/planning"
       wide
       actions={
@@ -369,7 +394,18 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
               <Printer size={13} />
               Print
             </Link>
-            {canForward ? (
+            {needsApproval && canWrite ? (
+              <button
+                type="button"
+                className="ui-btn-primary h-8 gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={transitioning}
+                title="Assigns the official work order number and releases the set"
+                onClick={() => void handleApprove()}
+              >
+                {transitioning ? <Loader2 size={13} className="animate-spin" /> : null}
+                Approve
+              </button>
+            ) : canForward ? (
               <button
                 type="button"
                 className="ui-btn-primary h-8 gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-40"
@@ -430,11 +466,18 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
                   <input
                     className="ui-input mt-1 w-44 font-mono text-lg"
                     value={form.orderNo}
+                    disabled={order.status !== "draft"}
                     onChange={(event) => setForm((current) => (current ? { ...current, orderNo: event.target.value } : current))}
                     onBlur={() => void saveHeaderField("orderNo", form.orderNo.trim())}
                   />
                 ) : (
-                  <div className="mt-1 font-mono text-lg text-ink">{order.orderNo}</div>
+                  <div className="mt-1 font-mono text-lg text-ink">
+                    {order.orderNo || (
+                      <span className="text-ink-tertiary" title="Provisional — approve to assign the official number">
+                        {order.draftNo || "draft"}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
               <span className={order.status === "in_production" ? "ui-chip-accent" : "ui-chip"}>

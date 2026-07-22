@@ -13,6 +13,7 @@ import {
   ORDER_TYPE_PREFIXES,
   orderNoMonthKey,
   setNoFromOrderNo,
+  suggestDraftNo,
   suggestOrderNo,
   trailerOrderNo,
   type WorkOrderFulfillment,
@@ -42,7 +43,12 @@ type PlannerSupabaseClient = ReturnType<typeof createPlannerSupabaseClient>;
 /** One row of the work-order list -- the promoted header fields, cheap to fetch for every order. */
 export interface WorkOrderSummary {
   id: string;
+  /** The official number, or "" while the order is still a draft (decision N1). */
   orderNo: string;
+  /** Provisional `D-MMYY-NN`, shown until approval mints the official number. */
+  draftNo: string;
+  /** Snapshot of the sales order this came from; "" for manually created orders. */
+  salesOrderNo: string;
   customer: string;
   model: string;
   orderType: WorkOrderType;
@@ -74,6 +80,9 @@ export interface WorkOrderLine {
 export interface WorkOrderDetail {
   id: string;
   orderNo: string;
+  draftNo: string;
+  salesOrderNo: string;
+  salesOrderLineId: string | null;
   templateId: string | null;
   customer: string;
   model: string;
@@ -148,9 +157,9 @@ export interface CreateWorkOrderResult {
 // ── column projections ───────────────────────────────────────────────────
 
 const WORK_ORDER_LIST_COLUMNS =
-  "id, order_no, customer, model, order_type, status, order_date, set_no, trailer_letter, main_order_id, updated_at";
+  "id, order_no, draft_no, sales_order_no, customer, model, order_type, status, order_date, set_no, trailer_letter, main_order_id, updated_at";
 const WORK_ORDER_COLUMNS =
-  "id, order_no, template_id, customer, model, order_type, status, order_date, notes, set_no, trailer_letter, main_order_id, released_at, production_started_at, shipped_at, cancelled_at, created_at, updated_at";
+  "id, order_no, draft_no, sales_order_no, sales_order_line_id, template_id, customer, model, order_type, status, order_date, notes, set_no, trailer_letter, main_order_id, released_at, production_started_at, shipped_at, cancelled_at, created_at, updated_at";
 const WORK_ORDER_LINE_COLUMNS =
   "id, item_no, description, build_qty, shipped_qty, fulfillment, assembly_order_no, pull_from_ref, position";
 
@@ -178,6 +187,8 @@ function mapWorkOrderSummary(row: Record<string, unknown>): WorkOrderSummary {
   return {
     id: String(row.id),
     orderNo: String(row.order_no ?? ""),
+    draftNo: String(row.draft_no ?? ""),
+    salesOrderNo: String(row.sales_order_no ?? ""),
     customer: String(row.customer ?? ""),
     model: String(row.model ?? ""),
     orderType: (row.order_type as WorkOrderType) ?? "mts",
@@ -208,6 +219,9 @@ function mapWorkOrderDetail(header: Record<string, unknown>, lines: Record<strin
   return {
     id: String(header.id),
     orderNo: String(header.order_no ?? ""),
+    draftNo: String(header.draft_no ?? ""),
+    salesOrderNo: String(header.sales_order_no ?? ""),
+    salesOrderLineId: header.sales_order_line_id ? String(header.sales_order_line_id) : null,
     templateId: header.template_id ? String(header.template_id) : null,
     customer: String(header.customer ?? ""),
     model: String(header.model ?? ""),
@@ -368,7 +382,10 @@ async function fetchGenPmOrderNos(
   if (error) {
     throw new Error(`Could not load existing order numbers: ${error.message}`);
   }
-  return (data ?? []).map((row) => String(row.order_no));
+  // The ilike filter above already excludes drafts (their order_no is null and matches no
+  // pattern), but drop nulls explicitly rather than relying on that: String(null) would yield
+  // the literal "null" and quietly enter the number pool if the filter ever changes.
+  return (data ?? []).flatMap((row) => (row.order_no ? [String(row.order_no)] : []));
 }
 
 /**
@@ -415,8 +432,11 @@ export async function createWorkOrder(
     if (existingError) {
       throw new Error(`Could not load existing order numbers: ${existingError.message}`);
     }
+    // Drafts carry a null order_no (the official number is minted at approval -- decision N1),
+    // so they must not be scanned: counting them would burn numbers on orders that may never
+    // be approved and leave permanent holes in the sequence production builds against.
     const orderNo = suggestOrderNo(
-      (existing ?? []).map((row) => row.order_no),
+      (existing ?? []).flatMap((row) => (row.order_no ? [row.order_no] : [])),
       input.orderDate,
       input.orderType,
     );
@@ -591,6 +611,200 @@ async function createGenPmSet(
   throw new Error("Could not allocate a unique set number; try again.");
 }
 
+/** One half of a draft set: the recipe it came from and the BOM lines it starts with. */
+export interface CreateDraftHalfInput {
+  templateId: string | null;
+  customer: string;
+  model: string;
+  notes: string;
+  lines: Array<Omit<WorkOrderLine, "id">>;
+}
+
+export interface CreateDraftSetInput extends CreateDraftHalfInput {
+  /** The schedule line this order answers. */
+  salesOrderLineId: string;
+  /** Snapshot of the sales order number, frozen onto the printed traveler. */
+  salesOrderNo: string;
+  orderDate: string;
+  /** Which supermarket trailer this unit takes. */
+  trailerLetter: string;
+  /** The married Power Module, created as a draft alongside the Main. */
+  pm?: CreateDraftHalfInput | null;
+}
+
+export interface CreateDraftSetResult {
+  id: string;
+  draftNo: string;
+  pmId: string | null;
+}
+
+/**
+ * Create a GEN (+ married PM) as DRAFTS, with no official order number.
+ *
+ * This is the N1 path: the official `GEN-MMYY-NN` is minted at approval by `approveWorkOrderSet`,
+ * so a discarded draft costs nothing and the official sequence production builds against stays
+ * contiguous. Drafts carry a provisional `D-MMYY-NN` instead, which is deliberately un-mistakable
+ * for a real order number.
+ *
+ * The PM is created NOW rather than at approval because the planner has to see its parts list to
+ * verify the set; only the numbering waits.
+ */
+export async function createDraftWorkOrderSet(
+  workspaceId: string,
+  input: CreateDraftSetInput,
+): Promise<CreateDraftSetResult> {
+  const supabase = createPlannerSupabaseClient();
+  const { data: userData } = await getUserFromSession(supabase);
+  const createdBy = userData.user?.id ?? null;
+  const trailerLetter = normalizeOptionalTrailerLetter(input.trailerLetter);
+  const mmyy = orderNoMonthKey(input.orderDate);
+
+  // `suggestDraftNo` is a client-side max+1 against a unique index, so two planners creating a
+  // draft in the same month can collide. Recompute once on 23505 rather than surfacing a raw
+  // "duplicate key value violates unique constraint" to the planner — the same retry the official
+  // numbering path uses.
+  let draftNo = "";
+  let mainId = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { data: existingDrafts, error: draftsError } = await supabase
+      .from("work_orders")
+      .select("draft_no")
+      .eq("workspace_id", workspaceId)
+      .like("draft_no", `D-${mmyy}-%`);
+    if (draftsError) {
+      throw new Error(`Could not load existing draft numbers: ${draftsError.message}`);
+    }
+    draftNo = suggestDraftNo(
+      (existingDrafts ?? []).flatMap((row) => (row.draft_no ? [String(row.draft_no)] : [])),
+      input.orderDate,
+    );
+
+    const { data: main, error: mainError } = await supabase
+      .from("work_orders")
+      .insert({
+        workspace_id: workspaceId,
+        order_no: null,
+        draft_no: draftNo,
+        sales_order_line_id: input.salesOrderLineId,
+        sales_order_no: input.salesOrderNo,
+        template_id: input.templateId,
+        customer: input.customer,
+        model: input.model,
+        order_type: "head_unit",
+        status: "draft",
+        order_date: input.orderDate,
+        notes: input.notes,
+        trailer_letter: trailerLetter,
+        created_by: createdBy,
+      })
+      .select("id")
+      .single();
+
+    if (!mainError) {
+      mainId = String(main.id);
+      break;
+    }
+    if (mainError.code === "23505" && attempt === 0) {
+      continue; // Someone took the draft number between the scan and the insert.
+    }
+    throw new Error(`Could not create the work order: ${mainError.message}`);
+  }
+  if (!mainId) {
+    throw new Error("Could not allocate a unique draft number; try again.");
+  }
+
+  await insertWorkOrderLines(supabase, workspaceId, mainId, draftNo, input.lines);
+
+  let pmId: string | null = null;
+  if (input.pm) {
+    const { data: pm, error: pmError } = await supabase
+      .from("work_orders")
+      .insert({
+        workspace_id: workspaceId,
+        order_no: null,
+        draft_no: "",
+        sales_order_line_id: input.salesOrderLineId,
+        sales_order_no: input.salesOrderNo,
+        template_id: input.pm.templateId,
+        customer: input.pm.customer,
+        model: input.pm.model,
+        order_type: "power_module",
+        status: "draft",
+        order_date: input.orderDate,
+        notes: input.pm.notes,
+        main_order_id: mainId,
+        created_by: createdBy,
+      })
+      .select("id")
+      .single();
+    if (pmError) {
+      // Roll the Main back rather than strand an unpaired half. VERIFY the rollback: RLS can
+      // permit an INSERT while silently matching zero rows on the DELETE, and an unverified
+      // rollback leaves an orphan Main — with lines and a consumed draft number — behind an
+      // error message that only mentions the power module. Same hazard `createGenPmSet`
+      // documents; it must not be re-introduced here.
+      const { data: rolledBack } = await supabase
+        .from("work_orders")
+        .delete()
+        .eq("workspace_id", workspaceId)
+        .eq("id", mainId)
+        .select("id");
+      const stranded = !rolledBack || rolledBack.length === 0;
+      throw new Error(
+        stranded
+          ? `Could not create the power module (${pmError.message}), and draft ${draftNo} could not be removed — delete it manually before retrying.`
+          : `Could not create the power module: ${pmError.message}`,
+      );
+    }
+    pmId = String(pm.id);
+    await insertWorkOrderLines(supabase, workspaceId, pmId, draftNo, input.pm.lines);
+  }
+
+  return { id: mainId, draftNo, pmId };
+}
+
+/** What approval minted: the official numbers and the shared set number. */
+export interface ApproveWorkOrderSetResult {
+  orderNo: string;
+  pmOrderNo: string | null;
+  setNo: string;
+}
+
+/**
+ * Approve a draft set: mint `GEN-MMYY-NN`, stamp the same `NN` on its married Power Module, and
+ * release both — atomically, in one database function.
+ *
+ * This is the only write in Planning that is an RPC rather than a store call. Every other write
+ * is a single row where a client round-trip is safe; this one has a multi-row invariant (a
+ * numbered Main must never outlive an unnumbered PM) and allocates a number that must stay
+ * CONTIGUOUS, which a client-side max+1 cannot guarantee under concurrency — the unique index
+ * gives uniqueness, but two racing approvals would leave a permanent hole in the sequence
+ * production builds against.
+ */
+export async function approveWorkOrderSet(
+  workspaceId: string,
+  mainId: string,
+): Promise<ApproveWorkOrderSetResult> {
+  const supabase = createPlannerSupabaseClient();
+  const { data, error } = await supabase.rpc("approve_work_order_set", {
+    p_workspace_id: workspaceId,
+    p_main_id: mainId,
+  });
+  if (error) {
+    throw new Error(`Could not approve the work order: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) {
+    throw new Error("Approval returned no order number.");
+  }
+  return {
+    orderNo: String(row.order_no ?? ""),
+    pmOrderNo: row.pm_order_no ? String(row.pm_order_no) : null,
+    setNo: String(row.set_no ?? ""),
+  };
+}
+
 export async function updateWorkOrderHeader(
   workspaceId: string,
   id: string,
@@ -602,7 +816,10 @@ export async function updateWorkOrderHeader(
   if (patch.model !== undefined) row.model = patch.model;
   if (patch.orderDate !== undefined) row.order_date = patch.orderDate;
   if (patch.notes !== undefined) row.notes = patch.notes;
-  if (patch.orderNo !== undefined) row.order_no = patch.orderNo;
+  // Blank means "no official number" -- which is NULL, not "". The unique index normalizes to
+  // lower(btrim(order_no)), so two rows cleared to "" would collide on a cryptic 23505 while
+  // two NULLs coexist freely. Cleared numbers must therefore round-trip back to NULL.
+  if (patch.orderNo !== undefined) row.order_no = patch.orderNo.trim() === "" ? null : patch.orderNo;
 
   const { error } = await supabase.from("work_orders").update(row).eq("workspace_id", workspaceId).eq("id", id);
   if (error) {

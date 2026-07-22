@@ -6,6 +6,7 @@ import {
   nextForwardStatus,
   orderNoMonthKey,
   setNoFromOrderNo,
+  suggestDraftNo,
   suggestOrderNo,
   trailerOrderNo,
 } from "./work-orders";
@@ -159,5 +160,40 @@ describe("missingAssemblyCount", () => {
         { fulfillment: "pull_from_stock", assemblyOrderNo: "" },
       ]),
     ).toBe(2);
+  });
+});
+
+describe("suggestDraftNo", () => {
+  it("starts a month's draft series at 01", () => {
+    expect(suggestDraftNo([], "2026-07-15")).toBe("D-0726-01");
+  });
+
+  it("takes max + 1 within the month", () => {
+    expect(suggestDraftNo(["D-0726-01", "D-0726-03"], "2026-07-15")).toBe("D-0726-04");
+  });
+
+  it("ignores other months", () => {
+    expect(suggestDraftNo(["D-0626-09"], "2026-07-15")).toBe("D-0726-01");
+  });
+
+  it("ignores official order numbers so the two series never interfere", () => {
+    expect(suggestDraftNo(["GEN-0726-07", "PM-0726-07", "D-0726-01"], "2026-07-15")).toBe("D-0726-02");
+  });
+
+  it("tolerates malformed entries", () => {
+    expect(suggestDraftNo(["D-0726-", "junk", "", "D-0726-02"], "2026-07-15")).toBe("D-0726-03");
+  });
+
+  it("is case-insensitive about the prefix", () => {
+    expect(suggestDraftNo(["d-0726-04"], "2026-07-15")).toBe("D-0726-05");
+  });
+
+  it("pads past nine so the series sorts lexicographically", () => {
+    expect(suggestDraftNo(["D-0726-09"], "2026-07-15")).toBe("D-0726-10");
+  });
+
+  it("never collides with a GEN prefix that starts with the same letter shape", () => {
+    // "DEC-0726-05" is the decal prefix — it must not be read as a D- draft.
+    expect(suggestDraftNo(["DEC-0726-05"], "2026-07-15")).toBe("D-0726-01");
   });
 });

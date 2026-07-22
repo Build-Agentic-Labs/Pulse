@@ -1,0 +1,23 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2]:
+    - button "Toggle theme" [ref=f3e4] [cursor=pointer]
+    - main [ref=f3e7]:
+      - generic [ref=f3e8]:
+        - heading "Sign in" [level=1] [ref=f3e9]
+        - paragraph [ref=f3e10]: Welcome back. Use your work email.
+        - generic [ref=f3e11]:
+          - generic [ref=f3e12]:
+            - generic [ref=f3e13]: Work email
+            - textbox "Work email" [ref=f3e14]:
+              - /placeholder: you@anacorp.com
+          - generic [ref=f3e15]:
+            - generic [ref=f3e16]:
+              - generic [ref=f3e17]: Password
+              - button "Forgot password?" [ref=f3e18] [cursor=pointer]
+            - textbox "Password" [ref=f3e19]:
+              - /placeholder: Enter your password
+          - button "Sign in" [ref=f3e20] [cursor=pointer]
+          - generic [ref=f3e21]: Or
+          - button "Continue with Microsoft" [ref=f3e23] [cursor=pointer]
+          - button "Create account" [ref=f3e29] [cursor=pointer]
+  - alert [ref=f3e30]

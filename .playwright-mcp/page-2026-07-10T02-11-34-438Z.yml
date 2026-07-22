@@ -1,0 +1,44 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - banner [ref=f1e3]:
+      - link "Pulse" [ref=f1e4] [cursor=pointer]:
+        - /url: /
+      - generic [ref=f1e6]: ANA Corp
+      - button "Switch to dark theme" [ref=f1e8] [cursor=pointer]
+    - main [ref=f1e12]:
+      - generic [ref=f1e13]:
+        - generic [ref=f1e14]: Thursday, July 9
+        - heading "Good evening." [level=1] [ref=f1e15]
+        - paragraph [ref=f1e16]: Pick a space to get started.
+      - generic [ref=f1e17]:
+        - link [ref=f1e18] [cursor=pointer]:
+          - /url: /projects/project-flexboost/planner?view=dashboard
+          - generic [ref=f1e24]:
+            - heading [level=3] [ref=f1e25]
+            - paragraph [ref=f1e29]: Line design, work instructions, exploded views and build animations.
+        - link [ref=f1e30] [cursor=pointer]:
+          - /url: /planning
+          - generic [ref=f1e37]:
+            - heading [level=3] [ref=f1e38]
+            - paragraph [ref=f1e42]: Work orders, schedules and capacity for the production plan.
+        - link [ref=f1e43] [cursor=pointer]:
+          - /url: /production
+          - generic [ref=f1e49]:
+            - heading [level=3] [ref=f1e50]
+            - paragraph [ref=f1e54]: Live stations — documents, throughput, targets and travelers.
+        - link [ref=f1e55] [cursor=pointer]:
+          - /url: /sops
+          - generic [ref=f1e60]:
+            - heading [level=3] [ref=f1e61]
+            - paragraph [ref=f1e65]: SOPs, work instructions and document control.
+        - link [ref=f1e66] [cursor=pointer]:
+          - /url: /projects/project-flexboost/planner?view=settings
+          - generic [ref=f1e73]:
+            - heading [level=3] [ref=f1e74]
+            - paragraph [ref=f1e78]: Members, roles and project access.
+        - generic [ref=f1e85]:
+          - heading "Insights Soon" [level=3] [ref=f1e86]:
+            - text: Insights
+            - generic [ref=f1e87]: Soon
+          - paragraph [ref=f1e88]: Reporting across every space.
+  - alert [ref=f1e89]

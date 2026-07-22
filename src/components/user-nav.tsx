@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { NotificationBell } from "@/components/notification-bell";
 import { useTheme } from "@/components/theme-provider";
 import { SPACE_META, SPACE_ORDER, SpaceIcon, spaceDisabledLabel, spaceHref } from "@/components/spaces";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
@@ -300,6 +301,8 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
       >
         {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
       </button>
+
+      <NotificationBell />
 
       {showSpacesLink ? (
         <SpacesMenu

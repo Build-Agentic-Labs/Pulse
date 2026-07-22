@@ -1,0 +1,23 @@
+/* Scoped styles for the top-bar notification bell. Squared 4px geometry per
+   the design system — never a pill. Colors ride the theme's CSS variables so
+   dark mode needs no extra rules. */
+.bell-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--color-ink);
+  color: var(--color-surface);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+
+.bell-panel {
+  max-height: 420px;
+  overflow-y: auto;
+}

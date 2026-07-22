@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   resolveEventRecipients,
   resolveReminders,
+  renderSopNotificationEmail,
   type NotifiableEvent,
   type SopNotificationContext,
   type SopSnapshot,
   type SopReminderState,
+  type SopEmailInput,
 } from "./notifications";
 
 const sop = (over: Partial<SopSnapshot> = {}): SopSnapshot => ({
@@ -309,5 +311,60 @@ describe("resolveReminders", () => {
     const out = resolveReminders(NOW, [reassigned]);
     expect(ids(out)).toEqual(["new-signer"]);
     expect(out[0].reminderIndex).toBe(1);
+  });
+});
+
+describe("renderSopNotificationEmail", () => {
+  const input = (over: Partial<SopEmailInput> = {}): SopEmailInput => ({
+    kind: "review_requested",
+    sopNumber: "SOP-0042",
+    title: "Line Clearance",
+    version: "C",
+    actorName: "Sam Submitter",
+    departmentName: "Engineering",
+    origin: "https://pulse.example.com",
+    sopId: "sop-1",
+    reminderIndex: 0,
+    waitingDays: null,
+    ...over,
+  });
+
+  it("review subject carries number, title, and revision", () => {
+    expect(renderSopNotificationEmail(input()).subject).toBe('Review requested: SOP-0042 "Line Clearance" (Rev C)');
+  });
+
+  it("subjects match the spec shapes for the other kinds", () => {
+    expect(renderSopNotificationEmail(input({ kind: "final_approval_requested" })).subject).toBe(
+      'Signature needed: SOP-0042 "Line Clearance"',
+    );
+    expect(renderSopNotificationEmail(input({ kind: "quality_release_requested" })).subject).toBe(
+      'Ready for release: SOP-0042 "Line Clearance"',
+    );
+    expect(renderSopNotificationEmail(input({ kind: "sent_back" })).subject).toBe(
+      'Sent back with remarks: SOP-0042 "Line Clearance"',
+    );
+  });
+
+  it("body links to the SOP in both text and html", () => {
+    const { text, html } = renderSopNotificationEmail(input());
+    expect(text).toContain("https://pulse.example.com/sops/sop-1");
+    expect(html).toContain('href="https://pulse.example.com/sops/sop-1"');
+  });
+
+  it("reminders get the prefix and the waiting line", () => {
+    const out = renderSopNotificationEmail(input({ reminderIndex: 1, waitingDays: 4 }));
+    expect(out.subject).toBe('Reminder: Review requested: SOP-0042 "Line Clearance" (Rev C)');
+    expect(out.text).toContain("waiting 4 days");
+  });
+
+  it("html-escapes user-controlled fields", () => {
+    const out = renderSopNotificationEmail(input({ title: '<img src=x onerror=1>' }));
+    expect(out.html).not.toContain("<img");
+    expect(out.html).toContain("&lt;img");
+  });
+
+  it("falls back gracefully when number/title/version are missing", () => {
+    const out = renderSopNotificationEmail(input({ sopNumber: null, title: null, version: null }));
+    expect(out.subject).toBe('Review requested: SOP "Untitled SOP"');
   });
 });

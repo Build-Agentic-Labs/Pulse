@@ -310,3 +310,91 @@ function remindersForSop(now: Date, state: SopReminderState): PendingNotificatio
   }
   return out;
 }
+
+export interface SopEmailInput {
+  kind: SopNotificationKind;
+  sopNumber: string | null;
+  title: string | null;
+  version: string | null;
+  actorName: string;
+  departmentName: string | null;
+  origin: string;
+  sopId: string;
+  reminderIndex: number;
+  waitingDays: number | null;
+}
+
+export interface SopEmailContent {
+  subject: string;
+  text: string;
+  html: string;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+/**
+ * Four literal templates, one per kind — deliberately no engine, no registry
+ * (spec's YAGNI cuts). Email is a UI surface: plain sentences, one link.
+ */
+export function renderSopNotificationEmail(input: SopEmailInput): SopEmailContent {
+  const label = `${input.sopNumber ?? "SOP"} "${input.title ?? "Untitled SOP"}"`;
+  const link = `${input.origin}/sops/${input.sopId}`;
+
+  let subject: string;
+  let happened: string;
+  let needed: string;
+  switch (input.kind) {
+    case "review_requested":
+      subject = `Review requested: ${label}${input.version ? ` (Rev ${input.version})` : ""}`;
+      happened = `${input.actorName} sent ${label} for review.`;
+      needed = input.departmentName
+        ? `You are the reviewer for the ${input.departmentName} seat — please review it and return your result.`
+        : `Please review it and return your result.`;
+      break;
+    case "final_approval_requested":
+      subject = `Signature needed: ${label}`;
+      happened = `Every reviewer accepted ${label}.`;
+      needed = input.departmentName
+        ? `Your formal ${input.departmentName} department signature is needed to approve it.`
+        : `Your formal department signature is needed to approve it.`;
+      break;
+    case "quality_release_requested":
+      subject = `Ready for release: ${label}`;
+      happened = `${label} has every department signature.`;
+      needed = `As a Quality approver, you can review it and make it effective.`;
+      break;
+    case "sent_back":
+      subject = `Sent back with remarks: ${label}`;
+      happened = `${input.actorName} sent ${label} back.`;
+      needed = `Please address the remarks and resubmit it for review.`;
+      break;
+  }
+
+  const isReminder = input.reminderIndex > 0;
+  if (isReminder) subject = `Reminder: ${subject}`;
+  const waiting =
+    isReminder && input.waitingDays !== null ? `This has been waiting ${input.waitingDays} days.` : null;
+
+  const textLines = [happened, needed, waiting, `Open it: ${link}`].filter(Boolean);
+  const htmlParagraphs = [happened, needed, waiting]
+    .filter((line): line is string => Boolean(line))
+    .map((line) => `<p style="margin:0 0 12px">${escapeHtml(line)}</p>`)
+    .join("");
+
+  return {
+    subject,
+    text: textLines.join("\n\n"),
+    html:
+      `<div style="font-family:system-ui,sans-serif;font-size:14px;color:#111">` +
+      htmlParagraphs +
+      `<p style="margin:16px 0 0"><a href="${link}" ` +
+      `style="display:inline-block;padding:8px 14px;background:#111;color:#fff;text-decoration:none">` +
+      `Open in Pulse</a></p></div>`,
+  };
+}

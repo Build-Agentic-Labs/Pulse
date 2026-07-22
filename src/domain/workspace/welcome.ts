@@ -84,10 +84,11 @@ export function renderWorkspaceWelcomeEmail(input: {
   selfCaused: boolean;
   origin: string;
 }): SopEmailContent {
-  const happened =
-    !input.selfCaused && input.actorName
+  const happened = input.selfCaused
+    ? `You joined ${input.workspaceName} via your company email domain.`
+    : input.actorName
       ? `${input.actorName} added you to ${input.workspaceName}.`
-      : `You joined ${input.workspaceName} via your company email domain.`;
+      : `You were added to ${input.workspaceName}.`;
   const what = `Pulse is where this team plans production, controls SOP documents, and tracks review work.`;
   const reason = "You are receiving this because you were added to this workspace.";
   const link = `${input.origin}/`;
@@ -100,6 +101,7 @@ export function renderWorkspaceWelcomeEmail(input: {
     text: [happened, what, `Open it: ${link}`, "—", reason, input.origin].join("\n\n"),
     html: renderEmailShell({
       accent: WELCOME_ACCENT,
+      subtitle: "Company workspace",
       eyebrow: "Welcome",
       heading: `Welcome to ${input.workspaceName}`,
       bodyParagraphsHtml: paragraph(happened) + paragraph(what),

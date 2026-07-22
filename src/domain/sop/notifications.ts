@@ -409,6 +409,7 @@ export function renderSopNotificationEmail(input: SopEmailInput): SopEmailConten
 
   const html = renderEmailShell({
     accent,
+    subtitle: "SOP document control",
     eyebrow: eyebrowText,
     heading,
     bodyParagraphsHtml: bodyParagraph(happened) + bodyParagraph(needed) + waitingNote,

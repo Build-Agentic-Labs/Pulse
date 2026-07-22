@@ -80,6 +80,9 @@ describe("renderWorkspaceWelcomeEmail", () => {
     expect(renderWorkspaceWelcomeEmail(base).text).toContain("Rosendo Lopez added you to Anacorp.");
     const self = renderWorkspaceWelcomeEmail({ ...base, actorName: null, selfCaused: true });
     expect(self.text).toContain("You joined Anacorp via your company email domain.");
+    expect(
+      renderWorkspaceWelcomeEmail({ ...base, actorName: null, selfCaused: false }).text,
+    ).toContain("You were added to Anacorp.");
   });
 
   it("links to the app root in text and html, with the branded shell", () => {
@@ -87,7 +90,8 @@ describe("renderWorkspaceWelcomeEmail", () => {
     expect(out.text).toContain("https://pulse.example.com/");
     expect(out.html).toContain('href="https://pulse.example.com/"');
     expect(out.html).toContain(">Pulse</span>");
-    expect(out.html).toContain("you were added to this workspace");
+    expect(out.html).toContain("Company workspace");
+    expect(out.html).toContain("You are receiving this because you were added to this workspace.");
   });
 
   it("escapes user-controlled names", () => {

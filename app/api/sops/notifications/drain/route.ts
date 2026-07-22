@@ -32,12 +32,21 @@ async function drain(request: Request): Promise<NextResponse> {
   const resendApiKey = process.env.RESEND_API_KEY ?? "";
   const resendFrom = process.env.RESEND_FROM ?? "";
 
+  // Links go into emails sent to OTHER users, so the origin must come from
+  // trusted config, not the request's Host. NEXT_PUBLIC_SITE_URL wins if set;
+  // Vercel's canonical production host is next; the request origin is the
+  // dev-only fallback.
+  const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "";
+  const origin =
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    (vercelHost ? `https://${vercelHost}` : new URL(request.url).origin);
+
   try {
     const report = await runSopNotificationDrain({
       store: createSopNotificationDrainStore(admin),
       send: resendApiKey && resendFrom ? createResendSender(resendApiKey, resendFrom) : null,
       now: () => new Date(),
-      origin: new URL(request.url).origin,
+      origin,
     });
     return NextResponse.json(report);
   } catch (error: unknown) {

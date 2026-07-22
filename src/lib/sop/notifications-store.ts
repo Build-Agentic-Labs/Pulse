@@ -42,7 +42,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // which made the two `.select(SOP_COLUMNS)` calls below fall back to a
 // `GenericStringError` return type instead of `SopRow[]`.
 const SOP_COLUMNS =
-  "id, workspace_id, title, sop_number, version, status, deleted_at, created_by, submitted_by, content_hash, final_approval_requested_at, final_approval_content_hash, rejected_reason, review_cycle, approved_at, department_id";
+  "id, workspace_id, title, sop_number, version, status, deleted_at, created_by, submitted_by, content_hash, final_approval_requested_at, final_approval_content_hash, rejected_reason, review_cycle, approved_at";
 
 type SopRow = {
   id: string;
@@ -60,7 +60,6 @@ type SopRow = {
   rejected_reason: string | null;
   review_cycle: number;
   approved_at: string | null;
-  department_id: string | null;
 };
 
 function toSnapshot(row: SopRow): SopSnapshot {

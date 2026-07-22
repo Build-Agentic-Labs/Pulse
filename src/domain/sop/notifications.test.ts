@@ -139,6 +139,19 @@ describe("resolveEventRecipients: quality gate", () => {
     const e = event({ eventType: "status_changed", details: "corrupt" });
     expect(resolveEventRecipients(e, qctx())).toEqual([]);
   });
+
+  it("excludes the actor when they hold a quality approver position", () => {
+    const c = qctx();
+    const withActorAsApprover = {
+      ...c,
+      qualityApprovers: [
+        ...c.qualityApprovers,
+        { userId: "resp", holdsSeat: false, overruledThisCycle: false },
+      ],
+    };
+    const out = resolveEventRecipients(approvedEvent(), withActorAsApprover);
+    expect(ids(out)).toEqual(["q-clean"]);
+  });
 });
 
 describe("resolveEventRecipients: sent_back", () => {
@@ -169,6 +182,14 @@ describe("resolveEventRecipients: sent_back", () => {
   it("never emails the author about their own action", () => {
     const e = event({ eventType: "review_returned", actorId: "author", details: { no_changes: false } });
     expect(resolveEventRecipients(e, ctx())).toEqual([]);
+  });
+
+  it("review_returned with malformed/missing details returns empty", () => {
+    const e1 = event({ eventType: "review_returned", actorId: "resp", details: "corrupt" });
+    expect(resolveEventRecipients(e1, ctx())).toEqual([]);
+
+    const e2 = event({ eventType: "review_returned", actorId: "resp", details: {} });
+    expect(resolveEventRecipients(e2, ctx())).toEqual([]);
   });
 });
 

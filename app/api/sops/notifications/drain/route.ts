@@ -15,6 +15,7 @@ import {
   runSopNotificationDrain,
 } from "@/lib/sop/notifications-drain";
 import { createSopNotificationDrainStore } from "@/lib/sop/notifications-store";
+import { createWorkspaceWelcomeDrainStore } from "@/lib/workspace/welcome-store";
 import type { Database } from "@/lib/database.types";
 
 const kickRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 6 });
@@ -42,13 +43,21 @@ async function drain(request: Request): Promise<NextResponse> {
     (vercelHost ? `https://${vercelHost}` : new URL(request.url).origin);
 
   try {
-    const report = await runSopNotificationDrain({
+    const send = resendApiKey && resendFrom ? createResendSender(resendApiKey, resendFrom) : null;
+    const now = () => new Date();
+    const sopReport = await runSopNotificationDrain({
       store: createSopNotificationDrainStore(admin),
-      send: resendApiKey && resendFrom ? createResendSender(resendApiKey, resendFrom) : null,
-      now: () => new Date(),
+      send,
+      now,
       origin,
     });
-    return NextResponse.json(report);
+    const workspaceReport = await runSopNotificationDrain({
+      store: createWorkspaceWelcomeDrainStore(admin),
+      send,
+      now,
+      origin,
+    });
+    return NextResponse.json({ configured: send !== null, sop: sopReport, workspace: workspaceReport });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Drain failed.";
     return NextResponse.json({ error: message }, { status: 500 });

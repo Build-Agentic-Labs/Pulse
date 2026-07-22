@@ -3,8 +3,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
 import { fetchMySpaceAccess } from "@/lib/planning/store";
+import { SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
 
-const WORKSPACE_STORAGE_KEY = "pulse:sops:workspace-id";
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 
 type PlanningWorkspaceContextValue = {
@@ -30,7 +30,7 @@ export function usePlanningWorkspace(): PlanningWorkspaceContextValue {
 function readStoredWorkspaceId(): string | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    return window.localStorage.getItem(WORKSPACE_STORAGE_KEY) ?? undefined;
+    return window.localStorage.getItem(SOP_WORKSPACE_STORAGE_KEY) ?? undefined;
   } catch {
     return undefined;
   }

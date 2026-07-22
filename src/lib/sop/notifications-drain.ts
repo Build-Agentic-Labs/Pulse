@@ -46,8 +46,8 @@ export function createResendSender(apiKey: string, from: string): EmailSender {
   };
 }
 
-export interface DrainItem {
-  pending: PendingNotification;
+export interface DrainItem<P = PendingNotification> {
+  pending: P;
   email: string | null;
   content: SopEmailContent;
 }
@@ -59,19 +59,19 @@ export interface RetryItem {
   attempts: number;
 }
 
-export interface DrainBatch {
-  items: DrainItem[];
+export interface DrainBatch<P = PendingNotification> {
+  items: DrainItem<P>[];
   /** Health signal: age of the oldest event still owed a notification. */
   oldestUnnotifiedEventAgeHours: number | null;
 }
 
-export interface DrainStore {
+export interface DrainStore<P = PendingNotification> {
   /** Scan events + reminders, resolve recipients, render emails. Read-only. */
-  collect(now: Date, origin: string): Promise<DrainBatch>;
+  collect(now: Date, origin: string): Promise<DrainBatch<P>>;
   /** Claimed-but-unsent rows past the lease, below the attempt cap. */
   retryItems(now: Date, origin: string): Promise<RetryItem[]>;
   /** Insert the ledger row; a unique-index conflict returns claimed:false. */
-  claim(pending: PendingNotification): Promise<{ claimed: boolean; ledgerId: number | null }>;
+  claim(pending: P): Promise<{ claimed: boolean; ledgerId: number | null }>;
   markSent(ledgerId: number, messageId: string): Promise<void>;
   markFailed(ledgerId: number, error: string, attemptsAfter: number): Promise<void>;
 }
@@ -86,8 +86,8 @@ export interface DrainReport {
   oldestUnnotifiedEventAgeHours: number | null;
 }
 
-export async function runSopNotificationDrain(deps: {
-  store: DrainStore;
+export async function runSopNotificationDrain<P = PendingNotification>(deps: {
+  store: DrainStore<P>;
   send: EmailSender | null;
   now: () => Date;
   origin: string;
@@ -148,8 +148,8 @@ export async function runSopNotificationDrain(deps: {
   return report;
 }
 
-async function attemptSend(
-  store: DrainStore,
+async function attemptSend<P = PendingNotification>(
+  store: DrainStore<P>,
   send: EmailSender,
   ledgerId: number,
   email: string,

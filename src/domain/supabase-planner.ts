@@ -35,6 +35,7 @@ import { applyCalculatedFields } from "./calculations";
 import { defaultDocumentTypeCodes } from "./nomenclature";
 import { formatDisplayTitle } from "@/lib/display-names";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
+import { kickSopNotifications } from "@/lib/sop/notify-kick";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -1879,6 +1880,11 @@ export async function ensureDefaultWorkspaceMembership(
       }
 
       bootstrappedUserIds.add(user.id);
+
+      // A redemption may have just minted memberships (invite or domain
+      // auto-join) — nudge the notification drain so the welcome email lands in
+      // seconds instead of at the next cron. Browser-only no-op elsewhere.
+      kickSopNotifications();
     }
 
     return loadWorkspaceProjectGroups(user.id, supabase);

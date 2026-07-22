@@ -2811,6 +2811,60 @@ export type Database = {
           },
         ]
       }
+      workspace_notifications: {
+        Row: {
+          attempts: number
+          created_at: string
+          event_id: number
+          id: number
+          kind: string
+          last_error: string | null
+          recipient_id: string
+          resend_message_id: string | null
+          sent_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          event_id: number
+          id?: never
+          kind: string
+          last_error?: string | null
+          recipient_id: string
+          resend_message_id?: string | null
+          sent_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          event_id?: number
+          id?: never
+          kind?: string
+          last_error?: string | null
+          recipient_id?: string
+          resend_message_id?: string | null
+          sent_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_notifications_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "audit_log"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workspace_notifications_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_revocations: {
         Row: {
           created_at: string

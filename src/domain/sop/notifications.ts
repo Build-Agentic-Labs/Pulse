@@ -7,6 +7,8 @@
  * Spec: docs/superpowers/specs/2026-07-21-sop-notifications-design.md
  */
 
+import { escapeHtml, renderEmailShell } from "@/domain/notification-email-shell";
+
 export const REMINDER_AFTER_DAYS = 3;
 export const MAX_REMINDERS = 2;
 
@@ -330,14 +332,6 @@ export interface SopEmailContent {
   html: string;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
 const SEAT_REASON = "You are receiving this because you hold a review seat on this SOP.";
 
 /**
@@ -404,7 +398,6 @@ export function renderSopNotificationEmail(input: SopEmailInput): SopEmailConten
   const heading = `${input.sopNumber ?? "SOP"} — ${input.title ?? "Untitled SOP"}${
     input.version ? ` (Rev ${input.version})` : ""
   }`;
-  const host = input.origin.replace(/^https?:\/\//, "");
 
   const textLines = [happened, needed, waiting, `Open it: ${link}`, "—", reason, input.origin].filter(Boolean);
 
@@ -414,28 +407,17 @@ export function renderSopNotificationEmail(input: SopEmailInput): SopEmailConten
     ? `<p style="margin:0 0 12px;padding:10px 14px;background:#fef3c7;border-radius:4px;font-size:13px;line-height:1.5;color:#92400e;">${escapeHtml(waiting)}</p>`
     : "";
 
-  const html =
-    `<div style="margin:0;padding:32px 16px;background:#f4f4f5;font-family:-apple-system,'Segoe UI',system-ui,sans-serif;">` +
-    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" width="100%" style="max-width:560px;margin:0 auto;">` +
-    `<tr><td style="padding:0 2px 14px;">` +
-    `<span style="font-size:17px;font-weight:700;letter-spacing:0.02em;color:#111111;">Pulse</span>` +
-    `<span style="font-size:12px;color:#71717a;">&nbsp;&middot;&nbsp;SOP document control</span>` +
-    `</td></tr>` +
-    `<tr><td style="background:#ffffff;border:1px solid #e4e4e7;border-top:3px solid ${accent};border-radius:4px;padding:28px 32px;">` +
-    `<p style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${accent};">${escapeHtml(eyebrowText)}</p>` +
-    `<p style="margin:0 0 16px;font-size:17px;font-weight:600;line-height:1.4;color:#111111;">${escapeHtml(heading)}</p>` +
-    bodyParagraph(happened) +
-    bodyParagraph(needed) +
-    waitingNote +
-    `<p style="margin:20px 0 0;"><a href="${link}" ` +
-    `style="display:inline-block;padding:10px 18px;background:#111111;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:4px;">` +
-    `Open in Pulse</a></p>` +
-    `</td></tr>` +
-    `<tr><td style="padding:16px 2px 0;font-size:12px;line-height:1.6;color:#71717a;">` +
-    `${escapeHtml(reason)}<br>` +
-    `<a href="${input.origin}" style="color:#71717a;">${escapeHtml(host)}</a>&nbsp;&middot;&nbsp;Automated notification from Pulse &mdash; replies are not monitored.` +
-    `</td></tr>` +
-    `</table></div>`;
+  const html = renderEmailShell({
+    accent,
+    subtitle: "SOP document control",
+    eyebrow: eyebrowText,
+    heading,
+    bodyParagraphsHtml: bodyParagraph(happened) + bodyParagraph(needed) + waitingNote,
+    ctaLabel: "Open in Pulse",
+    ctaHref: link,
+    reason,
+    origin: input.origin,
+  });
 
   return { subject, text: textLines.join("\n\n"), html };
 }

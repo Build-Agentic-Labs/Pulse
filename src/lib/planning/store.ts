@@ -368,7 +368,10 @@ async function fetchGenPmOrderNos(
   if (error) {
     throw new Error(`Could not load existing order numbers: ${error.message}`);
   }
-  return (data ?? []).map((row) => String(row.order_no));
+  // The ilike filter above already excludes drafts (their order_no is null and matches no
+  // pattern), but drop nulls explicitly rather than relying on that: String(null) would yield
+  // the literal "null" and quietly enter the number pool if the filter ever changes.
+  return (data ?? []).flatMap((row) => (row.order_no ? [String(row.order_no)] : []));
 }
 
 /**
@@ -415,8 +418,11 @@ export async function createWorkOrder(
     if (existingError) {
       throw new Error(`Could not load existing order numbers: ${existingError.message}`);
     }
+    // Drafts carry a null order_no (the official number is minted at approval -- decision N1),
+    // so they must not be scanned: counting them would burn numbers on orders that may never
+    // be approved and leave permanent holes in the sequence production builds against.
     const orderNo = suggestOrderNo(
-      (existing ?? []).map((row) => row.order_no),
+      (existing ?? []).flatMap((row) => (row.order_no ? [row.order_no] : [])),
       input.orderDate,
       input.orderType,
     );

@@ -12,6 +12,7 @@ import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import type { Database, Json, TablesUpdate } from "@/lib/database.types";
 import { throwIfError } from "@/lib/supabase-errors";
 import { SopConflictError } from "./store";
+import { kickSopNotifications } from "./notify-kick";
 
 const CONTROL_COLUMNS =
   "id, workspace_id, department_id, status, sop_number, doc_type, version, major_version, minor_version, " +
@@ -154,6 +155,7 @@ export async function enableSopSelfReviewTest(sopId: string): Promise<void> {
 export async function requestSopFinalApproval(sopId: string): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   await throwIfError(supabase.rpc("request_sop_final_approval", { p_sop: sopId }));
+  kickSopNotifications();
 }
 
 export async function getSopControl(id: string): Promise<SopControl | undefined> {
@@ -218,6 +220,7 @@ export async function signSop(
       p_resolves: options.resolvesSignatureId ?? undefined,
     }),
   );
+  kickSopNotifications();
   return String(value);
 }
 
@@ -462,6 +465,7 @@ export async function transitionSop(
       .maybeSingle(),
   );
   if (!updated) throw new SopConflictError();
+  kickSopNotifications();
   return mapControl(updated as unknown as Record<string, unknown>);
 }
 

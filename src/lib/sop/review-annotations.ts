@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import type { Database, TablesInsert } from "@/lib/database.types";
+import { kickSopNotifications } from "./notify-kick";
 
 export interface SopReviewAnnotation {
   id: string;
@@ -103,6 +104,7 @@ export async function submitSopReviewResult(sopId: string, noChanges: boolean): 
     p_no_changes: noChanges,
   });
   if (error) throw new Error(error.message);
+  kickSopNotifications();
   return String(data);
 }
 

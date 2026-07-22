@@ -85,8 +85,12 @@ Every new feature, in this order:
   unused/redundant; they are a live feature. See docs/deferred-work.md §1.
 - react-hooks v7 compiler-era lint rules are pinned off in eslint.config.mjs
   with rationale; the classic rules stay on.
-- `schedule-import.ts`, `sop/numbering.ts`, `sop/version.ts` are pre-built,
-  not dead. Decide to finish or delete them — don't garbage-collect them.
+- `sop/numbering.ts`, `sop/version.ts` are pre-built, not dead. Decide to
+  finish or delete them — don't garbage-collect them.
+  (`schedule-import.ts` was the third: **decided 2026-07-21** — its sheet
+  parsing became `domain/planning/schedule-row.ts`, its customer/template
+  resolution was deleted in favour of SKU-keyed configs. See
+  docs/superpowers/specs/2026-07-21-planning-schedule-to-work-order-design.md.)
 - The unlayered scrollbar reset/restore pairs in globals.css must stay at the
   same cascade level. The `signedUrlCache` browser-only guard prevents
   cross-user URL leaks — never relax it.

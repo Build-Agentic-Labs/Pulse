@@ -317,20 +317,11 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       }
 
       const reviewSentAtBySop = new Map<string, string>();
-      for (const row of (reviewSentEvents.data ?? []) as { sop_id: string; review_cycle: number; created_at: string }[]) {
+      for (const row of reviewSentEvents.data ?? []) {
         const sop = bundle.sops.get(row.sop_id);
         // Ascending order: the last write per (sop, current cycle) wins = latest.
         if (sop && row.review_cycle === sop.review_cycle) reviewSentAtBySop.set(row.sop_id, row.created_at);
       }
-
-      const submissionRows = (submissions.data ?? []) as { sop_id: string; reviewer_id: string; review_cycle: number }[];
-      const deptApprovalRows = (deptApprovals.data ?? []) as {
-        sop_id: string;
-        signer_id: string;
-        seat_department_id: string | null;
-        review_cycle: number;
-        signed_content_hash: string;
-      }[];
 
       const states: SopReminderState[] = inFlight.flatMap((sop) => {
         const ctx = contextFor(bundle, sop.id);
@@ -340,10 +331,10 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
             sop: ctx.sop,
             seats: ctx.seats,
             qualityApprovers: ctx.qualityApprovers,
-            currentReviewReturns: submissionRows
+            currentReviewReturns: (submissions.data ?? [])
               .filter((row) => row.sop_id === sop.id && row.review_cycle === sop.review_cycle)
               .map((row) => row.reviewer_id),
-            currentDeptApprovals: deptApprovalRows
+            currentDeptApprovals: (deptApprovals.data ?? [])
               .filter(
                 (row) =>
                   row.sop_id === sop.id &&

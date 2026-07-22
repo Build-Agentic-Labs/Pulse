@@ -608,7 +608,10 @@ export async function updateWorkOrderHeader(
   if (patch.model !== undefined) row.model = patch.model;
   if (patch.orderDate !== undefined) row.order_date = patch.orderDate;
   if (patch.notes !== undefined) row.notes = patch.notes;
-  if (patch.orderNo !== undefined) row.order_no = patch.orderNo;
+  // Blank means "no official number" -- which is NULL, not "". The unique index normalizes to
+  // lower(btrim(order_no)), so two rows cleared to "" would collide on a cryptic 23505 while
+  // two NULLs coexist freely. Cleared numbers must therefore round-trip back to NULL.
+  if (patch.orderNo !== undefined) row.order_no = patch.orderNo.trim() === "" ? null : patch.orderNo;
 
   const { error } = await supabase.from("work_orders").update(row).eq("workspace_id", workspaceId).eq("id", id);
   if (error) {

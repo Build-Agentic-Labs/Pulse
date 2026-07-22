@@ -53,6 +53,18 @@
 
 ## Task 1: Schema, RLS, and generated types
 
+> ✅ **DONE** — commit `2516148`, corrections in `20260721121000_planning_sales_orders_constraints.sql`.
+>
+> ⚠️ **The inline SQL below is WRONG and is kept only as a record of intent.** It declares `uuid`
+> primary keys; every existing planning table uses `text` with `gen_random_uuid()::text`, so this
+> SQL would fail against `work_orders.id`. Step 2 caught it. **The applied, correct migration is
+> `supabase/migrations/20260721120000_planning_sales_orders.sql` — read that, not this block.**
+>
+> Gate review also added, in the follow-up migration: `set_updated_at` triggers on both new
+> tables (missed; every other planning table has one), a case/trim-normalized unique index on
+> `sales_orders.so_no`, a `draft_no` uniqueness backstop, and check constraints for row-range
+> sanity, `flags` being a JSON array, and `converted` lines naming their work order.
+
 **Files:**
 - Create: `supabase/migrations/20260721120000_planning_sales_orders.sql`
 - Modify: `src/lib/database.types.ts` (generated)

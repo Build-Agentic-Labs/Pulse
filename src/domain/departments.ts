@@ -25,16 +25,14 @@ export interface DepartmentMember {
 }
 
 const STANDARD_POSITION_TITLES: Record<string, readonly string[]> = {
+  INS: ["VP Sales", "Director Sales", "Inside Sales Manager", "Sales Manager", "Senior Sales Representative", "Inside Sales Representative", "Sales Coordinator"],
   INV: ["Inventory Control Manager", "Inventory Control Supervisor", "Inventory Analyst", "Inventory Control Specialist"],
   LOG: ["Logistics Manager", "Logistics Supervisor", "Logistics Coordinator", "Logistics Specialist"],
-  OPS: ["EVP Operations", "VP Operations", "Director Operations", "Operations Manager", "Operations Supervisor", "Operations Specialist"],
+  MFG: ["VP Manufacturing", "Director Manufacturing", "Manufacturing Manager", "Production Manager", "Production Supervisor", "Manufacturing Engineer", "Production Specialist"],
   PLN: ["Director Planning", "Planning Manager", "Planning Supervisor", "Senior Planner", "Planner"],
-  PRC: ["VP Procurement", "Director Procurement", "Procurement Manager", "Sourcing Manager", "Procurement Specialist"],
-  PRD: ["VP Manufacturing", "Director Manufacturing", "Manufacturing Manager", "Production Manager", "Production Supervisor", "Manufacturing Engineer", "Production Specialist"],
   PRO: ["VP Engineering", "Director Engineering", "Director Industrial Engineering", "Process Engineering Manager", "Industrial Engineering Manager", "Process Engineer", "Industrial Engineer", "Engineering Technician"],
   PUR: ["VP Purchasing", "Director Purchasing", "Purchasing Manager", "SCM Manager", "Senior Buyer", "Buyer", "Purchasing Specialist"],
-  QA: ["VP Quality", "Director Quality", "Quality Manager", "QA Manager", "Quality Engineer", "Quality Specialist", "Quality Technician"],
-  SAL: ["VP Sales", "Director Sales", "Inside Sales Manager", "Sales Manager", "Senior Sales Representative", "Inside Sales Representative", "Sales Coordinator"],
+  QAS: ["VP Quality", "Director Quality", "Quality Manager", "QA Manager", "Quality Engineer", "Quality Specialist", "Quality Technician"],
   SVC: ["VP Service", "Director Service", "Service Manager", "Field Service Manager", "Service Supervisor", "Service Technician", "Customer Service Representative"],
 };
 

@@ -146,3 +146,70 @@ describe("buildConfigIndex", () => {
     expect(result.genConfigId).toBe("cfg-gen");
   });
 });
+
+describe("resolveScheduleLine — a shifted column must not build the wrong thing", () => {
+  it("blocks when the FG SKU is configured as accessories", () => {
+    const result = resolveScheduleLine({ ...row, fgSku: "ACC-STD", accSku: "" }, index);
+    expect(result.status).toBe("flagged");
+    expect(result.flags).toContainEqual(
+      expect.objectContaining({ code: "sku-wrong-type", blocking: true }),
+    );
+  });
+
+  it("blocks when the ACC SKU is configured as a generator", () => {
+    const result = resolveScheduleLine({ ...row, accSku: "FG-7040-ES" }, index);
+    expect(result.status).toBe("flagged");
+    expect(result.flags).toContainEqual(
+      expect.objectContaining({ code: "acc-sku-wrong-type", blocking: true }),
+    );
+    expect(result.accConfigId).toBeUndefined();
+  });
+
+  it("accepts a standalone power-module SKU in the FG column", () => {
+    const pmOnly = buildConfigIndex(
+      [{ id: "cfg-pm", sku: "PM-70", orderType: "power_module", model: "BOSS70 PM", pmConfigId: null, defaultTrailerLetter: "" }],
+      ["E"],
+    );
+    const result = resolveScheduleLine({ ...row, model: "BOSS70 PM", fgSku: "PM-70", accSku: "" }, pmOnly);
+    expect(result.status).toBe("resolved");
+    expect(result.genConfigId).toBe("cfg-pm");
+  });
+});
+
+describe("resolveScheduleLine — model cross-check", () => {
+  it("advises but does not block an unrecognized model name", () => {
+    // The SKU is authoritative under one-SKU-one-BOM, so unfamiliar model text must not stall a
+    // legitimate row. The dangerous case (wrong SKU) is caught by the order-type check instead.
+    const result = resolveScheduleLine({ ...row, model: "PDS185EZ" }, index);
+    expect(result.status).toBe("resolved");
+    expect(result.flags).toContainEqual(
+      expect.objectContaining({ code: "unrecognized-model", blocking: false }),
+    );
+  });
+
+  it("flags a standalone-PM sheet row married to a hybrid SKU", () => {
+    const result = resolveScheduleLine({ ...row, model: "BOSS70 PM" }, index);
+    expect(result.flags).toContainEqual(
+      expect.objectContaining({ code: "model-mismatch", blocking: false }),
+    );
+  });
+
+  it("flags a trailer sheet row married to a hybrid SKU", () => {
+    const result = resolveScheduleLine({ ...row, model: "SDG150 TRLR" }, index);
+    expect(result.flags).toContainEqual(
+      expect.objectContaining({ code: "model-mismatch", blocking: false }),
+    );
+  });
+
+  it("does not flag a matching hybrid written with the EBOSS prefix", () => {
+    const result = resolveScheduleLine({ ...row, model: "BOSS70-40 Hybrid" }, index);
+    expect(result.flags.map((flag) => flag.code)).not.toContain("model-mismatch");
+  });
+
+  it("names the missing FG SKU explicitly when the column is empty", () => {
+    const result = resolveScheduleLine({ ...row, fgSku: "" }, index);
+    expect(result.flags).toContainEqual(
+      expect.objectContaining({ code: "sku-not-configured", detail: "no FG SKU on this line" }),
+    );
+  });
+});

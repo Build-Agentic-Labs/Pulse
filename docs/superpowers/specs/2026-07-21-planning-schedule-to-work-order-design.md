@@ -384,9 +384,23 @@ highest-risk logic in the feature; heaviest test coverage.
 along with flag codes `unknown-customer`, `no-template-for-customer`,
 `no-gen-template-for-combo`, `template-model-mismatch`.
 
-**New flags:** `sku-not-configured`, `acc-sku-not-configured` — both blocking, both linking
-into the Configuration manager. `trailer-letter-unspecified` and `ao-to-enter` survive as
-advisories.
+**New flags:** `sku-not-configured`, `acc-sku-not-configured`, `sku-wrong-type`,
+`acc-sku-wrong-type` — all blocking, all linking into the Configuration manager.
+`trailer-letter-unspecified` and `ao-to-enter` survive as advisories.
+
+**The order-type flags exist because of one specific accident:** a single-column paste shift in
+the schedule puts the ACC SKU in the FG column. Without checking that the resolved config's
+`order_type` suits the column it came from, that line resolves *perfectly cleanly* and builds a
+"generator" work order out of an accessory parts list. A FG SKU must resolve to
+`head_unit`/`power_module`/`trailer`; an ACC SKU must resolve to `accessories`.
+
+**`unrecognized-model` is ADVISORY, not blocking** (it was blocking in the pre-SKU resolver).
+Under one-SKU-one-BOM the SKU is authoritative and the model text is only a human-readable
+cross-check, so unfamiliar model spelling must not stall a legitimate row — model naming drifts
+month to month. The genuinely dangerous case, *the SKU itself being wrong*, is caught by the
+order-type flags above rather than by parsing prose. `model-mismatch` compares parsed **kind**
+as well as combo, so a standalone-PM row married to a hybrid SKU is flagged even though neither
+side yields a comparable combo.
 
 Modules are split by **phase** (parse the sheet → resolve against config → build the export),
 not by entity, so each has one dependency direction and no shared state: `schedule-row.ts`

@@ -14,12 +14,22 @@ export type FlagCode =
   | "blank-model"
   | "unrecognized-model"
   | "sku-not-configured"
+  | "sku-wrong-type"
   | "acc-sku-not-configured"
+  | "acc-sku-wrong-type"
   | "trailer-letter-unspecified"
   | "trailer-config-missing"
   | "ao-to-enter"
   | "so-missing"
   | "model-mismatch";
+
+/**
+ * Configuration types a FINISHED-GOODS SKU may legitimately have. `accessories` is excluded on
+ * purpose: a single-column paste shift in the schedule puts the ACC SKU in the FG column, and
+ * without this check that line resolves perfectly cleanly and builds a "generator" work order
+ * out of an accessory parts list.
+ */
+const FG_ORDER_TYPES: ReadonlySet<string> = new Set(["head_unit", "power_module", "trailer"]);
 
 export interface ResolutionFlag {
   code: FlagCode;
@@ -117,26 +127,40 @@ export function resolveScheduleLine(row: ScheduleRowInput, index: ConfigIndex): 
   const assemblyOrderNo = (row.fgAo ?? "").trim();
 
   // ── the generator config, from the FG SKU ──
-  const genConfig = index.bySku.get(skuKey(row.fgSku));
+  const fgSku = (row.fgSku ?? "").trim();
+  const genConfig = index.bySku.get(skuKey(fgSku));
   if (!genConfig) {
     flags.push(
       blocking(
         "sku-not-configured",
-        row.fgSku.trim()
-          ? `FG SKU "${row.fgSku.trim()}" has no product configuration`
-          : "no FG SKU on this line",
+        fgSku ? `FG SKU "${fgSku}" has no product configuration` : "no FG SKU on this line",
+      ),
+    );
+  } else if (!FG_ORDER_TYPES.has(genConfig.orderType)) {
+    flags.push(
+      blocking(
+        "sku-wrong-type",
+        `FG SKU "${fgSku}" is configured as ${genConfig.orderType}, which cannot be built as a main order — check the sheet's columns are not shifted`,
       ),
     );
   }
 
-  // Model text is a cross-check on the SKU, not the thing being resolved.
+  // Model text is a CROSS-CHECK on the SKU, not the thing being resolved: under one-SKU-one-BOM
+  // the SKU decides what gets built, so a model the parser does not recognize is advisory
+  // (naming drifts, and blocking would stall legitimate rows). The dangerous case — the SKU
+  // itself being wrong — is caught by the order-type check above, not by this text.
   if (parsedModel.kind === "blank") {
     flags.push(blocking("blank-model", "empty MODEL TYPE"));
   } else if (parsedModel.kind === "other") {
-    flags.push(advisory("unrecognized-model", `"${parsedModel.raw}" is not a recognized model name`));
+    flags.push(advisory("unrecognized-model", `"${parsedModel.raw.trim()}" is not a recognized model name`));
   } else if (genConfig && genConfig.model.trim() && parsedModel.raw.trim()) {
-    const sheetCombo = parseModel(genConfig.model).combo;
-    if (parsedModel.combo && sheetCombo && parsedModel.combo !== sheetCombo) {
+    // Compare KIND as well as combo. Comparing combos alone silently passes a standalone-PM
+    // sheet row married to a hybrid SKU — exactly the disagreement this validator exists for,
+    // because neither side yields a comparable combo.
+    const configModel = parseModel(genConfig.model);
+    const kindDiffers = parsedModel.kind !== configModel.kind;
+    const comboDiffers = (parsedModel.combo ?? "") !== (configModel.combo ?? "");
+    if (kindDiffers || comboDiffers) {
       flags.push(
         advisory(
           "model-mismatch",
@@ -151,12 +175,21 @@ export function resolveScheduleLine(row: ScheduleRowInput, index: ConfigIndex): 
   const accSku = (row.accSku ?? "").trim();
   if (accSku) {
     const accConfig = index.bySku.get(skuKey(accSku));
-    if (accConfig) {
-      accConfigId = accConfig.id;
-    } else {
+    if (!accConfig) {
       flags.push(
         blocking("acc-sku-not-configured", `accessory SKU "${accSku}" has no product configuration`),
       );
+    } else if (accConfig.orderType !== "accessories") {
+      // The mirror of the FG check: a shifted column would append a whole generator BOM to the
+      // order as though it were accessories.
+      flags.push(
+        blocking(
+          "acc-sku-wrong-type",
+          `accessory SKU "${accSku}" is configured as ${accConfig.orderType}, not accessories — check the sheet's columns are not shifted`,
+        ),
+      );
+    } else {
+      accConfigId = accConfig.id;
     }
   }
 

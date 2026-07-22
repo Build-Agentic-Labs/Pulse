@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildExportColumn, exportColumnText } from "./export-column";
+import { buildExportColumn, exportColumnText, MAX_EXPORT_ROWS } from "./export-column";
 
 describe("buildExportColumn", () => {
   it("emits one cell per row in the range, in row order", () => {
@@ -152,5 +152,72 @@ describe("exportColumnText", () => {
   it("preserves trailing blanks as newlines so the paste block keeps its height", () => {
     const column = buildExportColumn([{ sourceRowNo: 4, orderNo: "GEN-0726-01" }], { first: 4, last: 6 });
     expect(exportColumnText(column)).toBe("GEN-0726-01\n\n");
+  });
+});
+
+describe("buildExportColumn — malformed input cannot produce a misleading column", () => {
+  it("returns an empty column for a NaN range instead of reporting phantom fills", () => {
+    const column = buildExportColumn([{ sourceRowNo: 4, orderNo: "GEN-0726-01" }], {
+      first: Number.NaN,
+      last: Number.NaN,
+    });
+    expect(column).toEqual({ cells: [], filled: 0, total: 0 });
+  });
+
+  it("returns an empty column for an unbounded range instead of looping forever", () => {
+    const column = buildExportColumn([], { first: 4, last: Number.POSITIVE_INFINITY });
+    expect(column.total).toBe(0);
+  });
+
+  it("returns an empty column when the range exceeds the sanity cap", () => {
+    const column = buildExportColumn([], { first: 1, last: MAX_EXPORT_ROWS + 1 });
+    expect(column.total).toBe(0);
+  });
+
+  it("builds a range exactly at the sanity cap", () => {
+    const column = buildExportColumn([], { first: 1, last: MAX_EXPORT_ROWS });
+    expect(column.total).toBe(MAX_EXPORT_ROWS);
+  });
+
+  it("skips a non-integer source row rather than counting it as filled", () => {
+    const column = buildExportColumn([{ sourceRowNo: 4.5, orderNo: "GEN-0726-01" }], { first: 4, last: 5 });
+    expect(column.cells).toEqual(["", ""]);
+    expect(column.filled).toBe(0);
+  });
+
+  it("keeps filled in lockstep with the emitted cells for every shape", () => {
+    const cases = [
+      { rows: [{ sourceRowNo: 4, orderNo: "A" }], range: { first: 4, last: 6 } },
+      { rows: [{ sourceRowNo: 9, orderNo: "B" }], range: { first: 4, last: 6 } },
+      { rows: [{ sourceRowNo: 4.5, orderNo: "C" }], range: { first: 4, last: 6 } },
+      { rows: [{ sourceRowNo: 5, orderNo: null }], range: { first: 4, last: 6 } },
+    ];
+    for (const { rows, range } of cases) {
+      const column = buildExportColumn(rows, range);
+      expect(column.filled).toBe(column.cells.filter((cell) => cell !== "").length);
+    }
+  });
+
+  it("collapses a newline inside an order number so the column keeps its height", () => {
+    const column = buildExportColumn(
+      [
+        { sourceRowNo: 4, orderNo: "GEN-0726-01\nX" },
+        { sourceRowNo: 5, orderNo: "GEN-0726-02" },
+      ],
+      { first: 4, last: 5 },
+    );
+    expect(column.cells).toEqual(["GEN-0726-01 X", "GEN-0726-02"]);
+    expect(exportColumnText(column).split("\n")).toHaveLength(2);
+  });
+
+  it("collapses a tab so a value cannot spill into the neighbouring column", () => {
+    const column = buildExportColumn([{ sourceRowNo: 4, orderNo: "GEN\t0726" }], { first: 4, last: 4 });
+    expect(column.cells).toEqual(["GEN 0726"]);
+  });
+
+  it("treats a whitespace-only order number as unapproved", () => {
+    const column = buildExportColumn([{ sourceRowNo: 4, orderNo: "   " }], { first: 4, last: 4 });
+    expect(column.cells).toEqual([""]);
+    expect(column.filled).toBe(0);
   });
 });

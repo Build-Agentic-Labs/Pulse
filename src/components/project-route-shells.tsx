@@ -33,10 +33,8 @@ const MobilePhotoPortal = dynamic(
   () => import("./mobile-photo-portal").then((module) => module.MobilePhotoPortal),
   { loading: () => <AppLoadingShell title="Opening photos" /> },
 );
-const PlanningRoute = dynamic(
-  () => import("./planning/planning-route").then((module) => module.PlanningRoute),
-  { loading: () => <PlanningLoadingState /> },
-);
+// `PlanningRoute` is no longer imported here — `app/planning/layout.tsx` mounts it once for the
+// whole space instead of each route wrapping itself in it.
 const WorkOrderBoard = dynamic(
   () => import("./planning/work-order-board").then((module) => module.WorkOrderBoard),
   { loading: () => <PlanningLoadingState /> },
@@ -63,12 +61,14 @@ export function HomeRouteShell({ initialGroups }: ShellProps = {}) {
   );
 }
 
-export function PlanningRouteShell({ initialGroups }: ShellProps = {}) {
-  return (
-    <PlanningRoute initialGroups={initialGroups}>
-      <WorkOrderBoard />
-    </PlanningRoute>
-  );
+/**
+ * The Planning board. Auth, workspace and the access gate are provided once by
+ * `app/planning/layout.tsx`, so this shell no longer wraps itself in `PlanningRoute` — doing so
+ * would re-run the gate on every navigation, which is the flash the layout exists to remove.
+ * The dynamic import stays: it keeps the board out of the initial bundle.
+ */
+export function PlanningRouteShell() {
+  return <WorkOrderBoard />;
 }
 
 export function SettingsRouteShell({ initialGroups }: ShellProps = {}) {

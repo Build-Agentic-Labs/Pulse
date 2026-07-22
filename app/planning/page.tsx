@@ -1,10 +1,16 @@
 import { PlanningRouteShell } from "@/components/project-route-shells";
-import { fetchInitialWorkspaceGroups } from "@/lib/supabase/server-data";
 
 export const metadata = {
-  title: "Planning | Pulse",
+  title: "Work orders | Pulse",
 };
 
-export default async function PlanningPage() {
-  return <PlanningRouteShell initialGroups={await fetchInitialWorkspaceGroups()} />;
+/**
+ * The work-order board, and the Planning space root. Kept at `/planning` rather than moved to
+ * `/planning/work-orders` so existing links, print routes and bookmarks keep working.
+ *
+ * The workspace fetch that used to live here moved to `app/planning/layout.tsx`, which performs
+ * it once for every route in the space.
+ */
+export default function PlanningPage() {
+  return <PlanningRouteShell />;
 }

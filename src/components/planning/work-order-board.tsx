@@ -193,8 +193,13 @@ export function WorkOrderBoard() {
       if (statusFilter !== ALL_FILTER && order.status !== statusFilter) return false;
       if (customerFilter !== ALL_FILTER && order.customer !== customerFilter) return false;
       if (monthFilter !== ALL_FILTER && monthKey(order.orderDate) !== monthFilter) return false;
-      if (needle && !order.orderNo.toLowerCase().includes(needle) && !order.customer.toLowerCase().includes(needle)) {
-        return false;
+      if (needle) {
+        // Search the provisional draft id and the sales order too — a draft has no official
+        // number, so matching only on orderNo would make every draft unfindable.
+        const haystack = [order.orderNo, order.draftNo, order.salesOrderNo, order.customer]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(needle)) return false;
       }
       return true;
     });
@@ -361,10 +366,20 @@ export function WorkOrderBoard() {
                           className="h-4 w-4 accent-accent"
                           checked={selected.has(order.id)}
                           onChange={() => toggleSelected(order.id)}
-                          aria-label={`Select order ${order.orderNo}`}
+                          aria-label={`Select order ${order.orderNo || order.draftNo}`}
                         />
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-ink">{order.orderNo}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5 font-mono">
+                        {order.orderNo ? (
+                          <span className="text-ink">{order.orderNo}</span>
+                        ) : (
+                          // A draft has no official number yet (decision N1). Its provisional id is
+                          // shown dimmed so it can never be mistaken for one on screen.
+                          <span className="text-ink-tertiary" title="Provisional — approve to assign the official number">
+                            {order.draftNo || "draft"}
+                          </span>
+                        )}
+                      </td>
                       <td className="max-w-[220px] truncate px-3 py-2.5 text-ink" title={order.customer}>
                         {order.customer}
                       </td>

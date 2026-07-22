@@ -13,6 +13,7 @@ import {
   ORDER_TYPE_PREFIXES,
   orderNoMonthKey,
   setNoFromOrderNo,
+  suggestDraftNo,
   suggestOrderNo,
   trailerOrderNo,
   type WorkOrderFulfillment,
@@ -42,7 +43,12 @@ type PlannerSupabaseClient = ReturnType<typeof createPlannerSupabaseClient>;
 /** One row of the work-order list -- the promoted header fields, cheap to fetch for every order. */
 export interface WorkOrderSummary {
   id: string;
+  /** The official number, or "" while the order is still a draft (decision N1). */
   orderNo: string;
+  /** Provisional `D-MMYY-NN`, shown until approval mints the official number. */
+  draftNo: string;
+  /** Snapshot of the sales order this came from; "" for manually created orders. */
+  salesOrderNo: string;
   customer: string;
   model: string;
   orderType: WorkOrderType;
@@ -74,6 +80,9 @@ export interface WorkOrderLine {
 export interface WorkOrderDetail {
   id: string;
   orderNo: string;
+  draftNo: string;
+  salesOrderNo: string;
+  salesOrderLineId: string | null;
   templateId: string | null;
   customer: string;
   model: string;
@@ -148,9 +157,9 @@ export interface CreateWorkOrderResult {
 // ── column projections ───────────────────────────────────────────────────
 
 const WORK_ORDER_LIST_COLUMNS =
-  "id, order_no, customer, model, order_type, status, order_date, set_no, trailer_letter, main_order_id, updated_at";
+  "id, order_no, draft_no, sales_order_no, customer, model, order_type, status, order_date, set_no, trailer_letter, main_order_id, updated_at";
 const WORK_ORDER_COLUMNS =
-  "id, order_no, template_id, customer, model, order_type, status, order_date, notes, set_no, trailer_letter, main_order_id, released_at, production_started_at, shipped_at, cancelled_at, created_at, updated_at";
+  "id, order_no, draft_no, sales_order_no, sales_order_line_id, template_id, customer, model, order_type, status, order_date, notes, set_no, trailer_letter, main_order_id, released_at, production_started_at, shipped_at, cancelled_at, created_at, updated_at";
 const WORK_ORDER_LINE_COLUMNS =
   "id, item_no, description, build_qty, shipped_qty, fulfillment, assembly_order_no, pull_from_ref, position";
 
@@ -178,6 +187,8 @@ function mapWorkOrderSummary(row: Record<string, unknown>): WorkOrderSummary {
   return {
     id: String(row.id),
     orderNo: String(row.order_no ?? ""),
+    draftNo: String(row.draft_no ?? ""),
+    salesOrderNo: String(row.sales_order_no ?? ""),
     customer: String(row.customer ?? ""),
     model: String(row.model ?? ""),
     orderType: (row.order_type as WorkOrderType) ?? "mts",
@@ -208,6 +219,9 @@ function mapWorkOrderDetail(header: Record<string, unknown>, lines: Record<strin
   return {
     id: String(header.id),
     orderNo: String(header.order_no ?? ""),
+    draftNo: String(header.draft_no ?? ""),
+    salesOrderNo: String(header.sales_order_no ?? ""),
+    salesOrderLineId: header.sales_order_line_id ? String(header.sales_order_line_id) : null,
     templateId: header.template_id ? String(header.template_id) : null,
     customer: String(header.customer ?? ""),
     model: String(header.model ?? ""),
@@ -595,6 +609,129 @@ async function createGenPmSet(
     return { id: mainInserted.id, orderNo: mainOrderNo, pmId: pmInserted.id, pmOrderNo };
   }
   throw new Error("Could not allocate a unique set number; try again.");
+}
+
+/** One half of a draft set: the recipe it came from and the BOM lines it starts with. */
+export interface CreateDraftHalfInput {
+  templateId: string | null;
+  customer: string;
+  model: string;
+  notes: string;
+  lines: Array<Omit<WorkOrderLine, "id">>;
+}
+
+export interface CreateDraftSetInput extends CreateDraftHalfInput {
+  /** The schedule line this order answers. */
+  salesOrderLineId: string;
+  /** Snapshot of the sales order number, frozen onto the printed traveler. */
+  salesOrderNo: string;
+  orderDate: string;
+  /** Which supermarket trailer this unit takes. */
+  trailerLetter: string;
+  /** The married Power Module, created as a draft alongside the Main. */
+  pm?: CreateDraftHalfInput | null;
+}
+
+export interface CreateDraftSetResult {
+  id: string;
+  draftNo: string;
+  pmId: string | null;
+}
+
+/**
+ * Create a GEN (+ married PM) as DRAFTS, with no official order number.
+ *
+ * This is the N1 path: the official `GEN-MMYY-NN` is minted at approval by `approveWorkOrderSet`,
+ * so a discarded draft costs nothing and the official sequence production builds against stays
+ * contiguous. Drafts carry a provisional `D-MMYY-NN` instead, which is deliberately un-mistakable
+ * for a real order number.
+ *
+ * The PM is created NOW rather than at approval because the planner has to see its parts list to
+ * verify the set; only the numbering waits.
+ */
+export async function createDraftWorkOrderSet(
+  workspaceId: string,
+  input: CreateDraftSetInput,
+): Promise<CreateDraftSetResult> {
+  const supabase = createPlannerSupabaseClient();
+  const { data: userData } = await getUserFromSession(supabase);
+  const createdBy = userData.user?.id ?? null;
+  const trailerLetter = normalizeOptionalTrailerLetter(input.trailerLetter);
+  const mmyy = orderNoMonthKey(input.orderDate);
+
+  const { data: existingDrafts, error: draftsError } = await supabase
+    .from("work_orders")
+    .select("draft_no")
+    .eq("workspace_id", workspaceId)
+    .like("draft_no", `D-${mmyy}-%`);
+  if (draftsError) {
+    throw new Error(`Could not load existing draft numbers: ${draftsError.message}`);
+  }
+  const draftNo = suggestDraftNo(
+    (existingDrafts ?? []).flatMap((row) => (row.draft_no ? [String(row.draft_no)] : [])),
+    input.orderDate,
+  );
+
+  const { data: main, error: mainError } = await supabase
+    .from("work_orders")
+    .insert({
+      workspace_id: workspaceId,
+      order_no: null,
+      draft_no: draftNo,
+      sales_order_line_id: input.salesOrderLineId,
+      sales_order_no: input.salesOrderNo,
+      template_id: input.templateId,
+      customer: input.customer,
+      model: input.model,
+      order_type: "head_unit",
+      status: "draft",
+      order_date: input.orderDate,
+      notes: input.notes,
+      trailer_letter: trailerLetter,
+      created_by: createdBy,
+    })
+    .select("id")
+    .single();
+  if (mainError) {
+    throw new Error(`Could not create the work order: ${mainError.message}`);
+  }
+  const mainId = String(main.id);
+
+  await insertWorkOrderLines(supabase, workspaceId, mainId, draftNo, input.lines);
+
+  let pmId: string | null = null;
+  if (input.pm) {
+    const { data: pm, error: pmError } = await supabase
+      .from("work_orders")
+      .insert({
+        workspace_id: workspaceId,
+        order_no: null,
+        draft_no: "",
+        sales_order_line_id: input.salesOrderLineId,
+        sales_order_no: input.salesOrderNo,
+        template_id: input.pm.templateId,
+        customer: input.pm.customer,
+        model: input.pm.model,
+        order_type: "power_module",
+        status: "draft",
+        order_date: input.orderDate,
+        notes: input.pm.notes,
+        main_order_id: mainId,
+        created_by: createdBy,
+      })
+      .select("id")
+      .single();
+    if (pmError) {
+      // Roll the Main back rather than strand an unpaired half — the same reasoning as the
+      // legacy set-create path, which is why editors may delete their own drafts.
+      await supabase.from("work_orders").delete().eq("workspace_id", workspaceId).eq("id", mainId);
+      throw new Error(`Could not create the power module: ${pmError.message}`);
+    }
+    pmId = String(pm.id);
+    await insertWorkOrderLines(supabase, workspaceId, pmId, draftNo, input.pm.lines);
+  }
+
+  return { id: mainId, draftNo, pmId };
 }
 
 /** What approval minted: the official numbers and the shared set number. */

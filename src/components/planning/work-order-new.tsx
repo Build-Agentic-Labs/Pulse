@@ -1,299 +1,419 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
+import { formatDate } from "@/domain/formatting";
+import { getConfig, loadConfigIndex, type ConfigDetail } from "@/lib/planning/config-store";
 import {
-  WORK_ORDER_TYPE_LABELS,
-  WORK_ORDER_TYPES,
-  suggestOrderNo,
-  trailerOrderNo,
-  type WorkOrderType,
-} from "@/domain/work-orders";
-import { createWorkOrder, listTrailerConfigs, listWorkOrders, type TrailerConfig } from "@/lib/planning/store";
+  listSalesOrders,
+  listUnconvertedLines,
+  markLineConverted,
+  type SalesOrderLineRow,
+  type SalesOrderSummary,
+} from "@/lib/planning/sales-order-store";
+import {
+  createDraftWorkOrderSet,
+  listTrailerConfigs,
+  type TrailerConfig,
+  type WorkOrderLine,
+} from "@/lib/planning/store";
 import { PlanningShell } from "./planning-shell";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
-const TYPE_OPTIONS: ThemedSelectOption[] = WORK_ORDER_TYPES.map((type) => ({
-  value: type,
-  label: WORK_ORDER_TYPE_LABELS[type],
-}));
+/**
+ * Create a work order from a SALES ORDER line rather than by typing.
+ *
+ * Pick the sales order → pick the unit → every field and both parts lists fill in from the SKU
+ * catalog → verify → save as a draft. The official number is minted later, at approval, so a
+ * draft that turns out wrong can simply be discarded without leaving a hole in the sequence
+ * production builds against.
+ */
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-type FormState = {
-  customer: string;
-  model: string;
-  orderType: WorkOrderType;
-  orderDate: string;
-  notes: string;
-  /** Trailer configuration letter: optional on a Main, required on a trailer order, "" otherwise. */
-  trailerLetter: string;
+/** A line's parts, assembled from its FG SKU (+ accessory SKU appended) before saving. */
+type PreparedSet = {
+  line: SalesOrderLineRow;
+  genConfig: ConfigDetail;
+  pmConfig: ConfigDetail | null;
+  accConfig: ConfigDetail | null;
+  /** Generator BOM followed by the accessory BOM, one continuous sequence. */
+  mainLines: Array<Omit<WorkOrderLine, "id">>;
+  pmLines: Array<Omit<WorkOrderLine, "id">>;
 };
 
-function blankForm(): FormState {
-  return {
-    customer: "",
-    model: "",
-    orderType: WORK_ORDER_TYPES[0],
-    orderDate: todayIso(),
-    notes: "",
-    trailerLetter: "",
-  };
+function toWorkOrderLines(
+  configs: readonly (ConfigDetail | null)[],
+  assemblyOrderNo: string,
+): Array<Omit<WorkOrderLine, "id">> {
+  const lines: Array<Omit<WorkOrderLine, "id">> = [];
+  for (const config of configs) {
+    if (!config) continue;
+    for (const line of config.lines) {
+      lines.push({
+        itemNo: line.itemNo,
+        description: line.description,
+        buildQty: line.buildQty,
+        shippedQty: null,
+        fulfillment: "assembly",
+        assemblyOrderNo,
+        pullFromRef: "",
+      });
+    }
+  }
+  return lines;
 }
 
-/**
- * Create a blank work order. Lines and SKUs are added on the detail screen (item master
- * autocomplete); catalogs / schedule import will seed lines later. There is no MTS Excel
- * "template sheet" picker — those were layout clones, not product source of truth.
- */
 export function WorkOrderNew() {
   const router = useRouter();
   const { workspaceId, canWrite } = usePlanningWorkspace();
 
-  const [existingOrderNos, setExistingOrderNos] = useState<string[]>([]);
-  const [trailerConfigs, setTrailerConfigs] = useState<TrailerConfig[]>([]);
-  const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [form, setForm] = useState<FormState>(blankForm);
+  const [salesOrders, setSalesOrders] = useState<SalesOrderSummary[]>([]);
+  const [trailers, setTrailers] = useState<TrailerConfig[]>([]);
+  const [selectedSalesOrder, setSelectedSalesOrder] = useState("");
+  const [lines, setLines] = useState<SalesOrderLineRow[]>([]);
+  const [prepared, setPrepared] = useState<PreparedSet | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const loadSeqRef = useRef(0);
-
-  const refresh = useCallback(async () => {
-    const seq = ++loadSeqRef.current;
-    if (!workspaceId) {
-      setExistingOrderNos([]);
-      setTrailerConfigs([]);
-      setLoadStatus("ready");
-      return;
-    }
-    setLoadStatus("loading");
-    setError("");
-    try {
-      const [orders, configs] = await Promise.all([
-        listWorkOrders(workspaceId),
-        listTrailerConfigs(workspaceId),
-      ]);
-      if (seq !== loadSeqRef.current) return;
-      setExistingOrderNos(orders.map((order) => order.orderNo));
-      setTrailerConfigs(configs);
-      setLoadStatus("ready");
-    } catch (caught) {
-      if (seq !== loadSeqRef.current) return;
-      setError(caught instanceof Error ? caught.message : "Could not load planning data.");
-      setLoadStatus("error");
-    }
-  }, [workspaceId]);
+  // Verified/editable header fields, seeded from the resolved line.
+  const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [trailerLetter, setTrailerLetter] = useState("");
+  const [notes, setNotes] = useState("");
 
   useEffect(() => {
-    void refresh();
+    if (!workspaceId) return;
+    let cancelled = false;
+    Promise.all([listSalesOrders(workspaceId), listTrailerConfigs(workspaceId)])
+      .then(([orders, trailerConfigs]) => {
+        if (cancelled) return;
+        setSalesOrders(orders.filter((order) => order.convertedCount < order.lineCount));
+        setTrailers(trailerConfigs);
+        setStatus("ready");
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setError(cause instanceof Error ? cause.message : "Could not load sales orders.");
+        setStatus("error");
+      });
     return () => {
-      loadSeqRef.current += 1;
+      cancelled = true;
     };
-  }, [refresh]);
+  }, [workspaceId]);
 
-  const isHeadUnit = form.orderType === "head_unit";
-  const requiresTrailerLetter = form.orderType === "trailer";
-  const showTrailerSelect = isHeadUnit || requiresTrailerLetter;
-
-  const trailerLetterOptions = useMemo<ThemedSelectOption[]>(() => {
-    const configOptions = trailerConfigs.map((config) => ({
-      value: config.letter,
-      label: `${config.letter} — ${config.name || "Unnamed"}`,
-    }));
-    const placeholder = requiresTrailerLetter
-      ? { value: "", label: "Select a configuration…" }
-      : { value: "", label: "No trailer" };
-    return [placeholder, ...configOptions];
-  }, [trailerConfigs, requiresTrailerLetter]);
-
-  const suggestedOrderNo = useMemo(
-    () =>
-      form.orderType === "trailer"
-        ? trailerOrderNo(form.orderDate, form.trailerLetter || "?")
-        : suggestOrderNo(existingOrderNos, form.orderDate, form.orderType),
-    [existingOrderNos, form.orderDate, form.orderType, form.trailerLetter],
+  const pickSalesOrder = useCallback(
+    async (salesOrderId: string) => {
+      setSelectedSalesOrder(salesOrderId);
+      setPrepared(null);
+      setLines([]);
+      if (!workspaceId || !salesOrderId) return;
+      try {
+        setLines(await listUnconvertedLines(workspaceId, salesOrderId));
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not load the sales order's lines.");
+      }
+    },
+    [workspaceId],
   );
 
-  const trailerLetterValid = /^[A-Z]$/.test(form.trailerLetter);
-  const canSubmit =
-    canWrite &&
-    Boolean(workspaceId) &&
-    form.customer.trim() !== "" &&
-    form.orderDate.trim() !== "" &&
-    !saving &&
-    loadStatus === "ready" &&
-    (!requiresTrailerLetter || trailerLetterValid);
+  /** Resolve one line's SKUs into real parts lists. */
+  const pickLine = useCallback(
+    async (line: SalesOrderLineRow) => {
+      if (!workspaceId) return;
+      setError("");
+      setBusy(true);
+      try {
+        const index = await loadConfigIndex(workspaceId);
+        const genEntry = index.bySku.get(line.fgSku.trim().toUpperCase());
+        if (!genEntry) {
+          throw new Error(`FG SKU "${line.fgSku}" has no product configuration yet.`);
+        }
+        const accEntry = line.accSku ? index.bySku.get(line.accSku.trim().toUpperCase()) : undefined;
+        if (line.accSku && !accEntry) {
+          throw new Error(`Accessory SKU "${line.accSku}" has no product configuration yet.`);
+        }
 
-  async function handleCreate() {
-    if (!workspaceId || !canSubmit) return;
-    setSaving(true);
+        const [genConfig, pmConfig, accConfig] = await Promise.all([
+          getConfig(workspaceId, genEntry.id),
+          genEntry.pmConfigId ? getConfig(workspaceId, genEntry.pmConfigId) : Promise.resolve(null),
+          accEntry ? getConfig(workspaceId, accEntry.id) : Promise.resolve(null),
+        ]);
+        if (!genConfig) throw new Error("The generator configuration could not be loaded.");
+
+        setPrepared({
+          line,
+          genConfig,
+          pmConfig,
+          accConfig,
+          // Accessory lines are APPENDED to the generator order rather than becoming their own
+          // order, so a traveler reads generator BOM first and accessories second.
+          mainLines: toWorkOrderLines([genConfig, accConfig], line.assemblyOrderNo),
+          pmLines: toWorkOrderLines([pmConfig], line.assemblyOrderNo),
+        });
+        setTrailerLetter(line.trailerLetter);
+        setNotes(genConfig.notesDefault);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not prepare that line.");
+        setPrepared(null);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [workspaceId],
+  );
+
+  async function saveDraft() {
+    if (!workspaceId || !prepared) return;
+    setBusy(true);
     setError("");
     try {
-      const result = await createWorkOrder(workspaceId, {
-        templateId: null,
-        customer: form.customer.trim(),
-        model: form.model.trim(),
-        orderType: form.orderType,
-        orderDate: form.orderDate,
-        notes: form.notes,
-        lines: [],
-        trailerLetter: form.trailerLetter,
-        pm: null,
+      const result = await createDraftWorkOrderSet(workspaceId, {
+        salesOrderLineId: prepared.line.id,
+        salesOrderNo: prepared.line.soNo,
+        templateId: prepared.genConfig.id,
+        customer: prepared.line.customerRaw || prepared.genConfig.customer,
+        model: prepared.genConfig.model || prepared.line.modelRaw,
+        orderDate,
+        notes,
+        trailerLetter,
+        lines: prepared.mainLines,
+        pm: prepared.pmConfig
+          ? {
+              templateId: prepared.pmConfig.id,
+              customer: prepared.line.customerRaw || prepared.pmConfig.customer,
+              model: prepared.pmConfig.model,
+              notes: prepared.pmConfig.notesDefault,
+              lines: prepared.pmLines,
+            }
+          : null,
       });
+      await markLineConverted(workspaceId, prepared.line.id, result.id);
       router.push(`/planning/work-orders/${result.id}`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create the work order.");
-      setSaving(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create the work order.");
+      setBusy(false);
     }
   }
 
+  const salesOrderOptions: ThemedSelectOption[] = [
+    { value: "", label: "Select a sales order…" },
+    ...salesOrders.map((order) => ({
+      value: order.id,
+      label: `${order.soNo} — ${order.customer || "no customer"} (${order.lineCount - order.convertedCount} to build)`,
+    })),
+  ];
+
+  const trailerOptions: ThemedSelectOption[] = [
+    { value: "", label: "No trailer" },
+    ...trailers.map((trailer) => ({
+      value: trailer.letter,
+      label: `${trailer.letter} — ${trailer.name || "Unnamed"}`,
+    })),
+  ];
+
   return (
     <PlanningShell title="New work order" backHref="/planning">
-      <div className="mx-auto max-w-xl space-y-5">
-        <div>
-          <h1 className="ui-section-title">New work order</h1>
-          <p className="ui-section-subtitle">
-            Fill in the header, then add line items on the next screen. The printed sheet layout is fixed —
-            product SKUs come from the item master (and catalogs later), not from Excel template copies.
-          </p>
-        </div>
+      <section className="space-y-5">
+        {status === "loading" ? (
+          <div className="ui-panel p-5 text-sm text-ink-secondary">Loading sales orders…</div>
+        ) : null}
 
-        {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
+        {error ? <div className="ui-panel border-danger/40 p-4 text-sm text-danger">{error}</div> : null}
 
-        <section className="ui-panel space-y-4 p-5">
-          {!canWrite ? (
-            <div className="ui-notice ui-notice-warn px-3 py-2 ui-section-subtitle">
-              You have read-only access to Planning; ask an editor to create this order.
-            </div>
-          ) : null}
+        {status === "ready" && salesOrders.length === 0 ? (
+          <section className="ui-panel p-5">
+            <div className="ui-mono-label">Nothing to build yet</div>
+            <p className="mt-3 text-sm text-ink-secondary">
+              Work orders are created from a sales order line.{" "}
+              <Link href="/planning/sales-orders" className="underline underline-offset-2">
+                Upload a production schedule
+              </Link>{" "}
+              to get started.
+            </p>
+          </section>
+        ) : null}
 
-          <div>
-            <label className="ui-mono-label" htmlFor="wo-new-customer">
-              Customer
-            </label>
-            <input
-              id="wo-new-customer"
-              type="text"
-              className="ui-input"
-              value={form.customer}
-              onChange={(event) => setForm((current) => ({ ...current, customer: event.target.value }))}
-              disabled={!canWrite || saving}
-              autoComplete="organization"
-            />
-          </div>
-
-          <div>
-            <label className="ui-mono-label" htmlFor="wo-new-model">
-              Model
-            </label>
-            <input
-              id="wo-new-model"
-              type="text"
-              className="ui-input"
-              value={form.model}
-              onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))}
-              disabled={!canWrite || saving}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className="ui-mono-label">Type</label>
+        {status === "ready" && salesOrders.length > 0 ? (
+          <section className="ui-panel space-y-4 p-5">
+            <div className="space-y-1.5">
+              <span className="ui-mono-label">Sales order</span>
               <ThemedSelect
-                value={form.orderType}
-                onChange={(value) =>
-                  setForm((current) => ({
-                    ...current,
-                    orderType: value as WorkOrderType,
-                    // Drop trailer letter when switching to a type that doesn't use it.
-                    trailerLetter:
-                      value === "head_unit" || value === "trailer" ? current.trailerLetter : "",
-                  }))
-                }
-                options={TYPE_OPTIONS}
-                ariaLabel="Work order type"
-                disabled={!canWrite || saving}
-                className="mt-1 w-full"
+                value={selectedSalesOrder}
+                options={salesOrderOptions}
+                ariaLabel="Sales order"
+                onChange={(value) => void pickSalesOrder(value)}
               />
             </div>
 
-            <div>
-              <label className="ui-mono-label" htmlFor="wo-new-date">
-                Order date
-              </label>
-              <input
-                id="wo-new-date"
-                type="date"
-                className="ui-input"
-                value={form.orderDate}
-                onChange={(event) => setForm((current) => ({ ...current, orderDate: event.target.value }))}
-                disabled={!canWrite || saving}
-              />
-            </div>
-          </div>
+            {lines.length > 0 ? (
+              <div className="space-y-1.5">
+                <span className="ui-mono-label">Unit</span>
+                <ul className="divide-y divide-line">
+                  {lines.map((line) => (
+                    <li key={line.id}>
+                      <button
+                        type="button"
+                        className={`flex w-full items-center gap-3 px-1 py-2 text-left text-[13px] hover:bg-raised/40 ${
+                          prepared?.line.id === line.id ? "text-ink" : "text-ink-secondary"
+                        }`}
+                        onClick={() => void pickLine(line)}
+                      >
+                        <span className="font-mono text-[12px] text-ink-tertiary">row {line.sourceRowNo}</span>
+                        <span>{line.modelRaw || "—"}</span>
+                        <span className="font-mono text-[12px]">{line.fgSku}</span>
+                        {line.status === "flagged" ? (
+                          <span className="ml-auto flex items-center gap-1 text-[12px] text-danger">
+                            <AlertTriangle size={12} strokeWidth={1.75} />
+                            {line.flags.filter((flag) => flag.blocking).length} blocking
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
-          {showTrailerSelect ? (
-            <div>
-              <label className="ui-mono-label">
-                Trailer {requiresTrailerLetter ? "configuration" : "configuration (optional)"}
-              </label>
-              {trailerConfigs.length === 0 ? (
-                <p className="ui-section-subtitle mt-1 text-ink-tertiary">
-                  No trailer configurations yet — add them in Settings → Trailer configurations.
-                </p>
-              ) : (
-                <ThemedSelect
-                  value={form.trailerLetter}
-                  onChange={(value) => setForm((current) => ({ ...current, trailerLetter: value }))}
-                  options={trailerLetterOptions}
-                  ariaLabel="Trailer configuration"
-                  disabled={!canWrite || saving}
-                  className="mt-1 w-full"
-                />
-              )}
-            </div>
-          ) : null}
+        {prepared ? (
+          <>
+            <section className="ui-panel space-y-4 p-5">
+              <div className="ui-mono-label">Verify</div>
+              <dl className="grid gap-3 sm:grid-cols-3">
+                <Field label="Sales order" value={prepared.line.soNo || "—"} mono />
+                <Field label="Customer" value={prepared.line.customerRaw || "—"} />
+                <Field label="Model" value={prepared.genConfig.model || prepared.line.modelRaw || "—"} />
+                <Field label="FG SKU" value={prepared.genConfig.sku} mono />
+                <Field label="Accessory SKU" value={prepared.accConfig?.sku ?? "—"} mono />
+                <Field label="Assembly A#" value={prepared.line.assemblyOrderNo || "to enter"} mono />
+              </dl>
 
-          <div>
-            <label className="ui-mono-label" htmlFor="wo-new-notes">
-              Notes
-            </label>
-            <textarea
-              id="wo-new-notes"
-              className="ui-input resize-none"
-              rows={3}
-              value={form.notes}
-              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-              disabled={!canWrite || saving}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <label className="space-y-1.5">
+                  <span className="ui-mono-label">Order date</span>
+                  <input
+                    type="date"
+                    className="ui-input w-full"
+                    value={orderDate}
+                    onChange={(event) => setOrderDate(event.target.value)}
+                  />
+                  <span className="block text-[11px] text-ink-tertiary">
+                    Decides the number series ({formatDate(orderDate)}).
+                  </span>
+                </label>
+
+                <div className="space-y-1.5">
+                  <span className="ui-mono-label">Trailer</span>
+                  <ThemedSelect
+                    value={trailerLetter}
+                    options={trailerOptions}
+                    ariaLabel="Trailer configuration"
+                    onChange={setTrailerLetter}
+                  />
+                  <span className="block text-[11px] text-ink-tertiary">
+                    Matched against supermarket stock at assembly.
+                  </span>
+                </div>
+
+                <label className="space-y-1.5">
+                  <span className="ui-mono-label">Notes</span>
+                  <input className="ui-input w-full" value={notes} onChange={(event) => setNotes(event.target.value)} />
+                </label>
+              </div>
+
+              {prepared.line.flags.length > 0 ? (
+                <ul className="space-y-1">
+                  {prepared.line.flags.map((flag) => (
+                    <li
+                      key={flag.code}
+                      className={`text-[12px] ${flag.blocking ? "text-danger" : "text-ink-tertiary"}`}
+                    >
+                      {flag.code} — {flag.detail}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+
+            <PartsPanel
+              title={`Generator${prepared.accConfig ? " + accessories" : ""}`}
+              lines={prepared.mainLines}
             />
-          </div>
+            {prepared.pmConfig ? <PartsPanel title="Power module" lines={prepared.pmLines} /> : null}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-            <div>
-              <div className="ui-mono-label text-ink-tertiary">Order no. (suggested)</div>
-              <div className="font-mono text-sm text-ink">{suggestedOrderNo}</div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="ui-btn-primary inline-flex h-9 items-center gap-2 px-3 text-[12px] disabled:opacity-50"
+                disabled={!canWrite || busy}
+                onClick={() => void saveDraft()}
+              >
+                {busy ? <Loader2 size={13} className="animate-spin" /> : null}
+                Save as draft
+              </button>
+              <span className="text-[12px] text-ink-tertiary">
+                The official work order number is assigned when you approve it.
+              </span>
             </div>
-            <p className="ui-section-subtitle text-right text-ink-tertiary">Starts with no lines — add items next.</p>
-          </div>
+          </>
+        ) : null}
 
-          <div className="flex justify-end">
-            <button
-              type="button"
-              className="ui-btn-primary h-9 gap-1.5 px-4 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!canSubmit}
-              onClick={() => void handleCreate()}
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-              {saving ? "Creating…" : "Create work order"}
-            </button>
-          </div>
-        </section>
-      </div>
+        <Link href="/planning" className="ui-btn-ghost inline-flex h-8 items-center gap-1.5 px-2 text-[12px]">
+          <ArrowLeft size={14} strokeWidth={1.75} />
+          Back to work orders
+        </Link>
+      </section>
     </PlanningShell>
+  );
+}
+
+function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <dt className="ui-mono-label text-ink-tertiary">{label}</dt>
+      <dd className={`mt-1 text-[13px] text-ink ${mono ? "font-mono text-[12px]" : ""}`}>{value}</dd>
+    </div>
+  );
+}
+
+function PartsPanel({ title, lines }: { title: string; lines: readonly Omit<WorkOrderLine, "id">[] }) {
+  return (
+    <section className="ui-panel p-5">
+      <div className="flex items-center gap-3">
+        <span className="ui-mono-label">{title}</span>
+        <span className="text-[12px] text-ink-tertiary">
+          {lines.length} {lines.length === 1 ? "part" : "parts"}
+        </span>
+      </div>
+      {lines.length === 0 ? (
+        <p className="mt-3 text-sm text-danger">
+          This configuration has no parts — the work order would be empty.
+        </p>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr>
+                <th className="ui-mono-label border-b border-line px-2 py-2 text-left">Item</th>
+                <th className="ui-mono-label border-b border-line px-2 py-2 text-left">Description</th>
+                <th className="ui-mono-label border-b border-line px-2 py-2 text-left">Qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line, index) => (
+                <tr key={`${line.itemNo}-${index}`}>
+                  <td className="border-b border-line px-2 py-1.5 font-mono text-[12px]">{line.itemNo}</td>
+                  <td className="border-b border-line px-2 py-1.5 text-ink-secondary">{line.description}</td>
+                  <td className="border-b border-line px-2 py-1.5">{line.buildQty}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

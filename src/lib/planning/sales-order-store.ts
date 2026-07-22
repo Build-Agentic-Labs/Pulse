@@ -186,9 +186,14 @@ export async function getImportLines(
 ): Promise<SalesOrderLineRow[]> {
   const supabase = client ?? createPlannerSupabaseClient();
 
+  // The work_orders embed MUST name its foreign key. Two FKs join these tables — this one, and
+  // work_orders.sales_order_line_id pointing back — so an unqualified `work_orders(...)` embed is
+  // ambiguous and PostgREST rejects the whole query. Storing the link in both directions is
+  // deliberate (one is live and joinable, the other is the traveler's frozen snapshot), so the
+  // disambiguation is the price of that and must not be "simplified" away.
   const { data, error } = await supabase
     .from("sales_order_lines")
-    .select(`${LINE_COLUMNS}, sales_orders(so_no), work_orders(order_no)`)
+    .select(`${LINE_COLUMNS}, sales_orders(so_no), work_orders!sales_order_lines_work_order_id_fkey(order_no)`)
     .eq("workspace_id", workspaceId)
     .eq("import_id", importId)
     .order("source_row_no", { ascending: true });

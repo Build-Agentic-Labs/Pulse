@@ -59,6 +59,8 @@ export function SalesOrdersWorkspace() {
     async (scheduleImport: ScheduleImportSummary) => {
       if (!workspaceId) return;
       setView({ kind: "import", scheduleImport });
+      setError("");
+      setLines([]);
       try {
         setLines(await getImportLines(workspaceId, scheduleImport.id));
       } catch (cause) {
@@ -111,6 +113,10 @@ export function SalesOrdersWorkspace() {
           </button>
           <span className="ui-mono-label text-ink-secondary">{view.scheduleImport.fileName}</span>
         </div>
+
+        {/* A failed line load must be visible here — the export column would otherwise render an
+            all-blank column and simply look like nothing has been approved yet. */}
+        {error ? <div className="ui-panel border-danger/40 p-4 text-sm text-danger">{error}</div> : null}
 
         <ExportColumnPanel scheduleImport={view.scheduleImport} lines={lines} />
 

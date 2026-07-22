@@ -6,12 +6,11 @@ import { AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels"
 import { QualityLoadingState } from "@/components/space-loading-states";
 import { ThemedSelect } from "@/components/themed-select";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrgToolAccess } from "@/domain/supabase-planner";
-import { SOP_WORKSPACE_COOKIE } from "@/lib/sop/workspace-cookie";
+import { SOP_WORKSPACE_COOKIE, SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
 import type { AccessLevel, WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
 import { useAuthFormActions } from "@/lib/auth-form-actions";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
-const WORKSPACE_STORAGE_KEY = "pulse:sops:workspace-id";
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 
 function writeWorkspaceCookie(workspaceId: string) {
@@ -69,7 +68,7 @@ export function useSopWorkspace(): SopWorkspaceContextValue {
 function readStoredWorkspaceId(): string | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    return window.localStorage.getItem(WORKSPACE_STORAGE_KEY) ?? undefined;
+    return window.localStorage.getItem(SOP_WORKSPACE_STORAGE_KEY) ?? undefined;
   } catch {
     return undefined;
   }
@@ -78,7 +77,7 @@ function readStoredWorkspaceId(): string | undefined {
 function writeStoredWorkspaceId(workspaceId: string) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(WORKSPACE_STORAGE_KEY, workspaceId);
+    window.localStorage.setItem(SOP_WORKSPACE_STORAGE_KEY, workspaceId);
   } catch {
     // Ignore storage failures in private browsing.
   }

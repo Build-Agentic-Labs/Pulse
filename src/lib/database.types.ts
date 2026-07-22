@@ -1145,6 +1145,63 @@ export type Database = {
           },
         ]
       }
+      sop_notifications: {
+        Row: {
+          attempts: number
+          created_at: string
+          event_id: number | null
+          id: number
+          kind: string
+          last_error: string | null
+          recipient_id: string
+          reminder_index: number
+          resend_message_id: string | null
+          sent_at: string | null
+          sop_id: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          event_id?: number | null
+          id?: never
+          kind: string
+          last_error?: string | null
+          recipient_id: string
+          reminder_index?: number
+          resend_message_id?: string | null
+          sent_at?: string | null
+          sop_id: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          event_id?: number | null
+          id?: never
+          kind?: string
+          last_error?: string | null
+          recipient_id?: string
+          reminder_index?: number
+          resend_message_id?: string | null
+          sent_at?: string | null
+          sop_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_notifications_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "sop_event_log"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sop_notifications_sop_id_fkey"
+            columns: ["sop_id"]
+            isOneToOne: false
+            referencedRelation: "sops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sop_review_annotations: {
         Row: {
           author_name: string

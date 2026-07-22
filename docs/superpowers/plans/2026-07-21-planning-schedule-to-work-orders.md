@@ -10,6 +10,26 @@
 
 **Spec:** [`docs/superpowers/specs/2026-07-21-planning-schedule-to-work-order-design.md`](../specs/2026-07-21-planning-schedule-to-work-order-design.md)
 
+## Status — all 13 tasks implemented (2026-07-21)
+
+| Task | Commit | Notes |
+|---|---|---|
+| 1 Schema + RLS | `2516148`, `e4b5ce5` | Applied live. Gate review added updated_at triggers, normalized SO#, draft_no uniqueness |
+| 2 Side pane | `6dc745f`, `86d333c` | Gate review caught a login crash and print-clipping; fixed with a `(workspace)` route group |
+| 3 schedule-row | `dcb98fa` | 20 tests carried over verbatim; old resolver + dry-run script deleted |
+| 4 schedule-resolve | `fb653f4`, `d6931d9` | Gate review added order-type flags — a shifted column built a generator from an accessory BOM |
+| 5 export-column | `60b2ed7`, `d6931d9` | Gate review: `filled` could exceed `total`; newline in an order number split a cell |
+| 6 draft numbering | `d1008d0` | |
+| 7 config store | `86d333c` | |
+| 8 configuration UI | `d6931d9` | Verified live: create → read → retire |
+| 9 sales-order store | `f8f2455` | `sales_order_id` made nullable — advisory-missing SO# rows were unstorable |
+| 10 schedule upload | `f01f015` | Preview logic extracted to `schedule-preview.ts`; extraction found a divider-row bug |
+| 11 approval RPC | `98bfc79` | 7 integration checks against the live DB, rolled back |
+| 12 create + approve + export | `56a1e74` | Verified live end to end; fixed an ambiguous PostgREST embed and a silent error |
+| 13 verification gate | — | typecheck + lint + 425 tests + production build green |
+
+**Known gap:** `read-excel-file` rejects openpyxl-generated workbooks (`Couldn't read "inline string" cell value`), so the browser upload was verified only up to the reader. The parse → resolve → import → export pipeline is covered end to end by `schedule-preview.test.ts` against real sheet shapes. Worth confirming with a genuine monthly workbook before relying on it.
+
 ## Global Constraints
 
 - **Schema + RLS first**, then `npm run gen:types`, then queries. Commit the updated `src/lib/database.types.ts`.

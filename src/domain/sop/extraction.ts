@@ -94,7 +94,7 @@ export const SOP_EXTRACTION_TOOL = {
         additionalProperties: false,
         required: ["sopNumber", "title", "version", "revisionDate", "effectiveDate"],
         properties: {
-          sopNumber: { type: "string", description: 'e.g. "SOP-QA-001"' },
+          sopNumber: { type: "string", description: 'e.g. "SOP-QAS-001"' },
           title: { type: "string" },
           version: { type: "string" },
           revisionDate: { type: "string", description: "ISO YYYY-MM-DD or empty" },

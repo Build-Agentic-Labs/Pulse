@@ -77,7 +77,7 @@ export interface DepartmentInput {
 
 /**
  * Insert or update a department. The DB enforces code-uniqueness and one-quality-gate. `code` is
- * immutable once set (it drives DEPT-TYPE-NNN numbering), so updates change only name + gate.
+ * immutable once set (it drives TYPE-DEPT-NNN numbering), so updates change only name + gate.
  */
 export async function saveDepartment(workspaceId: string, input: DepartmentInput): Promise<Department> {
   const supabase = createPlannerSupabaseClient();

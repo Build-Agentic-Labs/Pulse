@@ -29,9 +29,9 @@ export function authoringMode(myDepartments: Department[]): AuthoringMode {
   return { kind: "choose", departments: myDepartments };
 }
 
-/** Human preview of the number to be minted, e.g. previewSopNumber("QA","SOP") -> "QA-SOP-###". */
+/** Human preview of the number to be minted, e.g. previewSopNumber("QAS","SOP") -> "SOP-QAS-###". */
 export function previewSopNumber(departmentCode: string, docType: string): string {
-  return `${departmentCode.toUpperCase()}-${docType.toUpperCase()}-###`;
+  return `${docType.toUpperCase()}-${departmentCode.toUpperCase()}-###`;
 }
 
 /**

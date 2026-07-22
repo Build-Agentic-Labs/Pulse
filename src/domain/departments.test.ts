@@ -1,5 +1,34 @@
 import { describe, it, expect } from "vitest";
-import { roleAtLeast, canAuthor, canSignReview, canDeptApprove, pickMemberDepartments, type Department } from "./departments";
+import {
+  roleAtLeast,
+  canAuthor,
+  canSignReview,
+  canDeptApprove,
+  pickMemberDepartments,
+  standardPositionTitlesForDepartment,
+  type Department,
+} from "./departments";
+
+describe("standardPositionTitlesForDepartment", () => {
+  it("has a curated list for every roster code", () => {
+    const roster = ["INS", "INV", "LOG", "MFG", "PLN", "PRO", "PUR", "QAS", "SVC"];
+    for (const code of roster) {
+      const titles = standardPositionTitlesForDepartment(code);
+      expect(titles.length, code).toBeGreaterThan(0);
+      expect(titles, code).not.toContain("Executive Vice President");
+    }
+  });
+
+  it("keys the curated lists by the current codes, not the pre-2026-07 ones", () => {
+    expect(standardPositionTitlesForDepartment("QAS")).toContain("VP Quality");
+    expect(standardPositionTitlesForDepartment("MFG")).toContain("VP Manufacturing");
+    expect(standardPositionTitlesForDepartment("INS")).toContain("Inside Sales Manager");
+  });
+
+  it("falls back to the generic ladder for unknown codes", () => {
+    expect(standardPositionTitlesForDepartment("ZZZ")).toContain("Executive Vice President");
+  });
+});
 
 describe("dept role capabilities (cumulative)", () => {
   it("author can author but not sign", () => {

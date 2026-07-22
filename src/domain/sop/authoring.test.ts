@@ -23,8 +23,8 @@ describe("authoringMode", () => {
 });
 
 describe("previewSopNumber", () => {
-  it("formats CODE-TYPE-### uppercased", () => {
-    expect(previewSopNumber("qa", DEFAULT_DOC_TYPE)).toBe("QA-SOP-###");
+  it("formats TYPE-CODE-### uppercased", () => {
+    expect(previewSopNumber("qas", DEFAULT_DOC_TYPE)).toBe("SOP-QAS-###");
   });
 });
 

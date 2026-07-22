@@ -1,5 +1,5 @@
 /**
- * Store layer for SOP document control: reading control-column state, minting DEPT-TYPE-NNN
+ * Store layer for SOP document control: reading control-column state, minting TYPE-DEPT-NNN
  * numbers, recording e-signatures, and driving lifecycle transitions. The database triggers
  * (enforce_sop_transition) and definer functions (next_sop_number, sign_sop) are the real gate;
  * this layer only shapes calls and surfaces the trigger's readable error messages.
@@ -175,7 +175,7 @@ export async function getSopAuthorDisplayName(sopId: string): Promise<string> {
   return String(value ?? "").trim();
 }
 
-/** Mint the next DEPT-TYPE-NNN number for a department (transactional, DB-authorized). */
+/** Mint the next TYPE-DEPT-NNN number for a department (transactional, DB-authorized). */
 export async function mintSopNumber(workspaceId: string, departmentId: string, docType: string): Promise<string> {
   const supabase = createPlannerSupabaseClient();
   const value = await throwIfError(

@@ -18,7 +18,7 @@ const item = (over: Partial<DrainItem> = {}): DrainItem => ({
 });
 
 function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
-  const calls = { claims: 0, sent: [] as number[], failed: [] as { id: number; attempts: number }[] };
+  const calls = { sent: [] as number[], failed: [] as { id: number; attempts: number }[] };
   let nextLedgerId = 100;
   const store: DrainStore = {
     collect: async () => batch,
@@ -129,5 +129,42 @@ describe("runSopNotificationDrain", () => {
     expect(report.retried).toBe(1);
     expect(calls.sent).toEqual([55]);
     expect(report.skippedNoEmail).toBe(1);
+  });
+
+  it("a store.claim rejection costs only that item", async () => {
+    const items = [item(), item({ pending: { ...item().pending, recipientId: "u2" }, email: "u2@example.com" })];
+    const { store, calls } = fakeStore({ items, oldestUnnotifiedEventAgeHours: null });
+    let first = true;
+    const baseClaim = store.claim;
+    store.claim = async (pending) => {
+      if (first) {
+        first = false;
+        throw new Error("db timeout");
+      }
+      return baseClaim(pending);
+    };
+    const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
+    expect(report.failed).toBe(1);
+    expect(report.sent).toBe(1);
+    expect(calls.sent).toHaveLength(1);
+  });
+
+  it("a rejecting markFailed after a failed send still costs only that item", async () => {
+    const items = [item(), item({ pending: { ...item().pending, recipientId: "u2" }, email: "u2@example.com" })];
+    const { store } = fakeStore({ items, oldestUnnotifiedEventAgeHours: null });
+    store.markFailed = async () => {
+      throw new Error("db down");
+    };
+    let first = true;
+    const flakySender = async () => {
+      if (first) {
+        first = false;
+        return { ok: false as const, status: 500, error: "boom", permanent: false };
+      }
+      return { ok: true as const, id: "re_2" };
+    };
+    const report = await runSopNotificationDrain({ store, send: flakySender, now, origin });
+    expect(report.failed).toBe(1);
+    expect(report.sent).toBe(1);
   });
 });

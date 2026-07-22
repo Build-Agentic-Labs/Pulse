@@ -114,14 +114,20 @@ export async function runSopNotificationDrain(deps: {
       report.skippedNoEmail += 1;
       continue;
     }
-    const { claimed, ledgerId } = await store.claim(item.pending);
-    if (!claimed || ledgerId === null) {
-      report.skippedDuplicate += 1;
-      continue;
+    try {
+      const { claimed, ledgerId } = await store.claim(item.pending);
+      if (!claimed || ledgerId === null) {
+        report.skippedDuplicate += 1;
+        continue;
+      }
+      const outcome = await attemptSend(store, send, ledgerId, item.email, item.content, 0);
+      if (outcome === "sent") report.sent += 1;
+      else report.failed += 1;
+    } catch {
+      // A store-layer rejection (claim, or the failure bookkeeping itself) must
+      // cost only this item. A claimed-but-unstamped row re-enters via the retry lane.
+      report.failed += 1;
     }
-    const outcome = await attemptSend(store, send, ledgerId, item.email, item.content, 0);
-    if (outcome === "sent") report.sent += 1;
-    else report.failed += 1;
   }
 
   for (const retry of await store.retryItems(deps.now(), deps.origin)) {
@@ -130,9 +136,13 @@ export async function runSopNotificationDrain(deps: {
       report.skippedNoEmail += 1;
       continue;
     }
-    const outcome = await attemptSend(store, send, retry.ledgerId, retry.email, retry.content, retry.attempts);
-    if (outcome === "sent") report.retried += 1;
-    else report.failed += 1;
+    try {
+      const outcome = await attemptSend(store, send, retry.ledgerId, retry.email, retry.content, retry.attempts);
+      if (outcome === "sent") report.retried += 1;
+      else report.failed += 1;
+    } catch {
+      report.failed += 1;
+    }
   }
 
   return report;

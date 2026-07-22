@@ -786,7 +786,7 @@ export type Database = {
           id: string
           import_id: string
           model_raw: string
-          sales_order_id: string
+          sales_order_id: string | null
           source_row_no: number
           status: string
           trailer_letter: string
@@ -804,7 +804,7 @@ export type Database = {
           id?: string
           import_id: string
           model_raw?: string
-          sales_order_id: string
+          sales_order_id?: string | null
           source_row_no: number
           status?: string
           trailer_letter?: string
@@ -822,7 +822,7 @@ export type Database = {
           id?: string
           import_id?: string
           model_raw?: string
-          sales_order_id?: string
+          sales_order_id?: string | null
           source_row_no?: number
           status?: string
           trailer_letter?: string

@@ -1,0 +1,48 @@
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e2]:
+    - button "Toggle theme" [ref=f2e4] [cursor=pointer]
+    - complementary [ref=f2e7]:
+      - generic [ref=f2e8]:
+        - text: Pulse
+        - paragraph [ref=f2e9]: Real-time production analytics for the shop floor — track takt time, throughput, and downtime as they happen.
+      - generic [ref=f2e10]:
+        - generic [ref=f2e12]:
+          - article:
+            - heading "Takt Time" [level=2]
+            - paragraph: The pace production must hold to meet demand — available time divided by the units required.
+          - article:
+            - heading "Line Balancing" [level=2]
+            - paragraph: Distributing work evenly across stations so no single operator becomes the bottleneck.
+          - article:
+            - heading "Work Order" [level=2]
+            - paragraph: A released instruction to build a specific quantity of a product by a due date.
+          - article:
+            - heading "Cycle Time" [level=2]
+            - paragraph: The time to complete one unit at a station, from the first touch to the last.
+          - article:
+            - heading "Traveler" [level=2]
+            - paragraph: The record that moves with a work order, capturing what happened at every step.
+          - article:
+            - heading "Throughput" [level=2]
+            - paragraph: The number of finished units a line completes over a given period.
+        - generic [ref=f2e13]: Anacorp Manufacturing
+    - main [ref=f2e15]:
+      - generic [ref=f2e16]:
+        - heading "Sign in" [level=1] [ref=f2e17]
+        - paragraph [ref=f2e18]: Welcome back. Use your work email.
+        - generic [ref=f2e19]:
+          - generic [ref=f2e20]:
+            - generic [ref=f2e21]: Work email
+            - textbox "Work email" [ref=f2e22]:
+              - /placeholder: you@anacorp.com
+          - generic [ref=f2e23]:
+            - generic [ref=f2e24]:
+              - generic [ref=f2e25]: Password
+              - button "Forgot password?" [ref=f2e26] [cursor=pointer]
+            - textbox "Password" [ref=f2e27]:
+              - /placeholder: Enter your password
+          - button "Sign in" [ref=f2e28] [cursor=pointer]
+          - generic [ref=f2e29]: Or
+          - button "Continue with Microsoft" [ref=f2e31] [cursor=pointer]
+          - button "Create account" [ref=f2e37] [cursor=pointer]
+  - alert [ref=f2e38]

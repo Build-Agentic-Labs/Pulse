@@ -291,12 +291,32 @@ export async function importSchedule(
     flags: row.flags as unknown as Database["public"]["Tables"]["sales_order_lines"]["Insert"]["flags"],
   }));
 
-  for (let index = 0; index < payload.length; index += LINE_INSERT_CHUNK) {
-    const chunk = payload.slice(index, index + LINE_INSERT_CHUNK);
-    const { error } = await supabase.from("sales_order_lines").insert(chunk);
-    if (error) {
-      throw new Error(`Could not import the schedule's lines: ${error.message}`);
+  // A partially written import is worse than none: the header carries the full row RANGE, so the
+  // export column would walk it and emit blanks for the rows that never landed — indistinguishable
+  // from "not approved yet". On any failure, remove the header (lines cascade) so the planner sees
+  // a failed import to retry rather than a plausible-looking wrong one.
+  try {
+    for (let index = 0; index < payload.length; index += LINE_INSERT_CHUNK) {
+      const chunk = payload.slice(index, index + LINE_INSERT_CHUNK);
+      const { error } = await supabase.from("sales_order_lines").insert(chunk);
+      if (error) {
+        throw new Error(`Could not import the schedule's lines: ${error.message}`);
+      }
     }
+  } catch (cause) {
+    const { error: rollbackError } = await supabase
+      .from("schedule_imports")
+      .delete()
+      .eq("workspace_id", workspaceId)
+      .eq("id", importId)
+      .select("id");
+    const detail = cause instanceof Error ? cause.message : "the schedule could not be imported";
+    if (rollbackError) {
+      throw new Error(
+        `${detail}. The partial import could not be cleaned up either (${rollbackError.message}) — delete "${input.fileName}" from the import list before retrying.`,
+      );
+    }
+    throw new Error(detail);
   }
 
   return {
@@ -368,19 +388,65 @@ async function resolveSalesOrders(
   return result;
 }
 
-/** Mark a line converted once its work order exists. The DB rejects `converted` with no order. */
+/**
+ * Mark a line converted once its work order exists. The DB rejects `converted` with no order.
+ *
+ * Guarded on the line having NO work order yet, so two planners (or two tabs) converting the same
+ * unit cannot both succeed and silently leave two work orders built for one physical unit. A
+ * no-op result is reported as a conflict rather than swallowed.
+ */
 export async function markLineConverted(
   workspaceId: string,
   lineId: string,
   workOrderId: string,
 ): Promise<void> {
   const supabase = createPlannerSupabaseClient();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("sales_order_lines")
     .update({ status: "converted", work_order_id: workOrderId })
     .eq("workspace_id", workspaceId)
-    .eq("id", lineId);
+    .eq("id", lineId)
+    .is("work_order_id", null)
+    .select("id");
   if (error) {
     throw new Error(`Could not link the line to its work order: ${error.message}`);
   }
+  if (!data || data.length === 0) {
+    throw new Error(
+      "This unit already has a work order — someone else converted it. Reload the sales order before creating another.",
+    );
+  }
+}
+
+/**
+ * Units already built from a previous import, keyed `SO#|FG SKU` (both normalized).
+ *
+ * The preview uses this to warn before a corrected re-upload quietly double-builds a month: the
+ * new import creates fresh `pending` lines for units that already have work orders, and nothing
+ * else in the pipeline would notice.
+ */
+export async function listConvertedUnitKeys(
+  workspaceId: string,
+  client?: PlanningClient,
+): Promise<ReadonlySet<string>> {
+  const supabase = client ?? createPlannerSupabaseClient();
+  const { data, error } = await supabase
+    .from("sales_order_lines")
+    .select("fg_sku, sales_orders(so_no)")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "converted");
+  if (error) {
+    throw new Error(`Could not check for already-built units: ${error.message}`);
+  }
+  const keys = new Set<string>();
+  for (const row of data ?? []) {
+    const salesOrder = (row as { sales_orders?: { so_no?: string } | null }).sales_orders;
+    keys.add(unitKey(String(salesOrder?.so_no ?? ""), String(row.fg_sku ?? "")));
+  }
+  return keys;
+}
+
+/** The identity of a physical unit across imports: its sales order plus its finished-goods SKU. */
+export function unitKey(soNo: string, fgSku: string): string {
+  return `${soNo.trim().toUpperCase()}|${fgSku.trim().toUpperCase()}`;
 }

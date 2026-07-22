@@ -21,6 +21,7 @@ import {
   type WorkOrderLine,
 } from "@/lib/planning/store";
 import { PlanningShell } from "./planning-shell";
+import { StandaloneWorkOrderForm } from "./standalone-work-order-form";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
 /**
@@ -108,6 +109,7 @@ export function WorkOrderNew() {
       setSelectedSalesOrder(salesOrderId);
       setPrepared(null);
       setLines([]);
+      setError("");
       if (!workspaceId || !salesOrderId) return;
       try {
         setLines(await listUnconvertedLines(workspaceId, salesOrderId));
@@ -125,14 +127,36 @@ export function WorkOrderNew() {
       setError("");
       setBusy(true);
       try {
+        // Blocking flags are not advisory: a line flagged at import is a line that must not be
+        // built until the underlying data is fixed. The resolver already decided this — refusing
+        // here is what makes that decision mean something.
+        const blocking = line.flags.filter((flag) => flag.blocking);
+        if (blocking.length > 0) {
+          throw new Error(
+            `This line is blocked: ${blocking.map((flag) => flag.detail).join("; ")}. Fix it in Product configuration, then re-import.`,
+          );
+        }
+
         const index = await loadConfigIndex(workspaceId);
         const genEntry = index.bySku.get(line.fgSku.trim().toUpperCase());
         if (!genEntry) {
           throw new Error(`FG SKU "${line.fgSku}" has no product configuration yet.`);
         }
+        // Mirror the resolver's order-type check. Without it a shifted schedule column resolves
+        // an accessory config as the generator and builds a "generator" from an accessory BOM.
+        if (!["head_unit", "power_module", "trailer"].includes(genEntry.orderType)) {
+          throw new Error(
+            `FG SKU "${line.fgSku}" is configured as ${genEntry.orderType}, which cannot be built as a main order — check the schedule's columns are not shifted.`,
+          );
+        }
         const accEntry = line.accSku ? index.bySku.get(line.accSku.trim().toUpperCase()) : undefined;
         if (line.accSku && !accEntry) {
           throw new Error(`Accessory SKU "${line.accSku}" has no product configuration yet.`);
+        }
+        if (accEntry && accEntry.orderType !== "accessories") {
+          throw new Error(
+            `Accessory SKU "${line.accSku}" is configured as ${accEntry.orderType}, not accessories — check the schedule's columns are not shifted.`,
+          );
         }
 
         const [genConfig, pmConfig, accConfig] = await Promise.all([
@@ -189,7 +213,15 @@ export function WorkOrderNew() {
             }
           : null,
       });
-      await markLineConverted(workspaceId, prepared.line.id, result.id);
+      try {
+        await markLineConverted(workspaceId, prepared.line.id, result.id);
+      } catch (linkCause) {
+        // The work order EXISTS — retrying "Save as draft" would build a second one for the same
+        // unit. Send the planner to what was created instead of offering a duplicating retry.
+        setError(
+          `${linkCause instanceof Error ? linkCause.message : "Could not link the line."} The work order was created — opening it.`,
+        );
+      }
       router.push(`/planning/work-orders/${result.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create the work order.");
@@ -359,6 +391,12 @@ export function WorkOrderNew() {
               </span>
             </div>
           </>
+        ) : null}
+
+        {/* Trailers, rework and stock orders have no schedule line behind them, so the
+            sales-order flow above can never create them (decision D3). */}
+        {status === "ready" ? (
+          <StandaloneWorkOrderForm workspaceId={workspaceId ?? ""} canWrite={canWrite} trailers={trailers} />
         ) : null}
 
         <Link href="/planning" className="ui-btn-ghost inline-flex h-8 items-center gap-1.5 px-2 text-[12px]">

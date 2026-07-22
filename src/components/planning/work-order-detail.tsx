@@ -466,6 +466,7 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
                   <input
                     className="ui-input mt-1 w-44 font-mono text-lg"
                     value={form.orderNo}
+                    disabled={order.status !== "draft"}
                     onChange={(event) => setForm((current) => (current ? { ...current, orderNo: event.target.value } : current))}
                     onBlur={() => void saveHeaderField("orderNo", form.orderNo.trim())}
                   />

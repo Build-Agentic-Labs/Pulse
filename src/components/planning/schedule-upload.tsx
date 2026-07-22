@@ -14,7 +14,12 @@ import {
 import { buildSchedulePreview, groupPreviewFlags } from "@/domain/planning/schedule-preview";
 import type { ConfigIndex } from "@/domain/planning/schedule-resolve";
 import { loadConfigIndex } from "@/lib/planning/config-store";
-import { importSchedule, type ResolvedScheduleRow } from "@/lib/planning/sales-order-store";
+import {
+  importSchedule,
+  listConvertedUnitKeys,
+  unitKey,
+  type ResolvedScheduleRow,
+} from "@/lib/planning/sales-order-store";
 import type { WorkbookCell } from "@/lib/planning/parse-workbook";
 import { readWorkbookFile } from "@/lib/planning/read-files";
 
@@ -54,6 +59,8 @@ export function ScheduleUpload({
   const [headerRowIndex, setHeaderRowIndex] = useState(-1);
   const [mapping, setMapping] = useState<ColumnMapping | null>(null);
   const [configIndex, setConfigIndex] = useState<ConfigIndex | null>(null);
+  /** `SO#|FG SKU` of units already built, so a corrected re-upload cannot quietly double-build. */
+  const [builtUnits, setBuiltUnits] = useState<ReadonlySet<string>>(new Set());
 
   const sheet = sheets.find((candidate) => candidate.name === sheetName) ?? null;
   const headerRow = sheet && headerRowIndex >= 0 ? sheet.rows[headerRowIndex] : null;
@@ -64,9 +71,14 @@ export function ScheduleUpload({
     setError("");
     setFileName(file.name);
     try {
-      const [workbook, index] = await Promise.all([readWorkbookFile(file), loadConfigIndex(workspaceId)]);
+      const [workbook, index, built] = await Promise.all([
+        readWorkbookFile(file),
+        loadConfigIndex(workspaceId),
+        listConvertedUnitKeys(workspaceId),
+      ]);
       setSheets(workbook.sheets);
       setConfigIndex(index);
+      setBuiltUnits(built);
       const first = workbook.sheets[0];
       if (workbook.sheets.length === 1 && first) {
         selectSheet(first);
@@ -99,8 +111,16 @@ export function ScheduleUpload({
     if (!sheet || !mapping || !configIndex || headerRowIndex < 0) return null;
 
     const built = buildSchedulePreview(sheet.rows, headerRowIndex, mapping, configIndex);
+
+    // A corrected re-upload of the same month re-creates PENDING lines for units that already
+    // have work orders. Nothing downstream would notice, so the planner would build them twice.
+    const alreadyBuilt = built.rows.filter((row) =>
+      builtUnits.has(unitKey(row.resolution.so, row.resolution.fgSku)),
+    );
+
     return {
       ...built,
+      alreadyBuilt,
       flagGroups: groupPreviewFlags(built.rows),
       resolvedRows: built.rows.map<ResolvedScheduleRow>((row) => ({
         sourceRowNo: row.sourceRowNo,
@@ -115,7 +135,7 @@ export function ScheduleUpload({
         flags: row.resolution.flags,
       })),
     };
-  }, [stage, sheet, mapping, configIndex, headerRowIndex]);
+  }, [stage, sheet, mapping, configIndex, headerRowIndex, builtUnits]);
 
   async function runImport() {
     if (!preview || !sheet) return;
@@ -268,6 +288,26 @@ export function ScheduleUpload({
             <Stat label="Resolved" value={preview.resolvedCount} />
             <Stat label="Flagged" value={preview.flaggedCount} tone={preview.flaggedCount > 0 ? "danger" : undefined} />
           </dl>
+
+          {preview.alreadyBuilt.length > 0 ? (
+            <div className="ui-panel border-danger/40 p-4">
+              <div className="ui-mono-label text-danger">Already built</div>
+              <p className="mt-2 text-[13px] text-ink-secondary">
+                {preview.alreadyBuilt.length}{" "}
+                {preview.alreadyBuilt.length === 1 ? "unit on this sheet already has" : "units on this sheet already have"}{" "}
+                a work order from an earlier import. Importing again creates a second line for the
+                same unit — build it and you build it twice.
+              </p>
+              <ul className="mt-2 space-y-0.5 text-[12px] text-ink-tertiary">
+                {preview.alreadyBuilt.slice(0, 8).map((row) => (
+                  <li key={row.sourceRowNo} className="font-mono">
+                    row {row.sourceRowNo} · {row.resolution.so} · {row.resolution.fgSku}
+                  </li>
+                ))}
+                {preview.alreadyBuilt.length > 8 ? <li>…and {preview.alreadyBuilt.length - 8} more</li> : null}
+              </ul>
+            </div>
+          ) : null}
 
           {preview.flagGroups.length > 0 ? (
             <div className="space-y-2">

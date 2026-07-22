@@ -659,43 +659,59 @@ export async function createDraftWorkOrderSet(
   const trailerLetter = normalizeOptionalTrailerLetter(input.trailerLetter);
   const mmyy = orderNoMonthKey(input.orderDate);
 
-  const { data: existingDrafts, error: draftsError } = await supabase
-    .from("work_orders")
-    .select("draft_no")
-    .eq("workspace_id", workspaceId)
-    .like("draft_no", `D-${mmyy}-%`);
-  if (draftsError) {
-    throw new Error(`Could not load existing draft numbers: ${draftsError.message}`);
-  }
-  const draftNo = suggestDraftNo(
-    (existingDrafts ?? []).flatMap((row) => (row.draft_no ? [String(row.draft_no)] : [])),
-    input.orderDate,
-  );
+  // `suggestDraftNo` is a client-side max+1 against a unique index, so two planners creating a
+  // draft in the same month can collide. Recompute once on 23505 rather than surfacing a raw
+  // "duplicate key value violates unique constraint" to the planner — the same retry the official
+  // numbering path uses.
+  let draftNo = "";
+  let mainId = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { data: existingDrafts, error: draftsError } = await supabase
+      .from("work_orders")
+      .select("draft_no")
+      .eq("workspace_id", workspaceId)
+      .like("draft_no", `D-${mmyy}-%`);
+    if (draftsError) {
+      throw new Error(`Could not load existing draft numbers: ${draftsError.message}`);
+    }
+    draftNo = suggestDraftNo(
+      (existingDrafts ?? []).flatMap((row) => (row.draft_no ? [String(row.draft_no)] : [])),
+      input.orderDate,
+    );
 
-  const { data: main, error: mainError } = await supabase
-    .from("work_orders")
-    .insert({
-      workspace_id: workspaceId,
-      order_no: null,
-      draft_no: draftNo,
-      sales_order_line_id: input.salesOrderLineId,
-      sales_order_no: input.salesOrderNo,
-      template_id: input.templateId,
-      customer: input.customer,
-      model: input.model,
-      order_type: "head_unit",
-      status: "draft",
-      order_date: input.orderDate,
-      notes: input.notes,
-      trailer_letter: trailerLetter,
-      created_by: createdBy,
-    })
-    .select("id")
-    .single();
-  if (mainError) {
+    const { data: main, error: mainError } = await supabase
+      .from("work_orders")
+      .insert({
+        workspace_id: workspaceId,
+        order_no: null,
+        draft_no: draftNo,
+        sales_order_line_id: input.salesOrderLineId,
+        sales_order_no: input.salesOrderNo,
+        template_id: input.templateId,
+        customer: input.customer,
+        model: input.model,
+        order_type: "head_unit",
+        status: "draft",
+        order_date: input.orderDate,
+        notes: input.notes,
+        trailer_letter: trailerLetter,
+        created_by: createdBy,
+      })
+      .select("id")
+      .single();
+
+    if (!mainError) {
+      mainId = String(main.id);
+      break;
+    }
+    if (mainError.code === "23505" && attempt === 0) {
+      continue; // Someone took the draft number between the scan and the insert.
+    }
     throw new Error(`Could not create the work order: ${mainError.message}`);
   }
-  const mainId = String(main.id);
+  if (!mainId) {
+    throw new Error("Could not allocate a unique draft number; try again.");
+  }
 
   await insertWorkOrderLines(supabase, workspaceId, mainId, draftNo, input.lines);
 
@@ -722,10 +738,23 @@ export async function createDraftWorkOrderSet(
       .select("id")
       .single();
     if (pmError) {
-      // Roll the Main back rather than strand an unpaired half — the same reasoning as the
-      // legacy set-create path, which is why editors may delete their own drafts.
-      await supabase.from("work_orders").delete().eq("workspace_id", workspaceId).eq("id", mainId);
-      throw new Error(`Could not create the power module: ${pmError.message}`);
+      // Roll the Main back rather than strand an unpaired half. VERIFY the rollback: RLS can
+      // permit an INSERT while silently matching zero rows on the DELETE, and an unverified
+      // rollback leaves an orphan Main — with lines and a consumed draft number — behind an
+      // error message that only mentions the power module. Same hazard `createGenPmSet`
+      // documents; it must not be re-introduced here.
+      const { data: rolledBack } = await supabase
+        .from("work_orders")
+        .delete()
+        .eq("workspace_id", workspaceId)
+        .eq("id", mainId)
+        .select("id");
+      const stranded = !rolledBack || rolledBack.length === 0;
+      throw new Error(
+        stranded
+          ? `Could not create the power module (${pmError.message}), and draft ${draftNo} could not be removed — delete it manually before retrying.`
+          : `Could not create the power module: ${pmError.message}`,
+      );
     }
     pmId = String(pm.id);
     await insertWorkOrderLines(supabase, workspaceId, pmId, draftNo, input.pm.lines);

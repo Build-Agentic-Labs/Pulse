@@ -200,3 +200,113 @@ export function resolveEventRecipients(
       return [];
   }
 }
+
+export interface ReminderLedgerRow {
+  recipientId: string;
+  kind: SopNotificationKind;
+  reminderIndex: number;
+  sentAt: string;
+}
+
+export interface SopReminderState {
+  sop: SopSnapshot;
+  seats: SeatSnapshot[];
+  qualityApprovers: QualityApproverSnapshot[];
+  /** Reviewer ids with a sop_review_submissions row for the current cycle. */
+  currentReviewReturns: string[];
+  /** dept_approval signatures for the current cycle + final-approval hash, per seat. */
+  currentDeptApprovals: { signerId: string; departmentId: string }[];
+  approvedAt: string | null;
+  /** Latest review_sent event time for the current cycle (any age, no window). */
+  reviewSentAt: string | null;
+  /** Prior SENT reminder rows for this SOP (event_id null, sent_at not null). */
+  reminders: ReminderLedgerRow[];
+}
+
+interface ReminderCandidate {
+  recipientId: string;
+  kind: SopNotificationKind;
+  anchorAt: string;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Nudges for signer stalls, recomputed from CURRENT state every drain — which is
+ * what makes reminders self-cancelling on recall/rejection/retirement, and what
+ * hands a reassigned seat's new signer their first nudge with no special case.
+ * Nudge 1 anchors on the stall's start; nudge N anchors on nudge N-1's sent_at.
+ */
+export function resolveReminders(now: Date, states: SopReminderState[]): PendingNotification[] {
+  return states.flatMap((state) => remindersForSop(now, state));
+}
+
+function remindersForSop(now: Date, state: SopReminderState): PendingNotification[] {
+  const { sop } = state;
+  if (sop.deletedAt) return [];
+
+  const candidates: ReminderCandidate[] = [];
+
+  if (sop.status === "in_review" && !finalApprovalPhaseActive(sop) && state.reviewSentAt) {
+    const returned = new Set(state.currentReviewReturns);
+    for (const seat of state.seats) {
+      if (seat.rasic === "informed" || !seat.signerId || returned.has(seat.signerId)) continue;
+      candidates.push({ recipientId: seat.signerId, kind: "review_requested", anchorAt: state.reviewSentAt });
+    }
+  }
+
+  if (sop.status === "in_review" && finalApprovalPhaseActive(sop) && sop.finalApprovalRequestedAt) {
+    for (const seat of state.seats) {
+      if (!isBlocking(seat.rasic) || !seat.signerId) continue;
+      const signed = state.currentDeptApprovals.some(
+        (approval) => approval.signerId === seat.signerId && approval.departmentId === seat.departmentId,
+      );
+      if (signed) continue;
+      candidates.push({
+        recipientId: seat.signerId,
+        kind: "final_approval_requested",
+        anchorAt: sop.finalApprovalRequestedAt,
+      });
+    }
+  }
+
+  if (sop.status === "approved" && state.approvedAt) {
+    for (const approver of state.qualityApprovers) {
+      if (approver.holdsSeat || approver.overruledThisCycle) continue;
+      if (approver.userId === sop.authorId || approver.userId === sop.submittedBy) continue;
+      candidates.push({
+        recipientId: approver.userId,
+        kind: "quality_release_requested",
+        anchorAt: state.approvedAt,
+      });
+    }
+  }
+
+  const out: PendingNotification[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = `${candidate.recipientId}:${candidate.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const prior = state.reminders
+      .filter((row) => row.recipientId === candidate.recipientId && row.kind === candidate.kind)
+      .sort((a, b) => a.reminderIndex - b.reminderIndex);
+    const last = prior[prior.length - 1];
+    const nextIndex = last ? last.reminderIndex + 1 : 1;
+    if (nextIndex > MAX_REMINDERS) continue;
+
+    const anchor = last ? last.sentAt : candidate.anchorAt;
+    const waitedDays = (now.getTime() - new Date(anchor).getTime()) / DAY_MS;
+    if (waitedDays < REMINDER_AFTER_DAYS) continue;
+
+    out.push({
+      recipientId: candidate.recipientId,
+      kind: candidate.kind,
+      sopId: sop.id,
+      eventId: null,
+      reminderIndex: nextIndex,
+    });
+  }
+  return out;
+}

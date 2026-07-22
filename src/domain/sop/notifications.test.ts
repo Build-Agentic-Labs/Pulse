@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveEventRecipients,
+  resolveReminders,
   type NotifiableEvent,
   type SopNotificationContext,
   type SopSnapshot,
+  type SopReminderState,
 } from "./notifications";
 
 const sop = (over: Partial<SopSnapshot> = {}): SopSnapshot => ({
@@ -201,5 +203,106 @@ describe("resolveEventRecipients: universal guards", () => {
 
   it("unknown event types resolve to nothing", () => {
     expect(resolveEventRecipients(event({ eventType: "remark_added" }), ctx())).toEqual([]);
+  });
+});
+
+describe("resolveReminders", () => {
+  const NOW = new Date("2026-07-25T12:00:00Z"); // 4 days after 07-21
+  const state = (over: Partial<SopReminderState> = {}): SopReminderState => ({
+    sop: sop(),
+    seats: [
+      { departmentId: "d-r", departmentName: "Engineering", rasic: "responsible", signerId: "resp" },
+      { departmentId: "d-s", departmentName: "Safety", rasic: "support", signerId: "supp" },
+    ],
+    qualityApprovers: [],
+    currentReviewReturns: [],
+    currentDeptApprovals: [],
+    approvedAt: null,
+    reviewSentAt: "2026-07-21T12:00:00Z",
+    reminders: [],
+    ...over,
+  });
+
+  it("nudges every stalled draft-phase reviewer after 3 days", () => {
+    const out = resolveReminders(NOW, [state()]);
+    expect(ids(out)).toEqual(["resp", "supp"]);
+    expect(out.every((n) => n.kind === "review_requested" && n.reminderIndex === 1 && n.eventId === null)).toBe(true);
+  });
+
+  it("does not nudge before the threshold", () => {
+    const early = new Date("2026-07-23T12:00:00Z"); // 2 days
+    expect(resolveReminders(early, [state()])).toEqual([]);
+  });
+
+  it("skips reviewers who already returned their review", () => {
+    expect(ids(resolveReminders(NOW, [state({ currentReviewReturns: ["resp"] })]))).toEqual(["supp"]);
+  });
+
+  it("caps at MAX_REMINDERS", () => {
+    const capped = state({
+      reminders: [
+        { recipientId: "resp", kind: "review_requested", reminderIndex: 1, sentAt: "2026-07-24T12:00:00Z" },
+        { recipientId: "resp", kind: "review_requested", reminderIndex: 2, sentAt: "2026-07-28T12:00:00Z" },
+      ],
+    });
+    const late = new Date("2026-08-15T12:00:00Z");
+    expect(ids(resolveReminders(late, [capped]))).toEqual(["supp"]);
+  });
+
+  it("anchors nudge 2 on nudge 1's sent_at, not the original event", () => {
+    const one = state({
+      reminders: [{ recipientId: "resp", kind: "review_requested", reminderIndex: 1, sentAt: "2026-07-24T00:00:00Z" }],
+    });
+    // 07-25 is only 1.5 days after nudge 1: resp not due; supp (no nudges yet) is.
+    expect(ids(resolveReminders(NOW, [one]))).toEqual(["supp"]);
+    const later = new Date("2026-07-27T06:00:00Z");
+    const out = resolveReminders(later, [one]);
+    expect(out.find((n) => n.recipientId === "resp")?.reminderIndex).toBe(2);
+  });
+
+  it("final-approval phase nudges only unsigned R/A seats", () => {
+    const fa = state({
+      sop: sop({ finalApprovalRequestedAt: "2026-07-21T12:00:00Z", finalApprovalContentHash: "hash-1" }),
+      currentDeptApprovals: [],
+    });
+    const out = resolveReminders(NOW, [fa]);
+    expect(ids(out)).toEqual(["resp"]); // supp is not R/A
+    expect(out[0].kind).toBe("final_approval_requested");
+  });
+
+  it("final-approval nudge respects an existing signature for that seat", () => {
+    const fa = state({
+      sop: sop({ finalApprovalRequestedAt: "2026-07-21T12:00:00Z", finalApprovalContentHash: "hash-1" }),
+      currentDeptApprovals: [{ signerId: "resp", departmentId: "d-r" }],
+    });
+    expect(resolveReminders(NOW, [fa])).toEqual([]);
+  });
+
+  it("quality stall nudges unbarred approvers, anchored on approved_at", () => {
+    const q = state({
+      sop: sop({ status: "approved" }),
+      approvedAt: "2026-07-21T12:00:00Z",
+      qualityApprovers: [
+        { userId: "q-clean", holdsSeat: false, overruledThisCycle: false },
+        { userId: "q-seated", holdsSeat: true, overruledThisCycle: false },
+      ],
+    });
+    const out = resolveReminders(NOW, [q]);
+    expect(ids(out)).toEqual(["q-clean"]);
+    expect(out[0].kind).toBe("quality_release_requested");
+  });
+
+  it("self-cancels: a recalled SOP produces no reminders", () => {
+    expect(resolveReminders(NOW, [state({ sop: sop({ status: "draft" }) })])).toEqual([]);
+  });
+
+  it("a reassigned seat's new signer gets nudge 1 (their first contact)", () => {
+    const reassigned = state({
+      seats: [{ departmentId: "d-r", departmentName: "Engineering", rasic: "responsible", signerId: "new-signer" }],
+      reminders: [{ recipientId: "old-signer", kind: "review_requested", reminderIndex: 1, sentAt: "2026-07-22T12:00:00Z" }],
+    });
+    const out = resolveReminders(NOW, [reassigned]);
+    expect(ids(out)).toEqual(["new-signer"]);
+    expect(out[0].reminderIndex).toBe(1);
   });
 });

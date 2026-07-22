@@ -1,8 +1,8 @@
 import {
+  GatedPlanningRouteShell,
   HomeRouteShell,
   MobilePhotoRouteShell,
   PlannerRouteShell,
-  PlanningRouteShell,
   ProductionRouteShell,
 } from "@/components/project-route-shells";
 
@@ -34,7 +34,7 @@ function routeShellForReturnTo(returnTo?: string) {
   }
 
   if (pathname === "/planning") {
-    return <PlanningRouteShell />;
+    return <GatedPlanningRouteShell />;
   }
 
   if (pathname === "/production") {

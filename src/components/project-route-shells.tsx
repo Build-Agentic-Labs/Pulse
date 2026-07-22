@@ -33,8 +33,13 @@ const MobilePhotoPortal = dynamic(
   () => import("./mobile-photo-portal").then((module) => module.MobilePhotoPortal),
   { loading: () => <AppLoadingShell title="Opening photos" /> },
 );
-// `PlanningRoute` is no longer imported here — `app/planning/layout.tsx` mounts it once for the
-// whole space instead of each route wrapping itself in it.
+// `app/planning/(workspace)/layout.tsx` mounts this once for the whole space, so in-space routes
+// do not wrap themselves in it. It is still needed for `GatedPlanningRouteShell` below, which
+// renders the board from OUTSIDE that layout.
+const PlanningRoute = dynamic(
+  () => import("./planning/planning-route").then((module) => module.PlanningRoute),
+  { loading: () => <PlanningLoadingState /> },
+);
 const WorkOrderBoard = dynamic(
   () => import("./planning/work-order-board").then((module) => module.WorkOrderBoard),
   { loading: () => <PlanningLoadingState /> },
@@ -62,13 +67,30 @@ export function HomeRouteShell({ initialGroups }: ShellProps = {}) {
 }
 
 /**
- * The Planning board. Auth, workspace and the access gate are provided once by
- * `app/planning/layout.tsx`, so this shell no longer wraps itself in `PlanningRoute` — doing so
- * would re-run the gate on every navigation, which is the flash the layout exists to remove.
- * The dynamic import stays: it keeps the board out of the initial bundle.
+ * The Planning board, for routes UNDER `app/planning/(workspace)/` — that layout provides auth,
+ * the workspace provider and the access gate once, so wrapping again here would re-run the gate
+ * on every navigation, which is the flash the layout exists to remove. The dynamic import stays:
+ * it keeps the board out of the initial bundle.
  */
 export function PlanningRouteShell() {
   return <WorkOrderBoard />;
+}
+
+/**
+ * The same board WITH its own gate, for rendering outside the Planning layout — specifically
+ * `/login?returnTo=/planning`, which renders the destination in place so an unauthenticated
+ * visitor gets the sign-in panel and lands where they were headed. Without the gate the board
+ * would call `usePlanningWorkspace()` with no provider above it and throw, turning a sign-in
+ * into an error screen.
+ */
+export function GatedPlanningRouteShell({ initialGroups }: ShellProps = {}) {
+  return (
+    <PlanningRoute initialGroups={initialGroups}>
+      <div className="flex h-[100dvh] flex-col">
+        <WorkOrderBoard />
+      </div>
+    </PlanningRoute>
+  );
 }
 
 export function SettingsRouteShell({ initialGroups }: ShellProps = {}) {

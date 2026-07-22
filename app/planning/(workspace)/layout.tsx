@@ -9,10 +9,18 @@ export const metadata = {
 };
 
 /**
- * One shell for the whole Planning space. Mounting the provider and the sidebar HERE rather than
- * per page means auth + workspace load ONCE and stay mounted while the planner moves between
+ * One shell for the Planning WORKSPACE routes. Mounting the provider and the sidebar HERE rather
+ * than per page means auth + workspace load ONCE and stay mounted while the planner moves between
  * Sales orders, Work orders and Product configuration -- no gate re-run, no sidebar flash. Same
  * fix `app/sops/layout.tsx` made for Quality.
+ *
+ * WHY THE `(workspace)` ROUTE GROUP: the print routes (`/planning/print` and
+ * `/planning/work-orders/[id]/print`) deliberately sit OUTSIDE it. They are documents, not
+ * screens -- a fixed `h-[100dvh] overflow-hidden` ancestor clips printed output to the first
+ * page, which is exactly what `work-order-print.tsx`'s `.wo-print-scroll` reset exists to
+ * prevent, and a sidebar would land on the paper in landscape. The group keeps this chrome off
+ * them entirely instead of relying on print-media overrides to undo it. They keep their own
+ * `PlanningRoute` gate.
  *
  * This is a server component: it performs the first-paint fetch, and `children` stay server
  * components even though `PlanningRoute` is a client component. A client component may receive

@@ -338,20 +338,30 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+const SEAT_REASON = "You are receiving this because you hold a review seat on this SOP.";
+
 /**
  * Four literal templates, one per kind — deliberately no engine, no registry
- * (spec's YAGNI cuts). Email is a UI surface: plain sentences, one link.
+ * (spec's YAGNI cuts). The html is a branded, email-client-safe card: inline
+ * styles only, table layout (Outlook), squared 4px geometry to match the app's
+ * design language, and a per-kind accent + "why you got this" footer.
  */
 export function renderSopNotificationEmail(input: SopEmailInput): SopEmailContent {
   const label = `${input.sopNumber ?? "SOP"} "${input.title ?? "Untitled SOP"}"`;
   const link = `${input.origin}/sops/${input.sopId}`;
 
   let subject: string;
+  let eyebrow: string;
+  let accent: string;
+  let reason: string;
   let happened: string;
   let needed: string;
   switch (input.kind) {
     case "review_requested":
       subject = `Review requested: ${label}${input.version ? ` (Rev ${input.version})` : ""}`;
+      eyebrow = "Review requested";
+      accent = "#2563eb";
+      reason = SEAT_REASON;
       happened = `${input.actorName} sent ${label} for review.`;
       needed = input.departmentName
         ? `You are the reviewer for the ${input.departmentName} seat — please review it and return your result.`
@@ -359,6 +369,9 @@ export function renderSopNotificationEmail(input: SopEmailInput): SopEmailConten
       break;
     case "final_approval_requested":
       subject = `Signature needed: ${label}`;
+      eyebrow = "Signature needed";
+      accent = "#7c3aed";
+      reason = SEAT_REASON;
       happened = `Every reviewer accepted ${label}.`;
       needed = input.departmentName
         ? `Your formal ${input.departmentName} department signature is needed to approve it.`
@@ -366,11 +379,17 @@ export function renderSopNotificationEmail(input: SopEmailInput): SopEmailConten
       break;
     case "quality_release_requested":
       subject = `Ready for release: ${label}`;
+      eyebrow = "Ready for release";
+      accent = "#059669";
+      reason = "You are receiving this because you are a Quality approver in this workspace.";
       happened = `${label} has every department signature.`;
       needed = `As a Quality approver, you can review it and make it effective.`;
       break;
     case "sent_back":
       subject = `Sent back with remarks: ${label}`;
+      eyebrow = "Sent back";
+      accent = "#dc2626";
+      reason = "You are receiving this because you are the author of this SOP.";
       happened = `${input.actorName} sent ${label} back.`;
       needed = `Please address the remarks and resubmit it for review.`;
       break;
@@ -378,23 +397,45 @@ export function renderSopNotificationEmail(input: SopEmailInput): SopEmailConten
 
   const isReminder = input.reminderIndex > 0;
   if (isReminder) subject = `Reminder: ${subject}`;
+  const eyebrowText = isReminder ? `Reminder — ${eyebrow}` : eyebrow;
   const waiting =
     isReminder && input.waitingDays !== null ? `This has been waiting ${input.waitingDays} days.` : null;
 
-  const textLines = [happened, needed, waiting, `Open it: ${link}`].filter(Boolean);
-  const htmlParagraphs = [happened, needed, waiting]
-    .filter((line): line is string => Boolean(line))
-    .map((line) => `<p style="margin:0 0 12px">${escapeHtml(line)}</p>`)
-    .join("");
+  const heading = `${input.sopNumber ?? "SOP"} — ${input.title ?? "Untitled SOP"}${
+    input.version ? ` (Rev ${input.version})` : ""
+  }`;
+  const host = input.origin.replace(/^https?:\/\//, "");
 
-  return {
-    subject,
-    text: textLines.join("\n\n"),
-    html:
-      `<div style="font-family:system-ui,sans-serif;font-size:14px;color:#111">` +
-      htmlParagraphs +
-      `<p style="margin:16px 0 0"><a href="${link}" ` +
-      `style="display:inline-block;padding:8px 14px;background:#111;color:#fff;text-decoration:none">` +
-      `Open in Pulse</a></p></div>`,
-  };
+  const textLines = [happened, needed, waiting, `Open it: ${link}`, "—", reason, input.origin].filter(Boolean);
+
+  const bodyParagraph = (line: string): string =>
+    `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#3f3f46;">${escapeHtml(line)}</p>`;
+  const waitingNote = waiting
+    ? `<p style="margin:0 0 12px;padding:10px 14px;background:#fef3c7;border-radius:4px;font-size:13px;line-height:1.5;color:#92400e;">${escapeHtml(waiting)}</p>`
+    : "";
+
+  const html =
+    `<div style="margin:0;padding:32px 16px;background:#f4f4f5;font-family:-apple-system,'Segoe UI',system-ui,sans-serif;">` +
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" width="100%" style="max-width:560px;margin:0 auto;">` +
+    `<tr><td style="padding:0 2px 14px;">` +
+    `<span style="font-size:17px;font-weight:700;letter-spacing:0.02em;color:#111111;">Pulse</span>` +
+    `<span style="font-size:12px;color:#71717a;">&nbsp;&middot;&nbsp;SOP document control</span>` +
+    `</td></tr>` +
+    `<tr><td style="background:#ffffff;border:1px solid #e4e4e7;border-top:3px solid ${accent};border-radius:4px;padding:28px 32px;">` +
+    `<p style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${accent};">${escapeHtml(eyebrowText)}</p>` +
+    `<p style="margin:0 0 16px;font-size:17px;font-weight:600;line-height:1.4;color:#111111;">${escapeHtml(heading)}</p>` +
+    bodyParagraph(happened) +
+    bodyParagraph(needed) +
+    waitingNote +
+    `<p style="margin:20px 0 0;"><a href="${link}" ` +
+    `style="display:inline-block;padding:10px 18px;background:#111111;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:4px;">` +
+    `Open in Pulse</a></p>` +
+    `</td></tr>` +
+    `<tr><td style="padding:16px 2px 0;font-size:12px;line-height:1.6;color:#71717a;">` +
+    `${escapeHtml(reason)}<br>` +
+    `<a href="${input.origin}" style="color:#71717a;">${escapeHtml(host)}</a>&nbsp;&middot;&nbsp;Automated notification from Pulse &mdash; replies are not monitored.` +
+    `</td></tr>` +
+    `</table></div>`;
+
+  return { subject, text: textLines.join("\n\n"), html };
 }

@@ -367,4 +367,37 @@ describe("renderSopNotificationEmail", () => {
     const out = renderSopNotificationEmail(input({ sopNumber: null, title: null, version: null }));
     expect(out.subject).toBe('Review requested: SOP "Untitled SOP"');
   });
+
+  it("brands the html with the Pulse wordmark and an uppercase kind eyebrow", () => {
+    const { html } = renderSopNotificationEmail(input());
+    expect(html).toContain(">Pulse</span>");
+    expect(html).toContain("Review requested</p>");
+  });
+
+  it("footer explains why the recipient got the email, per kind", () => {
+    expect(renderSopNotificationEmail(input()).html).toContain("you hold a review seat");
+    expect(renderSopNotificationEmail(input({ kind: "final_approval_requested" })).html).toContain(
+      "you hold a review seat",
+    );
+    expect(renderSopNotificationEmail(input({ kind: "quality_release_requested" })).html).toContain(
+      "Quality approver",
+    );
+    expect(renderSopNotificationEmail(input({ kind: "sent_back" })).html).toContain("author of this SOP");
+  });
+
+  it("text version carries the reason footer too", () => {
+    expect(renderSopNotificationEmail(input()).text).toContain("you hold a review seat");
+  });
+
+  it("reminder emails mark the eyebrow and render the waiting line as a note", () => {
+    const { html } = renderSopNotificationEmail(input({ reminderIndex: 1, waitingDays: 4 }));
+    expect(html).toContain("Reminder — Review requested</p>");
+    expect(html).toContain("waiting 4 days");
+  });
+
+  it("escapes the title inside the card heading", () => {
+    const { html } = renderSopNotificationEmail(input({ title: '<b>"sneaky"</b>' }));
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;b&gt;");
+  });
 });

@@ -234,6 +234,11 @@ describe("resolveReminders", () => {
     expect(resolveReminders(early, [state()])).toEqual([]);
   });
 
+  it("fires at exactly the 3-day boundary", () => {
+    const exact = new Date("2026-07-24T12:00:00Z"); // anchor 2026-07-21T12:00:00Z + exactly 72h
+    expect(ids(resolveReminders(exact, [state()]))).toEqual(["resp", "supp"]);
+  });
+
   it("skips reviewers who already returned their review", () => {
     expect(ids(resolveReminders(NOW, [state({ currentReviewReturns: ["resp"] })]))).toEqual(["supp"]);
   });

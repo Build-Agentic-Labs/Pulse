@@ -94,6 +94,10 @@ export function orderNoMonthKey(orderDate: string): string {
 
 /**
  * Next number in the month's series: `{PREFIX}-MMYY-NN`, restarting at 01 each month.
+ *
+ * Pass only APPROVED order numbers. Under decision N1 a draft has no `order_no` at all, so
+ * counting drafts here would burn numbers on orders that may never be approved and leave
+ * permanent holes in the sequence production builds against. Drafts carry `suggestDraftNo`.
  * GEN (head_unit) and PM (power_module) share a single per-month sequence pool — a set's
  * Main and Power Module carry the same NN — so numbering either one scans BOTH GEN- and PM-
  * numbers for the month, ensuring a set's NN is never reused by either side. Other types
@@ -124,6 +128,40 @@ export function suggestOrderNo(
     }
   }
   return `${prefix}-${mmyy}-${String(max + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Provisional draft prefix. Deliberately distinct from every `ORDER_TYPE_PREFIXES` value so a
+ * draft id can never be mistaken for an official work-order number on paper or in a spreadsheet.
+ * The trailing hyphen matters when scanning: `DEC-` (decal) also begins with D.
+ */
+export const DRAFT_PREFIX = "D";
+
+/**
+ * Next provisional draft number: `D-MMYY-NN`, restarting at 01 each month.
+ *
+ * Gaps in THIS series are expected and harmless — that is the entire point of minting the
+ * OFFICIAL number at approval instead (design decision N1). Discarding a draft costs nothing,
+ * which is what keeps the `GEN-` sequence production builds against contiguous.
+ *
+ * Pass only draft numbers; official numbers are ignored anyway, but the two series are separate
+ * pools and mixing them would be a category error at the call site.
+ */
+export function suggestDraftNo(existingDraftNos: readonly string[], orderDate: string): string {
+  const mmyy = orderNoMonthKey(orderDate);
+  const scan = `${DRAFT_PREFIX}-${mmyy}-`;
+  let max = 0;
+  for (const draftNo of existingDraftNos) {
+    const normalized = (draftNo ?? "").trim().toUpperCase();
+    if (!normalized.startsWith(scan)) {
+      continue;
+    }
+    const sequence = Number.parseInt(normalized.slice(scan.length), 10);
+    if (Number.isFinite(sequence) && sequence > max) {
+      max = sequence;
+    }
+  }
+  return `${scan}${String(max + 1).padStart(2, "0")}`;
 }
 
 /** Trailer supermarket order number: `TRL-MMYY-{LETTER}` (one per config letter per month). */

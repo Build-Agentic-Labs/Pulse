@@ -2945,6 +2945,14 @@ export type Database = {
         Args: { p_details?: Json; p_event_type: string; p_sop: string }
         Returns: undefined
       }
+      approve_work_order_set: {
+        Args: { p_main_id: string; p_workspace_id: string }
+        Returns: {
+          order_no: string
+          pm_order_no: string
+          set_no: string
+        }[]
+      }
       can_edit_sop_content: { Args: { p_sop: string }; Returns: boolean }
       can_edit_sop_roster: { Args: { p_sop: string }; Returns: boolean }
       can_read_sop: { Args: { p_sop: string }; Returns: boolean }

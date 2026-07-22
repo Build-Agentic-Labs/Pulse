@@ -597,6 +597,48 @@ async function createGenPmSet(
   throw new Error("Could not allocate a unique set number; try again.");
 }
 
+/** What approval minted: the official numbers and the shared set number. */
+export interface ApproveWorkOrderSetResult {
+  orderNo: string;
+  pmOrderNo: string | null;
+  setNo: string;
+}
+
+/**
+ * Approve a draft set: mint `GEN-MMYY-NN`, stamp the same `NN` on its married Power Module, and
+ * release both — atomically, in one database function.
+ *
+ * This is the only write in Planning that is an RPC rather than a store call. Every other write
+ * is a single row where a client round-trip is safe; this one has a multi-row invariant (a
+ * numbered Main must never outlive an unnumbered PM) and allocates a number that must stay
+ * CONTIGUOUS, which a client-side max+1 cannot guarantee under concurrency — the unique index
+ * gives uniqueness, but two racing approvals would leave a permanent hole in the sequence
+ * production builds against.
+ */
+export async function approveWorkOrderSet(
+  workspaceId: string,
+  mainId: string,
+): Promise<ApproveWorkOrderSetResult> {
+  const supabase = createPlannerSupabaseClient();
+  const { data, error } = await supabase.rpc("approve_work_order_set", {
+    p_workspace_id: workspaceId,
+    p_main_id: mainId,
+  });
+  if (error) {
+    throw new Error(`Could not approve the work order: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) {
+    throw new Error("Approval returned no order number.");
+  }
+  return {
+    orderNo: String(row.order_no ?? ""),
+    pmOrderNo: row.pm_order_no ? String(row.pm_order_no) : null,
+    setNo: String(row.set_no ?? ""),
+  };
+}
+
 export async function updateWorkOrderHeader(
   workspaceId: string,
   id: string,

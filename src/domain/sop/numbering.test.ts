@@ -2,15 +2,15 @@ import { describe, it, expect } from "vitest";
 import { formatSopNumber, parseSopNumber } from "./numbering";
 
 describe("SOP numbering", () => {
-  it("formats DEPT-TYPE-NNN with zero padding", () => {
-    expect(formatSopNumber("qa", "sop", 14)).toBe("QA-SOP-014");
-    expect(formatSopNumber("ENG", "WI", 7)).toBe("ENG-WI-007");
-    expect(formatSopNumber("QA", "SOP", 1234)).toBe("QA-SOP-1234");
+  it("formats TYPE-DEPT-NNN with zero padding", () => {
+    expect(formatSopNumber("qas", "sop", 14)).toBe("SOP-QAS-014");
+    expect(formatSopNumber("MFG", "WI", 7)).toBe("WI-MFG-007");
+    expect(formatSopNumber("QAS", "SOP", 1234)).toBe("SOP-QAS-1234");
   });
 
   it("parses a valid number", () => {
-    expect(parseSopNumber("QA-SOP-014")).toEqual({ dept: "QA", type: "SOP", seq: 14 });
-    expect(parseSopNumber("eng-wi-007")).toEqual({ dept: "ENG", type: "WI", seq: 7 });
+    expect(parseSopNumber("SOP-QAS-014")).toEqual({ dept: "QAS", type: "SOP", seq: 14 });
+    expect(parseSopNumber("wi-mfg-007")).toEqual({ dept: "MFG", type: "WI", seq: 7 });
   });
 
   it("returns null for non-matching strings", () => {

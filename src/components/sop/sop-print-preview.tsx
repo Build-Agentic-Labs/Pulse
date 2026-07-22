@@ -73,7 +73,7 @@ function DocumentHeader({ sop, reviewCategory }: { sop: Sop; reviewCategory?: st
     <header className="sop-export-header" data-review-category={reviewCategory}>
       <div className="sop-export-header-main">
         <NextImage src="/sop/ana-logo.png" alt="ANA Inc." width={150} height={42} />
-        <div>{`${sop.meta.sopNumber || "SOP-QA-00X"}: ${sop.meta.title || ""}`.trim()}</div>
+        <div>{`${sop.meta.sopNumber || "SOP-QAS-00X"}: ${sop.meta.title || ""}`.trim()}</div>
       </div>
       <div className="sop-export-header-info">
         <div>Version: {sop.meta.version || "1.0"}</div>

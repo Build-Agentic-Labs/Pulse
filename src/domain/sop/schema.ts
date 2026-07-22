@@ -2,7 +2,7 @@
  * Canonical SOP data model.
  *
  * Derived directly from the company standard template (`assets/sop-template.docx`,
- * "SOP-QA-00X: QMS"). This type is the single source of truth for the whole SOP
+ * "SOP-QAS-00X: QMS"). This type is the single source of truth for the whole SOP
  * feature: the create/edit form edits a `Sop`, the legacy-document converter maps
  * old PDFs/DOCX *into* a `Sop`, and the DOCX exporter fills the template *from* a
  * `Sop`. Change the company standard => change this file first.
@@ -49,7 +49,7 @@ export const SOP_STATUS_LABELS: Record<SopStatus, string> = {
 // ---------------------------------------------------------------------------
 
 export interface SopMeta {
-  /** Document number, e.g. "SOP-QA-001". */
+  /** Document number, e.g. "SOP-QAS-001". */
   sopNumber: string;
   /** Short title, e.g. "QMS". */
   title: string;
@@ -117,7 +117,7 @@ export interface SopLinkedSop {
   title: string;
 }
 
-/** "SOP-QA-001 — QMS" (degrades gracefully when either half is blank). */
+/** "SOP-QAS-001 — QMS" (degrades gracefully when either half is blank). */
 export function linkedSopLabel(link: SopLinkedSop): string {
   if (link.sopNumber && link.title) return `${link.sopNumber} — ${link.title}`;
   return link.sopNumber || link.title || link.sopId;

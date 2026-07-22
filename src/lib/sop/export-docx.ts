@@ -260,7 +260,7 @@ function buildHeader(sop: Sop, logo: Uint8Array | null): Header {
     ? [new ImageRun({ type: "png", data: logo, transformation: { width: 150, height: 42 } })]
     : [new TextRun({ text: "ANA INC.", bold: true, size: 28, color: INK, font: FONT })];
 
-  const title = `${sop.meta.sopNumber || "SOP-QA-00X"}: ${sop.meta.title || ""}`.trim();
+  const title = `${sop.meta.sopNumber || "SOP-QAS-00X"}: ${sop.meta.title || ""}`.trim();
 
   // Fully-bordered header box matching the company template: a tall logo + title cell on the
   // left, and three stacked info cells (version / revision / effective) on the right. Every

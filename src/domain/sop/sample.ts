@@ -75,7 +75,7 @@ export function applySampleData(sop: Sop): Sop {
   return {
     ...sop,
     meta: {
-      sopNumber: "SOP-QA-001",
+      sopNumber: "SOP-QAS-001",
       title: "QMS",
       version: "1.0",
       revisionDate: "",

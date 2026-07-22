@@ -2,7 +2,7 @@
 -- Run with the local Supabase stack:  supabase db reset && supabase test db
 --
 -- Core invariants that survive the RASIC redesign, corrected for the new contract:
---   * DEPT-TYPE-NNN numbering format + transactional mint
+--   * TYPE-DEPT-NNN numbering format + transactional mint
 --   * a client cannot INSERT a born-"effective" SOP (guard INSERT branch)
 --   * content is frozen once an SOP leaves draft
 --   * dept approval is quorum-driven: sign_sop auto-advances in_review -> approved when
@@ -73,12 +73,12 @@ end $$;
 select test_as('11111111-1111-1111-1111-111111111111');
 select is(
   public.next_sop_number('ws_test', 'dept_prd', 'SOP'),
-  'PRD-SOP-001',
-  'next_sop_number formats DEPT-TYPE-NNN and starts at 001'
+  'SOP-PRD-001',
+  'next_sop_number formats TYPE-DEPT-NNN and starts at 001'
 );
 select is(
   public.next_sop_number('ws_test', 'dept_prd', 'SOP'),
-  'PRD-SOP-002',
+  'SOP-PRD-002',
   'next_sop_number increments transactionally'
 );
 
@@ -86,7 +86,7 @@ select is(
 -- 2. A client cannot INSERT a born-"effective" SOP — the guard forces draft.
 -- ---------------------------------------------------------------------------
 insert into public.sops (id, workspace_id, sop_number, title, document, status, created_by, department_id)
-values ('sop_born', 'ws_test', 'PRD-SOP-050', 'Sneaky', '{}'::jsonb, 'effective',
+values ('sop_born', 'ws_test', 'SOP-PRD-050', 'Sneaky', '{}'::jsonb, 'effective',
         '11111111-1111-1111-1111-111111111111', 'dept_prd');
 select is(
   (select status from public.sops where id = 'sop_born'),
@@ -97,7 +97,7 @@ select is(
 -- A working draft to drive the lifecycle. Seats: one responsible (owning dept) and the
 -- mandatory accountable seat (another dept). The submitter (u1) holds no seat.
 insert into public.sops (id, workspace_id, sop_number, title, document, status, created_by, department_id)
-values ('sop_1', 'ws_test', 'PRD-SOP-010', 'Torque spec', '{"body":"v1"}'::jsonb, 'draft',
+values ('sop_1', 'ws_test', 'SOP-PRD-010', 'Torque spec', '{"body":"v1"}'::jsonb, 'draft',
         '11111111-1111-1111-1111-111111111111', 'dept_prd');
 
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values

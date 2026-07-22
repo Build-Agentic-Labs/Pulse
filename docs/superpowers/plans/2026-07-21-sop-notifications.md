@@ -30,7 +30,7 @@
 ### Task 1: Migration — `sop_notifications` ledger
 
 **Files:**
-- Create: `supabase/migrations/20260721150000_sop_notifications_ledger.sql`
+- Create: `supabase/migrations/20260721170000_sop_notifications_ledger.sql`
 - Modify (generated): `src/lib/database.types.ts`
 
 **Interfaces:**
@@ -87,29 +87,37 @@ revoke all on public.sop_notifications from anon, authenticated;
 
 - [ ] **Step 2: Apply to the live database**
 
-Try: `npx supabase db push`
-If the CLI is not linked/authorized: **PAUSE** and ask your human partner to paste the file into the Supabase SQL editor (project `neaadefipcpxxcqszpud`) and run it, then continue. Do not skip ahead.
+**Do NOT use `npx supabase db push`** — this repo does not register migrations in supabase's history table; pushing would try to re-apply already-live migrations. Use the repo's safe applier (transactional, row-count-guarded):
+
+Run: `node --env-file=.env.local scripts/apply-migration-safely.mjs 20260721170000_sop_notifications_ledger.sql`
+Expected: applies cleanly, zero row-count changes reported.
 
 - [ ] **Step 3: Verify RLS posture**
 
-Run in the SQL editor (or `psql`) as a check — expected: `rowsecurity = true` and zero policies:
+Run:
 
-```sql
-select relrowsecurity from pg_class where relname = 'sop_notifications';
-select count(*) from pg_policies where tablename = 'sop_notifications';
+```bash
+node --env-file=.env.local --input-type=module -e "
+import pg from 'pg';
+const c = new pg.Client({ connectionString: process.env.DATABASE_URL });
+await c.connect();
+const r = await c.query(\"select (select relrowsecurity from pg_class where relname='sop_notifications') as rls, (select count(*)::int from pg_policies where tablename='sop_notifications') as policies\");
+console.log(JSON.stringify(r.rows[0]));
+await c.end();
+"
 ```
 
-Expected: `true`, `0`.
+Expected: `{"rls":true,"policies":0}`.
 
 - [ ] **Step 4: Regenerate types**
 
-Run: `npm run gen:types` (needs `SUPABASE_ACCESS_TOKEN`; if missing, PAUSE and ask).
-Expected: `src/lib/database.types.ts` gains a `sop_notifications` block.
+Run: `npx supabase gen types typescript --project-id neaadefipcpxxcqszpud --schema public > src/lib/database.types.ts`
+(Stored CLI login is already authorized — verified.) Then confirm: `grep -c "sop_notifications" src/lib/database.types.ts` returns > 0 and `git diff --stat src/lib/database.types.ts` shows only additions.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add supabase/migrations/20260721150000_sop_notifications_ledger.sql src/lib/database.types.ts
+git add supabase/migrations/20260721170000_sop_notifications_ledger.sql src/lib/database.types.ts
 git commit -m "feat(sop): sop_notifications send ledger (service-role only)"
 ```
 

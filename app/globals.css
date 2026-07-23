@@ -2579,7 +2579,7 @@ body {
   .ui-dept-workbench {
     border-top: 1px solid var(--color-border);
     border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface);
+    background: transparent;
   }
 
   .ui-dept-row {
@@ -2587,7 +2587,8 @@ body {
   }
 
   .ui-dept-row-active {
-    background: var(--color-surface-muted);
+    background: transparent;
+    box-shadow: inset 2px 0 0 var(--color-ink);
   }
 
   .ui-dept-code {

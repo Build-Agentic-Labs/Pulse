@@ -344,7 +344,7 @@ function NewDepartmentForm({ saving, onSubmit, onCancel }: NewDepartmentFormProp
   }
 
   return (
-    <section className="space-y-3 border-y border-line bg-surface px-5 py-4">
+    <section className="space-y-3 border-y border-line px-5 py-4">
       <div className="ui-mono-label text-ink-secondary">New department</div>
       <div className="grid gap-3 sm:grid-cols-[120px_1fr]">
         <input

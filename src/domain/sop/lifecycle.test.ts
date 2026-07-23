@@ -40,7 +40,7 @@ describe("canTransitionSop", () => {
       expect(canTransitionSop({ ...base, hasResponsibleSeat: false }).ok).toBe(false);
     });
 
-    it("blocks submitting without exactly one Accountable seat", () => {
+    it("blocks submitting without exactly one Approve duty", () => {
       expect(canTransitionSop({ ...base, accountableSeatCount: 0 }).ok).toBe(false);
       expect(canTransitionSop({ ...base, accountableSeatCount: 2 }).ok).toBe(false);
     });

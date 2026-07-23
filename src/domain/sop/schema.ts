@@ -10,7 +10,7 @@
 
 // ---------------------------------------------------------------------------
 // RASIC — the responsibility legend used in the Procedure section.
-// R: Responsible. A: Approval. S: Support. I: Information. C: Collaboration.
+// R: Responsible. A: Approve. S: Support. I: Inform. C: Consult.
 // ---------------------------------------------------------------------------
 
 export const RASIC_CODES = ["R", "A", "S", "I", "C"] as const;
@@ -18,13 +18,13 @@ export type RasicCode = (typeof RASIC_CODES)[number];
 
 export const RASIC_LABELS: Record<RasicCode, string> = {
   R: "Responsible",
-  A: "Approval",
+  A: "Approve",
   S: "Support",
-  I: "Information",
-  C: "Collaboration",
+  I: "Inform",
+  C: "Consult",
 };
 
-/** "R: Responsible · A: Approval · …" — the legend shown in the editor and export. */
+/** "R: Responsible · A: Approve · …" — the legend shown in the editor and export. */
 export function rasicLegend(separator = "  ·  "): string {
   return RASIC_CODES.map((code) => `${code}: ${RASIC_LABELS[code]}`).join(separator);
 }

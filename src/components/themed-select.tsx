@@ -17,6 +17,8 @@ export type ThemedSelectOption = {
   value: string;
   label: string;
   disabled?: boolean;
+  /** Optional visual group heading. Consecutive options with the same group share one heading. */
+  group?: string;
 };
 
 type ThemedSelectProps = {
@@ -24,10 +26,13 @@ type ThemedSelectProps = {
   options: readonly ThemedSelectOption[];
   onChange: (value: string) => void;
   ariaLabel?: string;
+  autoOpen?: boolean;
   className?: string;
   disabled?: boolean;
   menuAlign?: "left" | "right";
   placeholder?: string;
+  /** Optional compact trigger text when the menu labels need to be more descriptive. */
+  selectedLabel?: string;
   triggerClassName?: string;
   variant?: "default" | "sop";
 };
@@ -37,10 +42,12 @@ export function ThemedSelect({
   options,
   onChange,
   ariaLabel,
+  autoOpen = false,
   className = "",
   disabled = false,
   menuAlign = "left",
   placeholder,
+  selectedLabel,
   triggerClassName = "",
   variant = "default",
 }: ThemedSelectProps) {
@@ -51,8 +58,12 @@ export function ThemedSelect({
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
   const selected = useMemo(() => options.find((option) => option.value === value), [options, value]);
-  const visibleLabel = selected?.label ?? placeholder ?? options[0]?.label ?? "Select";
+  const visibleLabel = selectedLabel ?? selected?.label ?? placeholder ?? options[0]?.label ?? "Select";
   const isSop = variant === "sop";
+
+  useEffect(() => {
+    if (autoOpen && !disabled) setOpen(true);
+  }, [autoOpen, disabled]);
 
   useEffect(() => {
     if (!open) {
@@ -198,21 +209,28 @@ export function ThemedSelect({
           style={menuStyle ?? undefined}
           onKeyDown={handleMenuKeyDown}
         >
-          {options.map((option) => {
+          {options.map((option, index) => {
             const selectedOption = option.value === value;
+            const showGroup = Boolean(option.group && option.group !== options[index - 1]?.group);
             return (
-              <button
-                key={option.value}
-                type="button"
-                className={`ui-themed-select-option ${isSop ? "ui-themed-select-option-sop" : ""}`}
-                role="option"
-                aria-selected={selectedOption}
-                disabled={option.disabled}
-                onClick={() => commit(option.value)}
-              >
-                <span className="ui-themed-select-option-label">{option.label}</span>
-                {selectedOption ? <Check size={13} className="ui-themed-select-check" aria-hidden="true" /> : null}
-              </button>
+              <div key={`${option.group ?? "ungrouped"}:${option.value}`} role="presentation">
+                {showGroup ? (
+                  <div className="ui-themed-select-group" role="presentation">
+                    {option.group}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  className={`ui-themed-select-option ${option.group ? "ui-themed-select-option-grouped" : ""} ${isSop ? "ui-themed-select-option-sop" : ""}`}
+                  role="option"
+                  aria-selected={selectedOption}
+                  disabled={option.disabled}
+                  onClick={() => commit(option.value)}
+                >
+                  <span className="ui-themed-select-option-label" title={option.label}>{option.label}</span>
+                  {selectedOption ? <Check size={13} className="ui-themed-select-check" aria-hidden="true" /> : null}
+                </button>
+              </div>
             );
           })}
         </div>,

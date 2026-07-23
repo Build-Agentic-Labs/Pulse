@@ -52,11 +52,11 @@ interface ApprovalSignatureEntry {
 }
 
 const APPROVAL_RASIC_LABELS: Record<SopRasic, string> = {
-  responsible: "Responsible department approval",
-  accountable: "Accountable department approval",
-  support: "Support review",
-  consulted: "Consulted review",
-  informed: "Information only",
+  responsible: "Responsible — department approval",
+  accountable: "Approve — department approval",
+  support: "Support — review",
+  consulted: "Consult — review",
+  informed: "Inform — no signature",
 };
 
 function isPdf(file: SopAnnexFile): boolean {
@@ -165,24 +165,13 @@ function EmptyAwareText({ value }: { value: string }) {
 }
 
 function ApprovalTable({
-  sop,
   entries,
   revealSignatureId,
 }: {
-  sop: Sop;
   entries: ApprovalSignatureEntry[] | null;
   revealSignatureId?: string | null;
 }) {
-  const rows = entries?.length
-    ? entries
-    : sop.approvals.map((row, index) => ({
-        key: `legacy-${index}`,
-        approval: row.role,
-        name: row.name,
-        position: row.position,
-        signedAt: null,
-        signatureStrokes: [],
-      }));
+  const rows = entries ?? [];
 
   return (
     <table className="sop-export-table">
@@ -896,9 +885,11 @@ export function SopPrintPreview({
                     </tbody>
                   </table>
                 </Section>
-                <Section title="Change Approvals">
-                  <ApprovalTable sop={sop} entries={approvalEntries} revealSignatureId={revealSignatureId} />
-                </Section>
+                {approvalEntries?.length ? (
+                  <Section title="Change Approvals">
+                    <ApprovalTable entries={approvalEntries} revealSignatureId={revealSignatureId} />
+                  </Section>
+                ) : null}
               </>
             ) : null}
           </DocumentPage>
@@ -916,9 +907,11 @@ export function SopPrintPreview({
                 </tbody>
               </table>
             </Section>
-            <Section title="Change Approvals">
-              <ApprovalTable sop={sop} entries={approvalEntries} revealSignatureId={revealSignatureId} />
-            </Section>
+            {approvalEntries?.length ? (
+              <Section title="Change Approvals">
+                <ApprovalTable entries={approvalEntries} revealSignatureId={revealSignatureId} />
+              </Section>
+            ) : null}
             </DocumentPage>
           ) : null}
 

@@ -81,7 +81,7 @@ export function SopShell({
 
         <div className="flex items-center gap-0.5 sm:gap-1">
           {actions}
-          <UserNav />
+          <UserNav showThemeToggle={false} />
         </div>
       </header>
 

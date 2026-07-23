@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { createEmptySop, linkedSopLabel } from "./schema";
+import { createEmptySop, linkedSopLabel, rasicLegend } from "./schema";
+
+describe("rasicLegend", () => {
+  it("uses the canonical responsibility words", () => {
+    expect(rasicLegend(" | ")).toBe(
+      "R: Responsible | A: Approve | S: Support | I: Inform | C: Consult",
+    );
+  });
+});
 
 describe("linkedSopLabel", () => {
   it("joins number and title with an em dash", () => {

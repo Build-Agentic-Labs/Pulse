@@ -8,17 +8,18 @@ import { listMembersForDepartments } from "@/lib/departments/store";
 import {
   listProfileNames,
   removeSeat,
+  SOP_RASIC_LABELS,
   upsertSeat,
   type SopRasic,
   type SopReviewSeat,
 } from "@/lib/sop/review";
 
 const RASIC_OPTIONS: { value: SopRasic; label: string; hint: string }[] = [
-  { value: "responsible", label: "Responsible", hint: "Does the work. Signature required." },
-  { value: "accountable", label: "Accountable", hint: "Owns the outcome. Signature required. Exactly one." },
-  { value: "support", label: "Support", hint: "Supplies resources. Signs; does not block." },
-  { value: "informed", label: "Informed", hint: "Notified on release. Never signs." },
-  { value: "consulted", label: "Consulted", hint: "Gives input. Signs or comments; does not block." },
+  { value: "responsible", label: SOP_RASIC_LABELS.responsible, hint: "Performs the work. Signature required." },
+  { value: "accountable", label: SOP_RASIC_LABELS.accountable, hint: "Approves the work. Signature required. Exactly one." },
+  { value: "support", label: SOP_RASIC_LABELS.support, hint: "Provides resources. Signs; does not block." },
+  { value: "informed", label: SOP_RASIC_LABELS.informed, hint: "Receives updates. Never signs." },
+  { value: "consulted", label: SOP_RASIC_LABELS.consulted, hint: "Provides input. Signs or comments; does not block." },
 ];
 
 function getErrorMessage(error: unknown): string {
@@ -29,7 +30,7 @@ interface RosterEditorProps {
   sopId: string;
   departments: Department[];
   seats: SopReviewSeat[];
-  /** The SOP's author. They may not hold a Responsible or Accountable seat. */
+  /** The SOP's author. They may not hold a Responsible or Approve duty. */
   authorId: string | null;
   onChanged: () => Promise<void> | void;
 }
@@ -130,12 +131,12 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
 
   const problems: string[] = [];
   if (responsibleCount === 0) problems.push("Name at least one Responsible department.");
-  if (!soloSelfReview && accountableCount !== 1) problems.push("Name exactly one Accountable department.");
+  if (!soloSelfReview && accountableCount !== 1) problems.push("Assign exactly one department to Approve.");
   if (workflowSeats.some((seat) => seat.rasic !== "informed" && !seat.signerId)) {
     problems.push("Choose a reviewer for every department that must sign or review.");
   }
   if (!soloSelfReview && authorHoldsBlockingSeat) {
-    problems.push("The author cannot hold a Responsible or Accountable seat.");
+    problems.push("The author cannot hold a Responsible or Approve duty.");
   }
 
   return (

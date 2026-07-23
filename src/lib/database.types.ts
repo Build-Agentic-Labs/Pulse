@@ -2839,6 +2839,7 @@ export type Database = {
           event_id: number
           id: number
           kind: string
+          last_attempt_at: string | null
           last_error: string | null
           recipient_id: string
           resend_message_id: string | null
@@ -2851,6 +2852,7 @@ export type Database = {
           event_id: number
           id?: never
           kind: string
+          last_attempt_at?: string | null
           last_error?: string | null
           recipient_id: string
           resend_message_id?: string | null
@@ -2863,6 +2865,7 @@ export type Database = {
           event_id?: number
           id?: never
           kind?: string
+          last_attempt_at?: string | null
           last_error?: string | null
           recipient_id?: string
           resend_message_id?: string | null

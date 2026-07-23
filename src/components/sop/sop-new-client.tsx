@@ -13,7 +13,7 @@ import { useSopWorkspace } from "./sop-workspace-provider";
 /** Shell-wrapped centered message used for the empty / loading / blocked states. */
 function NewSopNotice({ children }: { children: ReactNode }) {
   return (
-    <SopShell sidebar={<div className="ui-nav-section">SOPs</div>} back={{ href: "/sops", label: "All SOPs" }}>
+    <SopShell sidebar={null} back={{ href: "/sops", label: "All SOPs" }}>
       <div className="flex h-full items-center justify-center p-4">
         <div className="max-w-md text-center">{children}</div>
       </div>

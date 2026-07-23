@@ -19,18 +19,19 @@ type PlanningShellProps = {
 };
 
 /**
- * Sticky-header shell for the Planning space. Header idiom copied verbatim from
- * space-placeholder.tsx so Planning matches every other space's chrome. Sub-pages
- * pass `backHref="/planning"` so the arrow steps back to the board, not the dashboard.
+ * Full-width-header shell for the Planning space. The header stays page-owned so detail pages
+ * can supply their own back target and actions, but it spans the viewport above the persistent
+ * sidebar just like the SOP and Settings shells. Sub-pages pass `backHref="/planning"` so the
+ * arrow steps back to the board, not the dashboard.
  */
 export function PlanningShell({ title, actions, backHref, backLabel = "Back to work orders", wide = false, children }: PlanningShellProps) {
   // The app disables document scrolling globally (html/body overflow:hidden — see
   // globals.css), so each space provides its own scroll container, like the SOP shell.
-  // Viewport height is owned by `app/planning/layout.tsx` (which also holds the sidebar); this
-  // shell fills the content column beside it rather than claiming the screen itself.
+  // The 48px top padding reserves the fixed header in both the workspace layout and standalone
+  // access-gate renderings.
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-canvas text-ink">
-      <header className="ui-chrome relative z-10 flex h-12 shrink-0 items-center gap-3 px-4">
+    <div className="flex min-h-0 flex-1 flex-col bg-surface pt-12 text-ink">
+      <header className="ui-chrome fixed inset-x-0 top-0 z-40 flex h-12 shrink-0 items-center gap-3 px-3 sm:px-4">
         {backHref ? (
           <Link
             href={backHref}
@@ -62,8 +63,10 @@ export function PlanningShell({ title, actions, backHref, backLabel = "Back to w
         <UserNav />
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className={`mx-auto px-8 py-8 ${wide ? "max-w-[1760px]" : "max-w-[1100px]"}`}>{children}</div>
+      <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="ui-planning-space h-full overflow-y-auto bg-canvas lg:rounded-tl-2xl">
+          <div className={`mx-auto px-4 py-6 md:px-6 ${wide ? "max-w-[1760px]" : "max-w-6xl"}`}>{children}</div>
+        </div>
       </main>
     </div>
   );

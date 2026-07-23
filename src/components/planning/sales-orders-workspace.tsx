@@ -120,7 +120,7 @@ export function SalesOrdersWorkspace() {
 
         <ExportColumnPanel scheduleImport={view.scheduleImport} lines={lines} />
 
-        <section className="ui-panel overflow-x-auto">
+        <section className="ui-data-table-frame ui-data-table-frame-canvas overflow-x-auto">
           <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr>
@@ -163,11 +163,13 @@ export function SalesOrdersWorkspace() {
 
   return (
     <section className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="ui-mono-label text-ink-secondary">
-          {salesOrders.length} {salesOrders.length === 1 ? "sales order" : "sales orders"}
-        </span>
-        <span className="flex-1" />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="ui-section-title">Sales orders</h1>
+          <p className="ui-section-subtitle">
+            Import the production schedule and convert approved lines into work orders.
+          </p>
+        </div>
         {canWrite ? (
           <button
             type="button"
@@ -178,6 +180,10 @@ export function SalesOrdersWorkspace() {
             Upload schedule
           </button>
         ) : null}
+      </div>
+
+      <div className="ui-mono-label text-ink-secondary">
+        {salesOrders.length} {salesOrders.length === 1 ? "sales order" : "sales orders"}
       </div>
 
       {imports.length === 0 ? (
@@ -193,7 +199,7 @@ export function SalesOrdersWorkspace() {
         <>
           <section className="space-y-2">
             <div className="ui-mono-label">Imports</div>
-            <div className="ui-panel overflow-x-auto">
+            <div className="ui-data-table-frame ui-data-table-frame-canvas overflow-x-auto">
               <table className="w-full border-collapse text-[13px]">
                 <thead>
                   <tr>
@@ -231,7 +237,7 @@ export function SalesOrdersWorkspace() {
 
           <section className="space-y-2">
             <div className="ui-mono-label">Sales orders</div>
-            <div className="ui-panel overflow-x-auto">
+            <div className="ui-data-table-frame ui-data-table-frame-canvas overflow-x-auto">
               <table className="w-full border-collapse text-[13px]">
                 <thead>
                   <tr>

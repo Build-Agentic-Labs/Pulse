@@ -2,7 +2,7 @@
 
 import "./app-settings-panel.css";
 
-import { Check, CircleUserRound, ClipboardCheck, FolderKanban, Moon, Palette, Settings, Sun, UsersRound } from "lucide-react";
+import { Check, CircleUserRound, FolderKanban, Moon, Palette, Settings, Sun, UsersRound } from "lucide-react";
 
 import { useState, type ReactNode } from "react";
 
@@ -21,8 +21,6 @@ import { WorkspaceListSettings } from "@/components/workspace-list-settings";
 import { ProjectSettings } from "@/components/project-settings";
 
 import { PlanningSettings } from "@/components/planning/planning-settings";
-
-import { DepartmentsAdmin } from "@/components/sop/departments-admin";
 
 import { NavSelectionTrack } from "@/components/nav-selection-track";
 
@@ -43,8 +41,6 @@ const settingsSections = [
   { id: "projects", label: "Projects", icon: FolderKanban },
 
   { id: "planning", label: "Planning", icon: Settings },
-
-  { id: "quality", label: "Quality", icon: ClipboardCheck },
 
 ] as const;
 
@@ -689,16 +685,6 @@ export function AppSettingsPanel({
         ) : null}
 
 
-
-        {activeSection === "quality" ? (
-
-          <SettingsPage title="Quality" description="Departments, SOP ownership, access, and release controls.">
-
-            <DepartmentsAdmin embedded />
-
-          </SettingsPage>
-
-        ) : null}
 
       </div>
 

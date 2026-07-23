@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AppSettingsPanel,
   settingsSections,
@@ -42,6 +42,13 @@ export function SettingsWorkspace(home: DashboardHomeContext) {
   const searchParams = useSearchParams();
   const [section, setSection] = useState<SettingsSection>(() => parseSection(searchParams.get("section")));
   const project = useMemo(() => preferredProjectContext(home), [home]);
+
+  useEffect(() => {
+    const requested = searchParams.get("section");
+    if (requested && !settingsSections.some((candidate) => candidate.id === requested)) {
+      window.history.replaceState(null, "", "/settings");
+    }
+  }, [searchParams]);
 
   function selectSection(next: SettingsSection) {
     setSection(next);

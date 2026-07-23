@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings } from "lucide-react";
+import { Search, Settings, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -93,6 +93,8 @@ export function WorkOrderBoard() {
   const [customerFilter, setCustomerFilter] = useState(ALL_FILTER);
   const [monthFilter, setMonthFilter] = useState(ALL_FILTER);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersRef = useRef<HTMLDivElement>(null);
 
   // Stale-response guard (same intent as sop-list.tsx's `active` flag / the provider's
   // `cancelled` flag): each load takes a ticket from this counter, and only the latest ticket
@@ -128,6 +130,30 @@ export function WorkOrderBoard() {
       loadSeqRef.current += 1;
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!filtersOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as HTMLElement;
+      if (!filtersRef.current?.contains(target) && !target.closest(".ui-themed-select-menu")) {
+        setFiltersOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setFiltersOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [filtersOpen]);
 
   // One-time purge of MTS Excel "work order templates" (layout clones, not product truth).
   // Editors only; failures are non-fatal so a permission miss doesn't block the board.
@@ -205,6 +231,20 @@ export function WorkOrderBoard() {
     });
   }, [orders, statusFilter, customerFilter, monthFilter, query]);
 
+  const activeFilterCount = [
+    query.trim() !== "",
+    statusFilter !== ALL_FILTER,
+    customerFilter !== ALL_FILTER,
+    monthFilter !== ALL_FILTER,
+  ].filter(Boolean).length;
+
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter(ALL_FILTER);
+    setCustomerFilter(ALL_FILTER);
+    setMonthFilter(ALL_FILTER);
+  }
+
   function toggleSelected(id: string) {
     setSelected((current) => {
       const next = new Set(current);
@@ -251,56 +291,128 @@ export function WorkOrderBoard() {
             </button>
           </div>
         ) : null}
-        <div className="ui-wo-toolbar flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="ui-section-title">Work orders</h1>
+            <p className="ui-section-subtitle">
+              Create, release, and track production work orders.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="ui-btn-ghost h-9 px-3 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={selected.size === 0}
+              onClick={handlePrintSelected}
+            >
+              Print selected ({selected.size})
+            </button>
+            <div className="relative" ref={filtersRef}>
+              <button
+                type="button"
+                className="ui-btn-ghost h-9 gap-1.5 px-3"
+                aria-haspopup="dialog"
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen((open) => !open)}
+                disabled={listStatus !== "ready" || orders.length === 0}
+              >
+                <SlidersHorizontal size={14} strokeWidth={1.75} />
+                Filters
+                {activeFilterCount > 0 ? (
+                  <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-canvas">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
+              </button>
+              {filtersOpen ? (
+                <div
+                  role="dialog"
+                  aria-label="Work order filters"
+                  className="absolute right-0 z-30 mt-2 w-72 space-y-4 rounded-lg border border-line bg-canvas p-4 shadow-lg"
+                >
+                  <label className="block space-y-1.5">
+                    <span className="ui-mono-label">Search</span>
+                    <span className="relative block">
+                      <Search
+                        size={14}
+                        strokeWidth={1.75}
+                        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
+                      />
+                      <input
+                        type="search"
+                        className="ui-field-standalone h-9 pl-9 pr-3"
+                        placeholder="Order, customer, or sales order"
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                      />
+                    </span>
+                  </label>
+                  <div className="space-y-1.5">
+                    <span className="ui-mono-label">Status</span>
+                    <ThemedSelect
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      options={statusOptions}
+                      ariaLabel="Filter by status"
+                      triggerClassName="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="ui-mono-label">Customer</span>
+                    <ThemedSelect
+                      value={customerFilter}
+                      onChange={setCustomerFilter}
+                      options={customerOptions}
+                      ariaLabel="Filter by customer"
+                      triggerClassName="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="ui-mono-label">Month</span>
+                    <ThemedSelect
+                      value={monthFilter}
+                      onChange={setMonthFilter}
+                      options={monthOptions}
+                      ariaLabel="Filter by month"
+                      triggerClassName="h-9"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between border-t border-line pt-3">
+                    <span className="ui-section-subtitle mt-0">
+                      {filteredOrders.length} of {orders.length}
+                    </span>
+                    <button
+                      type="button"
+                      className="ui-btn-ghost h-8 px-2"
+                      disabled={activeFilterCount === 0}
+                      onClick={clearFilters}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            {canWrite ? (
+              <button type="button" className="ui-btn-primary h-9 px-3" onClick={handleNewWorkOrder}>
+                New work order
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex min-h-8 flex-wrap items-center gap-3">
           <span className="ui-mono-label whitespace-nowrap text-ink-secondary">
-            {orders.length} work order{orders.length === 1 ? "" : "s"}
+            {filteredOrders.length} work order{filteredOrders.length === 1 ? "" : "s"}
           </span>
-          <ThemedSelect
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={statusOptions}
-            ariaLabel="Filter by status"
-            disabled={listStatus !== "ready" || orders.length === 0}
-          />
-          <ThemedSelect
-            value={customerFilter}
-            onChange={setCustomerFilter}
-            options={customerOptions}
-            ariaLabel="Filter by customer"
-            disabled={listStatus !== "ready" || orders.length === 0}
-          />
-          <ThemedSelect
-            value={monthFilter}
-            onChange={setMonthFilter}
-            options={monthOptions}
-            ariaLabel="Filter by month"
-            disabled={listStatus !== "ready" || orders.length === 0}
-          />
-          <input
-            type="search"
-            className="ui-input w-[140px] max-w-[220px] grow"
-            placeholder="Search orders"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            disabled={listStatus !== "ready" || orders.length === 0}
-          />
-          <span className="flex-1" />
-          <button
-            type="button"
-            className="ui-btn-ghost h-8 px-3 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={selected.size === 0}
-            onClick={handlePrintSelected}
-          >
-            Print selected ({selected.size})
-          </button>
-          {canWrite ? (
-            <button type="button" className="ui-btn-primary h-8 px-3" onClick={handleNewWorkOrder}>
-              New work order
+          {activeFilterCount > 0 ? (
+            <button type="button" className="ui-btn-ghost h-8 px-2" onClick={clearFilters}>
+              Clear filters
             </button>
           ) : null}
         </div>
 
-        <section className="ui-data-table-frame">
+        <section className="ui-data-table-frame ui-data-table-frame-canvas">
           {listStatus === "loading" ? (
             <WorkOrderTableSkeleton />
           ) : listStatus === "error" ? (

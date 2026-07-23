@@ -69,9 +69,8 @@ export function WorkOrderLineRow({
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const itemNoInputRef = useRef<HTMLInputElement>(null);
-  // The line table lives in an overflow-x-auto scroll container, which clips absolutely
-  // positioned descendants — a dropdown on the bottom rows (the "Add line" flow) would be
-  // cut off. Fixed positioning escapes the clip; the rect is measured when results open.
+  // Fixed positioning keeps the item-search results clear of the compact table and lets the
+  // bottom row's menu extend beyond the table frame; the rect is measured when results open.
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => setItemNo(line.itemNo), [line.itemNo]);
@@ -234,27 +233,29 @@ export function WorkOrderLineRow({
   if (!canWrite) {
     return (
       <tr className="border-b border-line/60 last:border-b-0">
-        <td className="px-3 py-2.5 font-mono text-ink">{line.itemNo}</td>
-        <td className="px-3 py-2.5 text-ink">{line.description}</td>
-        <td className="whitespace-nowrap px-3 py-2.5 text-ink-secondary">{line.buildQty}</td>
-        <td className="whitespace-nowrap px-3 py-2.5 text-ink-secondary">{FULFILLMENT_LABELS[line.fulfillment]}</td>
-        <td className={`whitespace-nowrap px-3 py-2.5 ${needsAssemblyNo ? "text-danger" : "text-ink-secondary"}`}>
+        <td className="truncate px-2 py-2.5 font-mono text-ink" title={line.itemNo}>{line.itemNo}</td>
+        <td className="truncate px-2 py-2.5 text-ink" title={line.description}>{line.description}</td>
+        <td className="px-2 py-2.5 text-ink-secondary">{line.buildQty}</td>
+        <td className="truncate px-2 py-2.5 text-ink-secondary" title={FULFILLMENT_LABELS[line.fulfillment]}>
+          {FULFILLMENT_LABELS[line.fulfillment]}
+        </td>
+        <td className={`truncate px-2 py-2.5 ${needsAssemblyNo ? "text-danger" : "text-ink-secondary"}`}>
           {line.fulfillment === "assembly" ? line.assemblyOrderNo || "—" : line.pullFromRef || "—"}
         </td>
-        <td className="whitespace-nowrap px-3 py-2.5 text-ink-secondary">{line.shippedQty ?? "—"}</td>
-        <td className="px-3 py-2.5" aria-hidden="true" />
+        <td className="px-2 py-2.5 text-ink-secondary">{line.shippedQty ?? "—"}</td>
+        <td className="px-1 py-2.5" aria-hidden="true" />
       </tr>
     );
   }
 
   return (
     <tr className="border-b border-line/60 align-top last:border-b-0">
-      <td className="px-3 py-2">
+      <td className="px-2 py-2">
         <div ref={rootRef} className="relative">
           <input
             ref={itemNoInputRef}
             type="text"
-            className="ui-input"
+            className="ui-input min-w-0"
             value={itemNo}
             onChange={(event) => handleItemNoChange(event.target.value)}
             onBlur={handleItemNoBlur}
@@ -297,48 +298,49 @@ export function WorkOrderLineRow({
           ) : null}
         </div>
       </td>
-      <td className="px-3 py-2">
+      <td className="px-2 py-2">
         <input
           type="text"
-          className="ui-input"
+          className="ui-input min-w-0"
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           onBlur={handleDescriptionBlur}
         />
       </td>
-      <td className="w-24 px-3 py-2">
+      <td className="px-2 py-2">
         <input
           type="number"
-          className="ui-input"
+          className="ui-input min-w-0"
           value={buildQty}
           onChange={(event) => setBuildQty(event.target.value)}
           onBlur={handleBuildQtyBlur}
           min={0}
         />
       </td>
-      <td className="w-40 px-3 py-2">
+      <td className="px-2 py-2">
         <ThemedSelect
           value={fulfillment}
           onChange={handleFulfillmentChange}
           options={FULFILLMENT_OPTIONS}
           ariaLabel="Fulfillment"
           className="w-full"
+          triggerClassName="h-9 px-2 text-[12px]"
         />
       </td>
-      <td className="w-40 px-3 py-2">
+      <td className="px-2 py-2">
         <input
           type="text"
-          className={`ui-input ${needsAssemblyNo ? "border-danger" : ""}`}
+          className={`ui-input min-w-0 ${needsAssemblyNo ? "border-danger" : ""}`}
           value={assemblyOrPull}
           onChange={(event) => setAssemblyOrPull(event.target.value)}
           onBlur={handleAssemblyOrPullBlur}
           placeholder={fulfillment === "assembly" ? "A# …" : "Pull ref …"}
         />
       </td>
-      <td className="w-24 px-3 py-2">
+      <td className="px-2 py-2">
         <input
           type="number"
-          className="ui-input disabled:cursor-not-allowed disabled:opacity-40"
+          className="ui-input min-w-0 disabled:cursor-not-allowed disabled:opacity-40"
           value={shippedQty}
           onChange={(event) => setShippedQty(event.target.value)}
           onBlur={handleShippedQtyBlur}
@@ -346,7 +348,7 @@ export function WorkOrderLineRow({
           min={0}
         />
       </td>
-      <td className="px-3 py-2">
+      <td className="px-1 py-2">
         <button
           type="button"
           className="ui-btn-ghost h-8 w-8 shrink-0 px-0 text-ink-tertiary hover:text-danger"

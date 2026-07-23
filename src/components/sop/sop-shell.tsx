@@ -35,7 +35,6 @@ export function SopShell({
   children: ReactNode;
 }) {
   const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // When a guard is present we can't decide synchronously (the themed confirm resolves a
@@ -60,10 +59,7 @@ export function SopShell({
           </Link>
           <button
             type="button"
-            onClick={() => {
-              setCollapsed(false);
-              setMobileOpen((open) => !open);
-            }}
+            onClick={() => setMobileOpen((open) => !open)}
             className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 text-ink-tertiary hover:text-ink lg:hidden"
             title={mobileOpen ? "Close SOP navigation" : "Open SOP navigation"}
             aria-label={mobileOpen ? "Close SOP navigation" : "Open SOP navigation"}
@@ -94,24 +90,12 @@ export function SopShell({
             onClick={() => setMobileOpen(false)}
           />
         ) : null}
-        {collapsed ? (
-          <button
-            type="button"
-            onClick={() => setCollapsed(false)}
-            className="ui-btn-ghost absolute bottom-3 left-2 z-30 hidden h-8 w-8 items-center justify-center rounded-full border border-line bg-surface px-0 text-ink-tertiary hover:text-ink lg:inline-flex"
-            title="Show sidebar"
-            aria-label="Show sidebar"
-          >
-            <PanelLeft size={15} strokeWidth={1.75} />
-          </button>
-        ) : null}
         <aside
-          className={`ui-nav-sidebar shrink-0 flex-col overflow-hidden transition-[width,opacity] duration-300 ease-ui ${
+          className={`ui-nav-sidebar shrink-0 flex-col overflow-hidden ${
             mobileOpen
               ? "absolute inset-y-0 left-0 z-30 flex w-[var(--shell-sidebar)] border-r border-line bg-surface shadow-xl lg:static lg:z-auto lg:border-r-0 lg:shadow-none"
               : ""
           }`}
-          style={collapsed ? { width: 0, opacity: 0 } : undefined}
         >
           <nav
             className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-3"
@@ -125,17 +109,6 @@ export function SopShell({
             ) : null}
             {sidebar}
           </nav>
-          <div className="shrink-0 px-2 pb-3 pt-1">
-            <button
-              type="button"
-              onClick={() => setCollapsed(true)}
-              className="ui-btn-ghost hidden h-8 w-8 items-center justify-center px-0 text-ink-tertiary hover:text-ink lg:inline-flex"
-              title="Hide sidebar"
-              aria-label="Hide sidebar"
-            >
-              <PanelLeftClose size={15} strokeWidth={1.75} />
-            </button>
-          </div>
         </aside>
 
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">

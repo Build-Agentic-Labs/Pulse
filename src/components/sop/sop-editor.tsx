@@ -66,6 +66,7 @@ import {
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
 import { ProcessFlowchart } from "./process-flowchart";
+import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopPrintPreview } from "./sop-print-preview";
 import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
 import { SopRosterEditor } from "./sop-roster-editor";
@@ -1488,17 +1489,7 @@ export function SopEditor({
   }
 
   if (requestedStepId && requestedStepIndex < 0) {
-    return (
-      <SopShell
-        crumb={sop.meta.title || sop.meta.sopNumber || "Untitled"}
-        sidebar={sidebar}
-        back={{ href: "/sops?tab=review", label: "Review queue" }}
-      >
-        <div className="flex h-full items-center justify-center p-4">
-          <Loader2 size={20} className="animate-spin text-ink-tertiary" />
-        </div>
-      </SopShell>
-    );
+    return <SopDetailLoadingState initialView={initialView} />;
   }
 
   return (

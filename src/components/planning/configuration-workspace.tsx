@@ -247,16 +247,22 @@ export function ConfigurationWorkspace() {
   return (
     <>
       <section className="space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="ui-mono-label text-ink-secondary">
-            {configs.length} {configs.length === 1 ? "configuration" : "configurations"}
-          </span>
-          <span className="flex-1" />
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="ui-section-title">Product configuration</h1>
+            <p className="ui-section-subtitle">
+              Define finished-goods SKUs and the parts used to build each work order.
+            </p>
+          </div>
           {canWrite ? (
             <button type="button" className="ui-btn-primary h-9 px-3 text-[12px]" onClick={() => setEditor(emptyEditor())}>
               New configuration
             </button>
           ) : null}
+        </div>
+
+        <div className="ui-mono-label text-ink-secondary">
+          {configs.length} {configs.length === 1 ? "configuration" : "configurations"}
         </div>
 
         {configs.length === 0 ? (
@@ -268,7 +274,7 @@ export function ConfigurationWorkspace() {
             </p>
           </section>
         ) : (
-          <div className="ui-panel overflow-x-auto">
+          <div className="ui-data-table-frame ui-data-table-frame-canvas overflow-x-auto">
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr>
@@ -372,14 +378,17 @@ function ConfigEditor({
 
   return (
     <section className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <button type="button" className="ui-btn-ghost inline-flex h-8 items-center gap-1.5 px-2 text-[12px]" onClick={onCancel}>
           <ArrowLeft size={14} strokeWidth={1.75} />
           Back
         </button>
-        <span className="ui-mono-label text-ink-secondary">
-          {editor.id ? "Edit configuration" : "New configuration"}
-        </span>
+        <div>
+          <h1 className="ui-section-title">{editor.id ? "Edit configuration" : "New configuration"}</h1>
+          <p className="ui-section-subtitle">
+            {editor.id ? editor.sku || "Product configuration" : "Define the SKU, model, and required parts."}
+          </p>
+        </div>
         <span className="flex-1" />
         {canWrite ? (
           <button

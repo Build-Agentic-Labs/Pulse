@@ -1,7 +1,10 @@
 import { cookies } from "next/headers";
 import { Suspense } from "react";
-import { QualityLoadingState } from "@/components/space-loading-states";
-import { SopWorkspace, type SopWorkspaceInitialData } from "@/components/sop/sop-workspace";
+import {
+  SopWorkspace,
+  SopWorkspaceLoadingState,
+  type SopWorkspaceInitialData,
+} from "@/components/sop/sop-workspace";
 import { listDepartments } from "@/lib/departments/store";
 import { listHistoricalRevisions } from "@/lib/sop/review";
 import { fetchReviewQueueData } from "@/lib/sop/review-queue-data";
@@ -14,10 +17,12 @@ export const metadata = {
   description: "Create standardized SOPs and convert legacy documents.",
 };
 
-type ServerTab = "all" | "review" | "library" | "retired";
+type ServerTab = "all" | "review" | "library" | "retired" | "settings";
 
 function parseServerTab(raw: string | string[] | undefined): ServerTab {
-  return raw === "review" || raw === "library" || raw === "retired" ? raw : "all";
+  return raw === "review" || raw === "library" || raw === "retired" || raw === "settings"
+    ? raw
+    : "all";
 }
 
 /**
@@ -39,9 +44,11 @@ export default async function SopsPage({
   searchParams: Promise<{ tab?: string | string[] }>;
 }) {
   let initial: SopWorkspaceInitialData | undefined;
+  const params = await searchParams;
+  const tab = parseServerTab(params.tab);
 
   try {
-    const [cookieStore, params] = await Promise.all([cookies(), searchParams]);
+    const cookieStore = await cookies();
     const workspaceId = cookieStore.get(SOP_WORKSPACE_COOKIE)?.value;
     if (workspaceId) {
       const supabase = await createSupabaseServerClient();
@@ -49,7 +56,6 @@ export default async function SopsPage({
       // unverified input, and this page is the request's verification point.
       const { data } = await supabase.auth.getUser();
       if (data.user) {
-        const tab = parseServerTab(params.tab);
         switch (tab) {
           case "all": {
             const sops = await listSops(workspaceId, supabase);
@@ -77,6 +83,8 @@ export default async function SopsPage({
             initial = { tab, workspaceId, queue };
             break;
           }
+          case "settings":
+            break;
         }
       }
     }
@@ -85,7 +93,7 @@ export default async function SopsPage({
   }
 
   return (
-    <Suspense fallback={<QualityLoadingState />}>
+    <Suspense fallback={<SopWorkspaceLoadingState active={tab} />}>
       <SopWorkspace initial={initial} />
     </Suspense>
   );

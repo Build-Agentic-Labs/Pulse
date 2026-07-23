@@ -641,12 +641,6 @@ export function SopList({
                                     : processState === "awaiting_quality"
                                       ? `/sops/${sop.id}?step=quality-approval`
                                     : `/sops/${sop.id}`;
-                              const openInNewTab =
-                                !isViewOnly && (
-                                  processState === "draft_review" ||
-                                  processState === "final_approval" ||
-                                  processState === "awaiting_quality"
-                                );
                               const canEditRow =
                                 editable &&
                                 sop.status === "draft" &&
@@ -659,8 +653,6 @@ export function SopList({
                                 <td className="px-5 py-3.5 align-middle">
                                   <Link
                                     href={editorHref}
-                                    target={openInNewTab ? "_blank" : undefined}
-                                    rel={openInNewTab ? "noopener noreferrer" : undefined}
                                     className="text-xs font-medium text-ink-secondary hover:text-ink"
                                   >
                                     {sop.sopNumber || "—"}
@@ -669,8 +661,6 @@ export function SopList({
                                 <td className="max-w-0 px-5 py-3.5 align-middle">
                                   <Link
                                     href={editorHref}
-                                    target={openInNewTab ? "_blank" : undefined}
-                                    rel={openInNewTab ? "noopener noreferrer" : undefined}
                                     className="block min-w-0"
                                   >
                                     <span className="block truncate text-[13px] font-medium leading-snug text-ink">

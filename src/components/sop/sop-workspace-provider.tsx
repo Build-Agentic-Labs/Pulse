@@ -9,6 +9,7 @@ import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrg
 import { SOP_WORKSPACE_COOKIE, SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
 import type { AccessLevel, WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
 import { useAuthFormActions } from "@/lib/auth-form-actions";
+import type { InitialSopWorkspaceData } from "@/lib/supabase/server-data";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
@@ -118,14 +119,23 @@ function pickWorkspaceId(groups: WorkspaceProjectGroup[]): string | undefined {
   return groups[0]?.workspace.id;
 }
 
-export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
+export function SopWorkspaceProvider({
+  children,
+  initial,
+}: {
+  children: ReactNode;
+  initial?: InitialSopWorkspaceData;
+}) {
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
+  const seededFromServer = (initial?.groups.length ?? 0) > 0;
   const [session, setSession] = useState<Session | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
-  const [groups, setGroups] = useState<WorkspaceProjectGroup[]>([]);
-  const [workspaceId, setWorkspaceIdState] = useState<string | undefined>(undefined);
-  const [orgToolAccess, setOrgToolAccess] = useState<AccessLevel | undefined>(undefined);
-  const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">("loading");
+  const [groups, setGroups] = useState<WorkspaceProjectGroup[]>(initial?.groups ?? []);
+  const [workspaceId, setWorkspaceIdState] = useState<string | undefined>(initial?.workspaceId);
+  const [orgToolAccess, setOrgToolAccess] = useState<AccessLevel | undefined>(initial?.orgToolAccess);
+  const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">(
+    seededFromServer ? "ready" : "loading",
+  );
   const [message, setMessage] = useState("");
   const auth = useAuthFormActions(supabase);
   const statusRef = useRef(status);
@@ -238,11 +248,21 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
     [workspaceId, role, orgToolAccess, groups, setWorkspaceId],
   );
 
-  if (!sessionReady || (session && status === "loading")) {
+  if ((!sessionReady && !seededFromServer) || (session && status === "loading")) {
     return <QualityLoadingState />;
   }
 
-  if (!session || status === "auth") {
+  if (status === "error") {
+    return (
+      <ErrorRecoveryPanel
+        title="SOPs failed to load"
+        body={message || "Your organizations could not be loaded. Retry keeps you here and reloads access."}
+        onRetry={() => void refreshWorkspaces(session, { showLoading: true })}
+      />
+    );
+  }
+
+  if (sessionReady && (!session || status === "auth")) {
     return (
       <AuthFormPanel
         title="Sign in to your organization"
@@ -253,16 +273,6 @@ export function SopWorkspaceProvider({ children }: { children: ReactNode }) {
         onMicrosoftSignIn={() => void auth.handleMicrosoftSignIn()}
         onResetPassword={(email) => void auth.handleResetPassword(email)}
         onResendConfirmation={(email) => void auth.handleResendConfirmation(email)}
-      />
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <ErrorRecoveryPanel
-        title="SOPs failed to load"
-        body={message || "Your organizations could not be loaded. Retry keeps you here and reloads access."}
-        onRetry={() => void refreshWorkspaces(session, { showLoading: true })}
       />
     );
   }

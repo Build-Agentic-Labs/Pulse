@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { SopWorkspaceProvider } from "@/components/sop/sop-workspace-provider";
+import { fetchInitialSopWorkspaceData } from "@/lib/supabase/server-data";
 
 export const metadata = {
   title: "SOPs | Pulse",
@@ -11,6 +12,10 @@ export const metadata = {
  * and loads the workspace ONCE and stays mounted while you move between SOP screens — no
  * "Loading SOPs" flash on every navigation. The persistent tabbed shell lives in SopWorkspace.
  */
-export default function SopsLayout({ children }: { children: ReactNode }) {
-  return <SopWorkspaceProvider>{children}</SopWorkspaceProvider>;
+export default async function SopsLayout({ children }: { children: ReactNode }) {
+  return (
+    <SopWorkspaceProvider initial={await fetchInitialSopWorkspaceData()}>
+      {children}
+    </SopWorkspaceProvider>
+  );
 }

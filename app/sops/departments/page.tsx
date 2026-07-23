@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// Department and SOP-access administration now lives in the system Settings space.
+// Department and SOP-access administration lives inside the SOP workspace.
 export default function DepartmentsPage() {
-  redirect("/settings?section=quality");
+  redirect("/sops?tab=settings");
 }

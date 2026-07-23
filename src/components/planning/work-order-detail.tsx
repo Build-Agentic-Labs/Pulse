@@ -554,18 +554,27 @@ export function WorkOrderDetail({ workOrderId }: { workOrderId: string }) {
             </div>
           </section>
 
-          <section className="ui-panel overflow-hidden">
-            <div className="ui-table-scroll">
-              <table className="w-full min-w-[960px] border-collapse text-sm">
+          <section className="ui-data-table-frame ui-data-table-frame-canvas">
+            <div className="overflow-hidden">
+              <table className="w-full table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-[15%]" />
+                  <col className="w-[29%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[6%]" />
+                </colgroup>
                 <thead>
                   <tr>
-                    <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Item no</th>
-                    <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Description</th>
-                    <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Build qty</th>
-                    <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Fulfillment</th>
-                    <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">A# / Pull ref</th>
-                    <th className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2.5 text-left">Shipped qty</th>
-                    <th className="border-b border-line px-3 py-2.5" aria-hidden="true" />
+                    <th className="ui-mono-label border-b border-line px-2 py-2.5 text-left leading-tight">Item no</th>
+                    <th className="ui-mono-label border-b border-line px-2 py-2.5 text-left leading-tight">Description</th>
+                    <th className="ui-mono-label border-b border-line px-2 py-2.5 text-left leading-tight">Build qty</th>
+                    <th className="ui-mono-label border-b border-line px-2 py-2.5 text-left leading-tight">Fulfillment</th>
+                    <th className="ui-mono-label border-b border-line px-2 py-2.5 text-left leading-tight">A# / Pull ref</th>
+                    <th className="ui-mono-label border-b border-line px-2 py-2.5 text-left leading-tight">Shipped qty</th>
+                    <th className="border-b border-line px-1 py-2.5" aria-hidden="true" />
                   </tr>
                 </thead>
                 <tbody>

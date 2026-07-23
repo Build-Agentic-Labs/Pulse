@@ -1,6 +1,18 @@
-import { loadPlannerStateFromSupabase, loadWorkspaceProjectGroups } from "@/domain/supabase-planner";
-import type { PlannerState, WorkspaceProjectGroup } from "@/domain/types";
+import { cookies } from "next/headers";
+import {
+  fetchOrgToolAccess,
+  loadPlannerStateFromSupabase,
+  loadWorkspaceProjectGroups,
+} from "@/domain/supabase-planner";
+import type { AccessLevel, PlannerState, WorkspaceProjectGroup } from "@/domain/types";
+import { SOP_WORKSPACE_COOKIE } from "@/lib/sop/workspace-cookie";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+export type InitialSopWorkspaceData = {
+  groups: WorkspaceProjectGroup[];
+  orgToolAccess: AccessLevel;
+  workspaceId?: string;
+};
 
 /**
  * Server-side first paint for the workspace shell (refactor plan, Stage 5): the
@@ -27,6 +39,39 @@ export async function fetchInitialWorkspaceGroups(): Promise<WorkspaceProjectGro
       return undefined;
     }
     return await loadWorkspaceProjectGroups(data.user.id, supabase);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Server-side first paint for the SOP provider. Unlike its generic loading
+ * fallback, this data is enough to render the final navigation immediately:
+ * workspace role controls the Manage section, org-tool access controls author
+ * actions, and the validated cookie keeps the selected workspace stable.
+ *
+ * The client provider still revalidates in the background and performs the
+ * default-membership bootstrap when needed. This function remains read-only so
+ * RSC retries and prefetches cannot create memberships.
+ */
+export async function fetchInitialSopWorkspaceData(): Promise<InitialSopWorkspaceData | undefined> {
+  try {
+    const [supabase, cookieStore] = await Promise.all([createSupabaseServerClient(), cookies()]);
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) {
+      return undefined;
+    }
+
+    const [groups, orgToolAccess] = await Promise.all([
+      loadWorkspaceProjectGroups(data.user.id, supabase),
+      fetchOrgToolAccess(supabase).catch(() => "none" as const),
+    ]);
+    const requestedWorkspaceId = cookieStore.get(SOP_WORKSPACE_COOKIE)?.value;
+    const workspaceId =
+      groups.find((group) => group.workspace.id === requestedWorkspaceId)?.workspace.id ??
+      groups[0]?.workspace.id;
+
+    return { groups, orgToolAccess, workspaceId };
   } catch {
     return undefined;
   }

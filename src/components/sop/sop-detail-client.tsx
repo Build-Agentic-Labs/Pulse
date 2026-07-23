@@ -4,17 +4,16 @@ import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { NothingSpinner } from "@/components/nothing-ui";
 import type { Department } from "@/domain/departments";
 import { listDepartments, listMyDepartments } from "@/lib/departments/store";
 import { getSop, type SopRecord } from "@/lib/sop/store";
+import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopEditor, type SopEditorInitialView } from "./sop-editor";
 import { SopShell } from "./sop-shell";
 import { SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 const browseSidebar = (
   <>
-    <div className="ui-nav-section">SOPs</div>
     <div className="space-y-0.5">
       <Link href="/sops" className="ui-nav-item ui-nav-item-idle">
         <FileText size={15} strokeWidth={1.75} />
@@ -137,13 +136,5 @@ export function SopDetailClient({ initialView }: { initialView?: SopEditorInitia
     );
   }
 
-  // Loading: keep the app frame up (sidebar + chrome) with a centered spinner so opening a
-  // SOP doesn't flash a blank white canvas before the editor mounts.
-  return (
-    <SopShell sidebar={browseSidebar}>
-      <div className="flex h-full items-center justify-center p-4">
-        <NothingSpinner />
-      </div>
-    </SopShell>
-  );
+  return <SopDetailLoadingState initialView={initialView} />;
 }

@@ -27,18 +27,17 @@ export const metadata = {
  * server-rendered children as props -- they arrive as already-rendered payload and are never
  * "run" by the client boundary.
  *
- * The header is deliberately NOT spanned across the top (unlike SopShell): each page owns its
- * own header via `PlanningShell` because the work-order detail needs its own back arrow, wide
- * mode and action buttons, and hoisting the header would force a slot mechanism to pass those
- * from page up to layout.
+ * Each page still owns its header via `PlanningShell` because work-order detail needs its own
+ * back arrow and actions. `PlanningShell` fixes that header across the viewport; the sidebar and
+ * page column both reserve the same 48px top row so Planning matches the shared workspace shell.
  */
 export default async function PlanningLayout({ children }: { children: ReactNode }) {
   return (
     <PlanningRoute initialGroups={await fetchInitialWorkspaceGroups()}>
-      <div className="flex h-[100dvh] overflow-hidden bg-canvas text-ink">
+      <div className="flex h-[100dvh] overflow-hidden bg-surface text-ink">
         {/* `ui-nav-sidebar` is desktop-only (hidden below lg). Planning is a desktop workflow --
             it starts with an Excel upload -- so small screens get the pages without the nav. */}
-        <aside className="ui-nav-sidebar shrink-0 flex-col overflow-hidden">
+        <aside className="ui-nav-sidebar shrink-0 flex-col overflow-hidden pt-12">
           <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-3">
             <PlanningNav />
           </nav>

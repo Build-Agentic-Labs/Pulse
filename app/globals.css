@@ -2057,6 +2057,33 @@ body {
     text-transform: none;
   }
 
+  /* Planning follows the same quiet document scale as Quality: 16px section
+     headings, 13px body/form/table text, and outlined containers that read on
+     the page canvas instead of stacking gray cards inside the workspace. */
+  .ui-planning-space {
+    font-family: var(--type-sans);
+    font-size: 0.8125rem;
+  }
+
+  .ui-planning-space .ui-panel,
+  .ui-planning-space .ui-data-table-frame,
+  .ui-planning-space .ui-empty-state {
+    background: transparent;
+  }
+
+  .ui-planning-space .ui-input,
+  .ui-planning-space .text-sm,
+  .ui-planning-space .text-base,
+  .ui-planning-space table {
+    font-family: var(--type-sans);
+    font-size: 0.8125rem;
+    font-weight: 400;
+  }
+
+  .ui-planning-space .text-lg {
+    font-size: var(--type-title);
+  }
+
   .ui-empty-state {
     min-height: 10rem;
     display: flex;
@@ -2599,37 +2626,6 @@ body {
   .ui-sop-shell .ui-chip-accent,
   .ui-sop-shell .ui-notice,
   .ui-sop-shell .ui-field-standalone {
-    border-radius: 4px;
-  }
-
-  /* Work-order board toolbar: one 32px control row. Globally the themed-select
-     triggers are 40px/14px and .ui-input is a 16px underline field — three
-     control heights in one row read oversized and mismatched. Inside the
-     toolbar everything drops to compact 12px mono boxes with the same 4px
-     squared geometry as the buttons (no pills). Scoped so both classes keep
-     their global look elsewhere. */
-  .ui-wo-toolbar .ui-themed-select-trigger {
-    height: 2rem;
-    font-size: 0.75rem;
-    padding: 0 0.625rem;
-    border-radius: 4px;
-  }
-
-  .ui-wo-toolbar .ui-input {
-    height: 2rem;
-    padding: 0 0.625rem;
-    font-size: 0.75rem;
-    border: 1px solid color-mix(in srgb, var(--color-border-strong) 42%, transparent);
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--color-surface-raised) 54%, transparent);
-  }
-
-  .ui-wo-toolbar .ui-input:focus {
-    border-color: color-mix(in srgb, var(--color-ink) 38%, transparent);
-  }
-
-  .ui-wo-toolbar .ui-btn-primary,
-  .ui-wo-toolbar .ui-btn-ghost {
     border-radius: 4px;
   }
 

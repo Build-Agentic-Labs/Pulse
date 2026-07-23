@@ -1,4 +1,19 @@
-import { ArrowLeft, CircleUserRound, ClipboardCheck, FolderKanban, Palette, PanelLeftClose, Settings, UsersRound } from "lucide-react";
+import {
+  Archive,
+  ArrowLeft,
+  CircleUserRound,
+  ClipboardList,
+  FileText,
+  FileSpreadsheet,
+  FolderKanban,
+  Inbox,
+  Library,
+  Palette,
+  PanelLeftClose,
+  Settings,
+  Settings2,
+  UsersRound,
+} from "lucide-react";
 import type { CSSProperties } from "react";
 
 function LoadingStatus({ label }: { label: string }) {
@@ -174,7 +189,6 @@ export function SettingsLoadingState({ label = "Opening Settings" }: { label?: s
     { label: "Organization", icon: UsersRound },
     { label: "Projects", icon: FolderKanban },
     { label: "Planning", icon: Settings },
-    { label: "Quality", icon: ClipboardCheck },
   ];
 
   return (
@@ -258,23 +272,53 @@ export function WorkOrderTableSkeleton() {
 }
 
 export function PlanningLoadingState({ label = "Opening Planning" }: { label?: string }) {
+  const navItems = [
+    { label: "Sales orders", icon: FileSpreadsheet },
+    { label: "Work orders", icon: ClipboardList },
+  ];
+
   return (
-    <div className="flex h-[100dvh] flex-col bg-canvas text-ink" aria-busy="true">
+    <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink" aria-busy="true">
       <ChromePlaceholder space="Planning" label={label} />
-      <main className="min-h-0 flex-1 overflow-hidden">
-        <div className="mx-auto max-w-[1100px] px-8 py-8">
-          <div className="mb-5 flex items-center gap-2">
-            <SkeletonLine className="h-3 w-24" />
-            <SkeletonLine className="h-8 w-32" />
-            <SkeletonLine className="h-8 w-32" />
-            <span className="flex-1" />
-            <SkeletonLine className="h-8 w-28" />
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <aside className="ui-nav-sidebar shrink-0 flex-col overflow-hidden">
+          <nav className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-3">
+            <div className="ui-nav-section">Planning</div>
+            <div className="space-y-0.5">
+              {navItems.map(({ label: itemLabel, icon: Icon }, index) => (
+                <span
+                  key={itemLabel}
+                  className={`ui-nav-item ${index === 1 ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
+                >
+                  <Icon size={15} strokeWidth={1.75} />
+                  <span>{itemLabel}</span>
+                </span>
+              ))}
+            </div>
+            <div className="ui-nav-section mt-3">Setup</div>
+            <span className="ui-nav-item ui-nav-item-idle">
+              <Settings2 size={15} strokeWidth={1.75} />
+              <span>Product configuration</span>
+            </span>
+          </nav>
+        </aside>
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div className="ui-planning-space h-full overflow-hidden bg-canvas lg:rounded-tl-2xl">
+            <div className="mx-auto max-w-6xl px-4 py-6 md:px-6">
+              <div className="mb-5 flex items-center gap-2">
+                <SkeletonLine className="h-3 w-24" />
+                <SkeletonLine className="h-8 w-32" />
+                <SkeletonLine className="h-8 w-32" />
+                <span className="flex-1" />
+                <SkeletonLine className="h-8 w-28" />
+              </div>
+              <section className="ui-panel overflow-hidden">
+                <WorkOrderTableSkeleton />
+              </section>
+            </div>
           </div>
-          <section className="ui-panel overflow-hidden">
-            <WorkOrderTableSkeleton />
-          </section>
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
@@ -335,35 +379,52 @@ export function SopTableSkeleton() {
   );
 }
 
+export function QualityListLoadingContent() {
+  return (
+    <div className="mx-auto max-w-6xl" aria-busy="true">
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <SkeletonLine className="h-5 w-20" />
+          <SkeletonLine className="mt-3 h-2 w-80 max-w-full" />
+        </div>
+        <SkeletonLine className="h-9 w-24" />
+      </div>
+      <SkeletonLine className="mb-5 h-9 w-72 max-w-full" />
+      <SopTableSkeleton />
+    </div>
+  );
+}
+
 export function QualityLoadingState({ label = "Opening Quality" }: { label?: string }) {
-  const navItems = ["All SOPs", "Review queue", "Effective library", "Retired", "Departments"];
+  const navItems = [
+    { label: "All SOPs", icon: FileText },
+    { label: "Review queue", icon: Inbox },
+    { label: "Effective library", icon: Library },
+    { label: "Retired", icon: Archive },
+  ];
 
   return (
     <div className="ui-sop-shell fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink" aria-busy="true">
       <ChromePlaceholder space="Quality" label={label} />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <aside className="ui-nav-sidebar">
-          <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden px-2 py-3">
-            {navItems.map((item, index) => (
-              <span key={item} className={`ui-nav-item ${index === 0 ? "ui-nav-item-active" : "ui-nav-item-idle"}`}>
-                {item}
-              </span>
-            ))}
+          <nav className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-3">
+            <div className="space-y-0.5">
+              {navItems.map(({ label: itemLabel, icon: Icon }, index) => (
+                <span
+                  key={itemLabel}
+                  className={`ui-nav-item ${index === 0 ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
+                >
+                  <Icon size={15} strokeWidth={1.75} />
+                  <span>{itemLabel}</span>
+                </span>
+              ))}
+            </div>
           </nav>
         </aside>
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <div className="h-full overflow-hidden bg-canvas p-4 md:p-6 lg:rounded-tl-2xl">
-            <div className="mx-auto max-w-6xl">
-              <div className="mb-6 flex items-start justify-between gap-4">
-                <div>
-                  <SkeletonLine className="h-5 w-20" />
-                  <SkeletonLine className="mt-3 h-2 w-80 max-w-full" />
-                </div>
-                <SkeletonLine className="h-9 w-24" />
-              </div>
-              <SkeletonLine className="mb-5 h-9 w-72 max-w-full" />
-              <SopTableSkeleton />
-            </div>
+            <QualityListLoadingContent />
           </div>
         </main>
       </div>

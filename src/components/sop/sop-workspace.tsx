@@ -2,10 +2,10 @@
 
 import { Archive, Building2, FileText, Inbox, Library } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { NavSelectionTrack } from "@/components/nav-selection-track";
+import { QualityListLoadingContent } from "@/components/space-loading-states";
 import type { Department } from "@/domain/departments";
 import type { HistoricalSopRevision } from "@/lib/sop/review";
 import type { QueueData } from "@/lib/sop/review-queue-data";
@@ -33,18 +33,23 @@ const SopList = dynamic(
   () => import("./sop-list").then((module) => module.SopList),
   { loading: SopTabChunkLoading },
 );
+const DepartmentsAdmin = dynamic(
+  () => import("./departments-admin").then((module) => module.DepartmentsAdmin),
+  { loading: SopTabChunkLoading },
+);
 
-type Tab = "all" | "review" | "library" | "retired";
+type Tab = "all" | "review" | "library" | "retired" | "settings";
 
 const CRUMB: Record<Tab, string> = {
   all: "Quality / SOPs",
   library: "Quality / Effective library",
   review: "Quality / Review queue",
   retired: "Quality / Retired",
+  settings: "Quality / Quality settings",
 };
 
 function parseTab(raw: string | null): Tab {
-  if (raw === "review" || raw === "library" || raw === "retired") return raw;
+  if (raw === "review" || raw === "library" || raw === "retired" || raw === "settings") return raw;
   return "all";
 }
 
@@ -70,7 +75,10 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
   const { role } = useSopWorkspace();
   const manage = canManage(role);
   const params = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => parseTab(params.get("tab")));
+  const [tab, setTab] = useState<Tab>(() => {
+    const requested = parseTab(params.get("tab"));
+    return requested === "settings" && !manage ? "all" : requested;
+  });
   const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set([tab]));
 
   useEffect(() => {
@@ -81,6 +89,12 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
       return next;
     });
   }, [tab]);
+
+  useEffect(() => {
+    if (tab !== "settings" || manage) return;
+    setTab("all");
+    window.history.replaceState(null, "", "/sops");
+  }, [manage, tab]);
 
   function select(next: Tab) {
     setMountedTabs((current) => (current.has(next) ? current : new Set(current).add(next)));
@@ -133,6 +147,51 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
           />
         ) : null}
       </div>
+      <div hidden={tab !== "settings"} aria-hidden={tab !== "settings"}>
+        {mountedTabs.has("settings") && manage ? (
+          <QualitySettingsPanel active={tab === "settings"} />
+        ) : null}
+      </div>
+    </SopShell>
+  );
+}
+
+function QualitySettingsPanel({ active }: { active: boolean }) {
+  return (
+    <div className="mx-auto max-w-6xl">
+      <div className="mb-6">
+        <h1 className="ui-section-title">Quality settings</h1>
+        <p className="ui-section-subtitle">
+          Manage departments, SOP ownership, access, and release controls.
+        </p>
+      </div>
+      <DepartmentsAdmin active={active} embedded />
+    </div>
+  );
+}
+
+/**
+ * Route/Suspense fallback for the SOP list. It uses the same authenticated
+ * provider data and the same navigation component as the settled page, so a
+ * server-data wait changes only the content body—not labels, icons, permissions,
+ * or active-row styling in the shell.
+ */
+export function SopWorkspaceLoadingState({ active = "all" }: { active?: Tab }) {
+  const { role } = useSopWorkspace();
+  const manage = canManage(role);
+  const safeActive = active === "settings" && !manage ? "all" : active;
+  const router = useRouter();
+  const sidebar = (
+    <SopTabNav
+      active={safeActive}
+      manage={manage}
+      onSelect={(next) => router.replace(next === "all" ? "/sops" : `/sops?tab=${next}`)}
+    />
+  );
+
+  return (
+    <SopShell sidebar={sidebar} crumb={CRUMB[safeActive]}>
+      <QualityListLoadingContent />
     </SopShell>
   );
 }
@@ -161,7 +220,6 @@ function SopTabNav({
 
   return (
     <>
-      <div className="ui-nav-section">SOPs</div>
       <NavSelectionTrack
         activeIndex={["all", "review", "library", "retired"].indexOf(active)}
         className="space-y-0.5"
@@ -174,12 +232,19 @@ function SopTabNav({
       {manage ? (
         <>
           <div className="ui-nav-section mt-3">Manage</div>
-          <div className="space-y-0.5">
-            <Link href="/settings?section=quality" className="ui-nav-item ui-nav-item-idle" title="Quality settings">
+          <NavSelectionTrack activeIndex={active === "settings" ? 0 : -1} className="space-y-0.5">
+            <button
+              type="button"
+              onClick={() => onSelect("settings")}
+              className={`ui-nav-item w-full ${
+                active === "settings" ? "ui-nav-item-active" : "ui-nav-item-idle"
+              }`}
+              title="Quality settings"
+            >
               <Building2 size={15} strokeWidth={1.75} />
               <span>Quality settings</span>
-            </Link>
-          </div>
+            </button>
+          </NavSelectionTrack>
         </>
       ) : null}
       <SopWorkspaceSwitcher />

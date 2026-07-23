@@ -1145,6 +1145,24 @@ export type Database = {
           },
         ]
       }
+      sop_extraction_requests: {
+        Row: {
+          created_at: string
+          id: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: never
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: never
+          user_id?: string
+        }
+        Relationships: []
+      }
       sop_notifications: {
         Row: {
           attempts: number
@@ -1152,6 +1170,7 @@ export type Database = {
           event_id: number | null
           id: number
           kind: string
+          last_attempt_at: string | null
           last_error: string | null
           recipient_id: string
           reminder_index: number
@@ -1165,6 +1184,7 @@ export type Database = {
           event_id?: number | null
           id?: never
           kind: string
+          last_attempt_at?: string | null
           last_error?: string | null
           recipient_id: string
           reminder_index?: number
@@ -1178,6 +1198,7 @@ export type Database = {
           event_id?: number | null
           id?: never
           kind?: string
+          last_attempt_at?: string | null
           last_error?: string | null
           recipient_id?: string
           reminder_index?: number
@@ -3194,6 +3215,8 @@ export type Database = {
       }
       sign_sop: {
         Args: {
+          p_expected_cycle?: number
+          p_expected_hash?: string
           p_meaning: string
           p_reason?: string
           p_resolves?: string

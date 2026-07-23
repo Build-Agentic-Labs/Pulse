@@ -127,7 +127,7 @@ export function SopFinalApprovalWorkspace({
   }
 
   async function addSignature() {
-    if (status === "signing" || mySignature) return;
+    if (!control || status === "signing" || mySignature) return;
     if (!signatureStrokes.length) {
       setError("Draw and save your signature before signing this SOP.");
       return;
@@ -139,7 +139,11 @@ export function SopFinalApprovalWorkspace({
         setStatus("error");
         return;
       }
-      const signatureId = await signSop(sopId, "dept_approval", { seatDepartmentId: departmentId });
+      const signatureId = await signSop(sopId, "dept_approval", {
+        seatDepartmentId: departmentId,
+        expectedContentHash: control.contentHash,
+        expectedReviewCycle: control.reviewCycle,
+      });
       const [nextControl, nextSignatures] = await Promise.all([getSopControl(sopId), listSignatures(sopId)]);
       if (!nextControl) throw new Error("The signed SOP could not be reloaded.");
       setControl(nextControl);

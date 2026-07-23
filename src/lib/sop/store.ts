@@ -234,22 +234,60 @@ export async function saveSop(sop: Sop, workspaceId: string, options: SaveSopOpt
 
   // First save: a plain INSERT so created_by is written exactly once and never rewritten. The
   // owning department + doc type ride along here (frozen afterwards) when the builder supplies them.
-  const inserted = await throwIfError(
-    supabase
-      .from("sops")
-      .insert({
-        ...row,
-        id: next.id,
-        workspace_id: workspaceId,
-        created_by: userId,
-        ...(options.departmentId
-          ? { department_id: options.departmentId, doc_type: options.docType ?? DEFAULT_DOC_TYPE }
-          : {}),
-      })
-      .select(SOP_COLUMNS)
-      .single(),
-  );
-  return mapSop(inserted as Record<string, unknown>);
+  const insertResult = await supabase
+    .from("sops")
+    .insert({
+      ...row,
+      id: next.id,
+      workspace_id: workspaceId,
+      created_by: userId,
+      ...(options.departmentId
+        ? { department_id: options.departmentId, doc_type: options.docType ?? DEFAULT_DOC_TYPE }
+        : {}),
+    })
+    .select(SOP_COLUMNS)
+    .single();
+
+  if (!insertResult.error) {
+    return mapSop(insertResult.data as Record<string, unknown>);
+  }
+
+  // A primary-key collision means the INSERT actually committed but its HTTP response was
+  // dropped (e.g. a flaky connection); the client-side retry then re-INSERTs the same id and
+  // loops forever on sops_pkey, wedging the new SOP. Adopt the already-committed row as the
+  // concurrency token and fall through to a guarded UPDATE -- but only when it is genuinely
+  // this session's SOP; a pkey clash on someone else's row is a real error.
+  if (insertResult.error.code === "23505" && insertResult.error.message.includes("pkey") && userId) {
+    const existing = (await throwIfError(
+      supabase
+        .from("sops")
+        .select(`${SOP_COLUMNS}, created_by`)
+        .eq("id", next.id)
+        .is("deleted_at", null)
+        .maybeSingle(),
+    )) as Record<string, unknown> | null;
+    if (existing && existing.created_by === userId) {
+      const recovered = await throwIfError(
+        supabase
+          .from("sops")
+          .update(row)
+          .eq("id", next.id)
+          .eq("updated_at", String(existing.updated_at))
+          .is("deleted_at", null)
+          .select(SOP_COLUMNS)
+          .maybeSingle(),
+      );
+      if (!recovered) {
+        // The committed row moved again between the fetch and this UPDATE: a real conflict.
+        throw new SopConflictError();
+      }
+      return mapSop(recovered as Record<string, unknown>);
+    }
+  }
+
+  // Genuine failure (row belongs to another SOP, or a different constraint fired): surface it
+  // with the store's own message translation, matching the throwIfError path above.
+  throw new Error(sopConstraintMessage(insertResult.error) ?? insertResult.error.message);
 }
 
 /** How many production tasks link to this SOP (the "where-used" back-reference). */

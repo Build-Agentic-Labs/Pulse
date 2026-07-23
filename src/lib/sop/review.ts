@@ -210,6 +210,10 @@ export interface SignOptions {
   seatDepartmentId?: string;
   /** Required for objection_withdrawn / _overruled: the rejection being closed. */
   resolvesSignatureId?: string;
+  /** The content hash the caller rendered. The DB refuses the sign if the live row has moved. */
+  expectedContentHash?: string | null;
+  /** The review cycle the caller rendered. The DB refuses the sign if the live row has moved. */
+  expectedReviewCycle?: number | null;
 }
 
 /**
@@ -233,6 +237,8 @@ export async function signSop(
       p_reason: options.reason ?? undefined,
       p_seat_department: options.seatDepartmentId ?? undefined,
       p_resolves: options.resolvesSignatureId ?? undefined,
+      p_expected_hash: options.expectedContentHash ?? undefined,
+      p_expected_cycle: options.expectedReviewCycle ?? undefined,
     }),
   );
   kickSopNotifications();

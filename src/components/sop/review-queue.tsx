@@ -58,8 +58,13 @@ export function ReviewQueue({
   const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
     seededFromServer ? { workspaceId, loadedAt: 1 } : { loadedAt: 0 },
   );
+  // Bumped at the start of every refresh so an in-flight load for a prior workspace
+  // bails instead of overwriting the current one after a switch.
+  const refreshGenerationRef = useRef(0);
 
   const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
+    const generation = ++refreshGenerationRef.current;
+    const isCurrent = () => refreshGenerationRef.current === generation;
     if (!workspaceId) {
       setData(EMPTY);
       setListStatus("ready");
@@ -73,6 +78,7 @@ export function ReviewQueue({
     try {
       const supabase = createPlannerSupabaseClient();
       const userResult = await getUserFromSession(supabase);
+      if (!isCurrent()) return;
       const userId = userResult.data.user?.id ?? null;
       if (!userId) {
         setData(EMPTY);
@@ -81,11 +87,14 @@ export function ReviewQueue({
         return;
       }
 
-      setData(await fetchReviewQueueData(workspaceId, userId));
+      const queue = await fetchReviewQueueData(workspaceId, userId);
+      if (!isCurrent()) return;
+      setData(queue);
       setError("");
       setListStatus("ready");
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };
     } catch (caught) {
+      if (!isCurrent()) return;
       if (!options.background) {
         setError(caught instanceof Error ? caught.message : "Could not load your review queue.");
         setListStatus("error");
@@ -99,6 +108,27 @@ export function ReviewQueue({
       freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
     if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 15_000) return;
     void refreshList({ background: hasCurrentData });
+  }, [active, refreshList, workspaceId]);
+
+  // Reviewers keep this open as their inbox, and workflow actions often finish in another tab
+  // (review/signature workspaces). Refresh as soon as the user returns, with a visible-tab
+  // interval as a fallback for long-lived tabs. Background refreshes preserve the current queue
+  // instead of flashing a loader.
+  useEffect(() => {
+    if (!active || !workspaceId) return;
+
+    const refreshInBackground = () => {
+      if (document.visibilityState === "visible") void refreshList({ background: true });
+    };
+    const interval = window.setInterval(refreshInBackground, 15_000);
+    window.addEventListener("focus", refreshInBackground);
+    document.addEventListener("visibilitychange", refreshInBackground);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshInBackground);
+      document.removeEventListener("visibilitychange", refreshInBackground);
+    };
   }, [active, refreshList, workspaceId]);
 
   const pendingReviewIds = new Set(data.awaitingMe.map((seat) => seat.sopId));

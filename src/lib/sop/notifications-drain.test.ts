@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SopEmailContent } from "@/domain/sop/notifications";
 import {
+  RETRY_BASE_MINUTES,
   isAuthorizedCronRequest,
+  isRetryDue,
+  retryBackoffMinutes,
   runSopNotificationDrain,
   type DrainBatch,
   type DrainItem,
@@ -18,12 +21,20 @@ const item = (over: Partial<DrainItem> = {}): DrainItem => ({
 });
 
 function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
-  const calls = { sent: [] as number[], failed: [] as { id: number; attempts: number }[] };
+  const calls = {
+    sent: [] as number[],
+    failed: [] as { id: number; attempts: number }[],
+    retryClaims: [] as { id: number; expected: number }[],
+  };
   let nextLedgerId = 100;
   const store: DrainStore = {
     collect: async () => batch,
     retryItems: async () => retries,
     claim: async () => ({ claimed: true, ledgerId: nextLedgerId++ }),
+    claimRetry: async (id, expected) => {
+      calls.retryClaims.push({ id, expected });
+      return true;
+    },
     markSent: async (id) => void calls.sent.push(id),
     markFailed: async (id, _error, attempts) => void calls.failed.push({ id, attempts }),
   };
@@ -131,6 +142,25 @@ describe("runSopNotificationDrain", () => {
     expect(report.skippedNoEmail).toBe(1);
   });
 
+  it("retry lane atomically claims each row (at its attempt count) before sending", async () => {
+    const retries: RetryItem[] = [{ ledgerId: 55, email: "u1@example.com", content, attempts: 1 }];
+    const { store, calls } = fakeStore({ items: [], oldestUnnotifiedEventAgeHours: null }, retries);
+    await runSopNotificationDrain({ store, send: okSender, now, origin });
+    expect(calls.retryClaims).toEqual([{ id: 55, expected: 1 }]);
+    expect(calls.sent).toEqual([55]);
+  });
+
+  it("a lost retry claim (concurrent drain won the row) skips without sending", async () => {
+    const retries: RetryItem[] = [{ ledgerId: 55, email: "u1@example.com", content, attempts: 1 }];
+    const { store, calls } = fakeStore({ items: [], oldestUnnotifiedEventAgeHours: null }, retries);
+    store.claimRetry = async () => false;
+    const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
+    expect(report.skippedDuplicate).toBe(1);
+    expect(report.retried).toBe(0);
+    expect(report.failed).toBe(0);
+    expect(calls.sent).toEqual([]);
+  });
+
   it("a store.claim rejection costs only that item", async () => {
     const items = [item(), item({ pending: { ...item().pending, recipientId: "u2" }, email: "u2@example.com" })];
     const { store, calls } = fakeStore({ items, oldestUnnotifiedEventAgeHours: null });
@@ -166,5 +196,27 @@ describe("runSopNotificationDrain", () => {
     const report = await runSopNotificationDrain({ store, send: flakySender, now, origin });
     expect(report.failed).toBe(1);
     expect(report.sent).toBe(1);
+  });
+});
+
+describe("retry lease backoff", () => {
+  it("doubles the minimum spacing with each recorded attempt", () => {
+    expect(retryBackoffMinutes(0)).toBe(RETRY_BASE_MINUTES);
+    expect(retryBackoffMinutes(1)).toBe(RETRY_BASE_MINUTES * 2);
+    expect(retryBackoffMinutes(2)).toBe(RETRY_BASE_MINUTES * 4);
+  });
+
+  it("holds a row until its attempt-scaled lease elapses", () => {
+    const last = new Date("2026-07-21T12:00:00Z");
+    const spacingMs = RETRY_BASE_MINUTES * 2 * 60 * 1000; // attempts = 1
+    expect(isRetryDue(new Date(last.getTime() + spacingMs - 1000), last, last, 1)).toBe(false);
+    expect(isRetryDue(new Date(last.getTime() + spacingMs + 1000), last, last, 1)).toBe(true);
+  });
+
+  it("leases a claimed-but-never-attempted row off created_at", () => {
+    const created = new Date("2026-07-21T12:00:00Z");
+    const spacingMs = RETRY_BASE_MINUTES * 60 * 1000; // attempts = 0
+    expect(isRetryDue(new Date(created.getTime() + spacingMs - 1000), null, created, 0)).toBe(false);
+    expect(isRetryDue(new Date(created.getTime() + spacingMs + 1000), null, created, 0)).toBe(true);
   });
 });

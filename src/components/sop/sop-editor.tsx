@@ -382,6 +382,10 @@ export function SopEditor({
   const [persistedUpdatedAt, setPersistedUpdatedAt] = useState<string | undefined>(
     isNew ? undefined : initial.updatedAt,
   );
+  // Mirror of the concurrency token read by persist(): an in-flight save advances it
+  // synchronously (before its promise resolves), so a click that awaited that save reads the
+  // fresh token here rather than this closure's stale state copy.
+  const persistedUpdatedAtRef = useRef<string | undefined>(isNew ? undefined : initial.updatedAt);
   // Bumped on every user edit so a save that raced with typing doesn't clobber newer edits.
   const editVersionRef = useRef(0);
   const persistedAnnexIdsRef = useRef(
@@ -397,6 +401,9 @@ export function SopEditor({
   // Blocks overlapped saves from the same timer-vs-cleanup gap; a second in-flight save
   // would reuse the same expectedUpdatedAt and land as a false concurrency conflict.
   const saveInFlightRef = useRef(false);
+  // Handle to the save currently running, so a click that races an autosave can await it
+  // instead of being silently dropped (persist returned false while a save was in flight).
+  const inFlightSaveRef = useRef<Promise<boolean> | null>(null);
   const reviewDismissTimerRef = useRef<number | null>(null);
   // The status as last persisted -- a save that changes it auto-appends a changeHistory row.
   const lastSavedStatusRef = useRef<SopStatus>(initial.status);
@@ -786,8 +793,12 @@ export function SopEditor({
 
   useEffect(() => {
     if (!showFinalApproval) return;
-    const refresh = () => void refreshApprovalRouting({ background: true });
-    const interval = window.setInterval(refresh, 5_000);
+    // Only poll while the tab is visible, matching the SOP list: a backgrounded editor must
+    // not keep firing this multi-query refresh every tick. The list's 15s cadence applies here.
+    const refresh = () => {
+      if (document.visibilityState === "visible") void refreshApprovalRouting({ background: true });
+    };
+    const interval = window.setInterval(refresh, 15_000);
     return () => window.clearInterval(interval);
   }, [refreshApprovalRouting, showFinalApproval]);
 
@@ -855,19 +866,39 @@ export function SopEditor({
       return false;
     }
 
+    // A save (typically an autosave that a keystroke re-enabled the buttons over) may already be
+    // running. Wait for it to settle, then fall through to one fresh save so this click captures
+    // the latest edits against the up-to-date token -- never a silent no-op. The loop also
+    // serializes two clicks that both awaited the same in-flight save. saveInFlightRef and
+    // inFlightSaveRef are always set together, so this can't spin on a null promise.
+    while (saveInFlightRef.current) {
+      try {
+        await inFlightSaveRef.current;
+      } catch {
+        // The in-flight save reported its own outcome; attempt a fresh save regardless.
+      }
+    }
+
     // First save of a new SOP: the owning department mints the number (and is written on INSERT).
-    const firstSave = isNew && !persistedUpdatedAt;
+    // Read the token from the ref: a save we just awaited advances it synchronously, while this
+    // closure's `persistedUpdatedAt` would still show the pre-save value.
+    const expectedUpdatedAt = persistedUpdatedAtRef.current;
+    const firstSave = isNew && !expectedUpdatedAt;
     if (firstSave && !deptId) {
       setSaveError("Choose an owning department before saving.");
       setSaveStatus("error");
       return false;
     }
 
-    if (saveInFlightRef.current) return false;
-
     setSaveStatus("saving");
     setSaveError("");
     saveInFlightRef.current = true;
+    const run = runSave(firstSave, expectedUpdatedAt);
+    inFlightSaveRef.current = run;
+    return run;
+  }
+
+  async function runSave(firstSave: boolean, expectedUpdatedAt: string | undefined): Promise<boolean> {
     try {
       const needsAuthorIdentity = firstSave || sop.status !== lastSavedStatusRef.current;
       let savingAuthorIdentity = departmentAuthorIdentity;
@@ -887,13 +918,13 @@ export function SopEditor({
       }
 
       let working: Sop = { ...sop, meta: { ...sop.meta, version: controlledVersion } };
-      const saveOptions: SaveSopOptions = { expectedUpdatedAt: persistedUpdatedAt };
+      const saveOptions: SaveSopOptions = { expectedUpdatedAt };
       if (firstSave) {
         try {
           // A failed INSERT can be retried with the number already reserved by the first mint.
           // Re-minting here would create a gap every time a transient save error is retried.
           const reservedNumber = sop.meta.sopNumber.trim();
-          const minted = reservedNumber || (await mintSopNumber(workspaceId, deptId, DEFAULT_DOC_TYPE));
+          const minted = reservedNumber || (await mintSopNumber(workspaceId!, deptId, DEFAULT_DOC_TYPE));
           working = { ...working, meta: { ...working.meta, sopNumber: minted } };
           // Patch only the number: edits typed while the mint was in flight must survive.
           setSop((current) => ({ ...current, meta: { ...current.meta, sopNumber: minted } }));
@@ -924,8 +955,10 @@ export function SopEditor({
         ? { ...working, changeHistory: appendMissingChangeEntries(working.changeHistory, generatedHistoryEntries) }
         : working;
       try {
-        const next = await saveSop(toSave, workspaceId, saveOptions);
+        const next = await saveSop(toSave, workspaceId!, saveOptions);
         persistedAnnexIdsRef.current = new Set(next.annexes.flatMap((annex) => (annex.id ? [annex.id] : [])));
+        // Advance the ref synchronously so a click awaiting this save reads the fresh token.
+        persistedUpdatedAtRef.current = next.updatedAt;
         setPersistedUpdatedAt(next.updatedAt);
         lastSavedStatusRef.current = next.status;
         if (editVersionRef.current === sopEditVersion) {
@@ -977,6 +1010,7 @@ export function SopEditor({
       editVersionRef.current += 1;
       lastSavedStatusRef.current = next.status;
       setSop(next);
+      persistedUpdatedAtRef.current = next.updatedAt;
       setPersistedUpdatedAt(next.updatedAt);
       setDirty(false);
       setConflicted(false);
@@ -1295,6 +1329,7 @@ export function SopEditor({
       if (!control) throw new Error("The saved SOP could not be loaded for submission.");
       if (control.status !== "draft") {
         setSop((current) => ({ ...current, status: control.status, updatedAt: control.updatedAt }));
+        persistedUpdatedAtRef.current = control.updatedAt;
         setPersistedUpdatedAt(control.updatedAt);
         lastSavedStatusRef.current = control.status;
         setStepIndex(CREATOR_STEPS.length);
@@ -1324,6 +1359,7 @@ export function SopEditor({
       if (!latest) throw new Error("The SOP could not be reloaded after signing.");
       const transitioned = await transitionSop(sop.id, "in_review", latest.updatedAt);
       setSop((current) => ({ ...current, status: transitioned.status, updatedAt: transitioned.updatedAt }));
+      persistedUpdatedAtRef.current = transitioned.updatedAt;
       setPersistedUpdatedAt(transitioned.updatedAt);
       lastSavedStatusRef.current = transitioned.status;
       // The review round already happened — go straight to the signature phase

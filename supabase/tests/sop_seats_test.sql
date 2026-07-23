@@ -1,11 +1,10 @@
 -- pgTAP: Gate A — the roster must be complete and honest before draft -> in_review.
 --
 -- Pins the seat invariants:
---   * at least one responsible seat, exactly one accountable seat (unique index holds
---     the upper bound, Gate A the lower)
+--   * at least one required departmental approver; any number of departments may be required
 --   * every seat with a signer_id names a strict member of that seat's department
 --   * the submitter holds no blocking seat (first leg of the three-humans invariant)
---   * informed seats carry no signer (seat_signer_required allows null only there)
+--   * the approval roster refuses legacy Support / Consult / Inform duties
 --   * an authorship signature by the submitter, bound to (content_hash, review_cycle),
 --     is required to submit
 --
@@ -69,30 +68,29 @@ insert into public.sops (id, workspace_id, sop_number, title, document, status, 
 select s.id, 'ws_seats', s.num, s.title, '{"body":"v1"}'::jsonb, 'draft',
        'c0000000-0000-0000-0000-000000000001', 'dept_st_prd'
 from (values
-  ('sop_seat_1', 'PRD-SOP-001', 'No responsible'),
-  ('sop_seat_2', 'PRD-SOP-002', 'No accountable'),
-  ('sop_seat_3', 'PRD-SOP-003', 'Two accountable'),
+  ('sop_seat_1', 'PRD-SOP-001', 'No required approver'),
+  ('sop_seat_2', 'PRD-SOP-002', 'One required approver'),
+  ('sop_seat_3', 'PRD-SOP-003', 'Multiple required approvers'),
   ('sop_seat_4', 'PRD-SOP-004', 'Ghost signer'),
   ('sop_seat_5', 'PRD-SOP-005', 'Submitter seated'),
   ('sop_seat_6', 'PRD-SOP-006', 'Valid roster')) as s(id, num, title);
 
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
-  -- sop_seat_1: accountable only, no responsible.
-  ('sop_seat_1', 'dept_st_b', 'accountable', 'c0000000-0000-0000-0000-000000000003'),
-  -- sop_seat_2: responsible only, no accountable.
+  -- sop_seat_1 intentionally has no approval rows.
+  -- sop_seat_2: one required approver is sufficient.
   ('sop_seat_2', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000002'),
-  -- sop_seat_3: a valid pair; the second accountable is attempted below.
+  -- sop_seat_3: multiple required departments are allowed.
   ('sop_seat_3', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000002'),
-  ('sop_seat_3', 'dept_st_b', 'accountable', 'c0000000-0000-0000-0000-000000000003'),
-  -- sop_seat_4: the accountable signer is NOT a member of dept_st_b.
+  ('sop_seat_3', 'dept_st_b', 'responsible', 'c0000000-0000-0000-0000-000000000003'),
+  -- sop_seat_4: one signer is NOT a member of dept_st_b.
   ('sop_seat_4', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000002'),
-  ('sop_seat_4', 'dept_st_b', 'accountable', 'c0000000-0000-0000-0000-000000000005'),
+  ('sop_seat_4', 'dept_st_b', 'responsible', 'c0000000-0000-0000-0000-000000000005'),
   -- sop_seat_5: the submitter (u1) holds the responsible seat.
   ('sop_seat_5', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000001'),
-  ('sop_seat_5', 'dept_st_b', 'accountable', 'c0000000-0000-0000-0000-000000000003'),
+  ('sop_seat_5', 'dept_st_b', 'responsible', 'c0000000-0000-0000-0000-000000000003'),
   -- sop_seat_6: fully valid blocking roster.
   ('sop_seat_6', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000002'),
-  ('sop_seat_6', 'dept_st_b', 'accountable', 'c0000000-0000-0000-0000-000000000003');
+  ('sop_seat_6', 'dept_st_b', 'responsible', 'c0000000-0000-0000-0000-000000000003');
 
 -- Helper: act as a given user with the authenticated role.
 create or replace function test_as(p_uid text) returns void language plpgsql as $$
@@ -102,33 +100,30 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 1/2. Missing blocking seats. Authorship is signed first so the only Gate A
---      violation is the roster itself.
+-- 1/2. At least one required approver is necessary, and one is sufficient.
 -- ---------------------------------------------------------------------------
 select test_as('c0000000-0000-0000-0000-000000000001');
 select public.sign_sop('sop_seat_1', 'authorship');
 select throws_ok(
   $$ update public.sops set status = 'in_review' where id = 'sop_seat_1' $$,
   null,
-  'submitting without a responsible seat is refused (Gate A)'
+  'submitting without a required departmental approver is refused (Gate A)'
 );
 
 select public.sign_sop('sop_seat_2', 'authorship');
-select throws_ok(
+select lives_ok(
   $$ update public.sops set status = 'in_review' where id = 'sop_seat_2' $$,
-  null,
-  'submitting without an accountable seat is refused (Gate A)'
+  'one required departmental approver is sufficient'
 );
 
 -- ---------------------------------------------------------------------------
--- 3. At most one accountable seat — the partial unique index bites even for the owner.
+-- 3. Any number of departments may be required approvers.
 -- ---------------------------------------------------------------------------
 reset role;
-select throws_ok(
+select lives_ok(
   $$ insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id)
-     values ('sop_seat_3', 'dept_st_c', 'accountable', 'c0000000-0000-0000-0000-000000000004') $$,
-  null,
-  'a second accountable seat is refused (sop_review_seats_one_accountable)'
+     values ('sop_seat_3', 'dept_st_c', 'responsible', 'c0000000-0000-0000-0000-000000000004') $$,
+  'a third required departmental approver is allowed'
 );
 
 -- ---------------------------------------------------------------------------
@@ -153,18 +148,19 @@ select throws_ok(
 );
 
 -- ---------------------------------------------------------------------------
--- 6/7. Informed seats carry no signer; blocking seats must carry one.
+-- 6/7. Legacy non-approval duties are refused; required approvers need a signer.
 -- ---------------------------------------------------------------------------
-select lives_ok(
+select throws_ok(
   $$ insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id)
      values ('sop_seat_6', 'dept_st_c', 'informed', null) $$,
-  'an informed seat with a null signer_id is allowed (seat_signer_required)'
+  null,
+  'Inform belongs in procedure RASIC, not the approval roster'
 );
 select throws_ok(
   $$ insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id)
      values ('sop_seat_6', 'dept_st_d', 'responsible', null) $$,
   null,
-  'a responsible seat with a null signer_id is refused (seat_signer_required)'
+  'a required approver with a null signer_id is refused'
 );
 
 -- ---------------------------------------------------------------------------
@@ -178,7 +174,7 @@ select throws_ok(
 select public.sign_sop('sop_seat_6', 'authorship');
 select lives_ok(
   $$ update public.sops set status = 'in_review' where id = 'sop_seat_6' $$,
-  'a valid roster + authorship signature submits cleanly'
+  'a valid required-approver roster + authorship signature submits cleanly'
 );
 select is(
   (select status from public.sops where id = 'sop_seat_6'),

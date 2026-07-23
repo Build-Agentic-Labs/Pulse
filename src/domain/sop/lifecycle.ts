@@ -37,13 +37,11 @@ export interface TransitionContext {
   /** Workspace owner/admin — folds in for department-scoped verbs (never for signing). */
   isManager?: boolean;
 
-  /** The roster carries at least one Responsible department. */
-  hasResponsibleSeat?: boolean;
-  /** Exactly one department assigned Approve is required; stored internally as `accountable`. */
-  accountableSeatCount?: number;
-  /** This user holds a Responsible or Approve duty on this SOP. */
+  /** The roster carries at least one required departmental approver. */
+  requiredApproverCount?: number;
+  /** This user holds a required departmental approval seat on this SOP. */
   holdsBlockingSeat?: boolean;
-  /** This user holds any seat at all (blocking, support, or consulted). */
+  /** This user holds any departmental approval seat at all. */
   holdsAnySeat?: boolean;
   /** Every seat's designated signer belongs to that seat's department. */
   seatsStaffedCorrectly?: boolean;
@@ -84,8 +82,7 @@ export function canTransitionSop(ctx: TransitionContext): TransitionResult {
     isQualityApprover,
     hasDept,
     isManager = false,
-    hasResponsibleSeat = false,
-    accountableSeatCount = 0,
+    requiredApproverCount = 0,
     holdsBlockingSeat = false,
     holdsAnySeat = false,
     seatsStaffedCorrectly = true,
@@ -106,8 +103,7 @@ export function canTransitionSop(ctx: TransitionContext): TransitionResult {
     case "draft->in_review":
       if (!hasDept) return no("Assign an owning department before submitting for review.");
       if (!isOwningDeptMember) return no("Only a member of the owning department can submit this SOP.");
-      if (!hasResponsibleSeat) return no("Name at least one Responsible department before submitting.");
-      if (accountableSeatCount !== 1) return no("Assign exactly one department to Approve before submitting.");
+      if (requiredApproverCount < 1) return no("Assign at least one required departmental approver before submitting.");
       if (!seatsStaffedCorrectly) return no("Every seat's reviewer must belong to that seat's department.");
       if (holdsBlockingSeat) return no("You hold a blocking seat on this SOP; someone else must submit it.");
       if (!authorshipSigned) return no("Sign the authorship declaration before submitting this SOP.");
@@ -117,7 +113,7 @@ export function canTransitionSop(ctx: TransitionContext): TransitionResult {
     case "in_review->approved":
       // Not a button. `sign_sop` performs this edge when the last blocking seat signs.
       if (isSubmitter) return no("You can't approve an SOP you submitted for review.");
-      if (!quorumMet) return no("Every department assigned Responsible or Approve must sign before Quality review.");
+      if (!quorumMet) return no("Every required departmental approver must sign before Quality review.");
       if (hasOpenObjection) return no("Resolve the open objection before this SOP can be approved.");
       return OK;
 
@@ -127,7 +123,7 @@ export function canTransitionSop(ctx: TransitionContext): TransitionResult {
       // the trigger only accepts a bare UPDATE here when a rejection signature already exists.
       if (isSubmitter) return OK;
       if (holdsBlockingSeat && hasOwnRejection) return OK;
-      return no("Only a reviewer assigned Responsible or Approve can reject this SOP, or its submitter can recall it.");
+      return no("Only a required departmental approver can reject this SOP, or its submitter can recall it.");
 
     case "approved->effective":
       if (!isQualityApprover) return no("Only a Quality approver can make an SOP effective.");

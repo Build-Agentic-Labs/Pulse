@@ -72,7 +72,7 @@ select throws_ok(
 select lives_ok(
   $$ insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id)
      values ('sop_ta', 'd_ta_eng', 'responsible', 'e0000000-0000-0000-0000-000000000002'),
-            ('sop_ta', 'd_ta_mnt', 'accountable', 'e0000000-0000-0000-0000-000000000003') $$,
+            ('sop_ta', 'd_ta_mnt', 'responsible', 'e0000000-0000-0000-0000-000000000003') $$,
   'same-workspace seats are accepted'
 );
 

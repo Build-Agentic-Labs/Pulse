@@ -31,7 +31,6 @@ import { applySampleData } from "@/domain/sop/sample";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { fetchMyDeptRoles, listDepartments, listMembersForDepartments } from "@/lib/departments/store";
 import {
-  enableSopSelfReviewTest,
   getSopControl,
   isBlockingSeat,
   isSignatureCurrent,
@@ -41,7 +40,6 @@ import {
   mintSopNumber,
   requestSopFinalApproval,
   signSop,
-  sopRasicLabel,
   transitionSop,
   type SopReviewSeat,
   type SopSignature,
@@ -427,7 +425,7 @@ export function SopEditor({
         seats.flatMap((seat) => seat.signerId ? [seat.signerId] : []),
       );
       setApprovalDepartments(departments);
-      setApprovalSeats(seats);
+      setApprovalSeats(seats.filter((seat) => isBlockingSeat(seat.rasic)));
       setApprovalSignatures(signatures);
       setApprovalReviewerNames(reviewerNames);
       setApprovalAuthorId(control?.createdBy ?? null);
@@ -712,26 +710,12 @@ export function SopEditor({
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === steps.length - 1;
   const saveDisabled = !canEdit || !workspaceId || saveStatus === "saving";
-  const routingSeatsStaffed = approvalSeats.every(
-    (seat) => seat.rasic === "informed" || Boolean(seat.signerId),
-  );
-  const responsibleSeats = approvalSeats.filter((seat) => seat.rasic === "responsible");
-  const soloSelfReviewReady =
-    Boolean(approvalAuthorId) &&
-    responsibleSeats.length === 1 &&
-    responsibleSeats[0]?.signerId === approvalAuthorId &&
-    approvalSeats.every((seat) => seat.rasic !== "accountable") &&
-    routingSeatsStaffed;
-  const standardApprovalRoutingReady =
-    approvalSeats.some((seat) => seat.rasic === "responsible") &&
-    approvalSeats.filter((seat) => seat.rasic === "accountable").length === 1 &&
-    routingSeatsStaffed &&
+  const approvalRoutingReady =
+    approvalSeats.length > 0 &&
+    approvalSeats.every((seat) => Boolean(seat.signerId)) &&
     !approvalSeats.some(
-      (seat) =>
-        (seat.rasic === "responsible" || seat.rasic === "accountable") &&
-        seat.signerId === approvalAuthorId,
+      (seat) => seat.signerId === approvalAuthorId,
     );
-  const approvalRoutingReady = standardApprovalRoutingReady || soloSelfReviewReady;
   const provisionalSopNumber =
     isNew && !persistedUpdatedAt && selectedDept
       ? previewSopNumber(selectedDept.code, DEFAULT_DOC_TYPE)
@@ -1315,15 +1299,10 @@ export function SopEditor({
       setSaveStatus("error");
       return;
     }
-    const useSoloSelfReview = soloSelfReviewReady;
     setSubmittingForApproval(true);
     setSaveError("");
     try {
       if (!(await persist())) return;
-
-      if (useSoloSelfReview) {
-        await enableSopSelfReviewTest(sop.id);
-      }
 
       const control = await getSopControl(sop.id);
       if (!control) throw new Error("The saved SOP could not be loaded for submission.");
@@ -1940,7 +1919,6 @@ export function SopEditor({
                     sopId={sop.id}
                     departments={approvalDepartments}
                     seats={approvalSeats}
-                    authorId={approvalAuthorId}
                     onChanged={() => refreshApprovalRouting({ background: true })}
                   />
                 ) : (
@@ -1955,7 +1933,7 @@ export function SopEditor({
                           <div key={seat.departmentId} className="flex items-center gap-3 px-4 py-3 text-sm">
                             <span className="ui-chip">{department?.code ?? "—"}</span>
                             <span className="min-w-0 flex-1 truncate">{department?.name ?? "Unknown department"}</span>
-                            <span className="ui-mono-label text-ink-tertiary">{sopRasicLabel(seat.rasic)}</span>
+                            <span className="ui-mono-label text-ink-tertiary">Required approval</span>
                           </div>
                         );
                       }) : (
@@ -2173,7 +2151,7 @@ export function SopEditor({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-ink">{name}</p>
                           <p className="mt-0.5 truncate text-xs text-ink-tertiary">
-                            {department?.name ?? "Unknown department"} · {sopRasicLabel(seat.rasic)}
+                            {department?.name ?? "Unknown department"} · Required approval
                           </p>
                         </div>
                         <div className="shrink-0 text-right">
@@ -2313,10 +2291,8 @@ export function SopEditor({
                           approvalRoutingReady
                             ? reviewGate.allResponded
                               ? "The review round is complete — save this draft and send it to the formal approvers for signature"
-                              : soloSelfReviewReady
-                                ? "Temporary test mode: send this draft to yourself for review"
-                                : "Save this draft and send it to the assigned responsible reviewers"
-                            : "Assign at least one Responsible department and exactly one department to Approve"
+                              : "Save this draft and send it to every required departmental approver"
+                            : "Assign at least one required departmental approver who is not the SOP author"
                         }
                       >
                         <ShieldCheck size={14} />

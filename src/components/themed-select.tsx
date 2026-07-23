@@ -16,6 +16,8 @@ import { createPortal } from "react-dom";
 export type ThemedSelectOption = {
   value: string;
   label: string;
+  /** Optional secondary line shown beneath the option label. */
+  description?: string;
   disabled?: boolean;
   /** Optional visual group heading. Consecutive options with the same group share one heading. */
   group?: string;
@@ -58,7 +60,10 @@ export function ThemedSelect({
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
   const selected = useMemo(() => options.find((option) => option.value === value), [options, value]);
-  const visibleLabel = selectedLabel ?? selected?.label ?? placeholder ?? options[0]?.label ?? "Select";
+  const selectedOptionLabel = selected?.description
+    ? `${selected.label} — ${selected.description}`
+    : selected?.label;
+  const visibleLabel = selectedLabel ?? selectedOptionLabel ?? placeholder ?? options[0]?.label ?? "Select";
   const isSop = variant === "sop";
 
   useEffect(() => {
@@ -227,7 +232,15 @@ export function ThemedSelect({
                   disabled={option.disabled}
                   onClick={() => commit(option.value)}
                 >
-                  <span className="ui-themed-select-option-label" title={option.label}>{option.label}</span>
+                  <span
+                    className="ui-themed-select-option-content"
+                    title={option.description ? `${option.label} — ${option.description}` : option.label}
+                  >
+                    <span className="ui-themed-select-option-label">{option.label}</span>
+                    {option.description ? (
+                      <span className="ui-themed-select-option-description">{option.description}</span>
+                    ) : null}
+                  </span>
                   {selectedOption ? <Check size={13} className="ui-themed-select-check" aria-hidden="true" /> : null}
                 </button>
               </div>

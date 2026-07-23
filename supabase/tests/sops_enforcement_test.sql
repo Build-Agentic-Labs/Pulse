@@ -102,7 +102,7 @@ values ('sop_1', 'ws_test', 'SOP-PRD-010', 'Torque spec', '{"body":"v1"}'::jsonb
 
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
   ('sop_1', 'dept_prd', 'responsible', '22222222-2222-2222-2222-222222222222'),
-  ('sop_1', 'dept_eng', 'accountable', '44444444-4444-4444-4444-444444444444');
+  ('sop_1', 'dept_eng', 'responsible', '44444444-4444-4444-4444-444444444444');
 
 -- ---------------------------------------------------------------------------
 -- 3. Authorship + submit -> in_review, then content-freeze on a non-draft PATCH.

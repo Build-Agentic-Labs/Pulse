@@ -60,23 +60,13 @@ export type SignatureMeaning =
   | "objection_overruled";
 
 /**
- * Persisted RASIC duty values. The database keeps its original enum spellings for compatibility;
- * UI and export surfaces use the canonical Responsible / Approve / Support / Inform / Consult labels.
+ * Legacy approval-roster values retained for database compatibility. New and migrated approval
+ * rows use `responsible` internally to mean "required departmental approver." Procedure RASIC is
+ * stored separately on the SOP document and is not represented by these seats.
  */
 export type SopRasic = "responsible" | "accountable" | "support" | "consulted" | "informed";
 
-export const SOP_RASIC_LABELS: Record<SopRasic, string> = {
-  responsible: "Responsible",
-  accountable: "Approve",
-  support: "Support",
-  informed: "Inform",
-  consulted: "Consult",
-};
-
-export function sopRasicLabel(rasic: SopRasic): string {
-  return SOP_RASIC_LABELS[rasic];
-}
-
+/** Values treated as required approval seats while legacy data is being normalized. */
 export const BLOCKING_RASIC: readonly SopRasic[] = ["responsible", "accountable"];
 
 export function isBlockingSeat(rasic: SopRasic): boolean {
@@ -159,12 +149,6 @@ function mapControl(row: Record<string, unknown>): SopControl {
     finalApprovalContentHash: (row.final_approval_content_hash as string | null) ?? null,
     finalApprovalRequestedBy: (row.final_approval_requested_by as string | null) ?? null,
   };
-}
-
-/** Enable the narrow solo-author review path after its roster has been validated by the DB. */
-export async function enableSopSelfReviewTest(sopId: string): Promise<void> {
-  const supabase = createPlannerSupabaseClient();
-  await throwIfError(supabase.rpc("enable_sop_self_review_test", { p_sop: sopId }));
 }
 
 export async function requestSopFinalApproval(sopId: string): Promise<void> {
@@ -376,7 +360,7 @@ export async function listProfileNames(userIds: readonly string[]): Promise<Map<
   );
 }
 
-/** The roster: every seated department, its RASIC duty, and its designated signer. */
+/** The required departmental approval roster and each department's designated approver. */
 export async function listSeats(sopId: string): Promise<SopReviewSeat[]> {
   const supabase = createPlannerSupabaseClient();
   const rows = await throwIfError(
@@ -409,7 +393,7 @@ export async function listSeatsForSops(
   }));
 }
 
-/** Add or update a seat. Only legal while the SOP is a draft; the DB enforces the freeze. */
+/** Add or update a required approval seat. Only legal while the SOP is a draft. */
 export async function upsertSeat(seat: SopReviewSeat): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   await throwIfError(
@@ -417,7 +401,8 @@ export async function upsertSeat(seat: SopReviewSeat): Promise<void> {
       {
         sop_id: seat.sopId,
         department_id: seat.departmentId,
-        rasic: seat.rasic,
+        // The column keeps its legacy enum, but the approval roster now has one duty only.
+        rasic: "responsible",
         signer_id: seat.signerId,
       },
       { onConflict: "sop_id,department_id" },

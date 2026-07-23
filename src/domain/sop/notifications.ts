@@ -148,10 +148,10 @@ export function resolveEventRecipients(
 
   switch (event.eventType) {
     case "review_sent": {
-      // The draft-review phase blocks on EVERY non-informed seat, not just R/A:
-      // request_sop_final_approval refuses until each has returned a review.
+      // Only required departmental approvers participate in draft review.
+      // Procedure Consult / Support / Inform roles are not approval recipients.
       if (sop.status !== "in_review" || finalApprovalPhaseActive(sop)) return [];
-      return seatRecipients(event, ctx, "review_requested", (rasic) => rasic !== "informed");
+      return seatRecipients(event, ctx, "review_requested", isBlocking);
     }
 
     case "final_approval_requested": {
@@ -252,7 +252,7 @@ function remindersForSop(now: Date, state: SopReminderState): PendingNotificatio
   if (sop.status === "in_review" && !finalApprovalPhaseActive(sop) && state.reviewSentAt) {
     const returned = new Set(state.currentReviewReturns);
     for (const seat of state.seats) {
-      if (seat.rasic === "informed" || !seat.signerId || returned.has(seat.signerId)) continue;
+      if (!isBlocking(seat.rasic) || !seat.signerId || returned.has(seat.signerId)) continue;
       candidates.push({ recipientId: seat.signerId, kind: "review_requested", anchorAt: state.reviewSentAt });
     }
   }

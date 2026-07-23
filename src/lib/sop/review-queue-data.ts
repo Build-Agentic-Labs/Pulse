@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
 import { hasSubmittedSopReview, listSopReviewSubmissions } from "@/lib/sop/review-annotations";
-import { listMySeats, listMySignaturesFor, type MySeatItem } from "@/lib/sop/review";
+import { isBlockingSeat, listMySeats, listMySignaturesFor, type MySeatItem } from "@/lib/sop/review";
 import { listSops, type SopListItem } from "@/lib/sop/store";
 
 /** A seat awaiting this user's signature, with the department it speaks for. */
@@ -62,10 +62,9 @@ export async function fetchReviewQueueData(
     (department) => department.isQualityGate && deptRoles.get(department.id) === "approver",
   );
 
-  const inReviewSeats = seats.filter((seat) => seat.status === "in_review" && seat.rasic !== "informed");
+  const inReviewSeats = seats.filter((seat) => seat.status === "in_review" && isBlockingSeat(seat.rasic));
   const finalApprovalSeats = inReviewSeats.filter(
     (seat) =>
-      (seat.rasic === "responsible" || seat.rasic === "accountable") &&
       Boolean(seat.finalApprovalRequestedAt) &&
       seat.finalApprovalContentHash === seat.contentHash,
   );

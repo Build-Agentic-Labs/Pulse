@@ -6,21 +6,12 @@ import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import {
+  isBlockingSeat,
   listProfileNames,
   removeSeat,
-  SOP_RASIC_LABELS,
   upsertSeat,
-  type SopRasic,
   type SopReviewSeat,
 } from "@/lib/sop/review";
-
-const RASIC_OPTIONS: { value: SopRasic; label: string; hint: string }[] = [
-  { value: "responsible", label: SOP_RASIC_LABELS.responsible, hint: "Performs the work. Signature required." },
-  { value: "accountable", label: SOP_RASIC_LABELS.accountable, hint: "Approves the work. Signature required. Exactly one." },
-  { value: "support", label: SOP_RASIC_LABELS.support, hint: "Provides resources. Signs; does not block." },
-  { value: "informed", label: SOP_RASIC_LABELS.informed, hint: "Receives updates. Never signs." },
-  { value: "consulted", label: SOP_RASIC_LABELS.consulted, hint: "Provides input. Signs or comments; does not block." },
-];
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong. Please try again.";
@@ -30,34 +21,33 @@ interface RosterEditorProps {
   sopId: string;
   departments: Department[];
   seats: SopReviewSeat[];
-  /** The SOP's author. They may not hold a Responsible or Approve duty. */
-  authorId: string | null;
   onChanged: () => Promise<void> | void;
 }
 
 /**
- * Assign the responsible parties. RASIC is carried by DEPARTMENTS; each seated department names
- * exactly one designated reviewer who signs on its behalf.
+ * Assign the departments whose approval is required. Each department names exactly one approver
+ * who reviews the draft and later signs the formal departmental approval. Procedure RASIC is a
+ * separate responsibility map and is intentionally not part of this roster.
  *
  * Editable only while the SOP is a draft — the database freezes the roster on submit, and after
- * that only an admin may reassign a seat's signer. Every rule mirrored here is enforced in the
- * trigger; we surface the database's own message when it refuses.
+ * that only an admin may reassign an approver.
  */
-export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged }: RosterEditorProps) {
+export function SopRosterEditor({ sopId, departments, seats, onChanged }: RosterEditorProps) {
   const [members, setMembers] = useState<Map<string, { userId: string; name: string; positionTitle: string }[]>>(new Map());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState<{ departmentId: string; rasic: SopRasic; signerId: string }>({
+  const [draft, setDraft] = useState<{ departmentId: string; signerId: string }>({
     departmentId: "",
-    rasic: "responsible",
     signerId: "",
   });
 
   const qualityDepartment = departments.find((department) => department.isQualityGate);
   const workflowSeats = useMemo(
     () => seats.filter(
-      (seat) => !departments.find((department) => department.id === seat.departmentId)?.isQualityGate,
+      (seat) =>
+        isBlockingSeat(seat.rasic) &&
+        !departments.find((department) => department.id === seat.departmentId)?.isQualityGate,
     ),
     [departments, seats],
   );
@@ -117,28 +107,6 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
     setBusy(null);
   }
 
-  const responsibleCount = workflowSeats.filter((seat) => seat.rasic === "responsible").length;
-  const accountableCount = workflowSeats.filter((seat) => seat.rasic === "accountable").length;
-  const authorHoldsBlockingSeat = workflowSeats.some(
-    (seat) => (seat.rasic === "responsible" || seat.rasic === "accountable") && seat.signerId === authorId,
-  );
-  const soloSelfReview =
-    Boolean(authorId) &&
-    responsibleCount === 1 &&
-    workflowSeats.find((seat) => seat.rasic === "responsible")?.signerId === authorId &&
-    accountableCount === 0 &&
-    workflowSeats.every((seat) => seat.rasic === "informed" || Boolean(seat.signerId));
-
-  const problems: string[] = [];
-  if (responsibleCount === 0) problems.push("Name at least one Responsible department.");
-  if (!soloSelfReview && accountableCount !== 1) problems.push("Assign exactly one department to Approve.");
-  if (workflowSeats.some((seat) => seat.rasic !== "informed" && !seat.signerId)) {
-    problems.push("Choose a reviewer for every department that must sign or review.");
-  }
-  if (!soloSelfReview && authorHoldsBlockingSeat) {
-    problems.push("The author cannot hold a Responsible or Approve duty.");
-  }
-
   return (
     <section className="ui-data-table-frame">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
@@ -150,11 +118,11 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
             aria-expanded={adding}
             onClick={() => {
               setAdding((current) => !current);
-              setDraft({ departmentId: "", rasic: "responsible", signerId: "" });
+              setDraft({ departmentId: "", signerId: "" });
             }}
           >
             {adding ? <X size={14} /> : <Plus size={14} />}
-            {adding ? "Cancel" : "Add reviewer"}
+            {adding ? "Cancel" : "Add approver"}
           </button>
         ) : null}
       </div>
@@ -166,18 +134,16 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
       ) : null}
 
       <div className="ui-table-scroll">
-        <table className="w-full min-w-[720px] table-fixed border-collapse text-left">
+        <table className="w-full min-w-[620px] table-fixed border-collapse text-left">
           <colgroup>
-            <col className="w-[34%]" />
-            <col className="w-40" />
+            <col className="w-[38%]" />
             <col />
             <col className="w-14" />
           </colgroup>
           <thead>
             <tr className="border-b border-line">
               <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Department</th>
-              <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Duty</th>
-              <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Reviewer</th>
+              <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Required approver</th>
               <th scope="col" className="px-2 py-3"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
@@ -185,11 +151,12 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
             {workflowSeats.map((seat) => {
               const department = departments.find((item) => item.id === seat.departmentId);
               const options = members.get(seat.departmentId) ?? [];
-              const reviewerOptions = [
-                { value: "", label: seat.rasic === "informed" ? "No signer" : "Choose a reviewer…" },
+              const approverOptions = [
+                { value: "", label: "Choose an approver…" },
                 ...options.map((member) => ({
                   value: member.userId,
-                  label: `${member.name}${member.positionTitle ? ` — ${member.positionTitle}` : ""}`,
+                  label: member.name,
+                  description: member.positionTitle || "Position not assigned",
                 })),
               ];
               return (
@@ -205,33 +172,13 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
                       variant="sop"
                       className="w-full"
                       triggerClassName="ui-sop-select-inline"
-                      ariaLabel={`RASIC duty for ${department?.code ?? "department"}`}
-                      value={seat.rasic}
-                      options={RASIC_OPTIONS}
+                      ariaLabel={`Required approver for ${department?.code ?? "department"}`}
+                      value={seat.signerId ?? ""}
+                      options={approverOptions}
                       disabled={busy !== null}
                       onChange={(value) =>
-                        void guarded(`rasic-${seat.departmentId}`, () =>
-                          upsertSeat({
-                            ...seat,
-                            rasic: value as SopRasic,
-                            signerId: value === "informed" ? null : seat.signerId,
-                          }),
-                        )
-                      }
-                    />
-                  </td>
-                  <td className="px-5 py-2.5 align-middle">
-                    <ThemedSelect
-                      variant="sop"
-                      className="w-full"
-                      triggerClassName="ui-sop-select-inline"
-                      ariaLabel={`Designated reviewer for ${department?.code ?? "department"}`}
-                      value={seat.signerId ?? ""}
-                      options={reviewerOptions}
-                      disabled={busy !== null || seat.rasic === "informed"}
-                      onChange={(value) =>
-                        void guarded(`signer-${seat.departmentId}`, () =>
-                          upsertSeat({ ...seat, signerId: value || null }),
+                        void guarded(`approver-${seat.departmentId}`, () =>
+                          upsertSeat({ ...seat, rasic: "responsible", signerId: value || null }),
                         )
                       }
                     />
@@ -264,8 +211,10 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
                   {qualityDepartment?.name ?? "Quality department not assigned"}
                 </span>
               </td>
-              <td className="px-5 py-3.5 align-middle text-[13px] text-ink-secondary">Approver</td>
-              <td className="px-5 py-3.5 align-middle text-[13px] text-ink-secondary">Quality approvers</td>
+              <td className="px-5 py-3.5 align-middle">
+                <span className="block text-[13px] text-ink-secondary">Quality approvers</span>
+                <span className="mt-0.5 block text-[11px] text-ink-tertiary">Final approver</span>
+              </td>
               <td className="px-2 py-3.5 align-middle text-center">
                 <LockKeyhole size={14} className="mx-auto text-ink-tertiary" aria-label="Managed automatically" />
               </td>
@@ -292,27 +241,18 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
                     }}
                   />
                 </td>
-                <td className="px-3 py-2.5 align-middle">
+                <td className="px-5 py-2.5 align-middle">
                   <ThemedSelect
                     variant="sop"
-                    ariaLabel="RASIC duty"
-                    value={draft.rasic}
-                    disabled={busy !== null || !draft.departmentId}
-                    options={RASIC_OPTIONS}
-                    onChange={(value) => setDraft((prev) => ({ ...prev, rasic: value as SopRasic }))}
-                  />
-                </td>
-                <td className="px-3 py-2.5 align-middle">
-                  <ThemedSelect
-                    variant="sop"
-                    ariaLabel="Designated reviewer"
+                    ariaLabel="Required departmental approver"
                     value={draft.signerId}
-                    disabled={busy !== null || !draft.departmentId || draft.rasic === "informed"}
+                    disabled={busy !== null || !draft.departmentId}
                     options={[
-                      { value: "", label: draft.rasic === "informed" ? "No signer" : "Select reviewer…" },
+                      { value: "", label: "Select approver…" },
                       ...(members.get(draft.departmentId) ?? []).map((member) => ({
                         value: member.userId,
-                        label: `${member.name}${member.positionTitle ? ` — ${member.positionTitle}` : ""}`,
+                        label: member.name,
+                        description: member.positionTitle || "Position not assigned",
                       })),
                     ]}
                     onChange={(signerId) => setDraft((prev) => ({ ...prev, signerId }))}
@@ -322,23 +262,23 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
                   <button
                     type="button"
                     className="ui-btn-primary h-8 w-8 p-0 disabled:opacity-40"
-                    aria-label="Add department reviewer"
-                    title="Add department reviewer"
+                    aria-label="Add departmental approver"
+                    title="Add departmental approver"
                     disabled={
                       busy !== null ||
                       !draft.departmentId ||
-                      (draft.rasic !== "informed" && !draft.signerId)
+                      !draft.signerId
                     }
                     onClick={() =>
                       void guarded("add", async () => {
                         await upsertSeat({
                           sopId,
                           departmentId: draft.departmentId,
-                          rasic: draft.rasic,
-                          signerId: draft.rasic === "informed" ? null : draft.signerId,
+                          rasic: "responsible",
+                          signerId: draft.signerId,
                         });
                         setAdding(false);
-                        setDraft({ departmentId: "", rasic: "responsible", signerId: "" });
+                        setDraft({ departmentId: "", signerId: "" });
                       })
                     }
                   >
@@ -355,18 +295,6 @@ export function SopRosterEditor({ sopId, departments, seats, authorId, onChanged
         </table>
       </div>
 
-      {problems.length > 0 ? (
-        <div className="flex gap-3 border-t border-line px-5 py-2.5 text-xs">
-          <span className="shrink-0 font-medium text-warn">Setup required</span>
-          <span className="text-ink-secondary">{problems.join(" ")}</span>
-        </div>
-      ) : null}
-
-      {soloSelfReview ? (
-        <div className="border-t border-line px-5 py-2.5 text-xs text-ink-tertiary">
-          Author self-review is enabled for this test SOP.
-        </div>
-      ) : null}
     </section>
   );
 }

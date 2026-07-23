@@ -3,7 +3,7 @@
 -- Pins:
 --   * an incomplete blocking quorum never advances, neither via sign_sop nor via a
 --     manual UPDATE (the trigger independently re-validates the edge)
---   * support/consulted seats sign 'review' and never block
+--   * people outside the required-approver roster cannot sign
 --   * the last blocking dept_approval auto-advances in_review -> approved, no UPDATE issued
 --   * one person holding blocking seats for two departments signs once PER SEAT
 --     (seat_department_id stamped), and both seats must be satisfied
@@ -81,11 +81,9 @@ values
 
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
   ('sop_q1', 'dept_q_a', 'responsible', 'd0000000-0000-0000-0000-000000000002'),
-  ('sop_q1', 'dept_q_b', 'accountable', 'd0000000-0000-0000-0000-000000000003'),
-  ('sop_q1', 'dept_q_c', 'support',     'd0000000-0000-0000-0000-000000000004'),
-  ('sop_q1', 'dept_q_d', 'consulted',   'd0000000-0000-0000-0000-000000000005'),
+  ('sop_q1', 'dept_q_b', 'responsible', 'd0000000-0000-0000-0000-000000000003'),
   ('sop_q2', 'dept_q_a', 'responsible', 'd0000000-0000-0000-0000-000000000006'),
-  ('sop_q2', 'dept_q_b', 'accountable', 'd0000000-0000-0000-0000-000000000006');
+  ('sop_q2', 'dept_q_b', 'responsible', 'd0000000-0000-0000-0000-000000000006');
 
 -- Helper: act as a given user with the authenticated role.
 create or replace function test_as(p_uid text) returns void language plpgsql as $$
@@ -101,11 +99,12 @@ select test_as('d0000000-0000-0000-0000-000000000001');
 select public.sign_sop('sop_q1', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_q1';
 
--- 1. A support seat signs a review — allowed, never gates.
+-- 1. A person outside the required-approver roster cannot sign.
 select test_as('d0000000-0000-0000-0000-000000000004');
-select lives_ok(
+select throws_ok(
   $$ select public.sign_sop('sop_q1', 'review', p_seat_department => 'dept_q_c') $$,
-  'a support seat holder can sign a review'
+  null,
+  'a person outside the required-approver roster cannot sign a review'
 );
 
 -- 2. One of two blocking seats signed -> no advance.
@@ -125,13 +124,13 @@ select throws_ok(
   'a manual in_review->approved with an unmet quorum is refused even for an admin (Gate B)'
 );
 
--- 4. The last blocking signature advances by itself; support/consulted stay unsigned.
+-- 4. The last required departmental signature advances by itself.
 select test_as('d0000000-0000-0000-0000-000000000003');
 select public.sign_sop('sop_q1', 'dept_approval', p_seat_department => 'dept_q_b');
 select is(
   (select status from public.sops where id = 'sop_q1'),
   'approved',
-  'all blocking seats signed -> sign_sop auto-advances to approved; unsigned support/consulted do not block'
+  'all required departmental approvers signed -> sign_sop auto-advances to approved'
 );
 
 -- ---------------------------------------------------------------------------

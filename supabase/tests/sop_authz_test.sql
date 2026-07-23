@@ -81,10 +81,10 @@ values
 
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
   ('sop_z1', 'dept_z_a', 'responsible', 'e0000000-0000-0000-0000-000000000002'),
-  ('sop_z1', 'dept_z_b', 'accountable', 'e0000000-0000-0000-0000-000000000003'),
-  ('sop_z1', 'dept_z_c', 'support',     'e0000000-0000-0000-0000-000000000005'),
+  ('sop_z1', 'dept_z_b', 'responsible', 'e0000000-0000-0000-0000-000000000003'),
+  ('sop_z1', 'dept_z_c', 'responsible', 'e0000000-0000-0000-0000-000000000005'),
   ('sop_z2', 'dept_z_a', 'responsible', 'e0000000-0000-0000-0000-000000000002'),
-  ('sop_z2', 'dept_z_b', 'accountable', 'e0000000-0000-0000-0000-000000000003');
+  ('sop_z2', 'dept_z_b', 'responsible', 'e0000000-0000-0000-0000-000000000003');
 
 -- Helper: act as a given user with the authenticated role.
 create or replace function test_as(p_uid text) returns void language plpgsql as $$
@@ -136,6 +136,8 @@ select test_as('e0000000-0000-0000-0000-000000000002');
 select public.sign_sop('sop_z1', 'dept_approval', p_seat_department => 'dept_z_a');
 select test_as('e0000000-0000-0000-0000-000000000003');
 select public.sign_sop('sop_z1', 'dept_approval', p_seat_department => 'dept_z_b');
+select test_as('e0000000-0000-0000-0000-000000000005');
+select public.sign_sop('sop_z1', 'dept_approval', p_seat_department => 'dept_z_c');
 select is(
   (select status from public.sops where id = 'sop_z1'),
   'approved',

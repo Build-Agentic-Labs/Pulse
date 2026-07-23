@@ -53,15 +53,17 @@ const event = (over: Partial<NotifiableEvent> = {}): NotifiableEvent => ({
 const ids = (list: { recipientId: string }[]) => list.map((n) => n.recipientId).sort();
 
 describe("resolveEventRecipients: review_sent", () => {
-  it("emails every non-informed seat signer, excluding the actor", () => {
+  it("emails only required departmental approvers, excluding the actor", () => {
     const out = resolveEventRecipients(event(), ctx());
-    expect(ids(out)).toEqual(["acct", "resp", "supp"]);
+    expect(ids(out)).toEqual(["acct", "resp"]);
     expect(out.every((n) => n.kind === "review_requested")).toBe(true);
     expect(out.every((n) => n.eventId === 10 && n.reminderIndex === 0)).toBe(true);
   });
 
-  it("never emails informed seats", () => {
-    expect(ids(resolveEventRecipients(event(), ctx()))).not.toContain("info");
+  it("never emails Support or Inform participants", () => {
+    const recipients = ids(resolveEventRecipients(event(), ctx()));
+    expect(recipients).not.toContain("supp");
+    expect(recipients).not.toContain("info");
   });
 
   it("excludes the actor when they hold a seat", () => {
@@ -225,9 +227,9 @@ describe("resolveReminders", () => {
     ...over,
   });
 
-  it("nudges every stalled draft-phase reviewer after 3 days", () => {
+  it("nudges every stalled required approver after 3 days", () => {
     const out = resolveReminders(NOW, [state()]);
-    expect(ids(out)).toEqual(["resp", "supp"]);
+    expect(ids(out)).toEqual(["resp"]);
     expect(out.every((n) => n.kind === "review_requested" && n.reminderIndex === 1 && n.eventId === null)).toBe(true);
   });
 
@@ -238,11 +240,11 @@ describe("resolveReminders", () => {
 
   it("fires at exactly the 3-day boundary", () => {
     const exact = new Date("2026-07-24T12:00:00Z"); // anchor 2026-07-21T12:00:00Z + exactly 72h
-    expect(ids(resolveReminders(exact, [state()]))).toEqual(["resp", "supp"]);
+    expect(ids(resolveReminders(exact, [state()]))).toEqual(["resp"]);
   });
 
   it("skips reviewers who already returned their review", () => {
-    expect(ids(resolveReminders(NOW, [state({ currentReviewReturns: ["resp"] })]))).toEqual(["supp"]);
+    expect(resolveReminders(NOW, [state({ currentReviewReturns: ["resp"] })])).toEqual([]);
   });
 
   it("caps at MAX_REMINDERS", () => {
@@ -253,27 +255,27 @@ describe("resolveReminders", () => {
       ],
     });
     const late = new Date("2026-08-15T12:00:00Z");
-    expect(ids(resolveReminders(late, [capped]))).toEqual(["supp"]);
+    expect(resolveReminders(late, [capped])).toEqual([]);
   });
 
   it("anchors nudge 2 on nudge 1's sent_at, not the original event", () => {
     const one = state({
       reminders: [{ recipientId: "resp", kind: "review_requested", reminderIndex: 1, sentAt: "2026-07-24T00:00:00Z" }],
     });
-    // 07-25 is only 1.5 days after nudge 1: resp not due; supp (no nudges yet) is.
-    expect(ids(resolveReminders(NOW, [one]))).toEqual(["supp"]);
+    // 07-25 is only 1.5 days after nudge 1: the required approver is not due.
+    expect(resolveReminders(NOW, [one])).toEqual([]);
     const later = new Date("2026-07-27T06:00:00Z");
     const out = resolveReminders(later, [one]);
     expect(out.find((n) => n.recipientId === "resp")?.reminderIndex).toBe(2);
   });
 
-  it("final-approval phase nudges only unsigned R/A seats", () => {
+  it("final-approval phase nudges only unsigned required approvers", () => {
     const fa = state({
       sop: sop({ finalApprovalRequestedAt: "2026-07-21T12:00:00Z", finalApprovalContentHash: "hash-1" }),
       currentDeptApprovals: [],
     });
     const out = resolveReminders(NOW, [fa]);
-    expect(ids(out)).toEqual(["resp"]); // supp is not R/A
+    expect(ids(out)).toEqual(["resp"]); // Support is not part of approval routing.
     expect(out[0].kind).toBe("final_approval_requested");
   });
 

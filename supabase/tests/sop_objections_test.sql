@@ -4,13 +4,12 @@
 --   * a rejection by a blocking seat holder transitions to draft INSIDE sign_sop
 --   * the submitter holds no seat, so they cannot reject — but they can recall (no
 --     signature, no reason)
---   * support/consulted seats cannot reject
+--   * people outside the required-approver roster cannot reject
 --   * resubmission with an open objection is refused; after objection_withdrawn it passes
 --   * an edit that removes the objected-to content auto-closes the objection at resubmit,
 --     writing an objection_sustained row that references it
---   * overrule authority is exact: a Responsible objection falls only to the Accountable
---     seat's signer; an Accountable objection only to a Quality approver; a written
---     justification is required
+--   * only a Quality final approver can overrule a departmental objection, and a
+--     written justification is required
 --   * one person overruling two objections at the same content hash produces two
 --     resolving rows (resolves_signature_id is part of the idempotency key)
 --
@@ -80,13 +79,12 @@ insert into public.sops (id, workspace_id, sop_number, title, document, status, 
 values ('sop_obj_1', 'ws_obj', 'PRD-SOP-001', 'Contested', '{"body":"h1"}'::jsonb, 'draft',
         'f0000000-0000-0000-0000-000000000001', 'dept_o_prd');
 
--- Two responsible seats so overrule authority can be exercised twice at one hash.
+-- Required departmental approvers. Procedure Support / Consult / Inform roles
+-- intentionally do not appear in this document-control roster.
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
   ('sop_obj_1', 'dept_o_a', 'responsible', 'f0000000-0000-0000-0000-000000000002'),
   ('sop_obj_1', 'dept_o_d', 'responsible', 'f0000000-0000-0000-0000-000000000003'),
-  ('sop_obj_1', 'dept_o_b', 'accountable', 'f0000000-0000-0000-0000-000000000004'),
-  ('sop_obj_1', 'dept_o_c', 'support',     'f0000000-0000-0000-0000-000000000005'),
-  ('sop_obj_1', 'dept_o_e', 'consulted',   'f0000000-0000-0000-0000-000000000007');
+  ('sop_obj_1', 'dept_o_b', 'responsible', 'f0000000-0000-0000-0000-000000000004');
 
 -- Captured signature ids (owner context writes, keyed lookups below — readable by the
 -- authenticated role because the lookups run inside user-context sign_sop calls).
@@ -136,18 +134,18 @@ select throws_ok(
   'the submitter cannot sign a rejection (they hold no seat; author objection = recall)'
 );
 
--- 3/4. Support and consulted seats comment; they never block, so they never reject.
+-- 3/4. Procedure-only participants are not approval-seat holders and cannot reject.
 select test_as('f0000000-0000-0000-0000-000000000005');
 select throws_ok(
   $$ select public.sign_sop('sop_obj_1', 'rejection', 'not my call', p_seat_department => 'dept_o_c') $$,
   null,
-  'a support seat holder cannot sign a rejection'
+  'a person outside the required-approver roster cannot sign a rejection'
 );
 select test_as('f0000000-0000-0000-0000-000000000007');
 select throws_ok(
   $$ select public.sign_sop('sop_obj_1', 'rejection', 'not my call either', p_seat_department => 'dept_o_e') $$,
   null,
-  'a consulted seat holder cannot sign a rejection'
+  'another person outside the required-approver roster cannot sign a rejection'
 );
 
 -- 5. Recall: the submitter withdraws their own submission — no signature, no reason.
@@ -195,20 +193,20 @@ select lives_ok(
 );
 
 -- ---------------------------------------------------------------------------
--- Accountable objection: only Quality may overrule, and only with a justification.
+-- Departmental objection: only Quality may overrule, and only with a justification.
 -- ---------------------------------------------------------------------------
 select test_as('f0000000-0000-0000-0000-000000000004');
 select public.sign_sop('sop_obj_1', 'rejection', 'missing safety review', p_seat_department => 'dept_o_b');
 reset role;
 select capture_rejection('o2', 'f0000000-0000-0000-0000-000000000004', 'dept_o_b');
-select isnt((select v from _ids where k = 'o2'), null, 'fixture: captured the accountable objection');
+select isnt((select v from _ids where k = 'o2'), null, 'fixture: captured the departmental objection');
 
 select test_as('f0000000-0000-0000-0000-000000000002');
 select throws_ok(
   $$ select public.sign_sop('sop_obj_1', 'objection_overruled', 'overruled anyway',
        p_resolves => (select v from _ids where k = 'o2')) $$,
   null,
-  'a responsible seat signer cannot overrule an Accountable objection (Quality only)'
+  'a peer departmental approver cannot overrule an objection (Quality only)'
 );
 select test_as('f0000000-0000-0000-0000-000000000006');
 select throws_ok(
@@ -220,7 +218,7 @@ select throws_ok(
 select lives_ok(
   $$ select public.sign_sop('sop_obj_1', 'objection_overruled', 'risk assessed separately per QP-7',
        p_resolves => (select v from _ids where k = 'o2')) $$,
-  'a Quality approver overrules an Accountable objection with a justification'
+  'a Quality final approver overrules a departmental objection with a justification'
 );
 select test_as('f0000000-0000-0000-0000-000000000001');
 select lives_ok(
@@ -229,7 +227,7 @@ select lives_ok(
 );
 
 -- ---------------------------------------------------------------------------
--- Responsible objection: only the Accountable seat's signer may overrule.
+-- Another departmental objection follows the same Quality-only escalation.
 -- ---------------------------------------------------------------------------
 select test_as('f0000000-0000-0000-0000-000000000003');
 select public.sign_sop('sop_obj_1', 'rejection', 'unclear scope', p_seat_department => 'dept_o_d');
@@ -237,18 +235,18 @@ reset role;
 select capture_rejection('o3', 'f0000000-0000-0000-0000-000000000003', 'dept_o_d');
 select isnt((select v from _ids where k = 'o3'), null, 'fixture: captured the responsible objection');
 
-select test_as('f0000000-0000-0000-0000-000000000006');
+select test_as('f0000000-0000-0000-0000-000000000004');
 select throws_ok(
-  $$ select public.sign_sop('sop_obj_1', 'objection_overruled', 'quality says fine',
+  $$ select public.sign_sop('sop_obj_1', 'objection_overruled', 'peer says fine',
        p_resolves => (select v from _ids where k = 'o3')) $$,
   null,
-  'even Quality cannot overrule a Responsible objection (Accountable signer only)'
+  'a second departmental approver cannot overrule the objection'
 );
-select test_as('f0000000-0000-0000-0000-000000000004');
+select test_as('f0000000-0000-0000-0000-000000000006');
 select lives_ok(
   $$ select public.sign_sop('sop_obj_1', 'objection_overruled', 'scope defined in section 1',
        p_resolves => (select v from _ids where k = 'o3')) $$,
-  'the Accountable seat signer overrules a Responsible objection'
+  'the Quality final approver overrules the departmental objection'
 );
 
 -- ---------------------------------------------------------------------------
@@ -293,7 +291,7 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
--- Idempotency: the same Accountable signer overrules two objections at ONE hash.
+-- Idempotency: the same Quality final approver overrules two objections at ONE hash.
 -- Both resolving rows must exist — resolves_signature_id is part of the key.
 -- ---------------------------------------------------------------------------
 select test_as('f0000000-0000-0000-0000-000000000003');
@@ -301,11 +299,11 @@ select public.sign_sop('sop_obj_1', 'rejection', 'safety impact unassessed', p_s
 reset role;
 select capture_rejection('o5', 'f0000000-0000-0000-0000-000000000003', 'dept_o_d');
 
-select test_as('f0000000-0000-0000-0000-000000000004');
+select test_as('f0000000-0000-0000-0000-000000000006');
 select lives_ok(
   $$ select public.sign_sop('sop_obj_1', 'objection_overruled', 'assessed in HA-12',
        p_resolves => (select v from _ids where k = 'o5')) $$,
-  'the Accountable signer overrules the first objection at this hash'
+  'the Quality final approver overrules the first objection at this hash'
 );
 select test_as('f0000000-0000-0000-0000-000000000001');
 update public.sops set status = 'in_review' where id = 'sop_obj_1';
@@ -315,7 +313,7 @@ select public.sign_sop('sop_obj_1', 'rejection', 'training plan missing', p_seat
 reset role;
 select capture_rejection('o6', 'f0000000-0000-0000-0000-000000000002', 'dept_o_a');
 
-select test_as('f0000000-0000-0000-0000-000000000004');
+select test_as('f0000000-0000-0000-0000-000000000006');
 select lives_ok(
   $$ select public.sign_sop('sop_obj_1', 'objection_overruled', 'training handled by HR-4',
        p_resolves => (select v from _ids where k = 'o6')) $$,
@@ -326,7 +324,7 @@ select is(
   (select count(*) from public.sop_signatures
     where sop_id = 'sop_obj_1'
       and meaning = 'objection_overruled'
-      and signer_id = 'f0000000-0000-0000-0000-000000000004'
+      and signer_id = 'f0000000-0000-0000-0000-000000000006'
       and resolves_signature_id in (select v from _ids where k in ('o5', 'o6'))),
   2::bigint,
   'two overrules at one hash produced two resolving rows (key includes resolves_signature_id)'

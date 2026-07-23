@@ -64,7 +64,7 @@ values ('sop_cy_1', 'ws_cycle', 'PRD-SOP-001', 'Replay bait', '{"body":"cycle v1
 
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
   ('sop_cy_1', 'dept_cy_a', 'responsible', '60000000-0000-0000-0000-000000000002'),
-  ('sop_cy_1', 'dept_cy_b', 'accountable', '60000000-0000-0000-0000-000000000003');
+  ('sop_cy_1', 'dept_cy_b', 'responsible', '60000000-0000-0000-0000-000000000003');
 
 create temp table _ids (k text primary key, v text);
 grant select on _ids to authenticated;

@@ -2802,11 +2802,26 @@ body {
     opacity: 0.55;
   }
 
-  .ui-themed-select-option-label {
+  .ui-themed-select-option-content {
+    min-width: 0;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .ui-themed-select-option-label,
+  .ui-themed-select-option-description {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .ui-themed-select-option-description {
+    color: var(--color-ink-tertiary);
+    font-size: 0.6875rem;
+    line-height: 1.2;
   }
 
   .ui-themed-select-check {

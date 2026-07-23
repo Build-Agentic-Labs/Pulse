@@ -23,7 +23,6 @@ import {
   listSignatures,
   getSopAuthorDisplayName,
   getSopControl,
-  type SopRasic,
 } from "@/lib/sop/review";
 import type { SopReviewAnnotation } from "@/lib/sop/review-annotations";
 
@@ -50,14 +49,6 @@ interface ApprovalSignatureEntry {
   signedAt: string | null;
   signatureStrokes: SignatureStrokes;
 }
-
-const APPROVAL_RASIC_LABELS: Record<SopRasic, string> = {
-  responsible: "Responsible — department approval",
-  accountable: "Approve — department approval",
-  support: "Support — review",
-  consulted: "Consult — review",
-  informed: "Inform — no signature",
-};
 
 function isPdf(file: SopAnnexFile): boolean {
   return file.contentType === "application/pdf" || file.originalName.toLowerCase().endsWith(".pdf");
@@ -330,7 +321,7 @@ export function SopPrintPreview({
           );
           entries.push({
             key: `seat-${seat.departmentId}`,
-            approval: APPROVAL_RASIC_LABELS[seat.rasic],
+            approval: "Department approval",
             name: signature?.signerName || (seat.signerId ? names.get(seat.signerId) : "") || "Assigned approver",
             position:
               (seat.signerId

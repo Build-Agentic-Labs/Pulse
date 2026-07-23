@@ -328,7 +328,7 @@ export function ReviewQueue({
               <div className="px-4 py-3">
                 <h2 className="text-sm font-semibold text-ink">Draft review</h2>
                 <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
-                  Draft SOPs currently being reviewed by their responsible parties.
+                  Draft SOPs currently being reviewed by their required departmental approvers.
                 </p>
               </div>
               {draftReviews.map((sop) => (

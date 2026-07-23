@@ -11,8 +11,7 @@ const base: TransitionContext = {
   isQualityApprover: false,
   hasDept: true,
   isManager: false,
-  hasResponsibleSeat: true,
-  accountableSeatCount: 1,
+  requiredApproverCount: 2,
   holdsBlockingSeat: false,
   holdsAnySeat: false,
   seatsStaffedCorrectly: true,
@@ -36,13 +35,8 @@ describe("canTransitionSop", () => {
       expect(canTransitionSop({ ...base, role: undefined }).ok).toBe(false);
     });
 
-    it("blocks submitting without a Responsible seat", () => {
-      expect(canTransitionSop({ ...base, hasResponsibleSeat: false }).ok).toBe(false);
-    });
-
-    it("blocks submitting without exactly one Approve duty", () => {
-      expect(canTransitionSop({ ...base, accountableSeatCount: 0 }).ok).toBe(false);
-      expect(canTransitionSop({ ...base, accountableSeatCount: 2 }).ok).toBe(false);
+    it("blocks submitting without a required departmental approver", () => {
+      expect(canTransitionSop({ ...base, requiredApproverCount: 0 }).ok).toBe(false);
     });
 
     it("blocks submitting when a seat's reviewer does not belong to that department", () => {

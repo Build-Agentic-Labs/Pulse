@@ -71,7 +71,7 @@ values ('sop_r_1', 'ws_reassign', 'PRD-SOP-001', 'Reassignable', '{"body":"r1"}'
 
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
   ('sop_r_1', 'dept_r_a', 'responsible', '80000000-0000-0000-0000-000000000003'),
-  ('sop_r_1', 'dept_r_b', 'accountable', '80000000-0000-0000-0000-000000000005');
+  ('sop_r_1', 'dept_r_b', 'responsible', '80000000-0000-0000-0000-000000000005');
 
 -- Helper: act as a given user with the authenticated role.
 create or replace function test_as(p_uid text) returns void language plpgsql as $$

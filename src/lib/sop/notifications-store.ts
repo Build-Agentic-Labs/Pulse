@@ -26,6 +26,7 @@ import {
 } from "@/domain/sop/notifications";
 import {
   MAX_SEND_ATTEMPTS,
+  isRetryDue,
   type DrainBatch,
   type DrainItem,
   type DrainStore,
@@ -33,7 +34,6 @@ import {
 } from "./notifications-drain";
 
 const EVENT_WINDOW_DAYS = 30;
-const RETRY_LEASE_MINUTES = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Single string literal (not `+` concatenation): Supabase's generated `.select()`
@@ -393,15 +393,22 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     },
 
     async retryItems(now, origin): Promise<RetryItem[]> {
-      const lease = new Date(now.getTime() - RETRY_LEASE_MINUTES * 60 * 1000).toISOString();
       const { data, error } = await admin
         .from("sop_notifications")
-        .select("id, sop_id, recipient_id, kind, reminder_index, attempts")
+        .select("id, sop_id, recipient_id, kind, reminder_index, attempts, last_attempt_at, created_at")
         .is("sent_at", null)
-        .lt("attempts", MAX_SEND_ATTEMPTS)
-        .lt("created_at", lease);
+        .lt("attempts", MAX_SEND_ATTEMPTS);
       if (error) throw new Error(error.message);
-      const rows = data ?? [];
+      // Attempt-scaled lease off last_attempt_at (created_at for a never-tried
+      // row) so one outage can't burn every attempt within minutes.
+      const rows = (data ?? []).filter((row) =>
+        isRetryDue(
+          now,
+          row.last_attempt_at ? new Date(row.last_attempt_at) : null,
+          new Date(row.created_at),
+          row.attempts,
+        ),
+      );
       if (rows.length === 0) return [];
 
       const bundle = await loadContext(Array.from(new Set(rows.map((row) => row.sop_id))));
@@ -445,6 +452,21 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       return { claimed: true, ledgerId: Number(data.id) };
     },
 
+    async claimRetry(ledgerId, expectedAttempts) {
+      // Conditional bump: matches only while the row is still unsent AT the
+      // attempt count the caller read. A concurrent drain that already advanced
+      // it sees attempts move past `expectedAttempts` and updates zero rows.
+      const { data, error } = await admin
+        .from("sop_notifications")
+        .update({ attempts: expectedAttempts + 1, last_attempt_at: new Date().toISOString() })
+        .eq("id", ledgerId)
+        .is("sent_at", null)
+        .eq("attempts", expectedAttempts)
+        .select("id");
+      if (error) throw new Error(error.message);
+      return (data ?? []).length > 0;
+    },
+
     async markSent(ledgerId, messageId) {
       const { error } = await admin
         .from("sop_notifications")
@@ -456,7 +478,11 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     async markFailed(ledgerId, message, attemptsAfter) {
       const { error } = await admin
         .from("sop_notifications")
-        .update({ attempts: attemptsAfter, last_error: message.slice(0, 1000) })
+        .update({
+          attempts: attemptsAfter,
+          last_error: message.slice(0, 1000),
+          last_attempt_at: new Date().toISOString(),
+        })
         .eq("id", ledgerId);
       if (error) throw new Error(error.message);
     },

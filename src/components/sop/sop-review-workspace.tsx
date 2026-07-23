@@ -129,6 +129,16 @@ export function SopReviewWorkspace({
     if (pdfNavigationTimerRef.current !== null) window.clearTimeout(pdfNavigationTimerRef.current);
   }, []);
 
+  useEffect(() => {
+    if (!hasChanges) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasChanges]);
+
   function focusPdfCategory(category: string) {
     setActiveCategory(category);
     pdfNavigationRef.current = true;
@@ -259,6 +269,28 @@ export function SopReviewWorkspace({
       setError(caught instanceof Error ? caught.message : "The review remark could not be deleted.");
       setStatus("error");
     }
+  }
+
+  async function handleClose() {
+    const needsFlush =
+      !submission &&
+      (hasChanges || autosaveStatus === "waiting" || autosaveStatus === "saving" || autosaveStatus === "error");
+    if (needsFlush) {
+      setStatus("saving");
+      setAutosaveStatus("saving");
+      setError("");
+      try {
+        await persistRemarks();
+        setStatus("ready");
+        setAutosaveStatus("saved");
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "The review remarks could not be saved.");
+        setStatus("error");
+        setAutosaveStatus("error");
+        return;
+      }
+    }
+    onClose();
   }
 
   const panel = (
@@ -397,7 +429,7 @@ export function SopReviewWorkspace({
     <SopPrintPreview
       sop={record.sop}
       annexFiles={annexFiles}
-      onClose={onClose}
+      onClose={() => void handleClose()}
       mode="review"
       reviewPanel={panel}
       onReviewCategoryChange={(category) => {

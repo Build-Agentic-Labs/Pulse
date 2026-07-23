@@ -13,6 +13,29 @@ import { getBearerToken } from "@/lib/api-auth";
 /** After this many attempts an unsent row is dead — visible, never retried. */
 export const MAX_SEND_ATTEMPTS = 3;
 
+/** Base spacing of the retry lease. Doubled per attempt so a provider outage
+ *  spreads MAX_SEND_ATTEMPTS across hours instead of burning them in minutes. */
+export const RETRY_BASE_MINUTES = 30;
+
+/** Minimum wait before a row that has been attempted `attempts` times is due
+ *  again: 30m, 60m, 120m. Attempt-scaled backoff, not a flat lease. */
+export function retryBackoffMinutes(attempts: number): number {
+  return RETRY_BASE_MINUTES * Math.pow(2, Math.max(0, attempts));
+}
+
+/** Is a claimed-but-unsent row due for another attempt? Leases off the last
+ *  attempt (falling back to creation for a row claimed but never attempted). */
+export function isRetryDue(
+  now: Date,
+  lastAttemptAt: Date | null,
+  createdAt: Date,
+  attempts: number,
+): boolean {
+  const base = lastAttemptAt ?? createdAt;
+  const dueAt = base.getTime() + retryBackoffMinutes(attempts) * 60 * 1000;
+  return dueAt <= now.getTime();
+}
+
 /** Cron caller auth: constant bearer, set by Vercel Cron when CRON_SECRET exists. */
 export function isAuthorizedCronRequest(request: Request): boolean {
   const secret = process.env.CRON_SECRET ?? "";
@@ -72,6 +95,15 @@ export interface DrainStore<P = PendingNotification> {
   retryItems(now: Date, origin: string): Promise<RetryItem[]>;
   /** Insert the ledger row; a unique-index conflict returns claimed:false. */
   claim(pending: P): Promise<{ claimed: boolean; ledgerId: number | null }>;
+  /**
+   * Atomically claim a retry row for THIS attempt before sending: a conditional
+   * bump (attempts+1, last_attempt_at=now) that only matches while the row is
+   * still unsent at the expected attempt count. Returns false when a concurrent
+   * drain already advanced it — the caller must then skip the send so the two
+   * invocations never mail the same row twice. Optional: stores whose retry lane
+   * needs no cross-invocation guard omit it.
+   */
+  claimRetry?(ledgerId: number, expectedAttempts: number): Promise<boolean>;
   markSent(ledgerId: number, messageId: string): Promise<void>;
   markFailed(ledgerId: number, error: string, attemptsAfter: number): Promise<void>;
 }
@@ -137,6 +169,15 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
       continue;
     }
     try {
+      if (store.claimRetry) {
+        // Atomic claim BEFORE the send: the loser of a concurrent-drain race
+        // gets false and skips, so a stale unsent row is mailed at most once.
+        const claimed = await store.claimRetry(retry.ledgerId, retry.attempts);
+        if (!claimed) {
+          report.skippedDuplicate += 1;
+          continue;
+        }
+      }
       const outcome = await attemptSend(store, send, retry.ledgerId, retry.email, retry.content, retry.attempts);
       if (outcome === "sent") report.retried += 1;
       else report.failed += 1;

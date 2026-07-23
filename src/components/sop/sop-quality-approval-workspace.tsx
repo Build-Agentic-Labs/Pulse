@@ -18,7 +18,7 @@ import {
   type SopControl,
   type SopSignature,
 } from "@/lib/sop/review";
-import { getSop, type SopRecord } from "@/lib/sop/store";
+import { getSop, SopConflictError, type SopRecord } from "@/lib/sop/store";
 import { SignaturePad } from "./signature-pad";
 import { SopPrintPreview } from "./sop-print-preview";
 
@@ -135,7 +135,12 @@ export function SopQualityApprovalWorkspace({
         setStatus("error");
         return;
       }
-      const signatureId = qualitySignature?.id ?? await signSop(sopId, "quality_approval");
+      const signatureId =
+        qualitySignature?.id ??
+        (await signSop(sopId, "quality_approval", {
+          expectedContentHash: control.contentHash,
+          expectedReviewCycle: control.reviewCycle,
+        }));
       const signedControl = await getSopControl(sopId);
       if (!signedControl) throw new Error("The Quality-signed SOP could not be reloaded.");
       if (signedControl.status === "approved") {
@@ -155,6 +160,28 @@ export function SopQualityApprovalWorkspace({
       setStatus("ready");
       onReleased?.();
     } catch (caught) {
+      // A concurrent Quality release wins the optimistic transition and leaves this caller with a
+      // conflict, even though the SOP is already effective. Re-read: if it released, that is success.
+      if (caught instanceof SopConflictError) {
+        try {
+          const [nextRecord, nextControl, nextSignatures] = await Promise.all([
+            getSop(sopId),
+            getSopControl(sopId),
+            listSignatures(sopId),
+          ]);
+          if (nextRecord && nextControl?.status === "effective") {
+            setRecord(nextRecord);
+            setControl(nextControl);
+            setSignatures(nextSignatures);
+            setApprovalRefreshKey((value) => value + 1);
+            setStatus("ready");
+            onReleased?.();
+            return;
+          }
+        } catch {
+          // Fall through to the generic error below.
+        }
+      }
       setError(caught instanceof Error ? caught.message : "The SOP could not be released.");
       setStatus("error");
     }

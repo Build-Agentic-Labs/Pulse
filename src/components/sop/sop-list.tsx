@@ -133,6 +133,13 @@ export function SopList({
   const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
     seededFromServer ? { workspaceId, loadedAt: 1 } : { loadedAt: 0 },
   );
+  // A tab return fires focus AND visibilitychange within milliseconds, and the
+  // visible-tab interval can overlap both; each background refresh is ~5 queries.
+  // This flag coalesces the burst so only the first background pass runs.
+  const backgroundRefreshInFlight = useRef(false);
+  // Latest sops for the no-op return path (the useCallback closure would be stale).
+  const sopsRef = useRef(sops);
+  sopsRef.current = sops;
   const converting = convert !== null;
 
   const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
@@ -145,6 +152,17 @@ export function SopList({
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return [] as SopListItem[];
     }
+    if (options.background) {
+      // Skip when a background refresh is already running or just finished, so the
+      // focus + visibilitychange burst (and any interval overlap) makes one pass.
+      const justRefreshed =
+        freshnessRef.current.workspaceId === workspaceId &&
+        Date.now() - freshnessRef.current.loadedAt < 2_000;
+      if (backgroundRefreshInFlight.current || justRefreshed) {
+        return sopsRef.current;
+      }
+      backgroundRefreshInFlight.current = true;
+    }
     if (!options.background) {
       setListStatus("loading");
       setError("");
@@ -156,8 +174,10 @@ export function SopList({
       const userId = userResult.data.user?.id ?? null;
       const authored = userId ? next.filter((sop) => sop.createdBy === userId) : [];
       const authoredInReview = authored.filter((sop) => sop.status === "in_review");
+      // Verdicts only surface for in-review authored SOPs (review-status avatars and
+      // the feedback modal), matching the seats query below; do not fetch the rest.
       const [submissions, allSeats] = await Promise.all([
-        listSopReviewSubmissions(authored.map((sop) => sop.id)),
+        listSopReviewSubmissions(authoredInReview.map((sop) => sop.id)),
         listSeatsForSops(authoredInReview.map((sop) => sop.id)),
       ]);
       // One batched query instead of one per SOP; regroup to the previous shape.
@@ -201,6 +221,8 @@ export function SopList({
         setListStatus("error");
       }
       return [] as SopListItem[];
+    } finally {
+      backgroundRefreshInFlight.current = false;
     }
   }, [workspaceId]);
 

@@ -124,30 +124,40 @@ export async function uploadSopAnnexFile(input: {
   );
 
   try {
-    const saved = await throwIfError(
+    await throwIfError(
+      supabase.from("sop_annex_files").upsert(
+        {
+          id,
+          workspace_id: input.workspaceId,
+          sop_id: input.sopId,
+          annex_id: input.annexId,
+          storage_path: storagePath,
+          original_name: input.file.name.slice(0, 260),
+          content_type: contentType,
+          size_bytes: input.file.size,
+          uploaded_by: userId,
+        },
+        { onConflict: "sop_id,annex_id" },
+      ),
+    );
+    // Re-read the committed row: the upsert's own RETURNING reflects this call's
+    // write, so a co-author who won the (sop_id, annex_id) slot concurrently is
+    // invisible without a fresh read.
+    const winner = await throwIfError(
       supabase
         .from("sop_annex_files")
-        .upsert(
-          {
-            id,
-            workspace_id: input.workspaceId,
-            sop_id: input.sopId,
-            annex_id: input.annexId,
-            storage_path: storagePath,
-            original_name: input.file.name.slice(0, 260),
-            content_type: contentType,
-            size_bytes: input.file.size,
-            uploaded_by: userId,
-          },
-          { onConflict: "sop_id,annex_id" },
-        )
         .select(COLUMNS)
+        .eq("sop_id", input.sopId)
+        .eq("annex_id", input.annexId)
         .single(),
     );
-    if (existingFile && existingFile.storagePath !== storagePath) {
+    const winnerFile = mapFile(winner as Record<string, unknown>);
+    if (winnerFile.storagePath !== storagePath) {
+      await supabase.storage.from(BUCKET).remove([storagePath]);
+    } else if (existingFile && existingFile.storagePath !== storagePath) {
       await supabase.storage.from(BUCKET).remove([existingFile.storagePath]);
     }
-    return mapFile(saved as Record<string, unknown>);
+    return winnerFile;
   } catch (error) {
     await supabase.storage.from(BUCKET).remove([storagePath]);
     throw error;
@@ -156,9 +166,16 @@ export async function uploadSopAnnexFile(input: {
 
 export async function removeSopAnnexFile(file: SopAnnexFile): Promise<void> {
   const supabase = createPlannerSupabaseClient();
-  const { error } = await supabase.storage.from(BUCKET).remove([file.storagePath]);
-  if (error) throw new Error(error.message);
+  // Delete the metadata row first — it is the authoritative reference the
+  // controlled document reads. If it is rejected (e.g. RLS blocks the delete
+  // once the SOP has left draft) nothing is removed and the caller sees the
+  // error. Only once the row is gone do we remove the object, best-effort, so a
+  // storage failure leaves a harmless orphan rather than a dangling reference.
   await throwIfError(supabase.from("sop_annex_files").delete().eq("id", file.id));
+  const { error } = await supabase.storage.from(BUCKET).remove([file.storagePath]);
+  if (error) {
+    console.warn(`Failed to remove annex object ${file.storagePath} from the ${BUCKET} bucket: ${error.message}`);
+  }
 }
 
 /**

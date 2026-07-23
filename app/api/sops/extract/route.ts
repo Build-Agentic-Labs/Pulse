@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { createClient } from "@supabase/supabase-js";
 import {
   DEFAULT_EXTRACTION_MODEL,
   SOP_EXTRACTION_TOOL,
@@ -7,6 +8,7 @@ import {
 import { validateExtractedSop } from "@/domain/sop/extraction-validate";
 import { prepareSopUpload, type PreparedSopUpload } from "@/lib/sop/parse-document";
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
+import type { Database } from "@/lib/database.types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +49,54 @@ function isDocumentTooLargeError(error: unknown): boolean {
 }
 
 // Each conversion is a full LLM round-trip (up to 20 MB of PDF); cap per-user throughput.
-const checkExtractionRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 5 });
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 5;
+
+// Cheap per-instance first gate — stops a single instance being hammered without a
+// DB round-trip. Not authoritative: it can't see attempts on sibling serverless
+// instances, so it's backed by the cross-instance gate below.
+const checkExtractionRateLimit = createApiRateLimiter({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  maxRequests: RATE_LIMIT_MAX_REQUESTS,
+});
+
+// Cross-instance spend gate: record the attempt and count the caller's attempts in
+// the trailing window across ALL instances. This is the only cap on Anthropic spend,
+// so the in-memory bucket alone (per-instance) is not enough. Returns true when the
+// caller is over the limit, false when allowed, null when the service-role client is
+// unavailable (dev/local without SUPABASE_SERVICE_ROLE_KEY) — the caller then falls
+// back to the in-memory gate rather than blocking the feature outright.
+async function isOverExtractionRateLimit(userId: string): Promise<boolean | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!supabaseUrl || !serviceRoleKey) return null;
+
+  const admin = createClient<Database>(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
+
+  const insert = await admin.from("sop_extraction_requests").insert({ user_id: userId });
+  if (insert.error) return null;
+
+  // Prune rows older than the window on every insert so the table stays tiny.
+  await admin.from("sop_extraction_requests").delete().lt("created_at", windowStart);
+
+  const { count, error } = await admin
+    .from("sop_extraction_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gte("created_at", windowStart);
+  if (error || count === null) return null;
+
+  return count > RATE_LIMIT_MAX_REQUESTS;
+}
+
+const RATE_LIMITED_RESPONSE = () =>
+  Response.json(
+    { error: "Too many conversions at once. Wait a minute and try again." },
+    { status: 429 },
+  );
 
 // Build the Claude user-turn content for the upload. The PDF rides as a document block
 // (Claude reads/OCRs it); docx HTML is sent inline, preceded by any embedded images
@@ -83,10 +132,11 @@ export async function POST(request: Request) {
   }
 
   if (!checkExtractionRateLimit(auth.userId)) {
-    return Response.json(
-      { error: "Too many conversions at once. Wait a minute and try again." },
-      { status: 429 },
-    );
+    return RATE_LIMITED_RESPONSE();
+  }
+
+  if ((await isOverExtractionRateLimit(auth.userId)) === true) {
+    return RATE_LIMITED_RESPONSE();
   }
 
   // Converting a SOP only makes sense for users who can save one. sops writes are gated

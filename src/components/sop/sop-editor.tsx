@@ -18,12 +18,18 @@ import {
 import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
+import {
+  initialDraftChangeEntry,
+  lifecycleChangeEntry,
+  sameChangeEntry,
+  type SopChangeActor,
+} from "@/domain/sop/change-history";
 import { draftReviewGate } from "@/domain/sop/review-gate";
 import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
 import { applySampleData } from "@/domain/sop/sample";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
-import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
+import { fetchMyDeptRoles, listDepartments, listMembersForDepartments } from "@/lib/departments/store";
 import {
   enableSopSelfReviewTest,
   getSopControl,
@@ -35,6 +41,7 @@ import {
   mintSopNumber,
   requestSopFinalApproval,
   signSop,
+  sopRasicLabel,
   transitionSop,
   type SopReviewSeat,
   type SopSignature,
@@ -246,22 +253,44 @@ function getEmptyFieldExample(target: EventTarget): { element: HTMLInputElement 
   return text ? { element: target, text } : null;
 }
 
-/** The changeHistory row auto-appended when a save carries a status transition. */
-function statusChangeEntry(sop: Sop, from: SopStatus): Sop["changeHistory"][number] {
+type DepartmentAuthorIdentity = SopChangeActor & { departmentId: string; userId: string };
+
+async function loadDepartmentAuthorIdentity(departmentId: string): Promise<DepartmentAuthorIdentity> {
+  const supabase = createPlannerSupabaseClient();
+  const userResult = await getUserFromSession(supabase);
+  const user = userResult.data.user;
+  if (!user?.id) throw new Error("Your session expired. Sign in again before saving this SOP.");
+
+  const [profileNames, members] = await Promise.all([
+    listProfileNames([user.id]),
+    listMembersForDepartments([departmentId]),
+  ]);
+  const metadataName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name.trim() : "";
+  const member = members.find((candidate) => candidate.departmentId === departmentId && candidate.userId === user.id);
+
   return {
-    version: sop.meta.version,
-    changes: `Status changed from ${SOP_STATUS_LABELS[from]} to ${SOP_STATUS_LABELS[sop.status]}.`,
-    createdByName: "",
-    createdByPosition: "",
-    createdByDate: new Date().toISOString().slice(0, 10),
+    departmentId,
+    userId: user.id,
+    name: profileNames.get(user.id)?.trim() || metadataName || user.email?.trim() || "Department author",
+    position: member?.positionTitle.trim() || "Department Author",
   };
+}
+
+function appendMissingChangeEntries(
+  rows: Sop["changeHistory"],
+  entries: Sop["changeHistory"],
+): Sop["changeHistory"] {
+  return entries.reduce(
+    (current, entry) => current.some((candidate) => sameChangeEntry(candidate, entry)) ? current : [...current, entry],
+    rows,
+  );
 }
 
 export function SopEditor({
   initial,
   workspaceId,
   owningDepartment,
-  canEdit = true,
+  canEdit: canEditPermission = true,
   isNew = false,
   authoringDepartments,
   initialView,
@@ -271,7 +300,7 @@ export function SopEditor({
   /** Persisted owner for an existing SOP. New SOPs derive this from authoringDepartments. */
   owningDepartment?: Department;
   canEdit?: boolean;
-  /** True when the SOP has never been persisted (autosave stays off until the first save). */
+  /** True when the SOP has never been persisted (the first autosave inserts it). */
   isNew?: boolean;
   /** The departments the author may own this SOP with. Present only for new SOPs (length >= 1). */
   authoringDepartments?: Department[];
@@ -288,6 +317,7 @@ export function SopEditor({
     : undefined;
   const confirm = useConfirm();
   const [sop, setSop] = useState<Sop>(() => withAnnexIds(initial));
+  const canEdit = canEditPermission && sop.status === "draft";
   // Owning-department selection for a new SOP (undefined mode => not the create flow).
   const authMode = isNew && authoringDepartments ? authoringMode(authoringDepartments) : null;
   const [deptId, setDeptId] = useState<string>(() => {
@@ -296,6 +326,7 @@ export function SopEditor({
     return "";
   });
   const selectedDept = owningDepartment ?? authoringDepartments?.find((d) => d.id === deptId) ?? null;
+  const selectedDepartmentId = selectedDept?.id ?? "";
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
   const [reloadingLatest, setReloadingLatest] = useState(false);
@@ -319,6 +350,7 @@ export function SopEditor({
   const [uploadingAnnexId, setUploadingAnnexId] = useState<string | null>(null);
   const [annexUploadStatus, setAnnexUploadStatus] = useState<AnnexUploadStatus | null>(null);
   const [approvalDepartments, setApprovalDepartments] = useState<Department[]>([]);
+  const [departmentAuthorIdentity, setDepartmentAuthorIdentity] = useState<DepartmentAuthorIdentity | null>(null);
   const [approvalSeats, setApprovalSeats] = useState<SopReviewSeat[]>([]);
   const [approvalSignatures, setApprovalSignatures] = useState<SopSignature[]>([]);
   const [approvalReviewerNames, setApprovalReviewerNames] = useState<Map<string, string>>(new Map());
@@ -354,6 +386,7 @@ export function SopEditor({
   const persistedAnnexIdsRef = useRef(
     new Set(withAnnexIds(initial).annexes.flatMap((annex) => (annex.id ? [annex.id] : []))),
   );
+  const seededInitialHistoryRef = useRef<Sop["changeHistory"][number] | null>(null);
   // The edit version reflected in this render's `sop`. persist() closes over this snapshot
   // rather than reading the ref when it runs: a stale autosave timer can fire after a
   // keystroke but before its effect cleanup cancels it, and reading the ref at call time
@@ -413,6 +446,26 @@ export function SopEditor({
   useEffect(() => {
     void refreshApprovalRouting();
   }, [refreshApprovalRouting]);
+
+  useEffect(() => {
+    if (!selectedDepartmentId) {
+      setDepartmentAuthorIdentity(null);
+      return;
+    }
+
+    let active = true;
+    setDepartmentAuthorIdentity(null);
+    void loadDepartmentAuthorIdentity(selectedDepartmentId)
+      .then((identity) => {
+        if (active) setDepartmentAuthorIdentity(identity);
+      })
+      .catch(() => {
+        if (active) setDepartmentAuthorIdentity(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedDepartmentId]);
 
   useEffect(() => {
     if (!hasPersistedSop) return;
@@ -509,11 +562,13 @@ export function SopEditor({
     reviewAnnotations.length > 0 ||
     reviewSubmissions.length > 0 ||
     auditEvents.some((event) => event.eventType.startsWith("review_") || event.eventType.startsWith("remark_"));
+  const showAuditTrail = auditEvents.some((event) => event.eventType === "review_sent");
   const showDraftReview = isCurrentUserAuthor && (sop.status === "in_review" || hasReviewHistory);
   const finalApprovalRequested =
     Boolean(finalApprovalRequestedAt) &&
     finalApprovalContentHash === (approvalContentHash ?? "");
   const showFinalApproval = isCurrentUserAuthor && (
+    showDraftReview ||
     finalApprovalRequested ||
     sop.status === "approved" ||
     sop.status === "effective"
@@ -680,6 +735,32 @@ export function SopEditor({
       ? sop.meta.version.trim()
       : `1.${approvalReviewCycle}`
     : "1.0";
+
+  useEffect(() => {
+    if (
+      !isNew ||
+      persistedUpdatedAt ||
+      !selectedDepartmentId ||
+      departmentAuthorIdentity?.departmentId !== selectedDepartmentId
+    ) {
+      return;
+    }
+
+    const entry = initialDraftChangeEntry(controlledVersion, departmentAuthorIdentity);
+    const previousSeed = seededInitialHistoryRef.current;
+    setSop((current) => {
+      const canSeed = current.changeHistory.length === 0;
+      const canRefreshSeed = Boolean(
+        previousSeed &&
+        current.changeHistory.length === 1 &&
+        sameChangeEntry(current.changeHistory[0], previousSeed),
+      );
+      if (!canSeed && !canRefreshSeed) return current;
+      seededInitialHistoryRef.current = entry;
+      return { ...current, changeHistory: [entry] };
+    });
+  }, [controlledVersion, departmentAuthorIdentity, isNew, persistedUpdatedAt, selectedDepartmentId]);
+
   // Before the first save there is no numeric sequence yet. Keep every rendered document
   // (masthead, PDF preview, and Word export) aligned with the provisional number in the form.
   const renderedSop: Sop = {
@@ -710,8 +791,8 @@ export function SopEditor({
   }, [refreshApprovalRouting, showFinalApproval]);
 
   useEffect(() => {
-    if (step.id !== "draftReview") setAuditPanelOpen(false);
-  }, [step.id]);
+    if (!showAuditTrail) setAuditPanelOpen(false);
+  }, [showAuditTrail]);
 
   useEffect(() => {
     if (!auditPanelOpen) return;
@@ -787,6 +868,23 @@ export function SopEditor({
     setSaveError("");
     saveInFlightRef.current = true;
     try {
+      const needsAuthorIdentity = firstSave || sop.status !== lastSavedStatusRef.current;
+      let savingAuthorIdentity = departmentAuthorIdentity;
+      if (
+        needsAuthorIdentity &&
+        selectedDepartmentId &&
+        savingAuthorIdentity?.departmentId !== selectedDepartmentId
+      ) {
+        try {
+          savingAuthorIdentity = await loadDepartmentAuthorIdentity(selectedDepartmentId);
+          setDepartmentAuthorIdentity(savingAuthorIdentity);
+        } catch (error) {
+          setSaveError(error instanceof Error ? error.message : "Could not load the department author's information.");
+          setSaveStatus("error");
+          return false;
+        }
+      }
+
       let working: Sop = { ...sop, meta: { ...sop.meta, version: controlledVersion } };
       const saveOptions: SaveSopOptions = { expectedUpdatedAt: persistedUpdatedAt };
       if (firstSave) {
@@ -808,8 +906,22 @@ export function SopEditor({
       }
 
       const statusChanged = working.status !== lastSavedStatusRef.current;
-      const historyEntry = statusChanged ? statusChangeEntry(working, lastSavedStatusRef.current) : undefined;
-      const toSave: Sop = historyEntry ? { ...working, changeHistory: [...working.changeHistory, historyEntry] } : working;
+      const generatedHistoryEntries: Sop["changeHistory"] = [];
+      if (firstSave && working.changeHistory.length === 0 && savingAuthorIdentity) {
+        generatedHistoryEntries.push(initialDraftChangeEntry(controlledVersion, savingAuthorIdentity));
+      }
+      if (statusChanged) {
+        generatedHistoryEntries.push(
+          lifecycleChangeEntry(
+            working,
+            lastSavedStatusRef.current,
+            savingAuthorIdentity ?? { name: "Department author", position: "Department Author" },
+          ),
+        );
+      }
+      const toSave: Sop = generatedHistoryEntries.length
+        ? { ...working, changeHistory: appendMissingChangeEntries(working.changeHistory, generatedHistoryEntries) }
+        : working;
       try {
         const next = await saveSop(toSave, workspaceId, saveOptions);
         persistedAnnexIdsRef.current = new Set(next.annexes.flatMap((annex) => (annex.id ? [annex.id] : [])));
@@ -826,7 +938,7 @@ export function SopEditor({
           setSop((current) => ({
             ...current,
             updatedAt: next.updatedAt,
-            changeHistory: historyEntry ? [...current.changeHistory, historyEntry] : current.changeHistory,
+            changeHistory: appendMissingChangeEntries(current.changeHistory, generatedHistoryEntries),
           }));
           setSaveStatus("idle");
         }
@@ -843,10 +955,6 @@ export function SopEditor({
     } finally {
       saveInFlightRef.current = false;
     }
-  }
-
-  function handleSave() {
-    void persist();
   }
 
   async function handleReloadLatest() {
@@ -1041,11 +1149,11 @@ export function SopEditor({
     return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
   }, [dirty]);
 
-  // Debounced autosave, only for SOPs that already exist server-side (never auto-create a
-  // row) and only while a fresh edit is pending -- a failed save waits for the next edit
-  // instead of retrying in a loop, and a conflict stops autosave entirely.
+  // Debounced autosave after the latest edit settles. New SOPs use the same path for their
+  // initial INSERT and number assignment; simply opening the builder never creates an empty
+  // draft. A failed save waits for a retry or the next edit, and conflicts stop autosave.
   const autosaveArmed =
-    canEdit && Boolean(workspaceId) && dirty && !conflicted && Boolean(persistedUpdatedAt) && saveStatus === "idle";
+    canEdit && Boolean(workspaceId) && dirty && !conflicted && Boolean(selectedDept) && saveStatus === "idle";
   useEffect(() => {
     if (!autosaveArmed) return;
     const timer = window.setTimeout(() => {
@@ -1055,7 +1163,7 @@ export function SopEditor({
     // `persist` is recreated per render with the latest sop; re-arming on `sop` restarts
     // the debounce after every edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autosaveArmed, sop]);
+  }, [autosaveArmed, sop, deptId]);
 
   useEffect(() => {
     if (!workspaceId || !persistedUpdatedAt) {
@@ -1185,7 +1293,15 @@ export function SopEditor({
       const control = await getSopControl(sop.id);
       if (!control) throw new Error("The saved SOP could not be loaded for submission.");
       if (control.status !== "draft") {
-        router.push("/sops?tab=review");
+        setSop((current) => ({ ...current, status: control.status, updatedAt: control.updatedAt }));
+        setPersistedUpdatedAt(control.updatedAt);
+        lastSavedStatusRef.current = control.status;
+        setStepIndex(CREATOR_STEPS.length);
+        window.history.replaceState(
+          window.history.state,
+          "",
+          `/sops/${encodeURIComponent(sop.id)}?step=draft-review`,
+        );
         return;
       }
 
@@ -1205,11 +1321,23 @@ export function SopEditor({
 
       const latest = await getSopControl(sop.id);
       if (!latest) throw new Error("The SOP could not be reloaded after signing.");
-      await transitionSop(sop.id, "in_review", latest.updatedAt);
+      const transitioned = await transitionSop(sop.id, "in_review", latest.updatedAt);
+      setSop((current) => ({ ...current, status: transitioned.status, updatedAt: transitioned.updatedAt }));
+      setPersistedUpdatedAt(transitioned.updatedAt);
+      lastSavedStatusRef.current = transitioned.status;
       // The review round already happened — go straight to the signature phase
       // instead of reopening the reviewers' queue.
       if (reviewGate.allResponded) await requestSopFinalApproval(sop.id);
-      router.push("/sops?tab=review");
+      await refreshApprovalRouting({ background: true });
+      setAuditEvents(await listSopAuditEvents(sop.id));
+
+      const nextWorkflowStep = reviewGate.allResponded ? "final-approval" : "draft-review";
+      setStepIndex(CREATOR_STEPS.length + (reviewGate.allResponded ? 1 : 0));
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `/sops/${encodeURIComponent(sop.id)}?step=${nextWorkflowStep}`,
+      );
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The SOP could not be sent for review.");
       setSaveStatus("error");
@@ -1259,38 +1387,30 @@ export function SopEditor({
         <FileText size={15} />
         <span className="hidden sm:inline">Preview PDF</span>
       </button>
-      <button
-        type="button"
-        className="ui-btn-ghost h-9 w-9 gap-2 px-0 disabled:opacity-50 sm:w-auto sm:px-2.5"
-        onClick={handleExport}
-        disabled={exporting}
-        title="Export to Word (.docx)"
-        aria-label={exporting ? "Exporting to Word" : "Export to Word"}
-      >
-        <Download size={15} />
-        <span className="hidden sm:inline">{exporting ? "Exporting…" : "Export"}</span>
-      </button>
-      {canEdit ? (
+      {showAuditTrail ? (
+        <button
+          type="button"
+          className="ui-btn-ghost h-9 w-9 px-0"
+          onClick={() => setAuditPanelOpen((open) => !open)}
+          title="Audit trail"
+          aria-label="Audit trail"
+          aria-expanded={auditPanelOpen}
+          aria-controls="sop-audit-panel"
+        >
+          <History size={15} />
+        </button>
+      ) : null}
+      {sop.status === "effective" ? (
         <button
           type="button"
           className="ui-btn-ghost h-9 w-9 gap-2 px-0 disabled:opacity-50 sm:w-auto sm:px-2.5"
-          onClick={handleSave}
-          disabled={saveDisabled}
-          title={dirty ? "Unsaved changes" : undefined}
-          aria-label={saveStatus === "saving" ? "Saving SOP" : saveStatus === "error" ? "Retry saving SOP" : "Save SOP"}
+          onClick={handleExport}
+          disabled={exporting}
+          title="Export to Word (.docx)"
+          aria-label={exporting ? "Exporting to Word" : "Export to Word"}
         >
-          <Check size={15} />
-          <span className="hidden sm:inline">
-            {saveStatus === "saving"
-              ? "Saving…"
-              : saveStatus === "saved"
-                ? "Saved"
-                : saveStatus === "error"
-                  ? "Retry save"
-                  : dirty
-                    ? "Save*"
-                    : "Save"}
-          </span>
+          <Download size={15} />
+          <span className="hidden sm:inline">{exporting ? "Exporting…" : "Export"}</span>
         </button>
       ) : null}
     </>
@@ -1415,7 +1535,7 @@ export function SopEditor({
                   <p className="text-xs font-medium leading-4 text-ink">Review your converted SOP</p>
                   <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">
                     AI mapped your upload into the standard. Review each section, fix anything that looks off,
-                    then save it or send it for review.
+                    then send it for review when it is ready. Your changes save automatically.
                   </p>
                 </div>
                 <button
@@ -1443,7 +1563,15 @@ export function SopEditor({
                     {reloadingLatest ? <Loader2 size={13} className="animate-spin" /> : null}
                     {reloadingLatest ? "Reloading…" : "Reload latest"}
                   </button>
-                ) : null}
+                ) : (
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-8 shrink-0 gap-1.5 border border-line px-3"
+                    onClick={() => void persist()}
+                  >
+                    Retry
+                  </button>
+                )}
               </div>
             ) : null}
 
@@ -1663,38 +1791,24 @@ export function SopEditor({
                   />
                 </Section>
                 <Section title="References" reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
-                  <div className="space-y-5">
-                    <div>
-                      <p className="ui-field-label mb-2">Standards &amp; external references</p>
-                      <StringListEditor
-                        items={sop.references}
-                        placeholder="e.g. ISO 9001:2015"
-                        disabled={!canEdit}
-                        onChange={(references) => update({ references })}
-                      />
-                    </div>
-                    <div>
-                      <p className="ui-field-label mb-2">Referenced documents</p>
-                      <p className="mb-2 text-xs text-ink-tertiary">
-                        Link another SOP from this workspace, or upload a document. Both render in the
-                        References section of the printed SOP.
-                      </p>
-                      <ReferenceLibraryEditor
-                        links={sop.linkedSops}
-                        docs={sop.referenceDocs}
-                        files={referenceFileByDocId}
-                        options={(linkableSops ?? []).filter((item) => item.id !== sop.id)}
-                        loading={linkableSops === undefined && !linkableSopsError}
-                        error={linkableSopsError || referenceDocError}
-                        disabled={!canEdit}
-                        uploading={uploadingReferenceDoc}
-                        onChangeLinks={(linkedSops) => update({ linkedSops })}
-                        onUpload={(file) => void handleReferenceDocUpload(file)}
-                        onOpenDoc={(doc) => void handleReferenceDocOpen(doc)}
-                        onRemoveDoc={(doc) => void handleReferenceDocRemove(doc)}
-                      />
-                    </div>
-                  </div>
+                  <ReferenceLibraryEditor
+                    references={sop.references}
+                    links={sop.linkedSops}
+                    docs={sop.referenceDocs}
+                    files={referenceFileByDocId}
+                    options={(linkableSops ?? []).filter(
+                      (item) => item.id !== sop.id && item.status === "effective",
+                    )}
+                    loading={linkableSops === undefined && !linkableSopsError}
+                    error={linkableSopsError || referenceDocError}
+                    disabled={!canEdit}
+                    uploading={uploadingReferenceDoc}
+                    onChangeReferences={(references) => update({ references })}
+                    onChangeLinks={(linkedSops) => update({ linkedSops })}
+                    onUpload={(file) => void handleReferenceDocUpload(file)}
+                    onOpenDoc={(doc) => void handleReferenceDocOpen(doc)}
+                    onRemoveDoc={(doc) => void handleReferenceDocRemove(doc)}
+                  />
                 </Section>
               </>
             ) : null}
@@ -1747,6 +1861,7 @@ export function SopEditor({
                   <ProcessFlowchart
                     roles={sop.procedure.roles}
                     activities={sop.procedure.activities}
+                    departments={approvalDepartments}
                     disabled={!canEdit}
                     onChange={(roles, activities) => update({ procedure: { ...sop.procedure, roles, activities } })}
                   />
@@ -1813,7 +1928,7 @@ export function SopEditor({
                           <div key={seat.departmentId} className="flex items-center gap-3 px-4 py-3 text-sm">
                             <span className="ui-chip">{department?.code ?? "—"}</span>
                             <span className="min-w-0 flex-1 truncate">{department?.name ?? "Unknown department"}</span>
-                            <span className="ui-mono-label text-ink-tertiary">{seat.rasic}</span>
+                            <span className="ui-mono-label text-ink-tertiary">{sopRasicLabel(seat.rasic)}</span>
                           </div>
                         );
                       }) : (
@@ -2007,9 +2122,18 @@ export function SopEditor({
                       onClick={() => setPreviewing(true)}
                     >
                       <FileText size={14} />
-                      Preview signed PDF
+                      {finalApprovalRequested ? "Preview signed PDF" : "Preview document"}
                     </button>
                   </div>
+
+                  {!finalApprovalRequested ? (
+                    <div className="border-b border-line bg-surface-subtle px-4 py-3">
+                      <p className="text-xs font-medium text-ink">Upcoming step</p>
+                      <p className="mt-1 text-xs leading-5 text-ink-tertiary">
+                        Final approval has not been requested yet. Complete Draft Review, then send the SOP to its formal approvers.
+                      </p>
+                    </div>
+                  ) : null}
 
                   <div className="divide-y divide-line">
                     {finalApprovalStakeholders.map(({ seat, department, name, signature }) => (
@@ -2022,12 +2146,12 @@ export function SopEditor({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-ink">{name}</p>
                           <p className="mt-0.5 truncate text-xs text-ink-tertiary">
-                            {department?.name ?? "Unknown department"} · {seat.rasic}
+                            {department?.name ?? "Unknown department"} · {sopRasicLabel(seat.rasic)}
                           </p>
                         </div>
                         <div className="shrink-0 text-right">
                           <p className={`text-xs font-medium ${signature ? "text-emerald-700" : "text-ink-tertiary"}`}>
-                            {signature ? "Signed" : "Waiting for signature"}
+                            {signature ? "Signed" : finalApprovalRequested ? "Waiting for signature" : "Not requested"}
                           </p>
                           {signature ? (
                             <p className="mt-0.5 text-[11px] tabular-nums text-ink-tertiary">
@@ -2165,7 +2289,7 @@ export function SopEditor({
                               : soloSelfReviewReady
                                 ? "Temporary test mode: send this draft to yourself for review"
                                 : "Save this draft and send it to the assigned responsible reviewers"
-                            : "Assign at least one Responsible department and exactly one Accountable department"
+                            : "Assign at least one Responsible department and exactly one department to Approve"
                         }
                       >
                         <ShieldCheck size={14} />
@@ -2195,32 +2319,17 @@ export function SopEditor({
         </div>
       </div>
       </div>
-        {showDraftReview && step.id === "draftReview" ? (
-          <>
-            <button
-              type="button"
-              className={`fixed right-0 top-24 z-[58] flex items-center gap-2 rounded-l-md border border-r-0 border-line bg-surface-raised px-3 py-2.5 text-xs font-medium text-ink shadow-lg transition-[transform,opacity] duration-200 ease-out hover:bg-surface-subtle motion-reduce:transition-none ${
-                auditPanelOpen ? "pointer-events-none translate-x-full opacity-0" : "translate-x-0 opacity-100"
-              }`}
-              onClick={() => setAuditPanelOpen(true)}
-              aria-expanded={auditPanelOpen}
-              aria-controls="sop-audit-panel"
-            >
-              <History size={14} className="text-ink-secondary" />
-              Audit trail
-              <span className="ui-chip min-w-6 justify-center tabular-nums">{auditEvents.length}</span>
-            </button>
-
-            <aside
-              id="sop-audit-panel"
-              role="dialog"
-              aria-modal="false"
-              aria-label="SOP audit trail"
-              aria-hidden={!auditPanelOpen}
-              className={`fixed bottom-0 right-0 top-12 z-[60] flex w-[min(28rem,calc(100vw-1rem))] flex-col border-l border-line bg-surface-raised shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${
-                auditPanelOpen ? "translate-x-0" : "pointer-events-none translate-x-full"
-              }`}
-            >
+        {showAuditTrail ? (
+          <aside
+            id="sop-audit-panel"
+            role="dialog"
+            aria-modal="false"
+            aria-label="SOP audit trail"
+            aria-hidden={!auditPanelOpen}
+            className={`fixed bottom-0 right-0 top-12 z-[60] flex w-[min(28rem,calc(100vw-1rem))] flex-col border-l border-line bg-surface-raised shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${
+              auditPanelOpen ? "translate-x-0" : "pointer-events-none translate-x-full"
+            }`}
+          >
               <div className="flex flex-none items-start justify-between gap-4 border-b border-line px-5 py-4">
                 <div className="flex min-w-0 items-start gap-3">
                   <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-subtle text-ink-secondary">
@@ -2276,8 +2385,7 @@ export function SopEditor({
                   </p>
                 )}
               </div>
-            </aside>
-          </>
+          </aside>
         ) : null}
         {fieldHint ? (
           <div
@@ -2383,6 +2491,7 @@ function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
 // ---------------------------------------------------------------------------
 
 function ReferenceLibraryEditor({
+  references,
   links,
   docs,
   files,
@@ -2391,11 +2500,13 @@ function ReferenceLibraryEditor({
   error,
   disabled = false,
   uploading = false,
+  onChangeReferences,
   onChangeLinks,
   onUpload,
   onOpenDoc,
   onRemoveDoc,
 }: {
+  references: string[];
   links: SopLinkedSop[];
   docs: SopReferenceDoc[];
   /** Reference-doc id -> uploaded file (for open/remove and the "missing file" state). */
@@ -2406,15 +2517,49 @@ function ReferenceLibraryEditor({
   error: string;
   disabled?: boolean;
   uploading?: boolean;
+  onChangeReferences: (references: string[]) => void;
   onChangeLinks: (links: SopLinkedSop[]) => void;
   onUpload: (file: File) => void;
   onOpenDoc: (doc: SopReferenceDoc) => void;
   onRemoveDoc: (doc: SopReferenceDoc) => void;
 }) {
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerMode, setComposerMode] = useState<"sop" | "text">("sop");
+  const [typedReference, setTypedReference] = useState("");
   const available = options.filter((option) => !links.some((link) => link.sopId === option.id));
+
+  function addTypedReference() {
+    const value = typedReference.trim();
+    if (!value) return;
+    onChangeReferences([...references, value]);
+    setTypedReference("");
+    setComposerOpen(false);
+  }
 
   return (
     <div className="space-y-2">
+      {references.map((reference, index) => (
+        <div key={`reference-${index}`} className="flex min-h-9 items-center gap-2">
+          <input
+            className="ui-field-standalone min-w-0 flex-1"
+            value={reference}
+            placeholder="e.g. ISO 9001:2015"
+            disabled={disabled}
+            onChange={(event) => {
+              const next = [...references];
+              next[index] = event.target.value;
+              onChangeReferences(next);
+            }}
+          />
+          {disabled ? null : (
+            <RowDeleteButton
+              title="Remove reference"
+              onClick={() => onChangeReferences(references.filter((_, rowIndex) => rowIndex !== index))}
+            />
+          )}
+        </div>
+      ))}
+
       {links.map((link) => (
         <div key={link.sopId} className="flex min-h-9 items-center gap-2">
           <span className="ui-chip shrink-0">{link.sopNumber || "SOP"}</span>
@@ -2461,62 +2606,131 @@ function ReferenceLibraryEditor({
         );
       })}
 
-      {links.length === 0 && docs.length === 0 ? (
-        <p className="text-xs text-ink-tertiary">No documents referenced yet.</p>
-      ) : null}
-
       {error ? <p className="text-xs text-danger">{error}</p> : null}
 
       {disabled ? null : (
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          <div className="min-w-56">
-            {loading ? (
-              <div className="flex min-h-9 items-center gap-2 text-xs text-ink-tertiary">
-                <Loader2 size={13} className="animate-spin" /> Loading workspace SOPs…
+        composerOpen ? (
+          <div className="mt-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="min-w-0 flex-1">
+                {composerMode === "sop" ? (
+                  loading ? (
+                    <div className="flex min-h-9 items-center gap-2 text-xs text-ink-tertiary">
+                      <Loader2 size={13} className="animate-spin" /> Loading effective SOPs…
+                    </div>
+                  ) : available.length ? (
+                    <ThemedSelect
+                      className="w-full"
+                      ariaLabel="Select an effective SOP"
+                      value=""
+                      placeholder="Select effective SOP…"
+                      options={available.map((option) => ({
+                        value: option.id,
+                        label: `${option.sopNumber || "—"} · ${option.title || "Untitled SOP"}`,
+                      }))}
+                      onChange={(sopId) => {
+                        const target = available.find((option) => option.id === sopId);
+                        if (!target) return;
+                        onChangeLinks([
+                          ...links,
+                          { sopId: target.id, sopNumber: target.sopNumber, title: target.title },
+                        ]);
+                        setComposerOpen(false);
+                      }}
+                    />
+                  ) : (
+                    <div className="flex min-h-9 items-center rounded-md border border-line px-3 text-xs text-ink-tertiary">
+                      {options.length
+                        ? "Every effective SOP is already referenced."
+                        : "No effective SOPs are available yet."}
+                    </div>
+                  )
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      id="typed-sop-reference"
+                      className="ui-field-standalone min-w-0 flex-1"
+                      aria-label="Typed reference"
+                      value={typedReference}
+                      placeholder="e.g. ISO 9001:2015"
+                      onChange={(event) => setTypedReference(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        addTypedReference();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="ui-btn-primary h-9 shrink-0 px-3 disabled:opacity-40"
+                      disabled={!typedReference.trim()}
+                      onClick={addTypedReference}
+                    >
+                      Add
+                    </button>
+                  </div>
+                )}
               </div>
-            ) : available.length ? (
-              <ThemedSelect
-                ariaLabel="Add SOP reference"
-                value=""
-                placeholder="Add SOP reference…"
-                options={available.map((option) => ({
-                  value: option.id,
-                  label: `${option.sopNumber || "—"} · ${option.title || "Untitled SOP"}`,
-                }))}
-                onChange={(sopId) => {
-                  const target = available.find((option) => option.id === sopId);
-                  if (!target) return;
-                  onChangeLinks([...links, { sopId: target.id, sopNumber: target.sopNumber, title: target.title }]);
-                }}
-              />
-            ) : (
-              <p className="text-xs text-ink-tertiary">
-                {options.length ? "Every workspace SOP is already referenced." : "No other SOPs to link yet."}
-              </p>
-            )}
+
+              <div className="flex shrink-0 items-center gap-1">
+                {composerMode === "text" ? (
+                  <label
+                    className={`ui-btn-ghost inline-flex h-9 w-9 items-center justify-center px-0 ${
+                      uploading ? "pointer-events-none cursor-wait opacity-60" : "cursor-pointer"
+                    }`}
+                    aria-disabled={uploading}
+                    aria-label={uploading ? "Attaching reference document" : "Attach reference document"}
+                    title={uploading ? "Attaching document…" : "Attach document"}
+                  >
+                    {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                    <span className="sr-only">{uploading ? "Attaching…" : "Attach document"}</span>
+                    <input
+                      type="file"
+                      className="sr-only"
+                      aria-label="Attach reference document"
+                      accept={SOP_ANNEX_FILE_ACCEPT}
+                      disabled={uploading}
+                      onChange={(event) => {
+                        const selected = event.target.files?.[0];
+                        if (selected) onUpload(selected);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                ) : null}
+                <button
+                  type="button"
+                  className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary"
+                  aria-label="Close reference options"
+                  title="Close"
+                  onClick={() => {
+                    setComposerOpen(false);
+                    setComposerMode("sop");
+                    setTypedReference("");
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
           </div>
-          <label
-            className={`ui-btn-ghost inline-flex h-9 items-center gap-2 px-3 ${
-              uploading ? "pointer-events-none cursor-wait opacity-60" : "cursor-pointer"
-            }`}
-            aria-disabled={uploading}
-          >
-            {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-            Upload document
-            <input
-              type="file"
-              className="sr-only"
-              aria-label="Upload reference document"
-              accept={SOP_ANNEX_FILE_ACCEPT}
-              disabled={uploading}
-              onChange={(event) => {
-                const selected = event.target.files?.[0];
-                if (selected) onUpload(selected);
-                event.target.value = "";
-              }}
-            />
-          </label>
-        </div>
+        ) : (
+          <ThemedSelect
+            className="mt-2 w-44"
+            triggerClassName="ui-themed-select-trigger-compact"
+            ariaLabel="Add reference"
+            value=""
+            placeholder="+ Add reference"
+            options={[
+              { value: "sop", label: "Effective SOP" },
+              { value: "text", label: "Typed reference" },
+            ]}
+            onChange={(mode) => {
+              setComposerMode(mode === "text" ? "text" : "sop");
+              setComposerOpen(true);
+            }}
+          />
+        )
       )}
     </div>
   );

@@ -3,8 +3,14 @@
 import { Bell } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { badgeLabel, summarizeQueue, type QueueSummary } from "@/domain/sop/queue-summary";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  badgeLabel,
+  excludeAcknowledged,
+  summarizeQueue,
+  type QueueSummary,
+  type QueueSummaryItem,
+} from "@/domain/sop/queue-summary";
 import { createPlannerSupabaseClient, loadWorkspaceProjectGroups } from "@/domain/supabase-planner";
 import { fetchReviewQueueData } from "@/lib/sop/review-queue-data";
 import { SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
@@ -12,6 +18,25 @@ import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import "./notification-bell.css";
 
 const REFRESH_INTERVAL_MS = 60_000;
+const ACKNOWLEDGED_STORAGE_PREFIX = "pulse:sop-notification-acknowledged:v1";
+const MAX_ACKNOWLEDGED_ITEMS = 200;
+
+function readAcknowledged(storageKey: string): Set<string> {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
+    return new Set(Array.isArray(stored) ? stored.filter((value): value is string => typeof value === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeAcknowledged(storageKey: string, ids: ReadonlySet<string>) {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(Array.from(ids).slice(-MAX_ACKNOWLEDGED_ITEMS)));
+  } catch {
+    // Acknowledgment still applies to the current render if browser storage is unavailable.
+  }
+}
 
 /**
  * Self-clearing count of SOPs currently waiting on the viewer, recomputed from
@@ -20,9 +45,13 @@ const REFRESH_INTERVAL_MS = 60_000;
  * nothing, because the chrome must never break or flash over a background
  * concern. Failures keep the last good summary for the same reason.
  */
-function useActionableQueue(): QueueSummary | null {
+function useActionableQueue(): {
+  summary: QueueSummary | null;
+  acknowledge: (item: QueueSummaryItem) => void;
+} {
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [summary, setSummary] = useState<QueueSummary | null>(null);
+  const storageKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -52,7 +81,10 @@ function useActionableQueue(): QueueSummary | null {
         }
 
         const queue = await fetchReviewQueueData(workspaceId, user.id);
-        if (mounted) setSummary(summarizeQueue(queue));
+        const storageKey = `${ACKNOWLEDGED_STORAGE_PREFIX}:${workspaceId}:${user.id}`;
+        storageKeyRef.current = storageKey;
+        const visibleSummary = excludeAcknowledged(summarizeQueue(queue), readAcknowledged(storageKey));
+        if (mounted) setSummary(visibleSummary);
       } catch {
         // Keep the last good summary; retry on the next trigger.
       }
@@ -69,12 +101,24 @@ function useActionableQueue(): QueueSummary | null {
     };
   }, [supabase]);
 
-  return summary;
+  const acknowledge = useCallback((item: QueueSummaryItem) => {
+    const storageKey = storageKeyRef.current;
+    if (storageKey) {
+      const acknowledged = readAcknowledged(storageKey);
+      acknowledged.add(item.notificationId);
+      writeAcknowledged(storageKey, acknowledged);
+    }
+    setSummary((current) =>
+      current ? excludeAcknowledged(current, new Set([item.notificationId])) : current,
+    );
+  }, []);
+
+  return { summary, acknowledge };
 }
 
 export function NotificationBell() {
   const router = useRouter();
-  const summary = useActionableQueue();
+  const { summary, acknowledge } = useActionableQueue();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -132,11 +176,12 @@ export function NotificationBell() {
                 <div className="px-2.5 pb-1 pt-2 ui-mono-label text-ink-tertiary">{section.label}</div>
                 {section.items.map((item) => (
                   <button
-                    key={`${section.key}:${item.sopId}`}
+                    key={item.notificationId}
                     type="button"
                     role="menuitem"
                     className="ui-btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2.5 text-[12px]"
                     onClick={() => {
+                      acknowledge(item);
                       setOpen(false);
                       router.push(`/sops/${item.sopId}`);
                     }}

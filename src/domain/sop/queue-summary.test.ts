@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QueueData } from "@/lib/sop/review-queue-data";
-import { badgeLabel, summarizeQueue } from "./queue-summary";
+import { badgeLabel, excludeAcknowledged, summarizeQueue } from "./queue-summary";
 
 // Compact builders: only identity fields vary; the rest are constants that
 // satisfy the lib types without mattering to the summary.
@@ -96,15 +96,29 @@ describe("summarizeQueue", () => {
     expect(summary.total).toBe(1);
   });
 
-  it("maps items to sopId/sopNumber/title from both row shapes", () => {
+  it("maps items from both row shapes and gives each workflow event a stable notification ID", () => {
     const summary = summarizeQueue(
       queue({
         awaitingMe: [seat("seat-sop", "SOP-1", "Seat Row")],
         sentBack: [sopItem("list-sop", "SOP-4", "List Row")],
       }),
     );
-    expect(summary.sections[0].items).toEqual([{ sopId: "seat-sop", sopNumber: "SOP-1", title: "Seat Row" }]);
-    expect(summary.sections[1].items).toEqual([{ sopId: "list-sop", sopNumber: "SOP-4", title: "List Row" }]);
+    expect(summary.sections[0].items).toEqual([
+      {
+        notificationId: "awaitingMe:seat-sop:d1:0:h",
+        sopId: "seat-sop",
+        sopNumber: "SOP-1",
+        title: "Seat Row",
+      },
+    ]);
+    expect(summary.sections[1].items).toEqual([
+      {
+        notificationId: "sentBack:list-sop:0:h:needs%20work",
+        sopId: "list-sop",
+        sopNumber: "SOP-4",
+        title: "List Row",
+      },
+    ]);
   });
 
   it("an SOP in two sections counts once per section (no cross-section dedupe)", () => {
@@ -119,6 +133,37 @@ describe("summarizeQueue", () => {
 
   it("empty queue summarizes to zero sections and zero total", () => {
     expect(summarizeQueue(queue())).toEqual({ total: 0, sections: [] });
+  });
+});
+
+describe("excludeAcknowledged", () => {
+  it("removes an acknowledged item, its empty section, and its badge count", () => {
+    const summary = summarizeQueue(
+      queue({
+        awaitingMe: [seat("s1", "SOP-1", "One")],
+        sentBack: [sopItem("s2", "SOP-2", "Two")],
+      }),
+    );
+    const acknowledgedId = summary.sections[0].items[0].notificationId;
+
+    expect(excludeAcknowledged(summary, new Set([acknowledgedId]))).toEqual({
+      total: 1,
+      sections: [summary.sections[1]],
+    });
+  });
+
+  it("allows a later review cycle for the same SOP to appear as a new notification", () => {
+    const firstSeat = seat("same", "SOP-1", "Same");
+    const first = summarizeQueue(queue({ awaitingMe: [firstSeat] }));
+    const next = summarizeQueue(
+      queue({
+        awaitingMe: [{ ...firstSeat, reviewCycle: 1, contentHash: "new-content" }],
+      }),
+    );
+
+    expect(
+      excludeAcknowledged(next, new Set([first.sections[0].items[0].notificationId])).total,
+    ).toBe(1);
   });
 });
 

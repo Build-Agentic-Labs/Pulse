@@ -1,7 +1,8 @@
 "use client";
 
 import { ChevronDown, ChevronUp, Circle, Diamond, Plus, Square, Trash2, type LucideIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { standardPositionTitlesForDepartment, type Department } from "@/domain/departments";
 import {
   RASIC_CODES,
   RASIC_LABELS,
@@ -9,12 +10,13 @@ import {
   type SopActivity,
   type SopShape,
 } from "@/domain/sop/schema";
-import { ThemedSelect } from "@/components/themed-select";
+import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
 import { AutoTextarea } from "./auto-textarea";
 
 type Props = {
   roles: string[];
   activities: SopActivity[];
+  departments: Department[];
   /** Read-only mode: inputs are disabled and structural controls (add/move/delete) are hidden. */
   disabled?: boolean;
   onChange: (roles: string[], activities: SopActivity[]) => void;
@@ -45,20 +47,47 @@ function renumber(activities: SopActivity[]): SopActivity[] {
  * pill / process rectangle / decision diamond). A Table view keeps the dense RASIC matrix
  * for fast bulk responsibility entry. Both edit the same `(roles, activities)`.
  */
-export function ProcessFlowchart({ roles, activities, disabled = false, onChange }: Props) {
+export function ProcessFlowchart({ roles, activities, departments, disabled = false, onChange }: Props) {
   const [view, setView] = useState<"map" | "table">("map");
+  const [autoOpenRoleIndex, setAutoOpenRoleIndex] = useState<number | null>(null);
+  const roleOptions = useMemo<ThemedSelectOption[]>(() => {
+    const groupedTitles = departments
+      .slice()
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .flatMap((department) =>
+        standardPositionTitlesForDepartment(department.code).map((title) => ({ department, title })),
+      );
+    const titleCounts = new Map<string, number>();
+    for (const { title } of groupedTitles) {
+      titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+    }
+    return groupedTitles.map(({ department, title }) => ({
+      value: titleCounts.get(title) === 1 ? title : `${title} — ${department.name}`,
+      label: title,
+      group: department.name,
+    }));
+  }, [departments]);
 
   // --- roles (RASIC functions) ---
   function setRole(index: number, value: string) {
+    const previousRole = roles[index];
+    setAutoOpenRoleIndex(null);
     onChange(
       roles.map((role, i) => (i === index ? value : role)),
-      activities,
+      activities.map((activity) => {
+        if (!previousRole || previousRole === value || !(previousRole in activity.assignments)) return activity;
+        const { [previousRole]: assignment, ...remainingAssignments } = activity.assignments;
+        return { ...activity, assignments: { ...remainingAssignments, [value]: assignment } };
+      }),
     );
   }
   function addRole() {
+    if (roles.some((role) => !role)) return;
+    setAutoOpenRoleIndex(roles.length);
     onChange([...roles, ""], activities);
   }
   function removeRole(index: number) {
+    setAutoOpenRoleIndex(null);
     const removed = roles[index];
     const nextActivities = activities.map((activity) => {
       const { [removed]: _drop, ...rest } = activity.assignments;
@@ -119,15 +148,27 @@ export function ProcessFlowchart({ roles, activities, disabled = false, onChange
       {/* Roles — shared by both views */}
       <div>
         <span className="ui-field-label">Roles (RASIC functions)</span>
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-col items-start gap-2">
           {roles.map((role, index) => (
-            <div key={index} className="flex items-center gap-1">
-              <input
-                className="ui-field-standalone w-36 px-2 text-[12px]"
+            <div key={index} className="flex w-full items-center gap-1">
+              <ThemedSelect
+                variant="sop"
+                className="min-w-0 flex-1"
                 value={role}
-                placeholder="Role"
+                placeholder="Select role"
+                ariaLabel={`Role ${index + 1} for RASIC functions`}
+                autoOpen={autoOpenRoleIndex === index}
                 disabled={disabled}
-                onChange={(event) => setRole(index, event.target.value)}
+                options={[
+                  ...(role && !roleOptions.some((option) => option.value === role)
+                    ? [{ value: role, label: role, group: "Current role" }]
+                    : []),
+                  ...roleOptions.map((option) => ({
+                    ...option,
+                    disabled: roles.some((selectedRole, selectedIndex) => selectedIndex !== index && selectedRole === option.value),
+                  })),
+                ]}
+                onChange={(value) => setRole(index, value)}
               />
               {disabled ? null : (
                 <button
@@ -142,7 +183,13 @@ export function ProcessFlowchart({ roles, activities, disabled = false, onChange
             </div>
           ))}
           {disabled ? null : (
-            <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-3" onClick={addRole}>
+            <button
+              type="button"
+              className="ui-btn-ghost h-8 gap-1.5 px-3"
+              disabled={roles.some((role) => !role) || roleOptions.length === 0}
+              title={roleOptions.length === 0 ? "No department roles are available" : undefined}
+              onClick={addRole}
+            >
               <Plus size={12} />
               Role
             </button>
@@ -452,10 +499,11 @@ function MatrixView({
                     triggerClassName="ui-sop-select-compact"
                     ariaLabel={`RASIC assignment for ${role || `role ${roleIndex + 1}`}, activity ${index + 1}`}
                     value={activity.assignments[role] ?? ""}
+                    selectedLabel={activity.assignments[role] ?? "–"}
                     disabled={disabled}
                     options={[
-                      { value: "", label: "–" },
-                      ...RASIC_CODES.map((code) => ({ value: code, label: code })),
+                      { value: "", label: "Unassigned" },
+                      ...RASIC_CODES.map((code) => ({ value: code, label: RASIC_LABELS[code] })),
                     ]}
                     onChange={(value) => onSetCell(index, role, value)}
                   />

@@ -59,8 +59,23 @@ export type SignatureMeaning =
   | "objection_sustained"
   | "objection_overruled";
 
-/** RASIC duty a department carries on an SOP. Only responsible/accountable gate the release. */
+/**
+ * Persisted RASIC duty values. The database keeps its original enum spellings for compatibility;
+ * UI and export surfaces use the canonical Responsible / Approve / Support / Inform / Consult labels.
+ */
 export type SopRasic = "responsible" | "accountable" | "support" | "consulted" | "informed";
+
+export const SOP_RASIC_LABELS: Record<SopRasic, string> = {
+  responsible: "Responsible",
+  accountable: "Approve",
+  support: "Support",
+  informed: "Inform",
+  consulted: "Consult",
+};
+
+export function sopRasicLabel(rasic: SopRasic): string {
+  return SOP_RASIC_LABELS[rasic];
+}
 
 export const BLOCKING_RASIC: readonly SopRasic[] = ["responsible", "accountable"];
 

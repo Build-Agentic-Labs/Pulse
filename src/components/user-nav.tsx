@@ -240,7 +240,13 @@ export function BackToDashboardButton({
  * (identity + sign out). Replaces the per-surface back links and the old sidebar
  * user panel.
  */
-export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean }) {
+export function UserNav({
+  showSpacesLink = true,
+  showThemeToggle = true,
+}: {
+  showSpacesLink?: boolean;
+  showThemeToggle?: boolean;
+}) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const { theme, toggleTheme } = useTheme();
@@ -292,15 +298,17 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
 
   return (
     <div ref={containerRef} className="relative flex shrink-0 items-center gap-1">
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0"
-        title="Toggle theme"
-        aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      >
-        {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
-      </button>
+      {showThemeToggle ? (
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0"
+          title="Toggle theme"
+          aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        >
+          {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
+        </button>
+      ) : null}
 
       <NotificationBell />
 

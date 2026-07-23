@@ -94,7 +94,7 @@ describe("resolveEventRecipients: final_approval_requested", () => {
       sop: sop({ finalApprovalRequestedAt: "2026-07-21T13:00:00Z", finalApprovalContentHash: "hash-1" }),
     });
 
-  it("emails only Responsible and Accountable signers", () => {
+  it("emails only Responsible and Approve signers", () => {
     const out = resolveEventRecipients(event({ eventType: "final_approval_requested", actorId: "author" }), fa());
     expect(ids(out)).toEqual(["acct", "resp"]);
     expect(out.every((n) => n.kind === "final_approval_requested")).toBe(true);

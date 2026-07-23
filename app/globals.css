@@ -2779,6 +2779,19 @@ body {
       color 140ms var(--ease-ui);
   }
 
+  .ui-themed-select-group {
+    padding: 0.65rem 0.625rem 0.25rem;
+    color: var(--color-ink);
+    font-family: var(--type-sans);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .ui-themed-select-option-grouped {
+    padding-left: 1.125rem;
+  }
+
   .ui-themed-select-option:hover,
   .ui-themed-select-option:focus-visible,
   .ui-themed-select-option[aria-selected="true"] {
@@ -3279,4 +3292,3 @@ body {
 
   
 }
-

@@ -2,19 +2,25 @@
 
 import { Archive, Building2, FileText, Inbox, Library } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { NavSelectionTrack } from "@/components/nav-selection-track";
 import { QualityListLoadingContent } from "@/components/space-loading-states";
-import type { Department } from "@/domain/departments";
+import type { Department, DepartmentMember } from "@/domain/departments";
+import type { MemberAccess } from "@/domain/types";
 import type { HistoricalSopRevision } from "@/lib/sop/review";
+import type { SopListReviewData } from "@/lib/sop/list-review-data";
 import type { QueueData } from "@/lib/sop/review-queue-data";
 import type { SopListItem } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
 import { canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 function SopTabChunkLoading() {
-  return <div className="min-h-[560px]" aria-hidden="true" />;
+  // Tab chunks are mounted while their panels are hidden so they are ready before selection.
+  // Keep that background work visually silent; the active panel's data loader owns any
+  // foreground loading feedback once the chunk is available.
+  return <div className="min-h-[260px]" aria-hidden />;
 }
 
 const EffectiveLibrary = dynamic(
@@ -66,43 +72,66 @@ function parseTab(raw: string | null): Tab {
  * module into a server component become client-reference proxies.
  */
 export type SopWorkspaceInitialData =
-  | { tab: "all"; workspaceId: string; sops: SopListItem[] }
+  | {
+      tab: "all";
+      workspaceId: string;
+      sops: SopListItem[];
+      departments: Department[];
+      memberDepartments: Department[];
+      review: SopListReviewData;
+    }
   | { tab: "library"; workspaceId: string; sops: SopListItem[]; departments: Department[] }
   | { tab: "retired"; workspaceId: string; sops: SopListItem[]; revisions: HistoricalSopRevision[] }
-  | { tab: "review"; workspaceId: string; queue: QueueData };
+  | { tab: "review"; workspaceId: string; queue: QueueData }
+  | {
+      tab: "settings";
+      workspaceId: string;
+      departments: Department[];
+      members: DepartmentMember[];
+      directory: MemberAccess[];
+    };
 
 export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } = {}) {
   const { role } = useSopWorkspace();
   const manage = canManage(role);
   const params = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => {
-    const requested = parseTab(params.get("tab"));
-    return requested === "settings" && !manage ? "all" : requested;
-  });
+  const requested = parseTab(params.get("tab"));
+  const tab = requested === "settings" && !manage ? "all" : requested;
   const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set([tab]));
 
   useEffect(() => {
     setMountedTabs((current) => {
       if (current.has(tab)) return current;
-      const next = new Set(current);
-      next.add(tab);
-      return next;
+      return new Set(current).add(tab);
     });
   }, [tab]);
 
   useEffect(() => {
-    if (tab !== "settings" || manage) return;
-    setTab("all");
-    window.history.replaceState(null, "", "/sops");
-  }, [manage, tab]);
+    const warmPanels = () => {
+      setMountedTabs(new Set<Tab>([
+        "all",
+        "review",
+        "library",
+        "retired",
+        ...(manage ? ["settings" as const] : []),
+      ]));
+    };
+    const idleWindow = window as Window & {
+      requestIdleCallback?: Window["requestIdleCallback"];
+      cancelIdleCallback?: Window["cancelIdleCallback"];
+    };
+    if (idleWindow.requestIdleCallback) {
+      const id = idleWindow.requestIdleCallback(warmPanels, { timeout: 750 });
+      return () => idleWindow.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(warmPanels, 150);
+    return () => window.clearTimeout(id);
+  }, [manage]);
 
   function select(next: Tab) {
-    setMountedTabs((current) => (current.has(next) ? current : new Set(current).add(next)));
-    setTab(next);
-    // Keep the URL shareable/refresh-safe, but WITHOUT a Next navigation (so nothing re-mounts).
-    if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", next === "all" ? "/sops" : `/sops?tab=${next}`);
-    }
+    setMountedTabs((current) => current.has(next) ? current : new Set(current).add(next));
+    const href = next === "all" ? "/sops" : `/sops?tab=${next}`;
+    window.history.pushState(null, "", href);
   }
 
   const sidebar = <SopTabNav active={tab} manage={manage} onSelect={select} />;
@@ -113,7 +142,11 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("all") ? (
           <SopList
             active={tab === "all"}
+            preload
             initialSops={initial?.tab === "all" ? initial.sops : undefined}
+            initialDepartments={initial?.tab === "all" ? initial.departments : undefined}
+            initialMemberDepartments={initial?.tab === "all" ? initial.memberDepartments : undefined}
+            initialReview={initial?.tab === "all" ? initial.review : undefined}
             initialWorkspaceId={initial?.tab === "all" ? initial.workspaceId : undefined}
           />
         ) : null}
@@ -122,6 +155,7 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("review") ? (
           <ReviewQueue
             active={tab === "review"}
+            preload
             initialQueue={initial?.tab === "review" ? initial.queue : undefined}
             initialWorkspaceId={initial?.tab === "review" ? initial.workspaceId : undefined}
           />
@@ -131,6 +165,7 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("library") ? (
           <EffectiveLibrary
             active={tab === "library"}
+            preload
             initialSops={initial?.tab === "library" ? initial.sops : undefined}
             initialDepartments={initial?.tab === "library" ? initial.departments : undefined}
             initialWorkspaceId={initial?.tab === "library" ? initial.workspaceId : undefined}
@@ -141,6 +176,7 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("retired") ? (
           <RetiredSops
             active={tab === "retired"}
+            preload
             initialSops={initial?.tab === "retired" ? initial.sops : undefined}
             initialRevisions={initial?.tab === "retired" ? initial.revisions : undefined}
             initialWorkspaceId={initial?.tab === "retired" ? initial.workspaceId : undefined}
@@ -149,14 +185,35 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
       </div>
       <div hidden={tab !== "settings"} aria-hidden={tab !== "settings"}>
         {mountedTabs.has("settings") && manage ? (
-          <QualitySettingsPanel active={tab === "settings"} />
+          <QualitySettingsPanel
+            active={tab === "settings"}
+            preload
+            initialDepartments={initial?.tab === "settings" ? initial.departments : undefined}
+            initialMembers={initial?.tab === "settings" ? initial.members : undefined}
+            initialDirectory={initial?.tab === "settings" ? initial.directory : undefined}
+            initialWorkspaceId={initial?.tab === "settings" ? initial.workspaceId : undefined}
+          />
         ) : null}
       </div>
     </SopShell>
   );
 }
 
-function QualitySettingsPanel({ active }: { active: boolean }) {
+function QualitySettingsPanel({
+  active,
+  preload,
+  initialDepartments,
+  initialMembers,
+  initialDirectory,
+  initialWorkspaceId,
+}: {
+  active: boolean;
+  preload: boolean;
+  initialDepartments?: Department[];
+  initialMembers?: DepartmentMember[];
+  initialDirectory?: MemberAccess[];
+  initialWorkspaceId?: string;
+}) {
   return (
     <div className="mx-auto max-w-6xl">
       <div className="mb-6">
@@ -165,7 +222,15 @@ function QualitySettingsPanel({ active }: { active: boolean }) {
           Manage departments, SOP ownership, access, and release controls.
         </p>
       </div>
-      <DepartmentsAdmin active={active} embedded />
+      <DepartmentsAdmin
+        active={active}
+        preload={preload}
+        embedded
+        initialDepartments={initialDepartments}
+        initialMembers={initialMembers}
+        initialDirectory={initialDirectory}
+        initialWorkspaceId={initialWorkspaceId}
+      />
     </div>
   );
 }
@@ -180,14 +245,7 @@ export function SopWorkspaceLoadingState({ active = "all" }: { active?: Tab }) {
   const { role } = useSopWorkspace();
   const manage = canManage(role);
   const safeActive = active === "settings" && !manage ? "all" : active;
-  const router = useRouter();
-  const sidebar = (
-    <SopTabNav
-      active={safeActive}
-      manage={manage}
-      onSelect={(next) => router.replace(next === "all" ? "/sops" : `/sops?tab=${next}`)}
-    />
-  );
+  const sidebar = <SopTabNav active={safeActive} manage={manage} />;
 
   return (
     <SopShell sidebar={sidebar} crumb={CRUMB[safeActive]}>
@@ -203,18 +261,36 @@ function SopTabNav({
 }: {
   active: Tab;
   manage: boolean;
-  onSelect: (tab: Tab) => void;
+  onSelect?: (tab: Tab) => void;
 }) {
+  function handleClick(event: MouseEvent<HTMLAnchorElement>, tab: Tab) {
+    if (
+      !onSelect ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onSelect(tab);
+  }
+
   function item(tab: Tab, icon: ReactNode, label: string) {
+    const href = tab === "all" ? "/sops" : `/sops?tab=${tab}`;
     return (
-      <button
-        type="button"
-        onClick={() => onSelect(tab)}
+      <Link
+        href={href}
+        prefetch
+        scroll={false}
+        onClick={(event) => handleClick(event, tab)}
         className={`ui-nav-item w-full ${active === tab ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
       >
         {icon}
         <span>{label}</span>
-      </button>
+      </Link>
     );
   }
 
@@ -233,9 +309,11 @@ function SopTabNav({
         <>
           <div className="ui-nav-section mt-3">Manage</div>
           <NavSelectionTrack activeIndex={active === "settings" ? 0 : -1} className="space-y-0.5">
-            <button
-              type="button"
-              onClick={() => onSelect("settings")}
+            <Link
+              href="/sops?tab=settings"
+              prefetch
+              scroll={false}
+              onClick={(event) => handleClick(event, "settings")}
               className={`ui-nav-item w-full ${
                 active === "settings" ? "ui-nav-item-active" : "ui-nav-item-idle"
               }`}
@@ -243,7 +321,7 @@ function SopTabNav({
             >
               <Building2 size={15} strokeWidth={1.75} />
               <span>Quality settings</span>
-            </button>
+            </Link>
           </NavSelectionTrack>
         </>
       ) : null}

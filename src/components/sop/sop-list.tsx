@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
-import { SopTableSkeleton } from "@/components/space-loading-states";
+import { QuietLoading } from "@/components/quiet-loading";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { DEFAULT_DOC_TYPE } from "@/domain/sop/authoring";
@@ -23,10 +23,14 @@ import {
   sopFromExtraction,
   type SopListItem,
 } from "@/lib/sop/store";
-import { listProfileNames, listSeatsForSops, mintSopNumber } from "@/lib/sop/review";
+import { mintSopNumber } from "@/lib/sop/review";
+import {
+  fetchSopListReviewData,
+  type SopListReviewData,
+  type SopListReviewParticipant,
+} from "@/lib/sop/list-review-data";
 import {
   listSopReviewAnnotations,
-  listSopReviewSubmissions,
   type SopReviewAnnotation,
   type SopReviewSubmission,
 } from "@/lib/sop/review-annotations";
@@ -81,17 +85,32 @@ const REVIEW_FEEDBACK_LABELS: Record<string, string> = {
   overall: "Overall remarks",
 };
 
-interface ReviewParticipant {
-  userId: string;
-  name: string;
+function reviewResultsFrom(data?: SopListReviewData): Map<string, SopReviewSubmission[]> {
+  const grouped = new Map<string, SopReviewSubmission[]>();
+  for (const submission of data?.submissions ?? []) {
+    grouped.set(submission.sopId, [...(grouped.get(submission.sopId) ?? []), submission]);
+  }
+  return grouped;
+}
+
+function reviewParticipantsFrom(data?: SopListReviewData): Map<string, SopListReviewParticipant[]> {
+  return new Map(
+    (data?.participantGroups ?? []).map(({ sopId, participants }) => [sopId, participants]),
+  );
 }
 
 export function SopList({
   active = true,
+  preload = false,
   initialSops,
+  initialDepartments,
+  initialMemberDepartments,
+  initialReview,
   initialWorkspaceId,
 }: {
   active?: boolean;
+  /** Warm the panel while hidden; active still controls recurring refreshes. */
+  preload?: boolean;
   /**
    * Server-fetched first paint (refactor plan, Stage 5): when app/sops/page.tsx could
    * resolve the workspace cookie and session, the list arrives with the document and
@@ -100,6 +119,12 @@ export function SopList({
    * no longer matches the one the server fetched for.
    */
   initialSops?: SopListItem[];
+  /** Department labels and ordering paired with the server-fetched SOP list. */
+  initialDepartments?: Department[];
+  /** Current user's owning-department permissions paired with the list. */
+  initialMemberDepartments?: Department[];
+  /** Review avatars and verdicts paired with the server-fetched SOP list. */
+  initialReview?: SopListReviewData;
   initialWorkspaceId?: string;
 }) {
   const router = useRouter();
@@ -118,12 +143,29 @@ export function SopList({
   const [query, setQuery] = useState("");
   const [pendingImport, setPendingImport] = useState<Sop[]>([]);
   const [importing, setImporting] = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [convertDepartments, setConvertDepartments] = useState<Department[] | null>(null);
-  const [convertDepartmentId, setConvertDepartmentId] = useState("");
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [reviewResults, setReviewResults] = useState<Map<string, SopReviewSubmission[]>>(new Map());
-  const [reviewParticipants, setReviewParticipants] = useState<Map<string, ReviewParticipant[]>>(new Map());
+  const [departments, setDepartments] = useState<Department[]>(
+    seededFromServer && initialDepartments !== undefined ? initialDepartments : [],
+  );
+  const seededMemberDepartments =
+    seededFromServer && initialMemberDepartments !== undefined
+      ? initialMemberDepartments
+      : undefined;
+  const [convertDepartments, setConvertDepartments] = useState<Department[] | null>(
+    seededMemberDepartments ?? null,
+  );
+  const [convertDepartmentId, setConvertDepartmentId] = useState(
+    seededMemberDepartments?.[0]?.id ?? "",
+  );
+  const seededReview = seededFromServer ? initialReview : undefined;
+  const [currentUserId, setCurrentUserId] = useState<string | null>(
+    seededReview?.currentUserId ?? null,
+  );
+  const [reviewResults, setReviewResults] = useState<Map<string, SopReviewSubmission[]>>(
+    () => reviewResultsFrom(seededReview),
+  );
+  const [reviewParticipants, setReviewParticipants] = useState<
+    Map<string, SopListReviewParticipant[]>
+  >(() => reviewParticipantsFrom(seededReview));
   const [feedbackSop, setFeedbackSop] = useState<SopListItem | null>(null);
   const [feedbackAnnotations, setFeedbackAnnotations] = useState<SopReviewAnnotation[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
@@ -172,46 +214,11 @@ export function SopList({
       const supabase = createPlannerSupabaseClient();
       const userResult = await getUserFromSession(supabase);
       const userId = userResult.data.user?.id ?? null;
-      const authored = userId ? next.filter((sop) => sop.createdBy === userId) : [];
-      const authoredInReview = authored.filter((sop) => sop.status === "in_review");
-      // Verdicts only surface for in-review authored SOPs (review-status avatars and
-      // the feedback modal), matching the seats query below; do not fetch the rest.
-      const [submissions, allSeats] = await Promise.all([
-        listSopReviewSubmissions(authoredInReview.map((sop) => sop.id)),
-        listSeatsForSops(authoredInReview.map((sop) => sop.id)),
-      ]);
-      // One batched query instead of one per SOP; regroup to the previous shape.
-      const seatGroups = authoredInReview.map((sop) => ({
-        sopId: sop.id,
-        seats: allSeats.filter((seat) => seat.sopId === sop.id),
-      }));
-      const profileNames = await listProfileNames(
-        seatGroups.flatMap(({ seats }) => seats.flatMap((seat) => seat.signerId ? [seat.signerId] : [])),
-      );
-      const bySop = new Map<string, SopReviewSubmission[]>();
-      for (const submission of submissions) {
-        const sop = authored.find((item) => item.id === submission.sopId);
-        // Cycle-scoped, not hash-scoped: one review round per cycle, so a
-        // verdict stays valid after the author recalls and edits the draft.
-        if (!sop || submission.reviewCycle !== sop.reviewCycle) continue;
-        bySop.set(submission.sopId, [...(bySop.get(submission.sopId) ?? []), submission]);
-      }
-      const participantsBySop = new Map<string, ReviewParticipant[]>();
-      for (const { sopId, seats } of seatGroups) {
-        const unique = new Map<string, ReviewParticipant>();
-        for (const seat of seats) {
-          if (!seat.signerId || unique.has(seat.signerId)) continue;
-          unique.set(seat.signerId, {
-            userId: seat.signerId,
-            name: profileNames.get(seat.signerId) || "Assigned reviewer",
-          });
-        }
-        participantsBySop.set(sopId, Array.from(unique.values()));
-      }
+      const review = await fetchSopListReviewData(next, userId, supabase);
       setSops(next);
-      setCurrentUserId(userId);
-      setReviewResults(bySop);
-      setReviewParticipants(participantsBySop);
+      setCurrentUserId(review.currentUserId);
+      setReviewResults(reviewResultsFrom(review));
+      setReviewParticipants(reviewParticipantsFrom(review));
       setListStatus("ready");
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return next;
@@ -277,6 +284,7 @@ export function SopList({
 
   // Departments power the grouped sections.
   useEffect(() => {
+    if (seededFromServer && initialDepartments !== undefined) return;
     if (!workspaceId) return;
     let active = true;
     void listDepartments(workspaceId)
@@ -289,11 +297,12 @@ export function SopList({
     return () => {
       active = false;
     };
-  }, [workspaceId]);
+  }, [initialDepartments, seededFromServer, workspaceId]);
 
   // Conversion ownership follows the converter's explicit department membership, matching
   // new-SOP authoring. One department is automatic; several are selected in the toolbar.
   useEffect(() => {
+    if (seededMemberDepartments) return;
     if (!workspaceId) {
       setConvertDepartments([]);
       setConvertDepartmentId("");
@@ -317,12 +326,12 @@ export function SopList({
     return () => {
       active = false;
     };
-  }, [workspaceId]);
+  }, [workspaceId, seededMemberDepartments]);
 
   // Load the workspace's SOPs, then surface any legacy localStorage SOPs not yet in this
   // workspace as a one-time import offer (id-deduped; skipped once dismissed/imported).
   useEffect(() => {
-    if (!active) return;
+    if (!active && !preload) return;
     const hasCurrentData =
       freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
     if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 15_000) return;
@@ -340,7 +349,7 @@ export function SopList({
     return () => {
       alive = false;
     };
-  }, [active, refreshList, workspaceId, editable]);
+  }, [active, preload, refreshList, workspaceId, editable]);
 
   // Workflow actions often finish in another tab (review/signature workspaces). Refresh this
   // list as soon as the user returns, with a visible-tab interval as a fallback for long-lived
@@ -590,7 +599,7 @@ export function SopList({
         ) : null}
 
         {listStatus === "loading" ? (
-          <SopTableSkeleton />
+          <QuietLoading active={active} label="Loading SOPs" />
         ) : listStatus === "error" ? (
           <section className="ui-empty-state">
             <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load SOPs."}</p>
@@ -675,6 +684,7 @@ export function SopList({
                                 <td className="px-5 py-3.5 align-middle">
                                   <Link
                                     href={editorHref}
+                                    prefetch={!isViewOnly}
                                     className="text-xs font-medium text-ink-secondary hover:text-ink"
                                   >
                                     {sop.sopNumber || "—"}
@@ -683,6 +693,7 @@ export function SopList({
                                 <td className="max-w-0 px-5 py-3.5 align-middle">
                                   <Link
                                     href={editorHref}
+                                    prefetch={!isViewOnly}
                                     className="block min-w-0"
                                   >
                                     <span className="block truncate text-[13px] font-medium leading-snug text-ink">

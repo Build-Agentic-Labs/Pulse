@@ -53,6 +53,7 @@ import {
   type SopReviewSubmission,
 } from "@/lib/sop/review-annotations";
 import { listSopAuditEvents, type SopAuditEvent } from "@/lib/sop/audit-events";
+import type { SopApprovalRoutingInitialData } from "@/lib/sop/detail-data";
 import {
   listSopAnnexFiles,
   openSopAnnexFile,
@@ -292,6 +293,7 @@ export function SopEditor({
   canEdit: canEditPermission = true,
   isNew = false,
   authoringDepartments,
+  initialApprovalRouting,
   initialView,
 }: {
   initial: Sop;
@@ -303,6 +305,8 @@ export function SopEditor({
   isNew?: boolean;
   /** The departments the author may own this SOP with. Present only for new SOPs (length >= 1). */
   authoringDepartments?: Department[];
+  /** Server-composed approval/review state for an existing SOP's first paint. */
+  initialApprovalRouting?: SopApprovalRoutingInitialData;
   /** Deep-linked view supplied by the route before the editor's first render. */
   initialView?: SopEditorInitialView;
 }) {
@@ -348,23 +352,60 @@ export function SopEditor({
   const [uploadingReferenceDoc, setUploadingReferenceDoc] = useState(false);
   const [uploadingAnnexId, setUploadingAnnexId] = useState<string | null>(null);
   const [annexUploadStatus, setAnnexUploadStatus] = useState<AnnexUploadStatus | null>(null);
-  const [approvalDepartments, setApprovalDepartments] = useState<Department[]>([]);
+  const [approvalDepartments, setApprovalDepartments] = useState<Department[]>(
+    () => initialApprovalRouting?.departments ?? [],
+  );
   const [departmentAuthorIdentity, setDepartmentAuthorIdentity] = useState<DepartmentAuthorIdentity | null>(null);
-  const [approvalSeats, setApprovalSeats] = useState<SopReviewSeat[]>([]);
-  const [approvalSignatures, setApprovalSignatures] = useState<SopSignature[]>([]);
-  const [approvalReviewerNames, setApprovalReviewerNames] = useState<Map<string, string>>(new Map());
-  const [approvalAuthorId, setApprovalAuthorId] = useState<string | null>(null);
-  const [approvalReviewCycle, setApprovalReviewCycle] = useState(0);
-  const [approvalContentHash, setApprovalContentHash] = useState<string | null>(null);
-  const [finalApprovalRequestedAt, setFinalApprovalRequestedAt] = useState<string | null>(null);
-  const [finalApprovalContentHash, setFinalApprovalContentHash] = useState<string | null>(null);
-  const [isCurrentUserAuthor, setIsCurrentUserAuthor] = useState(false);
-  const [isCurrentUserQualityApprover, setIsCurrentUserQualityApprover] = useState(false);
+  const [approvalSeats, setApprovalSeats] = useState<SopReviewSeat[]>(
+    () => initialApprovalRouting?.seats ?? [],
+  );
+  const [approvalSignatures, setApprovalSignatures] = useState<SopSignature[]>(
+    () => initialApprovalRouting?.signatures ?? [],
+  );
+  const [approvalReviewerNames, setApprovalReviewerNames] = useState<Map<string, string>>(
+    () => new Map(initialApprovalRouting?.reviewerNames ?? []),
+  );
+  const [approvalAuthorId, setApprovalAuthorId] = useState<string | null>(
+    () => initialApprovalRouting?.control?.createdBy ?? null,
+  );
+  const [approvalReviewCycle, setApprovalReviewCycle] = useState(
+    () => initialApprovalRouting?.control?.reviewCycle ?? 0,
+  );
+  const [approvalContentHash, setApprovalContentHash] = useState<string | null>(
+    () => initialApprovalRouting?.control?.contentHash ?? null,
+  );
+  const [finalApprovalRequestedAt, setFinalApprovalRequestedAt] = useState<string | null>(
+    () => initialApprovalRouting?.control?.finalApprovalRequestedAt ?? null,
+  );
+  const [finalApprovalContentHash, setFinalApprovalContentHash] = useState<string | null>(
+    () => initialApprovalRouting?.control?.finalApprovalContentHash ?? null,
+  );
+  const [isCurrentUserAuthor, setIsCurrentUserAuthor] = useState(
+    () => Boolean(
+      initialApprovalRouting?.control?.createdBy &&
+      initialApprovalRouting.control.createdBy === initialApprovalRouting.currentUserId
+    ),
+  );
+  const [isCurrentUserQualityApprover, setIsCurrentUserQualityApprover] = useState(
+    () => {
+      if (!initialApprovalRouting) return false;
+      const roles = new Map(initialApprovalRouting.departmentRoles);
+      return initialApprovalRouting.departments.some(
+        (department) => department.isQualityGate && roles.get(department.id) === "approver",
+      );
+    },
+  );
   const [approvalRoutingLoading, setApprovalRoutingLoading] = useState(false);
   const [approvalRoutingError, setApprovalRoutingError] = useState("");
-  const [reviewAnnotations, setReviewAnnotations] = useState<SopReviewAnnotation[]>([]);
-  const [reviewSubmissions, setReviewSubmissions] = useState<SopReviewSubmission[]>([]);
-  const [auditEvents, setAuditEvents] = useState<SopAuditEvent[]>([]);
+  const [reviewAnnotations, setReviewAnnotations] = useState<SopReviewAnnotation[]>(
+    () => initialApprovalRouting?.reviewAnnotations ?? [],
+  );
+  const [reviewSubmissions, setReviewSubmissions] = useState<SopReviewSubmission[]>(
+    () => initialApprovalRouting?.reviewSubmissions ?? [],
+  );
+  const [auditEvents, setAuditEvents] = useState<SopAuditEvent[]>(
+    () => initialApprovalRouting?.auditEvents ?? [],
+  );
   const [auditError, setAuditError] = useState("");
   const [auditPanelOpen, setAuditPanelOpen] = useState(false);
   const [recallingReview, setRecallingReview] = useState(false);
@@ -403,6 +444,9 @@ export function SopEditor({
   // instead of being silently dropped (persist returned false while a save was in flight).
   const inFlightSaveRef = useRef<Promise<boolean> | null>(null);
   const reviewDismissTimerRef = useRef<number | null>(null);
+  const skipInitialApprovalFetchRef = useRef(Boolean(initialApprovalRouting));
+  const skipInitialReviewFetchRef = useRef(Boolean(initialApprovalRouting));
+  const skipInitialAuditFetchRef = useRef(Boolean(initialApprovalRouting));
   // The status as last persisted -- a save that changes it auto-appends a changeHistory row.
   const lastSavedStatusRef = useRef<SopStatus>(initial.status);
   const hasPersistedSop = !isNew || Boolean(persistedUpdatedAt);
@@ -450,6 +494,10 @@ export function SopEditor({
   }, [hasPersistedSop, sop.id, workspaceId]);
 
   useEffect(() => {
+    if (skipInitialApprovalFetchRef.current) {
+      skipInitialApprovalFetchRef.current = false;
+      return;
+    }
     void refreshApprovalRouting();
   }, [refreshApprovalRouting]);
 
@@ -475,6 +523,10 @@ export function SopEditor({
 
   useEffect(() => {
     if (!hasPersistedSop) return;
+    if (skipInitialReviewFetchRef.current) {
+      skipInitialReviewFetchRef.current = false;
+      return;
+    }
     let active = true;
     Promise.all([
       listSopReviewAnnotations(sop.id),
@@ -505,6 +557,10 @@ export function SopEditor({
 
   useEffect(() => {
     if (!hasPersistedSop) return;
+    if (skipInitialAuditFetchRef.current) {
+      skipInitialAuditFetchRef.current = false;
+      return;
+    }
     let active = true;
     setAuditError("");
     void listSopAuditEvents(sop.id)

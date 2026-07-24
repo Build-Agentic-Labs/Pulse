@@ -130,11 +130,12 @@ export async function listMembers(departmentId: string): Promise<DepartmentMembe
 /** Load the complete roster for a department list in one request. */
 export async function listMembersForDepartments(
   departmentIds: readonly string[],
+  client?: SupabaseClient<Database>,
 ): Promise<DepartmentMember[]> {
   const ids = [...new Set(departmentIds.filter(Boolean))];
   if (ids.length === 0) return [];
 
-  const supabase = createPlannerSupabaseClient();
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase.from("department_members").select(MEMBER_COLUMNS).in("department_id", ids),
   );
@@ -186,15 +187,27 @@ export async function fetchMyDeptRoles(
   const { data: userData } = await getUserFromSession(supabase);
   const userId = userData.user?.id;
   if (!userId) return new Map();
-  const depts = await listDepartments(workspaceId, supabase);
+  const [depts, roles] = await Promise.all([
+    listDepartments(workspaceId, supabase),
+    fetchDepartmentRolesForUser(userId, supabase),
+  ]);
   const deptIds = new Set(depts.map((d) => d.id));
+  return new Map([...roles].filter(([departmentId]) => deptIds.has(departmentId)));
+}
+
+/** All explicit department roles for one user. Callers may filter these to a workspace. */
+export async function fetchDepartmentRolesForUser(
+  userId: string,
+  client?: SupabaseClient<Database>,
+): Promise<Map<string, DeptRole>> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase.from("department_members").select(MEMBER_COLUMNS).eq("user_id", userId),
   );
   const roles = new Map<string, DeptRole>();
   for (const row of rows ?? []) {
     const m = mapMember(row);
-    if (deptIds.has(m.departmentId)) roles.set(m.departmentId, m.deptRole);
+    roles.set(m.departmentId, m.deptRole);
   }
   return roles;
 }
@@ -205,15 +218,18 @@ export async function fetchMyDeptRoles(
  * `has_department_role`): authoring requires real membership, so a manager with no department is
  * blocked from creating SOPs until added to one.
  */
-export async function listMyDepartments(workspaceId: string): Promise<Department[]> {
-  const supabase = createPlannerSupabaseClient();
-  const { data: userData } = await getUserFromSession(supabase);
-  const userId = userData.user?.id;
+export async function listMyDepartments(
+  workspaceId: string,
+  client?: SupabaseClient<Database>,
+  knownUserId?: string,
+): Promise<Department[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
+  const userId = knownUserId ?? (await getUserFromSession(supabase)).data.user?.id;
   if (!userId) return [];
-  const departments = await listDepartments(workspaceId);
-  const rows = await throwIfError(
-    supabase.from("department_members").select(MEMBER_COLUMNS).eq("user_id", userId),
-  );
-  const memberIds = new Set((rows ?? []).map((row: Record<string, unknown>) => mapMember(row).departmentId));
+  const [departments, roles] = await Promise.all([
+    listDepartments(workspaceId, supabase),
+    fetchDepartmentRolesForUser(userId, supabase),
+  ]);
+  const memberIds = new Set(roles.keys());
   return pickMemberDepartments(departments, memberIds);
 }

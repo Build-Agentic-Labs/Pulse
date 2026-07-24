@@ -108,8 +108,11 @@ export async function submitSopReviewResult(sopId: string, noChanges: boolean): 
   return String(data);
 }
 
-export async function listSopReviewAnnotations(sopId: string): Promise<SopReviewAnnotation[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listSopReviewAnnotations(
+  sopId: string,
+  client?: SupabaseClient<Database>,
+): Promise<SopReviewAnnotation[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const { data, error } = await supabase
     .from("sop_review_annotations")
     .select("*")

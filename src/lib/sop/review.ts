@@ -157,8 +157,11 @@ export async function requestSopFinalApproval(sopId: string): Promise<void> {
   kickSopNotifications();
 }
 
-export async function getSopControl(id: string): Promise<SopControl | undefined> {
-  const supabase = createPlannerSupabaseClient();
+export async function getSopControl(
+  id: string,
+  client?: SupabaseClient<Database>,
+): Promise<SopControl | undefined> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const row = await throwIfError(
     supabase.from("sops").select(CONTROL_COLUMNS).eq("id", id).is("deleted_at", null).maybeSingle(),
   );
@@ -350,10 +353,13 @@ export async function listMySignaturesFor(
 }
 
 /** Printed names for a set of users, so a pending seat can show who it is waiting on. */
-export async function listProfileNames(userIds: readonly string[]): Promise<Map<string, string>> {
+export async function listProfileNames(
+  userIds: readonly string[],
+  client?: SupabaseClient<Database>,
+): Promise<Map<string, string>> {
   const unique = Array.from(new Set(userIds));
   if (unique.length === 0) return new Map();
-  const supabase = createPlannerSupabaseClient();
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(supabase.from("profiles").select("id, full_name").in("id", unique));
   return new Map(
     (rows ?? []).map((row: Record<string, unknown>) => [String(row.id), String(row.full_name ?? "")]),
@@ -361,8 +367,11 @@ export async function listProfileNames(userIds: readonly string[]): Promise<Map<
 }
 
 /** The required departmental approval roster and each department's designated approver. */
-export async function listSeats(sopId: string): Promise<SopReviewSeat[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listSeats(
+  sopId: string,
+  client?: SupabaseClient<Database>,
+): Promise<SopReviewSeat[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase.from("sop_review_seats").select("sop_id, department_id, rasic, signer_id").eq("sop_id", sopId),
   );
@@ -475,8 +484,11 @@ export async function transitionSop(
   return mapControl(updated as unknown as Record<string, unknown>);
 }
 
-export async function listSignatures(sopId: string): Promise<SopSignature[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listSignatures(
+  sopId: string,
+  client?: SupabaseClient<Database>,
+): Promise<SopSignature[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
     supabase
       .from("sop_signatures")

@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Department } from "@/domain/departments";
 import { listDepartments, listMyDepartments } from "@/lib/departments/store";
+import type { SopDetailInitialData } from "@/lib/sop/detail-data";
 import { getSop, type SopRecord } from "@/lib/sop/store";
 import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopEditor, type SopEditorInitialView } from "./sop-editor";
@@ -34,12 +35,29 @@ type DetailState =
   | { status: "missing" }
   | { status: "error"; message: string };
 
-export function SopDetailClient({ initialView }: { initialView?: SopEditorInitialView }) {
+export function SopDetailClient({
+  initial,
+  initialView,
+}: {
+  initial?: SopDetailInitialData;
+  initialView?: SopEditorInitialView;
+}) {
   const params = useParams<{ sopId: string }>();
   const { canEditSops } = useSopWorkspace();
-  const [state, setState] = useState<DetailState>({ status: "pending" });
+  const [state, setState] = useState<DetailState>(() => initial
+    ? {
+        status: "loaded",
+        record: initial.record,
+        department: initial.department,
+        canEdit:
+          canEditSops &&
+          initial.record.sop.status === "draft" &&
+          (!initial.record.departmentId || initial.myDepartmentIds.includes(initial.record.departmentId)),
+      }
+    : { status: "pending" });
 
   useEffect(() => {
+    if (initial) return;
     let active = true;
     setState({ status: "pending" });
     getSop(params.sopId)
@@ -70,7 +88,7 @@ export function SopDetailClient({ initialView }: { initialView?: SopEditorInitia
     return () => {
       active = false;
     };
-  }, [params.sopId, canEditSops]);
+  }, [params.sopId, canEditSops, initial]);
 
   if (state.status === "loaded") {
     return (
@@ -80,6 +98,7 @@ export function SopDetailClient({ initialView }: { initialView?: SopEditorInitia
         workspaceId={state.record.workspaceId}
         owningDepartment={state.department}
         canEdit={state.canEdit}
+        initialApprovalRouting={initial?.approval}
         initialView={initialView}
       />
     );

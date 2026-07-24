@@ -4,7 +4,7 @@ import { Library } from "lucide-react";
 import { formatDate } from "@/domain/formatting";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SopTableSkeleton } from "@/components/space-loading-states";
+import { QuietLoading } from "@/components/quiet-loading";
 import type { Department } from "@/domain/departments";
 import { SOP_STATUS_LABELS } from "@/domain/sop/schema";
 import { listDepartments } from "@/lib/departments/store";
@@ -17,11 +17,13 @@ type ListStatus = "loading" | "ready" | "error";
 /** The controlled, in-force SOP library, organized exactly like the All SOPs table. */
 export function EffectiveLibrary({
   active = true,
+  preload = false,
   initialSops,
   initialDepartments,
   initialWorkspaceId,
 }: {
   active?: boolean;
+  preload?: boolean;
   /** Server-fetched first paint (Stage 5): seeds the list, then background-revalidates. */
   initialSops?: SopListItem[];
   initialDepartments?: Department[];
@@ -74,12 +76,12 @@ export function EffectiveLibrary({
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active && !preload) return;
     const hasCurrentData =
       freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
     if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 30_000) return;
     void refreshList({ background: hasCurrentData });
-  }, [active, refreshList, workspaceId]);
+  }, [active, preload, refreshList, workspaceId]);
 
   const groups = useMemo(() => {
     const byDepartment = new Map<string, SopListItem[]>();
@@ -123,7 +125,7 @@ export function EffectiveLibrary({
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
-        <SopTableSkeleton />
+        <QuietLoading active={active} label="Loading effective SOPs" />
       ) : listStatus === "error" ? (
         <section className="ui-empty-state">
           <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load effective SOPs."}</p>

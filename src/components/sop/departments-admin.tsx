@@ -3,6 +3,7 @@
 import { Building2, Flag, Loader2, Plus, Trash2, UserPlus, UsersRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
+import { QuietLoading } from "@/components/quiet-loading";
 import { ThemedSelect } from "@/components/themed-select";
 import { standardPositionTitlesForDepartment, type Department, type DepartmentMember, type DeptRole } from "@/domain/departments";
 import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
@@ -35,21 +36,64 @@ function memberLabel(member: MemberAccess): string {
   return member.fullName || member.email || member.userId;
 }
 
-export function DepartmentsAdmin({ active = true, embedded = false }: { active?: boolean; embedded?: boolean }) {
+function groupMembers(
+  departments: readonly Department[],
+  members: readonly DepartmentMember[],
+): Record<string, DepartmentMember[]> {
+  const grouped = Object.fromEntries(
+    departments.map((department) => [department.id, [] as DepartmentMember[]]),
+  );
+  for (const member of members) grouped[member.departmentId]?.push(member);
+  return grouped;
+}
+
+export function DepartmentsAdmin({
+  active = true,
+  preload = false,
+  embedded = false,
+  initialDepartments,
+  initialMembers,
+  initialDirectory,
+  initialWorkspaceId,
+}: {
+  active?: boolean;
+  preload?: boolean;
+  embedded?: boolean;
+  initialDepartments?: Department[];
+  initialMembers?: DepartmentMember[];
+  initialDirectory?: MemberAccess[];
+  initialWorkspaceId?: string;
+}) {
   const confirm = useConfirm();
   const { workspaceId, role } = useSopWorkspace();
   const manage = canManage(role);
+  const seeded =
+    initialDepartments !== undefined &&
+    initialMembers !== undefined &&
+    initialWorkspaceId === workspaceId;
 
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [membersByDepartment, setMembersByDepartment] = useState<Record<string, DepartmentMember[]>>({});
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [departments, setDepartments] = useState<Department[]>(
+    seeded ? initialDepartments : [],
+  );
+  const [membersByDepartment, setMembersByDepartment] = useState<Record<string, DepartmentMember[]>>(
+    () => seeded ? groupMembers(initialDepartments, initialMembers) : {},
+  );
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    seeded ? "ready" : "loading",
+  );
   const [error, setError] = useState("");
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    seeded ? initialDepartments[0]?.id : undefined,
+  );
 
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [directory, setDirectory] = useState<MemberAccess[]>([]);
-  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>({ loadedAt: 0 });
+  const [directory, setDirectory] = useState<MemberAccess[]>(
+    seeded ? initialDirectory ?? [] : [],
+  );
+  const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
+    seeded ? { workspaceId, loadedAt: Date.now() } : { loadedAt: 0 },
+  );
 
   const handleError = useCallback((message: string) => setError(message), []);
   const handleMembersChange = useCallback((departmentId: string, members: DepartmentMember[]) => {
@@ -71,12 +115,7 @@ export function DepartmentsAdmin({ active = true, embedded = false }: { active?:
     try {
       const next = await listDepartments(workspaceId);
       const members = await listMembersForDepartments(next.map((department) => department.id));
-      const nextMembers = Object.fromEntries(
-        next.map((department) => [department.id, [] as DepartmentMember[]]),
-      );
-      for (const member of members) {
-        nextMembers[member.departmentId]?.push(member);
-      }
+      const nextMembers = groupMembers(next, members);
       setDepartments(next);
       setMembersByDepartment(nextMembers);
       setSelectedId((current) =>
@@ -94,15 +133,16 @@ export function DepartmentsAdmin({ active = true, embedded = false }: { active?:
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active && !preload) return;
     const hasCurrentData =
       freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
     if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 30_000) return;
     void refresh({ background: hasCurrentData });
-  }, [active, refresh, workspaceId]);
+  }, [active, preload, refresh, workspaceId]);
 
   // The workspace member directory powers the name/email member picker (no raw UUIDs).
   useEffect(() => {
+    if (seeded) return;
     if (!workspaceId) {
       setDirectory([]);
       return;
@@ -118,7 +158,7 @@ export function DepartmentsAdmin({ active = true, embedded = false }: { active?:
     return () => {
       active = false;
     };
-  }, [workspaceId]);
+  }, [workspaceId, seeded]);
 
   const selected = useMemo(
     () => departments.find((dept) => dept.id === selectedId),
@@ -214,9 +254,11 @@ export function DepartmentsAdmin({ active = true, embedded = false }: { active?:
         <div className="ui-dept-workbench grid grid-cols-1 lg:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)]">
           <section className="min-w-0 overflow-hidden">
             {status === "loading" ? (
-              <div className="flex items-center justify-center px-4 py-12">
-                <Loader2 size={18} className="animate-spin text-ink-tertiary" />
-              </div>
+              <QuietLoading
+                active={active}
+                label="Loading departments"
+                reserveClassName="min-h-[120px]"
+              />
             ) : status === "error" ? (
               <div className="px-4 py-12 text-center">
                 <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load departments."}</p>

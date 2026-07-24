@@ -156,8 +156,11 @@ export async function listSops(
   return (rows ?? []).map(mapSopListItem);
 }
 
-export async function getSop(id: string): Promise<SopRecord | undefined> {
-  const supabase = createPlannerSupabaseClient();
+export async function getSop(
+  id: string,
+  client?: SupabaseClient<Database>,
+): Promise<SopRecord | undefined> {
+  const supabase = client ?? createPlannerSupabaseClient();
   // RLS scopes access: a SOP in a workspace the user can't read returns no row -> undefined.
   // Soft-deleted SOPs are treated as missing everywhere.
   const row = await throwIfError(

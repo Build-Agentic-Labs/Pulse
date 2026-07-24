@@ -2129,8 +2129,11 @@ export async function deleteProjectFromSupabase(projectId: string) {
   await throwIfError(supabase.from("projects").delete().eq("id", projectId));
 }
 
-export async function loadWorkspaceMembersFromSupabase(workspaceId: string): Promise<WorkspaceMemberProfile[]> {
-  const supabase = plannerClient();
+export async function loadWorkspaceMembersFromSupabase(
+  workspaceId: string,
+  client?: SupabaseClient<Database>,
+): Promise<WorkspaceMemberProfile[]> {
+  const supabase = client ?? plannerClient();
   // Fetch members and profiles separately and merge in JS. There is no direct foreign key
   // between workspace_members and profiles (both only reference auth.users), so a PostgREST
   // embed (`profiles(...)`) fails with PGRST200. Profile names for fellow members are
@@ -2293,14 +2296,17 @@ export async function deleteWorkspaceAccessGrantFromSupabase(workspaceId: string
 
 // Per-member access matrix for a workspace: each member's role plus their per-project level
 // and Org tools level. Readable by workspace managers and superadmins.
-export async function loadMembersAccessForWorkspace(workspaceId: string): Promise<MemberAccess[]> {
-  const supabase = plannerClient();
+export async function loadMembersAccessForWorkspace(
+  workspaceId: string,
+  client?: SupabaseClient<Database>,
+): Promise<MemberAccess[]> {
+  const supabase = client ?? plannerClient();
   const { data: userData } = await getUserFromSession(supabase);
   const selfId = userData.user?.id;
 
   // Members and the workspace's project list are independent — fetch them together.
   const [members, projectRows] = await Promise.all([
-    loadWorkspaceMembersFromSupabase(workspaceId),
+    loadWorkspaceMembersFromSupabase(workspaceId, supabase),
     throwIfError(supabase.from("projects").select("id").eq("workspace_id", workspaceId).order("created_at")),
   ]);
   const projectIds = (projectRows ?? []).map((row) => String(row.id));

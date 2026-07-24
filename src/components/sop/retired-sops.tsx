@@ -2,7 +2,7 @@
 
 import { Archive } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SopTableSkeleton } from "@/components/space-loading-states";
+import { QuietLoading } from "@/components/quiet-loading";
 import { formatDate } from "@/domain/formatting";
 import { listSops, type SopListItem } from "@/lib/sop/store";
 import { listHistoricalRevisions, type HistoricalSopRevision } from "@/lib/sop/review";
@@ -46,11 +46,13 @@ function buildRetiredEntries(rows: SopListItem[], revisions: HistoricalSopRevisi
 /** Read-only archive of SOPs explicitly retired through the document-control lifecycle. */
 export function RetiredSops({
   active = true,
+  preload = false,
   initialSops,
   initialRevisions,
   initialWorkspaceId,
 }: {
   active?: boolean;
+  preload?: boolean;
   /** Server-fetched first paint (Stage 5): seeds the archive, then background-revalidates. */
   initialSops?: SopListItem[];
   initialRevisions?: HistoricalSopRevision[];
@@ -100,12 +102,12 @@ export function RetiredSops({
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active && !preload) return;
     const hasCurrentData =
       freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
     if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 30_000) return;
     void refresh({ background: hasCurrentData });
-  }, [active, refresh, workspaceId]);
+  }, [active, preload, refresh, workspaceId]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -117,7 +119,7 @@ export function RetiredSops({
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {status === "loading" ? (
-        <SopTableSkeleton />
+        <QuietLoading active={active} label="Loading retired SOPs" />
       ) : status === "error" ? (
         <section className="ui-empty-state">
           <button type="button" className="ui-btn-ghost inline-flex h-9 px-3" onClick={() => void refresh()}>

@@ -1,4 +1,6 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import type { Database } from "@/lib/database.types";
 
 export interface SopAuditEvent {
   id: number;
@@ -24,8 +26,11 @@ function mapAuditEvent(row: Record<string, unknown>): SopAuditEvent {
   };
 }
 
-export async function listSopAuditEvents(sopId: string): Promise<SopAuditEvent[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listSopAuditEvents(
+  sopId: string,
+  client?: SupabaseClient<Database>,
+): Promise<SopAuditEvent[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const { data, error } = await supabase
     .from("sop_event_log")
     .select("id, sop_id, review_cycle, event_type, actor_id, actor_name, details, created_at")

@@ -3,7 +3,7 @@
 import { FileText, Inbox, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SopTableSkeleton } from "@/components/space-loading-states";
+import { QuietLoading } from "@/components/quiet-loading";
 import { formatDate } from "@/domain/formatting";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { SOP_STATUS_LABELS, type SopStatus } from "@/domain/sop/schema";
@@ -37,10 +37,12 @@ type ListStatus = "loading" | "ready" | "error";
  */
 export function ReviewQueue({
   active = true,
+  preload = false,
   initialQueue,
   initialWorkspaceId,
 }: {
   active?: boolean;
+  preload?: boolean;
   /** Server-fetched first paint (Stage 5): seeds the queue, then background-revalidates. */
   initialQueue?: QueueData;
   initialWorkspaceId?: string;
@@ -103,12 +105,12 @@ export function ReviewQueue({
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active && !preload) return;
     const hasCurrentData =
       freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
     if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 15_000) return;
     void refreshList({ background: hasCurrentData });
-  }, [active, refreshList, workspaceId]);
+  }, [active, preload, refreshList, workspaceId]);
 
   // Reviewers keep this open as their inbox, and workflow actions often finish in another tab
   // (review/signature workspaces). Refresh as soon as the user returns, with a visible-tab
@@ -174,7 +176,7 @@ export function ReviewQueue({
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
-        <SopTableSkeleton />
+        <QuietLoading active={active} label="Loading review queue" />
       ) : listStatus === "error" ? (
         <section className="ui-empty-state">
           <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load your review queue."}</p>

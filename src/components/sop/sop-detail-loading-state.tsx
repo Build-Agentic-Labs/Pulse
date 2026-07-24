@@ -1,5 +1,6 @@
 "use client";
 
+import { QuietLoading } from "@/components/quiet-loading";
 import type { SopEditorInitialView } from "./sop-editor";
 import { SopShell } from "./sop-shell";
 
@@ -58,19 +59,7 @@ export function SopDetailLoadingState({ initialView }: { initialView?: SopEditor
       back={{ href: "/sops", label: "All SOPs" }}
       crumb="SOP"
     >
-      <div className="mx-auto max-w-4xl" aria-busy="true" aria-label={`Opening ${heading}`}>
-        <section className="border-b border-line px-5 py-4">
-          <h2 className="ui-setup-section-title">{heading}</h2>
-          <span className="ui-skeleton-line mt-4 block h-3 w-52 max-w-full" aria-hidden />
-          <span className="ui-skeleton-line mt-3 block h-10 w-full" aria-hidden />
-        </section>
-        <section className="border-b border-line px-5 py-4" aria-hidden>
-          <span className="ui-skeleton-line block h-3 w-28" />
-          <span className="ui-skeleton-line mt-3 block h-10 w-full" />
-          <span className="ui-skeleton-line mt-4 block h-3 w-36" />
-          <span className="ui-skeleton-line mt-3 block h-10 w-full" />
-        </section>
-      </div>
+      <QuietLoading label={`Opening ${heading}`} reserveClassName="min-h-[300px]" />
     </SopShell>
   );
 }

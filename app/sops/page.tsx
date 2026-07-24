@@ -5,8 +5,15 @@ import {
   SopWorkspaceLoadingState,
   type SopWorkspaceInitialData,
 } from "@/components/sop/sop-workspace";
-import { listDepartments } from "@/lib/departments/store";
+import { pickMemberDepartments } from "@/domain/departments";
+import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
+import {
+  fetchDepartmentRolesForUser,
+  listDepartments,
+  listMembersForDepartments,
+} from "@/lib/departments/store";
 import { listHistoricalRevisions } from "@/lib/sop/review";
+import { fetchSopListReviewData } from "@/lib/sop/list-review-data";
 import { fetchReviewQueueData } from "@/lib/sop/review-queue-data";
 import { listSops } from "@/lib/sop/store";
 import { SOP_WORKSPACE_COOKIE } from "@/lib/sop/workspace-cookie";
@@ -58,8 +65,17 @@ export default async function SopsPage({
       if (data.user) {
         switch (tab) {
           case "all": {
-            const sops = await listSops(workspaceId, supabase);
-            initial = { tab, workspaceId, sops };
+            const [sops, departments, departmentRoles] = await Promise.all([
+              listSops(workspaceId, supabase),
+              listDepartments(workspaceId, supabase),
+              fetchDepartmentRolesForUser(data.user.id, supabase),
+            ]);
+            const review = await fetchSopListReviewData(sops, data.user.id, supabase);
+            const memberDepartments = pickMemberDepartments(
+              departments,
+              new Set(departmentRoles.keys()),
+            );
+            initial = { tab, workspaceId, sops, departments, memberDepartments, review };
             break;
           }
           case "library": {
@@ -83,8 +99,15 @@ export default async function SopsPage({
             initial = { tab, workspaceId, queue };
             break;
           }
-          case "settings":
+          case "settings": {
+            const departments = await listDepartments(workspaceId, supabase);
+            const [members, directory] = await Promise.all([
+              listMembersForDepartments(departments.map((department) => department.id), supabase),
+              loadMembersAccessForWorkspace(workspaceId, supabase),
+            ]);
+            initial = { tab, workspaceId, departments, members, directory };
             break;
+          }
         }
       }
     }

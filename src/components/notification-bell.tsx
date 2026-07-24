@@ -41,16 +41,18 @@ function writeAcknowledged(storageKey: string, ids: ReadonlySet<string>) {
 /**
  * Self-clearing count of SOPs currently waiting on the viewer, recomputed from
  * the same derivation as /sops/review. Null summary = signed out, no
- * workspace, or nothing fetched yet — in every such state the bell renders
- * nothing, because the chrome must never break or flash over a background
- * concern. Failures keep the last good summary for the same reason.
+ * workspace, or nothing fetched yet. The button itself is permanent chrome;
+ * only its badge and menu contents depend on this asynchronous summary.
+ * Failures keep the last good summary.
  */
 function useActionableQueue(): {
   summary: QueueSummary | null;
+  loading: boolean;
   acknowledge: (item: QueueSummaryItem) => void;
 } {
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [summary, setSummary] = useState<QueueSummary | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const storageKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -61,7 +63,10 @@ function useActionableQueue(): {
         const { session } = await resolveSupabaseSession(supabase);
         const user = session?.user;
         if (!user) {
-          if (mounted) setSummary(null);
+          if (mounted) {
+            setSummary(null);
+            setLoaded(true);
+          }
           return;
         }
 
@@ -76,7 +81,10 @@ function useActionableQueue(): {
           workspaceId = groups[0]?.workspace.id ?? null;
         }
         if (!workspaceId) {
-          if (mounted) setSummary(null);
+          if (mounted) {
+            setSummary(null);
+            setLoaded(true);
+          }
           return;
         }
 
@@ -84,9 +92,13 @@ function useActionableQueue(): {
         const storageKey = `${ACKNOWLEDGED_STORAGE_PREFIX}:${workspaceId}:${user.id}`;
         storageKeyRef.current = storageKey;
         const visibleSummary = excludeAcknowledged(summarizeQueue(queue), readAcknowledged(storageKey));
-        if (mounted) setSummary(visibleSummary);
+        if (mounted) {
+          setSummary(visibleSummary);
+          setLoaded(true);
+        }
       } catch {
         // Keep the last good summary; retry on the next trigger.
+        if (mounted) setLoaded(true);
       }
     }
 
@@ -113,12 +125,12 @@ function useActionableQueue(): {
     );
   }, []);
 
-  return { summary, acknowledge };
+  return { summary, loading: !loaded, acknowledge };
 }
 
 export function NotificationBell() {
   const router = useRouter();
-  const { summary, acknowledge } = useActionableQueue();
+  const { summary, loading, acknowledge } = useActionableQueue();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -145,11 +157,8 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  if (!summary) {
-    return null;
-  }
-
-  const { total, sections } = summary;
+  const total = summary?.total ?? 0;
+  const sections = summary?.sections ?? [];
 
   return (
     <div ref={containerRef} className="relative flex shrink-0 items-center">
@@ -160,6 +169,7 @@ export function NotificationBell() {
         title="SOP notifications"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-busy={loading ? "true" : undefined}
         aria-label={total > 0 ? `SOP notifications: ${total} waiting on you` : "SOP notifications"}
       >
         <Bell size={15} strokeWidth={1.75} />
@@ -168,7 +178,9 @@ export function NotificationBell() {
 
       {open ? (
         <div role="menu" className="bell-panel absolute right-0 top-full z-50 mt-2 w-72 ui-panel p-1.5 shadow-modal">
-          {sections.length === 0 ? (
+          {loading ? (
+            <div className="px-2.5 py-3 text-[12px] text-ink-tertiary">Checking notifications…</div>
+          ) : sections.length === 0 ? (
             <div className="px-2.5 py-3 text-[12px] text-ink-tertiary">Nothing waiting on you.</div>
           ) : (
             sections.map((section) => (

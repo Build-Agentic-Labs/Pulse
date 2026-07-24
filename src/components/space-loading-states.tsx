@@ -15,6 +15,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import type { CSSProperties } from "react";
+import { UserNav } from "@/components/user-nav";
 
 function LoadingStatus({ label }: { label: string }) {
   return (
@@ -24,7 +25,15 @@ function LoadingStatus({ label }: { label: string }) {
   );
 }
 
-function ChromePlaceholder({ space, label }: { space?: string; label: string }) {
+function ChromePlaceholder({
+  space,
+  label,
+  persistentUserNav = false,
+}: {
+  space?: string;
+  label: string;
+  persistentUserNav?: boolean;
+}) {
   return (
     <header className="ui-chrome flex h-12 shrink-0 items-center gap-3 px-4">
       <span className="grid h-8 w-8 place-items-center text-ink-tertiary" aria-hidden="true">
@@ -38,8 +47,17 @@ function ChromePlaceholder({ space, label }: { space?: string; label: string }) 
         </>
       ) : null}
       <span className="flex-1" />
-      <LoadingStatus label={label} />
-      <span className="h-7 w-7 rounded-full border border-line bg-surface-muted" aria-hidden="true" />
+      {persistentUserNav ? (
+        <div className="flex items-center gap-1">
+          <LoadingStatus label={label} />
+          <UserNav showThemeToggle={false} />
+        </div>
+      ) : (
+        <>
+          <LoadingStatus label={label} />
+          <span className="h-7 w-7 rounded-full border border-line bg-surface-muted" aria-hidden="true" />
+        </>
+      )}
     </header>
   );
 }
@@ -405,7 +423,7 @@ export function QualityLoadingState({ label = "Opening Quality" }: { label?: str
 
   return (
     <div className="ui-sop-shell fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink" aria-busy="true">
-      <ChromePlaceholder space="Quality" label={label} />
+      <ChromePlaceholder space="Quality / SOPs" label={label} persistentUserNav />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <aside className="ui-nav-sidebar">
           <nav className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-3">

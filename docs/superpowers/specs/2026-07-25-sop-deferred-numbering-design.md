@@ -169,8 +169,18 @@ data rather than from a snapshot.
   `listNumberLabel`; thread `departmentCode` where a surface lacks it (`review-queue`
   already carries it on seat rows).
 - **`effective-library.tsx`** — unchanged. Everything there is numbered by definition.
-- **`src/lib/sop/notifications-store.ts`** — surface the department code alongside
-  `sop_number` so notification copy can use the same label.
+- **`src/lib/sop/store.ts`** — the owning department code is embedded into both projections
+  (`department:departments(code)`, a left join on the `sops.department_id` FK) and exposed as
+  `departmentCode` on `SopListItem` **and** `SopRecord`. Every surface that renders an SOP
+  already loads one of those two, so the code that stands in for the number travels with the
+  document instead of being re-derived per screen.
+- **`src/components/sop/sop-print-preview.tsx`** — takes `departmentCode` and resolves the
+  label once at the top of the component, shadowing the `sop` prop. Four call sites print
+  documents (editor, draft review, final approval, quality approval) and three of them only
+  ever show *unreleased* ones, so resolving per call site would leave a blank number on a
+  controlled copy the first time a new print path was added.
+- **`src/domain/sop/queue-summary.ts`** — resolves `QueueSummaryItem.sopNumber` to the label,
+  so the notification bell renders it verbatim and cannot drift from the queue page.
 
 ### Types
 
@@ -190,10 +200,22 @@ data rather than from a snapshot.
    silently nulled on INSERT, so suites that merely use it as filler still pass, while
    any that assert on it must move to id-based references. Fix the assertions, not the
    clamp.
-3. New SQL assertions: a draft carries no number; `approved → effective` mints;
-   a revision keeps its number across a second release; `effective → obsolete` raises;
-   an effective row cannot be soft-deleted even by an owner; a client UPDATE setting
-   `sop_number` is silently pinned.
+
+   **Audit outcome (2026-07-25):** nine of the eleven seed a number purely as INSERT filler
+   and reference the SOP by id thereafter, so they are unaffected — the seeded value is now
+   inert. `sops_enforcement_test` was rewritten (see below) and `sop_changelog_test` gained a
+   `sop_number is stripped` case to its existing raw-INSERT forge-regression block, which is
+   exactly where that assertion belongs. No suite other than the new assertions exercises
+   `effective → obsolete` or soft-deletes an effective row, so removing those paths breaks
+   nothing that existed.
+3. New SQL assertions in `sops_enforcement_test` (plan 12 → 23): neither
+   `next_sop_number` nor `mint_sop_number_internal` is callable by a client; an INSERT
+   carrying a number has it clamped; an *approved* SOP is still unnumbered; release mints
+   `SOP-PRD-001`; the frozen revision carries that number; the quality signature is still
+   bound to the released document after the stamp; a client cannot rewrite an effective
+   SOP's number; `effective → obsolete` raises; an effective row cannot be soft-deleted; a
+   revision keeps the number and advances only the version; and the counter does not move
+   for a revision.
 4. Migration post-conditions assert inside the transaction, so a bad reclaim aborts.
 5. `npm run typecheck`, `lint`, `test`, `build`.
 6. Drive it live: build a document, confirm `SOP-PRO-###` through draft review and final

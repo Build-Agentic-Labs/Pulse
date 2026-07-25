@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { Department } from "@/domain/departments";
-import { authoringMode, previewSopNumber, effectiveSopNumber, DEFAULT_DOC_TYPE } from "./authoring";
+import {
+  authoringMode,
+  documentNumberLabel,
+  listNumberLabel,
+  effectiveSopNumber,
+  DEFAULT_DOC_TYPE,
+} from "./authoring";
 
 function dept(id: string, code: string): Department {
   return { id, workspaceId: "ws", code, name: `${code} dept`, isQualityGate: false };
@@ -22,9 +28,39 @@ describe("authoringMode", () => {
   });
 });
 
-describe("previewSopNumber", () => {
-  it("formats TYPE-CODE-### uppercased", () => {
-    expect(previewSopNumber("qas", DEFAULT_DOC_TYPE)).toBe("SOP-QAS-###");
+describe("documentNumberLabel", () => {
+  it("shows the real number once the document has earned one", () => {
+    expect(documentNumberLabel("SOP-QAS-014", "QAS", DEFAULT_DOC_TYPE)).toBe("SOP-QAS-014");
+  });
+
+  it("formats an unearned number as TYPE-CODE-### uppercased", () => {
+    expect(documentNumberLabel("", "qas", DEFAULT_DOC_TYPE)).toBe("SOP-QAS-###");
+    expect(documentNumberLabel("   ", "qas", DEFAULT_DOC_TYPE)).toBe("SOP-QAS-###");
+  });
+
+  it("treats the converter's <UNKNOWN> placeholder as unnumbered", () => {
+    expect(documentNumberLabel("<UNKNOWN>", "PRO", DEFAULT_DOC_TYPE)).toBe("SOP-PRO-###");
+  });
+
+  it("omits the department segment when no department is chosen yet", () => {
+    expect(documentNumberLabel("", "", DEFAULT_DOC_TYPE)).toBe("SOP-###");
+  });
+});
+
+describe("listNumberLabel", () => {
+  it("shows the real number once the document has earned one", () => {
+    expect(listNumberLabel("SOP-PRO-007", "PRO")).toBe("SOP-PRO-007");
+  });
+
+  it("stands in the department code while the document is unnumbered", () => {
+    expect(listNumberLabel("", "pro")).toBe("PRO");
+    expect(listNumberLabel(null, "PRO")).toBe("PRO");
+    expect(listNumberLabel("<UNKNOWN>", "PRO")).toBe("PRO");
+  });
+
+  it("falls back to a dash when there is no number and no department", () => {
+    expect(listNumberLabel("", "")).toBe("—");
+    expect(listNumberLabel(null, null)).toBe("—");
   });
 });
 

@@ -19,17 +19,26 @@ import { throwIfError as throwIfSupabaseError, type SupabaseResultError } from "
 const STORAGE_KEY = "pulse:sops:v1";
 
 // Exact columns consumed by the mappers below -- avoid select('*'), matching the planner store.
+// The owning department code rides along for the same reason as in SOP_LIST_COLUMNS: an
+// unreleased SOP has no number, and every surface that renders the document stands the
+// department code in instead. Must stay a single string literal (supabase-js type-parses it).
 const SOP_COLUMNS =
-  "id, workspace_id, department_id, sop_number, title, version, source, status, effective_date, document, created_at, updated_at";
+  "id, workspace_id, department_id, sop_number, title, version, source, status, effective_date, document, created_at, updated_at, department:departments(code)";
 
 // Slim projection for the list surface: promoted columns only, never the full jsonb document.
+// The owning department is embedded (left join on the sops.department_id FK, so SOPs with no
+// department still come back) because an unreleased SOP has no number and every list surface
+// stands its department code in instead -- see listNumberLabel. Must stay a single string
+// literal: supabase-js parses it at the type level.
 const SOP_LIST_COLUMNS =
-  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash";
+  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash, department:departments(code)";
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
   workspaceId: string;
   departmentId: string | null;
+  /** Owning department's code, e.g. "PRO". Stands in for the number until the SOP is released. */
+  departmentCode: string | null;
   sop: Sop;
 }
 
@@ -43,6 +52,8 @@ export interface SopListItem {
   status: SopStatus;
   updatedAt: string;
   departmentId: string | null;
+  /** Owning department's code, e.g. "PRO". Stands in for the number until the SOP is released. */
+  departmentCode: string | null;
   effectiveDate: string | null;
   nextReviewDate: string | null;
   createdBy: string | null;
@@ -119,6 +130,20 @@ function mapSop(row: Record<string, unknown>): Sop {
   };
 }
 
+/**
+ * Read the embedded owning-department code off a row. PostgREST returns an embedded to-one as an
+ * object, but the generated types model it as a possible array; normalize both shapes (same
+ * handling as listHistoricalRevisions).
+ */
+function embeddedDepartmentCode(row: Record<string, unknown>): string | null {
+  const relation = row.department;
+  const department = (Array.isArray(relation) ? relation[0] : relation) as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  return department?.code ? String(department.code) : null;
+}
+
 function mapSopListItem(row: Record<string, unknown>): SopListItem {
   return {
     id: String(row.id),
@@ -129,6 +154,7 @@ function mapSopListItem(row: Record<string, unknown>): SopListItem {
     status: (row.status as SopStatus | null) ?? "draft",
     updatedAt: String(row.updated_at ?? ""),
     departmentId: (row.department_id as string | null) ?? null,
+    departmentCode: embeddedDepartmentCode(row),
     effectiveDate: (row.effective_date as string | null) ?? null,
     nextReviewDate: (row.next_review_date as string | null) ?? null,
     createdBy: (row.created_by as string | null) ?? null,
@@ -172,6 +198,7 @@ export async function getSop(
   return {
     workspaceId: String(row.workspace_id),
     departmentId: (row.department_id as string | null) ?? null,
+    departmentCode: embeddedDepartmentCode(row),
     sop: mapSop(row),
   };
 }

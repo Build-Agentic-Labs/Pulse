@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QuietLoading } from "@/components/quiet-loading";
 import { formatDate } from "@/domain/formatting";
+import { listNumberLabel } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { SOP_STATUS_LABELS, type SopStatus } from "@/domain/sop/schema";
 import {
@@ -249,7 +250,7 @@ export function ReviewQueue({
                                 >
                                   <td className="px-5 py-3.5 align-middle">
                                     <Link href={href} className="text-xs font-medium text-ink-secondary hover:text-ink">
-                                      {sop.sopNumber || "—"}
+                                      {listNumberLabel(sop.sopNumber, sop.departmentCode)}
                                     </Link>
                                   </td>
                                   <td className="max-w-0 px-5 py-3.5 align-middle">
@@ -309,7 +310,9 @@ export function ReviewQueue({
                       {seat.title || seat.sopNumber || "Untitled SOP"}
                     </div>
                     <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
-                      {[seat.sopNumber, seat.version ? `v${seat.version}` : "", seat.departmentCode]
+                      {[listNumberLabel(seat.sopNumber, seat.sopDepartmentCode),
+                        seat.version ? `v${seat.version}` : "",
+                        seat.departmentCode]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
@@ -346,7 +349,9 @@ export function ReviewQueue({
                       {sop.title || sop.sopNumber || "Untitled SOP"}
                     </div>
                     <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
-                      {[sop.sopNumber, sop.version ? `v${sop.version}` : ""].filter(Boolean).join(" · ")}
+                      {[listNumberLabel(sop.sopNumber, sop.departmentCode), sop.version ? `v${sop.version}` : ""]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </div>
                   </div>
                   <span className={`ui-chip shrink-0 ${statusChipClass(sop.status)}`}>
@@ -380,7 +385,9 @@ export function ReviewQueue({
                       {sop.title || sop.sopNumber || "Untitled SOP"}
                     </div>
                     <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
-                      {[sop.sopNumber, sop.version ? `v${sop.version}` : ""].filter(Boolean).join(" · ")}
+                      {[listNumberLabel(sop.sopNumber, sop.departmentCode), sop.version ? `v${sop.version}` : ""]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </div>
                   </div>
                   <span className="ui-chip shrink-0 border-sky-600 text-sky-700">

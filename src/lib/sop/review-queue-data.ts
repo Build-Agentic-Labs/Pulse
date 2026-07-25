@@ -14,6 +14,12 @@ import { listSops, type SopListItem } from "@/lib/sop/store";
 /** A seat awaiting this user's signature, with the department it speaks for. */
 export interface PendingSeat extends MySeatItem {
   departmentCode: string;
+  /**
+   * The OWNING department's code, which is a different thing from departmentCode above: that one
+   * is the seat speaking, this one is whose sequence the number comes from at release. Unreleased
+   * SOPs show it in place of a number (listNumberLabel).
+   */
+  sopDepartmentCode: string | null;
 }
 
 export interface QualityQueueItem extends SopListItem {
@@ -80,7 +86,11 @@ export async function fetchReviewQueueData(
       (seat) =>
         !hasSubmittedSopReview(mySubmissions, seat.sopId, seat.reviewCycle, userId),
     )
-    .map((seat) => ({ ...seat, departmentCode: codeById.get(seat.departmentId) ?? "—" }));
+    .map((seat) => ({
+      ...seat,
+      departmentCode: codeById.get(seat.departmentId) ?? "—",
+      sopDepartmentCode: seat.sopDepartmentId ? codeById.get(seat.sopDepartmentId) ?? null : null,
+    }));
 
   const finalApprovals: PendingSeat[] = finalApprovalSeats
     .filter(
@@ -93,7 +103,11 @@ export async function fetchReviewQueueData(
             signature.signedContentHash === (seat.contentHash ?? ""),
         ),
     )
-    .map((seat) => ({ ...seat, departmentCode: codeById.get(seat.departmentId) ?? "—" }));
+    .map((seat) => ({
+      ...seat,
+      departmentCode: codeById.get(seat.departmentId) ?? "—",
+      sopDepartmentCode: seat.sopDepartmentId ? codeById.get(seat.sopDepartmentId) ?? null : null,
+    }));
 
   return {
     awaitingMe,

@@ -199,7 +199,7 @@ export function NotificationBell() {
                     }}
                   >
                     <span className="truncate">
-                      {item.sopNumber || "SOP"} · {item.title || "Untitled SOP"}
+                      {item.sopNumber} · {item.title || "Untitled SOP"}
                     </span>
                   </button>
                 ))}

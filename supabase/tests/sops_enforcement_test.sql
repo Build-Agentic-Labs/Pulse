@@ -2,7 +2,8 @@
 -- Run with the local Supabase stack:  supabase db reset && supabase test db
 --
 -- Core invariants that survive the RASIC redesign, corrected for the new contract:
---   * TYPE-DEPT-NNN numbering format + transactional mint
+--   * TYPE-DEPT-NNN numbering, EARNED AT RELEASE: unnumbered through draft/review/approval,
+--     minted inside approved -> effective, unwritable by any client, kept across a revision
 --   * a client cannot INSERT a born-"effective" SOP (guard INSERT branch)
 --   * content is frozen once an SOP leaves draft
 --   * dept approval is quorum-driven: sign_sop auto-advances in_review -> approved when
@@ -18,7 +19,7 @@
 -- auth.uid() resolves and RLS applies. Fixtures are created as the owner (RLS bypassed).
 
 begin;
-select plan(12);
+select plan(23);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -68,18 +69,19 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 1. Numbering format
+-- 1. Numbering is not a client operation. A number is earned at release, so no client may
+--    mint one on demand -- that is what used to let a discarded draft burn a sequence slot.
 -- ---------------------------------------------------------------------------
 select test_as('11111111-1111-1111-1111-111111111111');
-select is(
-  public.next_sop_number('ws_test', 'dept_prd', 'SOP'),
-  'SOP-PRD-001',
-  'next_sop_number formats TYPE-DEPT-NNN and starts at 001'
+select throws_ok(
+  $$ select public.next_sop_number('ws_test', 'dept_prd', 'SOP') $$,
+  null,
+  'a client cannot mint a number directly (execute revoked)'
 );
-select is(
-  public.next_sop_number('ws_test', 'dept_prd', 'SOP'),
-  'SOP-PRD-002',
-  'next_sop_number increments transactionally'
+select throws_ok(
+  $$ select public.mint_sop_number_internal('ws_test', 'dept_prd', 'SOP') $$,
+  null,
+  'a client cannot reach the internal mint either'
 );
 
 -- ---------------------------------------------------------------------------
@@ -92,6 +94,13 @@ select is(
   (select status from public.sops where id = 'sop_born'),
   'draft',
   'INSERT with status=effective is forced back to draft'
+);
+-- A squatted number would be skipped by the mint's collision loop, reopening the very gap
+-- deferred numbering closes. The guard clamps it rather than trusting the client.
+select is(
+  (select sop_number from public.sops where id = 'sop_born'),
+  null,
+  'INSERT carrying a sop_number has it clamped to null'
 );
 
 -- A working draft to drive the lifecycle. Seats: one responsible (owning dept) and the
@@ -152,6 +161,11 @@ select isnt(
   null,
   'the auto-advance stamps approved_by server-side'
 );
+select is(
+  (select sop_number from public.sops where id = 'sop_1'),
+  null,
+  'an approved SOP is still unnumbered: the number comes at release, not at approval'
+);
 
 -- ---------------------------------------------------------------------------
 -- 6. Quality makes it effective -> one effective revision is pointed to, version
@@ -176,6 +190,90 @@ select is(
     where s.id = 'sop_1'),
   (select content_hash from public.sops where id = 'sop_1'),
   'the effective revision carries the same content_hash the SOP holds'
+);
+
+-- ---------------------------------------------------------------------------
+-- 7. The number is earned here, and nowhere else.
+-- ---------------------------------------------------------------------------
+select is(
+  (select sop_number from public.sops where id = 'sop_1'),
+  'SOP-PRD-001',
+  'release mints the first number in the department sequence'
+);
+-- The frozen snapshot must be self-describing: snapshot_sop_revision reads the OLD row, so the
+-- release edge hands it the stamped document explicitly. Without that the archived controlled
+-- copy would read SOP-PRD-###.
+select is(
+  (select r.document #>> '{meta,sopNumber}' from public.sop_revisions r
+     join public.sops s on s.effective_revision_id = r.id
+    where s.id = 'sop_1'),
+  'SOP-PRD-001',
+  'the frozen revision carries the number it was released under'
+);
+-- Signatures bind to content_hash, and the number is excluded from that hash, so the
+-- quality_approval signed before the stamp is still bound to the released document.
+select is(
+  (select count(*)::int from public.sop_signatures g
+    where g.sop_id = 'sop_1' and g.meaning = 'quality_approval'
+      and g.signed_content_hash = (select content_hash from public.sops where id = 'sop_1')),
+  1,
+  'stamping the number does not strand the signature that authorized the release'
+);
+select throws_ok(
+  $$ update public.sops set sop_number = 'SOP-PRD-999' where id = 'sop_1' $$,
+  null,
+  'a client cannot rewrite the number of an effective SOP'
+);
+
+-- ---------------------------------------------------------------------------
+-- 8. Effective is terminal: retired only by supersession, never by deletion.
+-- ---------------------------------------------------------------------------
+select throws_ok(
+  $$ update public.sops set status = 'obsolete' where id = 'sop_1' $$,
+  null,
+  'effective -> obsolete is refused: release a new version to supersede instead'
+);
+select test_as('11111111-1111-1111-1111-111111111111');
+select throws_ok(
+  $$ update public.sops set deleted_at = now() where id = 'sop_1' $$,
+  null,
+  'an effective SOP cannot be soft-deleted'
+);
+
+-- ---------------------------------------------------------------------------
+-- 9. A revision keeps the document's number and only moves the version. The number names
+--    the document; the version names the release.
+-- ---------------------------------------------------------------------------
+update public.sops set status = 'draft', revision_reason = 'Torque value corrected'
+ where id = 'sop_1';
+update public.sops set document = '{"body":"v2"}'::jsonb where id = 'sop_1';
+select is(
+  (select sop_number from public.sops where id = 'sop_1'),
+  'SOP-PRD-001',
+  'opening a revision keeps the number'
+);
+
+select public.sign_sop('sop_1', 'authorship');
+update public.sops set status = 'in_review' where id = 'sop_1';
+select test_as('22222222-2222-2222-2222-222222222222');
+select public.sign_sop('sop_1', 'dept_approval', p_seat_department => 'dept_prd');
+select test_as('44444444-4444-4444-4444-444444444444');
+select public.sign_sop('sop_1', 'dept_approval', p_seat_department => 'dept_eng');
+select test_as('33333333-3333-3333-3333-333333333333');
+select public.sign_sop('sop_1', 'quality_approval');
+update public.sops set status = 'effective' where id = 'sop_1';
+select is(
+  (select sop_number || ' @ ' || version from public.sops where id = 'sop_1'),
+  'SOP-PRD-001 @ 1.1',
+  'a second release keeps the number and advances only the version'
+);
+-- The counter must not have moved for the revision: only first releases consume a slot.
+reset role;
+select is(
+  (select next_seq from public.doc_number_counter
+    where workspace_id = 'ws_test' and department_id = 'dept_prd' and doc_type = 'SOP'),
+  2,
+  'a revision consumes no sequence slot -- the counter still points at 002'
 );
 
 select finish();

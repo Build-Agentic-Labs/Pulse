@@ -26,7 +26,7 @@ import {
 } from "@/domain/sop/change-history";
 import { draftReviewGate } from "@/domain/sop/review-gate";
 import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc, type SopStatus } from "@/domain/sop/schema";
-import { authoringMode, DEFAULT_DOC_TYPE, previewSopNumber } from "@/domain/sop/authoring";
+import { authoringMode, DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
 import { applySampleData } from "@/domain/sop/sample";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { fetchMyDeptRoles, listDepartments, listMembersForDepartments } from "@/lib/departments/store";
@@ -37,7 +37,6 @@ import {
   listSeats,
   listSignatures,
   listProfileNames,
-  mintSopNumber,
   requestSopFinalApproval,
   signSop,
   transitionSop,
@@ -772,10 +771,13 @@ export function SopEditor({
     !approvalSeats.some(
       (seat) => seat.signerId === approvalAuthorId,
     );
-  const provisionalSopNumber =
-    isNew && !persistedUpdatedAt && selectedDept
-      ? previewSopNumber(selectedDept.code, DEFAULT_DOC_TYPE)
-      : null;
+  // A number is earned at release, so the placeholder stands for the whole of authoring and
+  // review -- not just until the first save, which is when the number used to be minted.
+  const renderedSopNumber = documentNumberLabel(
+    sop.meta.sopNumber,
+    selectedDept?.code,
+    DEFAULT_DOC_TYPE,
+  );
   // Version is lifecycle-owned: a new SOP is always 1.0 and only the database's
   // effective -> draft revision transition may increment it. Never trust typed/imported text.
   const controlledVersion = approvalReviewCycle > 0
@@ -809,19 +811,13 @@ export function SopEditor({
     });
   }, [controlledVersion, departmentAuthorIdentity, isNew, persistedUpdatedAt, selectedDepartmentId]);
 
-  // Before the first save there is no numeric sequence yet. Keep every rendered document
-  // (masthead, PDF preview, and Word export) aligned with the provisional number in the form.
+  // Until release there is no numeric sequence yet. Keep every rendered document (masthead, PDF
+  // preview, and Word export) showing the same placeholder the form shows.
   const renderedSop: Sop = {
     ...sop,
-    meta: {
-      ...sop.meta,
-      version: controlledVersion,
-      ...(provisionalSopNumber ? { sopNumber: provisionalSopNumber } : {}),
-    },
+    meta: { ...sop.meta, version: controlledVersion, sopNumber: renderedSopNumber },
   };
-  const displaySopNumber = /^<unknown>$/i.test(renderedSop.meta.sopNumber.trim())
-    ? "Unnumbered"
-    : renderedSop.meta.sopNumber || "—";
+  const displaySopNumber = renderedSopNumber;
 
   useLayoutEffect(() => {
     if (requestedStepIndex >= 0) setStepIndex(requestedStepIndex);
@@ -960,21 +956,13 @@ export function SopEditor({
       let working: Sop = { ...sop, meta: { ...sop.meta, version: controlledVersion } };
       const saveOptions: SaveSopOptions = { expectedUpdatedAt };
       if (firstSave) {
-        try {
-          // A failed INSERT can be retried with the number already reserved by the first mint.
-          // Re-minting here would create a gap every time a transient save error is retried.
-          const reservedNumber = sop.meta.sopNumber.trim();
-          const minted = reservedNumber || (await mintSopNumber(workspaceId!, deptId, DEFAULT_DOC_TYPE));
-          working = { ...working, meta: { ...working.meta, sopNumber: minted } };
-          // Patch only the number: edits typed while the mint was in flight must survive.
-          setSop((current) => ({ ...current, meta: { ...current.meta, sopNumber: minted } }));
-          saveOptions.departmentId = deptId;
-          saveOptions.docType = DEFAULT_DOC_TYPE;
-        } catch (error) {
-          setSaveError(error instanceof Error ? error.message : "Could not assign a SOP number.");
-          setSaveStatus("error");
-          return false;
-        }
+        // No number is minted here any more -- the `approved -> effective` transition mints it,
+        // so creating and discarding drafts no longer burns sequence positions. Persist an empty
+        // number rather than the rendered placeholder: `SOP-PRO-###` is a label, not a value, and
+        // the database clamps sop_number to null on INSERT regardless.
+        working = { ...working, meta: { ...working.meta, sopNumber: "" } };
+        saveOptions.departmentId = deptId;
+        saveOptions.docType = DEFAULT_DOC_TYPE;
       }
 
       const statusChanged = working.status !== lastSavedStatusRef.current;
@@ -1552,6 +1540,7 @@ export function SopEditor({
     return (
       <SopPrintPreview
         sop={renderedSop}
+        departmentCode={selectedDept?.code}
         annexFiles={annexFiles}
         onClose={closePreview}
         backLink={previewBackLink}
@@ -1734,7 +1723,11 @@ export function SopEditor({
                     <DocumentField label="SOP number">
                       <div className="sop-document-field flex items-center" aria-readonly="true">
                         <span className="truncate">
-                          {isNew && !persistedUpdatedAt && !selectedDept ? "Assigned on save" : displaySopNumber}
+                          {/* The number is earned at release, so the placeholder stands for all of
+                              authoring and review -- "Assigned on save" was true only while the
+                              first save minted it. Without a department chosen there is not even a
+                              sequence to name yet. */}
+                          {selectedDept ? displaySopNumber : "Assigned at release"}
                         </span>
                       </div>
                     </DocumentField>
@@ -2460,7 +2453,12 @@ export function SopEditor({
           </div>
         ) : null}
         {previewing ? (
-          <SopPrintPreview sop={renderedSop} annexFiles={annexFiles} onClose={closePreview} />
+          <SopPrintPreview
+            sop={renderedSop}
+            departmentCode={selectedDept?.code}
+            annexFiles={annexFiles}
+            onClose={closePreview}
+          />
         ) : null}
         {qualityApprovalOpen ? (
           <SopQualityApprovalWorkspace

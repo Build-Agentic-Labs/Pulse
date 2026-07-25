@@ -201,7 +201,9 @@ export function ProcessFlowchart({ roles, activities, departments, disabled = fa
           two views OF the diagram rather than as a stray control between the roles and the grid. */}
       <div>
         <span className="ui-field-label">Process flow diagram</span>
-        <div className="inline-flex items-center gap-0.5 rounded-lg border border-line bg-surface-muted p-0.5">
+        {/* mt-2 on top of the label's own mb-1 makes 12px — the same rhythm as the parent's
+            space-y-3, so the toggle sits away from its heading rather than crowding it. */}
+        <div className="mt-2 inline-flex items-center gap-0.5 rounded-lg border border-line bg-surface-muted p-0.5">
           <ViewTab active={view === "map"} onClick={() => setView("map")}>
             Map
           </ViewTab>

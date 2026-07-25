@@ -1,8 +1,12 @@
 /**
- * Store layer for SOP document control: reading control-column state, minting TYPE-DEPT-NNN
- * numbers, recording e-signatures, and driving lifecycle transitions. The database triggers
- * (enforce_sop_transition) and definer functions (next_sop_number, sign_sop) are the real gate;
- * this layer only shapes calls and surfaces the trigger's readable error messages.
+ * Store layer for SOP document control: reading control-column state, recording e-signatures,
+ * and driving lifecycle transitions. The database triggers (enforce_sop_transition) and definer
+ * functions (sign_sop) are the real gate; this layer only shapes calls and surfaces the trigger's
+ * readable error messages.
+ *
+ * Numbers are deliberately absent from this layer. A TYPE-DEPT-NNN number is minted inside the
+ * `approved -> effective` transition and is unwritable from any client, so there is nothing here
+ * to call — see docs/superpowers/specs/2026-07-25-sop-deferred-numbering-design.md.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -177,19 +181,6 @@ export async function getSopAuthorDisplayName(sopId: string): Promise<string> {
   return String(value ?? "").trim();
 }
 
-/** Mint the next TYPE-DEPT-NNN number for a department (transactional, DB-authorized). */
-export async function mintSopNumber(workspaceId: string, departmentId: string, docType: string): Promise<string> {
-  const supabase = createPlannerSupabaseClient();
-  const value = await throwIfError(
-    supabase.rpc("next_sop_number", {
-      p_workspace: workspaceId,
-      p_department: departmentId,
-      p_doc_type: docType,
-    }),
-  );
-  return String(value);
-}
-
 export interface SignOptions {
   /** Rejection reason, or the written justification on an overrule. */
   reason?: string;
@@ -266,7 +257,10 @@ export async function saveMySignatureProfile(strokes: SignatureStrokes): Promise
 /** A seat this user holds, with just enough of its SOP to render a queue row. */
 export interface MySeatItem {
   sopId: string;
+  /** The department this seat speaks for -- who must sign. Not the SOP's owning department. */
   departmentId: string;
+  /** The SOP's OWNING department: whose sequence the number will come from at release. */
+  sopDepartmentId: string | null;
   rasic: SopRasic;
   title: string;
   sopNumber: string;
@@ -294,7 +288,7 @@ export async function listMySeats(
     supabase
       .from("sop_review_seats")
       .select(
-        "sop_id, department_id, rasic, sops!inner(id, workspace_id, title, sop_number, version, status, content_hash, review_cycle, updated_at, deleted_at, final_approval_requested_at, final_approval_content_hash)",
+        "sop_id, department_id, rasic, sops!inner(id, workspace_id, department_id, title, sop_number, version, status, content_hash, review_cycle, updated_at, deleted_at, final_approval_requested_at, final_approval_content_hash)",
       )
       .eq("signer_id", userId)
       .eq("sops.workspace_id", workspaceId)
@@ -305,6 +299,7 @@ export async function listMySeats(
     return {
       sopId: String(row.sop_id),
       departmentId: String(row.department_id),
+      sopDepartmentId: (sop.department_id as string | null) ?? null,
       rasic: row.rasic as SopRasic,
       title: String(sop.title ?? ""),
       sopNumber: String(sop.sop_number ?? ""),

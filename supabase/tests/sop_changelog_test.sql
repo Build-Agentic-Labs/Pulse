@@ -15,7 +15,7 @@
 -- sign_sop v2 contract: sign_sop(p_sop, p_meaning, p_reason, p_seat_department, p_resolves).
 
 begin;
-select plan(21);
+select plan(22);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -182,6 +182,10 @@ values
 
 select is((select status from public.sops where id = 'sop_cl_2'), 'draft',
   'raw INSERT: status is forced to draft (D2)');
+-- A number is earned at release. A forged one would also be SKIPPED by the mint's collision
+-- loop when the sequence reached it, reopening the gap deferred numbering closes.
+select is((select sop_number from public.sops where id = 'sop_cl_2'), null::text,
+  'raw INSERT: sop_number is stripped (deferred numbering)');
 select is((select major_version from public.sops where id = 'sop_cl_2'), null::smallint,
   'raw INSERT: major_version is stripped (D2)');
 select is((select minor_version from public.sops where id = 'sop_cl_2'), null::smallint,

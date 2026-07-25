@@ -5,6 +5,7 @@ import Link from "next/link";
 import { formatDateControlled, formatDateTime } from "@/domain/formatting";
 import NextImage from "next/image";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
+import { DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
 import { linkedSopLabel, rasicLegend, type Sop } from "@/domain/sop/schema";
 import {
   SIGNATURE_VIEWBOX_HEIGHT,
@@ -221,7 +222,8 @@ function ApprovalTable({
 }
 
 export function SopPrintPreview({
-  sop,
+  sop: sopProp,
+  departmentCode,
   annexFiles,
   onClose,
   mode = "export",
@@ -235,6 +237,12 @@ export function SopPrintPreview({
   backLink,
 }: {
   sop: Sop;
+  /**
+   * Owning department code, used to render `SOP-PRO-###` while the SOP has not earned a number.
+   * Resolved here rather than at each call site so no print or export path can leak a blank
+   * number onto a controlled copy. Idempotent: a real number is passed through untouched.
+   */
+  departmentCode?: string | null;
   annexFiles: SopAnnexFile[];
   onClose: () => void;
   mode?: "export" | "review" | "approval";
@@ -248,6 +256,21 @@ export function SopPrintPreview({
   /** Rendered as a "← Back to …" toolbar button when this preview was reached from another SOP. */
   backLink?: { href: string; label: string };
 }) {
+  // Resolve the displayed number once, here, so every page of this document -- masthead, running
+  // header, toolbar -- agrees. Shadowing `sop` means no render path below can reach the raw prop
+  // and print a blank number onto a controlled copy.
+  const sop = useMemo<Sop>(
+    () => ({
+      ...sopProp,
+      meta: {
+        ...sopProp.meta,
+        // Doc type is SOP-only in v1 (see DEFAULT_DOC_TYPE); revisit when others are exposed.
+        sopNumber: documentNumberLabel(sopProp.meta.sopNumber, departmentCode, DEFAULT_DOC_TYPE),
+      },
+    }),
+    [sopProp, departmentCode],
+  );
+
   // Reference-doc uploads share the annex-file table; they belong to the References
   // list (rendered by name), not to the attached-forms appendix pages, so strip them
   // before any page-count or appendix logic sees them.

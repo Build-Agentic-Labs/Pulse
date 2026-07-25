@@ -428,6 +428,7 @@ export function SopReviewWorkspace({
   return (
     <SopPrintPreview
       sop={record.sop}
+      departmentCode={record.departmentCode}
       annexFiles={annexFiles}
       onClose={() => void handleClose()}
       mode="review"

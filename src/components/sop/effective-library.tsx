@@ -1,6 +1,7 @@
 "use client";
 
 import { Library } from "lucide-react";
+import { listNumberLabel } from "@/domain/sop/authoring";
 import { formatDate } from "@/domain/formatting";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -178,7 +179,10 @@ export function EffectiveLibrary({
                                     href={previewHref}
                                     className="text-xs font-medium text-ink-secondary hover:text-ink"
                                   >
-                                    {sop.sopNumber || "—"}
+                                    {/* Everything here is released, so this is always a real
+                                        number -- routed through the shared label anyway so the app
+                                        states unnumbered-ness exactly one way. */}
+                                    {listNumberLabel(sop.sopNumber, sop.departmentCode)}
                                   </Link>
                                 </td>
                                 <td className="max-w-0 px-5 py-3.5 align-middle">

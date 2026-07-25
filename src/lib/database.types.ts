@@ -3157,6 +3157,10 @@ export type Database = {
         Returns: boolean
       }
       is_super_admin: { Args: never; Returns: boolean }
+      mint_sop_number_internal: {
+        Args: { p_department: string; p_doc_type: string; p_workspace: string }
+        Returns: string
+      }
       next_sop_number: {
         Args: { p_department: string; p_doc_type: string; p_workspace: string }
         Returns: string
@@ -3228,7 +3232,10 @@ export type Database = {
         }
         Returns: string
       }
-      snapshot_sop_revision: { Args: { p_sop: string }; Returns: string }
+      snapshot_sop_revision: {
+        Args: { p_document?: Json; p_sop: string }
+        Returns: string
+      }
       sop_author_display_name: { Args: { p_sop: string }; Returns: string }
       sop_doc_hash: { Args: { doc: Json }; Returns: string }
       sop_has_open_objection: { Args: { p_sop: string }; Returns: boolean }

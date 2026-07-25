@@ -4,6 +4,7 @@ import { Archive } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { QuietLoading } from "@/components/quiet-loading";
 import { formatDate } from "@/domain/formatting";
+import { listNumberLabel } from "@/domain/sop/authoring";
 import { listSops, type SopListItem } from "@/lib/sop/store";
 import { listHistoricalRevisions, type HistoricalSopRevision } from "@/lib/sop/review";
 import { useSopWorkspace } from "./sop-workspace-provider";
@@ -26,7 +27,7 @@ function buildRetiredEntries(rows: SopListItem[], revisions: HistoricalSopRevisi
     .filter((sop): sop is SopListItem => sop.status === "obsolete")
     .map<RetiredEntry>((sop) => ({
       id: `sop:${sop.id}`,
-      sopNumber: sop.sopNumber,
+      sopNumber: listNumberLabel(sop.sopNumber, sop.departmentCode),
       title: sop.title,
       version: sop.version,
       archivedAt: sop.updatedAt,
@@ -34,7 +35,9 @@ function buildRetiredEntries(rows: SopListItem[], revisions: HistoricalSopRevisi
     }));
   const olderVersions = revisions.map<RetiredEntry>((revision) => ({
     id: `revision:${revision.id}`,
-    sopNumber: revision.sopNumber,
+    // A frozen revision only exists for a released document, so it always has a real number;
+    // normalize anyway so a blank can never render as an empty cell.
+    sopNumber: listNumberLabel(revision.sopNumber, null),
     title: revision.title,
     version: revision.versionLabel,
     archivedAt: revision.createdAt,
@@ -148,7 +151,7 @@ export function RetiredSops({
                   <tr key={entry.id} className="border-b border-line/70 last:border-b-0">
                     <td className="px-4 py-3.5">
                       <div className="truncate text-[13px] font-medium text-ink">{entry.title || "Untitled SOP"}</div>
-                      <div className="ui-mono-label mt-0.5 text-ink-tertiary">{entry.sopNumber || "Unnumbered"}</div>
+                      <div className="ui-mono-label mt-0.5 text-ink-tertiary">{entry.sopNumber}</div>
                     </td>
                     <td className="px-4 py-3.5 ui-mono-label text-ink-secondary">{entry.version || "—"}</td>
                     <td className="px-4 py-3.5"><span className="ui-chip">{entry.reason}</span></td>

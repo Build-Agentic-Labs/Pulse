@@ -281,6 +281,7 @@ export function SopFinalApprovalWorkspace({
   return (
     <SopPrintPreview
       sop={record.sop}
+      departmentCode={record.departmentCode}
       annexFiles={annexFiles}
       onClose={onClose}
       mode="approval"

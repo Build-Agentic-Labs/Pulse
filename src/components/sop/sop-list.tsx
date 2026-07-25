@@ -9,7 +9,7 @@ import { useConfirm } from "@/components/confirm-provider";
 import { QuietLoading } from "@/components/quiet-loading";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
-import { DEFAULT_DOC_TYPE } from "@/domain/sop/authoring";
+import { DEFAULT_DOC_TYPE, listNumberLabel } from "@/domain/sop/authoring";
 import { getSopProcessState, SOP_PROCESS_STATE_LABELS } from "@/domain/sop/process-state";
 import type { Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
@@ -23,7 +23,6 @@ import {
   sopFromExtraction,
   type SopListItem,
 } from "@/lib/sop/store";
-import { mintSopNumber } from "@/lib/sop/review";
 import {
   fetchSopListReviewData,
   type SopListReviewData,
@@ -405,11 +404,12 @@ export function SopList({
         throw new Error(payload.error || "Conversion failed.");
       }
       const created = sopFromExtraction(payload.sop);
-      // The uploaded document's number is legacy source content. Converted SOPs enter this
-      // system under the converter's department sequence, just like hand-authored SOPs.
-      const sopNumber = await mintSopNumber(workspaceId, owningDepartment.id, DEFAULT_DOC_TYPE);
-      const numbered = { ...created, meta: { ...created.meta, sopNumber } };
-      await saveSop(numbered, workspaceId, {
+      // The uploaded document's number is legacy source content, and it is dropped rather than
+      // carried in: a converted SOP goes through the same draft -> review -> release path as a
+      // hand-authored one and earns its number at release. (The database also clamps sop_number
+      // to null on INSERT, so a legacy number could not be preserved even deliberately.)
+      const unnumbered = { ...created, meta: { ...created.meta, sopNumber: "" } };
+      await saveSop(unnumbered, workspaceId, {
         departmentId: owningDepartment.id,
         docType: DEFAULT_DOC_TYPE,
       });
@@ -687,7 +687,7 @@ export function SopList({
                                     prefetch={!isViewOnly}
                                     className="text-xs font-medium text-ink-secondary hover:text-ink"
                                   >
-                                    {sop.sopNumber || "—"}
+                                    {listNumberLabel(sop.sopNumber, sop.departmentCode)}
                                   </Link>
                                 </td>
                                 <td className="max-w-0 px-5 py-3.5 align-middle">

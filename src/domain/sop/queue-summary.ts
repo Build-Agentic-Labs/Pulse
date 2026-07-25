@@ -8,11 +8,17 @@
  */
 
 import type { QueueData } from "@/lib/sop/review-queue-data";
+import { listNumberLabel } from "./authoring";
 
 export interface QueueSummaryItem {
   notificationId: string;
   sopId: string;
-  sopNumber: string | null;
+  /**
+   * Render-ready label, not the raw column: an unreleased SOP has no number yet and stands its
+   * owning department code in instead (listNumberLabel). Resolved here so the bell renders it
+   * verbatim and cannot drift from the queue page.
+   */
+  sopNumber: string;
   title: string | null;
 }
 
@@ -44,7 +50,7 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
           row.contentHash,
         ]),
         sopId: row.sopId,
-        sopNumber: row.sopNumber,
+        sopNumber: listNumberLabel(row.sopNumber, row.sopDepartmentCode),
         title: row.title,
       })),
     },
@@ -60,7 +66,7 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
           row.finalApprovalRequestedAt,
         ]),
         sopId: row.sopId,
-        sopNumber: row.sopNumber,
+        sopNumber: listNumberLabel(row.sopNumber, row.sopDepartmentCode),
         title: row.title,
       })),
     },
@@ -75,7 +81,7 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
           row.finalApprovalRequestedAt,
         ]),
         sopId: row.id,
-        sopNumber: row.sopNumber,
+        sopNumber: listNumberLabel(row.sopNumber, row.departmentCode),
         title: row.title,
       })),
     },
@@ -90,7 +96,7 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
           row.rejectedReason,
         ]),
         sopId: row.id,
-        sopNumber: row.sopNumber,
+        sopNumber: listNumberLabel(row.sopNumber, row.departmentCode),
         title: row.title,
       })),
     },

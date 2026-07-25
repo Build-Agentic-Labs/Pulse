@@ -1899,7 +1899,7 @@ export function SopEditor({
                   />
                 </Section>
                 <Section title="Procedure" reviewAttention={reviewCategoriesNeedingAttention.has("procedure")}>
-                  <Field label="Process flow description">
+                  <Field label="Process flow description" optional>
                     <AutoTextarea
                       className="ui-field-standalone min-h-16 py-2"
                       value={sop.procedure.processFlowDescription}
@@ -2498,10 +2498,25 @@ function Section({
     </section>
   );
 }
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  optional = false,
+  children,
+}: {
+  label: string;
+  /**
+   * Marks a field the author may leave blank. Nothing enforces these fields anyway — this only
+   * says so, so a blank one doesn't read as unfinished work on a controlled document.
+   */
+  optional?: boolean;
+  children: ReactNode;
+}) {
   return (
     <label className="block">
-      <span className="ui-field-label">{label}</span>
+      <span className="ui-field-label">
+        {label}
+        {optional ? <span className="ml-1.5 font-normal text-ink-tertiary">(optional)</span> : null}
+      </span>
       {children}
     </label>
   );

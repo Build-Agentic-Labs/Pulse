@@ -47,7 +47,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: supabase/setup-cli@v1
+      # v3 is a composite action (v1 was Node-based and ran on the deprecated Node 20).
+      # It installs the CLI from npm rather than GitHub releases; the removed `github-token`
+      # input was never used here, so `version` is the whole contract.
+      - uses: supabase/setup-cli@v3
         with:
           version: latest
 

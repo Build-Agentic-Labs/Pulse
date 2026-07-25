@@ -32,7 +32,15 @@ comment on column public.sop_review_seats.rasic is
 
 -- The temporary solo-author test path conflicts with segregation of duties:
 -- an author may submit, but may not be one of the required approvers.
+--
+-- Same hazard the seat normalization above guards against, one table over: 20260715143000
+-- added self_review_test to the transition guard's draft-only content-freeze list, so clearing
+-- it on an SOP that has already left draft is rejected with "This SOP is in_review; start a
+-- revision before editing its content". Suspending the seat trigger alone was not enough --
+-- this statement is on public.sops, which sops_enforce_transition guards.
+alter table public.sops disable trigger sops_enforce_transition;
 update public.sops set self_review_test = false where self_review_test;
+alter table public.sops enable trigger sops_enforce_transition;
 
 create or replace function public.sop_self_review_test_active(p_sop text)
 returns boolean
@@ -104,6 +112,13 @@ $migration$;
 
 -- A departmental objection now escalates directly to the independent Quality
 -- final approver. Another departmental approver cannot overrule a peer.
+--
+-- The $from$ blocks below carry `not v_test_self and` because that is what is actually in the
+-- live function: 20260715143000 patched this same line when it added the solo self-review
+-- bypass, and it applied first. Anchoring on the unprefixed text made this block raise
+-- 'sign_sop objection hierarchy changed'. The $to$ drops the bypass deliberately -- this
+-- migration retires self-review test mode above (sop_self_review_test_active now returns
+-- false), so v_test_self is constant-false from here on and the prefix would be inert.
 do $migration$
 declare v_definition text;
 begin
@@ -119,7 +134,7 @@ begin
           raise exception 'Only the Accountable department can overrule a Responsible objection';
         end if;
       elsif v_objseat.rasic = 'accountable' then
-        if not public.is_quality_approver(s.workspace_id) then
+        if not v_test_self and not public.is_quality_approver(s.workspace_id) then
           raise exception 'Only a Quality approver can overrule an Accountable objection';
         end if;
       else
@@ -138,7 +153,7 @@ $from$ in v_definition) = 0 then
           raise exception 'Only the Accountable department can overrule a Responsible objection';
         end if;
       elsif v_objseat.rasic = 'accountable' then
-        if not public.is_quality_approver(s.workspace_id) then
+        if not v_test_self and not public.is_quality_approver(s.workspace_id) then
           raise exception 'Only a Quality approver can overrule an Accountable objection';
         end if;
       else

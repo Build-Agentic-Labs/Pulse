@@ -21,17 +21,23 @@ const STORAGE_KEY = "pulse:sops:v1";
 // Exact columns consumed by the mappers below -- avoid select('*'), matching the planner store.
 // The owning department code rides along for the same reason as in SOP_LIST_COLUMNS: an
 // unreleased SOP has no number, and every surface that renders the document stands the
-// department code in instead. Must stay a single string literal (supabase-js type-parses it).
+// department code in instead. The !sops_department_id_fkey hint disambiguates three possible
+// sops<->departments paths -- see the note on SOP_LIST_COLUMNS below. Single string literal.
 const SOP_COLUMNS =
-  "id, workspace_id, department_id, sop_number, title, version, source, status, effective_date, document, created_at, updated_at, department:departments(code)";
+  "id, workspace_id, department_id, sop_number, title, version, source, status, effective_date, document, created_at, updated_at, department:departments!sops_department_id_fkey(code)";
 
 // Slim projection for the list surface: promoted columns only, never the full jsonb document.
 // The owning department is embedded (left join on the sops.department_id FK, so SOPs with no
 // department still come back) because an unreleased SOP has no number and every list surface
-// stands its department code in instead -- see listNumberLabel. Must stay a single string
-// literal: supabase-js parses it at the type level.
+// stands its department code in instead -- see listNumberLabel.
+//
+// The !sops_department_id_fkey hint is REQUIRED, not decoration: three FK paths connect sops to
+// departments -- this direct one, plus sop_review_seats and sop_signatures, which each carry a
+// sop_id AND a department FK and so read as junction tables. Without the hint PostgREST answers
+// "Could not embed because more than one relationship was found for 'sops' and 'departments'".
+// Must stay a single string literal: supabase-js parses it at the type level.
 const SOP_LIST_COLUMNS =
-  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash, department:departments(code)";
+  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash, department:departments!sops_department_id_fkey(code)";
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {

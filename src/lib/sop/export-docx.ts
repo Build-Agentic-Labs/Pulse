@@ -368,7 +368,13 @@ async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
     blocks.push(bodyText(""));
   }
 
-  blocks.push(sectionHeading("Responsible Person(s)"), bodyText(sop.responsiblePersons.filter(Boolean).join("; ")));
+  // One entry per line rather than a "; "-joined sentence. Plain paragraphs, not bulletList:
+  // the request was line breaks, and bullets would change the section's visual weight.
+  const responsiblePersons = sop.responsiblePersons.filter(Boolean);
+  blocks.push(
+    sectionHeading("Responsible Person(s)"),
+    ...(responsiblePersons.length > 0 ? responsiblePersons.map(bodyText) : [bodyText("")]),
+  );
   blocks.push(
     sectionHeading("References"),
     ...bulletList([

@@ -156,6 +156,19 @@ function EmptyAwareText({ value }: { value: string }) {
   return <p className={value ? undefined : "sop-export-empty"}>{value || "—"}</p>;
 }
 
+/** One entry per line, sharing EmptyAwareText's em-dash empty state. */
+function LinesOrDash({ values }: { values: readonly string[] }) {
+  const entries = values.filter(Boolean);
+  if (entries.length === 0) return <EmptyAwareText value="" />;
+  return (
+    <>
+      {entries.map((entry, index) => (
+        <p key={`${entry}-${index}`}>{entry}</p>
+      ))}
+    </>
+  );
+}
+
 function ApprovalTable({
   entries,
   revealSignatureId,
@@ -799,7 +812,7 @@ export function SopPrintPreview({
               ) : <EmptyAwareText value="" />}
             </Section>
             <Section title="Responsible Person(s)" reviewCategory="responsible">
-              <EmptyAwareText value={sop.responsiblePersons.filter(Boolean).join("; ")} />
+              <LinesOrDash values={sop.responsiblePersons} />
             </Section>
             <Section title="References" reviewCategory="references">
               {sop.linkedSops.length || (sop.referenceDocs ?? []).length || sop.references.length ? (

@@ -197,14 +197,18 @@ export function ProcessFlowchart({ roles, activities, departments, disabled = fa
         </div>
       </div>
 
-      {/* Map / Table toggle */}
-      <div className="inline-flex items-center gap-0.5 rounded-lg border border-line bg-surface-muted p-0.5">
-        <ViewTab active={view === "map"} onClick={() => setView("map")}>
-          Map
-        </ViewTab>
-        <ViewTab active={view === "table"} onClick={() => setView("table")}>
-          Table
-        </ViewTab>
+      {/* Process flow diagram — the heading owns the Map / Table toggle, so the toggle reads as
+          two views OF the diagram rather than as a stray control between the roles and the grid. */}
+      <div>
+        <span className="ui-field-label">Process flow diagram</span>
+        <div className="inline-flex items-center gap-0.5 rounded-lg border border-line bg-surface-muted p-0.5">
+          <ViewTab active={view === "map"} onClick={() => setView("map")}>
+            Map
+          </ViewTab>
+          <ViewTab active={view === "table"} onClick={() => setView("table")}>
+            Table
+          </ViewTab>
+        </div>
       </div>
 
       {view === "map" ? (

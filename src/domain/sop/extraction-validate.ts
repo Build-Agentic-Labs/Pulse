@@ -28,9 +28,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Strings pass through (clamped); finite numbers/booleans stringify; everything else → "". */
+/**
+ * Undo a newline the model escaped twice.
+ *
+ * Writing multi-paragraph prose into a JSON string field, the model sometimes emits the two
+ * characters `\` `n` instead of an escape the JSON decoder consumes. The tool-use input arrives
+ * already parsed, so nothing downstream can tell that apart from intended content — the literal
+ * flows into the editor and onto the printed controlled document. Observed 2026-07-25 in 3 of 6
+ * converted SOPs, all in `purpose` / `scope`; no authored SOP has ever carried one.
+ *
+ * Once emitted, a literal `\n` is genuinely ambiguous — `C:\network\share` contains one — so this
+ * only fires where a backslash sequence CANNOT be content: a paragraph break (`\n\n`), or a break
+ * followed by whitespace or a bullet. No Windows path segment starts with a space, a hyphen, or
+ * another backslash, which is what makes this deterministic rather than a guess. Every one of the
+ * 19 occurrences found in production matched one of these two shapes.
+ *
+ * A lone `\n` mid-word is left alone on purpose. Under-correcting leaves a visible blemish in a
+ * draft someone can fix; over-correcting silently rewrites a path in a controlled document.
+ */
+function unescapeLiteralNewlines(value: string): string {
+  // `(?:\\r)?` — the optional part is the whole two-character `\r`, not a bare `r`. Writing
+  // `\\r?\\n` instead would demand TWO backslashes before the n and match nothing real.
+  return value
+    // Paragraph break, including the CRLF spelling. Collapses to exactly two newlines.
+    .replace(/(?:(?:\\r)?\\n){2}/g, "\n\n")
+    // Single break introducing a list item or preceding whitespace.
+    .replace(/(?:\\r)?\\n(?=[\s\-*•])/g, "\n")
+    // Trailing break at the very end of a field.
+    .replace(/(?:\\r)?\\n$/, "\n");
+}
+
+/** Strings pass through (clamped, newline-normalized); numbers/booleans stringify; else → "". */
 function coerceString(value: unknown, maxChars: number = MAX_SHORT_FIELD_CHARS): string {
-  if (typeof value === "string") return value.slice(0, maxChars);
+  if (typeof value === "string") return unescapeLiteralNewlines(value).slice(0, maxChars);
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value === "boolean") return String(value);
   return "";

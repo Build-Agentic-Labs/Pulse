@@ -205,3 +205,38 @@ describe("validateExtractedSop", () => {
     expect(result!.meta.title).toBe("");
   });
 });
+
+describe("literal escape sequences from the model", () => {
+  // Observed in production 2026-07-25: 3 of 6 converted SOPs carried two-character `\n`
+  // sequences in `purpose` / `scope`, where the model double-escaped a break while writing
+  // multi-paragraph prose into a JSON string. All 19 occurrences were either a paragraph pair or
+  // a break introducing a bullet. No authored SOP has ever carried one.
+  it("normalizes a double-escaped paragraph break", () => {
+    const raw = { ...validExtraction(), purpose: String.raw`First para.\n\nSecond para.` };
+    expect(validateExtractedSop(raw)?.purpose).toBe("First para.\n\nSecond para.");
+  });
+
+  it("normalizes a break that introduces a list item", () => {
+    const raw = { ...validExtraction(), scope: String.raw`It covers:\n- Documents\n- Records` };
+    expect(validateExtractedSop(raw)?.scope).toBe("It covers:\n- Documents\n- Records");
+  });
+
+  it("leaves a genuine newline untouched", () => {
+    const raw = { ...validExtraction(), purpose: "First para.\n\nSecond para." };
+    expect(validateExtractedSop(raw)?.purpose).toBe("First para.\n\nSecond para.");
+  });
+
+  // The correction must never rewrite content. A backslash-n mid-word is a path, not a break,
+  // and staying wrong here is safer than silently editing a controlled document.
+  it("leaves a Windows path alone, in either case", () => {
+    const lower = { ...validExtraction(), scope: String.raw`Stored at C:\network\share.` };
+    expect(validateExtractedSop(lower)?.scope).toBe(String.raw`Stored at C:\network\share.`);
+    const upper = { ...validExtraction(), scope: String.raw`Stored at C:\Network\share.` };
+    expect(validateExtractedSop(upper)?.scope).toBe(String.raw`Stored at C:\Network\share.`);
+  });
+
+  it("leaves other backslash sequences alone", () => {
+    const raw = { ...validExtraction(), scope: String.raw`A 5\10 tolerance and a \tab token.` };
+    expect(validateExtractedSop(raw)?.scope).toBe(String.raw`A 5\10 tolerance and a \tab token.`);
+  });
+});

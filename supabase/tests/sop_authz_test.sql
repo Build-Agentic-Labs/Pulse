@@ -99,6 +99,9 @@ end $$;
 select test_as('e0000000-0000-0000-0000-000000000001');
 select public.sign_sop('sop_z1', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_z1';
+-- Preconditions added after this suite was written; see
+-- test_ready_for_approval in supabase/seed.sql.
+select public.test_ready_for_approval('sop_z1');
 select is(
   (select status from public.sops where id = 'sop_z1'),
   'in_review',
@@ -178,6 +181,9 @@ select is(
 select test_as('e0000000-0000-0000-0000-000000000007');
 select public.sign_sop('sop_z2', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_z2';
+-- Preconditions added after this suite was written; see
+-- test_ready_for_approval in supabase/seed.sql.
+select public.test_ready_for_approval('sop_z2');
 select test_as('e0000000-0000-0000-0000-000000000002');
 select public.sign_sop('sop_z2', 'dept_approval', p_seat_department => 'dept_z_a');
 select test_as('e0000000-0000-0000-0000-000000000003');

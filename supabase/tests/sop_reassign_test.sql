@@ -141,6 +141,9 @@ select throws_ok(
 select test_as('80000000-0000-0000-0000-000000000002');
 select public.sign_sop('sop_r_1', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_r_1';
+-- Preconditions added after this suite was written; see
+-- test_ready_for_approval in supabase/seed.sql.
+select public.test_ready_for_approval('sop_r_1');
 select test_as('80000000-0000-0000-0000-000000000004');
 select public.sign_sop('sop_r_1', 'dept_approval', p_seat_department => 'dept_r_a');
 

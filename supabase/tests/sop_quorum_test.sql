@@ -98,7 +98,9 @@ end $$;
 select test_as('d0000000-0000-0000-0000-000000000001');
 select public.sign_sop('sop_q1', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_q1';
-
+-- Preconditions added after this suite was written; see
+-- test_ready_for_approval in supabase/seed.sql.
+select public.test_ready_for_approval('sop_q1');
 -- 1. A person outside the required-approver roster cannot sign.
 select test_as('d0000000-0000-0000-0000-000000000004');
 select throws_ok(
@@ -139,7 +141,9 @@ select is(
 select test_as('d0000000-0000-0000-0000-000000000007');
 select public.sign_sop('sop_q2', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_q2';
-
+-- Preconditions added after this suite was written; see
+-- test_ready_for_approval in supabase/seed.sql.
+select public.test_ready_for_approval('sop_q2');
 -- 5. Signing for the first seat satisfies only that seat.
 select test_as('d0000000-0000-0000-0000-000000000006');
 select public.sign_sop('sop_q2', 'dept_approval', p_seat_department => 'dept_q_a');

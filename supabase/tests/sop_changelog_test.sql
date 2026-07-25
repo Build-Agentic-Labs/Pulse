@@ -80,6 +80,9 @@ begin
   perform test_as('70000000-0000-0000-0000-000000000001');
   perform public.sign_sop('sop_cl_1', 'authorship');
   update public.sops set status = 'in_review' where id = 'sop_cl_1';
+  -- Preconditions added after this suite was written; see
+  -- test_ready_for_approval in supabase/seed.sql.
+  perform public.test_ready_for_approval('sop_cl_1');
   perform test_as('70000000-0000-0000-0000-000000000002');
   perform public.sign_sop('sop_cl_1', 'dept_approval', p_seat_department => 'dept_cl_a');
   perform test_as('70000000-0000-0000-0000-000000000003');

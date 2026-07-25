@@ -35,3 +35,35 @@ jobs:
 
       - name: Test
         run: npm test
+
+  # The database is the enforcement layer for SOP document control, so the rules that matter most
+  # live in triggers and RLS policies that `npm test` cannot reach. This job is why it is caught:
+  # on 2026-07-25 the pgTAP suite found a number stamp that moved a document's content hash --
+  # voiding the very signature that authorized the release -- while typecheck, lint, 530 vitest
+  # tests, and two review passes were all green. Separate job so a database failure is legible on
+  # sight rather than buried in the Node checks.
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Postgres
+        run: supabase db start
+
+      # `db start` brings up Postgres; the reset is what applies every migration from scratch and
+      # then runs supabase/seed.sql -- which the suites now require, since it carries both the
+      # table grants the hosted project gets from platform defaults and the shared
+      # test_ready_for_approval helper.
+      #
+      # The reset is itself a real test: the SOP transition guard is patched in place via
+      # pg_get_functiondef + guarded replace, so a migration whose anchor has drifted raises here
+      # rather than silently reverting an earlier migration's work.
+      - name: Apply migrations and seed
+        run: supabase db reset
+
+      - name: pgTAP
+        run: supabase test db --local

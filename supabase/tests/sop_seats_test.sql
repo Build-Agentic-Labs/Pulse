@@ -11,7 +11,7 @@
 -- sign_sop v2 contract: sign_sop(p_sop, p_meaning, p_reason, p_seat_department, p_resolves).
 
 begin;
-select plan(10);
+select plan(11);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -156,19 +156,33 @@ select throws_ok(
   null,
   'Inform belongs in procedure RASIC, not the approval roster'
 );
-select throws_ok(
+-- An UNSTAFFED required approver is allowed in a draft roster, and blocked at submission.
+-- 20260715130000 dropped the seat_signer_required constraint on purpose -- department names can
+-- be inferred from the authored SOP before anyone is assigned -- while keeping the hard gate on
+-- submit. Both halves are asserted, because the constraint's removal is only safe if the gate
+-- really did survive.
+select lives_ok(
   $$ insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id)
      values ('sop_seat_6', 'dept_st_d', 'responsible', null) $$,
-  null,
-  'a required approver with a null signer_id is refused'
+  'an unstaffed required approver is allowed to sit in a draft roster'
+);
+select throws_like(
+  $$ update public.sops set status = 'in_review' where id = 'sop_seat_6' $$,
+  '%Choose a reviewer%',
+  'but an unstaffed required approver blocks submission'
 );
 
 -- ---------------------------------------------------------------------------
--- 8/9/10. Authorship is the last missing piece: refuse without it, pass with it.
+-- 9/10/11. Authorship is the last missing piece: refuse without it, pass with it.
 -- ---------------------------------------------------------------------------
-select throws_ok(
+-- Drop the unstaffed row (dept_st_d has no members, so it cannot be staffed) to isolate the
+-- authorship gate -- otherwise the next assertion would pass on the seat error instead.
+reset role;
+delete from public.sop_review_seats where sop_id = 'sop_seat_6' and department_id = 'dept_st_d';
+select test_as('c0000000-0000-0000-0000-000000000001');
+select throws_like(
   $$ update public.sops set status = 'in_review' where id = 'sop_seat_6' $$,
-  null,
+  '%authorship%',
   'submitting without an authorship signature is refused (Gate A)'
 );
 select public.sign_sop('sop_seat_6', 'authorship');

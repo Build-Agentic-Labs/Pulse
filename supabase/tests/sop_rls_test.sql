@@ -12,7 +12,7 @@
 --   * a genuinely memberless department stays grandfathered (open to org-tool viewers)
 
 begin;
-select plan(4);
+select plan(6);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -70,13 +70,30 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 1. D1: an org-tool viewer in NO department cannot see another department's draft.
+-- 1. An org-tool viewer in NO department may BROWSE another department's draft, but not edit it.
+--    This replaces the original D1 read ban, which 20260715122000 lifted on purpose: "Workspace
+--    SOP users may browse every department's documents, while draft content remains editable
+--    only by explicit members of the owning department." Reading is no longer the boundary --
+--    writing is, so that is what this asserts.
 -- ---------------------------------------------------------------------------
 select test_as('b0000000-0000-0000-0000-000000000002');
 select is(
   (select count(*) from public.sops where id = 'sop_rls_1'),
-  0::bigint,
-  'a workspace member with org-tool view and no department cannot read a scoped draft (D1)'
+  1::bigint,
+  'an org-tool viewer in no department may browse another department''s draft'
+);
+select is(
+  (select title from public.sops where id = 'sop_rls_1'),
+  'Scoped draft',
+  'browsing returns the real row, not an empty shell'
+);
+-- The write boundary. An UPDATE filtered by RLS touches zero rows rather than raising, so assert
+-- the content did not move -- a raise here would equally satisfy a naive throws_ok.
+update public.sops set document = '{"body":"tampered"}'::jsonb where id = 'sop_rls_1';
+select is(
+  (select document ->> 'body' from public.sops where id = 'sop_rls_1'),
+  'secret',
+  'browsing does not confer editing: a non-member UPDATE changes nothing'
 );
 
 -- ---------------------------------------------------------------------------

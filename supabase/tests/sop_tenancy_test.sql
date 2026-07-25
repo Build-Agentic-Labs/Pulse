@@ -92,7 +92,9 @@ select is(
 select test_as('e0000000-0000-0000-0000-000000000001');
 select public.sign_sop('sop_ta', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_ta';
-
+-- Preconditions added after this suite was written; see
+-- test_ready_for_approval in supabase/seed.sql.
+select public.test_ready_for_approval('sop_ta');
 -- ---------------------------------------------------------------------------
 -- 5/6. A seat holder removed from their department mid-review cannot sign, and
 --      the quorum does not count them.

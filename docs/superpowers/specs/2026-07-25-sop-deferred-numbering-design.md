@@ -119,12 +119,42 @@ data rather than from a snapshot.
    number outside a release. The function stays defined for reference and for the
    internal variant to mirror.
 
-5. **`enforce_sop_transition` v4** — supersedes v3. Deltas only:
+5. **`enforce_sop_transition` — patched in place, not rewritten.**
+
+   `enforce_sop_transition` has been modified three times since
+   `20260710123000_sop_transition_guard_v3.sql`, and only the first
+   (`20260710124500_sop_guard_v3_hardening`) is a checked-in full body. The other two
+   (`20260715143000_sop_solo_self_review_test_mode`,
+   `20260723133000_required_department_approvers`) rewrite the **live** definition via
+   `pg_get_functiondef` + `replace`, so **no file in this repo holds the current function
+   text.** Authoring a fresh body from the v3 file silently reverts:
+   - the removal of the "exactly one Accountable" gate — and because `20260723133000` also
+     added `check (rasic = 'responsible')` to `sop_review_seats`, a reinstated gate can
+     never be satisfied: **every `draft → in_review` would raise**, taking the whole review
+     workflow down;
+   - the `is_quality_approver(old.workspace_id)` re-check, whose absence lets someone
+     removed from Quality release a document on a stale signature;
+   - the `test_self` self-review-test bypass machinery;
+   - the corrected `sop_change_log.from_version` formula.
+
+   So this migration uses the same guarded-replace pattern those two use: each edit asserts
+   its anchor with `position(...) = 0 → raise` before replacing, which turns a drifted base
+   into a loud failure instead of a silent revert. Anchors were chosen from text neither
+   later patch touches.
+
+   Anchor presence and **uniqueness** were verified without a database by reconstructing the
+   live function text: take the hardening migration's body, then replay every
+   `replace(v_definition, …)` from the two patch migrations in timestamp order (14 of them
+   target the guard; the rest target `sign_sop`). All seven anchors occur exactly once in the
+   result — a `replace` hitting a second occurrence would corrupt the body. Deltas:
    - INSERT branch also forces `new.sop_number := null`. Without this a client can POST
      a row squatting a *future* number; the collision-skip loop would step over it and
      open exactly the gap this work removes.
    - UPDATE pins `new.sop_number := old.sop_number` unconditionally (v3 froze it only
-     when `old.status <> 'draft'`), so the number is client-unwritable on every edge.
+     when `old.status <> 'draft'`), so the number is client-unwritable on every edge. The
+     existing `new.sop_number is distinct from old.sop_number` clause in the content-freeze
+     list is left alone: pinning makes it unreachable, and removing it would be one more
+     anchor to drift against.
    - `approved → effective` mints when `old.sop_number` is null or blank, stamping both
      `new.sop_number` and `new.document->meta->sopNumber`, then passes the stamped
      document to `snapshot_sop_revision`. A revision of an already-numbered document
@@ -145,9 +175,13 @@ data rather than from a snapshot.
      so they must not hold a position in the sequence.
    - Reset each `(workspace_id, department_id, doc_type)` counter to `max(seq) + 1` over
      all remaining numbered rows **including soft-deleted ones**, so a later hard-undelete
-     cannot collide.
-   - Post-conditions: no row with `major_version is null` retains a number; every counter
-     is strictly greater than the highest number in its scope.
+     cannot collide. Written as `insert … on conflict do update`, not a bare `update`: a
+     scope can hold numbers without having a counter row at all (any number written by
+     something other than the mint), and a bare update would skip it silently while the
+     post-condition — which joins the counter table — could not see it either.
+   - Post-conditions: no row with `major_version is null` retains a number; every numbered
+     scope has a counter row; every counter is strictly greater than the highest number in
+     its scope.
 
 ### App code
 

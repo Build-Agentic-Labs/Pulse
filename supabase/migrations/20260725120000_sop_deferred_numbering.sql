@@ -50,11 +50,13 @@ $$;
 -- same UPDATE would be absent from the frozen snapshot, leaving the archived controlled copy
 -- reading SOP-PRO-###. The release edge now hands in the stamped document explicitly.
 --
--- Dropped rather than overloaded: `create or replace` with an added defaulted parameter would
--- leave the 1-arg version in place, and a 1-arg call would then be ambiguous.
+-- Dropped rather than overloaded: `create or replace` alone with an added defaulted parameter
+-- would leave the 1-arg version in place, and a 1-arg call would then be ambiguous. The DROP
+-- handles that; OR REPLACE on the 2-arg form is so a re-run after a failed apply succeeds
+-- (the data migration below asserts post-conditions and is designed to abort on bad data).
 drop function if exists public.snapshot_sop_revision(text);
 
-create function public.snapshot_sop_revision(p_sop text, p_document jsonb default null)
+create or replace function public.snapshot_sop_revision(p_sop text, p_document jsonb default null)
 returns text
 language plpgsql
 security definer
@@ -146,226 +148,105 @@ revoke execute on function public.mint_sop_number_internal(text, text, text)
 revoke execute on function public.next_sop_number(text, text, text) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. enforce_sop_transition v4 -- supersedes v3. Deltas from v3:
---   * INSERT also clamps sop_number to null. Without this a client can POST a row squatting a
---     FUTURE number; the collision-skip loop would step over it and open exactly the gap this
---     migration removes.
---   * sop_number is pinned to OLD on every UPDATE edge (v3 froze it only when the row was not a
---     draft), so it is client-unwritable everywhere. The release edge below is the sole writer.
+-- 4. Transition-guard deltas, applied IN PLACE to the live function.
+--
+-- Not a full `create or replace`: enforce_sop_transition has been patched three times since
+-- 20260710123000_sop_transition_guard_v3.sql, and only the first of those
+-- (20260710124500_sop_guard_v3_hardening) is a checked-in full body. The other two
+-- (20260715143000_sop_solo_self_review_test_mode, 20260723133000_required_department_approvers)
+-- rewrite the LIVE definition via pg_get_functiondef + replace, so no file in this repo contains
+-- the current function text. Authoring a fresh body from the v3 file would silently revert:
+--   * the removal of the "exactly one Accountable" gate -- and since 20260723133000 also added
+--     `check (rasic = 'responsible')` to sop_review_seats, a reinstated gate can never be
+--     satisfied: every draft -> in_review would raise, taking the whole review workflow down;
+--   * the `is_quality_approver(old.workspace_id)` re-check, whose absence lets someone removed
+--     from Quality release a document on a stale signature;
+--   * the `test_self` self-review-test bypass machinery;
+--   * the corrected sop_change_log from_version formula.
+--
+-- So this follows the same guarded-replace pattern those two migrations use: every edit asserts
+-- its anchor is present first, which turns a drifted base into a loud failure instead of a
+-- silent revert. Anchors were chosen from text that neither later patch touches.
+--
+-- Deltas:
+--   * INSERT clamps sop_number to null. Without this a client can POST a row squatting a FUTURE
+--     number; the mint's collision-skip loop would step over it and reopen the very gap this
+--     migration closes.
+--   * sop_number is pinned to OLD on every UPDATE edge, so it is client-unwritable everywhere
+--     and the release edge is its sole writer. (v3's `new.sop_number is distinct from
+--     old.sop_number` clause in the content-freeze list is left in place: pinning makes it
+--     unreachable, and removing it would be one more anchor to drift against.)
 --   * approved -> effective mints and stamps the number, then freezes the stamped document.
 --   * effective -> obsolete is refused: supersede the document instead.
 --   * an effective row can never be soft-deleted, manager included.
-create or replace function public.enforce_sop_transition()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  is_manager boolean;
-  v_reason text;
-  v_revision_reason text;
-  v_prev_label text;
-  v_objection record;
-  v_number text;
+do $migration$
+declare v_definition text;
 begin
-  -- INSERT: force a clean draft regardless of what the client sent.
-  if tg_op = 'INSERT' then
-    new.status := 'draft';
-    new.submitted_by := null;
-    new.approved_by := null;
-    new.approved_at := null;
-    new.effective_revision_id := null;
-    new.effective_date := null;
-    new.next_review_date := null;
-    new.rejected_by := null;
-    new.rejected_reason := null;
-    -- v2 left these client-writable: a forged major_version made the first release behave as a
-    -- revision, stamping a bogus version and emitting a change-log entry for v1.0.
-    new.version := null;
-    new.major_version := null;
-    new.minor_version := null;
-    new.review_cycle := 0;
-    new.revision_reason := null;
-    new.change_significance := null;
-    new.requires_retraining := false;
-    -- A number is earned at release. An insert may not carry one, not even a legacy number
-    -- from a converted document -- a squatted number becomes a skipped number.
+  select pg_get_functiondef('public.enforce_sop_transition()'::regprocedure) into v_definition;
+
+  -- (a) A local for the minted number.
+  if position($from$  v_objection record;$from$ in v_definition) = 0 then
+    raise exception 'Transition guard declaration block changed';
+  end if;
+  v_definition := replace(
+    v_definition,
+    $from$  v_objection record;$from$,
+    $to$  v_objection record;
+  v_number text;$to$
+  );
+
+  -- (b) INSERT: a number is earned at release, so an insert may not carry one -- not even a
+  -- legacy number off a converted document.
+  if position($from$    new.requires_retraining := false;
+    return new;$from$ in v_definition) = 0 then
+    raise exception 'Transition guard INSERT branch changed';
+  end if;
+  v_definition := replace(
+    v_definition,
+    $from$    new.requires_retraining := false;
+    return new;$from$,
+    $to$    new.requires_retraining := false;
     new.sop_number := null;
-    return new;
+    return new;$to$
+  );
+
+  -- (c) UPDATE: pin the number. The release edge below is the only thing that may set it.
+  if position($from$  new.revision_reason := old.revision_reason;$from$ in v_definition) = 0 then
+    raise exception 'Transition guard pinning block changed';
   end if;
+  v_definition := replace(
+    v_definition,
+    $from$  new.revision_reason := old.revision_reason;$from$,
+    $to$  new.revision_reason := old.revision_reason;
+  -- Minted by the release edge and by nothing else, on any status.
+  new.sop_number := old.sop_number;$to$
+  );
 
-  is_manager := public.has_workspace_role(
-    old.workspace_id, array['owner', 'admin']::public.workspace_role[]);
-
-  -- Capture client intent before pinning it away.
-  v_reason := new.rejected_reason;
-  v_revision_reason := new.revision_reason;
-
-  -- Pin trigger-managed columns to OLD. Only the edge logic below may change them.
-  new.submitted_by := old.submitted_by;
-  new.approved_by := old.approved_by;
-  new.approved_at := old.approved_at;
-  new.effective_revision_id := old.effective_revision_id;
-  new.next_review_date := old.next_review_date;
-  new.effective_date := old.effective_date;
-  new.rejected_by := old.rejected_by;
-  new.rejected_reason := old.rejected_reason;
-  new.workspace_id := old.workspace_id;
-  new.created_by := old.created_by;
-  new.major_version := old.major_version;
-  new.minor_version := old.minor_version;
-  new.review_cycle := old.review_cycle;
-  new.revision_reason := old.revision_reason;
-  -- The number is minted by the release edge and by nothing else, on any status.
-  new.sop_number := old.sop_number;
-
-  -- Content/settings freeze: only a draft is editable, on every edge (including status changes).
-  -- sop_number is absent from this list by design -- it is already pinned above, so a client
-  -- change to it is silently discarded rather than raised, on a draft as much as on a release.
-  if old.status <> 'draft' then
-    if new.document is distinct from old.document
-       or new.title is distinct from old.title
-       or new.department_id is distinct from old.department_id
-       or new.doc_type is distinct from old.doc_type
-       or new.version is distinct from old.version
-       or new.change_significance is distinct from old.change_significance
-       or new.requires_retraining is distinct from old.requires_retraining
-       or new.review_interval_months is distinct from old.review_interval_months then
-      raise exception 'This SOP is %; start a revision before editing its content', old.status;
-    end if;
+  -- (d) An effective document is in force. Deleting it would retire it without superseding it,
+  -- which is the back door the lifecycle change closes; is_manager is no exemption.
+  if position($from$    if not (old.status in ('draft', 'obsolete') or is_manager) then$from$ in v_definition) = 0 then
+    raise exception 'Transition guard soft-delete guard changed';
   end if;
-
-  -- Soft-delete guard.
-  if new.deleted_at is not null and old.deleted_at is null then
-    -- An effective document is in force. Deleting it would retire it without superseding it,
-    -- which is the back door the lifecycle change closes; is_manager is no exemption.
-    if old.status = 'effective' then
+  v_definition := replace(
+    v_definition,
+    $from$    if not (old.status in ('draft', 'obsolete') or is_manager) then$from$,
+    $to$    if old.status = 'effective' then
       raise exception 'An effective SOP cannot be deleted; release a new version to supersede it';
     end if;
-    if not (old.status in ('draft', 'obsolete') or is_manager) then
-      raise exception 'Retire this SOP before deleting it (only draft or obsolete SOPs can be deleted)';
-    end if;
+    if not (old.status in ('draft', 'obsolete') or is_manager) then$to$
+  );
+
+  -- (e) The number is earned HERE. A revision of an already-numbered document keeps its number:
+  -- the number identifies the document, the version identifies the release.
+  if position($from$      if old.major_version is null then
+        new.major_version := 1;$from$ in v_definition) = 0 then
+    raise exception 'Transition guard release version stamping changed';
   end if;
-
-  if new.status = old.status then
-    return new;
-  end if;
-
-  case old.status || '->' || new.status
-    when 'draft->in_review' then
-      if new.department_id is null then
-        raise exception 'Assign an owning department before submitting for review';
-      end if;
-      if not (is_manager or public.is_department_member(new.department_id)) then
-        raise exception 'Only a member of the owning department can submit this SOP';
-      end if;
-
-      -- Gate A: the roster.
-      if not exists (select 1 from public.sop_review_seats st
-                     where st.sop_id = old.id and st.rasic = 'responsible') then
-        raise exception 'Name at least one Responsible department before submitting';
-      end if;
-      if (select count(*) from public.sop_review_seats st
-          where st.sop_id = old.id and st.rasic = 'accountable') <> 1 then
-        raise exception 'Name exactly one Accountable department before submitting';
-      end if;
-      if exists (select 1 from public.sop_review_seats st
-                 where st.sop_id = old.id and st.signer_id is not null
-                   and not public.is_department_member(st.department_id, st.signer_id)) then
-        raise exception 'Every seat''s reviewer must belong to that seat''s department';
-      end if;
-      -- The three-humans invariant: the author never approves their own document.
-      if exists (select 1 from public.sop_review_seats st
-                 where st.sop_id = old.id
-                   and st.rasic in ('responsible', 'accountable')
-                   and st.signer_id = auth.uid()) then
-        raise exception 'You hold a blocking seat on this SOP; someone else must submit it';
-      end if;
-
-      if not exists (select 1 from public.sop_signatures g
-                     where g.sop_id = old.id and g.meaning = 'authorship'
-                       and g.signer_id = auth.uid()
-                       and g.signed_content_hash = new.content_hash
-                       and g.review_cycle = old.review_cycle) then
-        raise exception 'Sign the authorship declaration before submitting this SOP';
-      end if;
-
-      -- An edit moots an objection; record that closure explicitly before checking.
-      perform public.close_moot_objections(old.id);
-      if public.sop_has_open_objection(old.id) then
-        raise exception 'Resolve the open objection before resubmitting this SOP';
-      end if;
-
-      new.submitted_by := auth.uid();
-      new.rejected_reason := null;
-      new.rejected_by := null;
-
-    when 'in_review->approved' then
-      if old.submitted_by is null then
-        raise exception 'This SOP has no recorded submitter; resubmit it for review before approval';
-      end if;
-      if auth.uid() is not distinct from old.submitted_by then
-        raise exception 'You cannot approve an SOP you submitted for review';
-      end if;
-      if not public.sop_quorum_met(old.id) then
-        raise exception 'Every Responsible and Accountable department must sign before Quality review';
-      end if;
-      if public.sop_has_open_objection(old.id) then
-        raise exception 'Resolve the open objection before this SOP can be approved';
-      end if;
-      new.approved_by := auth.uid();
-      new.approved_at := now();
-
-    when 'in_review->draft' then
-      -- Reject: driven from inside sign_sop, which has just written the rejection signature.
-      select * into v_objection from public.sop_signatures g
-        where g.sop_id = old.id and g.meaning = 'rejection'
-          and g.signer_id = auth.uid()
-          and g.signed_content_hash = old.content_hash
-          and g.review_cycle = old.review_cycle
-          and not exists (select 1 from public.sop_signatures r where r.resolves_signature_id = g.id)
-        limit 1;
-
-      if v_objection.id is not null then
-        new.rejected_by := auth.uid();
-        new.rejected_reason := v_objection.rejected_reason;
-        new.submitted_by := null;
-      elsif auth.uid() is not distinct from old.submitted_by then
-        -- Recall: the submitter withdrawing their own submission. Not an objection.
-        new.rejected_by := null;
-        new.rejected_reason := null;
-        new.submitted_by := null;
-      else
-        raise exception 'Only a Responsible or Accountable reviewer can reject this SOP, or its submitter can recall it';
-      end if;
-
-    when 'approved->effective' then
-      if not exists (
-        select 1 from public.sop_signatures sg
-        where sg.sop_id = old.id and sg.meaning = 'quality_approval'
-          and sg.signer_id = auth.uid()
-          and sg.signed_content_hash = old.content_hash
-          and sg.review_cycle = old.review_cycle) then
-        raise exception 'Sign the quality approval before making this SOP effective';
-      end if;
-      if exists (select 1 from public.sop_review_seats st
-                 where st.sop_id = old.id and st.signer_id = auth.uid()) then
-        raise exception 'The Quality approver must not hold a review seat on this SOP';
-      end if;
-      if auth.uid() is not distinct from old.created_by
-         or auth.uid() is not distinct from old.submitted_by then
-        raise exception 'The Quality approver must differ from the author';
-      end if;
-      if exists (select 1 from public.sop_signatures sg
-                 where sg.sop_id = old.id and sg.meaning = 'objection_overruled'
-                   and sg.signer_id = auth.uid() and sg.review_cycle = old.review_cycle) then
-        raise exception 'The Quality approver who overruled an objection cannot also release this SOP';
-      end if;
-
-      -- The number is earned HERE. A revision of an already-numbered document keeps its number:
-      -- the number identifies the document, the version identifies the release.
-      if coalesce(btrim(old.sop_number), '') = '' then
+  v_definition := replace(
+    v_definition,
+    $from$      if old.major_version is null then
+        new.major_version := 1;$from$,
+    $to$      if coalesce(btrim(old.sop_number), '') = '' then
         if old.department_id is null then
           raise exception 'Assign an owning department before releasing this SOP';
         end if;
@@ -383,69 +264,42 @@ begin
           '{meta,sopNumber}', to_jsonb(v_number), true);
       end if;
 
-      -- First time effective → 1.0; later effectives keep the revision's bumped version.
       if old.major_version is null then
-        new.major_version := 1;
-        new.minor_version := 0;
-      end if;
-      new.version := new.major_version::text || '.' || new.minor_version::text;
-      new.effective_date := current_date;
-      new.next_review_date := (current_date
-        + (coalesce(old.review_interval_months, 24) || ' months')::interval)::date;
+        new.major_version := 1;$to$
+  );
 
-      select version_label into v_prev_label from public.sop_revisions
-        where id = old.effective_revision_id;
+  -- (f) Hand the stamped document to the snapshot: snapshot_sop_revision's own SELECT reads the
+  -- OLD row (it runs inside this BEFORE UPDATE), so the frozen controlled copy would otherwise
+  -- archive the SOP-PRO-### placeholder.
+  if position($from$public.snapshot_sop_revision(old.id);$from$ in v_definition) = 0 then
+    raise exception 'Transition guard snapshot call changed';
+  end if;
+  v_definition := replace(
+    v_definition,
+    $from$public.snapshot_sop_revision(old.id);$from$,
+    $to$public.snapshot_sop_revision(old.id, new.document);$to$
+  );
 
-      -- Hand in the stamped document: snapshot_sop_revision's own SELECT would read the OLD row.
-      new.effective_revision_id := public.snapshot_sop_revision(old.id, new.document);
-
-      -- A change log is issued ONLY when an already-effective version is revised. v1.0 has none.
-      if old.major_version is not null then
-        insert into public.sop_change_log
-          (sop_id, revision_id, from_version, to_version, reason, significance,
-           requires_retraining, created_by)
-        values (old.id, new.effective_revision_id, coalesce(v_prev_label, old.version), new.version,
-                coalesce(nullif(btrim(old.revision_reason), ''), 'Revision'),
-                old.change_significance, old.requires_retraining, auth.uid());
-        new.revision_reason := null;
-      end if;
-
-    when 'effective->draft' then  -- start a revision
-      if not (is_manager or public.has_department_role(
-                old.department_id, array['author', 'reviewer', 'approver']::public.department_sop_role[])) then
-        raise exception 'Only a member of the owning department can start a revision';
-      end if;
-      if v_revision_reason is null or btrim(v_revision_reason) = '' then
-        raise exception 'A revision needs a reason: what is changing, and why';
-      end if;
-      new.revision_reason := v_revision_reason;
-      -- The cycle bumps HERE and nowhere else. Prior-cycle signatures can never be replayed,
-      -- even against a document reverted to their exact content hash.
-      new.review_cycle := old.review_cycle + 1;
-      new.minor_version := coalesce(old.minor_version, 0) + 1;
-      new.version := coalesce(old.major_version, 1)::text || '.' || new.minor_version::text;
-      new.submitted_by := null;
-      new.approved_by := null;
-      new.approved_at := null;
-
-    when 'effective->obsolete' then
-      -- Removed in v4. Retiring an in-force document is superseding it: release a new version,
-      -- which retires the previous VERSION and leaves the document itself in force.
+  -- (g) Retiring an in-force document is superseding it: release a new version, which retires the
+  -- previous VERSION and leaves the document itself in force. draft/approved -> obsolete stay.
+  if position($from$    when 'effective->obsolete', 'approved->obsolete', 'draft->obsolete' then$from$ in v_definition) = 0 then
+    raise exception 'Transition guard obsolete branch changed';
+  end if;
+  v_definition := replace(
+    v_definition,
+    $from$    when 'effective->obsolete', 'approved->obsolete', 'draft->obsolete' then$from$,
+    $to$    when 'effective->obsolete' then
       raise exception 'An effective SOP is retired by releasing a new version, not by retiring the document';
 
-    when 'approved->obsolete', 'draft->obsolete' then
-      if not (is_manager or public.has_department_role(
-                old.department_id, array['approver']::public.department_sop_role[])) then
-        raise exception 'Only a department approver can retire an SOP';
-      end if;
+    when 'approved->obsolete', 'draft->obsolete' then$to$
+  );
 
-    else
-      raise exception 'Invalid SOP status transition from % to %', old.status, new.status;
-  end case;
+  execute v_definition;
+end $migration$;
 
-  return new;
-end $$;
-
+-- The trigger itself is unchanged (same function, same timing), but reassert it so the ordering
+-- contract with sops_aa_set_content_hash stays documented in one place: same-timing triggers fire
+-- in NAME order, and `aa_` sorting first is what lets the guard read the freshly computed hash.
 drop trigger if exists sops_enforce_transition on public.sops;
 create trigger sops_enforce_transition
 before insert or update on public.sops
@@ -533,22 +387,26 @@ begin
         and s.doc_type = c.doc_type
         and coalesce(btrim(s.sop_number), '') <> '');
 
-  update public.doc_number_counter c
-     set next_seq = sub.next_seq
-    from (
-      select s.workspace_id, s.department_id, s.doc_type, max(m.seq) + 1 as next_seq
-        from public.sops s
-        cross join lateral (
-          select ((regexp_match(upper(btrim(s.sop_number)),
-                   '^[A-Z0-9]+-[A-Z0-9]+-([0-9]+)$'))[1])::int as seq
-        ) m
-       where coalesce(btrim(s.sop_number), '') <> ''
-         and m.seq is not null
-       group by s.workspace_id, s.department_id, s.doc_type
-    ) sub
-   where c.workspace_id = sub.workspace_id
-     and c.department_id = sub.department_id
-     and c.doc_type = sub.doc_type;
+  -- INSERT ... ON CONFLICT rather than a bare UPDATE: a scope can hold numbers without having a
+  -- counter row at all (any number written by something other than the mint -- seeded legacy
+  -- data, say). A bare UPDATE would skip it silently, the "gapless from max+1" guarantee would
+  -- quietly not hold there, and the post-condition below could not see it either because it
+  -- INNER JOINs this table. Creating the row puts every numbered scope under the assertion.
+  insert into public.doc_number_counter (workspace_id, department_id, doc_type, next_seq)
+  select s.workspace_id, s.department_id, coalesce(s.doc_type, 'SOP'), max(m.seq) + 1
+    from public.sops s
+    cross join lateral (
+      select ((regexp_match(upper(btrim(s.sop_number)),
+               '^[A-Z0-9]+-[A-Z0-9]+-([0-9]+)$'))[1])::int as seq
+    ) m
+   where coalesce(btrim(s.sop_number), '') <> ''
+     and m.seq is not null
+     -- The counter's department_id is NOT NULL and FK-bound; an SOP with no department cannot
+     -- have a scope, and cannot be released either (the release edge refuses it).
+     and s.department_id is not null
+   group by s.workspace_id, s.department_id, coalesce(s.doc_type, 'SOP')
+  on conflict (workspace_id, department_id, doc_type)
+    do update set next_seq = excluded.next_seq;
 
   -- (d) Post-conditions. Assert inside the transaction so a bad reclaim aborts rather than ships.
   if exists (
@@ -558,6 +416,24 @@ begin
             or coalesce(document #>> '{meta,sopNumber}', '') <> '')
   ) then
     raise exception 'Reclaim incomplete: an unreleased SOP still holds a number';
+  end if;
+
+  if exists (
+    select 1
+      from public.sops s
+      cross join lateral (
+        select ((regexp_match(upper(btrim(s.sop_number)),
+                 '^[A-Z0-9]+-[A-Z0-9]+-([0-9]+)$'))[1])::int as seq
+      ) m
+     where m.seq is not null
+       and s.department_id is not null
+       and not exists (
+         select 1 from public.doc_number_counter c
+          where c.workspace_id = s.workspace_id
+            and c.department_id = s.department_id
+            and c.doc_type = coalesce(s.doc_type, 'SOP'))
+  ) then
+    raise exception 'Counter reset incomplete: a numbered scope has no counter row';
   end if;
 
   if exists (

@@ -228,17 +228,28 @@ select throws_ok(
 -- ---------------------------------------------------------------------------
 -- 8. Effective is terminal: retired only by supersession, never by deletion.
 -- ---------------------------------------------------------------------------
-select throws_ok(
+select throws_like(
   $$ update public.sops set status = 'obsolete' where id = 'sop_1' $$,
-  null,
-  'effective -> obsolete is refused: release a new version to supersede instead'
+  '%retired by releasing a new version%',
+  'effective -> obsolete is refused, with the supersede guidance'
 );
+
+-- is_manager must be no exemption for deletion, so this has to be attempted BY a manager --
+-- as a plain editor it would be refused by the pre-existing guard regardless. Elevated for
+-- this one assertion and put back immediately so nothing downstream sees a manager.
+reset role;
+update public.workspace_members set role = 'admin'
+ where workspace_id = 'ws_test' and user_id = '11111111-1111-1111-1111-111111111111';
 select test_as('11111111-1111-1111-1111-111111111111');
-select throws_ok(
+select throws_like(
   $$ update public.sops set deleted_at = now() where id = 'sop_1' $$,
-  null,
-  'an effective SOP cannot be soft-deleted'
+  '%cannot be deleted; release a new version%',
+  'an effective SOP cannot be soft-deleted, workspace admin included'
 );
+reset role;
+update public.workspace_members set role = 'editor'
+ where workspace_id = 'ws_test' and user_id = '11111111-1111-1111-1111-111111111111';
+select test_as('11111111-1111-1111-1111-111111111111');
 
 -- ---------------------------------------------------------------------------
 -- 9. A revision keeps the document's number and only moves the version. The number names

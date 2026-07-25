@@ -19,7 +19,7 @@
 -- auth.uid() resolves and RLS applies. Fixtures are created as the owner (RLS bypassed).
 
 begin;
-select plan(23);
+select plan(26);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -61,6 +61,14 @@ insert into public.department_members (department_id, user_id, dept_role) values
   ('dept_eng', '44444444-4444-4444-4444-444444444444', 'approver'),
   ('dept_qa', '33333333-3333-3333-3333-333333333333', 'approver');
 
+-- Since 20260715190000 a signer must have a saved handwritten signature; sign_sop snapshots it
+-- onto the signature row. Seed one per user so the lifecycle below can be driven.
+insert into public.user_signature_profiles (user_id, signature_strokes) values
+  ('11111111-1111-1111-1111-111111111111', '[[{"x":0,"y":0},{"x":1,"y":1}]]'::jsonb),
+  ('22222222-2222-2222-2222-222222222222', '[[{"x":0,"y":0},{"x":1,"y":1}]]'::jsonb),
+  ('33333333-3333-3333-3333-333333333333', '[[{"x":0,"y":0},{"x":1,"y":1}]]'::jsonb),
+  ('44444444-4444-4444-4444-444444444444', '[[{"x":0,"y":0},{"x":1,"y":1}]]'::jsonb);
+
 -- Helper: act as a given user with the authenticated role.
 create or replace function test_as(p_uid text) returns void language plpgsql as $$
 begin
@@ -85,6 +93,21 @@ select throws_ok(
 );
 
 -- ---------------------------------------------------------------------------
+-- 1b. The number is not signed content. This is what lets the release edge stamp a number
+--     into the document without stranding the signature that authorized the release.
+-- ---------------------------------------------------------------------------
+select is(
+  public.sop_doc_hash('{"body":"x","meta":{"title":"t"}}'::jsonb),
+  public.sop_doc_hash('{"body":"x","meta":{"title":"t","sopNumber":"SOP-PRD-001"}}'::jsonb),
+  'sop_doc_hash ignores meta.sopNumber, so stamping the number moves no hash'
+);
+select isnt(
+  public.sop_doc_hash('{"body":"x","meta":{"title":"t"}}'::jsonb),
+  public.sop_doc_hash('{"body":"y","meta":{"title":"t"}}'::jsonb),
+  'sop_doc_hash still tracks real content'
+);
+
+-- ---------------------------------------------------------------------------
 -- 2. A client cannot INSERT a born-"effective" SOP — the guard forces draft.
 -- ---------------------------------------------------------------------------
 insert into public.sops (id, workspace_id, sop_number, title, document, status, created_by, department_id)
@@ -106,7 +129,7 @@ select is(
 -- A working draft to drive the lifecycle. Seats: one responsible (owning dept) and the
 -- mandatory accountable seat (another dept). The submitter (u1) holds no seat.
 insert into public.sops (id, workspace_id, sop_number, title, document, status, created_by, department_id)
-values ('sop_1', 'ws_test', 'SOP-PRD-010', 'Torque spec', '{"body":"v1"}'::jsonb, 'draft',
+values ('sop_1', 'ws_test', 'SOP-PRD-010', 'Torque spec', '{"body":"v1","meta":{"title":"Torque spec"}}'::jsonb, 'draft',
         '11111111-1111-1111-1111-111111111111', 'dept_prd');
 
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
@@ -138,6 +161,26 @@ select throws_ok(
   $$ update public.sops set status = 'approved' where id = 'sop_1' $$,
   null,
   'a manual in_review->approved by the submitter with an unmet quorum is refused'
+);
+
+-- ---------------------------------------------------------------------------
+-- 4b. Draft review, then the final-approval request. Since 20260715172000 a seat cannot sign
+--     its department approval until the author has asked for final approval, and the author
+--     cannot ask until every required approver has returned the draft with no changes against
+--     the CURRENT content hash and review cycle.
+-- ---------------------------------------------------------------------------
+reset role;
+insert into public.sop_review_submissions
+  (sop_id, review_cycle, reviewer_id, reviewer_name, no_changes, content_hash)
+select 'sop_1', s.review_cycle, seat.signer_id, 'Reviewer', true, s.content_hash
+  from public.sops s
+  join public.sop_review_seats seat on seat.sop_id = s.id
+ where s.id = 'sop_1';
+
+select test_as('11111111-1111-1111-1111-111111111111');
+select lives_ok(
+  $$ select public.request_sop_final_approval('sop_1') $$,
+  'the author can request final approval once every required approver returned no changes'
 );
 
 -- ---------------------------------------------------------------------------
@@ -219,10 +262,11 @@ select is(
   1,
   'stamping the number does not strand the signature that authorized the release'
 );
-select throws_ok(
-  $$ update public.sops set sop_number = 'SOP-PRD-999' where id = 'sop_1' $$,
-  null,
-  'a client cannot rewrite the number of an effective SOP'
+update public.sops set sop_number = 'SOP-PRD-999' where id = 'sop_1';
+select is(
+  (select sop_number from public.sops where id = 'sop_1'),
+  'SOP-PRD-001',
+  'a client UPDATE of sop_number is silently pinned to the minted value, not honoured'
 );
 
 -- ---------------------------------------------------------------------------
@@ -257,7 +301,7 @@ select test_as('11111111-1111-1111-1111-111111111111');
 -- ---------------------------------------------------------------------------
 update public.sops set status = 'draft', revision_reason = 'Torque value corrected'
  where id = 'sop_1';
-update public.sops set document = '{"body":"v2"}'::jsonb where id = 'sop_1';
+update public.sops set document = '{"body":"v2","meta":{"title":"Torque spec"}}'::jsonb where id = 'sop_1';
 select is(
   (select sop_number from public.sops where id = 'sop_1'),
   'SOP-PRD-001',
@@ -266,6 +310,19 @@ select is(
 
 select public.sign_sop('sop_1', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_1';
+
+-- The revision bumped review_cycle and the edit changed content_hash, so the draft-review
+-- submissions must be made again for this cycle before final approval can be requested.
+reset role;
+insert into public.sop_review_submissions
+  (sop_id, review_cycle, reviewer_id, reviewer_name, no_changes, content_hash)
+select 'sop_1', s.review_cycle, seat.signer_id, 'Reviewer', true, s.content_hash
+  from public.sops s
+  join public.sop_review_seats seat on seat.sop_id = s.id
+ where s.id = 'sop_1';
+select test_as('11111111-1111-1111-1111-111111111111');
+select public.request_sop_final_approval('sop_1');
+
 select test_as('22222222-2222-2222-2222-222222222222');
 select public.sign_sop('sop_1', 'dept_approval', p_seat_department => 'dept_prd');
 select test_as('44444444-4444-4444-4444-444444444444');

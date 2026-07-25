@@ -44,6 +44,27 @@ Every new feature, in this order:
   absent from memory and is guarded by a tripwire (`assertSaneStateDeletion`) —
   do not weaken it, and do not build new save paths in its image. New features
   write granularly (upsert what changed).
+- **`enforce_sop_transition` and `sign_sop` are patched IN PLACE — never rewrite
+  their bodies from a file here.** No file in `supabase/migrations/` holds their
+  current text: several migrations read the *live* definition
+  (`pg_get_functiondef(...)`), string-`replace` fragments, and `execute` the
+  result. `grep -rl pg_get_functiondef supabase/migrations/` finds them. A
+  full-body rewrite authored from the newest checked-in file silently reverts
+  every later patch — this cost us a near-miss on 2026-07-25, where reinstating a
+  removed "exactly one Accountable seat" gate against a schema that now forbids
+  `rasic = 'accountable'` would have made *every* `draft → in_review` raise. Copy
+  the guarded-replace pattern instead: assert each anchor with
+  `if position($from$…$from$ in v_definition) = 0 then raise exception …`, then a
+  single `execute v_definition`, so a drifted base fails loudly. Verify anchors
+  are present AND unique by replaying the applied patches in timestamp order, and
+  confirm after with `npx supabase db query --linked`. Green tests prove nothing
+  here — the bug lives in the database, not the repo.
+- **Embedding `departments` from `sops` needs an explicit FK hint:**
+  `department:departments!sops_department_id_fkey(code)`. Three paths connect the
+  two tables — the direct column, plus `sop_review_seats` and `sop_signatures`,
+  which each carry a `sop_id` *and* a department FK and so read as junction
+  tables. Without the hint PostgREST returns `PGRST201`. The `Relationships`
+  array in `database.types.ts` lists only outgoing FKs and will not warn you.
 - **Auth:** sessions live in cookies (@supabase/ssr). Server code verifies with
   `getUser()` (a cookie is unverified input); client code uses
   `getUserFromSession()` (no network) and must handle its null. API routes use

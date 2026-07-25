@@ -66,7 +66,8 @@ Rules:
 - Set each activity's \`shape\`: "decision" for a yes/no question or a compliance / approval / quality check (often ending in "?"). Use "terminator" ONLY for a pure start- or end-state milestone written as a short noun phrase (e.g. "Order received", "SOP released") — never for an action. If a step is itself an action (receive, assess, communicate, document, notify), it is a "process" step. Everything else is "process".
 - Bracket the flow with terminators: when the process has a clear trigger and a clear final outcome, add a short Start terminator at the very beginning (the triggering event, e.g. "Order request received") and a short End terminator at the very end (the final outcome, e.g. "Escalation record archived"), in addition to the action steps. Terminators are flow markers only — they are NOT numbered in the written procedure list, so every real action must stay a "process" (or "decision") step and never be collapsed into a terminator.
 - "Annexes" are appendices / attached forms (label + description).
-- Capture any change-history table rows and approval-table rows you find.`;
+- Capture any change-history table rows and approval-table rows you find.
+- Line breaks in long fields (\`purpose\`, \`scope\`, \`detail\`) must be real line breaks in the string value. Never write the two characters backslash-n to mean a new line — that reaches the printed document as literal \\n text rather than a paragraph break.`;
 
 /** JSON Schema for the Anthropic tool input — mirrors `ExtractedSop`. */
 export const SOP_EXTRACTION_TOOL = {

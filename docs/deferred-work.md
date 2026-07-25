@@ -4,63 +4,51 @@ Companion to `nextjs-refactor-plan.md`. These items are **intentionally deferred
 not forgotten and not defects. Each says what it is, why it's parked, and what
 finishing it involves.
 
-Last reviewed: 2026-07-18
+Last reviewed: 2026-07-25
 
 ---
 
-## 1. Solo self-review test mode — KEEP, DO NOT REFACTOR
+## 1. Solo self-review test mode — RETIRED 2026-07-25
 
-**Decision: stays in place while SOP flow testing continues.**
+**Decision: retired. This section previously read "KEEP, DO NOT REFACTOR" — that is
+no longer true, and anything relying on it should be re-checked.**
 
-This is a deliberate feature for testing the SOP approval flow single-handed. It is
-not a defect and not a security hole — the database guards are narrow (author-only,
-draft-only, caller must be the sole Responsible reviewer with no Accountable seat),
-so no user can touch anyone else's SOP.
+Migration `20260723133000_required_department_approvers.sql` replaced the feature's
+two RPCs with stubs — `sop_self_review_test_active()` returns `select false`,
+`enable_sop_self_review_test()` raises "Solo self-review is no longer available;
+assign a required departmental approver" — and cleared `self_review_test` on every
+row. It was authored 2026-07-23 but only applied live on **2026-07-25**, because a
+defect in the same migration blocked `db push` until then; so anyone reading this
+between those dates would have seen the feature still working.
 
-### Where it lives (the complete footprint)
+Replaced by the required-departmental-approver roster: solo review is now impossible
+by design rather than by exception, since a seat's signer can never be the author.
+
+### What is left, and how to remove it
+
+Everything below is inert — `test_self` and `v_test_self` can never evaluate true —
+but it is still present:
 
 | Piece | Location |
 |---|---|
-| Column | `sops.self_review_test` |
-| RPC (enable) | `enable_sop_self_review_test(text)` — migration `20260715143000` |
-| RPC (check) | `sop_self_review_test_active(text)` |
-| Guard patches | Same migration patches `enforce_sop_transition()` and `sign_sop()` in place |
-| Client wrapper | `src/lib/sop/review.ts:153` `enableSopSelfReviewTest` |
-| UI gate | `src/components/sop/sop-editor.tsx:596` `soloSelfReviewReady` |
-| UI call | `src/components/sop/sop-editor.tsx:1051` |
+| Column | `sops.self_review_test` (all rows false) |
+| RPC (enable) | `enable_sop_self_review_test(text)` — raises |
+| RPC (check) | `sop_self_review_test_active(text)` — returns false |
+| Guard branches | `test_self` in `enforce_sop_transition()`, `v_test_self` in `sign_sop()` |
+| Store field | `SopControl.selfReviewTest` (`src/lib/sop/review.ts`) |
 
-### Isolation rules for the refactor
+`enableSopSelfReviewTest` and `soloSelfReviewReady` no longer exist in the app.
 
-The footprint is already small and well-contained — the entire UI surface is one
-derived boolean and one call. To keep it from entangling with the refactor:
+Removal is optional cleanup, not urgent — inert code costs nothing at runtime. If
+done, the one hard constraint is that **`enforce_sop_transition()` and `sign_sop()`
+must be patched in place** via `pg_get_functiondef` + guarded `replace`, never
+rewritten from a file: no file in the repo holds their current text. Rewriting from
+a checked-in version silently reverts every later migration — on 2026-07-25 that
+nearly reinstated a removed approval gate that would have blocked every
+`draft -> in_review`. See CLAUDE.md's hard rules.
 
-1. **Exempt from dead-code passes.** `enableSopSelfReviewTest` will look unused to
-   any "no callers" heuristic run against the RPC layer. It is not. Do not delete it.
-2. **Do not "simplify" the `soloSelfReviewReady` branch** in `sop-editor.tsx`. It
-   reads like a redundant special case. It is load-bearing.
-3. **Do not refactor the two RPCs into the normal approval path.** They exist
-   precisely to sit outside it.
-4. **When `sop-editor.tsx` is split** (Stage 6), keep `soloSelfReviewReady` and its
-   call site together in the same module so the feature stays removable as a unit.
-5. **The guard patching is migration-order-sensitive.** Migration `20260715143000`
-   rewrites `enforce_sop_transition()` and `sign_sop()` by asserting on their
-   existing source text. Any future migration that redefines those functions must
-   be checked against it, or the patch silently applies to the wrong code path.
-
-### Removal, when testing is done
-
-One migration plus one small commit:
-1. Migration: drop both RPCs, drop the `self_review_test` column, restore the
-   unpatched `enforce_sop_transition()` and `sign_sop()`.
-2. Code: delete `enableSopSelfReviewTest` (`review.ts:153`), the
-   `soloSelfReviewReady` derivation (`sop-editor.tsx:596`), and its call
-   (`sop-editor.tsx:1051`). `approvalRoutingReady` reverts to
-   `standardApprovalRoutingReady` alone.
-
-**Interim hardening (optional, ~2 lines):** the enable RPC is granted to
-`authenticated`, so it is not restricted to you specifically — any user who is the
-sole reviewer on their own draft can invoke it directly. Harmless during solo
-testing; restrict before operators or auditors are in the system.
+The old "interim hardening" note about the enable RPC being reachable by any
+authenticated user is moot: the RPC now raises for everyone.
 
 ---
 

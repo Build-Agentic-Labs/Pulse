@@ -287,16 +287,16 @@ at a time with verification** — several solve problems server rendering does n
 for testing the SOP approval flow single-handed, and it remains while that testing
 continues. Its database guards are narrow and it is not a security hole.
 
-**It is exempt from every stage of this refactor.** Full footprint, isolation
-rules, and the eventual removal procedure are documented in `deferred-work.md §1`.
-The three that matter most here:
+**RETIRED 2026-07-25 — the exemption below no longer applies.** Migration
+`20260723133000` stubbed both RPCs and cleared the flag; `enableSopSelfReviewTest`
+and `soloSelfReviewReady` are gone from the app, so the dead-code and
+don't-simplify warnings that stood here are obsolete. What remains is inert: the
+`sops.self_review_test` column, two stub RPCs, and `test_self` branches in
+`enforce_sop_transition()` / `sign_sop()` that can never be true.
 
-- Do not delete `enableSopSelfReviewTest` in dead-code passes — it will look
-  unused to a "no callers" heuristic. It is not.
-- Do not simplify the `soloSelfReviewReady` branch (`sop-editor.tsx:596`). It
-  reads like a redundant special case and is load-bearing.
-- When `sop-editor.tsx` is split in Stage 6, keep the flag and its call site in one
-  module so the feature stays removable as a unit.
+If those branches are ever removed, the functions must be patched in place via
+`pg_get_functiondef` + guarded `replace` — never rewritten from a checked-in file,
+which silently reverts later migrations. See `deferred-work.md §1` and CLAUDE.md.
 
 **The `canTransitionSop` mirror.** See `deferred-work.md §3`. Not blocking, but do
 not carry this refactor forward believing the SOP approval workflow is tested — it

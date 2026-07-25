@@ -102,8 +102,16 @@ Every new feature, in this order:
 
 ## Deliberate decisions — do not "fix" these
 
-- `enableSopSelfReviewTest` / `soloSelfReviewReady` (SOP solo test mode) look
-  unused/redundant; they are a live feature. See docs/deferred-work.md §1.
+- **SOP solo self-review test mode is RETIRED** (2026-07-25) — this note used to
+  say the opposite, so read it before acting on anything that mentions it.
+  `20260723133000` stubbed `sop_self_review_test_active()` to `select false`, made
+  `enable_sop_self_review_test()` raise, and cleared the flag on every row; it was
+  applied live 2026-07-25. `enableSopSelfReviewTest` and `soloSelfReviewReady` are
+  already gone from the app. What remains is inert but NOT free to delete casually:
+  the `sops.self_review_test` column, both RPCs, and `test_self` branches inside
+  `enforce_sop_transition()` / `sign_sop()` that can never evaluate true. Removing
+  the branches means patching those functions in place (see the rule above) — never
+  a rewrite. See docs/deferred-work.md §1.
 - react-hooks v7 compiler-era lint rules are pinned off in eslint.config.mjs
   with rationale; the classic rules stay on.
 - `sop/numbering.ts`, `sop/version.ts` are pre-built, not dead. Decide to

@@ -27,7 +27,6 @@ import {
 import { draftReviewGate } from "@/domain/sop/review-gate";
 import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
-import { formatResponsiblePersons, parseResponsiblePersons } from "@/domain/sop/responsible-persons";
 import { applySampleData } from "@/domain/sop/sample";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { fetchMyDeptRoles, listDepartments, listMembersForDepartments } from "@/lib/departments/store";
@@ -65,6 +64,7 @@ import {
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
 import { ProcessFlowchart } from "./process-flowchart";
+import { ResponsiblePersonsField } from "./responsible-persons-field";
 import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopPrintPreview } from "./sop-print-preview";
 import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
@@ -1875,19 +1875,10 @@ export function SopEditor({
                   title="Responsible person(s)"
                   reviewAttention={reviewCategoriesNeedingAttention.has("responsible")}
                 >
-                  {/* One entry per line. The previous single-line input wrote the whole typed
-                      string back as ONE array element, collapsing a multi-entry roster on the
-                      first keystroke — invisible while every consumer joined with "; ", and the
-                      reason this had to be fixed before rendering per entry. */}
-                  <AutoTextarea
-                    className="ui-field-standalone min-h-16 py-2"
-                    aria-label="Responsible persons or roles, one per line"
-                    placeholder={"e.g. Quality Manager\nProcess Owner"}
-                    value={formatResponsiblePersons(sop.responsiblePersons)}
+                  <ResponsiblePersonsField
+                    entries={sop.responsiblePersons}
                     disabled={!canEdit}
-                    onChange={(event) =>
-                      update({ responsiblePersons: parseResponsiblePersons(event.target.value) })
-                    }
+                    onChange={(responsiblePersons) => update({ responsiblePersons })}
                   />
                 </Section>
                 <Section

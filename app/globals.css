@@ -2803,11 +2803,30 @@ body {
     border-color: var(--color-ink-tertiary);
   }
 
-  /* The "Use ..." entry that commits a typed value. Set apart from the real options so it
+  /* The "Add ..." entry that commits a typed value. Set apart from the real options so it
      reads as an action rather than another item in the list. */
   .ui-themed-select-option-create {
     border-top: 1px solid var(--color-line);
-    font-style: italic;
+    gap: 0.375rem;
+  }
+
+  .ui-themed-select-create-icon {
+    flex-shrink: 0;
+    color: var(--color-ink-secondary);
+  }
+
+  /* Shown before anything is typed, so the menu advertises that it accepts new values. */
+  .ui-themed-select-create-hint {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0.5rem 0.625rem;
+    border-top: 1px solid var(--color-line);
+    color: var(--color-ink-tertiary);
+    font-family: var(--type-sans);
+    font-size: 0.6875rem;
+    line-height: 1.2;
   }
 
   .ui-themed-select-group {

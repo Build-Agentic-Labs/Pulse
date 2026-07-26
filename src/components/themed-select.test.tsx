@@ -48,7 +48,7 @@ describe("ThemedSelect with allowCustomValue", () => {
 
     // The trailing entry is the add action; a partial term is still offerable as a new role,
     // so filter it out and assert on the real options.
-    const real = optionLabels().filter((label) => !label.startsWith("Use"));
+    const real = optionLabels().filter((label) => !label.startsWith("Add"));
     expect(real).toEqual(["Quality Manager", "Quality Inspector"]);
   });
 
@@ -64,7 +64,7 @@ describe("ThemedSelect with allowCustomValue", () => {
     render(<ThemedSelect value="" options={OPTIONS} onChange={onChange} ariaLabel="Role" allowCustomValue />);
     fireEvent.click(trigger());
     fireEvent.change(search(), { target: { value: "  Line   Auditor  " } });
-    fireEvent.click(screen.getByRole("option", { name: /Line Auditor/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Add .*Line Auditor/ }));
 
     // Normalized on the way out, so spacing variants cannot become separate roles.
     expect(onChange).toHaveBeenCalledWith("Line Auditor");
@@ -77,7 +77,7 @@ describe("ThemedSelect with allowCustomValue", () => {
     fireEvent.click(trigger());
     fireEvent.change(search(), { target: { value: "operator" } });
 
-    expect(optionLabels().some((label) => label.startsWith("Use"))).toBe(false);
+    expect(optionLabels().some((label) => label.startsWith("Add"))).toBe(false);
 
     fireEvent.keyDown(search(), { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith("Operator");
@@ -91,6 +91,21 @@ describe("ThemedSelect with allowCustomValue", () => {
     fireEvent.keyDown(search(), { key: "Enter" });
 
     expect(onChange).toHaveBeenCalledWith("Line Auditor");
+  });
+
+  // The affordance itself: opening the menu must reveal that new values are accepted, without
+  // requiring the author to guess that the box is typeable.
+  it("advertises that a new value can be added before anything is typed", () => {
+    open();
+    expect(screen.getByText(/type a name above to add a new one/i)).toBeTruthy();
+  });
+
+  it("replaces the hint with the add action once something is typed", () => {
+    open();
+    fireEvent.change(search(), { target: { value: "Line Auditor" } });
+
+    expect(screen.queryByText(/type a name above to add a new one/i)).toBeNull();
+    expect(optionLabels().some((label) => label.startsWith("Add"))).toBe(true);
   });
 
   it("does nothing on Enter with an empty box", () => {

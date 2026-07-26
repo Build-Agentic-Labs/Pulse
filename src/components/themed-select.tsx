@@ -269,6 +269,29 @@ export function ThemedSelect({
                   else if (typed.length > 0) commit(typed);
                 }}
               />
+              {/* Both of these live in the STICKY header, not at the foot of the list. The role
+                  list runs to thousands of pixels, so an affordance below the fold is no
+                  affordance at all — measured at 2210px out of view before this moved. */}
+              {showCustomEntry ? (
+                <button
+                  type="button"
+                  className={`ui-themed-select-option ui-themed-select-option-create ${isSop ? "ui-themed-select-option-sop" : ""}`}
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => commit(typed)}
+                >
+                  <Plus size={13} className="ui-themed-select-create-icon" aria-hidden="true" />
+                  <span className="ui-themed-select-option-content">
+                    <span className="ui-themed-select-option-label">Add “{typed}”</span>
+                  </span>
+                </button>
+              ) : null}
+              {!typed ? (
+                <p className="ui-themed-select-create-hint" role="presentation">
+                  <Plus size={12} aria-hidden="true" />
+                  Type a name to add a new one
+                </p>
+              ) : null}
             </div>
           ) : null}
           {visibleOptions.map((option, index) => {
@@ -303,29 +326,6 @@ export function ThemedSelect({
               </div>
             );
           })}
-          {showCustomEntry ? (
-            <button
-              type="button"
-              className={`ui-themed-select-option ui-themed-select-option-create ${isSop ? "ui-themed-select-option-sop" : ""}`}
-              role="option"
-              aria-selected={false}
-              onClick={() => commit(typed)}
-            >
-              <Plus size={13} className="ui-themed-select-create-icon" aria-hidden="true" />
-              <span className="ui-themed-select-option-content">
-                <span className="ui-themed-select-option-label">Add “{typed}”</span>
-              </span>
-            </button>
-          ) : null}
-          {/* Standing hint, shown before anything is typed. Without it the menu looks like a
-              plain picker and nothing reveals that a new value can be created at all — the
-              create entry only appears once you have already guessed you can type. */}
-          {allowCustomValue && !typed ? (
-            <p className="ui-themed-select-create-hint" role="presentation">
-              <Plus size={12} aria-hidden="true" />
-              Type a name above to add a new one
-            </p>
-          ) : null}
         </div>,
         document.body,
       ) : null}

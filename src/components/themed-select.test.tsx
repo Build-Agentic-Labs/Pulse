@@ -97,14 +97,14 @@ describe("ThemedSelect with allowCustomValue", () => {
   // requiring the author to guess that the box is typeable.
   it("advertises that a new value can be added before anything is typed", () => {
     open();
-    expect(screen.getByText(/type a name above to add a new one/i)).toBeTruthy();
+    expect(screen.getByText(/type a name to add a new one/i)).toBeTruthy();
   });
 
   it("replaces the hint with the add action once something is typed", () => {
     open();
     fireEvent.change(search(), { target: { value: "Line Auditor" } });
 
-    expect(screen.queryByText(/type a name above to add a new one/i)).toBeNull();
+    expect(screen.queryByText(/type a name to add a new one/i)).toBeNull();
     expect(optionLabels().some((label) => label.startsWith("Add"))).toBe(true);
   });
 

@@ -2,7 +2,7 @@
 
 import { ChevronDown, ChevronUp, Circle, Diamond, Plus, Square, Trash2, type LucideIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
-import { standardPositionTitlesForDepartment, type Department } from "@/domain/departments";
+import { rasicRoleOptions, type Department } from "@/domain/departments";
 import {
   RASIC_CODES,
   RASIC_LABELS,
@@ -17,6 +17,12 @@ type Props = {
   roles: string[];
   activities: SopActivity[];
   departments: Department[];
+  /** The SOP's OWNING department — its titles lead the role dropdown. */
+  owningDepartmentId?: string | null;
+  /** Roles this workspace has already added, offered under "Added by your team". */
+  workspaceRoleNames?: readonly string[];
+  /** Called when an author commits a role that is in none of the offered groups. */
+  onCreateRole?: (name: string) => void;
   /** Read-only mode: inputs are disabled and structural controls (add/move/delete) are hidden. */
   disabled?: boolean;
   onChange: (roles: string[], activities: SopActivity[]) => void;
@@ -47,31 +53,30 @@ function renumber(activities: SopActivity[]): SopActivity[] {
  * pill / process rectangle / decision diamond). A Table view keeps the dense RASIC matrix
  * for fast bulk responsibility entry. Both edit the same `(roles, activities)`.
  */
-export function ProcessFlowchart({ roles, activities, departments, disabled = false, onChange }: Props) {
+export function ProcessFlowchart({
+  roles,
+  activities,
+  departments,
+  owningDepartmentId,
+  workspaceRoleNames = [],
+  onCreateRole,
+  disabled = false,
+  onChange,
+}: Props) {
   const [view, setView] = useState<"map" | "table">("map");
   const [autoOpenRoleIndex, setAutoOpenRoleIndex] = useState<number | null>(null);
-  const roleOptions = useMemo<ThemedSelectOption[]>(() => {
-    const groupedTitles = departments
-      .slice()
-      .sort((left, right) => left.name.localeCompare(right.name))
-      .flatMap((department) =>
-        standardPositionTitlesForDepartment(department.code).map((title) => ({ department, title })),
-      );
-    const titleCounts = new Map<string, number>();
-    for (const { title } of groupedTitles) {
-      titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-    }
-    return groupedTitles.map(({ department, title }) => ({
-      value: titleCounts.get(title) === 1 ? title : `${title} — ${department.name}`,
-      label: title,
-      group: department.name,
-    }));
-  }, [departments]);
+  const roleOptions = useMemo<ThemedSelectOption[]>(
+    () => rasicRoleOptions(owningDepartmentId, departments, workspaceRoleNames),
+    [departments, owningDepartmentId, workspaceRoleNames],
+  );
 
   // --- roles (RASIC functions) ---
   function setRole(index: number, value: string) {
     const previousRole = roles[index];
     setAutoOpenRoleIndex(null);
+    // Absent from every offered group => the author typed it. The document write is the
+    // onChange below; this adds it to the workspace list in the same gesture.
+    if (value && !roleOptions.some((option) => option.value === value)) onCreateRole?.(value);
     onChange(
       roles.map((role, i) => (i === index ? value : role)),
       activities.map((activity) => {
@@ -158,6 +163,7 @@ export function ProcessFlowchart({ roles, activities, departments, disabled = fa
                 placeholder="Select role"
                 ariaLabel={`Role ${index + 1} for RASIC functions`}
                 autoOpen={autoOpenRoleIndex === index}
+                allowCustomValue
                 disabled={disabled}
                 options={[
                   ...(role && !roleOptions.some((option) => option.value === role)

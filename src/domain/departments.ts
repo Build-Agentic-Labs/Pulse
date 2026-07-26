@@ -55,6 +55,107 @@ export function standardPositionTitlesForDepartment(code: string): readonly stri
   return STANDARD_POSITION_TITLES[code.trim().toUpperCase()] ?? DEFAULT_POSITION_TITLES;
 }
 
+// ---------------------------------------------------------------------------
+// RASIC role vocabulary — deliberately NOT the same list as the position titles above.
+//
+// A position title names a person on the roster. A RASIC role names an actor in a process, and
+// some actors are collective: "Associates/Employees" and "Board of Management" belong in a
+// responsibility matrix but must never be offered when assigning a job title to a real employee.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cross-department process actors, offered to every department.
+ *
+ * Shipped in code rather than seeded into sop_rasic_roles: no per-workspace bootstrap, a new
+ * workspace works on day one, and this baseline cannot be deleted the way a row can. Curation
+ * (rename/delete, owner/admin only) therefore applies exactly where drift happens — the roles
+ * authors type.
+ */
+export const GENERAL_RASIC_ROLES = [
+  "EVP Operations",
+  "Supervisor",
+  "Team Leader",
+  "Quality Inspector",
+  "Operator",
+  "Associates/Employees",
+  "HoD (Heads of Department)",
+  "Board of Management",
+] as const;
+
+/** Group heading for the workspace's own typed roles. */
+export const ADDED_RASIC_ROLES_GROUP = "Added by your team";
+
+/**
+ * Canonical form of a typed role name: trimmed, internal whitespace collapsed, null when there
+ * is nothing left. The unique index on (workspace_id, lower(btrim(name))) catches case and edge
+ * whitespace; collapsing runs of internal spaces is the part SQL cannot express, so "Team
+ * Leader" and "Team  Leader" resolve to one role rather than two.
+ */
+export function normalizeRasicRoleName(raw: string): string | null {
+  const collapsed = raw.trim().replace(/\s+/g, " ");
+  return collapsed.length > 0 ? collapsed : null;
+}
+
+/** One entry of the RASIC role dropdown. Structurally a ThemedSelectOption, without the import. */
+export interface RasicRoleOption {
+  value: string;
+  label: string;
+  group: string;
+}
+
+/**
+ * The grouped role dropdown, assembled from the three sources in display order: the SOP's owning
+ * department, the remaining departments alphabetically, General, then the workspace's own roles.
+ *
+ * Two properties the callers depend on:
+ *  - Each group is emitted CONTIGUOUSLY. ThemedSelect prints a heading whenever an option's
+ *    group differs from the previous option's, so a split group would print its heading twice.
+ *  - Values are deduped case-insensitively and the first source wins, so a typed duplicate can
+ *    never shadow a curated name.
+ */
+export function rasicRoleOptions(
+  owningDepartmentId: string | null | undefined,
+  departments: readonly Department[],
+  workspaceRoleNames: readonly string[],
+): RasicRoleOption[] {
+  const ordered = departments.slice().sort((left, right) => {
+    if (left.id === owningDepartmentId) return -1;
+    if (right.id === owningDepartmentId) return 1;
+    return left.name.localeCompare(right.name);
+  });
+
+  // A title offered by more than one department is qualified with the department name, so the
+  // two stay distinguishable instead of colliding on value.
+  const titleCounts = new Map<string, number>();
+  for (const department of ordered) {
+    for (const title of standardPositionTitlesForDepartment(department.code)) {
+      titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+    }
+  }
+
+  const options: RasicRoleOption[] = [];
+  const seen = new Set<string>();
+  function push(value: string, label: string, group: string) {
+    const key = value.trim().toLowerCase();
+    if (key.length === 0 || seen.has(key)) return;
+    seen.add(key);
+    options.push({ value, label, group });
+  }
+
+  for (const department of ordered) {
+    for (const title of standardPositionTitlesForDepartment(department.code)) {
+      const qualified = (titleCounts.get(title) ?? 0) > 1;
+      push(qualified ? `${title} — ${department.name}` : title, title, department.name);
+    }
+  }
+  for (const role of GENERAL_RASIC_ROLES) push(role, role, "General");
+  for (const raw of workspaceRoleNames) {
+    const name = normalizeRasicRoleName(raw);
+    if (name) push(name, name, ADDED_RASIC_ROLES_GROUP);
+  }
+  return options;
+}
+
 const ORDER: Record<DeptRole, number> = { author: 0, reviewer: 1, approver: 2 };
 
 /** True when `role` sits at or above `min` in the cumulative order. */

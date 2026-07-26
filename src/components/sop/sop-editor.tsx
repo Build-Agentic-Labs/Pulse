@@ -44,6 +44,7 @@ import {
   type SopSignature,
 } from "@/lib/sop/review";
 import { getSop, listSops, saveSop, SopConflictError, type SaveSopOptions, type SopListItem } from "@/lib/sop/store";
+import { addRasicRole, listRasicRoles } from "@/lib/sop/rasic-roles/store";
 import {
   listSopReviewAnnotations,
   listSopReviewSubmissions,
@@ -345,6 +346,10 @@ export function SopEditor({
   const [fieldHint, setFieldHint] = useState<FieldHint | null>(null);
   const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
   const [annexFileError, setAnnexFileError] = useState("");
+  // Roles this workspace has added, offered under "Added by your team" in the RASIC dropdown.
+  // Lazily loaded on the procedure step, same as the References picker below: dropdown contents
+  // are not first-paint content.
+  const [workspaceRoleNames, setWorkspaceRoleNames] = useState<string[]>([]);
   // Workspace SOPs offered by the References picker; loaded lazily on the overview step.
   const [linkableSops, setLinkableSops] = useState<SopListItem[] | undefined>(undefined);
   const [linkableSopsError, setLinkableSopsError] = useState("");
@@ -732,6 +737,21 @@ export function SopEditor({
   // Load the workspace SOP list the first time the overview step (which hosts the
   // References picker) becomes active; undefined = not loaded yet.
   useEffect(() => {
+    if (step.id !== "procedure" || !workspaceId) return;
+    let active = true;
+    listRasicRoles(workspaceId)
+      .then((roles) => {
+        if (active) setWorkspaceRoleNames(roles.map((role) => role.name));
+      })
+      // A failed load is not worth an error surface: the department and General groups still
+      // populate the dropdown, and typing a role still works.
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [step.id, workspaceId]);
+
+  useEffect(() => {
     if (step.id !== "overview" || !workspaceId || linkableSops !== undefined) return;
     let cancelled = false;
     listSops(workspaceId)
@@ -933,6 +953,31 @@ export function SopEditor({
     const run = runSave(firstSave, expectedUpdatedAt);
     inFlightSaveRef.current = run;
     return run;
+  }
+
+  /**
+   * Add a typed role to the workspace list. The document write already happened through
+   * ProcessFlowchart's onChange — this is the shared half of the same gesture, so a failure here
+   * must not disturb the document. Optimistic: the name is already selected on screen.
+   */
+  function handleCreateRasicRole(name: string) {
+    if (!workspaceId) return;
+    setWorkspaceRoleNames((current) =>
+      current.some((role) => role.toLowerCase() === name.toLowerCase()) ? current : [...current, name],
+    );
+    void addRasicRole(workspaceId, name)
+      .then((role) => {
+        setWorkspaceRoleNames((current) =>
+          current.some((existing) => existing.toLowerCase() === role.name.toLowerCase())
+            ? current
+            : [...current, role.name],
+        );
+      })
+      .catch(() => {
+        // Roll the optimistic entry back out of the dropdown. The role stays on the document,
+        // where it renders through the "Current role" fallback.
+        setWorkspaceRoleNames((current) => current.filter((role) => role !== name));
+      });
   }
 
   async function runSave(firstSave: boolean, expectedUpdatedAt: string | undefined): Promise<boolean> {
@@ -1911,6 +1956,9 @@ export function SopEditor({
                     roles={sop.procedure.roles}
                     activities={sop.procedure.activities}
                     departments={approvalDepartments}
+                    owningDepartmentId={selectedDepartmentId}
+                    workspaceRoleNames={workspaceRoleNames}
+                    onCreateRole={handleCreateRasicRole}
                     disabled={!canEdit}
                     onChange={(roles, activities) => update({ procedure: { ...sop.procedure, roles, activities } })}
                   />

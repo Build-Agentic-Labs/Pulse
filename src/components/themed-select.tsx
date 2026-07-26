@@ -33,6 +33,12 @@ type ThemedSelectProps = {
   disabled?: boolean;
   menuAlign?: "left" | "right";
   placeholder?: string;
+  /**
+   * Opt-in combobox behavior: a search box at the top of the menu that filters the options and
+   * offers to commit whatever was typed. Defaults to false, so every call site that does not
+   * pass it renders and behaves exactly as before.
+   */
+  allowCustomValue?: boolean;
   /** Optional compact trigger text when the menu labels need to be more descriptive. */
   selectedLabel?: string;
   triggerClassName?: string;
@@ -44,6 +50,7 @@ export function ThemedSelect({
   options,
   onChange,
   ariaLabel,
+  allowCustomValue = false,
   autoOpen = false,
   className = "",
   disabled = false,
@@ -59,6 +66,26 @@ export function ThemedSelect({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Same normalization the domain applies to a role name, so what is offered and what is
+  // committed cannot disagree about whitespace.
+  const typed = query.trim().replace(/\s+/g, " ");
+  const visibleOptions = useMemo(() => {
+    if (!allowCustomValue || !typed) return options;
+    const needle = typed.toLowerCase();
+    return options.filter(
+      (option) =>
+        option.label.toLowerCase().includes(needle) || option.value.toLowerCase().includes(needle),
+    );
+  }, [allowCustomValue, options, typed]);
+  // A case or spacing variant of something already offered is that option, never a new value.
+  const typedMatchesExisting = useMemo(
+    () => options.find((option) => option.value.trim().toLowerCase() === typed.toLowerCase()),
+    [options, typed],
+  );
+  const showCustomEntry = allowCustomValue && typed.length > 0 && !typedMatchesExisting;
   const selected = useMemo(() => options.find((option) => option.value === value), [options, value]);
   const selectedOptionLabel = selected?.description
     ? `${selected.label} — ${selected.description}`
@@ -69,6 +96,10 @@ export function ThemedSelect({
   useEffect(() => {
     if (autoOpen && !disabled) setOpen(true);
   }, [autoOpen, disabled]);
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -146,6 +177,10 @@ export function ThemedSelect({
   useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => {
+      if (allowCustomValue) {
+        searchRef.current?.focus();
+        return;
+      }
       const availableOptions = Array.from(
         menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [],
       );
@@ -153,7 +188,7 @@ export function ThemedSelect({
       (availableOptions[selectedIndex >= 0 ? selectedIndex : 0] ?? availableOptions[0])?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [open, options, value]);
+  }, [allowCustomValue, open, options, value]);
 
   function commit(nextValue: string) {
     if (nextValue !== value) onChange(nextValue);
@@ -214,9 +249,31 @@ export function ThemedSelect({
           style={menuStyle ?? undefined}
           onKeyDown={handleMenuKeyDown}
         >
-          {options.map((option, index) => {
+          {allowCustomValue ? (
+            <div className="ui-themed-select-search" role="presentation">
+              <input
+                ref={searchRef}
+                type="text"
+                className="ui-themed-select-search-input"
+                aria-label={ariaLabel ? `${ariaLabel} — type to filter or add` : "Type to filter or add"}
+                placeholder="Type to filter or add…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  // An exact match wins so a case variant can never create a duplicate;
+                  // otherwise Enter commits what was typed. Filtered options are chosen by
+                  // clicking or arrowing to them, which keeps Enter unambiguous.
+                  if (typedMatchesExisting) commit(typedMatchesExisting.value);
+                  else if (typed.length > 0) commit(typed);
+                }}
+              />
+            </div>
+          ) : null}
+          {visibleOptions.map((option, index) => {
             const selectedOption = option.value === value;
-            const showGroup = Boolean(option.group && option.group !== options[index - 1]?.group);
+            const showGroup = Boolean(option.group && option.group !== visibleOptions[index - 1]?.group);
             return (
               <div key={`${option.group ?? "ungrouped"}:${option.value}`} role="presentation">
                 {showGroup ? (
@@ -246,6 +303,19 @@ export function ThemedSelect({
               </div>
             );
           })}
+          {showCustomEntry ? (
+            <button
+              type="button"
+              className={`ui-themed-select-option ui-themed-select-option-create ${isSop ? "ui-themed-select-option-sop" : ""}`}
+              role="option"
+              aria-selected={false}
+              onClick={() => commit(typed)}
+            >
+              <span className="ui-themed-select-option-content">
+                <span className="ui-themed-select-option-label">Use “{typed}”</span>
+              </span>
+            </button>
+          ) : null}
         </div>,
         document.body,
       ) : null}

@@ -17,6 +17,7 @@ import {
   setMember,
   setMemberPosition,
 } from "@/lib/departments/store";
+import { RasicRolesAdmin } from "./rasic-roles-admin";
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
 
 const DEPT_ROLES: readonly DeptRole[] = ["author", "reviewer", "approver"];
@@ -366,6 +367,8 @@ export function DepartmentsAdmin({
             </section>
           )}
         </div>
+
+        <RasicRolesAdmin workspaceId={workspaceId} manage={manage} />
       </div>
   );
 }

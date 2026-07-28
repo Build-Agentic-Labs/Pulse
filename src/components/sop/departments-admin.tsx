@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import { QuietLoading } from "@/components/quiet-loading";
 import { ThemedSelect } from "@/components/themed-select";
-import { standardPositionTitlesForDepartment, type Department, type DepartmentMember, type DeptRole } from "@/domain/departments";
+import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
 import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
 import type { MemberAccess } from "@/domain/types";
 import {
@@ -17,6 +17,9 @@ import {
   setMember,
   setMemberPosition,
 } from "@/lib/departments/store";
+import { jobTitleOptions } from "@/domain/departments";
+import { addJobTitle, listJobTitles, type JobTitle } from "@/lib/sop/job-titles/store";
+import { JobTitlesAdmin } from "./job-titles-admin";
 import { RasicRolesAdmin } from "./rasic-roles-admin";
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
 
@@ -68,6 +71,36 @@ export function DepartmentsAdmin({
   const confirm = useConfirm();
   const { workspaceId, role } = useSopWorkspace();
   const manage = canManage(role);
+  // Shared across every department's picker, so a title typed for one is offered to the rest.
+  const [jobTitles, setJobTitles] = useState<JobTitle[]>([]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    listJobTitles(workspaceId)
+      .then((next) => {
+        if (active) setJobTitles(next);
+      })
+      // The standard titles still populate the picker, and typing still works.
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  function handleJobTitleAdded(name: string) {
+    if (!workspaceId) return;
+    void addJobTitle(workspaceId, name)
+      .then((title) => {
+        setJobTitles((current) =>
+          current.some((existing) => existing.name.toLowerCase() === title.name.toLowerCase())
+            ? current
+            : [...current, title],
+        );
+      })
+      // The member keeps the title; only the sharing failed.
+      .catch(() => undefined);
+  }
   const seeded =
     initialDepartments !== undefined &&
     initialMembers !== undefined &&
@@ -357,6 +390,8 @@ export function DepartmentsAdmin({
                 manage={manage}
                 directory={directory}
                 members={membersByDepartment[selected.id] ?? []}
+                workspaceJobTitles={jobTitles.map((title) => title.name)}
+                onJobTitleAdded={handleJobTitleAdded}
                 onError={handleError}
                 onMembersChange={handleMembersChange}
               />
@@ -367,6 +402,12 @@ export function DepartmentsAdmin({
             </section>
           )}
         </div>
+
+        <JobTitlesAdmin
+          titles={jobTitles}
+          manage={manage}
+          onChanged={setJobTitles}
+        />
 
         <RasicRolesAdmin workspaceId={workspaceId} manage={manage} />
       </div>
@@ -438,6 +479,10 @@ interface MembersPanelProps {
   members: DepartmentMember[];
   onError: (message: string) => void;
   onMembersChange: (departmentId: string, members: DepartmentMember[]) => void;
+  /** Titles this workspace has typed, offered alongside the department's standard ones. */
+  workspaceJobTitles: readonly string[];
+  /** Called when a member is given a title that was not on offer, so it can be shared. */
+  onJobTitleAdded: (title: string) => void;
 }
 
 function MembersPanel({
@@ -445,6 +490,8 @@ function MembersPanel({
   manage,
   directory,
   members,
+  workspaceJobTitles,
+  onJobTitleAdded,
   onError,
   onMembersChange,
 }: MembersPanelProps) {
@@ -493,6 +540,12 @@ function MembersPanel({
     );
     try {
       await setMemberPosition(department.id, userId, positionTitle);
+      // A title absent from every offered group was typed here; share it with the workspace so
+      // the next department can pick it. Failing to share must not fail the assignment — the
+      // member keeps the title either way.
+      if (positionTitle && !positionOptions.some((option) => option.value === positionTitle)) {
+        onJobTitleAdded(positionTitle);
+      }
     } catch (caught) {
       onMembersChange(department.id, previous);
       onError(messageFrom(caught, "Could not save the member's position."));
@@ -501,7 +554,12 @@ function MembersPanel({
     }
   }
 
-  const positionOptions = standardPositionTitlesForDepartment(department.code);
+  // Standard titles for this department plus whatever the workspace has typed. Assembly,
+  // ordering and dedupe live in the domain; this only renders the result.
+  const positionOptions = useMemo(
+    () => jobTitleOptions(department.code, workspaceJobTitles),
+    [department.code, workspaceJobTitles],
+  );
 
   async function handleAdd() {
     const userId = pick.trim();
@@ -589,12 +647,14 @@ function MembersPanel({
                       value={member.positionTitle}
                       disabled={busyUserId === member.userId}
                       onChange={(value) => void handlePositionChange(member.userId, value)}
+                      allowCustomValue
                       options={[
                         { value: "", label: "Select a position…" },
-                        ...(member.positionTitle && !positionOptions.includes(member.positionTitle)
+                        ...(member.positionTitle &&
+                        !positionOptions.some((option) => option.value === member.positionTitle)
                           ? [{ value: member.positionTitle, label: `${member.positionTitle} (existing)` }]
                           : []),
-                        ...positionOptions.map((positionTitle) => ({ value: positionTitle, label: positionTitle })),
+                        ...positionOptions,
                       ]}
                     />
                   </div>

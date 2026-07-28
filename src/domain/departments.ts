@@ -82,6 +82,85 @@ export const GENERAL_RASIC_ROLES = [
   "Board of Management",
 ] as const;
 
+// ---------------------------------------------------------------------------
+// Job titles — the title a PERSON holds on a department roster.
+//
+// Deliberately not the same vocabulary as the RASIC roles below. A role names an actor in a
+// process and may be collective ("Board of Management"); a title names one employee. Offering the
+// former when naming the latter is the confusion this separation prevents.
+// ---------------------------------------------------------------------------
+
+/** Group heading for titles this workspace typed itself. */
+export const ADDED_JOB_TITLES_GROUP = "Added by your team";
+
+/** Longest job title accepted. Generous for real titles, short enough to stay a title. */
+const MAX_JOB_TITLE_CHARS = 60;
+
+// Letters, digits, spaces and the punctuation real titles use. Deliberately excludes newlines,
+// tabs and control characters, which is what makes a pasted paragraph fail rather than become a
+// "title". Unicode letters are allowed so non-English titles are not second-class.
+const JOB_TITLE_ALLOWED = /^[\p{L}\p{N} \-/&().,]+$/u;
+const STARTS_WITH_LETTER = /^\p{L}/u;
+
+/**
+ * Canonical form of a typed job title, or null when it is not shaped like one.
+ *
+ * Whitespace and uniqueness are normalized; CAPITALIZATION IS NOT, on purpose. Title-casing would
+ * turn "PJ Mgr / Operations" into "Pj Mgr", "EVP Operations" into "Evp" and
+ * "HoD (Heads of Department)" into "Hod" — silently mangling initialisms that were typed
+ * correctly. Consistency comes from blocking near-duplicates, not from imposing a house style on
+ * words the app cannot interpret.
+ *
+ * There is no vocabulary rule: any wording is allowed as long as the shape is right.
+ */
+export function normalizeJobTitle(raw: string): string | null {
+  const trimmed = raw.trim();
+  // Reject an INTERIOR line break or tab rather than collapsing it: "Manager\nSupervisor" is two
+  // titles pasted together, and quietly turning it into "Manager Supervisor" invents one nobody
+  // holds. Leading and trailing whitespace is still forgiven by the trim above.
+  if (/[\n\r\t]/.test(trimmed)) return null;
+  const collapsed = trimmed.replace(/\s+/g, " ");
+  if (collapsed.length === 0 || collapsed.length > MAX_JOB_TITLE_CHARS) return null;
+  if (!STARTS_WITH_LETTER.test(collapsed)) return null;
+  if (!JOB_TITLE_ALLOWED.test(collapsed)) return null;
+  return collapsed;
+}
+
+/** One entry of the job-title dropdown. Structurally a ThemedSelectOption, without the import. */
+export interface JobTitleOption {
+  value: string;
+  label: string;
+  group: string;
+}
+
+/**
+ * The grouped job-title dropdown: the department's standard titles, then the workspace's own.
+ *
+ * Same two properties the role assembly guarantees — groups emitted contiguously (ThemedSelect
+ * prints a heading whenever an option's group differs from the previous one) and case-insensitive
+ * dedupe with the standard list winning, so a typed duplicate cannot shadow a curated title.
+ */
+export function jobTitleOptions(
+  departmentCode: string,
+  workspaceTitles: readonly string[],
+): JobTitleOption[] {
+  const options: JobTitleOption[] = [];
+  const seen = new Set<string>();
+  function push(value: string, group: string) {
+    const key = value.trim().toLowerCase();
+    if (key.length === 0 || seen.has(key)) return;
+    seen.add(key);
+    options.push({ value, label: value, group });
+  }
+
+  for (const title of standardPositionTitlesForDepartment(departmentCode)) push(title, "Standard titles");
+  for (const raw of workspaceTitles) {
+    const title = normalizeJobTitle(raw);
+    if (title) push(title, ADDED_JOB_TITLES_GROUP);
+  }
+  return options;
+}
+
 /** Group heading for the workspace's own typed roles. */
 export const ADDED_RASIC_ROLES_GROUP = "Added by your team";
 

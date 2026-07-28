@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Department } from "@/domain/departments";
-import { mapApprovalsToDepartments } from "./approval-mapping";
+import { mapApprovalsToDepartments, signerAfterDepartmentChange } from "./approval-mapping";
 import type { SopApproval } from "./schema";
 
 function dept(id: string, code: string, name: string, isQualityGate = false): Department {
@@ -91,5 +91,25 @@ describe("mapApprovalsToDepartments", () => {
     );
     const seatable = [...new Set(results.filter((r) => r.outcome === "mapped").map((r) => r.department!.id))];
     expect(seatable).toEqual(["d-mfg"]);
+  });
+});
+
+describe("signerAfterDepartmentChange", () => {
+  it("keeps a signer who also belongs to the destination", () => {
+    expect(signerAfterDepartmentChange("u1", ["u1", "u2"])).toBe("u1");
+  });
+
+  // The whole point: an outside signer would pass the roster UI and fail Gate A at submission.
+  it("drops a signer who does not belong to the destination", () => {
+    expect(signerAfterDepartmentChange("u1", ["u2", "u3"])).toBeNull();
+  });
+
+  it("stays empty when the seat had no signer", () => {
+    expect(signerAfterDepartmentChange(null, ["u1"])).toBeNull();
+    expect(signerAfterDepartmentChange(undefined, ["u1"])).toBeNull();
+  });
+
+  it("drops the signer when the destination has no members at all", () => {
+    expect(signerAfterDepartmentChange("u1", [])).toBeNull();
   });
 });

@@ -89,3 +89,20 @@ export function seatDepartmentsFrom(mappings: readonly ApprovalMapping[]): Depar
   }
   return result;
 }
+
+/**
+ * The signer a seat should keep when it moves to another department.
+ *
+ * Gate A requires every seat's reviewer to belong to that seat's department, so a signer who is
+ * not a member of the destination cannot come along: keeping them leaves a roster that looks
+ * complete and then fails at submission with "Every seat's reviewer must belong to that seat's
+ * department". Returning null asks the obvious question now instead of raising a confusing one
+ * later.
+ */
+export function signerAfterDepartmentChange(
+  signerId: string | null | undefined,
+  nextDepartmentMemberIds: readonly string[],
+): string | null {
+  if (!signerId) return null;
+  return nextDepartmentMemberIds.includes(signerId) ? signerId : null;
+}

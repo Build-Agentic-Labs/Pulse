@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import type { SopApproval } from "@/domain/sop/schema";
+import { signerAfterDepartmentChange } from "@/domain/sop/approval-mapping";
 import { ConvertedApprovalsNotice } from "./converted-approvals-notice";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import {
@@ -114,6 +115,34 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
     setBusy(null);
   }
 
+  /**
+   * Move a seat to a different department.
+   *
+   * (sop_id, department_id) is the primary key, so this is a delete-and-insert rather than an
+   * update. Both halves are legal only while the SOP is a draft — enforce_seat_freeze refuses
+   * INSERT and DELETE once it has been submitted — and this editor only renders for drafts.
+   *
+   * The signer is carried over ONLY if they are also a member of the new department. Gate A
+   * requires every seat's reviewer to belong to that seat's department, so keeping an outside
+   * signer would leave a roster that looks complete and then fails at submission with "Every
+   * seat's reviewer must belong to that seat's department". Blanking it asks the obvious
+   * question now instead of raising a confusing one later.
+   */
+  async function changeSeatDepartment(seat: SopReviewSeat, nextDepartmentId: string) {
+    if (!nextDepartmentId || nextDepartmentId === seat.departmentId) return;
+    await loadMembersForDepartmentIds([nextDepartmentId]);
+    await guarded(`department-${seat.departmentId}`, async () => {
+      const nextMemberIds = (members.get(nextDepartmentId) ?? []).map((member) => member.userId);
+      await removeSeat(sopId, seat.departmentId);
+      await upsertSeat({
+        sopId,
+        departmentId: nextDepartmentId,
+        rasic: "responsible",
+        signerId: signerAfterDepartmentChange(seat.signerId, nextMemberIds),
+      });
+    });
+  }
+
   const seatedDepartmentIds = useMemo(
     () => new Set(seats.map((seat) => seat.departmentId)),
     [seats],
@@ -177,8 +206,22 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
                   key={seat.departmentId}
                   className="group border-b border-line/70 transition-colors hover:bg-surface-hover"
                 >
-                  <td className="px-5 py-3.5 align-middle text-[13px] font-medium text-ink">
-                    <span className="block truncate">{department?.name ?? "Unknown"}</span>
+                  <td className="px-5 py-2.5 align-middle">
+                    <ThemedSelect
+                      variant="sop"
+                      className="w-full"
+                      triggerClassName="ui-sop-select-inline"
+                      ariaLabel={`Department for the ${department?.name ?? "unknown"} approval`}
+                      value={seat.departmentId}
+                      disabled={busy !== null}
+                      options={[
+                        ...(department
+                          ? [{ value: department.id, label: department.name }]
+                          : [{ value: seat.departmentId, label: "Unknown" }]),
+                        ...available.map((option) => ({ value: option.id, label: option.name })),
+                      ]}
+                      onChange={(value) => void changeSeatDepartment(seat, value)}
+                    />
                   </td>
                   <td className="px-5 py-2.5 align-middle">
                     <ThemedSelect

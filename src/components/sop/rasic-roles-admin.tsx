@@ -95,9 +95,7 @@ export function RasicRolesAdmin({ workspaceId, manage }: { workspaceId?: string;
       <div className="border-b border-line px-4 py-3">
         <h3 className="ui-setup-section-title">RASIC roles added by your team</h3>
         <p className="mt-1 text-xs text-ink-tertiary">
-          Roles authors typed in an SOP&apos;s procedure. The {GENERAL_RASIC_ROLES.length} general roles and each
-          department&apos;s standard titles are always offered and are not listed here. Renaming or removing
-          one changes what the dropdown offers; SOPs already using it keep the name.
+          {`Roles authors typed in an SOP's procedure. The ${GENERAL_RASIC_ROLES.length} general roles and each department's standard titles are always offered and are not listed here. Renaming or removing one changes what the dropdown offers; SOPs already using it keep the name.`}
         </p>
       </div>
 

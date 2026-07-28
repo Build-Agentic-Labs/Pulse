@@ -52,7 +52,9 @@ function validExtraction(): ExtractedSop {
         createdByDate: "2026-01-15",
       },
     ],
-    approvals: [{ role: "Quality Approval", name: "Jane Doe", position: "QM", date: "2026-02-01" }],
+    approvals: [
+      { role: "Quality Approval", name: "Jane Doe", position: "QM", date: "2026-02-01", department: "Quality" },
+    ],
   };
 }
 
@@ -145,7 +147,9 @@ describe("validateExtractedSop", () => {
     expect(result!.changeHistory).toEqual([
       { version: "1.0", changes: "Initial", createdByName: "", createdByPosition: "", createdByDate: "" },
     ]);
-    expect(result!.approvals).toEqual([{ role: "Quality Approval", name: "Jane", position: "", date: "" }]);
+    expect(result!.approvals).toEqual([
+      { role: "Quality Approval", name: "Jane", position: "", date: "", department: "" },
+    ]);
 
     const activities = result!.procedure.activities;
     expect(activities).toHaveLength(2);

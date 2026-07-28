@@ -407,7 +407,12 @@ export function sopFromExtraction(extracted: ExtractedSop): Sop {
       ...annex,
       id: `${base.id}-annex-${index}`,
     })),
-    // If the legacy doc had no approval rows, keep the standard template rows.
-    approvals: approvals.length > 0 ? approvals : base.approvals,
+    // If the legacy doc had no approval rows, keep the standard template rows. The extractor's
+    // `department` is renamed to `departmentCode` on the way in to say what it is: a hint about a
+    // department, resolved later against the ones that actually exist.
+    approvals:
+      approvals.length > 0
+        ? approvals.map(({ department, ...row }) => ({ ...row, departmentCode: department }))
+        : base.approvals,
   };
 }

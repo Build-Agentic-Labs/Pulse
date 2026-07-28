@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  ADDED_JOB_TITLES_GROUP,
   GENERAL_RASIC_ROLES,
   canAuthor,
   canDeptApprove,
   canSignReview,
+  jobTitleOptions,
+  normalizeJobTitle,
   normalizeRasicRoleName,
   pickMemberDepartments,
   rasicRoleOptions,
@@ -141,5 +144,83 @@ describe("rasicRoleOptions", () => {
     const options = rasicRoleOptions("d-eng", [eng, qa], []);
     const values = options.map((option) => option.value);
     expect(new Set(values).size).toBe(values.length);
+  });
+});
+
+describe("normalizeJobTitle", () => {
+  it("trims and collapses internal whitespace", () => {
+    expect(normalizeJobTitle("  Quality   Engineer ")).toBe("Quality Engineer");
+  });
+
+  // The reason capitalization is NOT normalized. The live workspace holds "PJ Mgr / Operations",
+  // and the shipped general roles include "EVP Operations" and "HoD (Heads of Department)";
+  // title-casing would render those "Pj Mgr", "Evp", "Hod" — mangling initialisms typed correctly.
+  it("leaves initialisms and mixed case exactly as typed", () => {
+    expect(normalizeJobTitle("PJ Mgr / Operations")).toBe("PJ Mgr / Operations");
+    expect(normalizeJobTitle("EVP Operations")).toBe("EVP Operations");
+    expect(normalizeJobTitle("HoD (Heads of Department)")).toBe("HoD (Heads of Department)");
+  });
+
+  it("accepts the punctuation real titles use", () => {
+    expect(normalizeJobTitle("Manager, Quality & Compliance")).toBe("Manager, Quality & Compliance");
+    expect(normalizeJobTitle("Engineer II - Process")).toBe("Engineer II - Process");
+    expect(normalizeJobTitle("Sr. Buyer")).toBe("Sr. Buyer");
+  });
+
+  it("rejects empty or whitespace-only input", () => {
+    expect(normalizeJobTitle("")).toBeNull();
+    expect(normalizeJobTitle("   ")).toBeNull();
+  });
+
+  it("rejects a title that does not start with a letter", () => {
+    expect(normalizeJobTitle("3rd Shift Lead")).toBeNull();
+    expect(normalizeJobTitle("- Manager")).toBeNull();
+  });
+
+  it("rejects characters that do not belong in a title", () => {
+    expect(normalizeJobTitle("Manager <script>")).toBeNull();
+    expect(normalizeJobTitle("Manager\nSupervisor")).toBeNull();
+    expect(normalizeJobTitle("Manager\tLead")).toBeNull();
+  });
+
+  it("rejects a title longer than the cap", () => {
+    expect(normalizeJobTitle(`Manager ${"x".repeat(60)}`)).toBeNull();
+  });
+
+  // No vocabulary rule: any wording is allowed as long as the shape is right.
+  it("accepts an unconventional but well-formed title", () => {
+    expect(normalizeJobTitle("Calibration Technician")).toBe("Calibration Technician");
+    expect(normalizeJobTitle("Line Whisperer")).toBe("Line Whisperer");
+  });
+});
+
+describe("jobTitleOptions", () => {
+  it("puts the department's standard titles first, then team-added", () => {
+    const options = jobTitleOptions("QAS", ["Calibration Technician"]);
+    expect(options[0].group).toBe("Standard titles");
+    expect(options[options.length - 1]).toMatchObject({
+      value: "Calibration Technician",
+      group: ADDED_JOB_TITLES_GROUP,
+    });
+  });
+
+  it("emits each group contiguously", () => {
+    const options = jobTitleOptions("QAS", ["Calibration Technician", "Line Auditor"]);
+    const seen = new Set<string>();
+    let previous = "";
+    for (const option of options) {
+      if (option.group !== previous) {
+        expect(seen.has(option.group)).toBe(false);
+        seen.add(option.group);
+        previous = option.group;
+      }
+    }
+  });
+
+  it("drops a team-added title that duplicates a standard one, case-insensitively", () => {
+    const options = jobTitleOptions("QAS", ["  quality manager  "]);
+    const matches = options.filter((option) => option.value.toLowerCase() === "quality manager");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].group).toBe("Standard titles");
   });
 });

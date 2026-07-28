@@ -11,20 +11,10 @@ import {
   SIGNATURE_VIEWBOX_HEIGHT,
   SIGNATURE_VIEWBOX_WIDTH,
   signatureStrokePath,
-  type SignatureStrokes,
 } from "@/domain/sop/signature";
-import { listDepartments, listMembersForDepartments } from "@/lib/departments/store";
+import { buildApprovalEntries, type ApprovalSignatureEntry } from "@/lib/sop/approval-entries";
 import { createSopAnnexFileUrl, openSopAnnexFile, type SopAnnexFile } from "@/lib/sop/annex-files";
 import { buildProcedureSvgPages } from "@/lib/sop/procedure-flow-image";
-import {
-  isBlockingSeat,
-  isSignatureCurrent,
-  listProfileNames,
-  listSeats,
-  listSignatures,
-  getSopAuthorDisplayName,
-  getSopControl,
-} from "@/lib/sop/review";
 import type { SopReviewAnnotation } from "@/lib/sop/review-annotations";
 
 interface RenderedAnnexPage {
@@ -40,15 +30,6 @@ interface AnnexPreviewState {
   loading: boolean;
   pages: RenderedAnnexPage[];
   errors: Record<string, string>;
-}
-
-interface ApprovalSignatureEntry {
-  key: string;
-  approval: string;
-  name: string;
-  position: string;
-  signedAt: string | null;
-  signatureStrokes: SignatureStrokes;
 }
 
 function isPdf(file: SopAnnexFile): boolean {
@@ -322,81 +303,12 @@ export function SopPrintPreview({
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      getSopControl(sop.id),
-      listSeats(sop.id),
-      listSignatures(sop.id),
-      getSopAuthorDisplayName(sop.id),
-    ])
-      .then(async ([control, seats, signatures, authorDisplayName]) => {
-        if (!control) return;
-        const departments = await listDepartments(control.workspaceId);
-        // One batched query for all departments' members instead of one per department.
-        const allMembers = await listMembersForDepartments(departments.map((department) => department.id));
-        const memberPositionByDepartmentAndUser = new Map<string, string>();
-        allMembers.forEach((member) => {
-          memberPositionByDepartmentAndUser.set(
-            `${member.departmentId}:${member.userId}`,
-            member.positionTitle,
-          );
-        });
-        const profileIds = seats.flatMap((seat) => seat.signerId ? [seat.signerId] : []);
-        const authorId = control.createdBy ?? control.submittedBy ?? control.finalApprovalRequestedBy;
-        if (authorId) profileIds.push(authorId);
-        const names = await listProfileNames(profileIds);
-        const departmentById = new Map(departments.map((department) => [department.id, department]));
-        const entries: ApprovalSignatureEntry[] = [];
-        for (const seat of seats.filter((item) => isBlockingSeat(item.rasic))) {
-          const department = departmentById.get(seat.departmentId);
-          const signature = signatures.find(
-            (item) =>
-              item.meaning === "dept_approval" &&
-              item.seatDepartmentId === seat.departmentId &&
-              item.signerId === seat.signerId &&
-              isSignatureCurrent(item, control),
-          );
-          entries.push({
-            key: `seat-${seat.departmentId}`,
-            approval: "Department approval",
-            name: signature?.signerName || (seat.signerId ? names.get(seat.signerId) : "") || "Assigned approver",
-            position:
-              (seat.signerId
-                ? memberPositionByDepartmentAndUser.get(`${seat.departmentId}:${seat.signerId}`)
-                : "") ||
-              (department ? `${department.code} · ${department.name}` : "Department approver"),
-            signedAt: signature?.signedAt ?? null,
-            signatureStrokes: signature?.signatureStrokes ?? [],
-          });
-        }
-        const qualityApproval = signatures.find(
-          (signature) => signature.meaning === "quality_approval" && isSignatureCurrent(signature, control),
-        );
-        const authorshipSignature = signatures.find(
-          (signature) => signature.meaning === "authorship",
-        );
-        if (qualityApproval) {
-          entries.push({
-            key: qualityApproval.id,
-            approval: "Quality approval",
-            name: qualityApproval.signerName || "Quality approver",
-            position:
-              departments
-                .filter((department) => department.isQualityGate)
-                .map((department) => memberPositionByDepartmentAndUser.get(`${department.id}:${qualityApproval.signerId}`))
-                .find(Boolean) || "Quality release",
-            signedAt: qualityApproval.signedAt,
-            signatureStrokes: qualityApproval.signatureStrokes,
-          });
-        }
-        if (active) {
-          setApprovalEntries(entries);
-          setSystemAuthorName(
-            authorDisplayName ||
-              (authorId ? names.get(authorId)?.trim() : "") ||
-              authorshipSignature?.signerName.trim() ||
-              "System author",
-          );
-        }
+    // Shared with the Word export so the two documents cannot disagree about who approved.
+    buildApprovalEntries(sop.id)
+      .then(({ entries, systemAuthorName: authorName }) => {
+        if (!active) return;
+        setApprovalEntries(entries);
+        setSystemAuthorName(authorName);
       })
       .catch(() => {
         if (active) setApprovalEntries(null);

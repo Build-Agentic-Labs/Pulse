@@ -174,6 +174,12 @@ export interface SopApproval {
   position: string;
   /** Stored ISO (YYYY-MM-DD). */
   date: string;
+  /**
+   * Department the converter believed signed this row, as written in the source document. A HINT
+   * only — resolved against the workspace's real departments and discarded when it matches none.
+   * Absent on hand-authored SOPs and on anything converted before this field existed.
+   */
+  departmentCode?: string;
 }
 
 // ---------------------------------------------------------------------------

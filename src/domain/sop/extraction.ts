@@ -46,7 +46,7 @@ export interface ExtractedSop {
     createdByPosition: string;
     createdByDate: string;
   }>;
-  approvals: Array<{ role: string; name: string; position: string; date: string }>;
+  approvals: Array<{ role: string; name: string; position: string; date: string; department: string }>;
 }
 
 export const SOP_SYSTEM_PROMPT = `You convert legacy Standard Operating Procedures (SOPs) into a company's standardized structure.
@@ -67,6 +67,7 @@ Rules:
 - Bracket the flow with terminators: when the process has a clear trigger and a clear final outcome, add a short Start terminator at the very beginning (the triggering event, e.g. "Order request received") and a short End terminator at the very end (the final outcome, e.g. "Escalation record archived"), in addition to the action steps. Terminators are flow markers only — they are NOT numbered in the written procedure list, so every real action must stay a "process" (or "decision") step and never be collapsed into a terminator.
 - "Annexes" are appendices / attached forms (label + description).
 - Capture any change-history table rows and approval-table rows you find.
+- For each approval row set \`department\` to the department that approver signs for, worded as the source document words it. Leave it empty rather than guessing — an empty value is handled, a wrong one has to be undone by hand.
 - Line breaks in long fields (\`purpose\`, \`scope\`, \`detail\`) must be real line breaks in the string value. Never write the two characters backslash-n to mean a new line — that reaches the printed document as literal \\n text rather than a paragraph break.`;
 
 /** JSON Schema for the Anthropic tool input — mirrors `ExtractedSop`. */
@@ -178,12 +179,17 @@ export const SOP_EXTRACTION_TOOL = {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["role", "name", "position", "date"],
+          required: ["role", "name", "position", "date", "department"],
           properties: {
             role: { type: "string" },
             name: { type: "string" },
             position: { type: "string" },
             date: { type: "string" },
+            department: {
+              type: "string",
+              description:
+                "The department this approver signs for, named as the source document writes it. Empty when the document does not say and it cannot be inferred with confidence.",
+            },
           },
         },
       },

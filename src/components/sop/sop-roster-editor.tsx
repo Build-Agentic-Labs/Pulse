@@ -4,6 +4,8 @@ import { Check, LockKeyhole, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
+import type { SopApproval } from "@/domain/sop/schema";
+import { ConvertedApprovalsNotice } from "./converted-approvals-notice";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import {
   isBlockingSeat,
@@ -21,6 +23,11 @@ interface RosterEditorProps {
   sopId: string;
   departments: Department[];
   seats: SopReviewSeat[];
+  /**
+   * The legacy document's approval rows, for a converted SOP. Present means "show the author what
+   * conversion decided on their behalf"; absent (hand-authored) means there is nothing to verify.
+   */
+  convertedApprovals?: readonly SopApproval[];
   onChanged: () => Promise<void> | void;
 }
 
@@ -32,7 +39,7 @@ interface RosterEditorProps {
  * Editable only while the SOP is a draft — the database freezes the roster on submit, and after
  * that only an admin may reassign an approver.
  */
-export function SopRosterEditor({ sopId, departments, seats, onChanged }: RosterEditorProps) {
+export function SopRosterEditor({ sopId, departments, seats, convertedApprovals, onChanged }: RosterEditorProps) {
   const [members, setMembers] = useState<Map<string, { userId: string; name: string; positionTitle: string }[]>>(new Map());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -107,7 +114,13 @@ export function SopRosterEditor({ sopId, departments, seats, onChanged }: Roster
     setBusy(null);
   }
 
+  const seatedDepartmentIds = useMemo(
+    () => new Set(seats.map((seat) => seat.departmentId)),
+    [seats],
+  );
+
   return (
+    <div className="space-y-4">
     <section className="ui-data-table-frame">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
         <h2 className="ui-setup-section-title">Department approvals</h2>
@@ -296,5 +309,14 @@ export function SopRosterEditor({ sopId, departments, seats, onChanged }: Roster
       </div>
 
     </section>
+
+    {convertedApprovals?.length ? (
+      <ConvertedApprovalsNotice
+        approvals={convertedApprovals}
+        departments={departments}
+        seatedDepartmentIds={seatedDepartmentIds}
+      />
+    ) : null}
+    </div>
   );
 }

@@ -156,6 +156,9 @@ function coerceApprovals(value: unknown): ExtractedSop["approvals"] {
       name: coerceString(raw.name),
       position: coerceString(raw.position),
       date: coerceString(raw.date),
+      // A hint, not a fact: mapApprovalsToDepartments resolves it against the workspace's real
+      // departments and drops it when it matches none.
+      department: coerceString(raw.department),
     }))
     .filter((entry) => Object.values(entry).some((field) => field.length > 0));
 }

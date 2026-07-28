@@ -10,6 +10,8 @@ import { QuietLoading } from "@/components/quiet-loading";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { DEFAULT_DOC_TYPE, listNumberLabel } from "@/domain/sop/authoring";
+import { mapApprovalsToDepartments, seatDepartmentsFrom } from "@/domain/sop/approval-mapping";
+import { upsertSeat } from "@/lib/sop/review";
 import { getSopProcessState, SOP_PROCESS_STATE_LABELS } from "@/domain/sop/process-state";
 import type { Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
@@ -413,6 +415,21 @@ export function SopList({
         departmentId: owningDepartment.id,
         docType: DEFAULT_DOC_TYPE,
       });
+      // Pre-populate the approval roster from the legacy document's approval table. Seats are
+      // created UNSTAFFED: the old document names a person who may not be a Pulse user, and
+      // guessing the wrong approver is worse than leaving the seat for the author to fill. The
+      // submit gate already refuses to start review until every seat has a real reviewer.
+      //
+      // A failure here must not fail the conversion — the document is saved either way, and the
+      // Approvals page shows what did and did not map.
+      try {
+        const mappings = mapApprovalsToDepartments(unnumbered.approvals, departments);
+        for (const department of seatDepartmentsFrom(mappings)) {
+          await upsertSeat({ sopId: created.id, departmentId: department.id, rasic: "responsible", signerId: null });
+        }
+      } catch {
+        // Surfaced on the Approvals page rather than blocking the import.
+      }
       // Flip the overlay to its completed state for a beat before opening the editor.
       setConvert((current) => (current ? { ...current, phase: "done" } : current));
       await new Promise((resolve) => setTimeout(resolve, 700));

@@ -10,6 +10,7 @@
 
 "use client";
 
+import type { ApprovalSignatureEntry } from "./approval-entries";
 import {
   AlignmentType,
   BorderStyle,
@@ -349,7 +350,10 @@ function buildFooter(): Footer {
   });
 }
 
-async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
+async function buildBody(
+  sop: Sop,
+  approvalEntries: readonly ApprovalSignatureEntry[],
+): Promise<Array<Paragraph | Table>> {
   const blocks: Array<Paragraph | Table> = [];
 
   blocks.push(sectionHeading("Purpose"), bodyText(sop.purpose));
@@ -424,11 +428,18 @@ async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
     ),
   );
 
+  // Built from the approval roster and its signatures -- the same source the PDF uses -- rather
+  // than from sop.approvals, which no UI can edit and which is blank on every hand-authored SOP.
   blocks.push(sectionHeading("Change Approvals"));
   blocks.push(
     dataTable(
-      ["Approval", "Name", "Position", "Date"],
-      sop.approvals.map((row) => [row.role, row.name, row.position, formatDateControlled(row.date)]),
+      ["Approval", "Name", "Position", "Signed"],
+      approvalEntries.map((row) => [
+        row.approval,
+        row.name,
+        row.position,
+        row.signedAt ? formatDateControlled(row.signedAt.slice(0, 10)) : "Pending signature",
+      ]),
       [28, 26, 26, 20],
     ),
   );
@@ -437,7 +448,15 @@ async function buildBody(sop: Sop): Promise<Array<Paragraph | Table>> {
 }
 
 /** Build the .docx and return it as a Blob for download. */
-export async function exportSopToDocx(sop: Sop): Promise<Blob> {
+/**
+ * `approvalEntries` comes from buildApprovalEntries — the same rows the PDF renders. Passing them
+ * in rather than deriving them here keeps this module free of Supabase and, more importantly,
+ * makes it impossible for the two documents to answer "who approved this?" differently.
+ */
+export async function exportSopToDocx(
+  sop: Sop,
+  approvalEntries: readonly ApprovalSignatureEntry[] = [],
+): Promise<Blob> {
   const logo = await loadLogo();
 
   const doc = new Document({
@@ -451,7 +470,7 @@ export async function exportSopToDocx(sop: Sop): Promise<Blob> {
         properties: { page: { margin: { top: 1440, bottom: 1080, left: 1080, right: 1080 } } },
         headers: { default: buildHeader(sop, logo) },
         footers: { default: buildFooter() },
-        children: await buildBody(sop),
+        children: await buildBody(sop, approvalEntries),
       },
     ],
   });

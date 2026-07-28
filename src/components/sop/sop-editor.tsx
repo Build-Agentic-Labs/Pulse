@@ -45,6 +45,7 @@ import {
 } from "@/lib/sop/review";
 import { getSop, listSops, saveSop, SopConflictError, type SaveSopOptions, type SopListItem } from "@/lib/sop/store";
 import { addRasicRole, listRasicRoles } from "@/lib/sop/rasic-roles/store";
+import { buildApprovalEntries } from "@/lib/sop/approval-entries";
 import {
   listSopReviewAnnotations,
   listSopReviewSubmissions,
@@ -1458,7 +1459,9 @@ export function SopEditor({
       // The docx library is heavy and only needed for export — pull it in on demand
       // so it stays out of the editor's initial bundle.
       const { exportFileName, exportSopToDocx } = await import("@/lib/sop/export-docx");
-      const blob = await exportSopToDocx(renderedSop);
+      // The same rows the PDF renders; without them Word would print an empty approvals table.
+      const { entries: approvalEntries } = await buildApprovalEntries(sop.id);
+      const blob = await exportSopToDocx(renderedSop, approvalEntries);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -2010,6 +2013,7 @@ export function SopEditor({
                     sopId={sop.id}
                     departments={approvalDepartments}
                     seats={approvalSeats}
+                    convertedApprovals={sop.source === "converted" ? sop.approvals : undefined}
                     onChanged={() => refreshApprovalRouting({ background: true })}
                   />
                 ) : (

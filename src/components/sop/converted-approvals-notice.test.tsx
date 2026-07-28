@@ -34,6 +34,35 @@ describe("ConvertedApprovalsNotice", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  // A converted document whose Word file had no approval table keeps the blank template's standard
+  // roles, so the panel must not announce that those were "carried over from the original".
+  it("stays silent when no row carries anything to map with", () => {
+    const { container } = render(
+      <ConvertedApprovalsNotice
+        approvals={[
+          row({ role: "Reviewed By", position: "" }),
+          row({ role: "Department Manager Release", position: "" }),
+          row({ role: "Quality Approval", position: "" }),
+        ]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // ...but a hint that matched nothing is a real finding, not an empty document: say so.
+  it("still reports rows that carry a hint nothing matched", () => {
+    const { container } = render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", departmentCode: "Legal" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+      />,
+    );
+    expect(bodyRows(container)).toEqual([["Approved By", "—", "—", "No match"]]);
+  });
+
   it("puts each fact in its own column", () => {
     const { container } = render(
       <ConvertedApprovalsNotice

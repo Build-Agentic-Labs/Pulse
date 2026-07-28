@@ -98,7 +98,17 @@ export function ConvertedApprovalsNotice({
   );
 
   // Nothing to verify when the legacy document had no approval table.
-  if (rows.length === 0) return null;
+  //
+  // "No rows" is not the only way that happens. A converted document whose Word file had no
+  // approval table falls back to the blank template's standard roles (see the base.approvals
+  // fallback in lib/sop/store.ts), so `source === "converted"` alone would print five phantom
+  // rows announcing that approvals were carried over when none were. The honest test is whether
+  // any row carries something to map WITH: a position title or a department hint. Without one, no
+  // row can resolve to a department and there is nothing for the author to check.
+  const hasMappableInput = approvals.some(
+    (approval) => approval.position.trim() !== "" || (approval.departmentCode ?? "").trim() !== "",
+  );
+  if (rows.length === 0 || !hasMappableInput) return null;
 
   const unresolved = rows.filter((row) => row.status === "no-match" || row.status === "seat-removed");
 

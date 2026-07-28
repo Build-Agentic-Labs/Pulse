@@ -39,6 +39,22 @@ describe("ConvertedApprovalsNotice", () => {
     expect(screen.getByText(/every row was placed/)).toBeTruthy();
   });
 
+  // The legacy name is transcribed text with no account behind it; showing it next to real
+  // approver pickers invites the reader to treat it as someone in the system.
+  it("never shows the person named in the original document", () => {
+    const { container } = render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ name: "M. Alvarez", position: "Production Manager", departmentCode: "MFG" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set(["d-mfg"])}
+      />,
+    );
+    expect(container.textContent).not.toContain("Alvarez");
+    // The position stays: it is the evidence for why this row mapped where it did.
+    expect(container.textContent).toContain("Production Manager");
+    expect(screen.getByText(/Reviewed By/)).toBeTruthy();
+  });
+
   // The row must not read as silently dropped: it was skipped for a reason the author can't see
   // anywhere else, and mapping it to a seat would make the SOP unreleasable.
   it("explains that the Quality row is the release gate, not a seat", () => {

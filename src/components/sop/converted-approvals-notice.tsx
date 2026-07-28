@@ -60,8 +60,14 @@ export function ConvertedApprovalsNotice({
       <ul className="divide-y divide-line">
         {mappings.map((mapping, index) => {
           const { approval, outcome, department } = mapping;
-          const label = [approval.role, approval.name].filter(Boolean).join(" — ") || "Approval row";
+          // The person named in the legacy document is deliberately NOT shown. It is transcribed
+          // text with no account behind it, and rendering it beside real approver pickers invites
+          // the reader to treat it as someone in the system. The row's role identifies it, and
+          // the position below explains why it mapped where it did. The name stays in
+          // sop.approvals as the historical record of what the original said.
+          const label = approval.role.trim() || "Approval row";
           const needsSeat = outcome === "mapped" && !seatedDepartmentIds.has(department!.id);
+          const matchedOn = approval.position.trim();
 
           return (
             <li key={`${label}-${index}`} className="flex items-start gap-3 px-4 py-2.5">
@@ -79,10 +85,10 @@ export function ConvertedApprovalsNotice({
                   {outcome === "quality-gate"
                     ? "Quality signs the final release, so it is not a department approval here."
                     : outcome === "unmapped"
-                      ? "No matching department — add one above if this approval is still required."
+                      ? `${matchedOn ? `${matchedOn} — n` : "N"}o matching department; add one above if this approval is still required.`
                       : needsSeat
-                        ? `${department!.name} — the seat was removed; add it back if still required.`
-                        : `${department!.name} — seat added, choose a reviewer above.`}
+                        ? `${matchedOn ? `${matchedOn} → ` : ""}${department!.name} — the seat was removed; add it back if still required.`
+                        : `${matchedOn ? `${matchedOn} → ` : ""}${department!.name} — seat added, choose a reviewer above.`}
                 </div>
               </div>
             </li>

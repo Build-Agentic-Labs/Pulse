@@ -2715,6 +2715,11 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    /* The trigger sets line-height: 1, which makes this box exactly font-size tall — one pixel
+       short of what the text needs, and `overflow: hidden` (required for the ellipsis) clips
+       precisely where descenders live, so "Planning" and "Logistics" lost the tail of the g.
+       The trigger is flex-centred at a fixed height, so a taller line box only re-centres. */
+    line-height: 1.35;
   }
 
   .ui-themed-select-icon {

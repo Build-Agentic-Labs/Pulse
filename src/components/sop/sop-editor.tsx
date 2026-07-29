@@ -78,6 +78,14 @@ import {
   revealSopSearchMatch,
   type SopSearchMatchHandle,
 } from "./sop-search-match";
+import {
+  initialSopEditorStepIndex,
+  requestedSopEditorStepId,
+  type SopEditorInitialView,
+} from "./sop-editor-step";
+import { SopStepNavIcon } from "./sop-step-nav-icon";
+
+export type { SopEditorInitialView } from "./sop-editor-step";
 
 type StepId =
   | "document"
@@ -88,8 +96,6 @@ type StepId =
   | "draftReview"
   | "finalApproval"
   | "qualityApproval";
-
-export type SopEditorInitialView = "pdf" | "draft-review" | "final-approval" | "quality-approval";
 
 const CREATOR_STEPS: Array<{ id: StepId; label: string }> = [
   { id: "document", label: "Document" },
@@ -346,7 +352,6 @@ export function SopEditor({
   const [previewing, setPreviewing] = useState(initialView === "pdf");
   const [previewOnly] = useState(initialView === "pdf");
   const [qualityApprovalOpen, setQualityApprovalOpen] = useState(false);
-  const [stepIndex, setStepIndex] = useState(0);
   const contentScrollRef = useRef<HTMLDivElement>(null);
   const searchRevealTimerRef = useRef<number | null>(null);
   const activeSearchMatchRef = useRef<SopSearchMatchHandle | null>(null);
@@ -669,16 +674,13 @@ export function SopEditor({
     ],
     [showDraftReview, showFinalApproval, showQualityApproval],
   );
-  const requestedStepId: StepId | null = initialView === "draft-review"
-    ? "draftReview"
-    : initialView === "final-approval"
-      ? "finalApproval"
-      : initialView === "quality-approval"
-        ? "qualityApproval"
-        : null;
+  const requestedStepId = requestedSopEditorStepId(initialView) as StepId | null;
   const requestedStepIndex = requestedStepId
     ? steps.findIndex((entry) => entry.id === requestedStepId)
     : -1;
+  const [stepIndex, setStepIndex] = useState(() =>
+    initialSopEditorStepIndex(steps, initialView),
+  );
   const draftReviewers = useMemo(() => {
     const reviewers = new Map<string, { userId: string; name: string; submission?: SopReviewSubmission }>();
     for (const seat of approvalSeats) {
@@ -1603,15 +1605,12 @@ export function SopEditor({
               className={`ui-nav-item w-full ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
               onClick={() => void handleStepSelect(index)}
             >
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                {active ? (
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                ) : filled ? (
-                  <Check size={13} style={{ color: "var(--color-success)" }} />
-                ) : (
-                  <span className="ui-mono-label text-ink-tertiary">{index + 1}</span>
-                )}
-              </span>
+              <SopStepNavIcon
+                active={active}
+                complete={filled}
+                pending={reviewStep}
+                number={index + 1}
+              />
               <span className="min-w-0 flex-1 truncate text-left">{entry.label}</span>
             </button>
           );

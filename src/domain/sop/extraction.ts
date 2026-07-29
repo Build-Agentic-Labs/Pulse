@@ -35,6 +35,11 @@ export interface ExtractedSop {
       description: string;
       detail?: string;
       output: string;
+      /** 1-based destination steps for decisions; null means the process ends. */
+      decisionBranches?: {
+        yesTargetStep?: number | null;
+        noTargetStep?: number | null;
+      };
       assignments: Record<string, RasicCode>;
     }>;
   };
@@ -64,6 +69,7 @@ Rules:
 - Each activity is one process step. \`description\` is a SHORT action label for the flowchart box — an imperative phrase of roughly 6-14 words (e.g. "Assess urgency and impact of last-minute order"), never a full paragraph. Put the step's full explanation / procedure wording in \`detail\` (preserve the source text); if the step is already short, \`detail\` may be empty.
 - Capture each step's \`input\` (what it needs / consumes to start) and \`output\` (what it produces / hands to the next step) as concise, meaningful business objects, records, decisions, or triggers. Use the source's explicit Input/Output columns when present; otherwise infer a concise phrase. Prefer a clear record / decision name over repeating the previous row's output verbatim. Leave empty only when there is genuinely nothing.
 - Set each activity's \`shape\`: "decision" for a yes/no question or a compliance / approval / quality check (often ending in "?"). Use "terminator" ONLY for a pure start- or end-state milestone written as a short noun phrase (e.g. "Order received", "SOP released") — never for an action. If a step is itself an action (receive, assess, communicate, document, notify), it is a "process" step. Everything else is "process".
+- For a decision, populate \`decisionBranches\` when the source makes the paths clear. Use the destination activity's 1-based \`step\` for \`yesTargetStep\` and \`noTargetStep\`; use null when that outcome ends the process. Leave a destination omitted rather than guessing. Do not add \`decisionBranches\` to non-decision activities.
 - Bracket the flow with terminators: when the process has a clear trigger and a clear final outcome, add a short Start terminator at the very beginning (the triggering event, e.g. "Order request received") and a short End terminator at the very end (the final outcome, e.g. "Escalation record archived"), in addition to the action steps. Terminators are flow markers only — they are NOT numbered in the written procedure list, so every real action must stay a "process" (or "decision") step and never be collapsed into a terminator.
 - "Annexes" are appendices / attached forms (label + description).
 - Capture any change-history table rows and approval-table rows you find.
@@ -141,6 +147,19 @@ export const SOP_EXTRACTION_TOOL = {
                 description: { type: "string", description: "SHORT action label for the box (~6-14 words), not a paragraph" },
                 detail: { type: "string", description: "Full explanation / procedure wording for this step; empty if already captured by description" },
                 output: { type: "string", description: "Output(s) the step produces; infer a concise phrase, empty only if truly none" },
+                decisionBranches: {
+                  type: "object",
+                  additionalProperties: false,
+                  description: "Optional Yes / No destinations for a decision, using 1-based activity step numbers; null ends the process",
+                  properties: {
+                    yesTargetStep: {
+                      anyOf: [{ type: "number" }, { type: "null" }],
+                    },
+                    noTargetStep: {
+                      anyOf: [{ type: "number" }, { type: "null" }],
+                    },
+                  },
+                },
                 assignments: {
                   type: "object",
                   additionalProperties: { type: "string", enum: ["R", "A", "S", "I", "C"] },

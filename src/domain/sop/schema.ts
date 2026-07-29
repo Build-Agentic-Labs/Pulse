@@ -75,6 +75,12 @@ export interface SopDefinition {
 /** Flowchart shape of a process step: terminator (start/end pill), process (rectangle), decision (diamond). */
 export type SopShape = "terminator" | "process" | "decision";
 
+/** Destinations for the two outcomes of a decision step. `null` means the process ends. */
+export interface SopDecisionBranches {
+  yesTargetActivityId?: string | null;
+  noTargetActivityId?: string | null;
+}
+
 /** One step (row) of the Procedure process map: input -> process step -> output, plus RASIC. */
 export interface SopActivity {
   id: string;
@@ -90,6 +96,8 @@ export interface SopActivity {
   detail?: string;
   /** Output(s) of this step — right column of the process map. */
   output?: string;
+  /** Yes / No destinations when `shape` is `decision`; omitted for ordinary linear steps. */
+  decisionBranches?: SopDecisionBranches;
   /** Role name -> responsibility code. Keys come from `SopProcedure.roles`. */
   assignments: Record<string, RasicCode>;
 }

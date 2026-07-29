@@ -38,6 +38,7 @@ function validExtraction(): ExtractedSop {
           description: "Does the draft meet ISO 9001 requirements?",
           detail: "Review the draft against the checklist.",
           output: "Approved draft",
+          decisionBranches: { yesTargetStep: null, noTargetStep: 1 },
           assignments: { "Quality Manager": "R", "Department Manager": "A" },
         },
       ],
@@ -157,6 +158,23 @@ describe("validateExtractedSop", () => {
     expect(activities[0].step).toBe(1); // -2 is invalid → positional fallback
     expect(activities[1].description).toBe("Second real step");
     expect(activities[1].step).toBe(3); // positional fallback uses the pre-drop index
+  });
+
+  it("coerces decision branch step numbers and preserves an explicit end", () => {
+    const input = validExtraction() as unknown as Record<string, unknown>;
+    const procedure = input.procedure as Record<string, unknown>;
+    const activities = procedure.activities as Array<Record<string, unknown>>;
+    activities[1].decisionBranches = {
+      yesTargetStep: "1",
+      noTargetStep: null,
+    };
+
+    const result = validateExtractedSop(input);
+
+    expect(result?.procedure.activities[1].decisionBranches).toEqual({
+      yesTargetStep: 1,
+      noTargetStep: null,
+    });
   });
 
   it("clamps oversized strings to the field caps", () => {

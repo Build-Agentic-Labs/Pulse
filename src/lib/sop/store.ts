@@ -379,6 +379,13 @@ export function sopFromExtraction(extracted: ExtractedSop): Sop {
   // The model output is trusted but not guaranteed; fall back to base values so a
   // partial/malformed payload can't throw while we build the Sop.
   const procedure = extracted.procedure ?? base.procedure;
+  const extractedActivities = procedure.activities ?? [];
+  const activityIds = extractedActivities.map((_, index) => `${base.id}-act-${index}`);
+  const targetActivityId = (step: number | null | undefined): string | null | undefined => {
+    if (step === null) return null;
+    if (step === undefined) return undefined;
+    return activityIds[step - 1];
+  };
   const approvals = extracted.approvals ?? [];
   return {
     ...base,
@@ -392,16 +399,28 @@ export function sopFromExtraction(extracted: ExtractedSop): Sop {
     procedure: {
       ...base.procedure,
       ...procedure,
-      activities: (procedure.activities ?? []).map((activity, index) => ({
-        id: `${base.id}-act-${index}`,
-        step: activity.step || index + 1,
-        shape: activity.shape,
-        input: activity.input ?? "",
-        description: activity.description,
-        detail: activity.detail ?? "",
-        output: activity.output ?? "",
-        assignments: activity.assignments ?? {},
-      })),
+      activities: extractedActivities.map((activity, index) => {
+        const yesTargetActivityId = targetActivityId(activity.decisionBranches?.yesTargetStep);
+        const noTargetActivityId = targetActivityId(activity.decisionBranches?.noTargetStep);
+        const decisionBranches =
+          yesTargetActivityId !== undefined || noTargetActivityId !== undefined
+            ? {
+                ...(yesTargetActivityId !== undefined ? { yesTargetActivityId } : {}),
+                ...(noTargetActivityId !== undefined ? { noTargetActivityId } : {}),
+              }
+            : undefined;
+        return {
+          id: activityIds[index],
+          step: activity.step || index + 1,
+          shape: activity.shape,
+          input: activity.input ?? "",
+          description: activity.description,
+          detail: activity.detail ?? "",
+          output: activity.output ?? "",
+          ...(decisionBranches ? { decisionBranches } : {}),
+          assignments: activity.assignments ?? {},
+        };
+      }),
     },
     annexes: (extracted.annexes ?? []).map((annex, index) => ({
       ...annex,

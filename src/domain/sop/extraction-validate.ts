@@ -110,8 +110,28 @@ function coerceAssignments(value: unknown): Record<string, RasicCode> {
   }, {});
 }
 
+function coerceDecisionTargetStep(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  const step = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(step) && step > 0 ? Math.floor(step) : undefined;
+}
+
+function coerceDecisionBranches(
+  value: unknown,
+): ExtractedActivity["decisionBranches"] {
+  if (!isRecord(value)) return undefined;
+  const yesTargetStep = coerceDecisionTargetStep(value.yesTargetStep);
+  const noTargetStep = coerceDecisionTargetStep(value.noTargetStep);
+  if (yesTargetStep === undefined && noTargetStep === undefined) return undefined;
+  return {
+    ...(yesTargetStep !== undefined ? { yesTargetStep } : {}),
+    ...(noTargetStep !== undefined ? { noTargetStep } : {}),
+  };
+}
+
 function coerceActivity(raw: Record<string, unknown>, index: number): ExtractedActivity {
   const step = typeof raw.step === "number" ? raw.step : Number(raw.step);
+  const decisionBranches = coerceDecisionBranches(raw.decisionBranches);
   return {
     // sopFromExtraction falls back to index+1 for a falsy step; do the same here so a
     // string/garbage step can't leak NaN into the document.
@@ -121,6 +141,7 @@ function coerceActivity(raw: Record<string, unknown>, index: number): ExtractedA
     description: coerceString(raw.description),
     detail: coerceString(raw.detail, MAX_BODY_CHARS),
     output: coerceString(raw.output),
+    ...(decisionBranches ? { decisionBranches } : {}),
     assignments: coerceAssignments(raw.assignments),
   };
 }

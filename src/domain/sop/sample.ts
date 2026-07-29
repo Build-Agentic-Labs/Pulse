@@ -14,6 +14,7 @@ const ACTIVITIES: Array<{
   detail?: string;
   output: string;
   shape?: "terminator" | "process" | "decision";
+  decisionBranches?: { yesTargetStep: number; noTargetStep: number };
   assignments: Record<string, "R" | "A" | "S" | "I" | "C">;
 }> = [
   { input: "", description: "QMS plan", output: "", shape: "terminator", assignments: {} },
@@ -51,6 +52,7 @@ const ACTIVITIES: Array<{
     detail: "Confirm the SOP's structure and content are aligned with ISO 9001 requirements.",
     output: "Compliance decision",
     shape: "decision",
+    decisionBranches: { yesTargetStep: 7, noTargetStep: 5 },
     assignments: { Quality: "R" },
   },
   {
@@ -72,6 +74,26 @@ const ACTIVITIES: Array<{
 
 /** Return a copy of `sop` with every section populated with realistic sample data. */
 export function applySampleData(sop: Sop): Sop {
+  const activityIds = ACTIVITIES.map((_, index) => `${sop.id}-sample-${index}`);
+  const sampleActivities = ACTIVITIES.map((activity, index) => ({
+    id: activityIds[index],
+    step: index + 1,
+    shape: activity.shape,
+    input: activity.input,
+    description: activity.description,
+    detail: activity.detail,
+    output: activity.output,
+    ...(activity.decisionBranches
+      ? {
+          decisionBranches: {
+            yesTargetActivityId: activityIds[activity.decisionBranches.yesTargetStep - 1],
+            noTargetActivityId: activityIds[activity.decisionBranches.noTargetStep - 1],
+          },
+        }
+      : {}),
+    assignments: activity.assignments,
+  }));
+
   return {
     ...sop,
     meta: {
@@ -103,16 +125,7 @@ export function applySampleData(sop: Sop): Sop {
       processFlowDescription:
         "Starting from the QMS plan, define the process map and process list, author each process with the standard SOP template, verify ISO 9001 compliance, obtain approvals, and place the released SOP under document control.",
       roles: ROLES,
-      activities: ACTIVITIES.map((activity, index) => ({
-        id: `${sop.id}-sample-${index}`,
-        step: index + 1,
-        shape: activity.shape,
-        input: activity.input,
-        description: activity.description,
-        detail: activity.detail,
-        output: activity.output,
-        assignments: activity.assignments,
-      })),
+      activities: sampleActivities,
     },
     annexes: [
       {

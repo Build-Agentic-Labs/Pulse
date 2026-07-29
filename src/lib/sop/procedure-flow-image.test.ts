@@ -51,8 +51,18 @@ describe("buildProcedureSvgPages", () => {
     expect(diamonds).toBe(decisions);
     expect(decisions).toBe(1);
 
-    // Each page joins its own rows, so total arrows = steps - number of pages.
-    expect((allSvg.match(/<line /g) || []).length).toBe(acts.length - pages.length);
+    // Ordinary steps keep the linear connector. The configured decision replaces its linear
+    // connector with one labelled path per outcome.
+    expect((allSvg.match(/<line /g) || []).length).toBe(acts.length - pages.length - decisions);
+    expect((allSvg.match(/class="decision-branch decision-branch-/g) || []).length).toBe(2);
+    expect(allSvg).toContain('data-branch="yes"');
+    expect(allSvg).toContain('data-branch="no"');
+    expect(allSvg).toContain(">Yes</text>");
+    expect(allSvg).toContain(">No</text>");
+    expect(allSvg).toContain('width="216"');
+    expect(allSvg).toMatch(
+      /class="decision-branch decision-branch-no" data-branch="no" d="M 388 [^"]* H 412 V [^"]* H 388"/,
+    );
 
     expect(allSvg).toContain("compliant?");
     expect(allSvg).toContain("Approved SOP");

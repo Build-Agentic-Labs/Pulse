@@ -47,7 +47,7 @@ const GEOM = {
   nodePadX: 16,
   nodePadY: 12,
   arrowGap: 26,
-  nodeW: 244,
+  nodeW: 216,
 };
 // Column text boxes, spaced so the framed side columns leave a clear gap between each frame.
 const COL = {
@@ -61,6 +61,8 @@ const FRAME_PAD = 5;
 const CX = COL.step.x + COL.step.w / 2;
 
 type RowLayout = {
+  activityId: string;
+  step: number;
   shape: SopShape;
   descLines: string[];
   inputLines: string[];
@@ -68,6 +70,23 @@ type RowLayout = {
   rasicLines: string[];
   nodeH: number;
   cellH: number;
+  decisionBranches?: {
+    yes: BranchTarget;
+    no: BranchTarget;
+  };
+};
+
+type BranchTarget = {
+  activityId?: string | null;
+  step?: number;
+  description: string;
+};
+
+type PositionedRow = {
+  row: RowLayout;
+  center: number;
+  nodeTop: number;
+  nodeBottom: number;
 };
 
 function escapeXml(value: string): string {
@@ -131,12 +150,75 @@ function arrow(x: number, y1: number, y2: number): string {
   );
 }
 
+function branchLabel(label: string, x: number, y: number, anchor: "start" | "middle" | "end" = "middle"): string {
+  return `<text class="decision-branch-label" x="${x}" y="${y}" font-family="Inter, Arial, sans-serif" font-size="10" font-weight="bold" fill="${COLOR.muted}" text-anchor="${anchor}">${escapeXml(label)}</text>`;
+}
+
+function verticalBranch(outcome: "yes" | "no", x: number, y1: number, y2: number): string {
+  const head = 5;
+  const labelY = y1 + (y2 - y1) / 2 + 3;
+  return (
+    `<path class="decision-branch decision-branch-${outcome}" data-branch="${outcome}" d="M ${x} ${y1} V ${y2 - head}" fill="none" stroke="${COLOR.line}" stroke-width="1.3"/>` +
+    `<polygon class="decision-branch-arrow" points="${x - head},${y2 - head} ${x + head},${y2 - head} ${x},${y2}" fill="${COLOR.line}"/>` +
+    branchLabel(outcome === "yes" ? "Yes" : "No", x + 9, labelY, "start")
+  );
+}
+
+function sideBranch(
+  outcome: "yes" | "no",
+  startX: number,
+  startY: number,
+  routeX: number,
+  targetX: number,
+  targetY: number,
+): string {
+  const head = 5;
+  const points =
+    targetX < routeX
+      ? `${targetX + head},${targetY - head} ${targetX + head},${targetY + head} ${targetX},${targetY}`
+      : `${targetX - head},${targetY - head} ${targetX - head},${targetY + head} ${targetX},${targetY}`;
+  const labelX = startX + (routeX - startX) / 2;
+  return (
+    `<path class="decision-branch decision-branch-${outcome}" data-branch="${outcome}" d="M ${startX} ${startY} H ${routeX} V ${targetY} H ${targetX}" fill="none" stroke="${COLOR.line}" stroke-width="1.3" stroke-linejoin="round"/>` +
+    `<polygon class="decision-branch-arrow" points="${points}" fill="${COLOR.line}"/>` +
+    branchLabel(outcome === "yes" ? "Yes" : "No", labelX, startY - 6)
+  );
+}
+
+function branchStub(outcome: "yes" | "no", startX: number, startY: number, endX: number, destination: string): string {
+  const head = 5;
+  const points =
+    endX > startX
+      ? `${endX - head},${startY - head} ${endX - head},${startY + head} ${endX},${startY}`
+      : `${endX + head},${startY - head} ${endX + head},${startY + head} ${endX},${startY}`;
+  const label = `${outcome === "yes" ? "Yes" : "No"} · ${destination}`;
+  return (
+    `<path class="decision-branch decision-branch-${outcome}" data-branch="${outcome}" d="M ${startX} ${startY} H ${endX}" fill="none" stroke="${COLOR.line}" stroke-width="1.3"/>` +
+    `<polygon class="decision-branch-arrow" points="${points}" fill="${COLOR.line}"/>` +
+    branchLabel(label, startX + (endX - startX) / 2, startY - 6)
+  );
+}
+
 /** Measure every step's wrapped text and box/row heights once, so rows can be packed onto pages. */
 function computeRows(sop: Sop): RowLayout[] {
   const { stepFont, stepLh, sideFont, sideLh, nodePadX, nodePadY, nodeW } = GEOM;
   const wrapStep = makeTextWrapper(stepFont);
   const wrapSide = makeTextWrapper(sideFont);
   const roles = sop.procedure.roles;
+  const activitiesById = new Map(sop.procedure.activities.map((activity) => [activity.id, activity]));
+  const resolveTarget = (activityId: string | null | undefined): BranchTarget => {
+    if (activityId === null) return { activityId, description: "End" };
+    if (activityId === undefined) return { activityId, description: "Not set" };
+    const target = activitiesById.get(activityId);
+    return target
+      ? {
+          activityId,
+          step: target.step,
+          description: `Step ${target.step}`,
+        }
+      : { activityId, description: "Missing step" };
+  };
+
   return sop.procedure.activities.map((activity) => {
     const shape: SopShape = activity.shape ?? "process";
     const inputLines = activity.input ? wrapSide(activity.input, COL.input.w) : [];
@@ -155,7 +237,26 @@ function computeRows(sop: Sop): RowLayout[] {
       outputLines.length * sideLh,
       rasicLines.length * sideLh,
     );
-    return { shape, descLines, inputLines, outputLines, rasicLines, nodeH, cellH };
+    const branches = activity.decisionBranches;
+    return {
+      activityId: activity.id,
+      step: activity.step,
+      shape,
+      descLines,
+      inputLines,
+      outputLines,
+      rasicLines,
+      nodeH,
+      cellH,
+      ...(decision && branches && (branches.yesTargetActivityId !== undefined || branches.noTargetActivityId !== undefined)
+        ? {
+            decisionBranches: {
+              yes: resolveTarget(branches.yesTargetActivityId),
+              no: resolveTarget(branches.noTargetActivityId),
+            },
+          }
+        : {}),
+    };
   });
 }
 
@@ -219,10 +320,16 @@ function renderPageSvg(pageRows: RowLayout[], continued: boolean): { svg: string
   parts.push(colFrame(COL.input.x, COL.input.w), colFrame(COL.output.x, COL.output.w), colFrame(COL.rasic.x, COL.rasic.w));
 
   let y = topBand + PAD;
-  pageRows.forEach((row, i) => {
+  const positionedRows: PositionedRow[] = pageRows.map((row) => {
     const center = y + row.cellH / 2;
     const nodeTop = center - row.nodeH / 2;
     const nodeBottom = center + row.nodeH / 2;
+    y += row.cellH + arrowGap;
+    return { row, center, nodeTop, nodeBottom };
+  });
+  const positionsById = new Map(positionedRows.map((position) => [position.row.activityId, position]));
+
+  positionedRows.forEach(({ row, center, nodeTop, nodeBottom }) => {
 
     if (row.shape === "decision") {
       const points = `${CX},${nodeTop} ${CX + nodeW / 2},${center} ${CX},${nodeBottom} ${CX - nodeW / 2},${center}`;
@@ -238,14 +345,39 @@ function renderPageSvg(pageRows: RowLayout[], continued: boolean): { svg: string
     parts.push(textBlock(COL.input.x, center, row.inputLines, "start", sideFont, sideLh, COLOR.ink));
     parts.push(textBlock(COL.output.x, center, row.outputLines, "start", sideFont, sideLh, COLOR.ink));
     parts.push(textBlock(COL.rasic.x, center, row.rasicLines, "start", sideFont, sideLh, COLOR.ink));
+  });
 
-    if (i < pageRows.length - 1) {
-      const next = pageRows[i + 1];
-      const nextNodeTop = y + row.cellH + arrowGap + next.cellH / 2 - next.nodeH / 2;
-      parts.push(arrow(CX, nodeBottom, nextNodeTop));
+  positionedRows.forEach(({ row, center, nodeBottom }, index) => {
+    const next = positionedRows[index + 1];
+    if (row.shape !== "decision" || !row.decisionBranches) {
+      if (next) parts.push(arrow(CX, nodeBottom, next.nodeTop));
+      return;
     }
 
-    y += row.cellH + arrowGap;
+    const renderBranch = (outcome: "yes" | "no", target: BranchTarget) => {
+      const targetPosition = target.activityId ? positionsById.get(target.activityId) : undefined;
+
+      if (outcome === "yes" && targetPosition === next) {
+        parts.push(verticalBranch(outcome, CX, nodeBottom, targetPosition.nodeTop));
+        return;
+      }
+
+      if (targetPosition && targetPosition.row.activityId !== row.activityId) {
+        const routeX = outcome === "yes" ? COL.step.x - 7 : COL.step.x + COL.step.w;
+        const startX = outcome === "yes" ? CX - nodeW / 2 : CX + nodeW / 2;
+        const targetX = outcome === "yes" ? CX - nodeW / 2 : CX + nodeW / 2;
+        parts.push(sideBranch(outcome, startX, center, routeX, targetX, targetPosition.center));
+        return;
+      }
+
+      const direction = outcome === "yes" ? -1 : 1;
+      const startX = CX + direction * (nodeW / 2);
+      const endX = startX + direction * 54;
+      parts.push(branchStub(outcome, startX, center, endX, target.description));
+    };
+
+    renderBranch("yes", row.decisionBranches.yes);
+    renderBranch("no", row.decisionBranches.no);
   });
 
   // Intrinsic size is RASTER_SCALE× the logical viewBox so the SVG rasterizes at high resolution.

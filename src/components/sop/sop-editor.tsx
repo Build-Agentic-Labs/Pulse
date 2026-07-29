@@ -45,6 +45,7 @@ import {
 } from "@/lib/sop/review";
 import { getSop, listSops, saveSop, SopConflictError, type SaveSopOptions, type SopListItem } from "@/lib/sop/store";
 import { addRasicRole, listRasicRoles } from "@/lib/sop/rasic-roles/store";
+import type { SopSearchResult } from "@/lib/sop/search";
 import { buildApprovalEntries } from "@/lib/sop/approval-entries";
 import {
   listSopReviewAnnotations,
@@ -71,6 +72,12 @@ import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopPrintPreview } from "./sop-print-preview";
 import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
 import { SopRosterEditor } from "./sop-roster-editor";
+import { SopSearch } from "./sop-search";
+import {
+  clearSopSearchMatch,
+  revealSopSearchMatch,
+  type SopSearchMatchHandle,
+} from "./sop-search-match";
 
 type StepId =
   | "document"
@@ -341,6 +348,8 @@ export function SopEditor({
   const [qualityApprovalOpen, setQualityApprovalOpen] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const contentScrollRef = useRef<HTMLDivElement>(null);
+  const searchRevealTimerRef = useRef<number | null>(null);
+  const activeSearchMatchRef = useRef<SopSearchMatchHandle | null>(null);
   const [showConvertedReview, setShowConvertedReview] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [reviewVisible, setReviewVisible] = useState(false);
@@ -1473,6 +1482,42 @@ export function SopEditor({
     }
   }
 
+  const clearActiveSearchMatch = useCallback(() => {
+    clearSopSearchMatch(activeSearchMatchRef.current);
+    activeSearchMatchRef.current = null;
+  }, []);
+
+  const handleSearchNavigate = useCallback(
+    (result: SopSearchResult, query: string, resultIndexInStep: number) => {
+      const targetStepIndex = steps.findIndex((entry) => entry.id === result.stepId);
+      if (targetStepIndex < 0) return;
+      setStepIndex(targetStepIndex);
+      clearActiveSearchMatch();
+
+      if (searchRevealTimerRef.current !== null) {
+        window.clearTimeout(searchRevealTimerRef.current);
+      }
+      searchRevealTimerRef.current = window.setTimeout(() => {
+        const root = contentScrollRef.current;
+        if (!root) return;
+        activeSearchMatchRef.current = revealSopSearchMatch({
+          root,
+          result,
+          query,
+          resultIndexInStep,
+        });
+      }, 60);
+    },
+    [clearActiveSearchMatch, steps],
+  );
+
+  useEffect(() => () => {
+    if (searchRevealTimerRef.current !== null) {
+      window.clearTimeout(searchRevealTimerRef.current);
+    }
+    clearActiveSearchMatch();
+  }, [clearActiveSearchMatch]);
+
   const actions = (
     <>
       {canEdit ? (
@@ -1486,6 +1531,12 @@ export function SopEditor({
           <Sparkles size={15} />
         </button>
       ) : null}
+      <SopSearch
+        sop={renderedSop}
+        disabled={previewing || qualityApprovalOpen}
+        onNavigate={handleSearchNavigate}
+        onClose={clearActiveSearchMatch}
+      />
       <button
         type="button"
         className="ui-btn-ghost h-9 w-9 gap-2 px-0 sm:w-auto sm:px-2.5"

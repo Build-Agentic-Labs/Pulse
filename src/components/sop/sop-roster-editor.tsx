@@ -3,7 +3,7 @@
 import { Check, LockKeyhole, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ThemedSelect } from "@/components/themed-select";
-import type { Department } from "@/domain/departments";
+import { canSignReview, type Department, type DeptRole } from "@/domain/departments";
 import type { SopApproval } from "@/domain/sop/schema";
 import { signerAfterDepartmentChange } from "@/domain/sop/approval-mapping";
 import { ConvertedApprovalsNotice } from "./converted-approvals-notice";
@@ -20,6 +20,13 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong. Please try again.";
 }
 
+interface RosterMember {
+  userId: string;
+  name: string;
+  positionTitle: string;
+  deptRole: DeptRole;
+}
+
 interface RosterEditorProps {
   sopId: string;
   departments: Department[];
@@ -34,14 +41,16 @@ interface RosterEditorProps {
 
 /**
  * Assign the departments whose approval is required. Each department names exactly one approver
- * who reviews the draft and later signs the formal departmental approval. Procedure RASIC is a
- * separate responsibility map and is intentionally not part of this roster.
+ * who reviews the draft and later signs the formal departmental approval. Quality may also hold
+ * one of these normal review seats; its locked final-release gate remains separate and must be
+ * completed by a different Quality approver. Procedure RASIC is a separate responsibility map and
+ * is intentionally not part of this roster.
  *
  * Editable only while the SOP is a draft — the database freezes the roster on submit, and after
  * that only an admin may reassign an approver.
  */
 export function SopRosterEditor({ sopId, departments, seats, convertedApprovals, onChanged }: RosterEditorProps) {
-  const [members, setMembers] = useState<Map<string, { userId: string; name: string; positionTitle: string }[]>>(new Map());
+  const [members, setMembers] = useState<Map<string, RosterMember[]>>(new Map());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
@@ -52,17 +61,11 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
 
   const qualityDepartment = departments.find((department) => department.isQualityGate);
   const workflowSeats = useMemo(
-    () => seats.filter(
-      (seat) =>
-        isBlockingSeat(seat.rasic) &&
-        !departments.find((department) => department.id === seat.departmentId)?.isQualityGate,
-    ),
-    [departments, seats],
+    () => seats.filter((seat) => isBlockingSeat(seat.rasic)),
+    [seats],
   );
   const seatedIds = new Set(workflowSeats.map((seat) => seat.departmentId));
-  const available = departments.filter(
-    (department) => !department.isQualityGate && !seatedIds.has(department.id),
-  );
+  const available = departments.filter((department) => !seatedIds.has(department.id));
 
   // One batched pass for any number of departments: a single department_members
   // query + a single profiles query, instead of 2 round trips per seat (N+1).
@@ -83,6 +86,7 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
                 userId: row.userId,
                 name: names.get(row.userId) || "Unnamed member",
                 positionTitle: row.positionTitle,
+                deptRole: row.deptRole,
               })),
           );
         }
@@ -132,7 +136,9 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
     if (!nextDepartmentId || nextDepartmentId === seat.departmentId) return;
     await loadMembersForDepartmentIds([nextDepartmentId]);
     await guarded(`department-${seat.departmentId}`, async () => {
-      const nextMemberIds = (members.get(nextDepartmentId) ?? []).map((member) => member.userId);
+      const nextMemberIds = (members.get(nextDepartmentId) ?? [])
+        .filter((member) => canSignReview(member.deptRole))
+        .map((member) => member.userId);
       await removeSeat(sopId, seat.departmentId);
       await upsertSeat({
         sopId,
@@ -192,14 +198,36 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
           <tbody>
             {workflowSeats.map((seat) => {
               const department = departments.find((item) => item.id === seat.departmentId);
+              const isQualityReviewSeat = Boolean(department?.isQualityGate);
               const options = members.get(seat.departmentId) ?? [];
+              const eligibleOptions = options.filter((member) => canSignReview(member.deptRole));
+              const ineligibleCurrentSigner = options.find(
+                (member) =>
+                  member.userId === seat.signerId &&
+                  !canSignReview(member.deptRole),
+              );
               const approverOptions = [
                 { value: "", label: "Choose an approver…" },
-                ...options.map((member) => ({
+                ...(ineligibleCurrentSigner
+                  ? [{
+                      value: ineligibleCurrentSigner.userId,
+                      label: ineligibleCurrentSigner.name,
+                      description: "Author access only — choose a reviewer or approver",
+                      disabled: true,
+                    }]
+                  : []),
+                ...eligibleOptions.map((member) => ({
                   value: member.userId,
                   label: member.name,
                   description: member.positionTitle || "Position not assigned",
                 })),
+                ...(!eligibleOptions.length && !ineligibleCurrentSigner
+                  ? [{
+                      value: "__no-eligible-approvers__",
+                      label: "No reviewers or approvers assigned",
+                      disabled: true,
+                    }]
+                  : []),
               ];
               return (
                 <tr
@@ -216,9 +244,19 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
                       disabled={busy !== null}
                       options={[
                         ...(department
-                          ? [{ value: department.id, label: department.name }]
+                          ? [{
+                              value: department.id,
+                              label: isQualityReviewSeat
+                                ? `${department.name} · Additional reviewer`
+                                : department.name,
+                            }]
                           : [{ value: seat.departmentId, label: "Unknown" }]),
-                        ...available.map((option) => ({ value: option.id, label: option.name })),
+                        ...available.map((option) => ({
+                          value: option.id,
+                          label: option.isQualityGate
+                            ? `${option.name} · Additional reviewer`
+                            : option.name,
+                        })),
                       ]}
                       onChange={(value) => void changeSeatDepartment(seat, value)}
                     />
@@ -238,6 +276,11 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
                         )
                       }
                     />
+                    {isQualityReviewSeat ? (
+                      <p className="mt-1.5 text-[11px] leading-4 text-ink-tertiary">
+                        Normal review loop. A different Quality approver completes final approval.
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-2 py-2.5 align-middle">
                     <button
@@ -284,11 +327,14 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
                     ariaLabel="Department to add"
                     value={draft.departmentId}
                     disabled={busy !== null}
+                    menuMaxHeight={420}
                     options={[
                       { value: "", label: "Add a department…" },
                       ...available.map((department) => ({
                         value: department.id,
-                        label: `${department.code} · ${department.name}`,
+                        label: `${department.code} · ${department.name}${
+                          department.isQualityGate ? " · Additional reviewer" : ""
+                        }`,
                       })),
                     ]}
                     onChange={(departmentId) => {
@@ -305,11 +351,23 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
                     disabled={busy !== null || !draft.departmentId}
                     options={[
                       { value: "", label: "Select approver…" },
-                      ...(members.get(draft.departmentId) ?? []).map((member) => ({
-                        value: member.userId,
-                        label: member.name,
-                        description: member.positionTitle || "Position not assigned",
-                      })),
+                      ...(members.get(draft.departmentId) ?? [])
+                        .filter((member) => canSignReview(member.deptRole))
+                        .map((member) => ({
+                          value: member.userId,
+                          label: member.name,
+                          description: member.positionTitle || "Position not assigned",
+                        })),
+                      ...(draft.departmentId &&
+                      !(members.get(draft.departmentId) ?? []).some((member) =>
+                        canSignReview(member.deptRole),
+                      )
+                        ? [{
+                            value: "__no-eligible-approvers__",
+                            label: "No reviewers or approvers assigned",
+                            disabled: true,
+                          }]
+                        : []),
                     ]}
                     onChange={(signerId) => setDraft((prev) => ({ ...prev, signerId }))}
                   />

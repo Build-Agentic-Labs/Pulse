@@ -158,9 +158,6 @@ export function SopList({
     seededMemberDepartments?.[0]?.id ?? "",
   );
   const seededReview = seededFromServer ? initialReview : undefined;
-  const [currentUserId, setCurrentUserId] = useState<string | null>(
-    seededReview?.currentUserId ?? null,
-  );
   const [reviewResults, setReviewResults] = useState<Map<string, SopReviewSubmission[]>>(
     () => reviewResultsFrom(seededReview),
   );
@@ -188,7 +185,6 @@ export function SopList({
   const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) {
       setSops([]);
-      setCurrentUserId(null);
       setReviewResults(new Map());
       setReviewParticipants(new Map());
       setListStatus("ready");
@@ -217,7 +213,6 @@ export function SopList({
       const userId = userResult.data.user?.id ?? null;
       const review = await fetchSopListReviewData(next, userId, supabase);
       setSops(next);
-      setCurrentUserId(review.currentUserId);
       setReviewResults(reviewResultsFrom(review));
       setReviewParticipants(reviewParticipantsFrom(review));
       setListStatus("ready");
@@ -733,11 +728,11 @@ export function SopList({
                                 </td>
                                 {showReviewStatus ? (
                                   <td className="px-3 py-2.5 align-middle">
-                                    {sop.status === "in_review" && sop.createdBy === currentUserId && rowReviewers.length ? (
+                                    {sop.status === "in_review" && rowReviewers.length ? (
                                       <button
                                         type="button"
                                         className="flex -space-x-1.5 rounded-full p-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-                                        aria-label={`View review status for ${sop.title || sop.sopNumber}`}
+                                        aria-label={`View review status for ${sop.title || sop.sopNumber || "Untitled SOP"}`}
                                         onClick={() => void openFeedback(sop)}
                                       >
                                         {rowReviewers.slice(0, 4).map((reviewer) => {
@@ -806,7 +801,7 @@ export function SopList({
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4"
           role="dialog"
           aria-modal="true"
-          aria-label={`Review feedback for ${feedbackSop.title || feedbackSop.sopNumber}`}
+          aria-label={`Review feedback for ${feedbackSop.title || feedbackSop.sopNumber || "Untitled SOP"}`}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setFeedbackSop(null);
           }}

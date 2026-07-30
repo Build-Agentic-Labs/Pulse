@@ -91,7 +91,7 @@ export function RasicRolesAdmin({ workspaceId, manage }: { workspaceId?: string;
   }
 
   return (
-    <section className="ui-panel overflow-hidden">
+    <section className="ui-panel overflow-hidden bg-transparent">
       <div className="border-b border-line px-4 py-3">
         <h3 className="ui-setup-section-title">RASIC roles added by your team</h3>
         <p className="mt-1 text-xs text-ink-tertiary">

@@ -32,6 +32,8 @@ type ThemedSelectProps = {
   className?: string;
   disabled?: boolean;
   menuAlign?: "left" | "right";
+  /** Maximum menu height in pixels when this picker needs to expose a longer list at once. */
+  menuMaxHeight?: number;
   placeholder?: string;
   /**
    * Opt-in combobox behavior: a search box at the top of the menu that filters the options and
@@ -55,6 +57,7 @@ export function ThemedSelect({
   className = "",
   disabled = false,
   menuAlign = "left",
+  menuMaxHeight = 288,
   placeholder,
   selectedLabel,
   triggerClassName = "",
@@ -156,7 +159,7 @@ export function ThemedSelect({
         left,
         top,
         width,
-        maxHeight: Math.min(288, maxHeight),
+        maxHeight: Math.min(menuMaxHeight, maxHeight),
       });
     }
 
@@ -172,7 +175,7 @@ export function ThemedSelect({
       window.visualViewport?.removeEventListener("resize", updateMenuPosition);
       window.visualViewport?.removeEventListener("scroll", updateMenuPosition);
     };
-  }, [menuAlign, open]);
+  }, [menuAlign, menuMaxHeight, open]);
 
   useEffect(() => {
     if (!open) return;

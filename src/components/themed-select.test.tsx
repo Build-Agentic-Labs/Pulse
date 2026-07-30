@@ -34,6 +34,23 @@ describe("ThemedSelect without allowCustomValue", () => {
 
     expect(onChange).toHaveBeenCalledWith("Operator");
   });
+
+  it("supports a taller menu for longer option lists", () => {
+    render(
+      <ThemedSelect
+        value=""
+        options={OPTIONS}
+        onChange={() => {}}
+        ariaLabel="Role"
+        menuMaxHeight={420}
+      />,
+    );
+    fireEvent.click(trigger());
+
+    expect((screen.getByRole("listbox", { name: "Role" }) as HTMLElement).style.maxHeight).toBe(
+      "420px",
+    );
+  });
 });
 
 describe("ThemedSelect with allowCustomValue", () => {

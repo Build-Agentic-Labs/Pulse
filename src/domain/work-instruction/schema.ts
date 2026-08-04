@@ -164,12 +164,17 @@ export const CARDS_ON_FIRST_SHEET = 3;
  * share the text column. The sample's own tightest card reads 725, which would
  * set a budget that clips on a busier step.
  *
- * Worst-case first card: 645. Set ~7% under.
+ * Worst-case first card: 645 at a 1.20in header, 685 at 1.05in.
+ *
+ * Left at 600 through both. The convention is ~7% under, which would now allow
+ * 640, but the value has survived two geometry changes untouched and raising it
+ * buys almost nothing: steps are authored one sentence long, so a 600-character
+ * card is already far past what a well-written step needs. Headroom here costs
+ * nothing and protects against the next layout change.
  *
  * A first-principles estimate put this at 360, and would have split steps that
  * fit with room to spare. If the card layout changes, re-run the measurement
- * rather than re-deriving it — re-measured after the header grew to 1.20in and
- * the value held.
+ * rather than re-deriving it.
  */
 export const INSTRUCTION_BUDGET_CHARS = 600;
 
@@ -177,9 +182,11 @@ export const INSTRUCTION_BUDGET_CHARS = 600;
  * Budget for a continuation card, which drops the photo column and runs text
  * the full card width.
  *
- * Worst-case measured the same way: 1,851 — roughly three times a first card,
- * which is why a long step usually needs only one continuation. Crowding the
- * checks does not move it, because they wrap across the full width. Set ~8%
- * under.
+ * Worst-case measured the same way: 1,851 at a 1.20in header — roughly three
+ * times a first card, which is why a long step usually needs only one
+ * continuation. Crowding the checks does not move it, because they wrap across
+ * the full width. Cards only grew when the header shrank, so 1700 stays safe;
+ * it has not been re-measured since, because the sample no longer contains a
+ * continuation to measure against.
  */
 export const CONTINUATION_BUDGET_CHARS = 1700;

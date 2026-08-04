@@ -103,7 +103,7 @@ overrode the recommendation.
    then revision history - then production data in the header. this will allow
    us to remove the revision history from the sheet canvas."* The header grew
    to 1.20in to hold it. Because the header is on every sheet, every card row
-   shrinks equally, so cards stay a uniform size — 5.25 × 4.17in.
+   shrinks equally, so cards stay a uniform size.
 
 9. **A material kit is a part number** (same review): *"combine material kits
    and parts - a kit will be a part number in that list."* The separate
@@ -115,6 +115,24 @@ overrode the recommendation.
     equipment, dont change the procedure items."* One block per column, all
     stretched to the band height, so the band reads as a single rank of boxes.
     Step cards were explicitly left alone.
+
+11. **"No photo" is not the same as "write here"** (added 2026-08-04, third
+    review). One class, `.wi-card-photo-empty`, was doing both jobs: ruled
+    writing lines for a blank template slot, reused as the placeholder when a
+    real step simply had no photo. A populated card therefore printed a ruled
+    writing box where its photo belonged. Split into `.wi-card-photo-missing`
+    (flat, labelled "No photo", reads as absence) and `.wi-rule-lines` (the
+    blank form's writing surface, and only that).
+
+12. **One sentence per step** (same review): *"the text should also just be one
+    sentence for each step."* This is an authoring convention, not a truncation
+    rule — the sample models it and a test enforces it there. Real
+    multi-sentence steps still flow onto continuation cards rather than being
+    cut, because silently dropping half an assembly instruction is a safety
+    problem. Enforcement in the authoring UI is not built.
+
+13. **Header trimmed to 1.05in** (same review), which grows every card to
+    5.25 × 4.25in.
 
 ## Page geometry
 
@@ -134,13 +152,13 @@ A step sheet, and sheet 1 where the setup band takes the first card row:
 ```
 ┌─ 17in ───────────────────────────────────────────────────────────────┐
 │ ┌──────────────────────────────────────────────────────────────────┐ │
-│ │ logo │ title + doc no. │ rev/eff/product/sheet │ rev history │ PD │ │  1.20in
+│ │ logo │ title + doc no. │ rev/eff/product/sheet │ rev history │ PD │ │  1.05in
 │ └──────────────────────────────────────────────────────────────────┘ │
 │ ┌──────────────────────────────────────────────────────────────────┐ │
-│ │ purpose │ safety │ tools │ parts │ references   (setup band)      │ │  4.17in
+│ │ purpose │ safety │ tools │ parts │ references   (setup band)      │ │  4.25in
 │ └──────────────────────────────────────────────────────────────────┘ │  11in
 │ ┌────────────┐ ┌────────────┐ ┌────────────┐                         │
-│ │  step 1    │ │  step 2    │ │  step 3    │                         │  4.17in
+│ │  step 1    │ │  step 2    │ │  step 3    │                         │  4.25in
 │ └────────────┘ └────────────┘ └────────────┘                         │
 │ ┌──────────────────────────────────────────────────────────────────┐ │
 │ │ ANA INC. CONFIDENTIAL …                          Page 1 of 3     │ │  0.30in
@@ -148,14 +166,14 @@ A step sheet, and sheet 1 where the setup band takes the first card row:
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Height closes as `1.20 + 4.17 + 4.17 + 0.30 + 0.36 gaps = 10.20in`. Width closes
+Height closes as `1.05 + 4.25 + 4.25 + 0.30 + 0.36 gaps = 10.21in`. Width closes
 as `(16.0 − 0.24 gaps) / 3 = 5.25in` per card.
 
 The setup band occupies row 1 of the same two-row grid the step sheets use, so a
-card is 5.25 × 4.17in wherever it lands. Growing the header shrinks both rows
+card is 5.25 × 4.25in wherever it lands. Growing the header shrinks both rows
 equally on **every** sheet, which is why cards stay uniform.
 
-Card internals, 5.25 × 4.17in with 0.1in padding:
+Card internals, 5.25 × 4.25in with 0.1in padding:
 
 | Element | Size |
 |---|---|
@@ -172,10 +190,11 @@ first exceeds `clientHeight`.
 
 Measure the **worst case**, not whatever the sample happens to contain: a card
 crowded with all five check types and a six-tool list, since checks and tools
-share the text column. That reads **645**; the sample's own tightest card reads
-725, and budgeting to 725 would clip on a busier step.
-`INSTRUCTION_BUDGET_CHARS` is **600**, ~7% under. A continuation card runs the
-full width and holds **1,851**; `CONTINUATION_BUDGET_CHARS` is **1700**.
+share the text column. That reads **645** at a 1.20in header and **685** at 1.05in.
+`INSTRUCTION_BUDGET_CHARS` stays **600** through both — more headroom than the
+~7% convention, kept because steps are authored one sentence long and raising it
+buys nothing. A continuation card runs the full width and holds **1,851**;
+`CONTINUATION_BUDGET_CHARS` is **1700**.
 
 The first-principles estimate was 360, which would have split steps that fit
 with room to spare. If the card layout changes, re-run the measurement rather

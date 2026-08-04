@@ -7,9 +7,15 @@
  * so it must exercise the production path — splitting, tool/photo lookup,
  * check flattening — not a parallel imitation of it.
  *
+ * Every step is ONE SENTENCE. That is the authoring style this template is
+ * built around: a card is a glanceable unit of work, and an operator reading it
+ * at arm's length on a shop floor should not have to parse a paragraph. The
+ * continuation machinery still exists for real data that runs longer — see
+ * `split-instruction.ts` and its tests — it is just not what the example models.
+ *
  * Deliberately exercises the awkward cases: ten steps (so the document spans
- * the setup sheet plus two step sheets and ends part-filled), a step with no
- * photo, and a step long enough to continue onto a second card.
+ * the setup sheet plus two step sheets and ends part-filled) and a step with no
+ * photo.
  */
 
 import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "../step-photos";
@@ -44,88 +50,71 @@ interface SampleStep {
 const STEPS: SampleStep[] = [
   {
     name: "Stage the bracket",
-    instruction:
-      "Retrieve the inverter bracket from kit KIT-INV-01. Confirm the part number stamped on the web reads BRK-1001 before staging it on the fixture.",
+    instruction: "Retrieve bracket BRK-1001 from kit KIT-INV-01 and stage it on the fixture.",
     minutes: 4,
     tools: ["Kit cart"],
     qualityCheck: check(["self_qc"]),
   },
   {
     name: "Seat the bracket",
-    instruction:
-      "Lower the bracket onto the frame rail so the locating pin passes through the forward hole. The bracket must sit flat with no visible gap at the rail face.",
+    instruction: "Lower the bracket onto the frame rail so the locating pin passes through the forward hole.",
     minutes: 6,
     tools: ["Lift table"],
     qualityCheck: check(["self_qc"]),
   },
   {
     name: "Start the fasteners",
-    instruction:
-      "Hand-start all four M8 flange bolts. Do not run any bolt down until all four are started, or the bracket will pull out of square.",
+    instruction: "Hand-start all four M8 flange bolts before running any of them down.",
     minutes: 5,
     tools: ["10mm socket"],
     qualityCheck: check(["critical"]),
   },
   {
     name: "Torque the fasteners",
-    instruction:
-      "Torque the four M8 bolts to 45 Nm in a diagonal cross pattern, then repeat the sequence a second time to confirm.",
+    instruction: "Torque the four M8 bolts to 45 Nm in a diagonal cross pattern, twice.",
     minutes: 8,
     tools: ["Torque wrench", "10mm socket"],
     qualityCheck: check(["qc", "torque_required"], 45),
   },
   {
     name: "Route the DC harness",
-    instruction:
-      "Route the DC harness through the bracket saddle and secure with two P-clips. Keep at least 25 mm of clearance from the exhaust shield.",
+    instruction: "Route the DC harness through the bracket saddle and secure it with two P-clips.",
     minutes: 7,
     tools: ["Nut driver"],
     qualityCheck: check(["self_qc"]),
     noPhoto: true,
   },
   {
-    // Long on purpose: past INSTRUCTION_BUDGET_CHARS, so the preview shows a
-    // step continuing onto a second card rather than being clipped.
     name: "Land the DC leads",
-    instruction:
-      "Land the positive and negative leads on the inverter studs. Observe polarity: the red lead lands on the stud marked +, the black on the stud marked -. " +
-      "Torque each nut to 12 Nm, then apply a witness mark across the nut and stud with a paint pen. " +
-      "Confirm the witness mark is unbroken before proceeding, and photograph both terminals for the build record. " +
-      "Any lead showing strand damage must be replaced, not repaired. " +
-      "Do not reuse a nut that has been torqued and backed off; draw a replacement from KIT-INV-01 and record the swap on the traveler. " +
-      "If either stud shows thread damage, stop and raise a nonconformance before continuing — do not chase the thread in place.",
+    instruction: "Land the DC leads on the inverter studs, red to plus, and torque each nut to 12 Nm.",
     minutes: 12,
     tools: ["Torque wrench", "13mm socket", "Paint pen"],
     qualityCheck: check(["qc", "critical", "torque_required"], 12),
   },
   {
     name: "Fit the terminal cover",
-    instruction:
-      "Fit the clear terminal cover and secure the two captive screws. The cover must fully seat with no harness pinched under the lip.",
+    instruction: "Fit the clear terminal cover and secure its two captive screws.",
     minutes: 4,
     tools: ["Nut driver"],
     qualityCheck: check(["self_qc"]),
   },
   {
     name: "Fit the shield",
-    instruction:
-      "Fit the exhaust shield and secure the three M6 bolts to 9 Nm. Confirm the 25 mm harness clearance is maintained after the shield is fitted.",
+    instruction: "Fit the exhaust shield and secure the three M6 bolts to 9 Nm.",
     minutes: 6,
     tools: ["Torque wrench", "10mm socket"],
     qualityCheck: check(["torque_required"], 9),
   },
   {
     name: "Label the assembly",
-    instruction:
-      "Apply the assembly label to the bracket face, oriented so it reads left to right with the enclosure fitted.",
+    instruction: "Apply the assembly label to the bracket face, reading left to right.",
     minutes: 3,
     tools: [],
     qualityCheck: check(["self_qc"]),
   },
   {
     name: "Final inspection",
-    instruction:
-      "Verify all witness marks are intact, the harness is clear of the exhaust shield, and the bracket shows no deformation.",
+    instruction: "Verify every witness mark is intact and the bracket shows no deformation.",
     minutes: 5,
     tools: [],
     qualityCheck: check(["qc"]),

@@ -45,7 +45,7 @@ const PRINT_STYLES = `
    and production data — which is what frees the sheet canvas for content the
    operator actually works from. */
 .wi-hdr {
-  flex: none; height: 1.20in; display: grid;
+  flex: none; height: 1.05in; display: grid;
   grid-template-columns: 1.9in 1fr 1.9in 3.4in 2.0in;
   border: 1px solid #666;
 }
@@ -125,7 +125,18 @@ const PRINT_STYLES = `
 .wi-card-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 2.45in minmax(0, 1fr); gap: 0.1in; }
 .wi-card-photo { border: 1px solid #ccc; background: #f7f7f7; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .wi-card-photo img { width: 100%; height: 100%; object-fit: contain; }
-.wi-card-photo-empty { border: 1px dashed #bbb; background: repeating-linear-gradient(0deg, transparent, transparent 0.22in, #e4e4e4 0.22in, #e4e4e4 calc(0.22in + 1px)); }
+/* A REAL step that simply has no photo. Reads as absence, not as somewhere to
+   write — deliberately distinct from .wi-rule-lines, which the two shared until
+   a populated card started printing a ruled writing box where its photo goes. */
+.wi-card-photo-missing {
+  border: 1px solid #e0e0e0; background: #fafafa;
+  color: #b0b0b0; font-size: 7pt; letter-spacing: 0.08em; text-transform: uppercase;
+}
+/* The blank template's writing surface, and only that. */
+.wi-rule-lines {
+  border: 1px dashed #bbb;
+  background: repeating-linear-gradient(0deg, transparent, transparent 0.22in, #e4e4e4 0.22in, #e4e4e4 calc(0.22in + 1px));
+}
 .wi-card-caption { flex: none; font-size: 7pt; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wi-card-text { display: flex; flex-direction: column; gap: 0.05in; min-width: 0; overflow: hidden; }
 .wi-card-instruction { flex: 1; min-height: 0; font-size: 9pt; line-height: 1.3; white-space: pre-wrap; overflow: hidden; }
@@ -391,7 +402,7 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
             <img src={card.photo.url} alt={card.photo.caption || `Step ${card.sequence}`} />
           </div>
         ) : (
-          <div className="wi-card-photo wi-card-photo-empty" />
+          <div className="wi-card-photo wi-card-photo-missing">No photo</div>
         )}
         <div className="wi-card-text">
           <div className="wi-card-instruction">{card.instruction}</div>
@@ -433,9 +444,9 @@ function BlankCardCell() {
         <span className="wi-card-name" />
       </div>
       <div className="wi-card-main">
-        <div className="wi-card-photo wi-card-photo-empty" />
+        <div className="wi-card-photo wi-rule-lines" />
         <div className="wi-card-text">
-          <div className="wi-card-instruction wi-card-photo-empty" style={{ border: 0 }} />
+          <div className="wi-card-instruction wi-rule-lines" style={{ border: 0 }} />
         </div>
       </div>
     </article>

@@ -23,19 +23,22 @@ describe("sampleWorkInstruction", () => {
     expect(last.cards.length).toBeLessThan(CARDS_PER_SHEET);
   });
 
-  it("includes a step continued across two cards", () => {
-    const cards = sampleWorkInstruction().cards;
-    const continued = cards.filter((card) => card.partCount > 1);
-
-    expect(continued.length).toBeGreaterThan(0);
-    expect(continued.map((card) => card.part)).toEqual([1, 2]);
+  it("keeps every step to a single sentence", () => {
+    // The authoring style the template is built around: one glanceable unit of
+    // work per card. Counts sentence-ending punctuation that is followed by more
+    // text, so a trailing period does not register as a second sentence.
+    for (const card of sampleWorkInstruction().cards) {
+      const breaks = card.instruction.match(/[.!?](?=\s+\S)/g) ?? [];
+      expect(breaks, `"${card.instruction}"`).toHaveLength(0);
+    }
   });
 
-  it("splits rather than overflowing — nothing is clipped", () => {
+  it("fits every step on one card, so nothing continues or overflows", () => {
     const cards = sampleWorkInstruction().cards;
 
+    expect(cards.every((card) => card.partCount === 1)).toBe(true);
     expect(cards.every((card) => !card.overflowing)).toBe(true);
-    expect(cards.every((card) => card.instruction.length <= INSTRUCTION_BUDGET_CHARS * 3)).toBe(true);
+    expect(cards.every((card) => card.instruction.length <= INSTRUCTION_BUDGET_CHARS)).toBe(true);
   });
 
   it("includes a step with no photo so the ruled empty slot is visible", () => {

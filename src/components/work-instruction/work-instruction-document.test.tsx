@@ -148,13 +148,22 @@ describe("WorkInstructionDocument", () => {
     expect(document.querySelectorAll(".wi-card-blank")).toHaveLength(CARDS_ON_FIRST_SHEET - 1);
   });
 
-  it("renders the step photo when present and a ruled placeholder when not", () => {
+  it("distinguishes a real step with no photo from an empty fill-in slot", () => {
     const withPhoto = makeCard(1, { photo: { id: "p1", url: "https://example.test/a.jpg", caption: "Bracket seated" } });
     render(<WorkInstructionDocument instruction={makeInstruction([withPhoto, makeCard(2)])} />);
 
     expect(screen.getByAltText("Bracket seated")).toBeInTheDocument();
-    // One empty slot for the photo-less real card; blank padding cards also draw one.
-    expect(document.querySelectorAll(".wi-card-photo-empty").length).toBeGreaterThanOrEqual(1);
+
+    // The photo-less REAL card reads as absence, not as somewhere to write.
+    const missing = document.querySelectorAll(".wi-card-photo-missing");
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toHaveTextContent("No photo");
+    expect(missing[0].classList.contains("wi-rule-lines")).toBe(false);
+
+    // Ruled writing lines belong only to the blank padding slot.
+    for (const ruled of document.querySelectorAll(".wi-rule-lines")) {
+      expect(ruled.closest(".wi-card-blank")).not.toBeNull();
+    }
   });
 
   it("shows per-step tools and checks on the card", () => {

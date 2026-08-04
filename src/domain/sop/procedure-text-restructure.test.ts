@@ -51,13 +51,13 @@ describe("restructurePreservesWording", () => {
   // identical text that merely arrives in a different encoding form is not a
   // false positive.
   it("rejects a dropped diacritic even in decomposed form", () => {
-    const decomposed = "Führung"; // escape: u + combining diaeresis (NFD) — raw glyphs get silently NFC-normalized by editors and model transcription, so escapes are the only reliable carrier
+    const decomposed = "Fu\u0308hrung"; // u + combining diaeresis (NFD); source escape so no tool can NFC-normalize it away
     expect(restructurePreservesWording(decomposed, "Fuhrung")).toBe(false);
   });
 
   it("accepts identical text in different Unicode normalization forms", () => {
-    const nfc = "Führung"; // escape: precomposed u-umlaut (NFC)
-    const nfd = "Führung"; // escape: u + combining diaeresis (NFD)
+    const nfc = "F\u00FChrung"; // precomposed u-umlaut (NFC)
+    const nfd = "Fu\u0308hrung"; // u + combining diaeresis (NFD)
     expect(restructurePreservesWording(nfc, nfd)).toBe(true);
   });
 });

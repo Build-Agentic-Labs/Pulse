@@ -490,7 +490,7 @@ git commit -m "feat: add pure page packer for SOP print preview"
 **Interfaces:**
 - Consumes: `MeasuredBlock` from Task 1 (this task produces everything except `height`).
 - Produces: `PrintBlock` (a `MeasuredBlock` minus `height`/`lineHeight`, plus `render: (lineRange?: PlacedLineRange) => ReactNode`), `PrintBlockExtras`, and `buildPrintBlocks(sop, extras?): { sections: PrintBlock[]; trailing: PrintBlock[] }`. Two segments because the flowchart sheets must stay where the controlled document has them today — after the Procedure narrative, before Annexes. One flat list would silently reorder the document (flowcharts after Change Approvals). Task 3 measures both segments in one offscreen pass but packs them separately; Task 4 renders sections → flow pages → trailing.
-- Rule for every block: **the root element `render` returns carries `data-review-category={category}`** — headings, list items, and table rows included, not just prose. Review-mode scroll tracking reads that attribute; any fragment missing it makes the review panel report the wrong section.
+- Rule for every block: **the root element `render` returns carries `data-review-category={category}`** — headings, list items, and table rows included, not just prose. Review-mode scroll tracking reads that attribute; any fragment missing it makes the review panel report the wrong section. **One sanctioned exception: the Change Approvals blocks carry no attribute.** `"approvals"` is not a `REVIEW_CATEGORIES` key, so an anchor there would capture scroll-spy and blank the panel highlight over that region — today that area has no anchor and the highlight correctly lingers on "history". Parity, not the rule, governs there.
 
 - [ ] **Step 1: Write the failing test**
 

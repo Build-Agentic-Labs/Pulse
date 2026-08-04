@@ -119,9 +119,17 @@ Card internals, 5.25 × 4.32in with 0.1in padding (inner 5.05 × 4.12):
 | Footer strip — duration, Op initials box, QA initials box | 0.30in, full width |
 | Gaps | 0.34in |
 
-Within the 3.20in text column: instruction ~1.6in, tools ~0.7in, checks ~0.7in.
-At 9pt in a 2.5in column (~45 characters per line), the instruction budget is
-roughly 8 lines ≈ **360 characters**.
+The instruction budget is **measured, not derived**. Binary-searching the real
+rendered box (Chrome, `/design/work-instruction`, 2026-08-04) for the point
+where `scrollHeight` first exceeds `clientHeight` gives 644 characters in the
+tightest card — three tools, three checks and the overflow note all competing
+for the text column — and 765 in the roomiest. `INSTRUCTION_BUDGET_CHARS` is
+set to **600**, ~7% under the tightest, so the warning fires just before text is
+actually lost.
+
+The first-principles estimate was 360, which would have told authors to split
+steps that fit with room to spare. If the card layout changes, re-run the
+measurement rather than re-deriving it.
 
 ## Document anatomy
 
@@ -260,10 +268,14 @@ Blank mode emits one setup sheet plus one step sheet of six empty cards.
 Overflow is **visible, never silent**, following the `sop-print-page-overflowing`
 precedent (`sop-print-preview.tsx:811-814`).
 
-An instruction exceeding the ~270-character budget renders the card with a
-warning outline and a continuation marker rather than clipping the text. Silently
+An instruction exceeding `INSTRUCTION_BUDGET_CHARS` renders the card with a red
+outline and a "split this step" marker rather than clipping the text. Silently
 truncating an assembly instruction is a safety problem; the loud failure tells
 the author to split the step, which is the correct fix.
+
+This is only useful if the budget is honest — a conservative budget produces
+false alarms and trains authors to ignore the warning, which is worse than no
+warning. Hence the measured value above.
 
 ## Testing
 

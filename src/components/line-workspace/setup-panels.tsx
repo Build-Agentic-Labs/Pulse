@@ -1,6 +1,7 @@
 "use client";
 
-import { ListChecks, Plus, Trash2, Wrench } from "lucide-react";
+import { FileText, ListChecks, Plus, Trash2, Wrench } from "lucide-react";
+import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import {
   getManufacturingStepCheckDefinitions,
@@ -450,18 +451,38 @@ export function WorkInstructionsPanel({
     return { label: "Incomplete", className: "border-line bg-surface-raised text-ink-secondary" };
   }
 
+  // The print route reloads planner state by project, so a product with no
+  // project behind it cannot produce a shareable document.
+  const projectId = product.projectId;
+
+  function printHref(task: Task) {
+    return `/projects/${projectId}/planner/work-instructions/print?taskIds=${task.id}&scenarioId=${task.scenarioId}`;
+  }
+
   return (
     <div className="mx-auto max-w-[1100px] space-y-6">
-      <header className="space-y-1">
-        <h2 className="ui-section-title">Work Instructions</h2>
-        <p className="ui-section-subtitle">
-          {workTasks.length === 0
-            ? "Add tasks in the Gantt to see the work instructions you need to build."
-            : `${readyCount} of ${workTasks.length} ready to generate · ${incompleteCount} still need tools & checks.`}
-        </p>
-        <p className="text-xs text-ink-tertiary">
-          A work instruction can be generated once its steps have both tools and a checklist assigned.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h2 className="ui-section-title">Work Instructions</h2>
+          <p className="ui-section-subtitle">
+            {workTasks.length === 0
+              ? "Add tasks in the Gantt to see the work instructions you need to build."
+              : `${readyCount} of ${workTasks.length} ready to generate · ${incompleteCount} still need tools & checks.`}
+          </p>
+          <p className="text-xs text-ink-tertiary">
+            A work instruction can be generated once its steps have both tools and a checklist assigned.
+          </p>
+        </div>
+        {projectId ? (
+          <Link
+            href={`/projects/${projectId}/planner/work-instructions/print?blank=1`}
+            target="_blank"
+            className="ui-btn-ghost h-9 shrink-0 gap-2 px-3"
+          >
+            <FileText size={15} />
+            Blank template
+          </Link>
+        ) : null}
       </header>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -488,36 +509,51 @@ export function WorkInstructionsPanel({
                   {zoneTasks.map((task, index) => {
                     const status = statusOf(task);
                     return (
-                      <button
-                        type="button"
+                      <div
                         key={task.id}
-                        onClick={() => onOpenTask(task.id)}
-                        className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-surface-raised ${
+                        className={`flex w-full items-center gap-3 px-3 transition hover:bg-surface-raised ${
                           index > 0 ? "border-t border-line" : ""
                         }`}
                       >
-                        <span className="ui-mono-label w-32 shrink-0 truncate text-ink-secondary">
-                          {task.manufacturingCode || "Uncoded"}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{task.name}</span>
-                        <span className="flex shrink-0 items-center gap-2 text-ink-tertiary">
-                          <span
-                            title={hasTools(task) ? "Tools assigned" : "No tools assigned"}
-                            className={hasTools(task) ? "text-ink-secondary" : "opacity-30"}
-                          >
-                            <Wrench size={13} strokeWidth={1.75} />
+                        <button
+                          type="button"
+                          onClick={() => onOpenTask(task.id)}
+                          className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left"
+                        >
+                          <span className="ui-mono-label w-32 shrink-0 truncate text-ink-secondary">
+                            {task.manufacturingCode || "Uncoded"}
                           </span>
-                          <span
-                            title={hasChecks(task) ? "Checks assigned" : "No checks assigned"}
-                            className={hasChecks(task) ? "text-ink-secondary" : "opacity-30"}
-                          >
-                            <ListChecks size={13} strokeWidth={1.75} />
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{task.name}</span>
+                          <span className="flex shrink-0 items-center gap-2 text-ink-tertiary">
+                            <span
+                              title={hasTools(task) ? "Tools assigned" : "No tools assigned"}
+                              className={hasTools(task) ? "text-ink-secondary" : "opacity-30"}
+                            >
+                              <Wrench size={13} strokeWidth={1.75} />
+                            </span>
+                            <span
+                              title={hasChecks(task) ? "Checks assigned" : "No checks assigned"}
+                              className={hasChecks(task) ? "text-ink-secondary" : "opacity-30"}
+                            >
+                              <ListChecks size={13} strokeWidth={1.75} />
+                            </span>
                           </span>
-                        </span>
-                        <span className={`ui-chip shrink-0 ${status.className}`}>
-                          {status.label}
-                        </span>
-                      </button>
+                          <span className={`ui-chip shrink-0 ${status.className}`}>
+                            {status.label}
+                          </span>
+                        </button>
+                        {projectId ? (
+                          <Link
+                            href={printHref(task)}
+                            target="_blank"
+                            className="ui-btn-ghost h-7 shrink-0 gap-1.5 px-2 text-xs"
+                            title={`Generate the work instruction for ${task.name}`}
+                          >
+                            <FileText size={13} />
+                            Generate
+                          </Link>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>

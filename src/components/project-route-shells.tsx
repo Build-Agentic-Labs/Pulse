@@ -25,6 +25,10 @@ const CompanyDashboard = dynamic(
   () => import("./company-dashboard").then((module) => module.CompanyDashboard),
   { loading: () => <DashboardLoadingState /> },
 );
+const WorkInstructionPrintPreview = dynamic(
+  () => import("./work-instruction/work-instruction-print").then((module) => module.WorkInstructionPrintPreview),
+  { loading: () => <ProductLoadingState /> },
+);
 const LineWorkspace = dynamic(
   () => import("./line-workspace").then((module) => module.LineWorkspace),
   { loading: ProjectRouteLoading },
@@ -151,6 +155,41 @@ export function PlannerRouteShell({
           projectId={project?.projectId ?? projectId}
           onReady={onReady}
           initialPlannerState={initialPlannerState}
+        />
+      )}
+    </AuthProjectGate>
+  );
+}
+
+/**
+ * Print sub-route of the planner. Same access requirements as the planner
+ * itself, so it reuses `routeKind: "planner"`; the print view deliberately
+ * renders without workspace chrome.
+ */
+export function WorkInstructionPrintRouteShell({
+  projectId,
+  initialGroups,
+  initialPlannerState,
+  taskIds,
+  scenarioId,
+  blank,
+}: {
+  projectId: string;
+  initialPlannerState?: PlannerState;
+  taskIds: string[];
+  scenarioId?: string;
+  blank?: boolean;
+} & ShellProps) {
+  return (
+    <AuthProjectGate projectId={projectId} routeKind="planner" initialGroups={initialGroups}>
+      {(project, onReady) => (
+        <WorkInstructionPrintPreview
+          projectId={project?.projectId ?? projectId}
+          scenarioId={scenarioId}
+          taskIds={taskIds}
+          blank={blank}
+          initialPlannerState={initialPlannerState}
+          onReady={onReady}
         />
       )}
     </AuthProjectGate>

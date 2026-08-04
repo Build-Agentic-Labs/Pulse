@@ -1,12 +1,19 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { CARDS_PER_SHEET, type WorkInstruction, type WorkInstructionCard } from "@/domain/work-instruction/schema";
+import {
+  CARDS_ON_FIRST_SHEET,
+  CARDS_PER_SHEET,
+  type WorkInstruction,
+  type WorkInstructionCard,
+} from "@/domain/work-instruction/schema";
 import { WorkInstructionDocument } from "./work-instruction-document";
 
 function makeCard(sequence: number, overrides: Partial<WorkInstructionCard> = {}): WorkInstructionCard {
   return {
     stepId: `step-${sequence}`,
     sequence,
+    part: 1,
+    partCount: 1,
     code: `FA-INV-010-WI1-${String(sequence).padStart(3, "0")}`,
     name: `Step ${sequence}`,
     instruction: `Do thing ${sequence}`,
@@ -60,21 +67,30 @@ function sheets(): HTMLElement[] {
 }
 
 describe("WorkInstructionDocument", () => {
-  it("renders a setup sheet plus a step sheet", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+  it("fits a three-step instruction on one sheet", () => {
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3)])} />);
 
-    expect(sheets()).toHaveLength(2);
+    expect(sheets()).toHaveLength(1);
+  });
+
+  it("starts the procedure on the setup sheet to save a page", () => {
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
+
+    const first = sheets()[0];
+    expect(first.querySelector(".wi-setup-band")).not.toBeNull();
+    expect(first.querySelectorAll(".wi-card")).toHaveLength(CARDS_ON_FIRST_SHEET);
+    expect(sheets()[1].querySelectorAll(".wi-card")).toHaveLength(CARDS_PER_SHEET);
   });
 
   it("puts the ANA logo and document number in the header of every sheet", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
 
     expect(screen.getAllByAltText("ANA Inc.")).toHaveLength(2);
     expect(screen.getAllByText("FA-INV-010-WI1")).toHaveLength(2);
   });
 
   it("numbers each sheet page N of M", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
 
     expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
     expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
@@ -84,14 +100,14 @@ describe("WorkInstructionDocument", () => {
     render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
 
     const lines = document.querySelectorAll(".wi-ftr-confidential");
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(1);
     expect(lines[0]).toHaveTextContent(
       "ANA INC. CONFIDENTIAL: This copyrighted work and all information is the property of ANA INC. All rights reserved",
     );
   });
 
   it("repeats the safety notes in every sheet header, not only on the setup sheet", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
 
     // The whole point of the header strip: an operator working from sheet 2
     // must not have to flip back to sheet 1 to see the hazard.
@@ -109,11 +125,11 @@ describe("WorkInstructionDocument", () => {
     expect(screen.getByText("SOP-MFG-014")).toBeInTheDocument();
   });
 
-  it("always renders six card slots on a step sheet, padding with blanks", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2)])} />);
+  it("pads the setup sheet's card row with ruled blanks", () => {
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
 
-    expect(document.querySelectorAll(".wi-card")).toHaveLength(CARDS_PER_SHEET);
-    expect(document.querySelectorAll(".wi-card-blank")).toHaveLength(CARDS_PER_SHEET - 2);
+    expect(document.querySelectorAll(".wi-card")).toHaveLength(CARDS_ON_FIRST_SHEET);
+    expect(document.querySelectorAll(".wi-card-blank")).toHaveLength(CARDS_ON_FIRST_SHEET - 1);
   });
 
   it("renders the step photo when present and a ruled placeholder when not", () => {
@@ -137,34 +153,52 @@ describe("WorkInstructionDocument", () => {
     expect(screen.getByText("45 Nm")).toBeInTheDocument();
   });
 
-  it("marks an overflowing card loudly instead of clipping its text", () => {
-    const long = "x".repeat(500);
+  it("marks an unbreakable card loudly instead of clipping its text", () => {
+    const long = "x".repeat(2000);
     render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1, { overflowing: true, instruction: long })])} />);
 
     expect(document.querySelectorAll(".wi-card-overflowing")).toHaveLength(1);
     expect(screen.getByText(long)).toBeInTheDocument();
   });
 
-  it("gives every card Op and QA initials boxes", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+  it("labels a continued step and drops its photo column", () => {
+    const cards = [
+      makeCard(1, { part: 1, partCount: 2, instruction: "First half." }),
+      makeCard(1, { part: 2, partCount: 2, instruction: "Second half." }),
+    ];
+    render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
 
-    expect(document.querySelectorAll(".wi-card-signoff")).toHaveLength(CARDS_PER_SHEET);
+    expect(screen.getByText("(1 of 2)")).toBeInTheDocument();
+    expect(screen.getByText("(2 of 2)")).toBeInTheDocument();
+    expect(document.querySelectorAll(".wi-card-continued")).toHaveLength(1);
+    // The continuation drops the photo slot entirely so text runs full width.
+    expect(document.querySelectorAll(".wi-card-continued .wi-card-photo")).toHaveLength(0);
   });
 
-  it("renders a full sheet of blank slots for an empty instruction", () => {
+  it("prints no signature or approval surface anywhere", () => {
+    // A repeated master carries no sign-off; signatures live on the referenced
+    // checklist action.
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+
+    expect(document.querySelectorAll(".wi-card-signoff")).toHaveLength(0);
+    expect(screen.queryByText("Prepared by")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reviewed by")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approved by")).not.toBeInTheDocument();
+    expect(screen.queryByText("Op")).not.toBeInTheDocument();
+    expect(screen.queryByText("QA")).not.toBeInTheDocument();
+  });
+
+  it("still draws the ruled revision history, which is not a signature", () => {
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+
+    expect(screen.getByText("Revision history")).toBeInTheDocument();
+  });
+
+  it("renders ruled blank slots across both sheets for an empty instruction", () => {
     render(<WorkInstructionDocument instruction={makeInstruction([])} />);
 
     expect(sheets()).toHaveLength(2);
-    expect(document.querySelectorAll(".wi-card-blank")).toHaveLength(CARDS_PER_SHEET);
-  });
-
-  it("draws ruled approval and revision blocks even when unpopulated", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
-
-    expect(screen.getByText("Prepared by")).toBeInTheDocument();
-    expect(screen.getByText("Reviewed by")).toBeInTheDocument();
-    expect(screen.getByText("Approved by")).toBeInTheDocument();
-    expect(screen.getByText("Revision history")).toBeInTheDocument();
+    expect(document.querySelectorAll(".wi-card-blank")).toHaveLength(CARDS_ON_FIRST_SHEET + CARDS_PER_SHEET);
   });
 
   it("renders several instructions back to back for batch printing", () => {
@@ -173,6 +207,6 @@ describe("WorkInstructionDocument", () => {
     render(<WorkInstructionDocument instruction={first} />);
     render(<WorkInstructionDocument instruction={second} />);
 
-    expect(sheets()).toHaveLength(4);
+    expect(sheets()).toHaveLength(2);
   });
 });

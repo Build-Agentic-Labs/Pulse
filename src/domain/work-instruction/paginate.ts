@@ -7,7 +7,13 @@
  * is variable-height and has to flow.
  */
 
-import { CARDS_PER_SHEET, type WorkInstruction, type WorkInstructionCard, type WorkInstructionSheet } from "./schema";
+import {
+  CARDS_ON_FIRST_SHEET,
+  CARDS_PER_SHEET,
+  type WorkInstruction,
+  type WorkInstructionCard,
+  type WorkInstructionSheet,
+} from "./schema";
 
 function chunk(cards: WorkInstructionCard[], size: number): WorkInstructionCard[][] {
   return cards.reduce<WorkInstructionCard[][]>((accumulator, card, index) => {
@@ -21,14 +27,19 @@ function chunk(cards: WorkInstructionCard[], size: number): WorkInstructionCard[
 }
 
 export function paginateWorkInstruction(instruction: WorkInstruction): WorkInstructionSheet[] {
-  const grouped = chunk(instruction.cards, CARDS_PER_SHEET);
-  // A blank instruction still prints one step sheet, of ruled empty slots, so
-  // the document is usable as a fill-in form.
-  const stepGroups = grouped.length > 0 ? grouped : [[]];
+  // Sheet 1 carries the setup band plus the first row of cards; the band is
+  // sized to exactly one card row, so the rest of the sheet is a normal row
+  // rather than white space. Purely a page-count saving.
+  const onFirst = instruction.cards.slice(0, CARDS_ON_FIRST_SHEET);
+  const remaining = instruction.cards.slice(CARDS_ON_FIRST_SHEET);
+
+  // A blank instruction gets an extra sheet of ruled slots so the fill-in form
+  // has somewhere to write past the first three steps.
+  const stepGroups = instruction.blank ? [[]] : chunk(remaining, CARDS_PER_SHEET);
   const total = stepGroups.length + 1;
 
   return [
-    { kind: "setup", page: 1, total, cards: [] },
+    { kind: "setup", page: 1, total, cards: onFirst },
     ...stepGroups.map((cards, index) => ({ kind: "steps" as const, page: index + 2, total, cards })),
   ];
 }

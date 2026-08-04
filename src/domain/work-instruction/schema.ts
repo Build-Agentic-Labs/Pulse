@@ -24,16 +24,30 @@ export interface WorkInstructionCheck {
   spec: string;
 }
 
-/** One step card in the 3x2 grid. */
+/**
+ * One step card in the 3x2 grid.
+ *
+ * A step whose text does not fit one card produces several cards — parts 1..n
+ * of the same step — rather than being clipped or handed back to the author to
+ * split. The photo, tools and duration ride on the first part; the checks ride
+ * on the last, where the step is actually verified.
+ */
 export interface WorkInstructionCard {
   stepId: string;
   /** 1-based position within the whole instruction, not within the sheet. */
   sequence: number;
+  /** 1-based part of this step. `partCount` is 1 for steps that fit one card. */
+  part: number;
+  partCount: number;
   /** stepDisplayCode(), e.g. "Z1-A-010-WI1-010". Empty when uncoded. */
   code: string;
   name: string;
+  /** This part's slice of the step text. */
   instruction: string;
-  /** True when `instruction` exceeds the card's line budget — drawn loudly, never clipped. */
+  /**
+   * True only when a single unsplittable token is wider than the card — the one
+   * case the splitter cannot resolve and a human must. Drawn loudly, never clipped.
+   */
   overflowing: boolean;
   durationMinutes?: number;
   tools: string[];
@@ -126,17 +140,36 @@ export interface WorkInstructionSheet {
 export const CARDS_PER_SHEET = 6;
 
 /**
- * Characters of instruction text a card can hold before it clips.
+ * Cards that share sheet 1 with the setup band.
+ *
+ * The setup band is sized to exactly one card row (4.32in), so the bottom row
+ * of sheet 1 is a normal row of three cards rather than white space. This is
+ * purely to conserve sheets: an 8-step instruction is 2 sheets instead of 3.
+ */
+export const CARDS_ON_FIRST_SHEET = 3;
+
+/**
+ * Characters of instruction text a card can hold, by card shape.
  *
  * MEASURED, not estimated (2026-08-04, Chrome at /design/work-instruction):
  * binary-searched the real rendered `.wi-card-instruction` box for the point
- * where scrollHeight first exceeds clientHeight. The tightest card — three
- * tools, three checks and the overflow note all competing for the text column —
- * held 644 characters; the roomiest held 765. This sits ~7% under the tightest
- * so the warning fires just before text is actually lost, never before.
+ * where scrollHeight first exceeds clientHeight. The tightest first card —
+ * three tools, three checks and a photo all competing for the text column —
+ * held 644 characters; the roomiest held 765. `FIRST` sits ~7% under the
+ * tightest so a split happens just before text would be lost.
  *
- * A first-principles estimate put this at 360 and would have told authors to
- * split steps that fit with room to spare. If the card layout changes, re-run
- * the measurement rather than re-deriving it.
+ * A first-principles estimate put this at 360, and would have split steps that
+ * fit with room to spare. If the card layout changes, re-run the measurement
+ * rather than re-deriving it.
  */
 export const INSTRUCTION_BUDGET_CHARS = 600;
+
+/**
+ * Budget for a continuation card, which drops the photo column and runs text
+ * the full card width.
+ *
+ * MEASURED the same way, same date: a continuation box is 5.03 x 3.55in and
+ * held 1,851 characters before clipping — roughly three times a first card,
+ * which is why a long step usually needs only one continuation. Set ~7% under.
+ */
+export const CONTINUATION_BUDGET_CHARS = 1700;

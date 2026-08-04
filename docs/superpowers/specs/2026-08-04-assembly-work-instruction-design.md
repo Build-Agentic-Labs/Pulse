@@ -76,6 +76,28 @@ overrode the recommendation.
    2.45 × 3.20in box that holds both portrait and landscape shots under
    `object-fit: contain`.
 
+5. **No signature surface anywhere** (added 2026-08-04, after first review).
+   The user's reasoning: *"i dont think we will have a signature area in the
+   Assembly work instructions since these will be repeated - we can reference a
+   checklist action if we need a signature on the action item."* A work
+   instruction is a reusable master reprinted for every build, so both the
+   document-level Prepared/Reviewed/Approved-by blocks **and** the per-card
+   Op/QA initials boxes are gone. Where a signature is required it belongs on
+   the referenced checklist action. The revision-history table stays — it is a
+   document-control record, not a signature.
+
+6. **Sheet 1 carries the first three steps** (added 2026-08-04, same review):
+   *"the first page can start to show some of the procedure already. to try to
+   conserve page count."* The setup band is sized to exactly one card row, so
+   the bottom half of sheet 1 is a normal row of three cards. An 8-step
+   instruction drops from three sheets to two.
+
+7. **Long steps continue onto further cards; they are never handed back to the
+   author** (added 2026-08-04, same review): *"this text should be broken into
+   chunks as well."* This replaces the original design's "flag it and tell the
+   author to split the step", which pushed page geometry onto the person least
+   able to see it.
+
 ## Page geometry
 
 ```
@@ -154,10 +176,12 @@ the confidentiality line copied verbatim from `sop-print-preview.tsx:67`:
 > ANA INC. CONFIDENTIAL: This copyrighted work and all information is the
 > property of ANA INC. All rights reserved
 
-### Sheet 1 — setup sheet
+### Sheet 1 — setup band plus the first three steps
 
 ISO 9001:2015 §7.5 asks that documented information carry identification,
-format, review and approval. Sheet 1 is where the non-step content lives:
+format, review and approval. The setup band is where the non-step content
+lives. It occupies the top card row of sheet 1; the bottom row is three real
+step cards.
 
 | Block | Source |
 |---|---|
@@ -168,23 +192,27 @@ format, review and approval. Sheet 1 is where the non-step content lives:
 | Reference documents | `task.drawingLink`, `task.sopLink` / `sopId` |
 | Production data | `plannedDurationMinutes`, `plannedOperators`, zone, component |
 | Revision history | blank ruled table |
-| Approvals | prepared by / reviewed by / approved by — blank ruled boxes |
 
-The last two render empty in this phase. They are the seam the control layer
-plugs into: `WorkInstructionMeta` declares the fields, the renderer already draws
-the boxes, and phase 2 supplies values instead of blanks.
+There is deliberately **no approvals block** — see decision 5. The revision
+history renders empty in this phase and is the seam the control layer plugs
+into: `WorkInstructionMeta` declares the fields, the renderer already draws the
+table, and phase 2 supplies rows instead of blanks.
+
+Blocks stretch to fill their column rather than stacking at the top. A printed
+form with boxes floating above dead space reads as unfinished, and the leftover
+is useful ruled space for handwritten notes.
 
 ### Step sheets — 3×2 cards
 
-Each card renders, in order: step number badge and `stepDisplayCode`, step name,
-photo with caption (annotated variant when `annotations` is present), instruction
-text, per-step tools from `getStepToolList(task, step.id)`, quality-check chips
-from `getManufacturingStepCheckState(step.qualityCheck, definitions)`
-(`manufacturing-step-checks.ts:133`), planned duration, and Op / QA initials
-boxes.
+Each card renders, in order: step number badge, step name, part label when the
+step is continued, planned duration, `stepDisplayCode`, photo with caption,
+instruction text, per-step tools from `getStepToolList(task, step.id)`, and
+quality-check chips from
+`getManufacturingStepCheckState(step.qualityCheck, definitions)`
+(`manufacturing-step-checks.ts:133`).
 
-The initials boxes are what let the printed sheet double as a build traveler —
-carried over from the traveler-table layout that was not chosen.
+No initials boxes — see decision 5. The printed sheet is a reusable master, not
+a per-build traveler.
 
 ## Architecture
 
@@ -197,7 +225,9 @@ themes (`work-order-print.tsx:3-13`).
 |---|---|---|
 | Domain | `src/domain/work-instruction/schema.ts` | `WorkInstruction`, `WorkInstructionMeta`, `WorkInstructionCard`, `WorkInstructionSheet` |
 | Domain | `src/domain/work-instruction/build.ts` | `buildWorkInstruction(task, product, zone, component)` — pure |
+| Domain | `src/domain/work-instruction/split-instruction.ts` | `splitInstruction(text, first, rest)` → chunks — pure |
 | Domain | `src/domain/work-instruction/paginate.ts` | `paginateWorkInstruction(wi)` → sheets — pure |
+| Domain | `src/domain/work-instruction/sample.ts` | Fixture for `/design/work-instruction`, built through `buildWorkInstruction` |
 | UI | `src/components/work-instruction/work-instruction-document.tsx` | Pure render, no fetching |
 | UI | `src/components/work-instruction/work-instruction-print.tsx` | Preview shell, print bar, loading/error states |
 | Route | `app/projects/[projectId]/planner/work-instructions/print/page.tsx` | Reads `?taskIds=`, loads state, renders |
@@ -236,10 +266,14 @@ disabled rather than pushing a route that cannot load.
 prose that must flow across pages (`use-paginated-pages.ts`,
 `domain/sop/pagination.ts`).
 
-A fixed 3×2 grid has six slots of known size. Pagination is
-`chunk(steps, 6)`: pure, synchronous, unit-testable, no DOM. Choosing a rigid
-grid removed an entire category of complexity, and this is the main reason the
-build is small.
+A fixed 3×2 grid has slots of known size, so pagination is arithmetic: three
+cards onto sheet 1 beside the setup band, then `chunk(rest, 6)`. Pure,
+synchronous, unit-testable, no DOM.
+
+The variable-height problem does not disappear — it moves into
+`splitInstruction`, where it is solved once against a measured character budget
+rather than by measuring the DOM on every render. Choosing a rigid grid is what
+made that trade available, and it is the main reason the build is small.
 
 ### Styles
 
@@ -263,19 +297,26 @@ its blocks with ruled blank rows.
 
 Blank mode emits one setup sheet plus one step sheet of six empty cards.
 
-## Overflow
+## Long steps: continuation cards
 
-Overflow is **visible, never silent**, following the `sop-print-page-overflowing`
-precedent (`sop-print-preview.tsx:811-814`).
+A step whose text does not fit one card produces **several cards** — parts 1..n
+of the same step — rather than being clipped or flagged.
+`splitInstruction(text, firstBudget, restBudget)` breaks at sentence boundaries
+where it can, word boundaries where it must, and never mid-word.
 
-An instruction exceeding `INSTRUCTION_BUDGET_CHARS` renders the card with a red
-outline and a "split this step" marker rather than clipping the text. Silently
-truncating an assembly instruction is a safety problem; the loud failure tells
-the author to split the step, which is the correct fix.
+The photo, tools and duration ride on part 1; the checks ride on the last part,
+where the step is actually verified. A continuation card drops the photo column
+entirely and runs text the full card width, which is why it gets its own,
+roughly 3× larger budget — so a long step usually needs only one continuation.
 
-This is only useful if the budget is honest — a conservative budget produces
-false alarms and trains authors to ignore the warning, which is worse than no
-warning. Hence the measured value above.
+Overflow now means only one thing: a **single unsplittable token wider than the
+card**. That still renders with a red outline and a "shorten this step" marker,
+never clipped, following the `sop-print-page-overflowing` precedent
+(`sop-print-preview.tsx:811-814`). It is the one case a human must resolve.
+
+The budgets must be honest for any of this to work. A conservative budget splits
+steps that fit, scattering one operation across cards for no reason; a generous
+one clips. Hence the measured values above.
 
 ## Testing
 

@@ -175,27 +175,83 @@ describe("buildWorkInstruction", () => {
     ]);
   });
 
-  it("flags a card as overflowing when the instruction exceeds the budget", () => {
+  it("keeps a step that fits on a single card", () => {
     const task = makeTask({
-      manufacturingSteps: [
-        { id: "short", sequence: 1, instruction: "x".repeat(INSTRUCTION_BUDGET_CHARS) },
-        { id: "long", sequence: 2, instruction: "x".repeat(INSTRUCTION_BUDGET_CHARS + 1) },
-      ],
+      manufacturingSteps: [{ id: "step-a", sequence: 1, instruction: "x".repeat(INSTRUCTION_BUDGET_CHARS) }],
     });
 
     const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
 
-    expect(wi.cards[0].overflowing).toBe(false);
-    expect(wi.cards[1].overflowing).toBe(true);
+    expect(wi.cards).toHaveLength(1);
+    expect(wi.cards[0]).toMatchObject({ part: 1, partCount: 1, overflowing: false });
   });
 
-  it("never truncates an overflowing instruction", () => {
-    const instruction = "x".repeat(INSTRUCTION_BUDGET_CHARS * 2);
+  it("continues an over-long step onto further cards instead of clipping it", () => {
+    const sentence = "Torque each nut to twelve newton metres and mark it. ";
+    const instruction = sentence.repeat(20).trim();
     const task = makeTask({ manufacturingSteps: [{ id: "step-a", sequence: 1, instruction }] });
 
     const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
 
-    expect(wi.cards[0].instruction).toBe(instruction);
+    expect(wi.cards.length).toBeGreaterThan(1);
+    expect(wi.cards.every((card) => card.sequence === 1)).toBe(true);
+    expect(wi.cards.map((card) => card.part)).toEqual([1, 2]);
+    expect(wi.cards.every((card) => card.partCount === 2)).toBe(true);
+  });
+
+  it("loses no words when a step is continued", () => {
+    const sentence = "Torque each nut to twelve newton metres and mark it. ";
+    const instruction = sentence.repeat(20).trim();
+    const task = makeTask({ manufacturingSteps: [{ id: "step-a", sequence: 1, instruction }] });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
+
+    expect(wi.cards.map((card) => card.instruction).join(" ").split(/\s+/)).toEqual(instruction.split(/\s+/));
+  });
+
+  it("puts photo, tools and duration on the first part and checks on the last", () => {
+    const sentence = "Torque each nut to twelve newton metres and mark it. ";
+    const task = makeTask({
+      manufacturingSteps: [
+        {
+          id: "step-a",
+          sequence: 1,
+          instruction: sentence.repeat(20).trim(),
+          durationMinutes: 12,
+          qualityCheck: JSON.stringify({ selected: ["qc"], values: {} }),
+        },
+      ],
+      customFields: {
+        [STEP_TOOL_LISTS_FIELD]: { "step-a": ["Torque wrench"] },
+        [STEP_PHOTO_ATTACHMENTS_FIELD]: {
+          "step-a": [{ id: "p1", name: "P", dataUrl: "https://example.test/a.jpg", capturedAt: "2026-08-01T00:00:00.000Z" }],
+        },
+      },
+    });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
+    const [first, last] = [wi.cards[0], wi.cards[wi.cards.length - 1]];
+
+    expect(first.photo).toBeDefined();
+    expect(first.tools).toEqual(["Torque wrench"]);
+    expect(first.durationMinutes).toBe(12);
+    expect(first.checks).toEqual([]);
+
+    expect(last.photo).toBeUndefined();
+    expect(last.tools).toEqual([]);
+    expect(last.durationMinutes).toBeUndefined();
+    expect(last.checks).toEqual([{ key: "qc", label: "QC", spec: "" }]);
+  });
+
+  it("flags a card only when a single token is too wide to break", () => {
+    const task = makeTask({
+      manufacturingSteps: [{ id: "step-a", sequence: 1, instruction: "x".repeat(INSTRUCTION_BUDGET_CHARS * 4) }],
+    });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
+
+    expect(wi.cards).toHaveLength(1);
+    expect(wi.cards[0].overflowing).toBe(true);
   });
 
   it("orders cards by step sequence regardless of array order", () => {

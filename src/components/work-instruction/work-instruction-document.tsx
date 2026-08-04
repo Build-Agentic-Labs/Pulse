@@ -20,6 +20,7 @@ import { formatMinutes } from "@/domain/calculations";
 import { formatDateControlled } from "@/domain/formatting";
 import { paginateWorkInstruction } from "@/domain/work-instruction/paginate";
 import {
+  CARDS_ON_FIRST_SHEET,
   CARDS_PER_SHEET,
   type WorkInstruction,
   type WorkInstructionCard,
@@ -28,9 +29,6 @@ import {
 
 const CONFIDENTIAL_LINE =
   "ANA INC. CONFIDENTIAL: This copyrighted work and all information is the property of ANA INC. All rights reserved";
-
-/** Blank ruled boxes stand in for unsigned approvals; the control layer fills them later. */
-const APPROVAL_ROLES = ["Prepared by", "Reviewed by", "Approved by"] as const;
 
 const PRINT_STYLES = `
 .wi-pages { display: grid; gap: 24px; justify-content: center; }
@@ -76,12 +74,15 @@ const PRINT_STYLES = `
 .wi-ftr-confidential { flex: 1; text-align: center; }
 .wi-ftr > span:first-child, .wi-ftr > span:last-child { white-space: nowrap; }
 
+/* Sheet 1 and the step sheets share one grid geometry, so a card is the same
+   size wherever it lands. On sheet 1 the setup band spans row 1. */
 .wi-grid {
   height: 100%; display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 0.12in;
 }
+.wi-setup-band { grid-column: 1 / -1; min-height: 0; }
 .wi-card {
   box-sizing: border-box; min-height: 0; overflow: hidden;
   display: flex; flex-direction: column; gap: 0.06in;
@@ -109,12 +110,18 @@ const PRINT_STYLES = `
 .wi-card-label { color: #666; font-size: 7pt; letter-spacing: 0.05em; text-transform: uppercase; }
 .wi-check { display: inline-flex; align-items: center; gap: 3px; margin: 0 4px 2px 0; padding: 1px 4px; border: 1px solid #999; }
 .wi-check-spec { font-family: var(--type-mono, monospace); font-weight: 700; }
-.wi-card-signoff { flex: none; display: flex; align-items: center; gap: 6px; font-size: 7pt; color: #666; }
-.wi-card-signoff-box { flex: 1; height: 0.2in; border: 1px solid #999; }
-.wi-card-duration { margin-left: auto; white-space: nowrap; }
+.wi-card-duration { flex: none; color: #666; font-size: 7pt; white-space: nowrap; }
+.wi-card-part { flex: none; color: #666; font-size: 7.5pt; font-style: italic; }
+/* A continuation card has no photo, so its text runs the full card width —
+   which is why continuations get their own, larger character budget. */
+.wi-card-continued .wi-card-main { grid-template-columns: minmax(0, 1fr); }
 
-.wi-setup { height: 100%; display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 0.14in; }
-.wi-setup-col { display: flex; flex-direction: column; gap: 0.14in; min-height: 0; }
+.wi-setup { height: 100%; display: grid; grid-template-columns: 1.15fr 1.15fr 1fr 1.6fr 1.5fr; gap: 0.12in; }
+.wi-setup-col { display: flex; flex-direction: column; gap: 0.12in; min-height: 0; }
+/* Blocks share their column's full height rather than stacking at the top:
+   a printed form with boxes floating above dead space reads as unfinished,
+   and the leftover is useful ruled space for handwritten notes. */
+.wi-setup-col > .wi-block { flex: 1; }
 .wi-block { display: flex; flex-direction: column; gap: 0.05in; border: 1px solid #666; padding: 0.09in; min-height: 0; overflow: hidden; }
 .wi-block h3 { margin: 0; font-size: 8pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #333; }
 .wi-block p { margin: 0; font-size: 9pt; line-height: 1.35; white-space: pre-wrap; overflow: hidden; }
@@ -128,10 +135,9 @@ const PRINT_STYLES = `
 .wi-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.05in 0.1in; font-size: 8.5pt; }
 .wi-facts > div { display: flex; justify-content: space-between; gap: 6px; border-bottom: 1px solid #ddd; }
 .wi-facts span:first-child { color: #666; }
-.wi-approval { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.1in; }
-.wi-approval-cell { display: flex; flex-direction: column; gap: 2px; }
-.wi-approval-line { height: 0.34in; border: 1px solid #999; }
-.wi-approval-role { font-size: 7.5pt; color: #666; }
+/* No signature or approval block by design: a work instruction is a repeated
+   master, reprinted for every build, so it carries no sign-off surface. Where a
+   signature is required it belongs on the referenced checklist action. */
 
 @media print {
   body { visibility: hidden !important; margin: 0 !important; }
@@ -214,6 +220,11 @@ function EmptyAware({ value, fallback }: { value: string; fallback: string }) {
   return <p className={value ? undefined : "wi-block-empty"}>{value || fallback}</p>;
 }
 
+/**
+ * The setup band: everything that is not a step, sized to exactly one card row
+ * so the bottom half of sheet 1 can carry real step cards instead of white
+ * space. Five columns rather than three, because it has to be short.
+ */
 function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
   const { setup, meta } = instruction;
   return (
@@ -222,11 +233,8 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
         <Block title="Purpose / scope">
           <EmptyAware value={setup.purpose} fallback="No description recorded" />
         </Block>
-        <Block title="Safety / PPE">
-          <EmptyAware value={setup.safetyNotes} fallback="No hazards recorded" />
-        </Block>
         <Block title="Production data">
-          <div className="wi-facts">
+          <div className="wi-facts" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
             <div>
               <span>Planned time</span>
               <span>{formatMinutes(setup.plannedDurationMinutes)}</span>
@@ -236,14 +244,16 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
               <span>{setup.plannedOperators}</span>
             </div>
             <div>
-              <span>Zone</span>
-              <span>{instruction.context.zoneName}</span>
-            </div>
-            <div>
               <span>Quality gate</span>
               <span>{setup.qualityGate ? "Yes" : "No"}</span>
             </div>
           </div>
+        </Block>
+      </div>
+
+      <div className="wi-setup-col">
+        <Block title="Safety / PPE">
+          <EmptyAware value={setup.safetyNotes} fallback="No hazards recorded" />
         </Block>
       </div>
 
@@ -259,6 +269,9 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
             <EmptyAware value="" fallback="No tools assigned" />
           )}
         </Block>
+      </div>
+
+      <div className="wi-setup-col">
         <Block title="Parts & materials">
           {setup.parts.length > 0 ? (
             <table className="wi-table">
@@ -306,9 +319,8 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
             <thead>
               <tr>
                 <th style={{ width: "16%" }}>Rev</th>
-                <th style={{ width: "26%" }}>Date</th>
+                <th style={{ width: "28%" }}>Date</th>
                 <th>Description</th>
-                <th style={{ width: "22%" }}>By</th>
               </tr>
             </thead>
             <tbody>
@@ -324,21 +336,10 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
                   <td>{entry.revision}</td>
                   <td>{formatDateControlled(entry.date)}</td>
                   <td>{entry.description}</td>
-                  <td>{entry.author}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </Block>
-        <Block title="Approvals">
-          <div className="wi-approval">
-            {APPROVAL_ROLES.map((role) => (
-              <div className="wi-approval-cell" key={role}>
-                <div className="wi-approval-line" />
-                <span className="wi-approval-role">{role}</span>
-              </div>
-            ))}
-          </div>
         </Block>
       </div>
     </div>
@@ -346,15 +347,22 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
 }
 
 function StepCardCell({ card }: { card: WorkInstructionCard }) {
+  const continued = card.part > 1;
   return (
-    <article className={`wi-card${card.overflowing ? " wi-card-overflowing" : ""}`}>
+    <article
+      className={`wi-card${continued ? " wi-card-continued" : ""}${card.overflowing ? " wi-card-overflowing" : ""}`}
+    >
       <div className="wi-card-head">
         <span className="wi-card-seq">{card.sequence}</span>
         <span className="wi-card-name">{card.name || `Step ${card.sequence}`}</span>
+        {card.partCount > 1 ? (
+          <span className="wi-card-part">{`(${card.part} of ${card.partCount})`}</span>
+        ) : null}
+        {card.durationMinutes ? <span className="wi-card-duration">{formatMinutes(card.durationMinutes)}</span> : null}
         {card.code ? <span className="wi-card-code">{card.code}</span> : null}
       </div>
       <div className="wi-card-main">
-        {card.photo ? (
+        {continued ? null : card.photo ? (
           <div className="wi-card-photo">
             {/* eslint-disable-next-line @next/next/no-img-element -- self-contained print document; src is a data: or signed URL */}
             <img src={card.photo.url} alt={card.photo.caption || `Step ${card.sequence}`} />
@@ -365,7 +373,7 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
         <div className="wi-card-text">
           <div className="wi-card-instruction">{card.instruction}</div>
           {card.overflowing ? (
-            <div className="wi-card-overflow-note">Text exceeds the card — split this step</div>
+            <div className="wi-card-overflow-note">Unbreakable text wider than the card — shorten this step</div>
           ) : null}
           {card.tools.length > 0 ? (
             <div className="wi-card-tools">
@@ -385,14 +393,7 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
           ) : null}
         </div>
       </div>
-      {card.photo?.caption ? <div className="wi-card-caption">{card.photo.caption}</div> : null}
-      <div className="wi-card-signoff">
-        <span>Op</span>
-        <span className="wi-card-signoff-box" />
-        <span>QA</span>
-        <span className="wi-card-signoff-box" />
-        {card.durationMinutes ? <span className="wi-card-duration">{formatMinutes(card.durationMinutes)}</span> : null}
-      </div>
+      {card.photo?.caption && !continued ? <div className="wi-card-caption">{card.photo.caption}</div> : null}
     </article>
   );
 }
@@ -414,27 +415,22 @@ function BlankCardCell() {
           <div className="wi-card-instruction wi-card-photo-empty" style={{ border: 0 }} />
         </div>
       </div>
-      <div className="wi-card-signoff">
-        <span>Op</span>
-        <span className="wi-card-signoff-box" />
-        <span>QA</span>
-        <span className="wi-card-signoff-box" />
-      </div>
     </article>
   );
 }
 
-function StepSheetBody({ sheet }: { sheet: WorkInstructionSheet }) {
-  const blanks = Math.max(0, CARDS_PER_SHEET - sheet.cards.length);
+/** Cards plus ruled blanks, always filling `slots` so the grid geometry holds. */
+function CardCells({ cards, slots }: { cards: WorkInstructionCard[]; slots: number }) {
+  const blanks = Math.max(0, slots - cards.length);
   return (
-    <div className="wi-grid">
-      {sheet.cards.map((card) => (
-        <StepCardCell card={card} key={card.stepId} />
+    <>
+      {cards.map((card) => (
+        <StepCardCell card={card} key={`${card.stepId}-${card.part}`} />
       ))}
       {Array.from({ length: blanks }, (_, index) => (
         <BlankCardCell key={`blank-${index}`} />
       ))}
-    </div>
+    </>
   );
 }
 
@@ -449,7 +445,18 @@ export function WorkInstructionDocument({ instruction }: { instruction: WorkInst
           <article className="wi-sheet" key={`${instruction.taskId}-${sheet.page}`}>
             <HeaderBand instruction={instruction} sheet={sheet} />
             <main className="wi-body">
-              {sheet.kind === "setup" ? <SetupSheetBody instruction={instruction} /> : <StepSheetBody sheet={sheet} />}
+              <div className="wi-grid">
+                {sheet.kind === "setup" ? (
+                  <>
+                    <div className="wi-setup-band">
+                      <SetupSheetBody instruction={instruction} />
+                    </div>
+                    <CardCells cards={sheet.cards} slots={CARDS_ON_FIRST_SHEET} />
+                  </>
+                ) : (
+                  <CardCells cards={sheet.cards} slots={CARDS_PER_SHEET} />
+                )}
+              </div>
             </main>
             <FooterBand instruction={instruction} sheet={sheet} />
           </article>

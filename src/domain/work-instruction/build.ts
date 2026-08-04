@@ -21,6 +21,7 @@ import { getTaskStepPhotoAttachmentMap, type StepPhotoAttachmentMap } from "../s
 import { getTaskStepToolListMap } from "../step-tools";
 import type { ManufacturingStep, Product, Task, Zone } from "../types";
 import {
+  CONTINUATION_BUDGET_CHARS,
   INSTRUCTION_BUDGET_CHARS,
   type WorkInstruction,
   type WorkInstructionCard,
@@ -28,6 +29,7 @@ import {
   type WorkInstructionPart,
   type WorkInstructionPhoto,
 } from "./schema";
+import { splitInstruction } from "./split-instruction";
 
 export interface BuildWorkInstructionInput {
   task: Task;
@@ -94,18 +96,38 @@ export function buildWorkInstruction({ task, product, zone }: BuildWorkInstructi
 
   const steps = [...(task.manufacturingSteps ?? [])].sort((left, right) => left.sequence - right.sequence);
 
-  const cards: WorkInstructionCard[] = steps.map((step, index) => ({
-    stepId: step.id,
-    sequence: index + 1,
-    code: stepDisplayCode(task, step),
-    name: step.name ?? "",
-    instruction: step.instruction,
-    overflowing: step.instruction.length > INSTRUCTION_BUDGET_CHARS,
-    durationMinutes: step.durationMinutes,
-    tools: toolsByStep[step.id] ?? [],
-    checks: buildChecks(step, definitions),
-    photo: buildPhoto(photosByStep, step.id),
-  }));
+  const cards: WorkInstructionCard[] = steps.flatMap((step, index) => {
+    const sequence = index + 1;
+    const code = stepDisplayCode(task, step);
+    const checks = buildChecks(step, definitions);
+    const chunks = splitInstruction(step.instruction, INSTRUCTION_BUDGET_CHARS, CONTINUATION_BUDGET_CHARS);
+    // A step with no text still gets one card — the operator needs the slot.
+    const parts = chunks.length > 0 ? chunks : [""];
+
+    return parts.map((instruction, partIndex) => {
+      const first = partIndex === 0;
+      const last = partIndex === parts.length - 1;
+      const budget = first ? INSTRUCTION_BUDGET_CHARS : CONTINUATION_BUDGET_CHARS;
+
+      return {
+        stepId: step.id,
+        sequence,
+        part: partIndex + 1,
+        partCount: parts.length,
+        code,
+        name: step.name ?? "",
+        instruction,
+        // The splitter already broke what it could; anything still over budget
+        // is a single token too wide to break, which only a human can fix.
+        overflowing: instruction.length > budget,
+        // Photo, tools and duration lead the step; checks close it.
+        durationMinutes: first ? step.durationMinutes : undefined,
+        tools: first ? (toolsByStep[step.id] ?? []) : [],
+        checks: last ? checks : [],
+        photo: first ? buildPhoto(photosByStep, step.id) : undefined,
+      };
+    });
+  });
 
   return {
     taskId: task.id,

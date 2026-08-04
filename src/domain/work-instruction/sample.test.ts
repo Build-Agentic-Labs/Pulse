@@ -23,11 +23,19 @@ describe("sampleWorkInstruction", () => {
     expect(last.cards.length).toBeLessThan(CARDS_PER_SHEET);
   });
 
-  it("includes exactly one overflowing card", () => {
-    const overflowing = sampleWorkInstruction().cards.filter((card) => card.overflowing);
+  it("includes a step continued across two cards", () => {
+    const cards = sampleWorkInstruction().cards;
+    const continued = cards.filter((card) => card.partCount > 1);
 
-    expect(overflowing).toHaveLength(1);
-    expect(overflowing[0].instruction.length).toBeGreaterThan(INSTRUCTION_BUDGET_CHARS);
+    expect(continued.length).toBeGreaterThan(0);
+    expect(continued.map((card) => card.part)).toEqual([1, 2]);
+  });
+
+  it("splits rather than overflowing — nothing is clipped", () => {
+    const cards = sampleWorkInstruction().cards;
+
+    expect(cards.every((card) => !card.overflowing)).toBe(true);
+    expect(cards.every((card) => card.instruction.length <= INSTRUCTION_BUDGET_CHARS * 3)).toBe(true);
   });
 
   it("includes a step with no photo so the ruled empty slot is visible", () => {

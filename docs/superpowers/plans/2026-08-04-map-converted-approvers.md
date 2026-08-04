@@ -20,6 +20,14 @@
 - Picker renders only when the callback prop is supplied. Absent → the table renders byte-identically to today.
 - Rows are identified by **array index** (`approvalIndex`) — approval rows have no id and can duplicate (Control Plan has `Robbie Miller` ×3).
 - Domain logic in `src/domain/` stays pure with a test file beside it (CLAUDE.md). No new CSS in `app/globals.css`.
+- **`ThemedSelect` is NOT a native `<select>`** — it is a trigger `<button aria-label=…>` plus a `role="listbox"` menu of `role="option"` buttons. Drive it in tests the way `src/components/themed-select.test.tsx:29-34` already does, and never with `fireEvent.change`:
+
+```tsx
+fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval" }));
+fireEvent.click(screen.getByRole("option", { name: /ENG/ }));
+```
+
+  Likewise assert a picker's presence with `screen.getByRole("button", { name: … })`, not `getByLabelText`.
 - Branch `feat/map-converted-approvers`. Run `git branch --show-current` before every commit. No `Co-Authored-By` footer.
 
 ## File Structure
@@ -124,7 +132,7 @@ Add to `src/components/sop/converted-approvals-notice.test.tsx`. The file alread
         onSeatDepartment={async () => {}}
       />,
     );
-    expect(screen.getByLabelText("Department for the Approved By approval")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Department for the Approved By approval" })).toBeTruthy();
   });
 
   it("renders no picker when the caller supplies no handler", () => {
@@ -135,7 +143,7 @@ Add to `src/components/sop/converted-approvals-notice.test.tsx`. The file alread
         seatedDepartmentIds={new Set()}
       />,
     );
-    expect(screen.queryByLabelText("Department for the Approved By approval")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Department for the Approved By approval" })).toBeNull();
   });
 
   it("offers no picker on a row that is already seated", () => {
@@ -147,7 +155,7 @@ Add to `src/components/sop/converted-approvals-notice.test.tsx`. The file alread
         onSeatDepartment={async () => {}}
       />,
     );
-    expect(screen.queryByLabelText("Department for the Approved By approval")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Department for the Approved By approval" })).toBeNull();
   });
 
   // Quality signs the final release; the transition guard refuses to release an
@@ -162,7 +170,7 @@ Add to `src/components/sop/converted-approvals-notice.test.tsx`. The file alread
         onSeatDepartment={async () => {}}
       />,
     );
-    expect(screen.queryByLabelText("Department for the Quality Approval approval")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Department for the Quality Approval approval" })).toBeNull();
   });
 
   it("excludes the quality-gate department and already-seated departments from the options", () => {
@@ -200,15 +208,13 @@ Add to `src/components/sop/converted-approvals-notice.test.tsx`. The file alread
       />,
     );
     // Index 1 is the unresolved row; index 0 already resolved by position.
-    const select = screen.getByLabelText("Department for the Approved By approval");
-    fireEvent.change(select, { target: { value: "d-eng" } });
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval" }));
+    fireEvent.click(screen.getByRole("option", { name: /ENG/ }));
     await waitFor(() => expect(calls).toEqual([[1, "d-eng"]]));
   });
 ```
 
 Add `fireEvent` and `waitFor` to the existing `@testing-library/react` import.
-
-**If `ThemedSelect` does not render a native `<select>`** (check the component first — it may be a custom button+menu), replace the `fireEvent.change` in the last test with clicking the trigger by its `ariaLabel` and then clicking the option by its label text, and replace `getByLabelText` with whatever query matches its rendered trigger. Keep the assertions identical.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -446,16 +452,15 @@ describe("SopRosterEditor — seating a converted approval", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Department for the Approved By approval"), {
-      target: { value: "d-eng" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval" }));
+    fireEvent.click(screen.getByRole("option", { name: /ENG/ }));
 
     await waitFor(() => expect(order).toEqual(["document", "seat"]));
   });
 });
 ```
 
-Adapt the `ThemedSelect` interaction exactly as in Task 2 Step 1 if it is not a native `<select>`. If `SopRosterEditor` needs additional required props to render, supply minimal valid values — do not weaken the assertion.
+If `SopRosterEditor` needs additional required props to render, supply minimal valid values — do not weaken the assertion.
 
 - [ ] **Step 5: Run the full gate**
 

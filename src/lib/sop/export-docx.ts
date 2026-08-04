@@ -96,6 +96,9 @@ function procedureNarrativeBlocks(text: string): Paragraph[] {
       blocks.push(
         new Paragraph({
           spacing: { before: 120, after: 80 },
+          // Same orphan rule the preview's keepWithNext enforces: a sub-heading
+          // never strands at the foot of a Word page (sectionHeading's precedent).
+          keepNext: true,
           children: [new TextRun({ text: classified.text, bold: true, size: 20, color: INK, font: FONT })],
         }),
       );

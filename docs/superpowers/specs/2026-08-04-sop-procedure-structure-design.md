@@ -228,6 +228,32 @@ status guard makes that a standing invariant rather than a lucky fact.
   post-paint guard stays silent); export the DOCX and confirm Word shows bold
   sub-headings and real bullets.
 
+## Amendments — 2026-08-04, final whole-branch review
+
+Where this section disagrees with the text above, this section governs.
+
+1. **Visible list markers.** Beyond the `.sop-export-subheading` rule, the
+   preview's `.sop-export-list` gains `list-style: disc` — the global reset had
+   stripped markers from every preview list (Measurements, References, annexes
+   included) while the DOCX export always rendered real Word bullets. Discs
+   restore preview/Word parity everywhere the class is used, not only for
+   procedure bullets. Live-verified: no pagination drift (offscreen and visible
+   trees share the same markup and stylesheet; markers render outside the
+   unchanged content box).
+2. **Verifier scope, stated precisely.** The mechanical check compares the
+   letters-and-digits-only projection (NFC-normalized, case-preserving). ALL
+   punctuation and whitespace differences pass it — not only "whitespace and
+   glyphs" as §Backfill 2 loosely said. The measured production delta of the
+   2026-08-04 run used only: +274 bullet glyphs, −17 separator commas, −6
+   source list hyphens; word-token sequences identical.
+3. **DOCX sub-headings carry `keepNext`** — the same orphan rule the preview's
+   `keepWithNext` enforces, so a `4.x` heading never strands at the foot of a
+   printed Word page.
+4. **The backfill model is steered by its own `BACKFILL_RESTRUCTURE_MODEL`**
+   (default `claude-sonnet-4-6`) — sharing `SOP_EXTRACTION_MODEL` would let one
+   env var silently re-steer two features with different defaults; the verifier
+   makes a mid-tier model fail safe for this mechanical task.
+
 ## Out of scope
 
 - Purpose/scope classification (no observed need).

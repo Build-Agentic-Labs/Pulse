@@ -31,7 +31,11 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const OUT_DIR = path.join(process.cwd(), "scratch", "procedure-backfill");
 const MIN_LENGTH = 400;
-const MODEL = process.env.SOP_EXTRACTION_MODEL || "claude-opus-5";
+// Own env var — SOP_EXTRACTION_MODEL steers the app's conversion route with a
+// DIFFERENT default, and sharing it would silently re-steer this script. A
+// mid-tier default is correct here: restructuring is mechanical, and the
+// wording verifier makes a weaker model fail SAFE (skip + log, never corrupt).
+const MODEL = process.env.BACKFILL_RESTRUCTURE_MODEL || "claude-sonnet-4-6";
 
 // --- Canonical copies -------------------------------------------------------
 // These two are byte-identical to src/domain/sop/procedure-text-restructure.ts
@@ -160,37 +164,45 @@ async function apply() {
     let skipped = 0;
     for (const file of stems) {
       const stem = file.replace(/\.after\.txt$/, "");
-      const id = (await readFile(path.join(OUT_DIR, `${stem}.id.txt`), "utf8")).trim();
-      const after = await readFile(path.join(OUT_DIR, file), "utf8");
-      const { rows } = await client.query(
-        `select status, document->'procedure'->>'processFlowDescription' as text from sops where id = $1`,
-        [id],
-      );
-      const current = rows[0];
-      if (!current || current.status !== "draft") {
+      // Per-item isolation: one bad pair or transient DB error skips that row
+      // and keeps the run going — the operator always gets the full report of
+      // what applied and where it stopped, instead of a mid-loop crash.
+      try {
+        const id = (await readFile(path.join(OUT_DIR, `${stem}.id.txt`), "utf8")).trim();
+        const after = await readFile(path.join(OUT_DIR, file), "utf8");
+        const { rows } = await client.query(
+          `select status, document->'procedure'->>'processFlowDescription' as text from sops where id = $1`,
+          [id],
+        );
+        const current = rows[0];
+        if (!current || current.status !== "draft") {
+          skipped += 1;
+          console.error(`skipped ${stem}: not found or no longer a draft`);
+          continue;
+        }
+        // A draft edited since generation fails re-verification and is skipped —
+        // the reviewed diff no longer describes the row.
+        if (!restructurePreservesWording(current.text ?? "", after)) {
+          skipped += 1;
+          console.error(`skipped ${stem}: database text changed since the diff was generated`);
+          continue;
+        }
+        const result = await client.query(
+          `update sops
+              set document = jsonb_set(document, '{procedure,processFlowDescription}', to_jsonb($1::text))
+            where id = $2 and status = 'draft'`,
+          [after, id],
+        );
+        if (result.rowCount === 1) {
+          applied += 1;
+          console.log(`applied: ${stem}`);
+        } else {
+          skipped += 1;
+          console.error(`skipped ${stem}: guarded update matched no row`);
+        }
+      } catch (error) {
         skipped += 1;
-        console.error(`skipped ${stem}: not found or no longer a draft`);
-        continue;
-      }
-      // A draft edited since generation fails re-verification and is skipped —
-      // the reviewed diff no longer describes the row.
-      if (!restructurePreservesWording(current.text ?? "", after)) {
-        skipped += 1;
-        console.error(`skipped ${stem}: database text changed since the diff was generated`);
-        continue;
-      }
-      const result = await client.query(
-        `update sops
-            set document = jsonb_set(document, '{procedure,processFlowDescription}', to_jsonb($1::text))
-          where id = $2 and status = 'draft'`,
-        [after, id],
-      );
-      if (result.rowCount === 1) {
-        applied += 1;
-        console.log(`applied: ${stem}`);
-      } else {
-        skipped += 1;
-        console.error(`skipped ${stem}: guarded update matched no row`);
+        console.error(`skipped ${stem}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     console.log(`\nDone. ${applied} applied, ${skipped} skipped.`);

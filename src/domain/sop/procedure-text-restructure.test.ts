@@ -33,13 +33,31 @@ describe("restructurePreservesWording", () => {
   });
 
   // Restructuring may normalize punctuation spacing but never letters/digits.
-  it("ignores punctuation and case only where whitespace collapse implies it", () => {
+  it("ignores dropped separator punctuation when a run-on list becomes bullets", () => {
     const before = "items, including:  Policies;  Quality manuals";
     const after = "items, including:\n• Policies\n• Quality manuals";
-    // Semicolons dropped when converting a run-on list to bullets is a wording
-    // change by the letters-only projection? No — ";" is punctuation, not a
-    // letter/digit, so the projection is identical. This is intentional:
-    // separators ARE the thing being restructured.
+    // ";" is punctuation, not a letter/digit, so the projection is identical.
+    // This is intentional: separators ARE the thing being restructured.
     expect(restructurePreservesWording(before, after)).toBe(true);
+  });
+
+  // Case is content. Restructuring moves text; it never re-cases it.
+  it("rejects a case-only change", () => {
+    expect(restructurePreservesWording("Use the Template.", "Use the template.")).toBe(false);
+  });
+
+  // NFC normalization closes both normalization-form holes at once: a genuinely
+  // dropped diacritic is caught (the letters differ after normalization), and
+  // identical text that merely arrives in a different encoding form is not a
+  // false positive.
+  it("rejects a dropped diacritic even in decomposed form", () => {
+    const decomposed = "Führung"; // u + combining diaeresis
+    expect(restructurePreservesWording(decomposed, "Fuhrung")).toBe(false);
+  });
+
+  it("accepts identical text in different Unicode normalization forms", () => {
+    const nfc = "Führung"; // precomposed u-umlaut (NFC)
+    const nfd = "Führung"; // u + combining diaeresis (NFD)
+    expect(restructurePreservesWording(nfc, nfd)).toBe(true);
   });
 });

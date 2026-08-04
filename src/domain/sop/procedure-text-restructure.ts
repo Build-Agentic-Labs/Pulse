@@ -5,15 +5,19 @@
  * verifier enforces that contract the same way assertSaneStateDeletion guards
  * the planner save path: a drifted restructure fails loudly and is excluded.
  *
- * The projection keeps letters and digits only (Unicode-aware), so whitespace,
+ * The projection keeps letters and digits only (Unicode-aware, NFC-normalized
+ * first so a decomposed accent cannot hide a dropped diacritic), so whitespace,
  * bullet glyphs, and punctuation separators — the things restructuring
  * legitimately moves or replaces — are invisible to it, while any reworded,
- * dropped, or reordered CONTENT changes the projection and fails.
+ * re-cased, dropped, or reordered CONTENT changes the projection and fails.
+ * Case is deliberately significant: restructuring moves text, it never
+ * re-cases it, and a stricter tripwire fails safe (the SOP is skipped and
+ * listed, never silently altered).
  */
 
-/** Letters-and-digits-only projection, lowercased. */
+/** Letters-and-digits-only projection, NFC-normalized, case-preserving. */
 function contentProjection(text: string): string {
-  return (text.match(/[\p{L}\p{N}]/gu) ?? []).join("").toLowerCase();
+  return (text.normalize("NFC").match(/[\p{L}\p{N}]/gu) ?? []).join("");
 }
 
 export function restructurePreservesWording(before: string, after: string): boolean {

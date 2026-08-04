@@ -98,16 +98,20 @@ async function generate() {
     let failed = 0;
     for (const row of rows) {
       const label = `${row.sop_number || row.id} — ${row.title || "untitled"}`;
-      const response = await anthropic.messages.create({
-        model: MODEL,
-        // Sized per the sister extraction route's precedent (32k): opus runs
-        // adaptive thinking by default and it shares this budget, so 8k could
-        // truncate the longest procedures. Truncation fails SAFE (the verifier
-        // rejects a missing tail) but costs yield; headroom is cheaper.
-        max_tokens: 32768,
-        system: RESTRUCTURE_INSTRUCTION,
-        messages: [{ role: "user", content: row.text }],
-      });
+      // Streaming accessor because 32k max_tokens trips the SDK's ten-minute
+      // non-streaming guard; finalMessage() returns the same Message shape.
+      const response = await anthropic.messages
+        .stream({
+          model: MODEL,
+          // Sized per the sister extraction route's precedent (32k): opus runs
+          // adaptive thinking by default and it shares this budget, so 8k could
+          // truncate the longest procedures. Truncation fails SAFE (the verifier
+          // rejects a missing tail) but costs yield; headroom is cheaper.
+          max_tokens: 32768,
+          system: RESTRUCTURE_INSTRUCTION,
+          messages: [{ role: "user", content: row.text }],
+        })
+        .finalMessage();
       if (response.stop_reason === "max_tokens") {
         failed += 1;
         console.error(`TRUNCATED (max_tokens) — skipped: ${label}`);

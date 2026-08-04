@@ -49,3 +49,77 @@ describe("exportSopToDocx — References", () => {
     expect(freeText).toBeGreaterThan(uploaded);
   });
 });
+
+describe("exportSopToDocx — Procedure narrative structure", () => {
+  it("renders detected headings as bold body-size paragraphs (not Word Heading style)", async () => {
+    const sop = createEmptySop("verify", "2026-01-01T00:00:00.000Z");
+    sop.procedure.processFlowDescription = "4.4 Document Creation\nBody line.";
+    const blob = await exportSopToDocx(sop);
+    const xml = new PizZip(Buffer.from(await blob.arrayBuffer())).file("word/document.xml")!.asText();
+
+    // Heading should appear as text with bold (<w:b/>) and body size (w:sz="20").
+    const headingIdx = xml.indexOf("4.4 Document Creation");
+    expect(headingIdx).toBeGreaterThan(-1);
+
+    // Look backward from the heading text to find its run properties.
+    const contextBefore = xml.substring(Math.max(0, headingIdx - 300), headingIdx);
+    expect(contextBefore).toContain("<w:b/>");
+    expect(contextBefore).toContain('<w:sz w:val="20"/>');
+
+    // Verify body line appears after the heading.
+    const afterHeading = xml.substring(headingIdx);
+    expect(afterHeading).toContain("Body line.");
+  });
+
+  it("collapses consecutive bullet lines into a single Word bullet list (no prefix in text)", async () => {
+    const sop = createEmptySop("verify", "2026-01-01T00:00:00.000Z");
+    sop.procedure.processFlowDescription = "• First item\n• Second item";
+    const blob = await exportSopToDocx(sop);
+    const xml = new PizZip(Buffer.from(await blob.arrayBuffer())).file("word/document.xml")!.asText();
+
+    // Both items should appear in the text (without the bullet prefix).
+    expect(xml).toContain("First item");
+    expect(xml).toContain("Second item");
+
+    // Bullet prefix should NOT appear in the text runs (Word renders the bullet itself).
+    // The classifyProcedureLine strips the "• " prefix before passing to bulletList.
+    expect(xml).not.toContain("• First item");
+    expect(xml).not.toContain("• Second item");
+
+    // Both items should be part of bullet lists (contain <w:numPr> in their paragraphs).
+    // Find the first item and check it's in a bullet list paragraph.
+    const firstIdx = xml.indexOf("First item");
+    expect(firstIdx).toBeGreaterThan(-1);
+    const firstContext = xml.substring(Math.max(0, firstIdx - 500), firstIdx + 100);
+    expect(firstContext).toContain("<w:numPr>");
+
+    // Same for second item.
+    const secondIdx = xml.indexOf("Second item");
+    expect(secondIdx).toBeGreaterThan(-1);
+    const secondContext = xml.substring(Math.max(0, secondIdx - 500), secondIdx + 100);
+    expect(secondContext).toContain("<w:numPr>");
+  });
+
+  it("renders blank lines as empty paragraphs (no em-dash leak from bodyText)", async () => {
+    const sop = createEmptySop("verify", "2026-01-01T00:00:00.000Z");
+    sop.procedure.processFlowDescription = "First.\n\nSecond.";
+    const blob = await exportSopToDocx(sop);
+    const xml = new PizZip(Buffer.from(await blob.arrayBuffer())).file("word/document.xml")!.asText();
+
+    // Both text lines should appear.
+    expect(xml).toContain("First.");
+    expect(xml).toContain("Second.");
+
+    // Extract just the Procedure section to avoid em-dashes from other empty fields.
+    const procStart = xml.indexOf("<w:t xml:space=\"preserve\">Procedure</w:t>");
+    const annexStart = xml.indexOf("<w:t xml:space=\"preserve\">Annexes");
+    const procSection = xml.substring(procStart, annexStart);
+
+    // The blank line must NOT produce an em-dash ("—") in the procedure region.
+    // bodyText("") generates "—", so procedureNarrativeBlocks must NOT call bodyText("")
+    // for blank lines — it creates an empty paragraph instead.
+    expect(procSection).not.toContain("—");
+    expect(procSection).not.toContain("&#8212;");
+    expect(procSection).not.toContain("&#x2014;");
+  });
+});

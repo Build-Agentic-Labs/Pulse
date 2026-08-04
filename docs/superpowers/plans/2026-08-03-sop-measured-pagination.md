@@ -175,6 +175,19 @@ describe("packBlocks", () => {
     expect(pages[0].overflowing).toBe(true);
   });
 
+  // A page that fits the heading but can never fit heading + MIN_SPLIT_LINES:
+  // breaking again cannot help (the fresh page holds only the carried heading),
+  // so a minimal chunk lands under the heading on a flagged page. The heading
+  // must never end up alone — that is this module's headline rule.
+  it("keeps a heading with content even when the pair can never co-fit legally", () => {
+    const pages = packBlocks([atom("h", 20, { keepWithNext: true }), text("para", 5)], 25);
+    expect(pages[0].blocks.map((b) => b.blockId)).toEqual(["h", "para"]);
+    expect(pages[0].overflowing).toBe(true);
+    for (const page of pages) {
+      expect(page.blocks.map((b) => b.blockId)).not.toEqual(["h"]);
+    }
+  });
+
   it("gives an oversized indivisible block its own page and flags it", () => {
     const pages = packBlocks([atom("a", 30), atom("huge", 250)], 100);
     expect(pages).toHaveLength(2);
@@ -324,13 +337,15 @@ export function packBlocks(
   /** Start a fresh page, carrying any trailing headings onto it. */
   function breakPage(): void {
     const carried = trailingHeadings;
-    trailingHeadings = [];
     current.splice(current.length - carried.length);
     flush();
     for (const item of carried) {
       current.push(item.placed);
       used += item.height;
     }
+    // Still trailing on the new page: a second break before their content lands
+    // must carry them again, or the first break orphans them retroactively.
+    trailingHeadings = carried;
   }
 
   for (let index = 0; index < blocks.length; index += 1) {
@@ -379,8 +394,11 @@ export function packBlocks(
       const linesLeft = totalLines - placedLines;
 
       // Too little room for a worthwhile chunk — break to a fresh page first
-      // (carrying any heading, so it cannot be orphaned by the break).
-      if (roomLines < MIN_SPLIT_LINES && current.length > 0) {
+      // (carrying any heading, so it cannot be orphaned by the break). If the
+      // page already holds nothing BUT carried headings, breaking again cannot
+      // create room: fall through and place a minimal chunk, letting the
+      // overfill check below flag the page instead of orphaning the heading.
+      if (roomLines < MIN_SPLIT_LINES && current.length > trailingHeadings.length) {
         breakPage();
         continue;
       }
@@ -392,14 +410,15 @@ export function packBlocks(
           // Shrink the chunk so at least MIN_SPLIT_LINES carry over. Never
           // overfills: take only decreases here.
           take = linesLeft - MIN_SPLIT_LINES;
-        } else if (current.length > 0) {
+        } else if (current.length > trailingHeadings.length) {
           // Fewer than 2×MIN lines cannot split legally — move the remainder
-          // whole to a fresh page.
+          // whole to a fresh page. Same headings-only guard as above: breaking
+          // a page that holds nothing but carried headings cannot create room.
           breakPage();
           continue;
         } else {
-          // Fresh page and still uncuttable (page shorter than the remainder):
-          // place whole; the overfill check below flags the page.
+          // Fresh page (or headings-only page) and still uncuttable: place
+          // whole; the overfill check below flags the page.
           take = linesLeft;
         }
       }
@@ -443,7 +462,7 @@ export function packBlocks(
 npx vitest run src/domain/sop/pagination.test.ts
 ```
 
-Expected: PASS, 16 tests.
+Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Typecheck and lint**
 

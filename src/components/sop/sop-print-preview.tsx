@@ -321,6 +321,9 @@ export function SopPrintPreview({
   const previewRootRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [pageScale, setPageScale] = useState(1);
+  // Block ids already warned about this mount — re-measures (debounced edits,
+  // resize) repeat the same overflowing block on every pass otherwise.
+  const warnedOverflowBlockIds = useRef<Set<string>>(new Set());
   const canDownloadPdf = mode === "export" && sop.status === "effective";
 
   useEffect(() => {
@@ -486,7 +489,10 @@ export function SopPrintPreview({
     };
   }, [sop, extras, referenceOpenError]);
 
-  const { sectionPages, trailingPages, measuring, failed, offscreenRef } = usePaginatedPages(segments);
+  // `measuring` is intentionally not destructured: the fallback below no longer
+  // conditions on it (see the comment there for why), and nothing else in this
+  // component reads it.
+  const { sectionPages, trailingPages, failed, offscreenRef } = usePaginatedPages(segments);
 
   // Blocks are self-contained (Task 2), so lookup by id is all rendering needs.
   // Ids that no longer resolve are skipped at render time (below) — during the
@@ -503,7 +509,10 @@ export function SopPrintPreview({
     const scrollEl = scrollRef.current;
     if (!scrollEl) return;
     const updateScale = () => {
-      setPageScale(Math.min(1, (scrollEl.clientWidth - 32) / PAGE_WIDTH_PX));
+      // Floored at 0.1: a clientWidth at or below the 32px padding allowance
+      // (e.g. a collapsed/hidden container mid-layout) would otherwise divide
+      // out to zero or negative, and `zoom: 0` collapses the pages entirely.
+      setPageScale(Math.max(0.1, Math.min(1, (scrollEl.clientWidth - 32) / PAGE_WIDTH_PX)));
     };
     updateScale();
     const observer = new ResizeObserver(updateScale);
@@ -513,21 +522,32 @@ export function SopPrintPreview({
 
   // A page the packer could not split anything on gets flagged rather than
   // silently clipped (see `.sop-print-page-overflowing` below); this is the
-  // author-facing signal that a block needs to be shortened.
+  // author-facing signal that a block needs to be shortened. Warned once per
+  // block id per mount — sectionPages/trailingPages change on every debounced
+  // re-measure (an edit, a resize), and the same oversized block would
+  // otherwise re-warn on every one of those passes.
   useEffect(() => {
     for (const page of [...sectionPages, ...trailingPages]) {
       if (!page.overflowing) continue;
       const blockId = page.blocks[page.blocks.length - 1]?.blockId ?? "unknown";
+      if (warnedOverflowBlockIds.current.has(blockId)) continue;
+      warnedOverflowBlockIds.current.add(blockId);
       console.warn(
         `SOP ${sop.meta.sopNumber || sop.id}: block "${blockId}" is taller than one page and cannot be split; it will overflow its sheet.`,
       );
     }
   }, [sectionPages, trailingPages, sop]);
 
-  // `measuring && empty` covers first paint before fonts settle; `failed` covers
-  // a measurement throw. Either way, one long hand-assigned page beats no
-  // document — this component gates approvals.
-  const fallback = failed || (measuring && sectionPages.length === 0);
+  // Dropped the `measuring` conjunct on purpose: `sectionPages.length === 0` alone
+  // covers first paint before fonts settle AND any later moment the plan comes
+  // back empty (e.g. a re-measure that lands mid print-styling, when the
+  // offscreen tree is momentarily display:none and usableHeight reads 0) — the
+  // plan branch renders nothing in that state regardless of `measuring`, so
+  // gating on `measuring` too just delayed the fallback into a blank page
+  // instead of preventing it. `failed` covers a measurement throw. Either way,
+  // one long hand-assigned page beats no document — this component gates
+  // approvals.
+  const fallback = failed || sectionPages.length === 0;
   const fallbackTotalPages = (hasAttachedForms ? 3 : 2) + flowPages.length;
   // Attachment sheets stay outside the count in both branches — they carry
   // their own "Appendix · Page x of y" label and no document footer.
@@ -727,6 +747,15 @@ export function SopPrintPreview({
         }
         .sop-inline-doc-frame { flex: 1; width: 100%; border: 0; background: #525659; }
         @media print { .sop-inline-doc { display: none !important; } }
+        /* The offscreen measurement tree must be display:none in print, not just
+           hidden — the main print block below forces
+           ".sop-print-page, .sop-print-page * { visibility: visible !important }"
+           so it can un-hide the real pages, and that same rule would re-reveal the
+           probe article and both segment containers too (they share the
+           .sop-print-page class for typography). visibility alone still lets a
+           hidden box fragment across printed pages; display:none removes it from
+           layout entirely, so it can never contribute extra printed sheets. */
+        @media print { .sop-print-measure { display: none !important; } }
         .sop-preview-scroll { flex: 1; min-width: 0; overflow: auto; padding: 24px 16px 64px; }
         .sop-review-panel {
           width: clamp(520px, 38vw, 680px); flex: none; overflow: hidden;
@@ -867,7 +896,12 @@ export function SopPrintPreview({
           .sop-preview-overlay, .sop-print-pages, .sop-print-page, .sop-print-page * { visibility: visible !important; }
           .sop-preview-bar { display: none !important; }
           .sop-preview-scroll { overflow: visible; padding: 0; }
-          .sop-print-pages { display: block; }
+          /* zoom:1 !important beats the screen-only inline "zoom: pageScale" —
+             inline styles normally win over stylesheet rules, but an author
+             !important declaration outranks even an inline style without one.
+             Without this, a review-mode window narrower than ~1360px prints
+             every page shrunk by whatever scale the screen last computed. */
+          .sop-print-pages { display: block; zoom: 1 !important; }
           .sop-print-page {
             width: 8.5in; height: 11in; min-height: 11in; margin: 0;
             padding: 0.52in 0.75in 0.42in; box-shadow: none;
@@ -1184,12 +1218,19 @@ export function SopPrintPreview({
           .sop-preview-content and outside .sop-preview-scroll so
           handleReviewScroll (which reads data-review-category only inside the
           scroll container) and the signature-reveal effect above (scoped to
-          .sop-print-pages) never see these duplicate anchors. Hidden with
-          position/visibility, never display:none — that would collapse
-          layout to 0×0 and every measurement would silently read zero. */}
+          .sop-print-pages) never see these duplicate anchors. On screen, hidden
+          with position/visibility (never display:none — that would collapse
+          layout to 0×0 and every measurement would silently read zero). In
+          print, the opposite is required: the .sop-print-measure class forces
+          display:none there (see the CSS above), because the main print
+          block's ".sop-print-page, .sop-print-page * { visibility: visible
+          !important }" would otherwise re-reveal this whole tree — it shares
+          the .sop-print-page class for typography — and a merely-hidden box
+          still fragments across printed pages. */}
       <div
         ref={offscreenRef}
         aria-hidden
+        className="sop-print-measure"
         style={{ position: "absolute", left: -99999, top: 0, visibility: "hidden", pointerEvents: "none" }}
       >
         <article className="sop-print-page" data-measure-page>
@@ -1198,6 +1239,14 @@ export function SopPrintPreview({
           <DocumentFooter page={1} total={1} />
         </article>
         <div style={{ position: "relative" }}>
+          {/* Invariant: the continuation-heading budget below is measured from
+              this fixed string, not from each section's real title. "Procedure"
+              is short enough to sit on one line at the 7in content width used
+              throughout; the longest real section title today,
+              "Responsible Person(s)", also fits on one line. If a future
+              section title were long enough to wrap at 7in, its "(cont.)"
+              heading would be taller than this probe measures, and every
+              continuation page would under-budget by that extra line. */}
           <section className="sop-export-section" style={{ marginTop: 0 }}>
             <h2>Procedure (cont.)</h2>
           </section>

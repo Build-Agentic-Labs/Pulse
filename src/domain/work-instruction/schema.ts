@@ -185,8 +185,12 @@ export const INSTRUCTION_BUDGET_CHARS = 600;
  * Worst-case measured the same way: 1,851 at a 1.20in header — roughly three
  * times a first card, which is why a long step usually needs only one
  * continuation. Crowding the checks does not move it, because they wrap across
- * the full width. Cards only grew when the header shrank, so 1700 stays safe;
- * it has not been re-measured since, because the sample no longer contains a
- * continuation to measure against.
+ * the full width.
+ *
+ * Not re-measured since: the sample no longer contains a continuation to
+ * measure against. Two changes have pulled in opposite directions — the shorter
+ * header grew every card by 0.08in, and the always-reserved caption row took
+ * 0.19in back — so the true figure is now nearer 1,760. 1700 remains under it.
+ * Re-measure properly before raising this.
  */
 export const CONTINUATION_BUDGET_CHARS = 1700;

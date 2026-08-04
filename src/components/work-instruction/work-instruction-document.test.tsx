@@ -148,6 +148,22 @@ describe("WorkInstructionDocument", () => {
     expect(document.querySelectorAll(".wi-card-blank")).toHaveLength(CARDS_ON_FIRST_SHEET - 1);
   });
 
+  it("reserves the caption row on every card so photo slots match in height", () => {
+    // jsdom has no layout, so this asserts the structural cause rather than the
+    // rendered height: a card that omitted the caption row let its photo slot
+    // absorb that height and print visibly taller than its neighbours.
+    const withPhoto = makeCard(1, { photo: { id: "p1", url: "https://example.test/a.jpg", caption: "Bracket seated" } });
+    const withoutPhoto = makeCard(2);
+    const continued = makeCard(3, { part: 2, partCount: 2 });
+    render(<WorkInstructionDocument instruction={makeInstruction([withPhoto, withoutPhoto, continued])} />);
+
+    const cards = document.querySelectorAll(".wi-card");
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) {
+      expect(card.querySelectorAll(".wi-card-caption")).toHaveLength(1);
+    }
+  });
+
   it("distinguishes a real step with no photo from an empty fill-in slot", () => {
     const withPhoto = makeCard(1, { photo: { id: "p1", url: "https://example.test/a.jpg", caption: "Bracket seated" } });
     render(<WorkInstructionDocument instruction={makeInstruction([withPhoto, makeCard(2)])} />);

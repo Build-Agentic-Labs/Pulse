@@ -137,7 +137,14 @@ const PRINT_STYLES = `
   border: 1px dashed #bbb;
   background: repeating-linear-gradient(0deg, transparent, transparent 0.22in, #e4e4e4 0.22in, #e4e4e4 calc(0.22in + 1px));
 }
-.wi-card-caption { flex: none; font-size: 7pt; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Always rendered, even with nothing to say: the row is reserved so the photo
+   slot is the same height on every card. Let it collapse when a caption is
+   absent and that card's .wi-card-main grows by the caption's height, making a
+   photo-less slot visibly taller than its neighbours. */
+.wi-card-caption {
+  flex: none; height: 0.13in;
+  font-size: 7pt; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .wi-card-text { display: flex; flex-direction: column; gap: 0.05in; min-width: 0; overflow: hidden; }
 .wi-card-instruction { flex: 1; min-height: 0; font-size: 9pt; line-height: 1.3; white-space: pre-wrap; overflow: hidden; }
 .wi-card-overflow-note { flex: none; color: #a52a2a; font-size: 7pt; font-weight: 700; }
@@ -427,7 +434,7 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
           ) : null}
         </div>
       </div>
-      {card.photo?.caption && !continued ? <div className="wi-card-caption">{card.photo.caption}</div> : null}
+      <div className="wi-card-caption">{!continued && card.photo?.caption ? card.photo.caption : ""}</div>
     </article>
   );
 }
@@ -449,6 +456,9 @@ function BlankCardCell() {
           <div className="wi-card-instruction wi-rule-lines" style={{ border: 0 }} />
         </div>
       </div>
+      {/* Reserved for the same reason as on a real card: keeps every slot in the
+          grid exactly the same height. */}
+      <div className="wi-card-caption" />
     </article>
   );
 }

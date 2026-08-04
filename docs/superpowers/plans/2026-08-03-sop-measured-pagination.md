@@ -43,7 +43,7 @@
 
 **Interfaces:**
 - Consumes: nothing — this is the foundation task.
-- Produces: `MeasuredBlock`, `PlacedBlock`, `PagePlan`, `packBlocks(blocks, usableHeight)`, and the exported constant `MIN_SPLIT_LINES = 2`. Tasks 3 and 4 depend on these exact names.
+- Produces: `MeasuredBlock`, `PlacedBlock`, `PlacedLineRange`, `PagePlan`, `packBlocks(blocks, usableHeight)`, and the exported constant `MIN_SPLIT_LINES = 2`. Tasks 3 and 4 depend on these exact names. `PlacedLineRange` carries `lineHeight` so a cut fragment renders as a clipping window over the whole paragraph.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -108,12 +108,12 @@ describe("packBlocks", () => {
     expect(pages[0].blocks[0]).toMatchObject({
       blockId: "para",
       continued: false,
-      lineRange: { startLine: 0, endLine: 10 },
+      lineRange: { startLine: 0, endLine: 10, lineHeight: 10 },
     });
     expect(pages[1].blocks[0]).toMatchObject({
       blockId: "para",
       continued: true,
-      lineRange: { startLine: 10, endLine: 20 },
+      lineRange: { startLine: 10, endLine: 20, lineHeight: 10 },
     });
   });
 
@@ -213,10 +213,22 @@ export interface MeasuredBlock {
   lineHeight?: number;
 }
 
+export interface PlacedLineRange {
+  startLine: number;
+  endLine: number;
+  /**
+   * Carried through to render time so the fragment can be shown as a clipping
+   * window over the *whole* paragraph. Slicing the string instead would re-wrap
+   * the remainder at different points than the measured pass, and the packer's
+   * arithmetic would stop describing what is on screen.
+   */
+  lineHeight: number;
+}
+
 export interface PlacedBlock {
   blockId: string;
   /** Present only for a cut block: the [startLine, endLine) placed on this page. */
-  lineRange?: { startLine: number; endLine: number };
+  lineRange?: PlacedLineRange;
   /** True when this fragment continues from the previous page. */
   continued: boolean;
 }
@@ -312,7 +324,7 @@ export function packBlocks(
       current.push({
         blockId: block.id,
         continued,
-        lineRange: { startLine: placed, endLine: placed + take },
+        lineRange: { startLine: placed, endLine: placed + take, lineHeight },
       });
       used += take * lineHeight;
       placed += take;
@@ -359,7 +371,7 @@ git commit -m "feat: add pure page packer for SOP print preview"
 
 **Interfaces:**
 - Consumes: `MeasuredBlock` from Task 1 (this task produces everything except `height`).
-- Produces: `PrintBlock` (a `MeasuredBlock` minus `height`/`lineHeight`, plus `render`), and `buildPrintBlocks(sop, options): PrintBlock[]`. Task 3 measures these; Task 4 renders them.
+- Produces: `PrintBlock` (a `MeasuredBlock` minus `height`/`lineHeight`, plus `render: (lineRange?: PlacedLineRange) => ReactNode`), and `buildPrintBlocks(sop, options): PrintBlock[]`. Task 3 measures these; Task 4 renders them, passing each `PlacedBlock.lineRange` straight through to `render`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -437,6 +449,7 @@ Create `src/components/sop/print-blocks.tsx`. Decompose in the order page 1 curr
 
 ```tsx
 import type { ReactNode } from "react";
+import type { PlacedLineRange } from "@/domain/sop/pagination";
 import type { Sop } from "@/domain/sop/schema";
 
 /** A leaf block before measurement. Task 3 adds `height`/`lineHeight`. */
@@ -447,15 +460,22 @@ export interface PrintBlock {
   keepWithNext?: boolean;
   splittable?: boolean;
   /** `lineRange` is supplied when the packer cut this block across pages. */
-  render: (lineRange?: { startLine: number; endLine: number }) => ReactNode;
+  render: (lineRange?: PlacedLineRange) => ReactNode;
 }
 ```
 
 Emit, in order: `purpose`, `scope`, `definitions` (one block per table row, header repeats), `responsible`, `references`, `measurements`, `procedure`, then `annexes`, `history`, and the approvals table. For each section emit a heading block with `keepWithNext: true`, then its content blocks. List and table rows are non-splittable.
 
-The prose helper, which every text section routes through:
+The prose helper, which every text section routes through. A cut fragment renders
+the **whole** paragraph inside a clipping window offset to its line range — never a
+sliced string, which would re-wrap the remainder at different points than the
+measured pass and detach the packer's arithmetic from what is on screen. Because the
+window starts exactly at a wrapped line boundary, no stray leading whitespace can
+appear on a continuation; the spec's trim requirement is satisfied by construction.
 
 ```tsx
+import type { PlacedLineRange } from "@/domain/sop/pagination";
+
 function proseBlocks(category: string, sectionTitle: string, value: string): PrintBlock[] {
   // One block per line. A paragraph containing no newline stays a single block and
   // is still marked splittable — the six SOPs whose Procedure has zero newlines
@@ -466,31 +486,57 @@ function proseBlocks(category: string, sectionTitle: string, value: string): Pri
     category,
     sectionTitle,
     splittable: true,
-    render: (lineRange) => (
-      <p
-        className={line ? undefined : "sop-export-empty"}
-        data-review-category={category}
-        data-line-range={lineRange ? `${lineRange.startLine}-${lineRange.endLine}` : undefined}
-      >
-        {/* A cut that lands mid-sentence leaves leading whitespace on the
-            continuation; trim it so the next sheet starts flush. */}
-        {lineRange?.startLine ? line.trimStart() : line || "—"}
-      </p>
-    ),
+    render: (lineRange) => {
+      const paragraph = (
+        <p className={line ? undefined : "sop-export-empty"} data-review-category={category}>
+          {line || "—"}
+        </p>
+      );
+      if (!lineRange) return paragraph;
+      const { startLine, endLine, lineHeight } = lineRange;
+      return (
+        <div
+          data-review-category={category}
+          data-line-range={`${startLine}-${endLine}`}
+          style={{ height: (endLine - startLine) * lineHeight, overflow: "hidden" }}
+        >
+          <div style={{ marginTop: -startLine * lineHeight }}>{paragraph}</div>
+        </div>
+      );
+    },
   }));
 }
 ```
 
+The `render` signature in `PrintBlock` is therefore
+`render: (lineRange?: PlacedLineRange) => ReactNode`.
+
 Reuse the existing markup exactly — `sop-export-section`, `sop-export-list`, `sop-export-table` — so the CSS in `sop-print-preview.tsx` continues to apply unchanged.
 
-Add a matching test to Step 1's suite:
+Add matching tests to Step 1's suite:
 
 ```tsx
-it("trims leading whitespace when a block continues onto the next page", () => {
-  const blocks = buildPrintBlocks(sopWith({ purpose: "   indented continuation" }));
+it("renders a cut fragment as a clipping window sized to its line range", () => {
+  const blocks = buildPrintBlocks(sopWith({ purpose: "A".repeat(4000) }));
   const body = blocks.filter((b) => b.category === "purpose" && !b.keepWithNext);
-  const { container } = render(<>{body[0].render({ startLine: 2, endLine: 4 })}</>);
-  expect(container.textContent).toBe("indented continuation");
+  const { container } = render(
+    <>{body[0].render({ startLine: 10, endLine: 20, lineHeight: 14 })}</>,
+  );
+  const window = container.firstElementChild as HTMLElement;
+  expect(window.style.height).toBe("140px");
+  expect(window.style.overflow).toBe("hidden");
+  const inner = window.firstElementChild as HTMLElement;
+  expect(inner.style.marginTop).toBe("-140px");
+  // The full text is present; the window, not the string, does the cutting.
+  expect(container.textContent).toBe("A".repeat(4000));
+});
+
+it("renders the plain paragraph when no line range is given", () => {
+  const blocks = buildPrintBlocks(sopWith({ purpose: "Short." }));
+  const body = blocks.filter((b) => b.category === "purpose" && !b.keepWithNext);
+  const { container } = render(<>{body[0].render()}</>);
+  expect(container.querySelector("p")?.textContent).toBe("Short.");
+  expect(container.querySelector("div")).toBeNull();
 });
 ```
 
@@ -500,7 +546,7 @@ it("trims leading whitespace when a block continues onto the next page", () => {
 npx vitest run src/components/sop/print-blocks.test.tsx
 ```
 
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
 

@@ -231,7 +231,7 @@ CSS changes are small and targeted:
 | Long title wrapping the header taller | usable height measured per SOP |
 | Flowchart + attachment sheets | pass through, already fixed-size |
 | Widow/orphan inside a split paragraph | minimum 2 lines either side |
-| Leading whitespace at a split point | trimmed on continuation |
+| Leading whitespace at a split point | impossible by construction — a continuation is a clipped window over the whole paragraph, starting at a wrapped line boundary |
 
 ### Hazards, mitigated
 

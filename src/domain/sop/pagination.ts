@@ -109,13 +109,15 @@ export function packBlocks(
   /** Start a fresh page, carrying any trailing headings onto it. */
   function breakPage(): void {
     const carried = trailingHeadings;
-    trailingHeadings = [];
     current.splice(current.length - carried.length);
     flush();
     for (const item of carried) {
       current.push(item.placed);
       used += item.height;
     }
+    // Still trailing on the new page: a second break before their content lands
+    // must carry them again, or the first break orphans them retroactively.
+    trailingHeadings = carried;
   }
 
   for (let index = 0; index < blocks.length; index += 1) {
@@ -164,8 +166,11 @@ export function packBlocks(
       const linesLeft = totalLines - placedLines;
 
       // Too little room for a worthwhile chunk — break to a fresh page first
-      // (carrying any heading, so it cannot be orphaned by the break).
-      if (roomLines < MIN_SPLIT_LINES && current.length > 0) {
+      // (carrying any heading, so it cannot be orphaned by the break). If the
+      // page already holds nothing BUT carried headings, breaking again cannot
+      // create room: fall through and place a minimal chunk, letting the
+      // overfill check below flag the page instead of orphaning the heading.
+      if (roomLines < MIN_SPLIT_LINES && current.length > trailingHeadings.length) {
         breakPage();
         continue;
       }
@@ -177,14 +182,15 @@ export function packBlocks(
           // Shrink the chunk so at least MIN_SPLIT_LINES carry over. Never
           // overfills: take only decreases here.
           take = linesLeft - MIN_SPLIT_LINES;
-        } else if (current.length > 0) {
+        } else if (current.length > trailingHeadings.length) {
           // Fewer than 2×MIN lines cannot split legally — move the remainder
-          // whole to a fresh page.
+          // whole to a fresh page. Same headings-only guard as above: breaking
+          // a page that holds nothing but carried headings cannot create room.
           breakPage();
           continue;
         } else {
-          // Fresh page and still uncuttable (page shorter than the remainder):
-          // place whole; the overfill check below flags the page.
+          // Fresh page (or headings-only page) and still uncuttable: place
+          // whole; the overfill check below flags the page.
           take = linesLeft;
         }
       }

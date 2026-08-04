@@ -123,6 +123,19 @@ describe("packBlocks", () => {
     expect(pages[0].overflowing).toBe(true);
   });
 
+  // A page that fits the heading but can never fit heading + MIN_SPLIT_LINES:
+  // breaking again cannot help (the fresh page holds only the carried heading),
+  // so a minimal chunk lands under the heading on a flagged page. The heading
+  // must never end up alone — that is this module's headline rule.
+  it("keeps a heading with content even when the pair can never co-fit legally", () => {
+    const pages = packBlocks([atom("h", 20, { keepWithNext: true }), text("para", 5)], 25);
+    expect(pages[0].blocks.map((b) => b.blockId)).toEqual(["h", "para"]);
+    expect(pages[0].overflowing).toBe(true);
+    for (const page of pages) {
+      expect(page.blocks.map((b) => b.blockId)).not.toEqual(["h"]);
+    }
+  });
+
   it("gives an oversized indivisible block its own page and flags it", () => {
     const pages = packBlocks([atom("a", 30), atom("huge", 250)], 100);
     expect(pages).toHaveLength(2);

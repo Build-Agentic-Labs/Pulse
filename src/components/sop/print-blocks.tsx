@@ -358,6 +358,16 @@ function buildHistorySection(sop: Sop, extras?: PrintBlockExtras): PrintBlock[] 
  * signature-reveal animation and `data-signature-id` anchors must stay in a
  * single element. Omitted (rather than falling back to placeholder markup)
  * when the caller has nothing to hand in yet.
+ *
+ * Deliberately carries NO `data-review-category` — this is the one sanctioned
+ * exception to the "every block carries its category" rule. `"approvals"` is
+ * not a `REVIEW_CATEGORIES` key (sop-review-workspace.tsx), and the review
+ * panel's scroll-spy (`handleReviewScroll`) highlights the last anchor whose
+ * top is above the scroll target: an anchor here would capture that scroll-spy
+ * and blank the panel highlight over this region. Today's markup has no
+ * anchor here either, so the highlight correctly lingers on "history" —
+ * parity, not the general rule, governs this block. Do not add the attribute
+ * back.
  */
 function buildApprovalsBlock(extras?: PrintBlockExtras): PrintBlock[] {
   if (!extras?.approvalsTable) return [];
@@ -368,7 +378,7 @@ function buildApprovalsBlock(extras?: PrintBlockExtras): PrintBlock[] {
       category: "approvals",
       sectionTitle: "Change Approvals",
       render: () => (
-        <section className="sop-export-section" data-review-category="approvals">
+        <section className="sop-export-section">
           <h2>Change Approvals</h2>
           {approvalsTable}
         </section>

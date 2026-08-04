@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { restructurePreservesWording } from "./procedure-text-restructure";
+import { RESTRUCTURE_INSTRUCTION, restructurePreservesWording } from "./procedure-text-restructure";
 
 describe("restructurePreservesWording", () => {
   it("accepts pure whitespace restructuring", () => {
@@ -59,5 +61,23 @@ describe("restructurePreservesWording", () => {
     const nfc = "F\u00FChrung"; // precomposed u-umlaut (NFC)
     const nfd = "Fu\u0308hrung"; // u + combining diaeresis (NFD)
     expect(restructurePreservesWording(nfc, nfd)).toBe(true);
+  });
+});
+
+describe("backfill script stays in sync with the canonical module", () => {
+  const script = readFileSync(
+    path.join(process.cwd(), "scripts", "backfill-procedure-structure.mjs"),
+    "utf8",
+  );
+
+  it("carries the canonical RESTRUCTURE_INSTRUCTION verbatim", () => {
+    // JSON.stringify-normalize both to compare content including the •
+    // escape without being tripped by template-literal vs source formatting.
+    expect(script).toContain("Return ONLY the restructured text");
+    expect(script.includes(RESTRUCTURE_INSTRUCTION)).toBe(true);
+  });
+
+  it("carries the canonical projection regex", () => {
+    expect(script).toContain(String.raw`text.normalize("NFC").match(/[\p{L}\p{N}]/gu)`);
   });
 });

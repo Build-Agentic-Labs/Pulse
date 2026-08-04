@@ -535,14 +535,32 @@ describe("restructurePreservesWording", () => {
   });
 
   // Restructuring may normalize punctuation spacing but never letters/digits.
-  it("ignores punctuation and case only where whitespace collapse implies it", () => {
+  it("ignores dropped separator punctuation when a run-on list becomes bullets", () => {
     const before = "items, including:  Policies;  Quality manuals";
     const after = "items, including:\n• Policies\n• Quality manuals";
-    // Semicolons dropped when converting a run-on list to bullets is a wording
-    // change by the letters-only projection? No — ";" is punctuation, not a
-    // letter/digit, so the projection is identical. This is intentional:
-    // separators ARE the thing being restructured.
+    // ";" is punctuation, not a letter/digit, so the projection is identical.
+    // This is intentional: separators ARE the thing being restructured.
     expect(restructurePreservesWording(before, after)).toBe(true);
+  });
+
+  // Case is content. Restructuring moves text; it never re-cases it.
+  it("rejects a case-only change", () => {
+    expect(restructurePreservesWording("Use the Template.", "Use the template.")).toBe(false);
+  });
+
+  // NFC normalization closes both normalization-form holes at once: a genuinely
+  // dropped diacritic is caught (the letters differ after normalization), and
+  // identical text that merely arrives in a different encoding form is not a
+  // false positive.
+  it("rejects a dropped diacritic even in decomposed form", () => {
+    const decomposed = "Führung"; // u + combining diaeresis
+    expect(restructurePreservesWording(decomposed, "Fuhrung")).toBe(false);
+  });
+
+  it("accepts identical text in different Unicode normalization forms", () => {
+    const nfc = "Führung"; // precomposed u-umlaut (NFC)
+    const nfd = "Führung"; // u + combining diaeresis (NFD)
+    expect(restructurePreservesWording(nfc, nfd)).toBe(true);
   });
 });
 ```
@@ -567,15 +585,19 @@ Create `src/domain/sop/procedure-text-restructure.ts`:
  * verifier enforces that contract the same way assertSaneStateDeletion guards
  * the planner save path: a drifted restructure fails loudly and is excluded.
  *
- * The projection keeps letters and digits only (Unicode-aware), so whitespace,
+ * The projection keeps letters and digits only (Unicode-aware, NFC-normalized
+ * first so a decomposed accent cannot hide a dropped diacritic), so whitespace,
  * bullet glyphs, and punctuation separators — the things restructuring
  * legitimately moves or replaces — are invisible to it, while any reworded,
- * dropped, or reordered CONTENT changes the projection and fails.
+ * re-cased, dropped, or reordered CONTENT changes the projection and fails.
+ * Case is deliberately significant: restructuring moves text, it never
+ * re-cases it, and a stricter tripwire fails safe (the SOP is skipped and
+ * listed, never silently altered).
  */
 
-/** Letters-and-digits-only projection, lowercased. */
+/** Letters-and-digits-only projection, NFC-normalized, case-preserving. */
 function contentProjection(text: string): string {
-  return (text.match(/[\p{L}\p{N}]/gu) ?? []).join("").toLowerCase();
+  return (text.normalize("NFC").match(/[\p{L}\p{N}]/gu) ?? []).join("");
 }
 
 export function restructurePreservesWording(before: string, after: string): boolean {
@@ -600,7 +622,7 @@ Return ONLY the restructured text — no commentary, no code fences.`;
 npx vitest run src/domain/sop/procedure-text-restructure.test.ts
 ```
 
-Expected: PASS, 6 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Amend the extraction prompt**
 
@@ -686,7 +708,7 @@ const MODEL = process.env.SOP_EXTRACTION_MODEL || "claude-opus-5";
 // (the canonical source); a repo test asserts they stay in sync.
 
 function contentProjection(text) {
-  return (text.match(/[\p{L}\p{N}]/gu) ?? []).join("").toLowerCase();
+  return (text.normalize("NFC").match(/[\p{L}\p{N}]/gu) ?? []).join("");
 }
 
 function restructurePreservesWording(before, after) {
@@ -858,7 +880,7 @@ describe("backfill script stays in sync with the canonical module", () => {
   });
 
   it("carries the canonical projection regex", () => {
-    expect(script).toContain(String.raw`text.match(/[\p{L}\p{N}]/gu)`);
+    expect(script).toContain(String.raw`text.normalize("NFC").match(/[\p{L}\p{N}]/gu)`);
   });
 });
 ```

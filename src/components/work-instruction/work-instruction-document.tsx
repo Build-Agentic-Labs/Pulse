@@ -41,9 +41,12 @@ const PRINT_STYLES = `
   font-family: var(--type-sans, var(--font-ui-family));
   font-size: 10pt; line-height: 1.35;
 }
+/* Document control lives entirely in the header — identity, revision history
+   and production data — which is what frees the sheet canvas for content the
+   operator actually works from. */
 .wi-hdr {
-  flex: none; height: 0.90in; display: grid;
-  grid-template-columns: 1.9in 1fr 2.1in 3.0in;
+  flex: none; height: 1.20in; display: grid;
+  grid-template-columns: 1.9in 1fr 1.9in 3.4in 2.0in;
   border: 1px solid #666;
 }
 .wi-hdr > div {
@@ -58,14 +61,15 @@ const PRINT_STYLES = `
 .wi-hdr-meta { font-size: 8pt; }
 .wi-hdr-meta > div { display: flex; justify-content: space-between; gap: 8px; }
 .wi-hdr-meta span:first-child { color: #555; }
-.wi-hdr-safety-label {
-  font-size: 7pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #8a5a00;
+.wi-hdr-label {
+  flex: none; color: #555;
+  font-size: 6.5pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
 }
-.wi-hdr-safety {
-  font-size: 8pt; line-height: 1.25; color: #1a1a1a;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
-}
-.wi-hdr-safety-empty { color: #888; font-style: italic; }
+.wi-hdr-cell { justify-content: flex-start !important; padding-top: 5px !important; }
+.wi-hdr-rev { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 7pt; }
+.wi-hdr-rev th, .wi-hdr-rev td { border: 1px solid #bbb; padding: 1px 4px; text-align: left; }
+.wi-hdr-rev th { background: #f0f0f0; font-weight: 700; }
+.wi-hdr-rev td { height: 0.155in; }
 .wi-body { flex: 1; min-height: 0; }
 .wi-ftr {
   flex: none; height: 0.30in; display: flex; align-items: center; justify-content: space-between;
@@ -119,12 +123,14 @@ const PRINT_STYLES = `
    which is why continuations get their own, larger character budget. */
 .wi-card-continued .wi-card-main { grid-template-columns: minmax(0, 1fr); }
 
-.wi-setup { height: 100%; display: grid; grid-template-columns: 1.15fr 1.15fr 1fr 1.6fr 1.5fr; gap: 0.12in; }
-.wi-setup-col { display: flex; flex-direction: column; gap: 0.12in; min-height: 0; }
-/* Blocks share their column's full height rather than stacking at the top:
-   a printed form with boxes floating above dead space reads as unfinished,
-   and the leftover is useful ruled space for handwritten notes. */
-.wi-setup-col > .wi-block { flex: 1; }
+/* One block per column, every container the same height — the band reads as a
+   single rank of boxes rather than a ragged collage, and the leftover inside
+   each is useful ruled space for handwritten notes. */
+.wi-setup {
+  height: 100%; display: grid;
+  grid-template-columns: 1.15fr 1.3fr 1fr 1.75fr 1.2fr;
+  gap: 0.12in; align-items: stretch;
+}
 .wi-block { display: flex; flex-direction: column; gap: 0.05in; border: 1px solid #666; padding: 0.09in; min-height: 0; overflow: hidden; }
 .wi-block h3 { margin: 0; font-size: 8pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #333; }
 .wi-block p { margin: 0; font-size: 9pt; line-height: 1.35; white-space: pre-wrap; overflow: hidden; }
@@ -165,6 +171,15 @@ const PRINT_STYLES = `
 
 function HeaderBand({ instruction, sheet }: { instruction: WorkInstruction; sheet: WorkInstructionSheet }) {
   const { meta, context, setup } = instruction;
+  const revisions =
+    meta.revisionHistory.length > 0
+      ? meta.revisionHistory
+      : [
+          { revision: "", date: "", description: "", author: "" },
+          { revision: "", date: "", description: "", author: "" },
+          { revision: "", date: "", description: "", author: "" },
+        ];
+
   return (
     <header className="wi-hdr">
       <div className="wi-hdr-logo">
@@ -193,13 +208,43 @@ function HeaderBand({ instruction, sheet }: { instruction: WorkInstruction; shee
           <span>{`${sheet.page} of ${sheet.total}`}</span>
         </div>
       </div>
-      <div>
-        <span className="wi-hdr-safety-label">Safety / PPE</span>
-        {setup.safetyNotes ? (
-          <span className="wi-hdr-safety">{setup.safetyNotes}</span>
-        ) : (
-          <span className="wi-hdr-safety wi-hdr-safety-empty">No hazards recorded for this task</span>
-        )}
+      <div className="wi-hdr-cell">
+        <span className="wi-hdr-label">Revision history</span>
+        <table className="wi-hdr-rev">
+          <thead>
+            <tr>
+              <th style={{ width: "13%" }}>Rev</th>
+              <th style={{ width: "26%" }}>Date</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {revisions.map((entry, index) => (
+              <tr key={`${entry.revision}-${index}`}>
+                <td>{entry.revision}</td>
+                <td>{formatDateControlled(entry.date)}</td>
+                <td>{entry.description}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="wi-hdr-cell">
+        <span className="wi-hdr-label">Production data</span>
+        <div className="wi-facts" style={{ gridTemplateColumns: "minmax(0, 1fr)", fontSize: "8pt" }}>
+          <div>
+            <span>Planned time</span>
+            <span>{formatMinutes(setup.plannedDurationMinutes)}</span>
+          </div>
+          <div>
+            <span>Operators</span>
+            <span>{setup.plannedOperators}</span>
+          </div>
+          <div>
+            <span>Quality gate</span>
+            <span>{setup.qualityGate ? "Yes" : "No"}</span>
+          </div>
+        </div>
       </div>
     </header>
   );
@@ -230,127 +275,75 @@ function EmptyAware({ value, fallback }: { value: string; fallback: string }) {
 }
 
 /**
- * The setup band: everything that is not a step, sized to exactly one card row
- * so the bottom half of sheet 1 can carry real step cards instead of white
- * space. Five columns rather than three, because it has to be short.
+ * The setup band: everything the operator works from that is not a step, sized
+ * to exactly one card row so the bottom half of sheet 1 carries real step cards
+ * instead of white space.
+ *
+ * One block per column, all the same height, so the band reads as a single rank
+ * of containers. Document control (revision history, production data) lives in
+ * the header instead — that is what keeps this to five blocks.
  */
 function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
-  const { setup, meta } = instruction;
+  const { setup } = instruction;
   return (
     <div className="wi-setup">
-      <div className="wi-setup-col">
-        <Block title="Purpose / scope">
-          <EmptyAware value={setup.purpose} fallback="No description recorded" />
-        </Block>
-        <Block title="Production data">
-          <div className="wi-facts" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-            <div>
-              <span>Planned time</span>
-              <span>{formatMinutes(setup.plannedDurationMinutes)}</span>
-            </div>
-            <div>
-              <span>Operators</span>
-              <span>{setup.plannedOperators}</span>
-            </div>
-            <div>
-              <span>Quality gate</span>
-              <span>{setup.qualityGate ? "Yes" : "No"}</span>
-            </div>
-          </div>
-        </Block>
-      </div>
+      <Block title="Purpose / scope">
+        <EmptyAware value={setup.purpose} fallback="No description recorded" />
+      </Block>
 
-      <div className="wi-setup-col">
-        <Block title="Safety / PPE">
-          <EmptyAware value={setup.safetyNotes} fallback="No hazards recorded" />
-        </Block>
-      </div>
+      <Block title="Safety / PPE">
+        <EmptyAware value={setup.safetyNotes} fallback="No hazards recorded" />
+      </Block>
 
-      <div className="wi-setup-col">
-        <Block title="Tools & equipment">
-          {setup.tools.length > 0 ? (
-            <ul className="wi-list">
-              {setup.tools.map((tool) => (
-                <li key={tool}>{tool}</li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyAware value="" fallback="No tools assigned" />
-          )}
-        </Block>
-      </div>
+      <Block title="Tools & equipment">
+        {setup.tools.length > 0 ? (
+          <ul className="wi-list">
+            {setup.tools.map((tool) => (
+              <li key={tool}>{tool}</li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyAware value="" fallback="No tools assigned" />
+        )}
+      </Block>
 
-      <div className="wi-setup-col">
-        <Block title="Parts & materials">
-          {setup.parts.length > 0 ? (
-            <table className="wi-table">
-              <thead>
-                <tr>
-                  <th style={{ width: "34%" }}>Part no.</th>
-                  <th>Description</th>
-                  <th style={{ width: "14%" }}>Qty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {setup.parts.map((part) => (
-                  <tr key={`${part.partNumber}-${part.description}`}>
-                    <td>{part.partNumber}</td>
-                    <td>{part.description}</td>
-                    <td>{part.quantity ?? ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <EmptyAware value="" fallback="No parts assigned" />
-          )}
-        </Block>
-        <Block title="Material kit">
-          <EmptyAware value={setup.materialKit} fallback="No kit assigned" />
-        </Block>
-      </div>
-
-      <div className="wi-setup-col">
-        <Block title="Reference documents">
-          <div className="wi-facts" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-            <div>
-              <span>Drawing</span>
-              <span>{setup.drawingLink || "—"}</span>
-            </div>
-            <div>
-              <span>Governing SOP</span>
-              <span>{setup.sopLink || "—"}</span>
-            </div>
-          </div>
-        </Block>
-        <Block title="Revision history">
-          <table className="wi-table wi-table-ruled">
+      <Block title="Parts & materials">
+        {setup.parts.length > 0 ? (
+          <table className="wi-table">
             <thead>
               <tr>
-                <th style={{ width: "16%" }}>Rev</th>
-                <th style={{ width: "28%" }}>Date</th>
+                <th style={{ width: "34%" }}>Part no.</th>
                 <th>Description</th>
+                <th style={{ width: "14%" }}>Qty</th>
               </tr>
             </thead>
             <tbody>
-              {(meta.revisionHistory.length > 0
-                ? meta.revisionHistory
-                : [
-                    { revision: "", date: "", description: "", author: "" },
-                    { revision: "", date: "", description: "", author: "" },
-                    { revision: "", date: "", description: "", author: "" },
-                  ]
-              ).map((entry, index) => (
-                <tr key={`${entry.revision}-${index}`}>
-                  <td>{entry.revision}</td>
-                  <td>{formatDateControlled(entry.date)}</td>
-                  <td>{entry.description}</td>
+              {setup.parts.map((part) => (
+                <tr key={`${part.partNumber}-${part.description}`}>
+                  <td>{part.partNumber}</td>
+                  <td>{part.description}</td>
+                  <td>{part.quantity ?? ""}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </Block>
-      </div>
+        ) : (
+          <EmptyAware value="" fallback="No parts assigned" />
+        )}
+      </Block>
+
+      <Block title="Reference documents">
+        <div className="wi-facts" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <div>
+            <span>Drawing</span>
+            <span>{setup.drawingLink || "—"}</span>
+          </div>
+          <div>
+            <span>Governing SOP</span>
+            <span>{setup.sopLink || "—"}</span>
+          </div>
+        </div>
+      </Block>
     </div>
   );
 }

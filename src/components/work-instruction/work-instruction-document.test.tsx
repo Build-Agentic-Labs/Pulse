@@ -49,7 +49,6 @@ function makeInstruction(cards: WorkInstructionCard[], overrides: Partial<WorkIn
       safetyNotes: "Pinch hazard.",
       tools: ["Torque wrench"],
       parts: [{ partNumber: "BRK-1001", description: "Inverter bracket", quantity: 1 }],
-      materialKit: "KIT-INV-01",
       drawingLink: "https://example.test/drawing.pdf",
       sopLink: "SOP-MFG-014",
       plannedDurationMinutes: 60,
@@ -106,13 +105,23 @@ describe("WorkInstructionDocument", () => {
     );
   });
 
-  it("repeats the safety notes in every sheet header, not only on the setup sheet", () => {
+  it("keeps safety on the sheet canvas, not in the header", () => {
     render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
 
-    // The whole point of the header strip: an operator working from sheet 2
-    // must not have to flip back to sheet 1 to see the hazard.
-    expect(document.querySelectorAll(".wi-hdr-safety")).toHaveLength(2);
-    expect(screen.getAllByText("Pinch hazard.")).toHaveLength(3);
+    // The header carries document control only; safety is a canvas block, so it
+    // appears once on the setup sheet rather than on every sheet.
+    expect(screen.getByText("Pinch hazard.")).toBeInTheDocument();
+    expect(document.querySelectorAll(".wi-hdr-safety")).toHaveLength(0);
+  });
+
+  it("puts revision history and production data in every sheet header", () => {
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
+
+    expect(screen.getAllByText("Revision history")).toHaveLength(2);
+    expect(screen.getAllByText("Production data")).toHaveLength(2);
+    expect(document.querySelectorAll(".wi-hdr-rev")).toHaveLength(2);
+    // and nowhere on the canvas
+    expect(document.querySelectorAll(".wi-setup .wi-hdr-rev")).toHaveLength(0);
   });
 
   it("lists setup tools, parts and references", () => {
@@ -121,8 +130,15 @@ describe("WorkInstructionDocument", () => {
     expect(screen.getByText("Torque wrench")).toBeInTheDocument();
     expect(screen.getByText("BRK-1001")).toBeInTheDocument();
     expect(screen.getByText("Inverter bracket")).toBeInTheDocument();
-    expect(screen.getByText("KIT-INV-01")).toBeInTheDocument();
     expect(screen.getByText("SOP-MFG-014")).toBeInTheDocument();
+  });
+
+  it("renders one equal-height container per setup block, with no material-kit block", () => {
+    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+
+    // Purpose, Safety, Tools, Parts, References — the kit is a parts row now.
+    expect(document.querySelectorAll(".wi-setup > .wi-block")).toHaveLength(5);
+    expect(screen.queryByText("Material kit")).not.toBeInTheDocument();
   });
 
   it("pads the setup sheet's card row with ruled blanks", () => {

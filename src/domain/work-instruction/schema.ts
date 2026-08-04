@@ -97,13 +97,17 @@ export interface WorkInstructionContext {
   manufacturingCode: string;
 }
 
-/** The setup sheet's non-step content. */
+/**
+ * The setup band's content.
+ *
+ * There is no separate `materialKit`: a kit is a part number, so it is folded
+ * into `parts` as a row rather than getting a block of its own.
+ */
 export interface WorkInstructionSetup {
   purpose: string;
   safetyNotes: string;
   tools: string[];
   parts: WorkInstructionPart[];
-  materialKit: string;
   drawingLink: string;
   sopLink: string;
   plannedDurationMinutes: number;
@@ -152,15 +156,20 @@ export const CARDS_ON_FIRST_SHEET = 3;
  * Characters of instruction text a card can hold, by card shape.
  *
  * MEASURED, not estimated (2026-08-04, Chrome at /design/work-instruction):
- * binary-searched the real rendered `.wi-card-instruction` box for the point
- * where scrollHeight first exceeds clientHeight. The tightest first card —
- * three tools, three checks and a photo all competing for the text column —
- * held 644 characters; the roomiest held 765. `FIRST` sits ~7% under the
- * tightest so a split happens just before text would be lost.
+ * binary-search the rendered `.wi-card-instruction` box for the point where
+ * scrollHeight first exceeds clientHeight.
+ *
+ * Measure the WORST CASE, not whatever the sample happens to contain — a card
+ * crowded with all five check types and a six-tool list, since checks and tools
+ * share the text column. The sample's own tightest card reads 725, which would
+ * set a budget that clips on a busier step.
+ *
+ * Worst-case first card: 645. Set ~7% under.
  *
  * A first-principles estimate put this at 360, and would have split steps that
  * fit with room to spare. If the card layout changes, re-run the measurement
- * rather than re-deriving it.
+ * rather than re-deriving it — re-measured after the header grew to 1.20in and
+ * the value held.
  */
 export const INSTRUCTION_BUDGET_CHARS = 600;
 
@@ -168,8 +177,9 @@ export const INSTRUCTION_BUDGET_CHARS = 600;
  * Budget for a continuation card, which drops the photo column and runs text
  * the full card width.
  *
- * MEASURED the same way, same date: a continuation box is 5.03 x 3.55in and
- * held 1,851 characters before clipping — roughly three times a first card,
- * which is why a long step usually needs only one continuation. Set ~7% under.
+ * Worst-case measured the same way: 1,851 — roughly three times a first card,
+ * which is why a long step usually needs only one continuation. Crowding the
+ * checks does not move it, because they wrap across the full width. Set ~8%
+ * under.
  */
 export const CONTINUATION_BUDGET_CHARS = 1700;

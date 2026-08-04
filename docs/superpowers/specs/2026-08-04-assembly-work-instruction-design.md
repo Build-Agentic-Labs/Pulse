@@ -98,6 +98,24 @@ overrode the recommendation.
    author to split the step", which pushed page geometry onto the person least
    able to see it.
 
+8. **Document control moves entirely into the header** (added 2026-08-04,
+   second review): *"for the header lets do the Revision, effective table -
+   then revision history - then production data in the header. this will allow
+   us to remove the revision history from the sheet canvas."* The header grew
+   to 1.20in to hold it. Because the header is on every sheet, every card row
+   shrinks equally, so cards stay a uniform size — 5.25 × 4.17in.
+
+9. **A material kit is a part number** (same review): *"combine material kits
+   and parts - a kit will be a part number in that list."* The separate
+   Material kit block is gone and `materialKit` is folded into `parts` as the
+   first row, which is also the order it is picked in.
+
+10. **Every setup container is the same height** (same review): *"Make all the
+    containers in the sheet canvas the same fixed height as the tools and
+    equipment, dont change the procedure items."* One block per column, all
+    stretched to the band height, so the band reads as a single rank of boxes.
+    Step cards were explicitly left alone.
+
 ## Page geometry
 
 ```
@@ -111,47 +129,58 @@ Explicit dimensions, **not** the `ledger` keyword. CSS Paged Media defines
 Sheet padding `0.45in 0.5in 0.35in`, giving a 16.0in content column and 10.20in
 of content height.
 
+A step sheet, and sheet 1 where the setup band takes the first card row:
+
 ```
 ┌─ 17in ───────────────────────────────────────────────────────────────┐
 │ ┌──────────────────────────────────────────────────────────────────┐ │
-│ │ ANA logo │ title + doc no.        │ rev / date / page │ PPE strip │ │  0.90in
+│ │ logo │ title + doc no. │ rev/eff/product/sheet │ rev history │ PD │ │  1.20in
 │ └──────────────────────────────────────────────────────────────────┘ │
+│ ┌──────────────────────────────────────────────────────────────────┐ │
+│ │ purpose │ safety │ tools │ parts │ references   (setup band)      │ │  4.17in
+│ └──────────────────────────────────────────────────────────────────┘ │  11in
 │ ┌────────────┐ ┌────────────┐ ┌────────────┐                         │
-│ │  step 1    │ │  step 2    │ │  step 3    │                         │  4.32in
-│ └────────────┘ └────────────┘ └────────────┘                         │  11in
-│ ┌────────────┐ ┌────────────┐ ┌────────────┐                         │
-│ │  step 4    │ │  step 5    │ │  step 6    │                         │  4.32in
+│ │  step 1    │ │  step 2    │ │  step 3    │                         │  4.17in
 │ └────────────┘ └────────────┘ └────────────┘                         │
 │ ┌──────────────────────────────────────────────────────────────────┐ │
-│ │ ANA INC. CONFIDENTIAL …                          Page 2 of 4     │ │  0.30in
+│ │ ANA INC. CONFIDENTIAL …                          Page 1 of 3     │ │  0.30in
 │ └──────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Height closes as `0.90 + 4.32 + 4.32 + 0.30 + 0.36 gaps = 10.20in`. Width closes
+Height closes as `1.20 + 4.17 + 4.17 + 0.30 + 0.36 gaps = 10.20in`. Width closes
 as `(16.0 − 0.24 gaps) / 3 = 5.25in` per card.
 
-Card internals, 5.25 × 4.32in with 0.1in padding (inner 5.05 × 4.12):
+The setup band occupies row 1 of the same two-row grid the step sheets use, so a
+card is 5.25 × 4.17in wherever it lands. Growing the header shrinks both rows
+equally on **every** sheet, which is why cards stay uniform.
+
+Card internals, 5.25 × 4.17in with 0.1in padding:
 
 | Element | Size |
 |---|---|
-| Header row — step no. badge, `stepDisplayCode`, step name | 0.28in, full width |
-| Photo box (left) | 2.45w × 3.20h, `object-fit: contain` |
-| Text column (right) | 2.50w × 3.20h — instruction, tools, checks |
-| Footer strip — duration, Op initials box, QA initials box | 0.30in, full width |
-| Gaps | 0.34in |
+| Header row — step no. badge, name, part label, duration, `stepDisplayCode` | 0.28in, full width |
+| Photo box (left) | 2.45w, `object-fit: contain` |
+| Text column (right) | 2.50w — instruction, tools, checks |
+| Caption | 0.14in |
 
-The instruction budget is **measured, not derived**. Binary-searching the real
-rendered box (Chrome, `/design/work-instruction`, 2026-08-04) for the point
-where `scrollHeight` first exceeds `clientHeight` gives 644 characters in the
-tightest card — three tools, three checks and the overflow note all competing
-for the text column — and 765 in the roomiest. `INSTRUCTION_BUDGET_CHARS` is
-set to **600**, ~7% under the tightest, so the warning fires just before text is
-actually lost.
+A continuation card drops the photo column, so its text runs the full 5.05in.
 
-The first-principles estimate was 360, which would have told authors to split
-steps that fit with room to spare. If the card layout changes, re-run the
-measurement rather than re-deriving it.
+The instruction budget is **measured, not derived**. Binary-search the rendered
+box (Chrome, `/design/work-instruction`) for the point where `scrollHeight`
+first exceeds `clientHeight`.
+
+Measure the **worst case**, not whatever the sample happens to contain: a card
+crowded with all five check types and a six-tool list, since checks and tools
+share the text column. That reads **645**; the sample's own tightest card reads
+725, and budgeting to 725 would clip on a busier step.
+`INSTRUCTION_BUDGET_CHARS` is **600**, ~7% under. A continuation card runs the
+full width and holds **1,851**; `CONTINUATION_BUDGET_CHARS` is **1700**.
+
+The first-principles estimate was 360, which would have split steps that fit
+with room to spare. If the card layout changes, re-run the measurement rather
+than re-deriving it — both values were re-measured after the header grew to
+1.20in and both held.
 
 ## Document anatomy
 
@@ -188,19 +217,18 @@ step cards.
 | Purpose / scope | `task.description` |
 | Safety & PPE | `task.safetyNotes` |
 | Tools & equipment | union of `getTaskStepToolListMap(task)` values + `task.toolsRequired` + `task.equipmentRequired` |
-| Parts / materials | `task.partReferences[]` (part no., description, qty) + `task.materialKit` |
+| Parts / materials | `task.materialKit` as the first row, then `task.partReferences[]` (part no., description, qty) |
 | Reference documents | `task.drawingLink`, `task.sopLink` / `sopId` |
-| Production data | `plannedDurationMinutes`, `plannedOperators`, zone, component |
-| Revision history | blank ruled table |
 
-There is deliberately **no approvals block** — see decision 5. The revision
-history renders empty in this phase and is the seam the control layer plugs
-into: `WorkInstructionMeta` declares the fields, the renderer already draws the
-table, and phase 2 supplies rows instead of blanks.
+Production data and the revision history live in the **header**, not here — see
+decision 8. There is deliberately no approvals block either (decision 5). The
+revision history renders empty in this phase and is the seam the control layer
+plugs into: `WorkInstructionMeta` declares the fields, the header already draws
+the table, and phase 2 supplies rows instead of blanks.
 
-Blocks stretch to fill their column rather than stacking at the top. A printed
-form with boxes floating above dead space reads as unfinished, and the leftover
-is useful ruled space for handwritten notes.
+One block per column, every container the same height (decision 10), so the band
+reads as a single rank of boxes. The leftover inside each is useful ruled space
+for handwritten notes.
 
 ### Step sheets — 3×2 cards
 

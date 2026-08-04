@@ -48,7 +48,6 @@ function makeInstruction(cardCount: number): WorkInstruction {
       safetyNotes: "",
       tools: [],
       parts: [],
-      materialKit: "",
       drawingLink: "",
       sopLink: "",
       plannedDurationMinutes: 60,

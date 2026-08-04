@@ -80,12 +80,21 @@ function buildPhoto(attachments: StepPhotoAttachmentMap, stepId: string): WorkIn
   return { id: first.id, url: first.dataUrl, caption: first.caption ?? "" };
 }
 
+/**
+ * Parts, with the material kit folded in as the first row.
+ *
+ * A kit IS a part number, so it belongs in the parts list rather than in a
+ * block of its own — and putting it first matches the order it is picked in.
+ */
 function buildParts(task: Task): WorkInstructionPart[] {
-  return (task.partReferences ?? []).map((part) => ({
+  const kit = task.materialKit?.trim();
+  const references = (task.partReferences ?? []).map((part) => ({
     partNumber: part.partNumber,
     description: part.description ?? "",
     quantity: part.quantity,
   }));
+
+  return kit ? [{ partNumber: kit, description: "Material kit", quantity: 1 }, ...references] : references;
 }
 
 export function buildWorkInstruction({ task, product, zone }: BuildWorkInstructionInput): WorkInstruction {
@@ -157,7 +166,6 @@ export function buildWorkInstruction({ task, product, zone }: BuildWorkInstructi
         ...(task.equipmentRequired ?? []),
       ]),
       parts: buildParts(task),
-      materialKit: task.materialKit ?? "",
       drawingLink: task.drawingLink ?? "",
       sopLink: task.sopLink ?? "",
       plannedDurationMinutes: task.plannedDurationMinutes,

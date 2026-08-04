@@ -287,16 +287,39 @@ describe("buildWorkInstruction", () => {
 
     expect(wi.setup.purpose).toBe("Mount the inverter bracket to the frame rail.");
     expect(wi.setup.safetyNotes).toBe("Pinch hazard. Gloves and safety glasses required.");
-    expect(wi.setup.materialKit).toBe("KIT-INV-01");
     expect(wi.setup.drawingLink).toBe("https://example.test/drawing.pdf");
     expect(wi.setup.sopLink).toBe("SOP-MFG-014");
     expect(wi.setup.qualityGate).toBe(true);
     expect(wi.setup.plannedDurationMinutes).toBe(60);
     expect(wi.setup.plannedOperators).toBe(2);
+  });
+
+  it("folds the material kit into the parts list as its first row", () => {
+    const task = makeTask({
+      materialKit: "KIT-INV-01",
+      partReferences: [
+        { id: "part-1", partNumber: "BRK-1001", description: "Inverter bracket", quantity: 1 },
+        { id: "part-2", partNumber: "FAS-M8", description: "M8 flange bolt", quantity: 4 },
+      ],
+    });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
+
     expect(wi.setup.parts).toEqual([
+      { partNumber: "KIT-INV-01", description: "Material kit", quantity: 1 },
       { partNumber: "BRK-1001", description: "Inverter bracket", quantity: 1 },
       { partNumber: "FAS-M8", description: "M8 flange bolt", quantity: 4 },
     ]);
+  });
+
+  it("omits the kit row when the task has no material kit", () => {
+    const task = makeTask({
+      partReferences: [{ id: "part-1", partNumber: "BRK-1001", description: "Inverter bracket", quantity: 1 }],
+    });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
+
+    expect(wi.setup.parts).toEqual([{ partNumber: "BRK-1001", description: "Inverter bracket", quantity: 1 }]);
   });
 
   it("carries product and zone context for the header band", () => {

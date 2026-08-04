@@ -98,7 +98,6 @@ function blankInstruction(): WorkInstruction {
       safetyNotes: "",
       tools: [],
       parts: [],
-      materialKit: "",
       drawingLink: "",
       sopLink: "",
       plannedDurationMinutes: 0,

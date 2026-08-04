@@ -29,6 +29,7 @@ import {
   WidthType,
 } from "docx";
 import { formatDateControlled } from "@/domain/formatting";
+import { classifyProcedureLine } from "@/domain/sop/procedure-text";
 import { linkedSopLabel, rasicLegend, type Sop } from "@/domain/sop/schema";
 import { renderProcedureFlowImages } from "./procedure-flow-image";
 
@@ -65,6 +66,52 @@ function bulletList(items: string[]): Paragraph[] {
         children: [new TextRun({ text: item, size: 20, color: INK, font: FONT })],
       }),
   );
+}
+
+/**
+ * The procedure narrative with detected structure (spec 2026-08-04): numbered
+ * sub-headings become bold body paragraphs — body size, NOT sectionHeading's
+ * size, and not a Word Heading style, so the document's navigation pane and
+ * numbering conventions are untouched — and consecutive bullet lines collapse
+ * into one real Word bullet list (glyph stripped; Word supplies its own).
+ * Flat text (no headings, no bullets) produces exactly the per-line bodyText
+ * output this replaced.
+ */
+function procedureNarrativeBlocks(text: string): Paragraph[] {
+  const blocks: Paragraph[] = [];
+  let bulletRun: string[] = [];
+  const flushBullets = () => {
+    if (bulletRun.length === 0) return;
+    blocks.push(...bulletList(bulletRun));
+    bulletRun = [];
+  };
+  for (const line of text.split(/\r?\n/)) {
+    const classified = classifyProcedureLine(line);
+    if (classified.kind === "bullet") {
+      bulletRun.push(classified.text);
+      continue;
+    }
+    flushBullets();
+    if (classified.kind === "heading") {
+      blocks.push(
+        new Paragraph({
+          spacing: { before: 120, after: 80 },
+          children: [new TextRun({ text: classified.text, bold: true, size: 20, color: INK, font: FONT })],
+        }),
+      );
+      continue;
+    }
+    if (classified.text.trim() === "") {
+      // A blank line is paragraph spacing. bodyText("") would render its
+      // em-dash empty-state — a literal "—" printed into the Word document —
+      // the same leak the preview's nbsp fix closed.
+      blocks.push(new Paragraph({ spacing: { after: 80 } }));
+      continue;
+    }
+    blocks.push(bodyText(classified.text));
+  }
+  flushBullets();
+  return blocks;
 }
 
 function cellText(text: string, opts: { bold?: boolean; color?: string } = {}): Paragraph {
@@ -391,7 +438,7 @@ async function buildBody(
 
   blocks.push(sectionHeading("Procedure"));
   if (sop.procedure.processFlowDescription) {
-    blocks.push(bodyText(sop.procedure.processFlowDescription));
+    blocks.push(...procedureNarrativeBlocks(sop.procedure.processFlowDescription));
   }
   if (sop.procedure.activities.length) {
     blocks.push(...(await procedureBlocks(sop)));

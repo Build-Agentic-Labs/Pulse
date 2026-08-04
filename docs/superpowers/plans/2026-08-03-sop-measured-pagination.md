@@ -554,11 +554,14 @@ describe("buildPrintBlocks", () => {
     expect(sections.filter((b) => b.category === "purpose")).toHaveLength(3);
   });
 
-  it("puts data-review-category on non-prose block roots too", () => {
+  // Blocks are self-contained: a list item brings its own section shell and
+  // single-item ul, so stacking blocks needs no grouping helper.
+  it("renders a list item as a self-contained block with its review category", () => {
     const { sections } = buildPrintBlocks(sopWith({ measurements: ["First KPI"] }));
     const body = sections.filter((b) => b.category === "measurements" && !b.keepWithNext);
-    const { container } = render(<ul>{body[0].render()}</ul>);
+    const { container } = render(<>{body[0].render()}</>);
     expect(container.querySelector("[data-review-category='measurements']")).not.toBeNull();
+    expect(container.querySelector("ul.sop-export-list li")?.textContent).toBe("First KPI");
   });
 
   it("routes annexes and change history into the trailing segment", () => {
@@ -645,9 +648,9 @@ function proseBlocks(category: string, sectionTitle: string, value: string): Pri
     splittable: true,
     render: (lineRange) => {
       const paragraph = (
-        <p className={line ? undefined : "sop-export-empty"} data-review-category={category}>
-          {line || "—"}
-        </p>
+        <section className="sop-export-section" style={{ marginTop: 0 }} data-review-category={category}>
+          <p className={line ? undefined : "sop-export-empty"}>{line || "—"}</p>
+        </section>
       );
       if (!lineRange) return paragraph;
       const { startLine, endLine, lineHeight } = lineRange;
@@ -668,7 +671,32 @@ function proseBlocks(category: string, sectionTitle: string, value: string): Pri
 The `render` signature in `PrintBlock` is therefore
 `render: (lineRange?: PlacedLineRange) => ReactNode`.
 
-Reuse the existing markup exactly — `sop-export-section`, `sop-export-list`, `sop-export-table` — so the CSS in `sop-print-preview.tsx` continues to apply unchanged.
+**Every block is self-contained**: its `render` output includes its own
+`.sop-export-section` shell, so a page (visible or offscreen) is just placed
+blocks stacked in order — no grouping helper whose visible and offscreen
+versions could diverge. Concretely:
+
+- A **heading** block renders
+  `<section className="sop-export-section" data-review-category={category}><h2>{title}</h2></section>`
+  and keeps the section's natural `margin-top: 12px` — the gap above a section
+  belongs to its heading. The existing `.sop-export-section:first-child
+  { margin-top: 0 }` rule absorbs it at the top of a page.
+- Every **content** block wraps in the same shell with `style={{ marginTop: 0 }}`
+  (the gap already came from the heading block). This is what keeps
+  `.sop-export-section p { white-space: pre-wrap }` and friends applying — those
+  selectors require the ancestor class, so a bare `<p>` would silently lose its
+  styling.
+- A **list item** renders as a self-contained single-item
+  `<ul className="sop-export-list"><li>…</li></ul>` inside its shell. The list
+  reset (`margin: 0`) makes consecutive single-item lists visually identical to
+  one list.
+- A **table row** renders as a self-contained single-row
+  `<table className="sop-export-table">` with the section's full `<colgroup>`
+  repeated — identical percentage columns under `table-layout: fixed` keep every
+  row's columns aligned across stacked tables. Non-first rows pass
+  `style={{ borderTop: 0 }}` on their cells so stacked 1px borders don't double
+  into a 2px seam. The header-row block renders the same table with `<thead>`
+  only, and reappears via the packer's continuation machinery.
 
 Add matching tests to Step 1's suite:
 
@@ -792,8 +820,10 @@ export function usePaginatedPages({ sections, trailing }: PaginatedSegments) {
 
     function continuationHeadingHeight(root: HTMLElement): number {
       // The "(cont.)" heading occupies real height on continuation pages; the
-      // packer must budget it or those pages overfill by one heading.
-      return root.querySelector<HTMLElement>("[data-measure-cont]")?.offsetHeight ?? 0;
+      // packer must budget it or those pages overfill by one heading. Read the
+      // sentinel's offsetTop, not the section's offsetHeight — the h2's bottom
+      // margin escapes by collapse and offsetHeight would under-budget it.
+      return root.querySelector<HTMLElement>("[data-measure-cont-end]")?.offsetTop ?? 0;
     }
 
     async function measure(): Promise<void> {
@@ -922,20 +952,26 @@ const blockById = useMemo(
 );
 ```
 
-Group consecutive placed blocks that share a `category` into one
-`<section className="sop-export-section" data-review-category={category}>` wrapper
-per page, so the existing `.sop-export-section h2` / `p` / list CSS applies
-unchanged. The offscreen tree (Step 2) groups identically — measurement and
-rendering must share the same wrapper structure or the heights lie. A group that
-opens a continued page is the page's first section, and the existing
-`.sop-export-section:first-child { margin-top: 0 }` rule absorbs its margin.
+Blocks are self-contained (Task 2), so a page body is placed blocks stacked in
+order — no grouping helper, and the offscreen tree stacks the identical output,
+which is what keeps measurement honest:
 
-At the top of any page whose `continuedSections` is non-empty, render inside the
-first section wrapper, before the fragment:
+```tsx
+{page.blocks.map((placed) => {
+  const block = blockById.get(placed.blockId);
+  if (!block) return null;
+  return <Fragment key={placed.blockId + (placed.lineRange ? `@${placed.lineRange.startLine}` : "")}>{block.render(placed.lineRange)}</Fragment>;
+})}
+```
+
+At the top of any page whose `continuedSections` is non-empty, render before the
+first fragment, as its own self-contained heading:
 
 ```tsx
 {page.continuedSections.map((section) => (
-  <h2 key={section.category}>{section.title} (cont.)</h2>
+  <section key={section.category} className="sop-export-section" style={{ marginTop: 0 }} data-review-category={section.category}>
+    <h2>{section.title} (cont.)</h2>
+  </section>
 ))}
 ```
 
@@ -964,10 +1000,16 @@ load-bearing:
     <main className="sop-print-page-body" data-measure-body />
     <DocumentFooter page={1} total={1} />
   </article>
-  {/* Probe for the height a "(cont.)" heading adds to a continuation page. */}
-  <section className="sop-export-section" style={{ marginTop: 0 }}>
-    <h2 data-measure-cont>Procedure (cont.)</h2>
-  </section>
+  {/* Probe for the height a "(cont.)" heading adds to a continuation page.
+      Measured via a sentinel's offsetTop, not offsetHeight — the h2's bottom
+      margin escapes the section by margin collapse and offsetHeight would
+      under-budget every continuation page by that margin. */}
+  <div style={{ position: "relative" }}>
+    <section className="sop-export-section" style={{ marginTop: 0 }}>
+      <h2>Procedure (cont.)</h2>
+    </section>
+    <div data-measure-cont-end />
+  </div>
   {(["sections", "trailing"] as const).map((name) => (
     <div
       key={name}
@@ -975,12 +1017,8 @@ load-bearing:
       className="sop-print-page"
       style={{ position: "relative", display: "block", width: "7in", height: "auto", minHeight: 0, overflow: "visible", padding: 0, boxShadow: "none" }}
     >
-      {groupIntoSections(segments[name]).map((group) => (
-        <section key={group.key} className="sop-export-section" data-review-category={undefined}>
-          {group.blocks.map((block) => (
-            <div key={block.id} data-block-id={block.id}>{block.render()}</div>
-          ))}
-        </section>
+      {segments[name].map((block) => (
+        <div key={block.id} data-block-id={block.id}>{block.render()}</div>
       ))}
     </div>
   ))}
@@ -990,9 +1028,11 @@ load-bearing:
 The segment containers reuse the `.sop-print-page` class purely for its typography
 (font family, 10pt, line-height 1.35) with the box overridden inline to a 7in
 content column (8.5in minus 0.75in side padding) — content must wrap at exactly
-the width it will render at, or line counts are wrong. `data-review-category` is
-stripped from offscreen copies (`undefined`), and `groupIntoSections` is the same
-grouping helper Step 1 uses for visible pages.
+the width it will render at, or line counts are wrong. Blocks render their normal
+self-contained output; the offscreen copies of `data-review-category` are outside
+`.sop-preview-scroll`, so `handleReviewScroll` never sees them. One known 4px
+niceness: a cut block's final window clips the paragraph's `margin-bottom`, so
+pages following a cut under-fill by 4px per cut — safe direction, invisible.
 
 - [ ] **Step 3: Update the CSS**
 

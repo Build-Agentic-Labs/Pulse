@@ -848,6 +848,12 @@ export function SopPrintPreview({
           font-family: var(--font-ui-family); font-size: 12pt; font-weight: 700; line-height: 1.3;
         }
         .sop-export-section p { margin: 0 0 4px; white-space: pre-wrap; }
+        /* Detected procedure sub-headings ("4.4 Document Creation") — body
+           size, bold, mirroring how the source Word documents styled them.
+           Deliberately a styled p, not an h2/h3: the heading machinery
+           (section h2 styles, review anchors, "(cont.)" titles) is
+           section-level and these must not enter it. */
+        .sop-export-subheading { margin: 0 0 4px; font-weight: 700; }
         .sop-export-empty { color: #666; }
         .sop-export-list { margin: 0; padding-left: 20px; }
         .sop-export-list li { margin: 0 0 2px; }

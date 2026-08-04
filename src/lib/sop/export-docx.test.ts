@@ -62,9 +62,13 @@ describe("exportSopToDocx — Procedure narrative structure", () => {
     expect(headingIdx).toBeGreaterThan(-1);
 
     // Look backward from the heading text to find its run properties.
-    const contextBefore = xml.substring(Math.max(0, headingIdx - 300), headingIdx);
-    expect(contextBefore).toContain("<w:b/>");
-    expect(contextBefore).toContain('<w:sz w:val="20"/>');
+    const headingContext = xml.substring(Math.max(0, headingIdx - 300), headingIdx);
+    expect(headingContext).toContain("<w:b/>");
+    expect(headingContext).toContain('<w:sz w:val="20"/>');
+
+    // Heading must NOT use a Word Heading style (no <w:pStyle> in the paragraph).
+    // This verifies the heading is body text, not a document heading style.
+    expect(headingContext).not.toContain("<w:pStyle");
 
     // Verify body line appears after the heading.
     const afterHeading = xml.substring(headingIdx);
@@ -86,18 +90,24 @@ describe("exportSopToDocx — Procedure narrative structure", () => {
     expect(xml).not.toContain("• First item");
     expect(xml).not.toContain("• Second item");
 
-    // Both items should be part of bullet lists (contain <w:numPr> in their paragraphs).
-    // Find the first item and check it's in a bullet list paragraph.
+    // Both items must have the SAME numId, proving they're in a single collapsed bullet list.
+    // Extract each item's numId from its paragraph properties.
     const firstIdx = xml.indexOf("First item");
     expect(firstIdx).toBeGreaterThan(-1);
-    const firstContext = xml.substring(Math.max(0, firstIdx - 500), firstIdx + 100);
-    expect(firstContext).toContain("<w:numPr>");
+    const firstParagraph = xml.substring(Math.max(0, firstIdx - 500), firstIdx + 100);
+    const firstNumIdMatch = firstParagraph.match(/w:numId w:val="(\d+)"/);
+    expect(firstNumIdMatch).toBeTruthy();
+    const firstNumId = firstNumIdMatch![1];
 
-    // Same for second item.
     const secondIdx = xml.indexOf("Second item");
     expect(secondIdx).toBeGreaterThan(-1);
-    const secondContext = xml.substring(Math.max(0, secondIdx - 500), secondIdx + 100);
-    expect(secondContext).toContain("<w:numPr>");
+    const secondParagraph = xml.substring(Math.max(0, secondIdx - 500), secondIdx + 100);
+    const secondNumIdMatch = secondParagraph.match(/w:numId w:val="(\d+)"/);
+    expect(secondNumIdMatch).toBeTruthy();
+    const secondNumId = secondNumIdMatch![1];
+
+    // Both items must use the same numId to be in the same bullet list.
+    expect(firstNumId).toBe(secondNumId);
   });
 
   it("renders blank lines as empty paragraphs (no em-dash leak from bodyText)", async () => {

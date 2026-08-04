@@ -33,3 +33,4 @@ UFO/*.zip
 
 # agent worktrees (isolated checkouts)
 .claude/worktrees/
+scratch/

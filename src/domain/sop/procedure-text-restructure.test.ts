@@ -1,0 +1,83 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { RESTRUCTURE_INSTRUCTION, restructurePreservesWording } from "./procedure-text-restructure";
+
+describe("restructurePreservesWording", () => {
+  it("accepts pure whitespace restructuring", () => {
+    const before = "Step one happens. Step two follows.";
+    const after = "Step one happens.\n\nStep two follows.";
+    expect(restructurePreservesWording(before, after)).toBe(true);
+  });
+
+  it("accepts added bullet glyphs", () => {
+    const before = "The creator shall: Use the template. Apply clear language.";
+    const after = "The creator shall:\n• Use the template.\n• Apply clear language.";
+    expect(restructurePreservesWording(before, after)).toBe(true);
+  });
+
+  it("rejects any wording change", () => {
+    const before = "Use the approved corporate template.";
+    const after = "Use the approved company template.";
+    expect(restructurePreservesWording(before, after)).toBe(false);
+  });
+
+  it("rejects dropped content", () => {
+    const before = "First sentence. Second sentence.";
+    const after = "First sentence.";
+    expect(restructurePreservesWording(before, after)).toBe(false);
+  });
+
+  it("rejects reordered content", () => {
+    const before = "Alpha then beta.";
+    const after = "Beta then alpha.";
+    expect(restructurePreservesWording(before, after)).toBe(false);
+  });
+
+  // Restructuring may normalize punctuation spacing but never letters/digits.
+  it("ignores dropped separator punctuation when a run-on list becomes bullets", () => {
+    const before = "items, including:  Policies;  Quality manuals";
+    const after = "items, including:\n• Policies\n• Quality manuals";
+    // ";" is punctuation, not a letter/digit, so the projection is identical.
+    // This is intentional: separators ARE the thing being restructured.
+    expect(restructurePreservesWording(before, after)).toBe(true);
+  });
+
+  // Case is content. Restructuring moves text; it never re-cases it.
+  it("rejects a case-only change", () => {
+    expect(restructurePreservesWording("Use the Template.", "Use the template.")).toBe(false);
+  });
+
+  // NFC normalization closes both normalization-form holes at once: a genuinely
+  // dropped diacritic is caught (the letters differ after normalization), and
+  // identical text that merely arrives in a different encoding form is not a
+  // false positive.
+  it("rejects a dropped diacritic even in decomposed form", () => {
+    const decomposed = "Fu\u0308hrung"; // u + combining diaeresis (NFD); source escape so no tool can NFC-normalize it away
+    expect(restructurePreservesWording(decomposed, "Fuhrung")).toBe(false);
+  });
+
+  it("accepts identical text in different Unicode normalization forms", () => {
+    const nfc = "F\u00FChrung"; // precomposed u-umlaut (NFC)
+    const nfd = "Fu\u0308hrung"; // u + combining diaeresis (NFD)
+    expect(restructurePreservesWording(nfc, nfd)).toBe(true);
+  });
+});
+
+describe("backfill script stays in sync with the canonical module", () => {
+  const script = readFileSync(
+    path.join(process.cwd(), "scripts", "backfill-procedure-structure.mjs"),
+    "utf8",
+  );
+
+  it("carries the canonical RESTRUCTURE_INSTRUCTION verbatim", () => {
+    // JSON.stringify-normalize both to compare content including the •
+    // escape without being tripped by template-literal vs source formatting.
+    expect(script).toContain("Return ONLY the restructured text");
+    expect(script.includes(RESTRUCTURE_INSTRUCTION)).toBe(true);
+  });
+
+  it("carries the canonical projection regex", () => {
+    expect(script).toContain(String.raw`text.normalize("NFC").match(/[\p{L}\p{N}]/gu)`);
+  });
+});

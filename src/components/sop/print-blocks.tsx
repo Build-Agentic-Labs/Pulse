@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { formatDateControlled } from "@/domain/formatting";
 import type { PlacedLineRange } from "@/domain/sop/pagination";
+import { classifyProcedureLine } from "@/domain/sop/procedure-text";
 import { linkedSopLabel, type Sop } from "@/domain/sop/schema";
 
 /** A leaf block before measurement. Task 3 adds `height`/`lineHeight`. */
@@ -215,6 +216,49 @@ function proseBlocks(category: string, sectionTitle: string, value: string): Pri
   }));
 }
 
+/**
+ * Procedure-only line classification (spec 2026-08-04): numbered sub-headings
+ * become atomic keepWithNext blocks — the paginator's orphan rules then protect
+ * them exactly as they protect section headings — and bullet-glyph lines become
+ * list items. Every other section keeps plain proseBlocks: purpose/scope are
+ * authored prose where "4.4 …" shapes do not occur, and holding the blast
+ * radius to the section with the problem keeps this reviewable.
+ */
+function procedureBlocks(category: string, sectionTitle: string, value: string): PrintBlock[] {
+  const plain = proseBlocks(category, sectionTitle, value);
+  if (!value) return plain;
+  const lines = value.split(/\r?\n/);
+  return lines.map((line, index) => {
+    const classified = classifyProcedureLine(line);
+    if (classified.kind === "paragraph") return plain[index];
+    if (classified.kind === "heading") {
+      return {
+        id: `${category}-p${index}`,
+        category,
+        sectionTitle,
+        keepWithNext: true,
+        render: () => (
+          <section className="sop-export-section" style={{ marginTop: 0 }} data-review-category={category}>
+            <p className="sop-export-subheading">{classified.text}</p>
+          </section>
+        ),
+      };
+    }
+    return {
+      id: `${category}-p${index}`,
+      category,
+      sectionTitle,
+      render: () => (
+        <section className="sop-export-section" style={{ marginTop: 0 }} data-review-category={category}>
+          <ul className="sop-export-list">
+            <li>{classified.text}</li>
+          </ul>
+        </section>
+      ),
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Section builders. Order and markup mirror sop-print-preview.tsx:715-786
 // (page-1 sections) and :796-855 (annexes / history / approvals).
@@ -416,7 +460,7 @@ export function buildPrintBlocks(
     ...buildReferencesSection(sop, extras),
     ...buildMeasurementsSection(sop),
     headingBlock("procedure-heading", "procedure", "Procedure"),
-    ...proseBlocks("procedure", "Procedure", sop.procedure.processFlowDescription),
+    ...procedureBlocks("procedure", "Procedure", sop.procedure.processFlowDescription),
   ];
 
   const trailing: PrintBlock[] = [

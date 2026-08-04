@@ -145,4 +145,71 @@ describe("buildPrintBlocks", () => {
       .join("");
     expect(text).not.toContain("Change Approvals");
   });
+
+  it("renders procedure sub-headings as atomic bold keepWithNext blocks", () => {
+    const { sections } = buildPrintBlocks(
+      sopWith({
+        procedure: {
+          processFlowDescription: "4.4 Document Creation\nThe creator may be an employee.",
+          roles: [],
+          activities: [],
+        },
+      }),
+    );
+    const body = sections.filter((b) => b.category === "procedure" && !b.keepWithNext);
+    const headings = sections.filter(
+      (b) => b.category === "procedure" && b.keepWithNext && b.sectionTitle === "Procedure",
+    );
+    // The section heading block plus the detected sub-heading block.
+    expect(headings.length).toBeGreaterThanOrEqual(1);
+    const sub = headings.find((b) => {
+      const { container } = render(<>{b.render()}</>);
+      return container.querySelector("p.sop-export-subheading") !== null;
+    });
+    expect(sub).toBeDefined();
+    expect(sub!.splittable).toBeFalsy();
+    const { container } = render(<>{sub!.render()}</>);
+    expect(container.querySelector("p.sop-export-subheading")?.textContent).toBe(
+      "4.4 Document Creation",
+    );
+    expect(container.querySelector("[data-review-category='procedure']")).not.toBeNull();
+    // The following prose line is still an ordinary splittable paragraph block.
+    expect(body.some((b) => b.splittable)).toBe(true);
+  });
+
+  it("renders procedure bullet lines as list items with the glyph stripped", () => {
+    const { sections } = buildPrintBlocks(
+      sopWith({
+        procedure: {
+          processFlowDescription: "The creator shall:\n• Use the approved corporate template.",
+          roles: [],
+          activities: [],
+        },
+      }),
+    );
+    const body = sections.filter((b) => b.category === "procedure" && !b.keepWithNext);
+    const bulletBlock = body.find((b) => {
+      const { container } = render(<>{b.render()}</>);
+      return container.querySelector("ul.sop-export-list li") !== null;
+    });
+    expect(bulletBlock).toBeDefined();
+    expect(bulletBlock!.splittable).toBeFalsy();
+    const { container } = render(<>{bulletBlock!.render()}</>);
+    expect(container.querySelector("ul.sop-export-list li")?.textContent).toBe(
+      "Use the approved corporate template.",
+    );
+  });
+
+  it("leaves purpose and scope classification-free", () => {
+    const { sections } = buildPrintBlocks(
+      sopWith({ purpose: "4.4 Document Creation\n• Not a bullet here." }),
+    );
+    const body = sections.filter((b) => b.category === "purpose" && !b.keepWithNext);
+    for (const block of body) {
+      const { container } = render(<>{block.render()}</>);
+      expect(container.querySelector("p.sop-export-subheading")).toBeNull();
+      expect(container.querySelector("ul")).toBeNull();
+      expect(block.splittable).toBe(true);
+    }
+  });
 });

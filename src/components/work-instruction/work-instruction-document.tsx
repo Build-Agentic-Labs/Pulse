@@ -66,10 +66,27 @@ const PRINT_STYLES = `
   font-size: 6.5pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
 }
 .wi-hdr-cell { justify-content: flex-start !important; padding-top: 5px !important; }
-.wi-hdr-rev { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 7pt; }
-.wi-hdr-rev th, .wi-hdr-rev td { border: 1px solid #bbb; padding: 1px 4px; text-align: left; }
-.wi-hdr-rev th { background: #f0f0f0; font-weight: 700; }
-.wi-hdr-rev td { height: 0.155in; }
+/* The revision table IS this header cell, not a table sitting inside one: the
+   cell gives up its padding, the table fills it edge to edge, and its rules are
+   the cell's own dividers. A bordered table inset in a bordered cell reads as a
+   box in a box. */
+.wi-hdr-rev-cell { padding: 0 !important; justify-content: stretch !important; gap: 0 !important; }
+.wi-hdr-rev {
+  width: 100%; height: 100%;
+  border-collapse: collapse; table-layout: fixed; font-size: 7pt;
+}
+.wi-hdr-rev th, .wi-hdr-rev td {
+  border-right: 1px solid #bbb; border-bottom: 1px solid #bbb;
+  padding: 1px 6px; text-align: left; vertical-align: middle;
+}
+.wi-hdr-rev th:last-child, .wi-hdr-rev td:last-child { border-right: 0; }
+.wi-hdr-rev tbody tr:last-child td { border-bottom: 0; }
+/* Title row: the cell's label, so it spans and carries no column rule. */
+.wi-hdr-rev-title {
+  border-right: 0 !important; height: 0.17in;
+  color: #555; font-size: 6.5pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.wi-hdr-rev-cols th { height: 0.16in; background: #f0f0f0; font-weight: 700; }
 .wi-body { flex: 1; min-height: 0; }
 .wi-ftr {
   flex: none; height: 0.30in; display: flex; align-items: center; justify-content: space-between;
@@ -208,11 +225,15 @@ function HeaderBand({ instruction, sheet }: { instruction: WorkInstruction; shee
           <span>{`${sheet.page} of ${sheet.total}`}</span>
         </div>
       </div>
-      <div className="wi-hdr-cell">
-        <span className="wi-hdr-label">Revision history</span>
+      <div className="wi-hdr-rev-cell">
         <table className="wi-hdr-rev">
           <thead>
             <tr>
+              <th className="wi-hdr-rev-title" colSpan={3}>
+                Revision history
+              </th>
+            </tr>
+            <tr className="wi-hdr-rev-cols">
               <th style={{ width: "13%" }}>Rev</th>
               <th style={{ width: "26%" }}>Date</th>
               <th>Description</th>

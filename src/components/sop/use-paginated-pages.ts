@@ -42,6 +42,12 @@ export function usePaginatedPages({ sections, trailing }: PaginatedSegments) {
         const probe = node?.querySelector<HTMLElement>("p") ?? node;
         const raw = probe ? window.getComputedStyle(probe).lineHeight : "normal";
         const parsed = Number.parseFloat(raw);
+        // Two different heights on purpose. `height` is the flow delta —
+        // margins included — and is what a placement costs the page.
+        // `contentHeight` is the text box alone and is what line arithmetic
+        // divides; rounding the margin-inflated delta would invent a phantom
+        // line at the end of every cut paragraph.
+        const contentHeight = probe ? probe.getBoundingClientRect().height : undefined;
         return {
           id: block.id,
           category: block.category,
@@ -49,6 +55,7 @@ export function usePaginatedPages({ sections, trailing }: PaginatedSegments) {
           keepWithNext: block.keepWithNext,
           splittable: block.splittable,
           height,
+          contentHeight: block.splittable ? contentHeight : undefined,
           lineHeight: block.splittable
             ? (Number.isFinite(parsed) && parsed > 0 ? parsed : height)
             : undefined,

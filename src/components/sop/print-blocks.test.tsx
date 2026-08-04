@@ -118,4 +118,31 @@ describe("buildPrintBlocks", () => {
     const { container } = render(<>{body[0].render()}</>);
     expect(container.querySelector("p.sop-export-empty")?.textContent).toBe("—");
   });
+
+  it("honors provided extras: approvals table, annex file lines, change author", () => {
+    const sop = sopWith({
+      annexes: [{ id: "ax1", label: "Annex A", description: "Inspection form" }],
+      changeHistory: [{ version: "1.0", changes: "Initial", createdByDate: "2026-08-01" }],
+    });
+    const { trailing } = buildPrintBlocks(sop, {
+      approvalsTable: <table data-testid="injected-approvals" />,
+      annexFileLines: new Map([["ax1", { name: "form.pdf", error: "could not render" }]]),
+      changeAuthor: () => "System Author\n08/01/2026",
+    });
+    const html = trailing
+      .map((block) => render(<>{block.render()}</>).container.innerHTML)
+      .join("");
+    expect(html).toContain("injected-approvals");
+    expect(html).toContain("form.pdf");
+    expect(html).toContain("could not render");
+    expect(html).toContain("System Author");
+  });
+
+  it("omits the approvals section entirely when no table is provided", () => {
+    const { trailing } = buildPrintBlocks(sopWith({}));
+    const text = trailing
+      .map((block) => render(<>{block.render()}</>).container.textContent)
+      .join("");
+    expect(text).not.toContain("Change Approvals");
+  });
 });

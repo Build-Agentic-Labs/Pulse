@@ -326,6 +326,27 @@ text above, this section governs.
    approvals table is far shorter than a page, and the overflow flag covers the
    pathological case.
 
+### Amendments — post-implementation (final whole-branch review)
+
+8. **`zoom` replaces `transform: scale()`** for the ≤1100px responsive rule.
+   Unlike a transform, `zoom` shrinks layout size too, so no height
+   compensation is needed; `@media print` pins it back to 1.
+9. **Flow height and content height are separate quantities.** Measured heights
+   are `offsetTop` deltas and carry collapsed margins, so the packer budgets
+   placements on flow `height` while line arithmetic divides `contentHeight`
+   (the text box alone). Budgeting whole paragraphs by `lines × lineHeight`
+   under-counted every block by its margin and pushed footers off the sheet;
+   the `:first-child` margin reset is likewise scoped to the real page body so
+   the offscreen tree's per-block wrappers cannot zero heading margins during
+   measurement.
+10. **A post-paint guard re-checks every rendered page.** If a page's body
+    `scrollHeight` exceeds its `clientHeight`, the page gains
+    `.sop-print-page-overflowing` and warns once — a measurement leak degrades
+    loudly to visible overflow, never to silent clipping.
+11. **Fallback pages carry `.sop-print-page-overflowing`.** The error contract
+    is "long but complete"; without the class, the new `height: 11in` +
+    `overflow: hidden` would truncate the hand-assembled fallback document.
+
 ## Open follow-up
 
 The collapsed Procedure prose (6 of 24 SOPs with zero newlines). Investigated and

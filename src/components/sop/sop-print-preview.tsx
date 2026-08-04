@@ -489,10 +489,10 @@ export function SopPrintPreview({
     };
   }, [sop, extras, referenceOpenError]);
 
-  // `measuring` is intentionally not destructured: the fallback below no longer
-  // conditions on it (see the comment there for why), and nothing else in this
-  // component reads it.
-  const { sectionPages, trailingPages, failed, offscreenRef } = usePaginatedPages(segments);
+  // The fallback below deliberately does not condition on `measuring` (see the
+  // comment there); it is read only to keep the empty-plan warning quiet during
+  // the initial measurement pass.
+  const { sectionPages, trailingPages, measuring, failed, offscreenRef } = usePaginatedPages(segments);
 
   // Blocks are self-contained (Task 2), so lookup by id is all rendering needs.
   // Ids that no longer resolve are skipped at render time (below) — during the
@@ -548,6 +548,43 @@ export function SopPrintPreview({
   // one long hand-assigned page beats no document — this component gates
   // approvals.
   const fallback = failed || sectionPages.length === 0;
+
+  // The measurement layer cannot prove the render layer honest on its own: a
+  // leak it hasn't imagined (the :first-child scoping above was exactly such a
+  // leak) under-budgets pages silently. This post-paint guard re-checks every
+  // rendered page against its own scrollHeight and, on drift, shows the
+  // overflow and says so — ugly output is honest output, per the spec.
+  useEffect(() => {
+    if (fallback) return;
+    const root = previewRootRef.current;
+    if (!root) return;
+    for (const body of root.querySelectorAll<HTMLElement>(".sop-print-pages .sop-print-page-body")) {
+      if (body.scrollHeight <= body.clientHeight + 1) continue;
+      const page = body.closest<HTMLElement>(".sop-print-page");
+      if (!page || page.classList.contains("sop-print-page-overflowing")) continue;
+      page.classList.add("sop-print-page-overflowing");
+      const label = page.querySelector(".sop-export-footer div")?.textContent ?? "a page";
+      const warnKey = `page-drift:${label}`;
+      if (!warnedOverflowBlockIds.current.has(warnKey)) {
+        warnedOverflowBlockIds.current.add(warnKey);
+        console.warn(
+          `SOP ${sop.meta.sopNumber || sop.id}: ${label} rendered taller than it was measured; showing the overflow instead of clipping it.`,
+        );
+      }
+    }
+  });
+
+  // An empty plan with no failure is still a degraded state worth one line —
+  // otherwise a persistent measurement no-op falls back in total silence.
+  useEffect(() => {
+    if (measuring || failed || sectionPages.length > 0 || segments.sections.length === 0) return;
+    if (warnedOverflowBlockIds.current.has("empty-plan")) return;
+    warnedOverflowBlockIds.current.add("empty-plan");
+    console.warn(
+      `SOP ${sop.meta.sopNumber || sop.id}: pagination produced no pages; showing the unpaginated document.`,
+    );
+  }, [measuring, failed, sectionPages, segments, sop]);
+
   const fallbackTotalPages = (hasAttachedForms ? 3 : 2) + flowPages.length;
   // Attachment sheets stay outside the count in both branches — they carry
   // their own "Appendix · Page x of y" label and no document footer.
@@ -799,7 +836,13 @@ export function SopPrintPreview({
         .sop-export-header-info > div:last-child { border-bottom: 0; }
         .sop-print-page-body { flex: 1; padding-top: 12px; }
         .sop-export-section { margin-top: 12px; break-inside: avoid; }
-        .sop-export-section:first-child { margin-top: 0; }
+        /* Scoped to the real page body ON PURPOSE. The offscreen measurement
+           tree wraps every block in its own [data-block-id] div, which makes
+           each section the first child of its wrapper — an unscoped
+           :first-child would zero every heading margin during measurement
+           while the visible page still renders them at 12px, over-packing
+           every page by the sum of its heading gaps. */
+        .sop-print-page-body > .sop-export-section:first-child { margin-top: 0; }
         .sop-export-section h2 {
           margin: 0 0 4px; color: #1a1a1a;
           font-family: var(--font-ui-family); font-size: 12pt; font-weight: 700; line-height: 1.3;
@@ -950,7 +993,11 @@ export function SopPrintPreview({
           <div className="sop-print-pages" style={{ zoom: pageScale }}>
           {fallback ? (
             <>
-              <DocumentPage sop={sop} page={1} total={totalPages} annotations={annotationsForPage(1)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation} headerReviewCategory={mode === "review" ? "document" : undefined}>
+              {/* Fallback pages carry the overflowing class so the pre-pagination
+                  long-page look survives the new height:11in + overflow:hidden —
+                  the spec's error contract is "long but complete", never
+                  "truncated but tidy". */}
+              <DocumentPage sop={sop} page={1} total={totalPages} className="sop-print-page-overflowing" annotations={annotationsForPage(1)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation} headerReviewCategory={mode === "review" ? "document" : undefined}>
                 <Section title="Purpose" reviewCategory="purpose"><EmptyAwareText value={sop.purpose} /></Section>
                 <Section title="Scope" reviewCategory="scope"><EmptyAwareText value={sop.scope} /></Section>
                 <Section title="Definitions" reviewCategory="definitions">
@@ -1032,7 +1079,7 @@ export function SopPrintPreview({
                 </DocumentPage>
               ))}
 
-              <DocumentPage sop={sop} page={annexSummaryPage} total={totalPages} annotations={annotationsForPage(annexSummaryPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
+              <DocumentPage sop={sop} page={annexSummaryPage} total={totalPages} className="sop-print-page-overflowing" annotations={annotationsForPage(annexSummaryPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
                 <Section title="Annexes & Forms" reviewCategory="annexes">
                   {sop.annexes.length ? sop.annexes.map((annex, index) => {
                     const file = formFiles.find((item) => item.annexId === annex.id);
@@ -1073,7 +1120,7 @@ export function SopPrintPreview({
               </DocumentPage>
 
               {hasAttachedForms ? (
-                <DocumentPage sop={sop} page={controlPage} total={totalPages} annotations={annotationsForPage(controlPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
+                <DocumentPage sop={sop} page={controlPage} total={totalPages} className="sop-print-page-overflowing" annotations={annotationsForPage(controlPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
                   <Section title="Change History" reviewCategory="history">
                     <table className="sop-export-table">
                       <colgroup><col style={{ width: "14%" }} /><col style={{ width: "56%" }} /><col style={{ width: "30%" }} /></colgroup>

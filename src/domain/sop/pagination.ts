@@ -22,15 +22,25 @@ export const MIN_SPLIT_LINES = 2;
 export interface MeasuredBlock {
   /** Stable identity, used for React keys and to look the block back up when rendering. */
   id: string;
-  /** Rendered height in CSS pixels at true page width. */
+  /**
+   * FLOW height in CSS pixels at true page width: the offsetTop delta to the
+   * next block, margins included. This is what a placement costs the page.
+   */
   height: number;
+  /**
+   * Height of the text box alone (lines × lineHeight), excluding collapsed
+   * margins that `height` carries. Line arithmetic for cutting uses this;
+   * budgeting always uses `height`. Falls back to `height` when absent —
+   * correct whenever the two are equal, as in synthetic tests.
+   */
+  contentHeight?: number;
   /** Drives `data-review-category` on every fragment, continuations included. */
   category: string;
   /** Repeated as "<title> (cont.)" when the section carries onto a new page. */
   sectionTitle: string;
   /** A heading: must not be the last thing on a page. */
   keepWithNext?: boolean;
-  /** Text that may be cut between lines. Requires `height === lines × lineHeight`. */
+  /** Text that may be cut between lines. */
   splittable?: boolean;
   /** Height of a single line. Required when `splittable`. */
   lineHeight?: number;
@@ -157,8 +167,22 @@ export function packBlocks(
       continue;
     }
 
+    // A splittable block whose FLOW height fits places whole, margins and all,
+    // exactly like an atom. Charging lines × lineHeight here instead would drop
+    // the paragraph's collapsed bottom margin from the budget — ~4px per block,
+    // 80px+ on a page of hyphen-bulleted lines — and push the footer off the
+    // sheet. Line arithmetic exists only for blocks that must actually cut.
+    if (block.height <= usableHeight - used) {
+      current.push({ blockId: block.id, continued: false });
+      used += block.height;
+      trailingHeadings = [];
+      continue;
+    }
+
     const lineHeight = block.lineHeight;
-    const totalLines = Math.max(1, Math.round(block.height / lineHeight));
+    // Line count comes from the text box, never the flow height: rounding a
+    // margin-inflated delta would invent a phantom line at the end of the block.
+    const totalLines = Math.max(1, Math.round((block.contentHeight ?? block.height) / lineHeight));
     let placedLines = 0;
 
     while (placedLines < totalLines) {
@@ -207,6 +231,10 @@ export function packBlocks(
           ? undefined
           : { startLine: placedLines, endLine: placedLines + take, lineHeight },
       });
+      // Fragments charge exact window height. The one imprecision: a remainder
+      // placed whole after a page break loses its bottom margin from the budget
+      // — at most one collapsed margin of whitespace spilling into the page's
+      // bottom padding, never text.
       used += take * lineHeight;
       placedLines += take;
       trailingHeadings = [];

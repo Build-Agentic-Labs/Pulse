@@ -143,6 +143,28 @@ describe("packBlocks", () => {
     expect(pages[1].overflowing).toBe(true);
   });
 
+  // Real measurements carry collapsed margins: flow height (offsetTop delta)
+  // exceeds the text box. Budgeting whole placements by lines × lineHeight
+  // instead of flow height under-counts every paragraph by its margin and
+  // pushes the footer off the sheet — the drift the final review caught live.
+  it("budgets a whole splittable block by its flow height, margins included", () => {
+    const withMargin = { ...text("para", 5), height: 54, contentHeight: 50 };
+    const pages = packBlocks([withMargin, text("tail", 1)], 60);
+    // 54 + 10 > 60: the 4px margin must push the tail to page 2. Line math
+    // alone (50 + 10 = 60) would have packed both onto one over-full page.
+    expect(pages).toHaveLength(2);
+    expect(pages[0].blocks.map((b) => b.blockId)).toEqual(["para"]);
+    expect(pages[1].blocks.map((b) => b.blockId)).toEqual(["tail"]);
+  });
+
+  it("derives line counts from contentHeight, never the margin-inflated flow height", () => {
+    const withMargin = { ...text("para", 20), height: 208, contentHeight: 200 };
+    const pages = packBlocks([withMargin], 100);
+    const last = pages[pages.length - 1].blocks[0].lineRange!;
+    // round(208 / 10) = 21 would emit a phantom 21st line; the text box says 20.
+    expect(last.endLine).toBe(20);
+  });
+
   it("does not flag pages that merely fill completely", () => {
     const pages = packBlocks([atom("a", 100)], 100);
     expect(pages[0].overflowing).toBe(false);

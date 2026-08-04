@@ -97,4 +97,25 @@ describe("buildPrintBlocks", () => {
     expect(container.querySelector("p")?.textContent).toBe("Short.");
     expect(container.querySelector("div")).toBeNull();
   });
+
+  // The em-dash empty state belongs to a section with no content at all. A blank
+  // line INSIDE authored prose is paragraph spacing — the old pre-wrap rendering
+  // showed one empty text line, so it must render as a non-breaking space, never
+  // as a dash row in the middle of a controlled document.
+  it("renders an interior blank line as spacing, not an em-dash", () => {
+    const { sections } = buildPrintBlocks(sopWith({ purpose: "First.\n\nSecond." }));
+    const body = sections.filter((b) => b.category === "purpose" && !b.keepWithNext);
+    expect(body).toHaveLength(3);
+    const { container } = render(<>{body[1].render()}</>);
+    expect(container.querySelector("p")?.textContent).toBe(" ");
+    expect(container.querySelector("p.sop-export-empty")).toBeNull();
+  });
+
+  it("renders a wholly empty section as the em-dash empty state", () => {
+    const { sections } = buildPrintBlocks(sopWith({ purpose: "" }));
+    const body = sections.filter((b) => b.category === "purpose" && !b.keepWithNext);
+    expect(body).toHaveLength(1);
+    const { container } = render(<>{body[0].render()}</>);
+    expect(container.querySelector("p.sop-export-empty")?.textContent).toBe("—");
+  });
 });

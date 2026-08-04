@@ -182,6 +182,11 @@ function proseBlocks(category: string, sectionTitle: string, value: string): Pri
   // is still marked splittable — the six SOPs whose Procedure has zero newlines
   // depend on the Range pass cutting it later.
   const lines = value ? value.split(/\r?\n/) : [""];
+  // The em-dash empty state belongs to a section with NO content at all
+  // (EmptyAwareText semantics). An interior blank line is the author's paragraph
+  // spacing: the old pre-wrap rendering showed it as one empty text line, so it
+  // renders as a non-breaking space — same height, no dash.
+  const sectionIsEmpty = !value;
   return lines.map((line, index) => ({
     id: `${category}-p${index}`,
     category,
@@ -190,7 +195,9 @@ function proseBlocks(category: string, sectionTitle: string, value: string): Pri
     render: (lineRange) => {
       const paragraph = (
         <section className="sop-export-section" style={{ marginTop: 0 }} data-review-category={category}>
-          <p className={line ? undefined : "sop-export-empty"}>{line || "—"}</p>
+          <p className={sectionIsEmpty ? "sop-export-empty" : undefined}>
+            {line || (sectionIsEmpty ? "—" : " ")}
+          </p>
         </section>
       );
       if (!lineRange) return paragraph;

@@ -846,10 +846,16 @@ export function SopEditor({
 
   // Until release there is no numeric sequence yet. Keep every rendered document (masthead, PDF
   // preview, and Word export) showing the same placeholder the form shows.
-  const renderedSop: Sop = {
-    ...sop,
-    meta: { ...sop.meta, version: controlledVersion, sopNumber: renderedSopNumber },
-  };
+  // Memoized: `sop` identity here is load-bearing for SopPrintPreview's measured pagination — a
+  // fresh object every render would re-trigger its offscreen remeasure on every parent render
+  // (including the editor's periodic refresh interval), not just on real content changes.
+  const renderedSop: Sop = useMemo(
+    () => ({
+      ...sop,
+      meta: { ...sop.meta, version: controlledVersion, sopNumber: renderedSopNumber },
+    }),
+    [sop, controlledVersion, renderedSopNumber],
+  );
   const displaySopNumber = renderedSopNumber;
 
   useLayoutEffect(() => {

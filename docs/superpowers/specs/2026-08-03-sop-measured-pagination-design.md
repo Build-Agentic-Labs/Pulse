@@ -285,6 +285,47 @@ sign against, so a preview that failed closed would block approvals outright.
   3. one with attached forms
   4. print preview: physical sheet count matches the footer's "of M"
 
+## Amendments — 2026-08-03, pre-implementation review (Fable)
+
+An adversarial model review of the implementation plan (verdict: REVISE) forced
+these changes before any code was written. Where this section disagrees with the
+text above, this section governs.
+
+1. **Line arithmetic replaces the `Range` binary search.** Approach B's
+   character-offset search was made redundant by the clipping-window rendering:
+   a cut fragment shows the whole paragraph through a window aligned to line
+   boundaries, so the packer only ever needs line counts
+   (`round(height / lineHeight)`), never character offsets. Assumption this
+   rests on: uniform line boxes — plain `<p>` content with no inline elements
+   that change line height. That holds for every prose section this document
+   renders.
+2. **Measurement is position-delta based, not rect based.**
+   `getBoundingClientRect().height` excludes margins, and this document's
+   spacing is margin-driven (`.sop-export-section { margin-top: 12px }`,
+   `p { margin-bottom: 4px }`) — rect heights under-measure every page by
+   roughly 200px on a dense SOP, which the new `overflow: hidden` would clip
+   silently. Heights are therefore successive `offsetTop` deltas inside a
+   `position: relative` measurement container, which attributes every margin to
+   a block.
+3. **Document order is preserved via two-segment packing.** Blocks pack as
+   `sections` (Purpose … Procedure) and `trailing` (Annexes, Change History,
+   Change Approvals) so flowchart sheets stay exactly where the controlled
+   document has them today: after the Procedure narrative, before Annexes.
+4. **Continuation headings are budgeted.** A "(cont.)" heading occupies real
+   height, so `packBlocks` takes a `continuationHeadingHeight` allowance and
+   reserves it on any page that opens with a continuation.
+5. **`continuedSections` carries `{ title, category }`**, not bare titles — the
+   repeated heading must render `data-review-category` for review-mode scroll
+   tracking.
+6. **Attachment sheets stay outside "Page N of M"**, matching current behaviour
+   (they self-label "Appendix · Page x of y" and carry no document footer). The
+   Rendering-changes formula above that included `attachmentPages.length` is
+   superseded.
+7. **The approvals table is one atomic block.** Its signature-reveal animation
+   and `data-signature-id` anchors stay in a single element; a realistic
+   approvals table is far shorter than a page, and the overflow flag covers the
+   pathological case.
+
 ## Open follow-up
 
 The collapsed Procedure prose (6 of 24 SOPs with zero newlines). Investigated and

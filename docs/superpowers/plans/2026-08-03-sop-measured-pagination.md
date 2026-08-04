@@ -4,7 +4,7 @@
 
 **Goal:** Replace `SopPrintPreview`'s hand-assigned page count with a measured paginator so every rendered sheet is a real 8.5×11in page carrying its own header, footer, and truthful "Page N of M".
 
-**Architecture:** Two passes. A pure greedy packer (`src/domain/sop/pagination.ts`) owns all layout policy and is unit-tested against synthetic heights. A React hook renders content into an offscreen container at true page width, measures each leaf block with `getBoundingClientRect`, and feeds the packer. `sop-print-preview.tsx` renders the resulting plan as real `DocumentPage`s.
+**Architecture:** Two passes. A pure greedy packer (`src/domain/sop/pagination.ts`) owns all layout policy and is unit-tested against synthetic heights. The preview renders blocks into an offscreen container at true page width; a hook measures each leaf block by successive `offsetTop` deltas (margins included — rect heights would under-measure) and feeds two segments (sections, trailing) through the packer, keeping flowchart sheets in their current document position. Cut paragraphs render as clipping windows over the whole text, so on-screen wrapping is identical to the measured pass. `sop-print-preview.tsx` renders the resulting plans as real `DocumentPage`s.
 
 **Tech Stack:** TypeScript, React 19, Next.js 16 (App Router), Vitest (node project for `.ts`, jsdom project for `.tsx`).
 
@@ -43,7 +43,7 @@
 
 **Interfaces:**
 - Consumes: nothing — this is the foundation task.
-- Produces: `MeasuredBlock`, `PlacedBlock`, `PlacedLineRange`, `PagePlan`, `packBlocks(blocks, usableHeight)`, and the exported constant `MIN_SPLIT_LINES = 2`. Tasks 3 and 4 depend on these exact names. `PlacedLineRange` carries `lineHeight` so a cut fragment renders as a clipping window over the whole paragraph.
+- Produces: `MeasuredBlock`, `PlacedBlock`, `PlacedLineRange`, `ContinuedSection`, `PagePlan`, `packBlocks(blocks, usableHeight, continuationHeadingHeight = 0)`, and the exported constant `MIN_SPLIT_LINES = 2`. Tasks 3 and 4 depend on these exact names. `PlacedLineRange` carries `lineHeight` so a cut fragment renders as a clipping window over the whole paragraph. `ContinuedSection` is `{ title: string; category: string }` — the category must travel with the title or the "(cont.)" heading cannot carry `data-review-category`. The third parameter reserves room at the top of any page that opens with a continuation, because the "(cont.)" heading itself occupies height the packer would otherwise not know about.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -117,9 +117,19 @@ describe("packBlocks", () => {
     });
   });
 
-  it("records the section to repeat as a continued heading", () => {
+  it("records the section to repeat as a continued heading, with its category", () => {
     const pages = packBlocks([text("para", 20)], 100);
-    expect(pages[1].continuedSections).toEqual(["Procedure"]);
+    expect(pages[1].continuedSections).toEqual([{ title: "Procedure", category: "procedure" }]);
+  });
+
+  it("reserves the continuation-heading allowance on pages that open with a continuation", () => {
+    const pages = packBlocks([text("para", 20)], 100, 15);
+    // Page 1 has no continuation: full 10 lines. Page 2 opens with one: only
+    // floor((100 - 15) / 10) = 8 lines fit under the "(cont.)" heading.
+    expect(pages).toHaveLength(3);
+    expect(pages[0].blocks[0].lineRange).toMatchObject({ startLine: 0, endLine: 10 });
+    expect(pages[1].blocks[0].lineRange).toMatchObject({ startLine: 10, endLine: 18 });
+    expect(pages[2].blocks[0].lineRange).toMatchObject({ startLine: 18, endLine: 20 });
   });
 
   // Cutting after line 11 of 12 would strand a single line. Pull the cut back so
@@ -135,6 +145,34 @@ describe("packBlocks", () => {
     const pages = packBlocks([atom("a", 85), text("para", 6)], 100);
     expect(pages[0].blocks.map((b) => b.blockId)).toEqual(["a"]);
     expect(pages[1].blocks[0]).toMatchObject({ blockId: "para", continued: false });
+    // Placed whole in one piece — no clipping window needed at render time.
+    expect(pages[1].blocks[0].lineRange).toBeUndefined();
+  });
+
+  // linesLeft = 3 cannot split into two legal chunks (each side needs
+  // MIN_SPLIT_LINES); the remainder moves to a fresh page whole.
+  it("moves an uncuttable short remainder whole instead of stranding one line", () => {
+    const pages = packBlocks([atom("a", 85), text("para", 3)], 105);
+    expect(pages[0].blocks.map((b) => b.blockId)).toEqual(["a"]);
+    expect(pages[1].blocks[0]).toMatchObject({ blockId: "para", continued: false });
+    expect(pages[1].blocks[0].lineRange).toBeUndefined();
+  });
+
+  it("carries a trailing heading onto the oversized atom's page instead of orphaning it", () => {
+    const blocks = [atom("h", 20, { keepWithNext: true }), atom("huge", 250)];
+    const pages = packBlocks(blocks, 100);
+    expect(pages).toHaveLength(1);
+    expect(pages[0].blocks.map((b) => b.blockId)).toEqual(["h", "huge"]);
+    expect(pages[0].overflowing).toBe(true);
+  });
+
+  // Degenerate: a page shorter than two text lines. The two-line paragraph cannot
+  // legally split, places whole, and the page is flagged rather than silently clipped.
+  it("flags a page overfilled by an uncuttable remainder on a degenerate tiny page", () => {
+    const pages = packBlocks([text("para", 2)], 15);
+    expect(pages).toHaveLength(1);
+    expect(pages[0].blocks[0].lineRange).toBeUndefined();
+    expect(pages[0].overflowing).toBe(true);
   });
 
   it("gives an oversized indivisible block its own page and flags it", () => {
@@ -233,11 +271,20 @@ export interface PlacedBlock {
   continued: boolean;
 }
 
+export interface ContinuedSection {
+  title: string;
+  category: string;
+}
+
 export interface PagePlan {
   blocks: PlacedBlock[];
-  /** Section titles to repeat as "(cont.)" at the top of this page. */
-  continuedSections: string[];
-  /** Set when this page holds a single indivisible block taller than the page. */
+  /**
+   * Sections to repeat as "<title> (cont.)" at the top of this page. A
+   * continuation is always the first block on its page, so this holds at most
+   * one entry — it stays an array for shape stability.
+   */
+  continuedSections: ContinuedSection[];
+  /** Set when this page holds content taller than the page that nothing could split. */
   overflowing: boolean;
 }
 
@@ -253,13 +300,18 @@ function minimumFirstChunk(block: MeasuredBlock | undefined): number {
 export function packBlocks(
   blocks: readonly MeasuredBlock[],
   usableHeight: number,
+  /** Height reserved on pages that open with a continuation — the "(cont.)" heading itself. */
+  continuationHeadingHeight = 0,
 ): PagePlan[] {
   if (usableHeight <= 0) return [];
 
   const pages: PagePlan[] = [];
   let current: PlacedBlock[] = [];
-  let continuedSections: string[] = [];
+  let continuedSections: ContinuedSection[] = [];
   let used = 0;
+  // Headings at the tail of `current` whose section content has not landed yet.
+  // A page break moves them forward instead of leaving page-bottom orphans.
+  let trailingHeadings: { placed: PlacedBlock; height: number }[] = [];
 
   function flush(overflowing = false): void {
     if (current.length === 0) return;
@@ -269,6 +321,18 @@ export function packBlocks(
     used = 0;
   }
 
+  /** Start a fresh page, carrying any trailing headings onto it. */
+  function breakPage(): void {
+    const carried = trailingHeadings;
+    trailingHeadings = [];
+    current.splice(current.length - carried.length);
+    flush();
+    for (const item of carried) {
+      current.push(item.placed);
+      used += item.height;
+    }
+  }
+
   for (let index = 0; index < blocks.length; index += 1) {
     const block = blocks[index];
 
@@ -276,60 +340,95 @@ export function packBlocks(
     // of what follows to be worth reading.
     if (block.keepWithNext) {
       const needed = block.height + minimumFirstChunk(blocks[index + 1]);
-      if (needed > usableHeight - used && current.length > 0) flush();
-      current.push({ blockId: block.id, continued: false });
+      if (needed > usableHeight - used && current.length > 0) breakPage();
+      const placed: PlacedBlock = { blockId: block.id, continued: false };
+      current.push(placed);
       used += block.height;
-      continue;
-    }
-
-    if (block.height <= usableHeight - used) {
-      current.push({ blockId: block.id, continued: false });
-      used += block.height;
+      trailingHeadings.push({ placed, height: block.height });
+      // Degenerate: a heading taller than the page overflows its own flagged page
+      // (its section content starts on the next page, headingless).
+      if (block.height > usableHeight) {
+        trailingHeadings = [];
+        flush(true);
+      }
       continue;
     }
 
     if (!block.splittable || !block.lineHeight) {
-      if (current.length > 0) flush();
+      if (block.height <= usableHeight - used) {
+        current.push({ blockId: block.id, continued: false });
+        used += block.height;
+        trailingHeadings = [];
+        continue;
+      }
+      breakPage();
       current.push({ blockId: block.id, continued: false });
-      used = block.height;
-      // Nothing left to split: hand it out alone and let the caller show the overflow.
-      if (block.height > usableHeight) flush(true);
+      used += block.height;
+      trailingHeadings = [];
+      // Nothing left to split: hand it out and let the caller show the overflow.
+      if (used > usableHeight) flush(true);
       continue;
     }
 
     const lineHeight = block.lineHeight;
     const totalLines = Math.max(1, Math.round(block.height / lineHeight));
-    let placed = 0;
+    let placedLines = 0;
 
-    while (placed < totalLines) {
+    while (placedLines < totalLines) {
       const roomLines = Math.floor((usableHeight - used) / lineHeight);
-      const linesLeft = totalLines - placed;
+      const linesLeft = totalLines - placedLines;
 
-      // Too little room for a worthwhile chunk — break to a fresh page first.
+      // Too little room for a worthwhile chunk — break to a fresh page first
+      // (carrying any heading, so it cannot be orphaned by the break).
       if (roomLines < MIN_SPLIT_LINES && current.length > 0) {
-        flush();
+        breakPage();
         continue;
       }
 
       let take = Math.min(Math.max(roomLines, 1), linesLeft);
       const leftover = linesLeft - take;
       if (leftover > 0 && leftover < MIN_SPLIT_LINES) {
-        take = Math.max(MIN_SPLIT_LINES, linesLeft - MIN_SPLIT_LINES);
+        if (linesLeft >= MIN_SPLIT_LINES * 2) {
+          // Shrink the chunk so at least MIN_SPLIT_LINES carry over. Never
+          // overfills: take only decreases here.
+          take = linesLeft - MIN_SPLIT_LINES;
+        } else if (current.length > 0) {
+          // Fewer than 2×MIN lines cannot split legally — move the remainder
+          // whole to a fresh page.
+          breakPage();
+          continue;
+        } else {
+          // Fresh page and still uncuttable (page shorter than the remainder):
+          // place whole; the overfill check below flags the page.
+          take = linesLeft;
+        }
       }
 
-      const continued = placed > 0;
-      if (continued && !continuedSections.includes(block.sectionTitle)) {
-        continuedSections.push(block.sectionTitle);
+      const continued = placedLines > 0;
+      if (continued) {
+        continuedSections.push({ title: block.sectionTitle, category: block.category });
       }
+      const whole = !continued && take === totalLines;
       current.push({
         blockId: block.id,
         continued,
-        lineRange: { startLine: placed, endLine: placed + take, lineHeight },
+        lineRange: whole
+          ? undefined
+          : { startLine: placedLines, endLine: placedLines + take, lineHeight },
       });
       used += take * lineHeight;
-      placed += take;
+      placedLines += take;
+      trailingHeadings = [];
 
-      if (placed < totalLines) flush();
+      if (used > usableHeight) {
+        // Only reachable via the uncuttable whole placement (or a single line
+        // taller than a degenerate page) — flagged, never silently clipped.
+        flush(true);
+      } else if (placedLines < totalLines) {
+        flush();
+        // The next chunk opens its page under a "(cont.)" heading; reserve its height.
+        used = continuationHeadingHeight;
+      }
     }
   }
 
@@ -344,7 +443,7 @@ export function packBlocks(
 npx vitest run src/domain/sop/pagination.test.ts
 ```
 
-Expected: PASS, 12 tests.
+Expected: PASS, 16 tests.
 
 - [ ] **Step 5: Typecheck and lint**
 
@@ -371,7 +470,8 @@ git commit -m "feat: add pure page packer for SOP print preview"
 
 **Interfaces:**
 - Consumes: `MeasuredBlock` from Task 1 (this task produces everything except `height`).
-- Produces: `PrintBlock` (a `MeasuredBlock` minus `height`/`lineHeight`, plus `render: (lineRange?: PlacedLineRange) => ReactNode`), and `buildPrintBlocks(sop, options): PrintBlock[]`. Task 3 measures these; Task 4 renders them, passing each `PlacedBlock.lineRange` straight through to `render`.
+- Produces: `PrintBlock` (a `MeasuredBlock` minus `height`/`lineHeight`, plus `render: (lineRange?: PlacedLineRange) => ReactNode`), `PrintBlockExtras`, and `buildPrintBlocks(sop, extras?): { sections: PrintBlock[]; trailing: PrintBlock[] }`. Two segments because the flowchart sheets must stay where the controlled document has them today — after the Procedure narrative, before Annexes. One flat list would silently reorder the document (flowcharts after Change Approvals). Task 3 measures both segments in one offscreen pass but packs them separately; Task 4 renders sections → flow pages → trailing.
+- Rule for every block: **the root element `render` returns carries `data-review-category={category}`** — headings, list items, and table rows included, not just prose. Review-mode scroll tracking reads that attribute; any fragment missing it makes the review panel report the wrong section.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -393,44 +493,63 @@ function sopWith(overrides: Record<string, unknown>) {
 
 describe("buildPrintBlocks", () => {
   it("emits a keepWithNext heading before each section's content", () => {
-    const blocks = buildPrintBlocks(sopWith({ purpose: "Establish a method." }));
-    const purpose = blocks.filter((b) => b.category === "purpose");
+    const { sections } = buildPrintBlocks(sopWith({ purpose: "Establish a method." }));
+    const purpose = sections.filter((b) => b.category === "purpose");
     expect(purpose[0].keepWithNext).toBe(true);
     expect(purpose[1].keepWithNext).toBeFalsy();
   });
 
   it("splits prose into one splittable block per line", () => {
-    const blocks = buildPrintBlocks(sopWith({ purpose: "First line.\nSecond line.\nThird line." }));
-    const body = blocks.filter((b) => b.category === "purpose" && !b.keepWithNext);
+    const { sections } = buildPrintBlocks(sopWith({ purpose: "First line.\nSecond line.\nThird line." }));
+    const body = sections.filter((b) => b.category === "purpose" && !b.keepWithNext);
     expect(body).toHaveLength(3);
     expect(body.every((b) => b.splittable)).toBe(true);
   });
 
   // The six SOPs whose Procedure has zero newlines are exactly why a single
-  // paragraph must still be marked splittable: the Range pass cuts it later.
+  // paragraph must still be marked splittable: the packer cuts it by line count.
   it("marks a paragraph with no newlines as splittable", () => {
-    const blocks = buildPrintBlocks(sopWith({ purpose: "A".repeat(4000) }));
-    const body = blocks.filter((b) => b.category === "purpose" && !b.keepWithNext);
+    const { sections } = buildPrintBlocks(sopWith({ purpose: "A".repeat(4000) }));
+    const body = sections.filter((b) => b.category === "purpose" && !b.keepWithNext);
     expect(body).toHaveLength(1);
     expect(body[0].splittable).toBe(true);
   });
 
   it("emits one non-splittable block per list item", () => {
-    const blocks = buildPrintBlocks(sopWith({ measurements: ["First KPI", "Second KPI"] }));
-    const body = blocks.filter((b) => b.category === "measurements" && !b.keepWithNext);
+    const { sections } = buildPrintBlocks(sopWith({ measurements: ["First KPI", "Second KPI"] }));
+    const body = sections.filter((b) => b.category === "measurements" && !b.keepWithNext);
     expect(body).toHaveLength(2);
     expect(body.every((b) => b.splittable)).toBeFalsy();
   });
 
-  it("gives every block a unique id", () => {
-    const blocks = buildPrintBlocks(sopWith({ purpose: "One.\nTwo.", scope: "Three." }));
-    const ids = blocks.map((b) => b.id);
+  it("gives every block a unique id across both segments", () => {
+    const { sections, trailing } = buildPrintBlocks(
+      sopWith({ purpose: "One.\nTwo.", scope: "Three." }),
+    );
+    const ids = [...sections, ...trailing].map((b) => b.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("carries the review category onto every block so scroll tracking still works", () => {
-    const blocks = buildPrintBlocks(sopWith({ purpose: "One.\nTwo." }));
-    expect(blocks.filter((b) => b.category === "purpose")).toHaveLength(3);
+    const { sections } = buildPrintBlocks(sopWith({ purpose: "One.\nTwo." }));
+    expect(sections.filter((b) => b.category === "purpose")).toHaveLength(3);
+  });
+
+  it("puts data-review-category on non-prose block roots too", () => {
+    const { sections } = buildPrintBlocks(sopWith({ measurements: ["First KPI"] }));
+    const body = sections.filter((b) => b.category === "measurements" && !b.keepWithNext);
+    const { container } = render(<ul>{body[0].render()}</ul>);
+    expect(container.querySelector("[data-review-category='measurements']")).not.toBeNull();
+  });
+
+  it("routes annexes and change history into the trailing segment", () => {
+    const { sections, trailing } = buildPrintBlocks(
+      sopWith({
+        changeHistory: [{ version: "1.0", changes: "Initial release", createdByDate: "2026-08-01" }],
+      }),
+    );
+    expect(trailing.some((b) => b.category === "history")).toBe(true);
+    expect(sections.some((b) => b.category === "history")).toBe(false);
   });
 });
 ```
@@ -464,7 +583,26 @@ export interface PrintBlock {
 }
 ```
 
-Emit, in order: `purpose`, `scope`, `definitions` (one block per table row, header repeats), `responsible`, `references`, `measurements`, `procedure`, then `annexes`, `history`, and the approvals table. For each section emit a heading block with `keepWithNext: true`, then its content blocks. List and table rows are non-splittable.
+Emit two segments. `sections`, in order: `purpose`, `scope`, `definitions` (one block per table row, header repeats), `responsible`, `references`, `measurements`, `procedure`. `trailing`: `annexes`, `history` (one block per Change History row), and the approvals table as **one atomic block** — it renders `ApprovalTable`, whose signature-reveal animation and `data-signature-id` anchors must stay in a single element (a realistic approvals table is a handful of rows; if it ever exceeds a page, the overflow flag warns rather than clipping). For each section emit a heading block with `keepWithNext: true`, then its content blocks. List and table rows are non-splittable.
+
+Interactive and component-state content is injected, keeping this module pure of preview state:
+
+```tsx
+export interface PrintBlockExtras {
+  /** References section: the preview injects the linked-SOP anchor and annex-open button. */
+  renderLinkedSop?: (link: Sop["linkedSops"][number]) => ReactNode;
+  renderReferenceDoc?: (doc: NonNullable<Sop["referenceDocs"]>[number]) => ReactNode;
+  /** Change History author column ("system author" + formatDateControlled join). */
+  changeAuthor?: (entry: Sop["changeHistory"][number]) => string;
+  /** Whole approvals table, one atomic trailing block; omitted → section omitted. */
+  approvalsTable?: ReactNode;
+  /** "Attached form: …" annotations under annex rows, keyed by annex id. */
+  annexFileLines?: Map<string, { name: string; error?: string }>;
+  annexLoading?: boolean;
+}
+```
+
+All fields optional with plain-text fallbacks so tests can call `buildPrintBlocks(sop)` bare. The render bodies mirror the existing markup exactly — page 1 sections at `sop-print-preview.tsx:715-786`, annexes/history/approvals at `:796-855`.
 
 The prose helper, which every text section routes through. A cut fragment renders
 the **whole** paragraph inside a clipping window offset to its line range — never a
@@ -517,8 +655,8 @@ Add matching tests to Step 1's suite:
 
 ```tsx
 it("renders a cut fragment as a clipping window sized to its line range", () => {
-  const blocks = buildPrintBlocks(sopWith({ purpose: "A".repeat(4000) }));
-  const body = blocks.filter((b) => b.category === "purpose" && !b.keepWithNext);
+  const { sections } = buildPrintBlocks(sopWith({ purpose: "A".repeat(4000) }));
+  const body = sections.filter((b) => b.category === "purpose" && !b.keepWithNext);
   const { container } = render(
     <>{body[0].render({ startLine: 10, endLine: 20, lineHeight: 14 })}</>,
   );
@@ -532,8 +670,8 @@ it("renders a cut fragment as a clipping window sized to its line range", () => 
 });
 
 it("renders the plain paragraph when no line range is given", () => {
-  const blocks = buildPrintBlocks(sopWith({ purpose: "Short." }));
-  const body = blocks.filter((b) => b.category === "purpose" && !b.keepWithNext);
+  const { sections } = buildPrintBlocks(sopWith({ purpose: "Short." }));
+  const body = sections.filter((b) => b.category === "purpose" && !b.keepWithNext);
   const { container } = render(<>{body[0].render()}</>);
   expect(container.querySelector("p")?.textContent).toBe("Short.");
   expect(container.querySelector("div")).toBeNull();
@@ -546,7 +684,7 @@ it("renders the plain paragraph when no line range is given", () => {
 npx vitest run src/components/sop/print-blocks.test.tsx
 ```
 
-Expected: PASS, 8 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -564,78 +702,147 @@ git commit -m "feat: decompose SOP sections into measurable print blocks"
 
 **Interfaces:**
 - Consumes: `packBlocks`, `MeasuredBlock`, `PagePlan` (Task 1); `PrintBlock` (Task 2).
-- Produces: `usePaginatedPages(blocks: PrintBlock[]): { pages: PagePlan[]; measuring: boolean; failed: boolean; offscreenRef: RefObject<HTMLDivElement | null> }`. Task 4 consumes all four fields.
+- Produces: `usePaginatedPages(segments: { sections: PrintBlock[]; trailing: PrintBlock[] }): { sectionPages: PagePlan[]; trailingPages: PagePlan[]; measuring: boolean; failed: boolean; offscreenRef: RefObject<HTMLDivElement | null> }`. Task 4 consumes all five fields and owns rendering the offscreen tree the hook measures (the hook is `.ts` and renders nothing).
 
 - [ ] **Step 1: Implement the hook**
 
 ```ts
-export function usePaginatedPages(blocks: readonly PrintBlock[]) {
+const FONTS_READY_TIMEOUT_MS = 3000;
+const REMEASURE_DEBOUNCE_MS = 150;
+
+export interface PaginatedSegments {
+  sections: readonly PrintBlock[];
+  trailing: readonly PrintBlock[];
+}
+
+export function usePaginatedPages({ sections, trailing }: PaginatedSegments) {
   const offscreenRef = useRef<HTMLDivElement | null>(null);
-  const [pages, setPages] = useState<PagePlan[]>([]);
+  const [sectionPages, setSectionPages] = useState<PagePlan[]>([]);
+  const [trailingPages, setTrailingPages] = useState<PagePlan[]>([]);
   const [measuring, setMeasuring] = useState(true);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const timer = window.setTimeout(() => { void measure(); }, 150);
+    setMeasuring(true);
+
+    // getBoundingClientRect ignores margins, and this document's spacing is
+    // margin-driven (.sop-export-section margin-top, p margin-bottom) — rect
+    // heights would under-measure every page and the page box would clip the
+    // shortfall. Successive offsetTops inside a position:relative segment
+    // container attribute every margin to a block, so the sum matches the
+    // real flowed layout exactly.
+    function measureSegment(root: HTMLElement, blocks: readonly PrintBlock[], segment: string): MeasuredBlock[] {
+      const container = root.querySelector<HTMLElement>(`[data-segment="${segment}"]`);
+      if (!container) return [];
+      const nodes = blocks.map((block) =>
+        container.querySelector<HTMLElement>(`[data-block-id="${block.id}"]`),
+      );
+      const bottom = container.scrollHeight;
+      return blocks.map((block, index) => {
+        const node = nodes[index];
+        const top = node?.offsetTop ?? 0;
+        const nextTop = nodes[index + 1]?.offsetTop ?? bottom;
+        const height = Math.max(0, nextTop - top);
+        const probe = node?.querySelector<HTMLElement>("p") ?? node;
+        const raw = probe ? window.getComputedStyle(probe).lineHeight : "normal";
+        const parsed = Number.parseFloat(raw);
+        return {
+          id: block.id,
+          category: block.category,
+          sectionTitle: block.sectionTitle,
+          keepWithNext: block.keepWithNext,
+          splittable: block.splittable,
+          height,
+          lineHeight: block.splittable
+            ? (Number.isFinite(parsed) && parsed > 0 ? parsed : height)
+            : undefined,
+        };
+      });
+    }
+
+    function usableHeight(root: HTMLElement): number {
+      // The probe page replicates the real article: header + empty body + footer
+      // at fixed 11in. The body's clientHeight IS the usable space — measured,
+      // never hardcoded, because the header grows when a long title wraps.
+      const body = root.querySelector<HTMLElement>("[data-measure-body]");
+      if (!body) return 0;
+      const paddingTop = Number.parseFloat(window.getComputedStyle(body).paddingTop) || 0;
+      return body.clientHeight - paddingTop;
+    }
+
+    function continuationHeadingHeight(root: HTMLElement): number {
+      // The "(cont.)" heading occupies real height on continuation pages; the
+      // packer must budget it or those pages overfill by one heading.
+      return root.querySelector<HTMLElement>("[data-measure-cont]")?.offsetHeight ?? 0;
+    }
 
     async function measure(): Promise<void> {
       try {
         // Measuring before webfonts settle makes every height wrong by a few
-        // percent, and reproduces only on cold loads.
-        await document.fonts.ready;
+        // percent, and reproduces only on cold loads. The race keeps a hung
+        // fonts promise from blanking the preview forever.
+        await Promise.race([
+          document.fonts.ready,
+          new Promise((resolve) => setTimeout(resolve, FONTS_READY_TIMEOUT_MS)),
+        ]);
         const root = offscreenRef.current;
         if (!root || cancelled) return;
 
-        const measured: MeasuredBlock[] = blocks.map((block) => {
-          const node = root.querySelector<HTMLElement>(`[data-block-id="${block.id}"]`);
-          const height = node?.getBoundingClientRect().height ?? 0;
-          const raw = node ? window.getComputedStyle(node).lineHeight : "normal";
-          const lineHeight = Number.parseFloat(raw);
-          return {
-            ...block,
-            height,
-            lineHeight: block.splittable
-              ? (Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : height)
-              : undefined,
-          };
-        });
+        const usable = usableHeight(root);
+        const contHeading = continuationHeadingHeight(root);
+        const measuredSections = measureSegment(root, sections, "sections");
+        const measuredTrailing = measureSegment(root, trailing, "trailing");
 
         if (cancelled) return;
-        setPages(packBlocks(measured, usableHeight(root)));
+        setSectionPages(packBlocks(measuredSections, usable, contHeading));
+        setTrailingPages(packBlocks(measuredTrailing, usable, contHeading));
         setFailed(false);
       } catch (error: unknown) {
         const detail = error instanceof Error ? error.message : String(error);
-        console.warn(`SOP preview pagination failed; falling back to a single page: ${detail}`);
+        console.warn(`SOP preview pagination failed; falling back to the unpaginated layout: ${detail}`);
         if (!cancelled) setFailed(true);
       } finally {
         if (!cancelled) setMeasuring(false);
       }
     }
 
-    const observer = new ResizeObserver(() => { void measure(); });
+    let timer = window.setTimeout(() => { void measure(); }, REMEASURE_DEBOUNCE_MS);
+    let observerPrimed = false;
+    const observer = new ResizeObserver(() => {
+      // ResizeObserver fires once immediately on observe(); that initial
+      // delivery would bypass the debounce and double-measure every change.
+      if (!observerPrimed) {
+        observerPrimed = true;
+        return;
+      }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { void measure(); }, REMEASURE_DEBOUNCE_MS);
+    });
     if (offscreenRef.current) observer.observe(offscreenRef.current);
-    return () => { cancelled = true; window.clearTimeout(timer); observer.disconnect(); };
-  }, [blocks]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [sections, trailing]);
 
-  return { pages, measuring, failed, offscreenRef };
+  return { sectionPages, trailingPages, measuring, failed, offscreenRef };
 }
 ```
 
-`usableHeight(root)` reads the live header and footer heights out of the offscreen
-container and subtracts them from the page box — never hardcoded, because the header
-grows when a long title wraps.
+Behaviour notes, beyond what the code states:
 
-Behaviour, in order:
-
-1. Render nothing until the offscreen container is mounted.
-2. `await document.fonts.ready` before measuring. Skipping this makes every height wrong by a few percent and reproduces only on cold loads — the worst kind of bug to chase.
-3. Measure each `[data-block-id]` with `getBoundingClientRect().height`.
-4. Derive `lineHeight` for splittable blocks from `getComputedStyle(node).lineHeight`, falling back to the block's own height when it resolves to `normal`.
-5. Measure usable height as page height minus the live header and footer heights — never hardcoded, because the header grows when a long title wraps.
-6. Call `packBlocks`.
-7. Re-run on `blocks` identity change, debounced 150ms, and on `ResizeObserver` firing for the offscreen container.
-8. On any throw, or if `document.fonts.ready` rejects: `console.warn` and set `failed: true`.
+1. The hook renders nothing — Task 4 owns the offscreen tree (`[data-segment]`
+   containers, `[data-block-id]` wrappers, the `[data-measure-body]` probe page,
+   the `[data-measure-cont]` heading probe). The hook only queries it.
+2. Heights come from offsetTop deltas, so the block wrappers must be plain
+   in-flow `<div>`s inside `position: relative` segment containers.
+3. `measuring` resets to `true` on every `sections`/`trailing` identity change,
+   and re-measures are debounced so editor keystrokes do not reflow five pages
+   per character.
+4. On any throw, or a rejected fonts promise: `console.warn` and `failed: true` —
+   Task 4 falls back to the unpaginated layout, which is today's behaviour.
 
 - [ ] **Step 2: Verify it compiles**
 
@@ -663,24 +870,112 @@ git commit -m "feat: measure SOP print blocks offscreen and pack them into pages
 - Consumes: `usePaginatedPages` (Task 3), `buildPrintBlocks` (Task 2), `PagePlan` (Task 1).
 - Produces: no new exports. `SopPrintPreview`'s public props are unchanged.
 
-- [ ] **Step 1: Replace the hand-assigned pages**
-
-Render `pages.map(...)` as `DocumentPage`s in place of the hardcoded page-1 block at `:714-787` and the trailing pages at `:796-855`. Flow pages and attachment pages keep their existing rendering and append after the prose pages.
+- [ ] **Step 1: Wire the hook and replace the hand-assigned pages**
 
 ```tsx
-const printBlocks = useMemo(() => buildPrintBlocks(sop), [sop]);
-const { pages, failed, offscreenRef } = usePaginatedPages(printBlocks);
+const segments = useMemo(() => buildPrintBlocks(sop, extras), [sop, extras]);
+const { sectionPages, trailingPages, measuring, failed, offscreenRef } = usePaginatedPages(segments);
 ```
 
-Replace `:342`:
+`extras` is memoized from the preview's own state (approvals table node, annex file
+lines, reference renderers) — see `PrintBlockExtras` in Task 2.
+
+**Page order is unchanged from today's controlled document:** section pages →
+flowchart pages → trailing pages (Annexes, Change History, Change Approvals) →
+attachment sheets. Packing sections and trailing separately is what keeps the
+flowcharts in their current position; a single flat plan would silently move them
+after the approvals table.
+
+Replace `:342` — attachment sheets stay **outside** the count, exactly as today
+(they carry their own "Appendix · Page x of y" label and no document footer):
 
 ```ts
-const totalPages = pages.length + flowPages.length + annexPreview.pages.length;
+const totalPages = sectionPages.length + flowPages.length + trailingPages.length;
 ```
 
-At the top of any page whose `continuedSections` is non-empty, render each as a heading reading `<title> (cont.)`, carrying the same `data-review-category`.
+Render placed blocks by id lookup, skipping ids that no longer resolve — during
+the debounce window after an edit, the plan is one render behind the blocks:
 
-- [ ] **Step 2: Update the CSS**
+```tsx
+const blockById = useMemo(
+  () => new Map([...segments.sections, ...segments.trailing].map((b) => [b.id, b])),
+  [segments],
+);
+```
+
+Group consecutive placed blocks that share a `category` into one
+`<section className="sop-export-section" data-review-category={category}>` wrapper
+per page, so the existing `.sop-export-section h2` / `p` / list CSS applies
+unchanged. The offscreen tree (Step 2) groups identically — measurement and
+rendering must share the same wrapper structure or the heights lie. A group that
+opens a continued page is the page's first section, and the existing
+`.sop-export-section:first-child { margin-top: 0 }` rule absorbs its margin.
+
+At the top of any page whose `continuedSections` is non-empty, render inside the
+first section wrapper, before the fragment:
+
+```tsx
+{page.continuedSections.map((section) => (
+  <h2 key={section.category}>{section.title} (cont.)</h2>
+))}
+```
+
+- [ ] **Step 2: Render the offscreen measurement tree**
+
+The hook queries it; this component renders it. Placement and hiding are
+load-bearing:
+
+- Inside the overlay root but **after** the visible `.sop-preview-content` in DOM
+  order, and **outside** `.sop-preview-scroll` — `handleReviewScroll` reads
+  `data-review-category` inside the scroll container, and duplicated anchors
+  there would corrupt review tracking.
+- Hidden with `position: absolute; left: -99999px; top: 0; visibility: hidden;
+  pointer-events: none;` and `aria-hidden`. **Never `display: none`** — that
+  collapses layout to 0×0 and every measurement silently reads zero, reproducing
+  the original bug with `failed` still false.
+- The signature-reveal effect at `:325` must scope its query to the visible
+  pages (`.sop-print-pages [data-signature-id=…]`) so the offscreen approvals
+  clone can never steal the `scrollIntoView`.
+
+```tsx
+<div ref={offscreenRef} aria-hidden style={{ position: "absolute", left: -99999, top: 0, visibility: "hidden", pointerEvents: "none" }}>
+  {/* Probe page: real header + empty body + footer at true geometry → usable height. */}
+  <article className="sop-print-page" data-measure-page>
+    <DocumentHeader sop={sop} />
+    <main className="sop-print-page-body" data-measure-body />
+    <DocumentFooter page={1} total={1} />
+  </article>
+  {/* Probe for the height a "(cont.)" heading adds to a continuation page. */}
+  <section className="sop-export-section" style={{ marginTop: 0 }}>
+    <h2 data-measure-cont>Procedure (cont.)</h2>
+  </section>
+  {(["sections", "trailing"] as const).map((name) => (
+    <div
+      key={name}
+      data-segment={name}
+      className="sop-print-page"
+      style={{ position: "relative", display: "block", width: "7in", height: "auto", minHeight: 0, overflow: "visible", padding: 0, boxShadow: "none" }}
+    >
+      {groupIntoSections(segments[name]).map((group) => (
+        <section key={group.key} className="sop-export-section" data-review-category={undefined}>
+          {group.blocks.map((block) => (
+            <div key={block.id} data-block-id={block.id}>{block.render()}</div>
+          ))}
+        </section>
+      ))}
+    </div>
+  ))}
+</div>
+```
+
+The segment containers reuse the `.sop-print-page` class purely for its typography
+(font family, 10pt, line-height 1.35) with the box overridden inline to a 7in
+content column (8.5in minus 0.75in side padding) — content must wrap at exactly
+the width it will render at, or line counts are wrong. `data-review-category` is
+stripped from offscreen copies (`undefined`), and `groupIntoSections` is the same
+grouping helper Step 1 uses for visible pages.
+
+- [ ] **Step 3: Update the CSS**
 
 At `:543` — replace the unbounded floor with a real page box:
 
@@ -694,20 +989,49 @@ At `:543` — replace the unbounded floor with a real page box:
 
 `overflow: hidden` is deliberate teeth. The original bug survived because overflow was *visible* — the preview looked merely long rather than wrong, so nothing flagged it. Clipping on screen turns a silent print defect into an obvious preview defect. `.sop-print-page-overflowing` is the single sanctioned exception, applied only when `PagePlan.overflowing` is set.
 
-At `:655` — swap fluid reflow for a scaled sheet so breaks match print at every viewport:
+At `:655` — swap fluid reflow for a scaled sheet so breaks match print at every
+viewport. The scale is computed, not a dangling CSS variable, and uses `zoom`
+(supported in all evergreen browsers since 2024), which — unlike `transform:
+scale()` — shrinks *layout* size too, so no height compensation is needed:
 
-```css
-@media (max-width: 1100px) {
-  .sop-print-pages { transform: scale(var(--sop-page-scale, 1)); transform-origin: top center; }
-  /* remove the width:100%; min-height:auto override on .sop-print-page */
-}
+```tsx
+const PAGE_WIDTH_PX = 816; // 8.5in × 96dpi
+const [pageScale, setPageScale] = useState(1);
+// In an effect: ResizeObserver on the .sop-preview-scroll element →
+// setPageScale(Math.min(1, (scrollEl.clientWidth - 32) / PAGE_WIDTH_PX));
 ```
 
-- [ ] **Step 3: Add the fallback path**
+```tsx
+<div className="sop-print-pages" style={{ zoom: pageScale }}>
+```
 
-When `failed` is true, render the pre-existing unpaginated markup. One long page beats no document — this component gates approvals.
+Remove the `width: 100%; min-height: auto` override on `.sop-print-page` inside
+`@media (max-width: 1100px)` — pages keep true geometry at every viewport, only
+their rendered size shrinks. (The attachment-page aspect-ratio override in that
+media block stays.)
 
-- [ ] **Step 4: Warn on overflow**
+- [ ] **Step 4: Add the fallback path**
+
+Keep the current hand-assigned JSX (today's page 1, annex summary, control page)
+behind the fallback branch — moved, not deleted. Render it when:
+
+```ts
+const fallback = failed || (measuring && sectionPages.length === 0);
+```
+
+`measuring && empty` covers first paint before fonts settle; `failed` covers a
+measurement throw. In the fallback branch `totalPages` reverts to today's
+arithmetic — the plan-derived count would read 0:
+
+```ts
+const totalPages = fallback
+  ? (hasAttachedForms ? 3 : 2) + flowPages.length
+  : sectionPages.length + flowPages.length + trailingPages.length;
+```
+
+One long page beats no document — this component gates approvals.
+
+- [ ] **Step 5: Warn on overflow**
 
 For each page where `overflowing` is set:
 
@@ -717,7 +1041,7 @@ console.warn(
 );
 ```
 
-- [ ] **Step 5: Run the full suite**
+- [ ] **Step 6: Run the full suite**
 
 ```bash
 npm run typecheck && npm run lint && npm test
@@ -725,7 +1049,7 @@ npm run typecheck && npm run lint && npm test
 
 Expected: all clean, all tests passing.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/components/sop/sop-print-preview.tsx
@@ -762,7 +1086,10 @@ Attachment sheets still render at full bleed and are counted in "of M".
 
 - [ ] **Step 5: Check the footer count against reality**
 
-Open the browser print preview. The physical sheet count must equal the "of M" in the footer. This is the assertion the old code could never satisfy.
+Open the browser print preview. The physical count of *main-document* sheets must
+equal the "of M" in the footer — this is the assertion the old code could never
+satisfy. Appendix sheets sit outside M by design (as today): they carry their own
+"Appendix · Page x of y" label and no document footer.
 
 - [ ] **Step 6: Check the console**
 

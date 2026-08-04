@@ -92,6 +92,34 @@ describe("mapApprovalsToDepartments", () => {
     const seatable = [...new Set(results.filter((r) => r.outcome === "mapped").map((r) => r.department!.id))];
     expect(seatable).toEqual(["d-mfg"]);
   });
+
+  // The property the converted-approver picker rests on: the author's chosen
+  // department is stored as departmentCode, and code resolution runs BEFORE the
+  // position-title fallback. Without this, a mapped row would keep rendering
+  // "No match" forever.
+  it("resolves by departmentCode even when the position title matches nothing", () => {
+    const unmatchable = { role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" };
+
+    const before = mapApprovalsToDepartments([unmatchable], DEPARTMENTS);
+    expect(before[0].outcome).toBe("unmapped");
+
+    const after = mapApprovalsToDepartments([{ ...unmatchable, departmentCode: "MFG" }], DEPARTMENTS);
+    expect(after[0].outcome).toBe("mapped");
+    expect(after[0].department?.code).toBe("MFG");
+  });
+
+  it("prefers departmentCode over a position title that would match a different department", () => {
+    const conflicting = {
+      role: "Approved By",
+      name: "R. Miller",
+      position: "Manufacturing/Production Manager",
+      date: "",
+      departmentCode: "QAS",
+    };
+    const [mapping] = mapApprovalsToDepartments([conflicting], DEPARTMENTS);
+    // QAS is the quality gate in the fixture, so the outcome proves which input won.
+    expect(mapping.outcome).toBe("quality-gate");
+  });
 });
 
 describe("signerAfterDepartmentChange", () => {

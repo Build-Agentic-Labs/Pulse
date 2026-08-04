@@ -855,7 +855,10 @@ export function SopPrintPreview({
            section-level and these must not enter it. */
         .sop-export-subheading { margin: 0 0 4px; font-weight: 700; }
         .sop-export-empty { color: #666; }
-        .sop-export-list { margin: 0; padding-left: 20px; }
+        /* list-style restated because the global reset strips it; the DOCX
+           export has always rendered these as real Word bullets, so visible
+           discs make the preview match the controlled document. */
+        .sop-export-list { margin: 0; padding-left: 20px; list-style: disc; }
         .sop-export-list li { margin: 0 0 2px; }
         .sop-export-link {
           margin: 0; padding: 0; border: 0; background: none; cursor: pointer;

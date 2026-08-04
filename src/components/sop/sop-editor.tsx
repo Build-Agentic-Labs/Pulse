@@ -27,7 +27,6 @@ import {
 import { draftReviewGate } from "@/domain/sop/review-gate";
 import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc, type SopStatus } from "@/domain/sop/schema";
 import { authoringMode, DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
-import { applySampleData } from "@/domain/sop/sample";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { fetchMyDeptRoles, listDepartments, listMembersForDepartments } from "@/lib/departments/store";
 import {
@@ -1117,18 +1116,6 @@ export function SopEditor({
     }
   }
 
-  function handleLoadSample() {
-    setSop((current) => {
-      const sample = withAnnexIds(applySampleData(current));
-      // Sample content must never replace an existing controlled identity. New SOPs keep an
-      // empty stored number until the first save mints the real department sequence.
-      return { ...sample, meta: { ...sample.meta, sopNumber: current.meta.sopNumber } };
-    });
-    editVersionRef.current += 1;
-    setDirty(true);
-    setSaveStatus("idle");
-  }
-
   async function handleAnnexUpload(index: number, file: File) {
     const annex = sop.annexes[index];
     if (!annex?.id || !workspaceId) {
@@ -1528,17 +1515,12 @@ export function SopEditor({
 
   const actions = (
     <>
-      {canEdit ? (
-        <button
-          type="button"
-          className="ui-btn-ghost h-9 w-9 px-0"
-          onClick={handleLoadSample}
-          title="Fill every step with sample data"
-          aria-label="Fill with sample data"
-        >
-          <Sparkles size={15} />
-        </button>
-      ) : null}
+      {/* The "fill with sample data" button was removed 2026-08-04. It sat one
+          click from the search box, unlabeled and unconfirmed, and overwrote
+          the approvals array with five fictional approvers — which no UI can
+          edit back out (see approval-entries.ts). Eight production SOPs still
+          carry that roster, one of them submitted for review. applySampleData
+          survives as a test fixture only (export-docx, procedure-flow-image). */}
       <SopSearch
         sop={renderedSop}
         disabled={previewing || qualityApprovalOpen}

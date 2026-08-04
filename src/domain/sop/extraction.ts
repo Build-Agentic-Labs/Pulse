@@ -74,7 +74,8 @@ Rules:
 - "Annexes" are appendices / attached forms (label + description).
 - Capture any change-history table rows and approval-table rows you find.
 - For each approval row set \`department\` to the department that approver signs for, worded as the source document words it. Leave it empty rather than guessing — an empty value is handled, a wrong one has to be undone by hand.
-- Line breaks in long fields (\`purpose\`, \`scope\`, \`detail\`) must be real line breaks in the string value. Never write the two characters backslash-n to mean a new line — that reaches the printed document as literal \\n text rather than a paragraph break.`;
+- Line breaks in long fields (\`purpose\`, \`scope\`, \`detail\`, \`procedure.processFlowDescription\`) must be real line breaks in the string value. Never write the two characters backslash-n to mean a new line — that reaches the printed document as literal \\n text rather than a paragraph break.
+- In \`procedure.processFlowDescription\`, preserve the source's internal structure as clean text: keep each numbered sub-heading (e.g. "4.4 Document Creation") on its own line exactly as written; render every list item from the source as its own line starting with "• " (bullet + space), regardless of the source's list glyphs; separate paragraphs with a blank line as the source does.`;
 
 /** JSON Schema for the Anthropic tool input — mirrors `ExtractedSop`. */
 export const SOP_EXTRACTION_TOOL = {

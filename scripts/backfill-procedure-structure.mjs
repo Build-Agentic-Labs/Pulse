@@ -100,10 +100,19 @@ async function generate() {
       const label = `${row.sop_number || row.id} — ${row.title || "untitled"}`;
       const response = await anthropic.messages.create({
         model: MODEL,
-        max_tokens: 8192,
+        // Sized per the sister extraction route's precedent (32k): opus runs
+        // adaptive thinking by default and it shares this budget, so 8k could
+        // truncate the longest procedures. Truncation fails SAFE (the verifier
+        // rejects a missing tail) but costs yield; headroom is cheaper.
+        max_tokens: 32768,
         system: RESTRUCTURE_INSTRUCTION,
         messages: [{ role: "user", content: row.text }],
       });
+      if (response.stop_reason === "max_tokens") {
+        failed += 1;
+        console.error(`TRUNCATED (max_tokens) — skipped: ${label}`);
+        continue;
+      }
       const after = response.content
         .filter((block) => block.type === "text")
         .map((block) => block.text)

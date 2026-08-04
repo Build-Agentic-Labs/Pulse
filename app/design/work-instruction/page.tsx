@@ -21,7 +21,7 @@ export default async function WorkInstructionDesignPage({
   const { blank } = await searchParams;
 
   return (
-    <div className="h-full overflow-auto bg-canvas p-8">
+    <div className="wi-print-body h-full overflow-auto bg-canvas p-8">
       <WorkInstructionDocument instruction={sampleWorkInstruction({ blank: blank === "1" })} />
     </div>
   );

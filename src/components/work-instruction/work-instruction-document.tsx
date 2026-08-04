@@ -89,6 +89,9 @@ const PRINT_STYLES = `
   padding: 0.1in; border: 1px solid #666;
 }
 .wi-card-blank { border-style: dashed; border-color: #aaa; }
+/* An empty filled badge prints as a solid ink disc; on a fill-in slot it wants
+   to be a circle to write the step number into. */
+.wi-card-blank .wi-card-seq { background: none; border: 1px solid #aaa; }
 .wi-card-overflowing { border: 2px solid #a52a2a; }
 .wi-card-head { flex: none; display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .wi-card-seq {
@@ -144,7 +147,13 @@ const PRINT_STYLES = `
   .wi-print-root { position: absolute; inset: 0; display: block; background: #fff; z-index: 0; }
   .wi-print-root, .wi-pages, .wi-sheet, .wi-sheet * { visibility: visible !important; }
   .wi-print-chrome { display: none !important; }
-  .wi-pages { display: block; gap: 0; }
+  /* Any padding or margin around the sheets lands INSIDE the printed flow and
+     spills past the last sheet's page break, emitting a blank trailing page.
+     Zeroed here rather than at the call site so every host of this document —
+     the print route, the design preview, an exported standalone file — prints
+     the same sheet count. */
+  .wi-pages { display: block; gap: 0; padding: 0 !important; margin: 0 !important; }
+  .wi-print-body { padding: 0 !important; margin: 0 !important; }
   .wi-sheet {
     width: 17in; height: 11in; margin: 0; box-shadow: none;
     break-after: page; page-break-after: always;

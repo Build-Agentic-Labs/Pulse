@@ -190,7 +190,9 @@ export function WorkInstructionPrintPreview({
   return (
     <div className="wi-print-root h-[100dvh] overflow-y-auto bg-canvas">
       <PrintToolbar backHref={`/projects/${projectId}/planner`} label={blank ? "Blank template" : label} />
-      <div className="px-8 py-8">
+      {/* wi-print-body: the print stylesheet zeroes this padding, which would
+          otherwise spill past the last sheet and print a blank trailing page. */}
+      <div className="wi-print-body px-8 py-8">
         {status === "loading" ? (
           <NothingLoadingBlock title="Loading work instruction" />
         ) : status === "empty" ? (

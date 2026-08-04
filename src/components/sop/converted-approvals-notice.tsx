@@ -1,7 +1,8 @@
 "use client";
 
 import { AlertTriangle, Check, ShieldCheck } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { mapApprovalsToDepartments, type ApprovalMapping } from "@/domain/sop/approval-mapping";
 import type { SopApproval } from "@/domain/sop/schema";
@@ -31,6 +32,8 @@ type RowStatus = "seated" | "quality-gate" | "seat-removed" | "no-match";
 
 interface NoticeRow {
   key: string;
+  /** This row's position in `approvals`, so a picker action can name which row it is for. */
+  index: number;
   /** What the original document called this approval, e.g. "Reviewed By". */
   documentRole: string;
   /**
@@ -73,6 +76,7 @@ function toRow(mapping: ApprovalMapping, index: number, seatedDepartmentIds: Rea
 
   return {
     key: `${approval.role}-${index}`,
+    index,
     documentRole: approval.role.trim() || "Approval row",
     documentPosition: approval.position.trim(),
     mappedTo: department?.name ?? "",
@@ -84,17 +88,32 @@ export function ConvertedApprovalsNotice({
   approvals,
   departments,
   seatedDepartmentIds,
+  onSeatDepartment,
 }: {
   approvals: readonly SopApproval[];
   departments: readonly Department[];
   seatedDepartmentIds: ReadonlySet<string>;
+  /**
+   * Turn an unresolved row into a real seat. Absent — a read-only viewer, or an
+   * SOP past draft — renders the table exactly as it always was: a report.
+   */
+  onSeatDepartment?: (approvalIndex: number, departmentId: string) => Promise<void>;
 }) {
+  const [pending, setPending] = useState<string | null>(null);
+
   const rows = useMemo(
     () =>
       mapApprovalsToDepartments(approvals, departments).map((mapping, index) =>
         toRow(mapping, index, seatedDepartmentIds),
       ),
     [approvals, departments, seatedDepartmentIds],
+  );
+
+  // Quality is the release gate, never a seat; an already-seated department has
+  // nothing to add. Both exclusions mirror the roster's own add-row.
+  const seatableDepartments = useMemo(
+    () => departments.filter((d) => !d.isQualityGate && !seatedDepartmentIds.has(d.id)),
+    [departments, seatedDepartmentIds],
   );
 
   // Nothing to verify when the legacy document had no approval table.
@@ -161,7 +180,31 @@ export function ConvertedApprovalsNotice({
                 <td className="px-4 py-2.5 align-middle text-[13px] text-ink-secondary">
                   {row.documentPosition || "—"}
                 </td>
-                <td className="px-4 py-2.5 align-middle text-[13px] text-ink">{row.mappedTo || "—"}</td>
+                <td className="px-4 py-2.5 align-middle text-[13px] text-ink">
+                  {onSeatDepartment && (row.status === "no-match" || row.status === "seat-removed") ? (
+                    <ThemedSelect
+                      variant="sop"
+                      ariaLabel={`Department for the ${row.documentRole} approval`}
+                      value=""
+                      disabled={pending === row.key}
+                      menuMaxHeight={420}
+                      options={[
+                        { value: "", label: "Choose a department…" },
+                        ...seatableDepartments.map((department) => ({
+                          value: department.id,
+                          label: `${department.code} · ${department.name}`,
+                        })),
+                      ]}
+                      onChange={(departmentId) => {
+                        if (!departmentId) return;
+                        setPending(row.key);
+                        void onSeatDepartment(row.index, departmentId).finally(() => setPending(null));
+                      }}
+                    />
+                  ) : (
+                    row.mappedTo || "—"
+                  )}
+                </td>
                 <td className="px-4 py-2.5 align-middle">
                   <span className="inline-flex items-center gap-1.5 text-xs text-ink-secondary">
                     <StatusIcon status={row.status} />

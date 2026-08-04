@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Department } from "@/domain/departments";
 import type { SopApproval } from "@/domain/sop/schema";
@@ -155,5 +155,99 @@ describe("ConvertedApprovalsNotice", () => {
     expect(container.textContent).not.toContain("Add it back above");
     expect(container.textContent).not.toContain("Add the department above");
     expect(container.textContent).not.toContain("Quality signs the final release");
+  });
+
+  it("offers a department picker on a row that matched nothing", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "IC Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+        onSeatDepartment={async () => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Department for the Approved By approval" })).toBeTruthy();
+  });
+
+  it("renders no picker when the caller supplies no handler", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "IC Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Department for the Approved By approval" })).toBeNull();
+  });
+
+  it("offers no picker on a row that is already seated", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "Production Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set(["d-mfg"])}
+        onSeatDepartment={async () => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Department for the Approved By approval" })).toBeNull();
+  });
+
+  // Quality signs the final release; the transition guard refuses to release an
+  // SOP whose Quality approver holds a seat. A picker here would invite the
+  // author to create the one seat that blocks their own release.
+  it("offers no picker on the quality-gate row", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Quality Approval", position: "Quality Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+        onSeatDepartment={async () => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Department for the Quality Approval approval" })).toBeNull();
+  });
+
+  it("excludes the quality-gate department and already-seated departments from the options", () => {
+    const departments = [
+      dept("d-mfg", "MFG", "Manufacturing/Production"),
+      dept("d-eng", "ENG", "Engineering"),
+      dept("d-qas", "QAS", "Quality", true),
+    ];
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "IC Manager" })]}
+        departments={departments}
+        seatedDepartmentIds={new Set(["d-mfg"])}
+        onSeatDepartment={async () => {}}
+      />,
+    );
+    // The options live in a portal (ThemedSelect renders its listbox via createPortal to
+    // document.body), so they only exist once the trigger is open, and only `screen` — not the
+    // render() `container` — reaches them.
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval" }));
+    const text = screen.getByRole("listbox").textContent ?? "";
+    expect(text).toContain("ENG");
+    expect(text).not.toContain("QAS");
+  });
+
+  it("reports the row index and chosen department to the handler", async () => {
+    const calls: Array<[number, string]> = [];
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[
+          row({ role: "Reviewed By", position: "Production Manager" }),
+          row({ role: "Approved By", position: "IC Manager" }),
+        ]}
+        departments={[dept("d-mfg", "MFG", "Manufacturing/Production"), dept("d-eng", "ENG", "Engineering")]}
+        seatedDepartmentIds={new Set(["d-mfg"])}
+        onSeatDepartment={async (index, departmentId) => {
+          calls.push([index, departmentId]);
+        }}
+      />,
+    );
+    // Index 1 is the unresolved row; index 0 already resolved by position.
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval" }));
+    fireEvent.click(screen.getByRole("option", { name: /ENG/ }));
+    await waitFor(() => expect(calls).toEqual([[1, "d-eng"]]));
   });
 });

@@ -24,9 +24,17 @@ import type { ManufacturingStep, Product, Task, Zone } from "../types";
 import { buildWorkInstruction } from "./build";
 import type { WorkInstruction } from "./schema";
 
-/** A flat grey frame with a caption, so the preview shows real photo geometry without shipping a bitmap. */
+/**
+ * A flat panel standing in for a step photo, so the preview shows real photo
+ * geometry without shipping a bitmap.
+ *
+ * Draws NO frame of its own: `.wi-card-photo` already borders it, and an inset
+ * stroke here renders as a box inside a box. The viewBox matches the photo
+ * slot's proportions so it fills the container rather than letterboxing under
+ * `object-fit: contain`.
+ */
 function placeholderPhoto(label: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 520"><rect width="400" height="520" fill="#dcdcdc"/><rect x="14" y="14" width="372" height="492" fill="none" stroke="#9a9a9a" stroke-width="3"/><text x="200" y="270" font-family="sans-serif" font-size="30" fill="#6a6a6a" text-anchor="middle">${label}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 576"><rect width="400" height="576" fill="#e8e8e8"/><text x="200" y="298" font-family="sans-serif" font-size="28" fill="#9a9a9a" text-anchor="middle">${label}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 

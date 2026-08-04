@@ -4,8 +4,9 @@ import { ArrowLeft, Printer, X } from "lucide-react";
 import Link from "next/link";
 import { formatDateControlled, formatDateTime } from "@/domain/formatting";
 import NextImage from "next/image";
-import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
 import { DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
+import type { PagePlan } from "@/domain/sop/pagination";
 import { linkedSopLabel, rasicLegend, type Sop } from "@/domain/sop/schema";
 import {
   SIGNATURE_VIEWBOX_HEIGHT,
@@ -16,6 +17,8 @@ import { buildApprovalEntries, type ApprovalSignatureEntry } from "@/lib/sop/app
 import { createSopAnnexFileUrl, openSopAnnexFile, type SopAnnexFile } from "@/lib/sop/annex-files";
 import { buildProcedureSvgPages } from "@/lib/sop/procedure-flow-image";
 import type { SopReviewAnnotation } from "@/lib/sop/review-annotations";
+import { buildPrintBlocks, type PrintBlock, type PrintBlockExtras } from "./print-blocks";
+import { usePaginatedPages } from "./use-paginated-pages";
 
 interface RenderedAnnexPage {
   fileId: string;
@@ -215,6 +218,42 @@ function ApprovalTable({
   );
 }
 
+/** 8.5in page width at 96dpi — the fixed layout width pages are scaled against. */
+const PAGE_WIDTH_PX = 816;
+
+/**
+ * A plan page's body: any "(cont.)" headings this page opens with, then its
+ * placed blocks stacked in order. Blocks are self-contained (their own
+ * `render()` includes the section shell), so this needs no grouping logic —
+ * it exists only to avoid repeating the same map between section and
+ * trailing pages.
+ */
+function PlanPageBody({ page, blockById }: { page: PagePlan; blockById: Map<string, PrintBlock> }) {
+  return (
+    <>
+      {page.continuedSections.map((section) => (
+        <section
+          key={section.category}
+          className="sop-export-section"
+          style={{ marginTop: 0 }}
+          data-review-category={section.category}
+        >
+          <h2>{section.title} (cont.)</h2>
+        </section>
+      ))}
+      {page.blocks.map((placed) => {
+        const block = blockById.get(placed.blockId);
+        if (!block) return null;
+        return (
+          <Fragment key={placed.blockId + (placed.lineRange ? `@${placed.lineRange.startLine}` : "")}>
+            {block.render(placed.lineRange)}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
+
 export function SopPrintPreview({
   sop: sopProp,
   departmentCode,
@@ -280,6 +319,8 @@ export function SopPrintPreview({
   const [systemAuthorName, setSystemAuthorName] = useState("System author");
   const reviewScrollFrame = useRef<number | null>(null);
   const previewRootRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [pageScale, setPageScale] = useState(1);
   const canDownloadPdf = mode === "export" && sop.status === "effective";
 
   useEffect(() => {
@@ -321,8 +362,11 @@ export function SopPrintPreview({
   useEffect(() => {
     if (!revealSignatureId || !approvalEntries?.some((entry) => entry.key === revealSignatureId)) return;
     const frame = window.requestAnimationFrame(() => {
+      // Scoped to the visible pages: the offscreen measurement tree renders the
+      // same ApprovalTable to measure it, and its clone must never be able to
+      // steal this scrollIntoView.
       previewRootRef.current
-        ?.querySelector<HTMLElement>(`[data-signature-id="${revealSignatureId}"]`)
+        ?.querySelector<HTMLElement>(`.sop-print-pages [data-signature-id="${revealSignatureId}"]`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
@@ -339,9 +383,159 @@ export function SopPrintPreview({
     [sop.annexes],
   );
   const hasAttachedForms = formFiles.length > 0;
-  const totalPages = (hasAttachedForms ? 3 : 2) + flowPages.length;
+
+  // "Attached form: …" annotations under annex rows, keyed by annex id — mirrors
+  // the lookup the hand-assigned annex summary page does inline (:798-812 today).
+  const annexFileLines = useMemo(() => {
+    const map = new Map<string, { name: string; error?: string }>();
+    for (const annex of sop.annexes) {
+      if (!annex.id) continue;
+      const file = formFiles.find((item) => item.annexId === annex.id);
+      if (!file) continue;
+      const error = annexPreview.errors[file.id];
+      map.set(annex.id, { name: file.originalName, error: error || undefined });
+    }
+    return map;
+  }, [sop.annexes, formFiles, annexPreview.errors]);
+
+  // Preview-owned state (approvals node, annex file lines, reference renderers)
+  // injected into the otherwise-pure print-block builder. Memoized so `segments`
+  // below stays referentially stable across unrelated re-renders.
+  const extras = useMemo<PrintBlockExtras>(
+    () => ({
+      renderLinkedSop: (link) => (
+        <Link
+          className="sop-export-link"
+          href={`/sops/${link.sopId}?preview=pdf&from=${encodeURIComponent(sop.id)}`}
+          title="Open this SOP's document preview"
+        >
+          {linkedSopLabel(link)}
+        </Link>
+      ),
+      renderReferenceDoc: (doc) => {
+        // The binary sits in the annex-file table keyed by this doc's id.
+        // Storage URLs are short-lived signed URLs, so mint one on click.
+        const file = annexFiles.find((item) => item.annexId === doc.id);
+        if (!file) return doc.name;
+        return (
+          <button
+            type="button"
+            className="sop-export-link"
+            onClick={() => {
+              setReferenceOpenError("");
+              // PDFs stay inside the app: an inline viewer over this preview
+              // with a Back button. Other types download.
+              const openTask = file.contentType === "application/pdf"
+                ? createSopAnnexFileUrl(file, 600).then((url) => setInlineDoc({ name: doc.name, url }))
+                : openSopAnnexFile(file);
+              openTask.catch((error: unknown) => {
+                setReferenceOpenError(
+                  error instanceof Error ? error.message : "The referenced file could not be opened.",
+                );
+              });
+            }}
+            title="Open the referenced file"
+          >
+            {doc.name}
+          </button>
+        );
+      },
+      changeAuthor: (entry) =>
+        [systemAuthorName, formatDateControlled(entry.createdByDate)].filter(Boolean).join("\n"),
+      approvalsTable: approvalEntries?.length ? (
+        <ApprovalTable entries={approvalEntries} revealSignatureId={revealSignatureId} />
+      ) : undefined,
+      annexFileLines,
+      annexLoading: annexPreview.loading,
+    }),
+    [sop, annexFiles, systemAuthorName, approvalEntries, revealSignatureId, annexFileLines, annexPreview.loading],
+  );
+
+  // `buildPrintBlocks` stays pure of preview UI state (see PrintBlockExtras),
+  // so the reference-open error — transient click feedback, not a document
+  // field — is spliced in here rather than threaded through that builder. It
+  // lands as its own trailing block right after the references section's last
+  // block, so it is measured and paginated exactly like everything else
+  // instead of risking a silent clip under `.sop-print-page`'s new
+  // `overflow: hidden`.
+  const segments = useMemo(() => {
+    const built = buildPrintBlocks(sop, extras);
+    if (!referenceOpenError) return built;
+    const lastReferenceIndex = built.sections.reduce(
+      (found, block, index) => (block.category === "references" ? index : found),
+      -1,
+    );
+    if (lastReferenceIndex === -1) return built;
+    const errorBlock: PrintBlock = {
+      id: "references-open-error",
+      category: "references",
+      sectionTitle: "References",
+      render: () => (
+        <section className="sop-export-section" style={{ marginTop: 0 }} data-review-category="references">
+          <p className="sop-export-annex-file-error">{referenceOpenError}</p>
+        </section>
+      ),
+    };
+    return {
+      ...built,
+      sections: [
+        ...built.sections.slice(0, lastReferenceIndex + 1),
+        errorBlock,
+        ...built.sections.slice(lastReferenceIndex + 1),
+      ],
+    };
+  }, [sop, extras, referenceOpenError]);
+
+  const { sectionPages, trailingPages, measuring, failed, offscreenRef } = usePaginatedPages(segments);
+
+  // Blocks are self-contained (Task 2), so lookup by id is all rendering needs.
+  // Ids that no longer resolve are skipped at render time (below) — during the
+  // debounce window after an edit, the plan is one render behind the blocks.
+  const blockById = useMemo(
+    () => new Map([...segments.sections, ...segments.trailing].map((b) => [b.id, b] as const)),
+    [segments],
+  );
+
+  // Scaled-sheet responsive strategy: pages keep true 8.5in geometry (and thus
+  // the same line wrapping the offscreen tree measured) at every viewport;
+  // only their rendered size shrinks, via `zoom` on the pages wrapper below.
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+    const updateScale = () => {
+      setPageScale(Math.min(1, (scrollEl.clientWidth - 32) / PAGE_WIDTH_PX));
+    };
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(scrollEl);
+    return () => observer.disconnect();
+  }, []);
+
+  // A page the packer could not split anything on gets flagged rather than
+  // silently clipped (see `.sop-print-page-overflowing` below); this is the
+  // author-facing signal that a block needs to be shortened.
+  useEffect(() => {
+    for (const page of [...sectionPages, ...trailingPages]) {
+      if (!page.overflowing) continue;
+      const blockId = page.blocks[page.blocks.length - 1]?.blockId ?? "unknown";
+      console.warn(
+        `SOP ${sop.meta.sopNumber || sop.id}: block "${blockId}" is taller than one page and cannot be split; it will overflow its sheet.`,
+      );
+    }
+  }, [sectionPages, trailingPages, sop]);
+
+  // `measuring && empty` covers first paint before fonts settle; `failed` covers
+  // a measurement throw. Either way, one long hand-assigned page beats no
+  // document — this component gates approvals.
+  const fallback = failed || (measuring && sectionPages.length === 0);
+  const fallbackTotalPages = (hasAttachedForms ? 3 : 2) + flowPages.length;
+  // Attachment sheets stay outside the count in both branches — they carry
+  // their own "Appendix · Page x of y" label and no document footer.
+  const totalPages = fallback
+    ? fallbackTotalPages
+    : sectionPages.length + flowPages.length + trailingPages.length;
   const annexSummaryPage = flowPages.length + 2;
-  const controlPage = totalPages;
+  const controlPage = fallbackTotalPages;
   const annotationsForPage = (pageNumber: number) =>
     annotations.filter((annotation) => annotation.pageNumber === pageNumber && !annotation.resolvedAt);
 
@@ -540,7 +734,7 @@ export function SopPrintPreview({
         }
         .sop-print-pages { display: grid; gap: 24px; justify-content: center; }
         .sop-print-page {
-          box-sizing: border-box; width: 8.5in; min-height: 11in;
+          box-sizing: border-box; width: 8.5in; height: 11in; overflow: hidden;
           display: flex; flex-direction: column;
           padding: 0.52in 0.75in 0.42in;
           background: #fff; color: #1a1a1a;
@@ -548,6 +742,10 @@ export function SopPrintPreview({
           font-family: var(--font-ui-family);
           font-size: 10pt; line-height: 1.35;
         }
+        /* The single sanctioned exception: applied only when a PagePlan's
+           overflowing flag is set, so a block too tall to split is visibly
+           broken in the preview rather than silently clipped. */
+        .sop-print-page-overflowing { height: auto; min-height: 11in; overflow: visible; }
         .sop-print-page-annotatable { cursor: crosshair; }
         .sop-annotation-marker {
           position: absolute; z-index: 4; width: 25px; height: 25px;
@@ -652,7 +850,12 @@ export function SopPrintPreview({
           .sop-preview-content { display: block; overflow: auto; }
           .sop-preview-scroll { overflow: visible; }
           .sop-review-panel { width: 100%; border-left: 0; border-top: 1px solid var(--color-line, #ddd); }
-          .sop-print-page { width: 100%; min-height: auto; padding: 28px 32px; }
+          /* No fluid reflow override here any more: pages keep true 8.5in
+             geometry (and thus the same 7in content column the offscreen tree
+             measured) at every viewport — only the rendered size shrinks, via
+             zoom on .sop-print-pages. A narrower fixed padding here would
+             desync the visible content width from the measured width and
+             reintroduce the wrap-mismatch bug this feature exists to fix. */
           .sop-print-page.sop-export-attachment-page {
             aspect-ratio: 8.5 / 11; min-height: auto; padding: 0;
           }
@@ -709,150 +912,209 @@ export function SopPrintPreview({
       </div>
 
       <div className="sop-preview-content">
-        <div className="sop-preview-scroll" onScroll={handleReviewScroll}>
-          <div className="sop-print-pages">
-          <DocumentPage sop={sop} page={1} total={totalPages} annotations={annotationsForPage(1)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation} headerReviewCategory={mode === "review" ? "document" : undefined}>
-            <Section title="Purpose" reviewCategory="purpose"><EmptyAwareText value={sop.purpose} /></Section>
-            <Section title="Scope" reviewCategory="scope"><EmptyAwareText value={sop.scope} /></Section>
-            <Section title="Definitions" reviewCategory="definitions">
-              {sop.definitions.length ? (
-                <table className="sop-export-table">
-                  <colgroup><col style={{ width: "30%" }} /><col style={{ width: "70%" }} /></colgroup>
-                  <thead><tr><th>Term</th><th>Definition</th></tr></thead>
-                  <tbody>{sop.definitions.map((row, index) => <tr key={index}><td>{row.term}</td><td>{row.definition}</td></tr>)}</tbody>
-                </table>
-              ) : <EmptyAwareText value="" />}
-            </Section>
-            <Section title="Responsible Person(s)" reviewCategory="responsible">
-              <LinesOrDash values={sop.responsiblePersons} />
-            </Section>
-            <Section title="References" reviewCategory="references">
-              {sop.linkedSops.length || (sop.referenceDocs ?? []).length || sop.references.length ? (
-                <ul className="sop-export-list">
-                  {sop.linkedSops.map((link) => (
-                    <li key={link.sopId}>
-                      <Link
-                        className="sop-export-link"
-                        href={`/sops/${link.sopId}?preview=pdf&from=${encodeURIComponent(sop.id)}`}
-                        title="Open this SOP's document preview"
-                      >
-                        {linkedSopLabel(link)}
-                      </Link>
-                    </li>
-                  ))}
-                  {(sop.referenceDocs ?? []).map((doc) => {
-                    // The binary sits in the annex-file table keyed by this doc's id.
-                    // Storage URLs are short-lived signed URLs, so mint one on click.
-                    const file = annexFiles.find((item) => item.annexId === doc.id);
-                    return (
-                      <li key={doc.id}>
-                        {file ? (
-                          <button
-                            type="button"
-                            className="sop-export-link"
-                            onClick={() => {
-                              setReferenceOpenError("");
-                              // PDFs stay inside the app: an inline viewer over this
-                              // preview with a Back button. Other types download.
-                              const openTask = file.contentType === "application/pdf"
-                                ? createSopAnnexFileUrl(file, 600).then((url) =>
-                                    setInlineDoc({ name: doc.name, url }),
-                                  )
-                                : openSopAnnexFile(file);
-                              openTask.catch((error: unknown) => {
-                                setReferenceOpenError(
-                                  error instanceof Error ? error.message : "The referenced file could not be opened.",
-                                );
-                              });
-                            }}
-                            title="Open the referenced file"
-                          >
-                            {doc.name}
-                          </button>
-                        ) : (
-                          doc.name
-                        )}
-                      </li>
-                    );
-                  })}
-                  {sop.references.map((item, index) => <li key={index}>{item}</li>)}
-                </ul>
-              ) : <EmptyAwareText value="" />}
-              {referenceOpenError ? <p className="sop-export-annex-file-error">{referenceOpenError}</p> : null}
-            </Section>
-            <Section title="Measurement" reviewCategory="measurements">
-              {sop.measurements.length ? <ul className="sop-export-list">{sop.measurements.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
-            </Section>
-            <Section title="Procedure" reviewCategory="procedure"><EmptyAwareText value={sop.procedure.processFlowDescription} /></Section>
-          </DocumentPage>
-
-          {flowPages.map((flowPage, index) => (
-            <DocumentPage key={index} sop={sop} page={index + 2} total={totalPages} className="sop-export-flow-page" annotations={annotationsForPage(index + 2)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
-              <div className="sop-export-flow-svg" data-review-category="procedure" dangerouslySetInnerHTML={{ __html: flowPage.svg }} />
-              <p className="sop-export-legend">{rasicLegend(".  ")}.</p>
-            </DocumentPage>
-          ))}
-
-          <DocumentPage sop={sop} page={annexSummaryPage} total={totalPages} annotations={annotationsForPage(annexSummaryPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
-            <Section title="Annexes & Forms" reviewCategory="annexes">
-              {sop.annexes.length ? sop.annexes.map((annex, index) => {
-                const file = formFiles.find((item) => item.annexId === annex.id);
-                const error = file ? annexPreview.errors[file.id] : "";
-                return (
-                  <div key={annex.id ?? index}>
-                    <p className="sop-export-annex"><strong>{annex.label}: </strong>{annex.description}</p>
-                    {file ? (
-                      <p className={`sop-export-annex-file ${error ? "sop-export-annex-file-error" : ""}`}>
-                        Attached form: {file.originalName}{error ? ` - ${error}` : ""}
-                      </p>
-                    ) : null}
-                  </div>
-                );
-              }) : <EmptyAwareText value="" />}
-              {annexPreview.loading ? <p className="sop-export-annex-file">Rendering attached forms…</p> : null}
-            </Section>
-            {!hasAttachedForms ? (
-              <>
-                <Section title="Change History" reviewCategory="history">
-                  <table className="sop-export-table">
-                    <colgroup><col style={{ width: "14%" }} /><col style={{ width: "56%" }} /><col style={{ width: "30%" }} /></colgroup>
-                    <thead><tr><th>Version</th><th>Changes</th><th>Author</th></tr></thead>
-                    <tbody>
-                      {sop.changeHistory.map((entry, index) => (
-                        <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[systemAuthorName, formatDateControlled(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
-                      ))}
-                    </tbody>
-                  </table>
+        <div className="sop-preview-scroll" ref={scrollRef} onScroll={handleReviewScroll}>
+          <div className="sop-print-pages" style={{ zoom: pageScale }}>
+          {fallback ? (
+            <>
+              <DocumentPage sop={sop} page={1} total={totalPages} annotations={annotationsForPage(1)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation} headerReviewCategory={mode === "review" ? "document" : undefined}>
+                <Section title="Purpose" reviewCategory="purpose"><EmptyAwareText value={sop.purpose} /></Section>
+                <Section title="Scope" reviewCategory="scope"><EmptyAwareText value={sop.scope} /></Section>
+                <Section title="Definitions" reviewCategory="definitions">
+                  {sop.definitions.length ? (
+                    <table className="sop-export-table">
+                      <colgroup><col style={{ width: "30%" }} /><col style={{ width: "70%" }} /></colgroup>
+                      <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+                      <tbody>{sop.definitions.map((row, index) => <tr key={index}><td>{row.term}</td><td>{row.definition}</td></tr>)}</tbody>
+                    </table>
+                  ) : <EmptyAwareText value="" />}
                 </Section>
-                {approvalEntries?.length ? (
-                  <Section title="Change Approvals">
-                    <ApprovalTable entries={approvalEntries} revealSignatureId={revealSignatureId} />
-                  </Section>
-                ) : null}
-              </>
-            ) : null}
-          </DocumentPage>
+                <Section title="Responsible Person(s)" reviewCategory="responsible">
+                  <LinesOrDash values={sop.responsiblePersons} />
+                </Section>
+                <Section title="References" reviewCategory="references">
+                  {sop.linkedSops.length || (sop.referenceDocs ?? []).length || sop.references.length ? (
+                    <ul className="sop-export-list">
+                      {sop.linkedSops.map((link) => (
+                        <li key={link.sopId}>
+                          <Link
+                            className="sop-export-link"
+                            href={`/sops/${link.sopId}?preview=pdf&from=${encodeURIComponent(sop.id)}`}
+                            title="Open this SOP's document preview"
+                          >
+                            {linkedSopLabel(link)}
+                          </Link>
+                        </li>
+                      ))}
+                      {(sop.referenceDocs ?? []).map((doc) => {
+                        // The binary sits in the annex-file table keyed by this doc's id.
+                        // Storage URLs are short-lived signed URLs, so mint one on click.
+                        const file = annexFiles.find((item) => item.annexId === doc.id);
+                        return (
+                          <li key={doc.id}>
+                            {file ? (
+                              <button
+                                type="button"
+                                className="sop-export-link"
+                                onClick={() => {
+                                  setReferenceOpenError("");
+                                  // PDFs stay inside the app: an inline viewer over this
+                                  // preview with a Back button. Other types download.
+                                  const openTask = file.contentType === "application/pdf"
+                                    ? createSopAnnexFileUrl(file, 600).then((url) =>
+                                        setInlineDoc({ name: doc.name, url }),
+                                      )
+                                    : openSopAnnexFile(file);
+                                  openTask.catch((error: unknown) => {
+                                    setReferenceOpenError(
+                                      error instanceof Error ? error.message : "The referenced file could not be opened.",
+                                    );
+                                  });
+                                }}
+                                title="Open the referenced file"
+                              >
+                                {doc.name}
+                              </button>
+                            ) : (
+                              doc.name
+                            )}
+                          </li>
+                        );
+                      })}
+                      {sop.references.map((item, index) => <li key={index}>{item}</li>)}
+                    </ul>
+                  ) : <EmptyAwareText value="" />}
+                  {referenceOpenError ? <p className="sop-export-annex-file-error">{referenceOpenError}</p> : null}
+                </Section>
+                <Section title="Measurement" reviewCategory="measurements">
+                  {sop.measurements.length ? <ul className="sop-export-list">{sop.measurements.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
+                </Section>
+                <Section title="Procedure" reviewCategory="procedure"><EmptyAwareText value={sop.procedure.processFlowDescription} /></Section>
+              </DocumentPage>
 
-          {hasAttachedForms ? (
-            <DocumentPage sop={sop} page={controlPage} total={totalPages} annotations={annotationsForPage(controlPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
-            <Section title="Change History" reviewCategory="history">
-              <table className="sop-export-table">
-                <colgroup><col style={{ width: "14%" }} /><col style={{ width: "56%" }} /><col style={{ width: "30%" }} /></colgroup>
-                <thead><tr><th>Version</th><th>Changes</th><th>Author</th></tr></thead>
-                <tbody>
-                  {sop.changeHistory.map((entry, index) => (
-                    <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[systemAuthorName, formatDateControlled(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </Section>
-            {approvalEntries?.length ? (
-              <Section title="Change Approvals">
-                <ApprovalTable entries={approvalEntries} revealSignatureId={revealSignatureId} />
-              </Section>
-            ) : null}
-            </DocumentPage>
-          ) : null}
+              {flowPages.map((flowPage, index) => (
+                <DocumentPage key={index} sop={sop} page={index + 2} total={totalPages} className="sop-export-flow-page" annotations={annotationsForPage(index + 2)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
+                  <div className="sop-export-flow-svg" data-review-category="procedure" dangerouslySetInnerHTML={{ __html: flowPage.svg }} />
+                  <p className="sop-export-legend">{rasicLegend(".  ")}.</p>
+                </DocumentPage>
+              ))}
+
+              <DocumentPage sop={sop} page={annexSummaryPage} total={totalPages} annotations={annotationsForPage(annexSummaryPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
+                <Section title="Annexes & Forms" reviewCategory="annexes">
+                  {sop.annexes.length ? sop.annexes.map((annex, index) => {
+                    const file = formFiles.find((item) => item.annexId === annex.id);
+                    const error = file ? annexPreview.errors[file.id] : "";
+                    return (
+                      <div key={annex.id ?? index}>
+                        <p className="sop-export-annex"><strong>{annex.label}: </strong>{annex.description}</p>
+                        {file ? (
+                          <p className={`sop-export-annex-file ${error ? "sop-export-annex-file-error" : ""}`}>
+                            Attached form: {file.originalName}{error ? ` - ${error}` : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  }) : <EmptyAwareText value="" />}
+                  {annexPreview.loading ? <p className="sop-export-annex-file">Rendering attached forms…</p> : null}
+                </Section>
+                {!hasAttachedForms ? (
+                  <>
+                    <Section title="Change History" reviewCategory="history">
+                      <table className="sop-export-table">
+                        <colgroup><col style={{ width: "14%" }} /><col style={{ width: "56%" }} /><col style={{ width: "30%" }} /></colgroup>
+                        <thead><tr><th>Version</th><th>Changes</th><th>Author</th></tr></thead>
+                        <tbody>
+                          {sop.changeHistory.map((entry, index) => (
+                            <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[systemAuthorName, formatDateControlled(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </Section>
+                    {approvalEntries?.length ? (
+                      <Section title="Change Approvals">
+                        <ApprovalTable entries={approvalEntries} revealSignatureId={revealSignatureId} />
+                      </Section>
+                    ) : null}
+                  </>
+                ) : null}
+              </DocumentPage>
+
+              {hasAttachedForms ? (
+                <DocumentPage sop={sop} page={controlPage} total={totalPages} annotations={annotationsForPage(controlPage)} onAnnotate={onAnnotate} onSelectAnnotation={onSelectAnnotation}>
+                  <Section title="Change History" reviewCategory="history">
+                    <table className="sop-export-table">
+                      <colgroup><col style={{ width: "14%" }} /><col style={{ width: "56%" }} /><col style={{ width: "30%" }} /></colgroup>
+                      <thead><tr><th>Version</th><th>Changes</th><th>Author</th></tr></thead>
+                      <tbody>
+                        {sop.changeHistory.map((entry, index) => (
+                          <tr key={index}><td>{entry.version}</td><td>{entry.changes}</td><td>{[systemAuthorName, formatDateControlled(entry.createdByDate)].filter(Boolean).join("\n")}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Section>
+                  {approvalEntries?.length ? (
+                    <Section title="Change Approvals">
+                      <ApprovalTable entries={approvalEntries} revealSignatureId={revealSignatureId} />
+                    </Section>
+                  ) : null}
+                </DocumentPage>
+              ) : null}
+            </>
+          ) : (
+            <>
+              {sectionPages.map((page, pageIndex) => (
+                <DocumentPage
+                  key={`section-${pageIndex}`}
+                  sop={sop}
+                  page={pageIndex + 1}
+                  total={totalPages}
+                  className={page.overflowing ? "sop-print-page-overflowing" : undefined}
+                  annotations={annotationsForPage(pageIndex + 1)}
+                  onAnnotate={onAnnotate}
+                  onSelectAnnotation={onSelectAnnotation}
+                  headerReviewCategory={pageIndex === 0 && mode === "review" ? "document" : undefined}
+                >
+                  <PlanPageBody page={page} blockById={blockById} />
+                </DocumentPage>
+              ))}
+
+              {flowPages.map((flowPage, index) => {
+                const pageNumber = sectionPages.length + index + 1;
+                return (
+                  <DocumentPage
+                    key={`flow-${index}`}
+                    sop={sop}
+                    page={pageNumber}
+                    total={totalPages}
+                    className="sop-export-flow-page"
+                    annotations={annotationsForPage(pageNumber)}
+                    onAnnotate={onAnnotate}
+                    onSelectAnnotation={onSelectAnnotation}
+                  >
+                    <div className="sop-export-flow-svg" data-review-category="procedure" dangerouslySetInnerHTML={{ __html: flowPage.svg }} />
+                    <p className="sop-export-legend">{rasicLegend(".  ")}.</p>
+                  </DocumentPage>
+                );
+              })}
+
+              {trailingPages.map((page, pageIndex) => {
+                const pageNumber = sectionPages.length + flowPages.length + pageIndex + 1;
+                return (
+                  <DocumentPage
+                    key={`trailing-${pageIndex}`}
+                    sop={sop}
+                    page={pageNumber}
+                    total={totalPages}
+                    className={page.overflowing ? "sop-print-page-overflowing" : undefined}
+                    annotations={annotationsForPage(pageNumber)}
+                    onAnnotate={onAnnotate}
+                    onSelectAnnotation={onSelectAnnotation}
+                  >
+                    <PlanPageBody page={page} blockById={blockById} />
+                  </DocumentPage>
+                );
+              })}
+            </>
+          )}
 
           {annexPreview.pages.map((attachment, attachmentIndex) => {
             const annex = annexById.get(attachment.annexId);
@@ -912,6 +1174,56 @@ export function SopPrintPreview({
           </div>
         </div>
         {reviewPanel ? <aside className="sop-review-panel">{reviewPanel}</aside> : null}
+      </div>
+
+      {/* Offscreen measurement tree. Renders unconditionally on every path,
+          including the fallback branch above — if this ever moved inside a
+          conditional, a null offscreenRef on the effect's first run would
+          leave `measuring` stuck true with no ResizeObserver ever attached,
+          and the preview would be stuck blank. Placed after
+          .sop-preview-content and outside .sop-preview-scroll so
+          handleReviewScroll (which reads data-review-category only inside the
+          scroll container) and the signature-reveal effect above (scoped to
+          .sop-print-pages) never see these duplicate anchors. Hidden with
+          position/visibility, never display:none — that would collapse
+          layout to 0×0 and every measurement would silently read zero. */}
+      <div
+        ref={offscreenRef}
+        aria-hidden
+        style={{ position: "absolute", left: -99999, top: 0, visibility: "hidden", pointerEvents: "none" }}
+      >
+        <article className="sop-print-page" data-measure-page>
+          <DocumentHeader sop={sop} />
+          <main className="sop-print-page-body" data-measure-body />
+          <DocumentFooter page={1} total={1} />
+        </article>
+        <div style={{ position: "relative" }}>
+          <section className="sop-export-section" style={{ marginTop: 0 }}>
+            <h2>Procedure (cont.)</h2>
+          </section>
+          <div data-measure-cont-end />
+        </div>
+        {(["sections", "trailing"] as const).map((name) => (
+          <div
+            key={name}
+            data-segment={name}
+            className="sop-print-page"
+            style={{
+              position: "relative",
+              display: "block",
+              width: "7in",
+              height: "auto",
+              minHeight: 0,
+              overflow: "visible",
+              padding: 0,
+              boxShadow: "none",
+            }}
+          >
+            {segments[name].map((block) => (
+              <div key={block.id} data-block-id={block.id}>{block.render()}</div>
+            ))}
+          </div>
+        ))}
       </div>
       {inlineDoc ? (
         <div className="sop-inline-doc" role="dialog" aria-label={`Referenced document ${inlineDoc.name}`}>

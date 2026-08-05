@@ -103,7 +103,7 @@ select is(
 -- ---------------------------------------------------------------------------
 select test_as('60000000-0000-0000-0000-000000000001');
 select lives_ok(
-  $$ update public.sops set status = 'draft', revision_reason = 'periodic review' where id = 'sop_cy_1' $$,
+  $$ update public.sops set status = 'draft', revision_reason = 'periodic review', change_significance = 'MINOR' where id = 'sop_cy_1' $$,
   'an owning-department member starts a revision with a reason'
 );
 select is(

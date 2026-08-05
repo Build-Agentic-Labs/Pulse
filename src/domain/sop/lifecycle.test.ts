@@ -172,17 +172,32 @@ describe("canTransitionSop", () => {
   });
 
   describe("Gate D — start a revision", () => {
-    it("allows starting a revision from effective with a reason", () => {
+    it("allows the active author to start an amendment from effective", () => {
       expect(
-        canTransitionSop({ ...base, role: "author", from: "effective", to: "draft", hasRevisionReason: true }).ok,
+        canTransitionSop({
+          ...base,
+          role: "author",
+          isAuthor: true,
+          from: "effective",
+          to: "draft",
+          hasRevisionReason: true,
+          changeSignificance: "MINOR",
+        }).ok,
       ).toBe(true);
     });
 
     it("blocks starting a revision without a reason", () => {
-      expect(canTransitionSop({ ...base, role: "author", from: "effective", to: "draft" }).ok).toBe(false);
+      expect(canTransitionSop({
+        ...base,
+        role: "author",
+        isAuthor: true,
+        from: "effective",
+        to: "draft",
+        changeSignificance: "MAJOR",
+      }).ok).toBe(false);
     });
 
-    it("lets a manager start a revision without a dept role", () => {
+    it("does not let a manager replace the recorded author", () => {
       expect(
         canTransitionSop({
           ...base,
@@ -191,8 +206,20 @@ describe("canTransitionSop", () => {
           from: "effective",
           to: "draft",
           hasRevisionReason: true,
+          changeSignificance: "MAJOR",
         }).ok,
-      ).toBe(true);
+      ).toBe(false);
+    });
+
+    it("requires the author to choose amendment or revision", () => {
+      expect(canTransitionSop({
+        ...base,
+        role: "author",
+        isAuthor: true,
+        from: "effective",
+        to: "draft",
+        hasRevisionReason: true,
+      }).ok).toBe(false);
     });
   });
 

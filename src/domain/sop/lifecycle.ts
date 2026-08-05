@@ -16,6 +16,7 @@
 
 import { canDeptApprove, type DeptRole } from "@/domain/departments";
 import type { SopStatus } from "./schema";
+import type { ChangeSignificance } from "./version";
 
 export type { SopStatus };
 
@@ -53,6 +54,8 @@ export interface TransitionContext {
   hasOpenObjection?: boolean;
   /** Gate D needs a written reason before an effective SOP can be reopened. */
   hasRevisionReason?: boolean;
+  /** MINOR = amendment; MAJOR = revision. Required when reopening an effective SOP. */
+  changeSignificance?: ChangeSignificance;
   /**
    * This user overruled an objection during the current cycle. A Quality approver who set an
    * objection aside may not also release the document — the trigger refuses, so the button must
@@ -90,6 +93,7 @@ export function canTransitionSop(ctx: TransitionContext): TransitionResult {
     quorumMet = false,
     hasOpenObjection = false,
     hasRevisionReason = false,
+    changeSignificance,
     overruledThisCycle = false,
     hasOwnRejection = false,
   } = ctx;
@@ -133,9 +137,11 @@ export function canTransitionSop(ctx: TransitionContext): TransitionResult {
         return no("You overruled an objection on this SOP; another Quality approver must release it.");
       return OK;
 
-    case "effective->draft": // start a revision
-      if (!isOwningDeptMember) return no("Only a member of the owning department can start a revision.");
-      if (!hasRevisionReason) return no("A revision needs a reason: what is changing, and why.");
+    case "effective->draft": // start an amendment or revision
+      if (!isAuthor) return no("Only the SOP author can start an amendment or revision.");
+      if (role === undefined) return no("The SOP author must be an active member of the owning department.");
+      if (!hasRevisionReason) return no("An amendment or revision needs a reason: what is changing, and why.");
+      if (!changeSignificance) return no("Choose amendment or revision.");
       return OK;
 
     case "effective->obsolete":

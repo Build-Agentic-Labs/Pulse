@@ -187,10 +187,10 @@ select must_fail($$ update public.sops set document='{"body":"tampered"}'::jsonb
 \echo ''
 \echo '════════ 6. Gate D — a revision needs a reason, and bumps the cycle ════════'
 select test_as('a1111111-1111-1111-1111-111111111111');
-select must_fail($$ update public.sops set status='draft' where id='sop_e2e' $$,
+select must_fail($$ update public.sops set status='draft', change_significance='MINOR' where id='sop_e2e' $$,
                  'starting a revision with no revision_reason');
 
-update public.sops set status='draft', revision_reason='Torque value corrected to 95 Nm' where id='sop_e2e';
+update public.sops set status='draft', revision_reason='Torque value corrected to 95 Nm', change_significance='MINOR' where id='sop_e2e';
 select must_be((select review_cycle from public.sops where id='sop_e2e')::text, '1', 'review_cycle after revision');
 select must_be((select version      from public.sops where id='sop_e2e'), '1.1',     'version after revision');
 

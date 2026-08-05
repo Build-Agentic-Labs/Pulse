@@ -15,7 +15,7 @@
 -- sign_sop v2 contract: sign_sop(p_sop, p_meaning, p_reason, p_seat_department, p_resolves).
 
 begin;
-select plan(22);
+select plan(26);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -107,24 +107,49 @@ select is(
   0::bigint,
   'a first release writes zero sop_change_log rows'
 );
+select is(
+  (select document->'changeHistory'->0->>'version' from public.sops where id = 'sop_cl_1'),
+  'V1',
+  'the system creates the immutable V1 initial-release history row'
+);
 
 -- ---------------------------------------------------------------------------
 -- 3/4/5. Gate D: a revision needs a non-blank reason.
 -- ---------------------------------------------------------------------------
+select test_as('70000000-0000-0000-0000-000000000002');
+select throws_ok(
+  $$ update public.sops set status = 'draft', revision_reason = 'Unauthorized edit', change_significance = 'MINOR' where id = 'sop_cl_1' $$,
+  null,
+  'a department reviewer cannot reopen the author''s effective SOP'
+);
 select test_as('70000000-0000-0000-0000-000000000001');
 select throws_ok(
-  $$ update public.sops set status = 'draft' where id = 'sop_cl_1' $$,
+  $$ update public.sops set status = 'draft', change_significance = 'MINOR' where id = 'sop_cl_1' $$,
   null,
   'starting a revision without a revision_reason is refused (Gate D)'
 );
 select throws_ok(
-  $$ update public.sops set status = 'draft', revision_reason = '   ' where id = 'sop_cl_1' $$,
+  $$ update public.sops set status = 'draft', revision_reason = '   ', change_significance = 'MINOR' where id = 'sop_cl_1' $$,
   null,
   'a whitespace-only revision_reason is refused (Gate D)'
 );
 select lives_ok(
-  $$ update public.sops set status = 'draft', revision_reason = 'Updated torque values' where id = 'sop_cl_1' $$,
+  $$ update public.sops set status = 'draft', revision_reason = 'Updated torque values', change_significance = 'MINOR' where id = 'sop_cl_1' $$,
   'a real revision_reason opens the revision'
+);
+select is(
+  (select (document->'changeHistory'->-1->>'version') || ':' || (document->'changeHistory'->-1->>'changes')
+     from public.sops where id = 'sop_cl_1'),
+  'V1.1:Updated torque values',
+  'an amendment appends the system-managed V1.1 history row and reason'
+);
+update public.sops
+   set document = jsonb_set(document, '{changeHistory,0,changes}', '"tampered"'::jsonb)
+ where id = 'sop_cl_1';
+select is(
+  (select document->'changeHistory'->0->>'changes' from public.sops where id = 'sop_cl_1'),
+  'Initial release',
+  'a direct draft update cannot rewrite a system-managed history row'
 );
 
 -- ---------------------------------------------------------------------------

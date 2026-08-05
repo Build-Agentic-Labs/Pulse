@@ -1,7 +1,7 @@
 /**
- * SOP revision numbering: `major.minor`. Drafts sit at `0.x`; the first time an SOP becomes
- * effective it is `1.0`. A MAJOR (substantive) change bumps the major and resets minor and
- * flags retraining; a MINOR (editorial) change bumps the minor.
+ * SOP revision numbering: `major.minor`. A new SOP is V1 (stored as `1.0`) throughout authoring
+ * and first release. A MAJOR (substantive) change bumps the major and resets minor and flags
+ * retraining; a MINOR amendment bumps the minor.
  */
 
 export type ChangeSignificance = "MAJOR" | "MINOR";
@@ -15,9 +15,30 @@ export function formatVersion(v: SopVersion): string {
   return `${v.major}.${v.minor}`;
 }
 
-/** The version a brand-new draft starts at (pre-first-approval). */
+/** Human-facing controlled-document label: 1.0 -> V1, 1.1 -> V1.1. */
+export function formatVersionLabel(v: SopVersion): string {
+  return v.minor === 0 ? `V${v.major}` : `V${v.major}.${v.minor}`;
+}
+
+export function versionLabel(version: string): string {
+  const parsed = parseVersion(version);
+  if (!parsed) return version.trim();
+  return formatVersionLabel(parsed);
+}
+
+export function parseVersion(version: string): SopVersion | null {
+  const match = /^(?:V)?(\d+)(?:\.(\d+))?$/i.exec(version.trim());
+  if (!match) return null;
+  return { major: Number(match[1]), minor: Number(match[2] ?? 0) };
+}
+
+export function nextVersionLabel(version: string, significance: ChangeSignificance): string {
+  return formatVersionLabel(nextVersion(parseVersion(version) ?? firstEffectiveVersion(), significance));
+}
+
+/** The version a brand-new draft starts at and keeps through first release. */
 export function initialVersion(): SopVersion {
-  return { major: 0, minor: 1 };
+  return { major: 1, minor: 0 };
 }
 
 /** The version assigned when an SOP first becomes effective. */

@@ -51,7 +51,6 @@ export function SopDetailClient({
         department: initial.department,
         canEdit:
           canEditSops &&
-          initial.record.sop.status === "draft" &&
           (!initial.record.departmentId || initial.myDepartmentIds.includes(initial.record.departmentId)),
       }
     : { status: "pending" });
@@ -77,7 +76,6 @@ export function SopDetailClient({
           department: departments.find((item) => item.id === record.departmentId),
           canEdit:
             canEditSops &&
-            record.sop.status === "draft" &&
             (!record.departmentId || myDepartments.some((item) => item.id === record.departmentId)),
         });
       })

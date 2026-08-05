@@ -18,17 +18,12 @@ import {
 import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
-import {
-  initialDraftChangeEntry,
-  lifecycleChangeEntry,
-  sameChangeEntry,
-  type SopChangeActor,
-} from "@/domain/sop/change-history";
 import { draftReviewGate } from "@/domain/sop/review-gate";
-import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc, type SopStatus } from "@/domain/sop/schema";
+import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc } from "@/domain/sop/schema";
+import { nextVersionLabel, versionLabel, type ChangeSignificance } from "@/domain/sop/version";
 import { authoringMode, DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
-import { fetchMyDeptRoles, listDepartments, listMembersForDepartments } from "@/lib/departments/store";
+import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
 import {
   getSopControl,
   isBlockingSeat,
@@ -267,39 +262,6 @@ function getEmptyFieldExample(target: EventTarget): { element: HTMLInputElement 
   return text ? { element: target, text } : null;
 }
 
-type DepartmentAuthorIdentity = SopChangeActor & { departmentId: string; userId: string };
-
-async function loadDepartmentAuthorIdentity(departmentId: string): Promise<DepartmentAuthorIdentity> {
-  const supabase = createPlannerSupabaseClient();
-  const userResult = await getUserFromSession(supabase);
-  const user = userResult.data.user;
-  if (!user?.id) throw new Error("Your session expired. Sign in again before saving this SOP.");
-
-  const [profileNames, members] = await Promise.all([
-    listProfileNames([user.id]),
-    listMembersForDepartments([departmentId]),
-  ]);
-  const metadataName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name.trim() : "";
-  const member = members.find((candidate) => candidate.departmentId === departmentId && candidate.userId === user.id);
-
-  return {
-    departmentId,
-    userId: user.id,
-    name: profileNames.get(user.id)?.trim() || metadataName || user.email?.trim() || "Department author",
-    position: member?.positionTitle.trim() || "Department Author",
-  };
-}
-
-function appendMissingChangeEntries(
-  rows: Sop["changeHistory"],
-  entries: Sop["changeHistory"],
-): Sop["changeHistory"] {
-  return entries.reduce(
-    (current, entry) => current.some((candidate) => sameChangeEntry(candidate, entry)) ? current : [...current, entry],
-    rows,
-  );
-}
-
 export function SopEditor({
   initial,
   workspaceId,
@@ -374,7 +336,6 @@ export function SopEditor({
   const [approvalDepartments, setApprovalDepartments] = useState<Department[]>(
     () => initialApprovalRouting?.departments ?? [],
   );
-  const [departmentAuthorIdentity, setDepartmentAuthorIdentity] = useState<DepartmentAuthorIdentity | null>(null);
   const [approvalSeats, setApprovalSeats] = useState<SopReviewSeat[]>(
     () => initialApprovalRouting?.seats ?? [],
   );
@@ -431,6 +392,9 @@ export function SopEditor({
   const [requestingFinalApproval, setRequestingFinalApproval] = useState(false);
   const [resolvingAnnotationId, setResolvingAnnotationId] = useState<string | null>(null);
   const [submittingForApproval, setSubmittingForApproval] = useState(false);
+  const [controlledChangeKind, setControlledChangeKind] = useState<ChangeSignificance | null>(null);
+  const [controlledChangeReason, setControlledChangeReason] = useState("");
+  const [startingControlledChange, setStartingControlledChange] = useState(false);
   // Edits since the last successful save -- drives the leave guards and autosave.
   const [dirty, setDirty] = useState(false);
   // A save lost the concurrency check: freeze autosave so we never loop against the conflict.
@@ -449,7 +413,6 @@ export function SopEditor({
   const persistedAnnexIdsRef = useRef(
     new Set(withAnnexIds(initial).annexes.flatMap((annex) => (annex.id ? [annex.id] : []))),
   );
-  const seededInitialHistoryRef = useRef<Sop["changeHistory"][number] | null>(null);
   // The edit version reflected in this render's `sop`. persist() closes over this snapshot
   // rather than reading the ref when it runs: a stale autosave timer can fire after a
   // keystroke but before its effect cleanup cancels it, and reading the ref at call time
@@ -466,8 +429,6 @@ export function SopEditor({
   const skipInitialApprovalFetchRef = useRef(Boolean(initialApprovalRouting));
   const skipInitialReviewFetchRef = useRef(Boolean(initialApprovalRouting));
   const skipInitialAuditFetchRef = useRef(Boolean(initialApprovalRouting));
-  // The status as last persisted -- a save that changes it auto-appends a changeHistory row.
-  const lastSavedStatusRef = useRef<SopStatus>(initial.status);
   const hasPersistedSop = !isNew || Boolean(persistedUpdatedAt);
 
   const refreshApprovalRouting = useCallback(async (options: { background?: boolean } = {}) => {
@@ -519,26 +480,6 @@ export function SopEditor({
     }
     void refreshApprovalRouting();
   }, [refreshApprovalRouting]);
-
-  useEffect(() => {
-    if (!selectedDepartmentId) {
-      setDepartmentAuthorIdentity(null);
-      return;
-    }
-
-    let active = true;
-    setDepartmentAuthorIdentity(null);
-    void loadDepartmentAuthorIdentity(selectedDepartmentId)
-      .then((identity) => {
-        if (active) setDepartmentAuthorIdentity(identity);
-      })
-      .catch(() => {
-        if (active) setDepartmentAuthorIdentity(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [selectedDepartmentId]);
 
   useEffect(() => {
     if (!hasPersistedSop) return;
@@ -818,31 +759,6 @@ export function SopEditor({
       : `1.${approvalReviewCycle}`
     : "1.0";
 
-  useEffect(() => {
-    if (
-      !isNew ||
-      persistedUpdatedAt ||
-      !selectedDepartmentId ||
-      departmentAuthorIdentity?.departmentId !== selectedDepartmentId
-    ) {
-      return;
-    }
-
-    const entry = initialDraftChangeEntry(controlledVersion, departmentAuthorIdentity);
-    const previousSeed = seededInitialHistoryRef.current;
-    setSop((current) => {
-      const canSeed = current.changeHistory.length === 0;
-      const canRefreshSeed = Boolean(
-        previousSeed &&
-        current.changeHistory.length === 1 &&
-        sameChangeEntry(current.changeHistory[0], previousSeed),
-      );
-      if (!canSeed && !canRefreshSeed) return current;
-      seededInitialHistoryRef.current = entry;
-      return { ...current, changeHistory: [entry] };
-    });
-  }, [controlledVersion, departmentAuthorIdentity, isNew, persistedUpdatedAt, selectedDepartmentId]);
-
   // Until release there is no numeric sequence yet. Keep every rendered document (masthead, PDF
   // preview, and Word export) showing the same placeholder the form shows.
   // Memoized: `sop` identity here is load-bearing for SopPrintPreview's measured pagination — a
@@ -999,23 +915,6 @@ export function SopEditor({
 
   async function runSave(firstSave: boolean, expectedUpdatedAt: string | undefined): Promise<boolean> {
     try {
-      const needsAuthorIdentity = firstSave || sop.status !== lastSavedStatusRef.current;
-      let savingAuthorIdentity = departmentAuthorIdentity;
-      if (
-        needsAuthorIdentity &&
-        selectedDepartmentId &&
-        savingAuthorIdentity?.departmentId !== selectedDepartmentId
-      ) {
-        try {
-          savingAuthorIdentity = await loadDepartmentAuthorIdentity(selectedDepartmentId);
-          setDepartmentAuthorIdentity(savingAuthorIdentity);
-        } catch (error) {
-          setSaveError(error instanceof Error ? error.message : "Could not load the department author's information.");
-          setSaveStatus("error");
-          return false;
-        }
-      }
-
       let working: Sop = { ...sop, meta: { ...sop.meta, version: controlledVersion } };
       const saveOptions: SaveSopOptions = { expectedUpdatedAt };
       if (firstSave) {
@@ -1028,30 +927,12 @@ export function SopEditor({
         saveOptions.docType = DEFAULT_DOC_TYPE;
       }
 
-      const statusChanged = working.status !== lastSavedStatusRef.current;
-      const generatedHistoryEntries: Sop["changeHistory"] = [];
-      if (firstSave && working.changeHistory.length === 0 && savingAuthorIdentity) {
-        generatedHistoryEntries.push(initialDraftChangeEntry(controlledVersion, savingAuthorIdentity));
-      }
-      if (statusChanged) {
-        generatedHistoryEntries.push(
-          lifecycleChangeEntry(
-            working,
-            lastSavedStatusRef.current,
-            savingAuthorIdentity ?? { name: "Department author", position: "Department Author" },
-          ),
-        );
-      }
-      const toSave: Sop = generatedHistoryEntries.length
-        ? { ...working, changeHistory: appendMissingChangeEntries(working.changeHistory, generatedHistoryEntries) }
-        : working;
       try {
-        const next = await saveSop(toSave, workspaceId!, saveOptions);
+        const next = await saveSop(working, workspaceId!, saveOptions);
         persistedAnnexIdsRef.current = new Set(next.annexes.flatMap((annex) => (annex.id ? [annex.id] : [])));
         // Advance the ref synchronously so a click awaiting this save reads the fresh token.
         persistedUpdatedAtRef.current = next.updatedAt;
         setPersistedUpdatedAt(next.updatedAt);
-        lastSavedStatusRef.current = next.status;
         if (editVersionRef.current === sopEditVersion) {
           // Nothing changed since the render that produced `sop` -- adopt the server copy wholesale.
           setSop(next);
@@ -1059,11 +940,10 @@ export function SopEditor({
           setSaveStatus("saved");
         } else {
           // Edits landed after that render: keep them (still dirty, so autosave picks them up)
-          // and only fold in the server timestamp plus the auto-appended history row.
+          // and only fold in the server timestamp. Change history is database-managed.
           setSop((current) => ({
             ...current,
             updatedAt: next.updatedAt,
-            changeHistory: appendMissingChangeEntries(current.changeHistory, generatedHistoryEntries),
           }));
           setSaveStatus("idle");
         }
@@ -1099,7 +979,6 @@ export function SopEditor({
       const next = withAnnexIds(latest.sop);
       persistedAnnexIdsRef.current = new Set(next.annexes.flatMap((annex) => (annex.id ? [annex.id] : [])));
       editVersionRef.current += 1;
-      lastSavedStatusRef.current = next.status;
       setSop(next);
       persistedUpdatedAtRef.current = next.updatedAt;
       setPersistedUpdatedAt(next.updatedAt);
@@ -1350,6 +1229,52 @@ export function SopEditor({
     }
   }
 
+  async function handleStartControlledChange() {
+    const reason = controlledChangeReason.trim();
+    if (!controlledChangeKind || !reason || startingControlledChange) return;
+    setStartingControlledChange(true);
+    setSaveError("");
+    try {
+      const latest = await getSopControl(sop.id);
+      if (!latest) throw new Error("The SOP could not be loaded before starting this change.");
+      if (latest.status !== "effective") {
+        throw new Error("Only an effective SOP can begin an amendment or revision.");
+      }
+
+      const transitioned = await transitionSop(sop.id, "draft", latest.updatedAt, {
+        revisionReason: reason,
+        changeSignificance: controlledChangeKind,
+      });
+      const refreshed = await getSop(sop.id);
+      if (!refreshed) throw new Error("The new controlled draft could not be loaded.");
+
+      setSop(refreshed.sop);
+      persistedUpdatedAtRef.current = refreshed.sop.updatedAt;
+      setPersistedUpdatedAt(refreshed.sop.updatedAt);
+      setApprovalReviewCycle(transitioned.reviewCycle);
+      setApprovalContentHash(transitioned.contentHash);
+      setFinalApprovalRequestedAt(transitioned.finalApprovalRequestedAt);
+      setFinalApprovalContentHash(transitioned.finalApprovalContentHash);
+      setControlledChangeKind(null);
+      setControlledChangeReason("");
+      setDirty(false);
+      setSaveStatus("idle");
+      setStepIndex(0);
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `/sops/${encodeURIComponent(sop.id)}?step=document`,
+      );
+      await refreshApprovalRouting({ background: true });
+      setAuditEvents(await listSopAuditEvents(sop.id));
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The controlled change could not be started.");
+      setSaveStatus("error");
+    } finally {
+      setStartingControlledChange(false);
+    }
+  }
+
   async function handleMarkRemarkAddressed(annotationId: string) {
     if (resolvingAnnotationId) return;
     setResolvingAnnotationId(annotationId);
@@ -1419,7 +1344,6 @@ export function SopEditor({
         setSop((current) => ({ ...current, status: control.status, updatedAt: control.updatedAt }));
         persistedUpdatedAtRef.current = control.updatedAt;
         setPersistedUpdatedAt(control.updatedAt);
-        lastSavedStatusRef.current = control.status;
         setStepIndex(CREATOR_STEPS.length);
         window.history.replaceState(
           window.history.state,
@@ -1449,7 +1373,6 @@ export function SopEditor({
       setSop((current) => ({ ...current, status: transitioned.status, updatedAt: transitioned.updatedAt }));
       persistedUpdatedAtRef.current = transitioned.updatedAt;
       setPersistedUpdatedAt(transitioned.updatedAt);
-      lastSavedStatusRef.current = transitioned.status;
       // The review round already happened — go straight to the signature phase
       // instead of reopening the reviewers' queue.
       if (reviewGate.allResponded) await requestSopFinalApproval(sop.id);
@@ -2042,11 +1965,7 @@ export function SopEditor({
                   {annexFileError ? <p className="mt-2 text-xs text-danger">{annexFileError}</p> : null}
                 </Section>
                 <Section title="Change history" reviewAttention={reviewCategoriesNeedingAttention.has("history")}>
-                  <ChangeHistoryEditor
-                    rows={sop.changeHistory}
-                    disabled={!canEdit}
-                    onChange={(changeHistory) => update({ changeHistory })}
-                  />
+                  <SystemChangeHistory rows={sop.changeHistory} />
                 </Section>
               </>
             ) : null}
@@ -2368,6 +2287,112 @@ export function SopEditor({
                     </div>
                   ) : null}
                 </section>
+
+                {isCurrentUserAuthor && canEditPermission && sop.status === "effective" ? (
+                  <section className="ui-panel overflow-hidden">
+                    <div className="border-b border-line px-4 py-4">
+                      <h2 className="ui-setup-section-title">Start a controlled change</h2>
+                      <p className="mt-1 max-w-2xl text-xs leading-5 text-ink-tertiary">
+                        Only you, as the recorded author, can reopen this effective SOP. Choose how the version
+                        should advance; the system will add the change-history entry automatically.
+                      </p>
+                    </div>
+                    <div className="space-y-4 px-4 py-4">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {([
+                          {
+                            kind: "MINOR" as const,
+                            title: "Amendment",
+                            description: "A focused correction or clarification.",
+                          },
+                          {
+                            kind: "MAJOR" as const,
+                            title: "New revision",
+                            description: "A substantive process or responsibility change.",
+                          },
+                        ]).map((option) => {
+                          const selected = controlledChangeKind === option.kind;
+                          return (
+                            <button
+                              key={option.kind}
+                              type="button"
+                              aria-pressed={selected}
+                              className={`rounded-lg border px-3 py-3 text-left transition-colors motion-reduce:transition-none ${
+                                selected
+                                  ? "border-ink bg-ink text-canvas"
+                                  : "border-line bg-canvas text-ink hover:border-ink-tertiary"
+                              }`}
+                              onClick={() => setControlledChangeKind(option.kind)}
+                            >
+                              <span className="flex items-center justify-between gap-3">
+                                <span className="text-sm font-medium">{option.title}</span>
+                                <span className={`ui-mono-label ${selected ? "text-canvas/70" : "text-ink-tertiary"}`}>
+                                  {nextVersionLabel(sop.meta.version, option.kind)}
+                                </span>
+                              </span>
+                              <span className={`mt-1 block text-xs leading-5 ${selected ? "text-canvas/70" : "text-ink-tertiary"}`}>
+                                {option.description}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {controlledChangeKind ? (
+                        <form
+                          className="space-y-3 border-t border-line pt-4"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void handleStartControlledChange();
+                          }}
+                        >
+                          <label className="block">
+                            <span className="ui-field-label">Reason for change</span>
+                            <AutoTextarea
+                              className="ui-field-standalone mt-2 min-h-24"
+                              value={controlledChangeReason}
+                              placeholder="Describe what is changing and why."
+                              onChange={(event) => setControlledChangeReason(event.target.value)}
+                              disabled={startingControlledChange}
+                            />
+                          </label>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-[11px] leading-4 text-ink-tertiary">
+                              {controlledChangeKind === "MINOR"
+                                ? `This amendment creates ${nextVersionLabel(sop.meta.version, "MINOR")}.`
+                                : `This revision creates ${nextVersionLabel(sop.meta.version, "MAJOR")} and requires retraining review.`}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="ui-btn-ghost h-9 px-3"
+                                onClick={() => {
+                                  setControlledChangeKind(null);
+                                  setControlledChangeReason("");
+                                }}
+                                disabled={startingControlledChange}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                className="ui-btn-primary h-9 gap-2 px-4 disabled:opacity-50"
+                                disabled={!controlledChangeReason.trim() || startingControlledChange}
+                              >
+                                {startingControlledChange ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                                {startingControlledChange
+                                  ? "Starting…"
+                                  : controlledChangeKind === "MINOR"
+                                    ? "Start amendment"
+                                    : "Start revision"}
+                              </button>
+                            </div>
+                          </div>
+                        </form>
+                      ) : null}
+                    </div>
+                  </section>
+                ) : null}
 
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
@@ -3198,78 +3223,47 @@ function AnnexesEditor({
     </div>
   );
 }
-function ChangeHistoryEditor({
-  rows,
-  disabled = false,
-  onChange,
-}: {
-  rows: Sop["changeHistory"];
-  disabled?: boolean;
-  onChange: (rows: Sop["changeHistory"]) => void;
-}) {
-  function patch(index: number, field: keyof Sop["changeHistory"][number], value: string) {
-    onChange(rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
-  }
-
+function SystemChangeHistory({ rows }: { rows: Sop["changeHistory"] }) {
   return (
-    <div className="space-y-3">
-      {rows.map((row, index) => (
-        <div key={index} className="rounded-md border border-line p-3">
-          <div className="grid gap-2 sm:grid-cols-[6rem_minmax(0,1fr)]">
-            <input
-              className="ui-field-standalone"
-              value={row.version}
-              placeholder="Version"
-              disabled={disabled}
-              onChange={(event) => patch(index, "version", event.target.value)}
-            />
-            <input
-              className="ui-field-standalone"
-              value={row.changes}
-              placeholder="Description of changes"
-              disabled={disabled}
-              onChange={(event) => patch(index, "changes", event.target.value)}
-            />
-          </div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_10rem_auto]">
-            <input
-              className="ui-field-standalone"
-              value={row.createdByName}
-              placeholder="Created by"
-              disabled={disabled}
-              onChange={(event) => patch(index, "createdByName", event.target.value)}
-            />
-            <input
-              className="ui-field-standalone"
-              value={row.createdByPosition}
-              placeholder="Position"
-              disabled={disabled}
-              onChange={(event) => patch(index, "createdByPosition", event.target.value)}
-            />
-            <input
-              type="date"
-              required
-              className="ui-field-standalone"
-              value={row.createdByDate}
-              disabled={disabled}
-              onChange={(event) => patch(index, "createdByDate", event.target.value)}
-            />
-            {disabled ? null : (
-              <RowDeleteButton title="Remove entry" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
-            )}
-          </div>
+    <div className="overflow-hidden rounded-lg border border-line">
+      <div className="flex items-center gap-2 border-b border-line bg-canvas px-3 py-2">
+        <History size={13} className="text-ink-tertiary" />
+        <p className="text-[11px] leading-4 text-ink-tertiary">
+          Managed by the SOP lifecycle. Entries cannot be edited or removed.
+        </p>
+      </div>
+      {rows.length ? (
+        <div className="divide-y divide-line">
+          {rows.map((row, index) => (
+            <div
+              key={`${row.version}-${row.createdByDate}-${index}`}
+              className="grid gap-3 px-3 py-3 sm:grid-cols-[5rem_minmax(0,1fr)_minmax(10rem,0.55fr)_7rem] sm:items-center"
+            >
+              <span className="ui-chip w-fit border-ink/20 bg-transparent font-medium text-ink">
+                {versionLabel(row.version) || "—"}
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-medium leading-5 text-ink">{row.changes || "System change"}</p>
+                <p className="mt-0.5 text-[11px] text-ink-tertiary sm:hidden">
+                  {row.createdByName || "SOP author"} · {row.createdByPosition || "Department Author"}
+                </p>
+              </div>
+              <div className="hidden min-w-0 sm:block">
+                <p className="truncate text-xs text-ink">{row.createdByName || "SOP author"}</p>
+                <p className="mt-0.5 truncate text-[11px] text-ink-tertiary">
+                  {row.createdByPosition || "Department Author"}
+                </p>
+              </div>
+              <time className="text-xs tabular-nums text-ink-tertiary" dateTime={row.createdByDate}>
+                {row.createdByDate || "Pending"}
+              </time>
+            </div>
+          ))}
         </div>
-      ))}
-      {disabled ? null : (
-        <AddButton
-          label="Add entry"
-          onClick={() =>
-            onChange([
-              ...rows,
-              { version: "", changes: "", createdByName: "", createdByPosition: "", createdByDate: "" },
-            ])
-          }
-        />
+      ) : (
+        <div className="px-3 py-5 text-sm text-ink-tertiary">
+          V1 will be recorded automatically when this SOP is first saved.
+        </div>
       )}
     </div>
   );

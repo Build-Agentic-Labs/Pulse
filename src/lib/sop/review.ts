@@ -11,6 +11,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SopStatus } from "@/domain/sop/schema";
+import type { ChangeSignificance } from "@/domain/sop/version";
 import { parseSignatureStrokes, type SignatureStrokes } from "@/domain/sop/signature";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import type { Database, Json, TablesUpdate } from "@/lib/database.types";
@@ -21,7 +22,7 @@ import { kickSopNotifications } from "./notify-kick";
 const CONTROL_COLUMNS =
   "id, workspace_id, department_id, status, sop_number, doc_type, version, major_version, minor_version, " +
   "submitted_by, approved_by, approved_at, effective_date, next_review_date, effective_revision_id, " +
-  "rejected_reason, created_by, updated_at, content_hash, review_cycle, revision_reason, self_review_test, " +
+  "rejected_reason, created_by, updated_at, content_hash, review_cycle, revision_reason, change_significance, self_review_test, " +
   "final_approval_requested_at, final_approval_content_hash, final_approval_requested_by";
 
 export interface SopControl {
@@ -46,6 +47,7 @@ export interface SopControl {
   /** Bumps on every revision (effective → draft). Signatures bind to this too. */
   reviewCycle: number;
   revisionReason: string | null;
+  changeSignificance: ChangeSignificance | null;
   /** Temporary, per-SOP flow-test bypass for a sole author/reviewer. */
   selfReviewTest: boolean;
   finalApprovalRequestedAt: string | null;
@@ -148,6 +150,10 @@ function mapControl(row: Record<string, unknown>): SopControl {
     contentHash: (row.content_hash as string | null) ?? null,
     reviewCycle: Number(row.review_cycle ?? 0),
     revisionReason: (row.revision_reason as string | null) ?? null,
+    changeSignificance:
+      row.change_significance === "MINOR" || row.change_significance === "MAJOR"
+        ? row.change_significance
+        : null,
     selfReviewTest: Boolean(row.self_review_test),
     finalApprovalRequestedAt: (row.final_approval_requested_at as string | null) ?? null,
     finalApprovalContentHash: (row.final_approval_content_hash as string | null) ?? null,
@@ -443,6 +449,8 @@ export interface TransitionPatch {
   reviewIntervalMonths?: number;
   /** Required to leave `effective` (Gate D): why this revision is being opened. */
   revisionReason?: string;
+  /** MINOR starts an amendment; MAJOR starts a new revision. */
+  changeSignificance?: ChangeSignificance;
 }
 
 /**
@@ -463,6 +471,7 @@ export async function transitionSop(
   if (patch.departmentId !== undefined) row.department_id = patch.departmentId;
   if (patch.reviewIntervalMonths !== undefined) row.review_interval_months = patch.reviewIntervalMonths;
   if (patch.revisionReason !== undefined) row.revision_reason = patch.revisionReason;
+  if (patch.changeSignificance !== undefined) row.change_significance = patch.changeSignificance;
 
   const updated = await throwIfError(
     supabase

@@ -299,7 +299,7 @@ select test_as('11111111-1111-1111-1111-111111111111');
 -- 9. A revision keeps the document's number and only moves the version. The number names
 --    the document; the version names the release.
 -- ---------------------------------------------------------------------------
-update public.sops set status = 'draft', revision_reason = 'Torque value corrected'
+update public.sops set status = 'draft', revision_reason = 'Torque value corrected', change_significance = 'MINOR'
  where id = 'sop_1';
 update public.sops set document = '{"body":"v2","meta":{"title":"Torque spec"}}'::jsonb where id = 'sop_1';
 select is(

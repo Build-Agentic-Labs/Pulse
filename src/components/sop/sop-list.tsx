@@ -12,6 +12,7 @@ import type { Department } from "@/domain/departments";
 import { DEFAULT_DOC_TYPE, listNumberLabel } from "@/domain/sop/authoring";
 import { mapApprovalsToDepartments, seatDepartmentsFrom } from "@/domain/sop/approval-mapping";
 import { upsertSeat } from "@/lib/sop/review";
+import { canDeleteSop } from "@/domain/sop/deletion";
 import { getSopProcessState, SOP_PROCESS_STATE_LABELS } from "@/domain/sop/process-state";
 import type { Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
@@ -36,7 +37,7 @@ import {
   type SopReviewSubmission,
 } from "@/lib/sop/review-annotations";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
-import { useSopWorkspace } from "./sop-workspace-provider";
+import { canManage, useSopWorkspace } from "./sop-workspace-provider";
 
 
 /** Periodic-review flag for a next-review date: overdue (past) or due soon (within 30 days). */
@@ -130,8 +131,10 @@ export function SopList({
 }) {
   const router = useRouter();
   const confirm = useConfirm();
-  const { workspaceId, canEditSops } = useSopWorkspace();
+  const { workspaceId, canEditSops, role } = useSopWorkspace();
   const editable = canEditSops;
+  // Workspace owners/admins: the `is_manager` branch of the database's delete guard.
+  const isManager = canManage(role);
   const seededFromServer =
     initialSops !== undefined && initialWorkspaceId !== undefined && initialWorkspaceId === workspaceId;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -684,10 +687,18 @@ export function SopList({
                                     : processState === "awaiting_quality"
                                       ? `/sops/${sop.id}?step=quality-approval`
                                     : `/sops/${sop.id}`;
-                              const canEditRow =
-                                editable &&
-                                sop.status === "draft" &&
-                                (!sop.departmentId || memberDepartmentIds.has(sop.departmentId));
+                              // Deletion is a wider rule than editing: the database lets a
+                              // manager remove an SOP that is mid-workflow. Gating the control
+                              // on canEditRow hid it on every non-draft, leaving no way to
+                              // clear an in_review SOP and no explanation on screen.
+                              const canDeleteRow = canDeleteSop({
+                                status: sop.status,
+                                canEditSops: editable,
+                                isManager,
+                                hasDepartment: Boolean(sop.departmentId),
+                                isDepartmentMember:
+                                  !sop.departmentId || memberDepartmentIds.has(sop.departmentId),
+                              });
                               return (
                                 <tr
                                   key={sop.id}
@@ -770,7 +781,7 @@ export function SopList({
                                 <td className="px-2 py-2.5 align-middle">
                                   <div className="flex items-center justify-end gap-1">
                                     <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                                      {canEditRow ? (
+                                      {canDeleteRow ? (
                                         <button
                                           type="button"
                                           className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"

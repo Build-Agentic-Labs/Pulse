@@ -92,6 +92,42 @@ describe("mapApprovalsToDepartments", () => {
     const seatable = [...new Set(results.filter((r) => r.outcome === "mapped").map((r) => r.department!.id))];
     expect(seatable).toEqual(["d-mfg"]);
   });
+
+  // The property the converted-approver picker rests on: the author's chosen
+  // department is stored as departmentCode, and code resolution runs BEFORE the
+  // position-title fallback. Without this, a mapped row would keep rendering
+  // "No match" forever.
+  it("resolves by departmentCode even when the position title matches nothing", () => {
+    // "IC Manager" is deliberately NOT in any department's STANDARD_POSITION_TITLES,
+    // so the position fallback cannot resolve it and only the code can.
+    const unmatchable = { role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" };
+
+    const before = mapApprovalsToDepartments([unmatchable], DEPARTMENTS);
+    expect(before[0].outcome).toBe("unmapped");
+
+    const after = mapApprovalsToDepartments([{ ...unmatchable, departmentCode: "MFG" }], DEPARTMENTS);
+    expect(after[0].outcome).toBe("mapped");
+    expect(after[0].department?.code).toBe("MFG");
+  });
+
+  // THE discriminating test. The position must be an EXACT entry in another
+  // department's STANDARD_POSITION_TITLES (findByPositionTitle matches exactly,
+  // not by substring) — otherwise the fallback resolves to nothing, the code wins
+  // by default, and the test passes under BOTH orderings while proving nothing.
+  // "Production Manager" is an exact MFG title; the code says QAS. Reversing the
+  // two resolvers in approval-mapping.ts MUST turn this red.
+  it("prefers departmentCode over a position title that matches a different department", () => {
+    const conflicting = {
+      role: "Approved By",
+      name: "R. Miller",
+      position: "Production Manager",
+      date: "",
+      departmentCode: "QAS",
+    };
+    const [mapping] = mapApprovalsToDepartments([conflicting], DEPARTMENTS);
+    // QAS is the quality gate, MFG is not — the outcome names which input won.
+    expect(mapping.outcome).toBe("quality-gate");
+  });
 });
 
 describe("signerAfterDepartmentChange", () => {

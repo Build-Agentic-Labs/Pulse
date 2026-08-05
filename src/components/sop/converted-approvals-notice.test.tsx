@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Department } from "@/domain/departments";
 import type { SopApproval } from "@/domain/sop/schema";
@@ -155,5 +155,154 @@ describe("ConvertedApprovalsNotice", () => {
     expect(container.textContent).not.toContain("Add it back above");
     expect(container.textContent).not.toContain("Add the department above");
     expect(container.textContent).not.toContain("Quality signs the final release");
+  });
+
+  it("offers a department picker on a row that matched nothing", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "IC Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+        onSeatDepartment={async () => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Department for the Approved By approval (row 1)" })).toBeTruthy();
+  });
+
+  it("renders no picker when the caller supplies no handler", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "IC Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Department for the Approved By approval (row 1)" })).toBeNull();
+  });
+
+  it("offers no picker on a row that is already seated", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "Production Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set(["d-mfg"])}
+        onSeatDepartment={async () => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Department for the Approved By approval (row 1)" })).toBeNull();
+  });
+
+  // Quality signs the final release; the transition guard refuses to release an
+  // SOP whose Quality approver holds a seat. A picker here would invite the
+  // author to create the one seat that blocks their own release.
+  it("offers no picker on the quality-gate row", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Quality Approval", position: "Quality Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+        onSeatDepartment={async () => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Department for the Quality Approval approval (row 1)" })).toBeNull();
+  });
+
+  // FIX 2: an already-seated department is deliberately NOT excluded from another unresolved
+  // row's options. This is what makes a lost document write repairable (the seat exists with no
+  // departmentCode, reads "No match", and needs its own department back in the list) and what
+  // lets two legacy rows naming the same department both map to it. Quality stays excluded — it
+  // is never a seat.
+  it("keeps a seated department available to another unresolved row, but still excludes quality gate", () => {
+    const departments = [
+      dept("d-mfg", "MFG", "Manufacturing/Production"),
+      dept("d-eng", "ENG", "Engineering"),
+      dept("d-qas", "QAS", "Quality", true),
+    ];
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "IC Manager" })]}
+        departments={departments}
+        seatedDepartmentIds={new Set(["d-mfg"])}
+        onSeatDepartment={async () => {}}
+      />,
+    );
+    // The options live in a portal (ThemedSelect renders its listbox via createPortal to
+    // document.body), so they only exist once the trigger is open, and only `screen` — not the
+    // render() `container` — reaches them.
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval (row 1)" }));
+    const text = screen.getByRole("listbox").textContent ?? "";
+    expect(text).toContain("ENG");
+    expect(text).toContain("MFG");
+    expect(text).not.toContain("QAS");
+  });
+
+  it("reports the row index and chosen department to the handler", async () => {
+    const calls: Array<[number, string]> = [];
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[
+          row({ role: "Reviewed By", position: "Production Manager" }),
+          row({ role: "Approved By", position: "IC Manager" }),
+        ]}
+        departments={[dept("d-mfg", "MFG", "Manufacturing/Production"), dept("d-eng", "ENG", "Engineering")]}
+        seatedDepartmentIds={new Set(["d-mfg"])}
+        onSeatDepartment={async (index, departmentId) => {
+          calls.push([index, departmentId]);
+        }}
+      />,
+    );
+    // Index 1 is the unresolved row; index 0 already resolved by position.
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval (row 2)" }));
+    fireEvent.click(screen.getByRole("option", { name: /ENG/ }));
+    await waitFor(() => expect(calls).toEqual([[1, "d-eng"]]));
+  });
+
+  // FIX 1: the row currently mid-write must read as in-flight, never as a deletion that never
+  // happened. Before this fix, a departmentCode write that landed before seatedDepartmentIds
+  // caught up made every successful mapping show "Seat removed" for ~250-700ms.
+  it("shows an in-flight label while a mapping is being written, and suppresses the seat-removed note for it", async () => {
+    let finishWrite: () => void = () => {};
+    const writeInFlight = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Reviewed By", departmentCode: "MFG" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+        onSeatDepartment={() => writeInFlight}
+      />,
+    );
+
+    // Before any click: this row resolved by departmentCode but its seat is not in
+    // seatedDepartmentIds yet, so it reads "seat-removed" and the note is present.
+    expect(screen.getByText("Seat removed")).toBeTruthy();
+    expect(screen.getByText(/Seat removed:/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Reviewed By approval (row 1)" }));
+    fireEvent.click(screen.getByRole("option", { name: /MFG/ }));
+
+    expect(await screen.findByText("Adding seat…")).toBeTruthy();
+    expect(screen.queryByText("Seat removed")).toBeNull();
+    expect(screen.queryByText(/Seat removed:/)).toBeNull();
+
+    finishWrite();
+    await waitFor(() => expect(screen.queryByText("Adding seat…")).toBeNull());
+  });
+
+  // FIX 3: the roster's shared busy lock must reach these pickers too, not just each row's own
+  // pending key — otherwise a second row's trigger stays clickable while another write is in
+  // flight, and clicking it calls nothing, sets no error, and leaves no trace.
+  it("disables the picker when seatingDisabled is true", () => {
+    render(
+      <ConvertedApprovalsNotice
+        approvals={[row({ role: "Approved By", position: "IC Manager" })]}
+        departments={DEPARTMENTS}
+        seatedDepartmentIds={new Set()}
+        onSeatDepartment={async () => {}}
+        seatingDisabled
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Department for the Approved By approval (row 1)" })).toBeDisabled();
   });
 });

@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertTriangle, Check, ShieldCheck } from "lucide-react";
-import { useMemo } from "react";
+import { AlertTriangle, Check, Loader2, ShieldCheck } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { mapApprovalsToDepartments, type ApprovalMapping } from "@/domain/sop/approval-mapping";
 import type { SopApproval } from "@/domain/sop/schema";
@@ -28,9 +29,18 @@ import type { SopApproval } from "@/domain/sop/schema";
  */
 
 type RowStatus = "seated" | "quality-gate" | "seat-removed" | "no-match";
+/**
+ * What the status cell actually shows. "pending" is never derived by `toRow` — it is a
+ * render-time override for the row currently mid-write (see `pending` state below), so a
+ * successful mapping never has a moment where it reads "Seat removed" for a seat that was in
+ * fact just created.
+ */
+type DisplayStatus = RowStatus | "pending";
 
 interface NoticeRow {
   key: string;
+  /** This row's position in `approvals`, so a picker action can name which row it is for. */
+  index: number;
   /** What the original document called this approval, e.g. "Reviewed By". */
   documentRole: string;
   /**
@@ -43,14 +53,16 @@ interface NoticeRow {
   status: RowStatus;
 }
 
-const STATUS_LABEL: Record<RowStatus, string> = {
+const STATUS_LABEL: Record<DisplayStatus, string> = {
   seated: "Seat added",
   "quality-gate": "Final release",
   "seat-removed": "Seat removed",
   "no-match": "No match",
+  pending: "Adding seat…",
 };
 
-function StatusIcon({ status }: { status: RowStatus }) {
+function StatusIcon({ status }: { status: DisplayStatus }) {
+  if (status === "pending") return <Loader2 size={13} className="shrink-0 animate-spin text-ink-tertiary" aria-hidden />;
   if (status === "quality-gate") return <ShieldCheck size={13} className="shrink-0 text-emerald-700" aria-hidden />;
   if (status === "seated") return <Check size={13} className="shrink-0 text-emerald-700" aria-hidden />;
   return <AlertTriangle size={13} className="shrink-0 text-warn" aria-hidden />;
@@ -73,6 +85,7 @@ function toRow(mapping: ApprovalMapping, index: number, seatedDepartmentIds: Rea
 
   return {
     key: `${approval.role}-${index}`,
+    index,
     documentRole: approval.role.trim() || "Approval row",
     documentPosition: approval.position.trim(),
     mappedTo: department?.name ?? "",
@@ -84,17 +97,45 @@ export function ConvertedApprovalsNotice({
   approvals,
   departments,
   seatedDepartmentIds,
+  onSeatDepartment,
+  seatingDisabled = false,
 }: {
   approvals: readonly SopApproval[];
   departments: readonly Department[];
   seatedDepartmentIds: ReadonlySet<string>;
+  /**
+   * Turn an unresolved row into a real seat. Absent — a read-only viewer, or an
+   * SOP past draft — renders the table exactly as it always was: a report.
+   */
+  onSeatDepartment?: (approvalIndex: number, departmentId: string) => Promise<void>;
+  /**
+   * The roster's own busy lock (`busy !== null`), so this table's pickers cannot fire a second
+   * write while any other roster action — including another row's own pending write — is already
+   * in flight. Without this, a second row's picker stays enabled and clicking it calls nothing,
+   * sets no error, and leaves no trace.
+   */
+  seatingDisabled?: boolean;
 }) {
+  const [pending, setPending] = useState<string | null>(null);
+
   const rows = useMemo(
     () =>
       mapApprovalsToDepartments(approvals, departments).map((mapping, index) =>
         toRow(mapping, index, seatedDepartmentIds),
       ),
     [approvals, departments, seatedDepartmentIds],
+  );
+
+  // Quality is the release gate, never a seat — that exclusion mirrors the roster's own add-row.
+  // Already-seated departments are deliberately NOT excluded here (unlike the roster's add-row):
+  // a lost document write can leave a seat with no departmentCode, which reads "No match" and
+  // needs exactly that seated department back in its options to be repairable; and the spec
+  // treats two legacy rows naming the same department as normal, so both must be able to map to
+  // it. seatConvertedApproval is what keeps re-selecting an already-seated department safe — it
+  // skips the seat write so an existing reviewer is never wiped.
+  const seatableDepartments = useMemo(
+    () => departments.filter((d) => !d.isQualityGate),
+    [departments],
   );
 
   // Nothing to verify when the legacy document had no approval table.
@@ -121,7 +162,11 @@ export function ConvertedApprovalsNotice({
   if (rows.some((row) => row.status === "no-match")) {
     notes.push("No match: nothing in this workspace matched the row. Add the department above if the approval is still required.");
   }
-  if (rows.some((row) => row.status === "seat-removed")) {
+  // A row that is mid-write (`pending === row.key`) must never trigger this note: its seat has
+  // not actually been removed, it just has not landed in `seatedDepartmentIds` yet. Rendering the
+  // deletion note for a write in progress would tell the author to redo something that is already
+  // happening.
+  if (rows.some((row) => row.status === "seat-removed" && pending !== row.key)) {
     notes.push("Seat removed: the seat was created and then deleted. Add it back above if the approval is still required.");
   }
 
@@ -153,23 +198,53 @@ export function ConvertedApprovalsNotice({
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {rows.map((row) => (
-              <tr key={row.key}>
-                <th scope="row" className="px-4 py-2.5 align-middle text-[13px] font-medium text-ink">
-                  {row.documentRole}
-                </th>
-                <td className="px-4 py-2.5 align-middle text-[13px] text-ink-secondary">
-                  {row.documentPosition || "—"}
-                </td>
-                <td className="px-4 py-2.5 align-middle text-[13px] text-ink">{row.mappedTo || "—"}</td>
-                <td className="px-4 py-2.5 align-middle">
-                  <span className="inline-flex items-center gap-1.5 text-xs text-ink-secondary">
-                    <StatusIcon status={row.status} />
-                    {STATUS_LABEL[row.status]}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {rows.map((row) => {
+              // Precedence: a row mid-write always shows "pending", regardless of what its
+              // derived status happens to be at this instant — that derived status is exactly
+              // the stale "seat-removed" the fix above exists to override.
+              const displayStatus: DisplayStatus = pending === row.key ? "pending" : row.status;
+              return (
+                <tr key={row.key}>
+                  <th scope="row" className="px-4 py-2.5 align-middle text-[13px] font-medium text-ink">
+                    {row.documentRole}
+                  </th>
+                  <td className="px-4 py-2.5 align-middle text-[13px] text-ink-secondary">
+                    {row.documentPosition || "—"}
+                  </td>
+                  <td className="px-4 py-2.5 align-middle text-[13px] text-ink">
+                    {onSeatDepartment && (row.status === "no-match" || row.status === "seat-removed") ? (
+                      <ThemedSelect
+                        variant="sop"
+                        ariaLabel={`Department for the ${row.documentRole} approval (row ${row.index + 1})`}
+                        value=""
+                        disabled={pending === row.key || seatingDisabled}
+                        menuMaxHeight={420}
+                        options={[
+                          { value: "", label: "Choose a department…" },
+                          ...seatableDepartments.map((department) => ({
+                            value: department.id,
+                            label: `${department.code} · ${department.name}`,
+                          })),
+                        ]}
+                        onChange={(departmentId) => {
+                          if (!departmentId) return;
+                          setPending(row.key);
+                          void onSeatDepartment(row.index, departmentId).finally(() => setPending(null));
+                        }}
+                      />
+                    ) : (
+                      row.mappedTo || "—"
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 align-middle">
+                    <span className="inline-flex items-center gap-1.5 text-xs text-ink-secondary">
+                      <StatusIcon status={displayStatus} />
+                      {STATUS_LABEL[displayStatus]}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

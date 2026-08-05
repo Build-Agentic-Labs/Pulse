@@ -34,33 +34,46 @@ describe("canDeleteSop", () => {
 
   // The bug this module exists to fix: the list hid the control on any non-draft, so a
   // manager could not remove an SOP sitting in review even though the database allows it.
-  it("allows a manager to delete an SOP that is mid-workflow", () => {
+  it("allows a manager of the owning department to delete an SOP mid-workflow", () => {
     expect(canDeleteSop(ctx({ status: "in_review", isManager: true }))).toBe(true);
     expect(canDeleteSop(ctx({ status: "approved", isManager: true }))).toBe(true);
   });
 
-  it("refuses a non-manager on an SOP that is mid-workflow", () => {
+  // The database still requires a manager past draft/obsolete. A department author who
+  // is not a manager must not be shown a control the database would reject.
+  it("refuses a non-manager on an SOP that is mid-workflow, even in their own department", () => {
     expect(canDeleteSop(ctx({ status: "in_review", isManager: false }))).toBe(false);
     expect(canDeleteSop(ctx({ status: "approved", isManager: false }))).toBe(false);
   });
 
-  // enforce_sop_department_content_edit fires only when old.status = 'draft'.
   it("refuses another department's draft", () => {
     expect(canDeleteSop(ctx({ status: "draft", isDepartmentMember: false }))).toBe(false);
   });
 
-  it("ignores department membership once the SOP has left draft", () => {
-    expect(
-      canDeleteSop(ctx({ status: "in_review", isManager: true, isDepartmentMember: false })),
-    ).toBe(true);
-    expect(
-      canDeleteSop(ctx({ status: "obsolete", isManager: false, isDepartmentMember: false })),
-    ).toBe(true);
+  // THE POLICY THIS MODULE ENFORCES BEYOND THE DATABASE. A department's documents belong
+  // to that department at every status. Being a workspace owner administers the
+  // workspace; it does not confer ownership of Quality's controlled documents. The
+  // database would permit these today — the UI must not offer them.
+  it("refuses another department's SOP at every status, even for a manager", () => {
+    for (const status of ["in_review", "approved", "obsolete"] as const) {
+      expect(
+        canDeleteSop(ctx({ status, isManager: true, isDepartmentMember: false })),
+      ).toBe(false);
+    }
   });
 
-  it("allows a departmentless draft regardless of membership", () => {
+  it("allows a member of the owning department to delete an obsolete SOP without being a manager", () => {
+    expect(canDeleteSop(ctx({ status: "obsolete", isManager: false }))).toBe(true);
+  });
+
+  // An orphan has no authors to speak for it, so a manager clears it — otherwise nothing
+  // could ever remove the department-less SOPs left by earlier conversions.
+  it("lets a manager delete a department-less SOP, and no one else", () => {
     expect(
-      canDeleteSop(ctx({ status: "draft", hasDepartment: false, isDepartmentMember: false })),
+      canDeleteSop(ctx({ status: "draft", hasDepartment: false, isDepartmentMember: false, isManager: true })),
     ).toBe(true);
+    expect(
+      canDeleteSop(ctx({ status: "draft", hasDepartment: false, isDepartmentMember: false, isManager: false })),
+    ).toBe(false);
   });
 });

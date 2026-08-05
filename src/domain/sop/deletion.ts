@@ -54,12 +54,22 @@ export function canDeleteSop({
   // Terminal by design: an effective SOP is superseded by a new version, never removed.
   if (status === "effective") return false;
 
-  // Draft and obsolete are freely removable; anything mid-workflow needs a manager.
-  if (!(status === "draft" || status === "obsolete" || isManager)) return false;
+  // POLICY, stricter than the database: an SOP belongs to its department, and that
+  // department's authors own its lifecycle — at every status, not just draft. Being a
+  // workspace owner is an administrative role; it does not confer ownership of another
+  // department's controlled documents. The database currently drops its department
+  // check once an SOP leaves draft and falls back to `is_manager`, which would let any
+  // owner delete another department's in-review document. Until the guard is tightened
+  // to match, this keeps the UI from offering that.
+  //
+  // An SOP with no owning department has no authors to speak for it, so removing that
+  // orphan falls to a manager — otherwise nothing could ever clear it.
+  if (!(hasDepartment ? isDepartmentMember : isManager)) return false;
 
-  // The department guard fires on drafts only, so a manager clearing an in_review SOP
-  // is not subject to it — but nobody may delete another department's draft.
-  if (status === "draft" && hasDepartment && !isDepartmentMember) return false;
+  // DATABASE, which the UI must not be looser than: past draft/obsolete, the transition
+  // guard still demands a manager. Showing a delete control to a department author on an
+  // in-review SOP would produce a failure at the database instead of an absent button.
+  if (!(status === "draft" || status === "obsolete" || isManager)) return false;
 
   return true;
 }

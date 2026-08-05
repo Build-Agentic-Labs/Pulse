@@ -1,7 +1,7 @@
 # Mapping converted approvers onto real seats
 
 **Date:** 2026-08-04
-**Status:** Approved, not yet implemented
+**Status:** Implemented on `feat/map-converted-approvers` (pending live verification)
 **Area:** `src/components/sop/converted-approvals-notice.tsx`,
 `src/components/sop/sop-roster-editor.tsx`, `src/components/sop/sop-editor.tsx`
 

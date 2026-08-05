@@ -20,6 +20,7 @@
 - Picker renders only when the callback prop is supplied. Absent → the table renders byte-identically to today.
 - Rows are identified by **array index** (`approvalIndex`) — approval rows have no id and can duplicate (Control Plan has `Robbie Miller` ×3).
 - Domain logic in `src/domain/` stays pure with a test file beside it (CLAUDE.md). No new CSS in `app/globals.css`.
+- **Every fixture `position` must be an EXACT entry of `STANDARD_POSITION_TITLES`** (`src/domain/departments.ts:27-37`) — `findByPositionTitle` compares whole normalized strings, so an invented-but-plausible title resolves to nothing, the row silently becomes `no-match`, and any test asserting a different status passes for the wrong reason. This defect was caught three separate times on this branch. Known-good: `"Production Manager"` = exact MFG, `"Quality Manager"` = exact QAS, `"IC Manager"` = deliberately in no list (that is how a fixture stays `no-match`). Run `mapApprovalsToDepartments` against a new fixture before trusting the test that uses it.
 - **`ThemedSelect` is NOT a native `<select>`** — it is a trigger `<button aria-label=…>` plus a `role="listbox"` menu of `role="option"` buttons. Drive it in tests the way `src/components/themed-select.test.tsx:29-34` already does, and never with `fireEvent.change`:
 
 ```tsx
@@ -171,7 +172,7 @@ Add to `src/components/sop/converted-approvals-notice.test.tsx`. The file alread
   it("offers no picker on a row that is already seated", () => {
     render(
       <ConvertedApprovalsNotice
-        approvals={[row({ role: "Approved By", position: "Manufacturing/Production Manager" })]}
+        approvals={[row({ role: "Approved By", position: "Production Manager" })]}
         departments={DEPARTMENTS}
         seatedDepartmentIds={new Set(["d-mfg"])}
         onSeatDepartment={async () => {}}
@@ -186,7 +187,7 @@ Add to `src/components/sop/converted-approvals-notice.test.tsx`. The file alread
   it("offers no picker on the quality-gate row", () => {
     render(
       <ConvertedApprovalsNotice
-        approvals={[row({ role: "Quality Approval", position: "Quality" })]}
+        approvals={[row({ role: "Quality Approval", position: "Quality Manager" })]}
         departments={DEPARTMENTS}
         seatedDepartmentIds={new Set()}
         onSeatDepartment={async () => {}}
@@ -219,7 +220,7 @@ Add to `src/components/sop/converted-approvals-notice.test.tsx`. The file alread
     render(
       <ConvertedApprovalsNotice
         approvals={[
-          row({ role: "Reviewed By", position: "Manufacturing/Production Manager" }),
+          row({ role: "Reviewed By", position: "Production Manager" }),
           row({ role: "Approved By", position: "IC Manager" }),
         ]}
         departments={[dept("d-mfg", "MFG", "Manufacturing/Production"), dept("d-eng", "ENG", "Engineering")]}

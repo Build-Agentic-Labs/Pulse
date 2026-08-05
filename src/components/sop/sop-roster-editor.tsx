@@ -36,6 +36,11 @@ interface RosterEditorProps {
    * conversion decided on their behalf"; absent (hand-authored) means there is nothing to verify.
    */
   convertedApprovals?: readonly SopApproval[];
+  /**
+   * Persist the author's department choice onto the legacy approval row. Supplied
+   * only when the document is editable; its absence is what hides the picker.
+   */
+  onMapApproval?: (approvalIndex: number, departmentCode: string) => Promise<void>;
   onChanged: () => Promise<void> | void;
 }
 
@@ -49,7 +54,14 @@ interface RosterEditorProps {
  * Editable only while the SOP is a draft — the database freezes the roster on submit, and after
  * that only an admin may reassign an approver.
  */
-export function SopRosterEditor({ sopId, departments, seats, convertedApprovals, onChanged }: RosterEditorProps) {
+export function SopRosterEditor({
+  sopId,
+  departments,
+  seats,
+  convertedApprovals,
+  onMapApproval,
+  onChanged,
+}: RosterEditorProps) {
   const [members, setMembers] = useState<Map<string, RosterMember[]>>(new Map());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -153,6 +165,18 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
     () => new Set(seats.map((seat) => seat.departmentId)),
     [seats],
   );
+
+  async function seatConvertedApproval(approvalIndex: number, departmentId: string) {
+    const department = departments.find((item) => item.id === departmentId);
+    if (!department || !onMapApproval) return;
+    await guarded(`map-${approvalIndex}`, async () => {
+      // Document write FIRST. If the seat write then fails the row reads
+      // "Seat removed" — accurate, still offers its picker, and a retry heals it.
+      // Reversed, a failure would leave a seat under a row still claiming "No match".
+      await onMapApproval(approvalIndex, department.code);
+      await upsertSeat({ sopId, departmentId, rasic: "responsible", signerId: null });
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -416,6 +440,7 @@ export function SopRosterEditor({ sopId, departments, seats, convertedApprovals,
         approvals={convertedApprovals}
         departments={departments}
         seatedDepartmentIds={seatedDepartmentIds}
+        onSeatDepartment={onMapApproval ? seatConvertedApproval : undefined}
       />
     ) : null}
     </div>

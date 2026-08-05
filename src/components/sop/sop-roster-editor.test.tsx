@@ -3,7 +3,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Department } from "@/domain/departments";
-import { listProfileNames, type SopReviewSeat } from "@/lib/sop/review";
+import { listProfileNames, upsertSeat, type SopReviewSeat } from "@/lib/sop/review";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import { SopRosterEditor } from "./sop-roster-editor";
 
@@ -179,5 +179,35 @@ describe("SopRosterEditor", () => {
         "Author Member — Author access only — choose a reviewer or approver",
       ),
     );
+  });
+});
+
+describe("SopRosterEditor — seating a converted approval", () => {
+  it("writes the approval row before creating the seat", async () => {
+    const order: string[] = [];
+    vi.mocked(upsertSeat).mockReset();
+    vi.mocked(upsertSeat).mockImplementation(async () => {
+      order.push("seat");
+    });
+
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={[
+          { id: "d-eng", workspaceId: "ws", code: "ENG", name: "Engineering", isQualityGate: false },
+        ]}
+        seats={[]}
+        convertedApprovals={[{ role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" }]}
+        onMapApproval={async () => {
+          order.push("document");
+        }}
+        onChanged={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval" }));
+    fireEvent.click(screen.getByRole("option", { name: /ENG/ }));
+
+    await waitFor(() => expect(order).toEqual(["document", "seat"]));
   });
 });

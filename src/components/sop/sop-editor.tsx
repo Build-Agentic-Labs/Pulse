@@ -1366,6 +1366,20 @@ export function SopEditor({
     }
   }
 
+  /**
+   * Record the author's department choice on the legacy approval row. This is what
+   * makes the mapping durable: mapApprovalsToDepartments resolves by departmentCode
+   * before falling back to the position title, so the row re-derives as seated
+   * instead of reading "No match" forever.
+   */
+  async function handleMapApproval(approvalIndex: number, departmentCode: string) {
+    update({
+      approvals: sop.approvals.map((approval, index) =>
+        index === approvalIndex ? { ...approval, departmentCode } : approval,
+      ),
+    });
+  }
+
   async function handleRequestFinalApproval() {
     if (requestingFinalApproval || finalApprovalRequested) return;
     setRequestingFinalApproval(true);
@@ -2052,6 +2066,7 @@ export function SopEditor({
                     departments={approvalDepartments}
                     seats={approvalSeats}
                     convertedApprovals={sop.source === "converted" ? sop.approvals : undefined}
+                    onMapApproval={handleMapApproval}
                     onChanged={() => refreshApprovalRouting({ background: true })}
                   />
                 ) : (
@@ -2071,7 +2086,9 @@ export function SopEditor({
                         );
                       }) : (
                         <p className="px-4 py-8 text-center text-xs text-ink-tertiary">
-                          Save the draft to configure department routing.
+                          {hasPersistedSop
+                            ? "No department routing configured."
+                            : "Save the draft to configure department routing."}
                         </p>
                       )}
                     </div>

@@ -62,9 +62,14 @@ export function canDeleteSop({
   // owner delete another department's in-review document. Until the guard is tightened
   // to match, this keeps the UI from offering that.
   //
-  // An SOP with no owning department has no authors to speak for it, so removing that
-  // orphan falls to a manager — otherwise nothing could ever clear it.
-  if (!(hasDepartment ? isDepartmentMember : isManager)) return false;
+  // An SOP with NO owning department is deliberately NOT held to this. Nobody can be a
+  // member of no-department, so requiring membership would make orphans undeletable,
+  // and requiring a manager would revoke something people actually do: three of the
+  // four department-less SOPs ever deleted in production were removed by a non-manager
+  // editor clearing up their own converted drafts. Orphans also cannot leave draft —
+  // `draft->in_review` raises 'Assign an owning department before submitting for
+  // review' — so this stays confined to drafts in practice.
+  if (hasDepartment && !isDepartmentMember) return false;
 
   // DATABASE, which the UI must not be looser than: past draft/obsolete, the transition
   // guard still demands a manager. Showing a delete control to a department author on an

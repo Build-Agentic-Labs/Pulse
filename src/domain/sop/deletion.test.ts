@@ -66,14 +66,22 @@ describe("canDeleteSop", () => {
     expect(canDeleteSop(ctx({ status: "obsolete", isManager: false }))).toBe(true);
   });
 
-  // An orphan has no authors to speak for it, so a manager clears it — otherwise nothing
-  // could ever remove the department-less SOPs left by earlier conversions.
-  it("lets a manager delete a department-less SOP, and no one else", () => {
+  // Nobody can be a member of no-department, so membership cannot be the test here.
+  // Requiring a manager instead would revoke real behaviour: three of the four
+  // department-less SOPs ever deleted in production were removed by a non-manager
+  // editor clearing up converted drafts. Any editor may clear an orphan.
+  it("lets any editor delete a department-less SOP", () => {
+    expect(
+      canDeleteSop(ctx({ status: "draft", hasDepartment: false, isDepartmentMember: false, isManager: false })),
+    ).toBe(true);
     expect(
       canDeleteSop(ctx({ status: "draft", hasDepartment: false, isDepartmentMember: false, isManager: true })),
     ).toBe(true);
+  });
+
+  it("still refuses a department-less SOP to someone who cannot write SOPs", () => {
     expect(
-      canDeleteSop(ctx({ status: "draft", hasDepartment: false, isDepartmentMember: false, isManager: false })),
+      canDeleteSop(ctx({ status: "draft", hasDepartment: false, canEditSops: false, isManager: true })),
     ).toBe(false);
   });
 });

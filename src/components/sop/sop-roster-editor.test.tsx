@@ -3,7 +3,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Department } from "@/domain/departments";
-import { listProfileNames, type SopReviewSeat } from "@/lib/sop/review";
+import { listProfileNames, removeSeat, upsertSeat, type SopReviewSeat } from "@/lib/sop/review";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import { SopRosterEditor } from "./sop-roster-editor";
 
@@ -179,5 +179,105 @@ describe("SopRosterEditor", () => {
         "Author Member — Author access only — choose a reviewer or approver",
       ),
     );
+  });
+});
+
+describe("SopRosterEditor — seating a converted approval", () => {
+  beforeEach(() => {
+    vi.mocked(upsertSeat).mockReset();
+    vi.mocked(removeSeat).mockReset();
+  });
+
+  it("writes the approval row before creating the seat", async () => {
+    const order: string[] = [];
+    vi.mocked(upsertSeat).mockImplementation(async () => {
+      order.push("seat");
+    });
+
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={[
+          { id: "d-eng", workspaceId: "ws", code: "ENG", name: "Engineering", isQualityGate: false },
+        ]}
+        seats={[]}
+        convertedApprovals={[{ role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" }]}
+        onMapApproval={async () => {
+          order.push("document");
+        }}
+        onChanged={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval (row 1)" }));
+    fireEvent.click(screen.getByRole("option", { name: /ENG/ }));
+
+    await waitFor(() => expect(order).toEqual(["document", "seat"]));
+  });
+
+  // FIX 2: re-upserting an already-seated department with signerId: null would wipe any
+  // reviewer already assigned to that seat. The document write must still happen — it is what
+  // makes the row resolve — but the seat write must be skipped entirely.
+  it("does not call upsertSeat when the chosen department is already seated, but still writes the document", async () => {
+    vi.mocked(upsertSeat).mockResolvedValue(undefined);
+    const documentWrites: Array<[number, string]> = [];
+
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={[
+          { id: "dept-mfg", workspaceId: "workspace", code: "MFG", name: "Manufacturing/Production", isQualityGate: false },
+        ]}
+        seats={[manufacturingSeat]}
+        convertedApprovals={[{ role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" }]}
+        onMapApproval={async (index, code) => {
+          documentWrites.push([index, code]);
+        }}
+        onChanged={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Approved By approval (row 1)" }));
+    fireEvent.click(screen.getByRole("option", { name: /MFG/ }));
+
+    await waitFor(() => expect(documentWrites).toEqual([[0, "MFG"]]));
+    expect(upsertSeat).not.toHaveBeenCalled();
+  });
+
+  // FIX 3: the roster's shared busy lock (`busy !== null`) must reach the notice's pickers too,
+  // not just each row's own pending key — otherwise a second row's trigger stays clickable while
+  // an unrelated roster write is in flight.
+  it("disables the converted-approval picker while another roster action is busy", async () => {
+    let resolveRemove: () => void = () => {};
+    vi.mocked(removeSeat).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRemove = resolve;
+        }),
+    );
+
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={[
+          { id: "dept-mfg", workspaceId: "workspace", code: "MFG", name: "Manufacturing/Production", isQualityGate: false },
+        ]}
+        seats={[manufacturingSeat]}
+        convertedApprovals={[{ role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" }]}
+        onMapApproval={async () => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove MFG from the roster" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Department for the Approved By approval (row 1)" }),
+      ).toBeDisabled(),
+    );
+
+    resolveRemove();
+    await waitFor(() => expect(removeSeat).toHaveBeenCalled());
   });
 });

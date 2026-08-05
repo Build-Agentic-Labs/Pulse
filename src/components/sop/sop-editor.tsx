@@ -1373,11 +1373,11 @@ export function SopEditor({
    * instead of reading "No match" forever.
    */
   async function handleMapApproval(approvalIndex: number, departmentCode: string) {
-    update({
-      approvals: sop.approvals.map((approval, index) =>
+    update((current) => ({
+      approvals: current.approvals.map((approval, index) =>
         index === approvalIndex ? { ...approval, departmentCode } : approval,
       ),
-    });
+    }));
   }
 
   async function handleRequestFinalApproval() {

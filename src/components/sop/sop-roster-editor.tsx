@@ -174,6 +174,11 @@ export function SopRosterEditor({
       // "Seat removed" — accurate, still offers its picker, and a retry heals it.
       // Reversed, a failure would leave a seat under a row still claiming "No match".
       await onMapApproval(approvalIndex, department.code);
+      // Already seated: either another legacy row already mapped here, or a previous pass
+      // created the seat and only the document write was lost. Either way, re-upserting with
+      // signerId: null would WIPE any reviewer already assigned to that seat. The document write
+      // above is enough to let this row resolve against the seat that already exists.
+      if (seatedDepartmentIds.has(departmentId)) return;
       await upsertSeat({ sopId, departmentId, rasic: "responsible", signerId: null });
     });
   }
@@ -441,6 +446,7 @@ export function SopRosterEditor({
         departments={departments}
         seatedDepartmentIds={seatedDepartmentIds}
         onSeatDepartment={onMapApproval ? seatConvertedApproval : undefined}
+        seatingDisabled={busy !== null}
       />
     ) : null}
     </div>

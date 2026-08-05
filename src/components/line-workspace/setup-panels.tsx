@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, ListChecks, Plus, Trash2, Wrench } from "lucide-react";
+import { Eye, FileText, ListChecks, Plus, Trash2, Wrench } from "lucide-react";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import {
@@ -455,9 +455,15 @@ export function WorkInstructionsPanel({
   // project behind it cannot produce a shareable document.
   const projectId = product.projectId;
 
-  function printHref(task: Task) {
-    return `/projects/${projectId}/planner/work-instructions/print?taskIds=${task.id}&scenarioId=${task.scenarioId}`;
+  function printHref(tasks: Task[]) {
+    const ids = tasks.map((task) => task.id).join(",");
+    const scenarioId = tasks[0]?.scenarioId ?? "";
+    return `/projects/${projectId}/planner/work-instructions/print?taskIds=${ids}&scenarioId=${scenarioId}`;
   }
+
+  // Batch preview stacks one document per task in a single print job, so a whole
+  // line can go to the printer in one pass.
+  const previewAllHref = workTasks.length > 0 ? printHref(workTasks) : "";
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-6">
@@ -474,14 +480,22 @@ export function WorkInstructionsPanel({
           </p>
         </div>
         {projectId ? (
-          <Link
-            href={`/projects/${projectId}/planner/work-instructions/print?blank=1`}
-            target="_blank"
-            className="ui-btn-ghost h-9 shrink-0 gap-2 px-3"
-          >
-            <FileText size={15} />
-            Blank template
-          </Link>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {previewAllHref ? (
+              <Link href={previewAllHref} target="_blank" className="ui-btn-ghost h-9 gap-2 px-3">
+                <Eye size={15} />
+                Preview all ({workTasks.length})
+              </Link>
+            ) : null}
+            <Link
+              href={`/projects/${projectId}/planner/work-instructions/print?blank=1`}
+              target="_blank"
+              className="ui-btn-ghost h-9 gap-2 px-3"
+            >
+              <FileText size={15} />
+              Blank template
+            </Link>
+          </div>
         ) : null}
       </header>
 
@@ -544,13 +558,13 @@ export function WorkInstructionsPanel({
                         </button>
                         {projectId ? (
                           <Link
-                            href={printHref(task)}
+                            href={printHref([task])}
                             target="_blank"
                             className="ui-btn-ghost h-7 shrink-0 gap-1.5 px-2 text-xs"
-                            title={`Generate the work instruction for ${task.name}`}
+                            title={`Preview the work instruction for ${task.name}`}
                           >
-                            <FileText size={13} />
-                            Generate
+                            <Eye size={13} />
+                            Preview
                           </Link>
                         ) : null}
                       </div>

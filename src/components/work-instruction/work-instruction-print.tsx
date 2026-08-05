@@ -17,7 +17,12 @@ import { NothingLoadingBlock } from "@/components/nothing-ui";
 import { loadPlannerStateFromSupabase } from "@/domain/supabase-planner";
 import type { PlannerState } from "@/domain/types";
 import { buildWorkInstruction } from "@/domain/work-instruction/build";
-import type { WorkInstruction } from "@/domain/work-instruction/schema";
+import {
+  DEFAULT_WORK_INSTRUCTION_LAYOUT,
+  WORK_INSTRUCTION_LAYOUTS,
+  type WorkInstruction,
+  type WorkInstructionLayout,
+} from "@/domain/work-instruction/schema";
 import { WorkInstructionDocument } from "./work-instruction-document";
 
 type LoadStatus = "loading" | "ready" | "empty" | "error";
@@ -30,11 +35,13 @@ export interface WorkInstructionPrintPreviewProps {
   blank?: boolean;
   /** Server-fetched first paint. An accelerant — the client load is the fallback, never skipped when this is absent. */
   initialPlannerState?: PlannerState;
+  /** Card-grid variant. Defaults to whatever the app generates today. */
+  layout?: WorkInstructionLayout;
   onReady?: () => void;
 }
 
 /** Build the requested instructions out of a loaded planner state, in the order asked for. */
-function buildFromState(state: PlannerState, taskIds: string[]): WorkInstruction[] {
+function buildFromState(state: PlannerState, taskIds: string[], layout: WorkInstructionLayout): WorkInstruction[] {
   const zoneById = new Map(state.zones.map((zone) => [zone.id, zone]));
   return taskIds
     .map((taskId) => state.tasks.find((task) => task.id === taskId))
@@ -44,6 +51,7 @@ function buildFromState(state: PlannerState, taskIds: string[]): WorkInstruction
         task,
         product: state.product,
         zone: task.zoneId ? zoneById.get(task.zoneId) : undefined,
+        layout,
       }),
     );
 }
@@ -58,18 +66,50 @@ function serverStateIsUsable(state: PlannerState | undefined, scenarioId?: strin
   return !scenarioId || state.scenario.id === scenarioId;
 }
 
-function PrintToolbar({ backHref, label }: { backHref: string; label: string }) {
+function PrintToolbar({
+  backHref,
+  label,
+  layout,
+  hrefForLayout,
+}: {
+  backHref: string;
+  label: string;
+  layout: WorkInstructionLayout;
+  hrefForLayout: (layoutId: string) => string;
+}) {
   return (
-    <div className="wi-print-chrome sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-surface px-4 py-2">
+    <div className="wi-print-chrome sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-2">
       <Link href={backHref} className="ui-btn-ghost h-8 gap-1.5 px-3">
         <ArrowLeft size={13} />
         Back
       </Link>
+
+      <div className="flex items-center gap-1 rounded border border-line p-0.5">
+        {Object.values(WORK_INSTRUCTION_LAYOUTS).map((option) => (
+          <Link
+            key={option.id}
+            href={hrefForLayout(option.id)}
+            aria-current={option.id === layout.id ? "page" : undefined}
+            className={`h-7 rounded px-2.5 text-xs leading-7 transition ${
+              option.id === layout.id ? "bg-surface-sunken font-semibold text-ink" : "text-ink-tertiary hover:text-ink"
+            }`}
+          >
+            {option.label}
+          </Link>
+        ))}
+      </div>
+
       <span className="flex-1" />
+
+      {/* Ledger landscape at 100% is easy to get wrong in the print dialog and
+          silently yields a shrunken Letter page, so the settings ride along. */}
+      <span className="hidden text-xs text-ink-tertiary lg:inline">
+        Print: Ledger 11&times;17 · Landscape · Margins none · Scale 100%
+      </span>
       <span className="ui-mono-label text-ink-tertiary">{label}</span>
       <button type="button" className="ui-btn-primary h-8 gap-1.5 px-3" onClick={() => window.print()}>
         <Printer size={13} />
-        Print
+        Print / Save PDF
       </button>
     </div>
   );
@@ -115,12 +155,13 @@ export function WorkInstructionPrintPreview({
   taskIds,
   blank,
   initialPlannerState,
+  layout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
   onReady,
 }: WorkInstructionPrintPreviewProps) {
   const seeded = blank
     ? [blankInstruction()]
     : serverStateIsUsable(initialPlannerState, scenarioId)
-      ? buildFromState(initialPlannerState, taskIds)
+      ? buildFromState(initialPlannerState, taskIds, layout)
       : [];
 
   const [instructions, setInstructions] = useState<WorkInstruction[]>(seeded);
@@ -156,7 +197,7 @@ export function WorkInstructionPrintPreview({
         setStatus("empty");
         return;
       }
-      const built = buildFromState(state, taskIds);
+      const built = buildFromState(state, taskIds, layout);
       setInstructions(built);
       setStatus(built.length > 0 ? "ready" : "empty");
     } catch (caught) {
@@ -164,7 +205,7 @@ export function WorkInstructionPrintPreview({
       setError(caught instanceof Error ? caught.message : "Could not load the work instruction.");
       setStatus("error");
     }
-  }, [blank, projectId, scenarioId, taskIds]);
+  }, [blank, layout, projectId, scenarioId, taskIds]);
 
   useEffect(() => {
     if (seededRef.current) {
@@ -181,6 +222,16 @@ export function WorkInstructionPrintPreview({
     if (status === "ready") onReady?.();
   }, [status, onReady]);
 
+  // Layout lives in the URL so a preview link carries the variant it was shared as.
+  const hrefForLayout = (layoutId: string) => {
+    const params = new URLSearchParams();
+    if (taskIds.length > 0) params.set("taskIds", taskIds.join(","));
+    if (scenarioId) params.set("scenarioId", scenarioId);
+    if (blank) params.set("blank", "1");
+    if (layoutId !== DEFAULT_WORK_INSTRUCTION_LAYOUT.id) params.set("v", layoutId.replace(/^v/, ""));
+    return `/projects/${projectId}/planner/work-instructions/print?${params.toString()}`;
+  };
+
   const label =
     instructions.length === 1
       ? instructions[0].meta.documentNumber || instructions[0].meta.title || "Work instruction"
@@ -188,7 +239,12 @@ export function WorkInstructionPrintPreview({
 
   return (
     <div className="wi-print-root h-[100dvh] overflow-y-auto bg-canvas">
-      <PrintToolbar backHref={`/projects/${projectId}/planner`} label={blank ? "Blank template" : label} />
+      <PrintToolbar
+        backHref={`/projects/${projectId}/planner`}
+        label={blank ? "Blank template" : label}
+        layout={layout}
+        hrefForLayout={hrefForLayout}
+      />
       {/* wi-print-body: the print stylesheet zeroes this padding, which would
           otherwise spill past the last sheet and print a blank trailing page. */}
       <div className="wi-print-body px-8 py-8">
@@ -209,7 +265,7 @@ export function WorkInstructionPrintPreview({
           </section>
         ) : (
           instructions.map((instruction) => (
-            <WorkInstructionDocument instruction={instruction} key={instruction.taskId} />
+            <WorkInstructionDocument instruction={instruction} layout={layout} key={instruction.taskId} />
           ))
         )}
       </div>

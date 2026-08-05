@@ -9,6 +9,10 @@
  * See docs/superpowers/specs/2026-08-04-assembly-work-instruction-design.md
  */
 
+import type { CardTextBudget } from "./split-instruction";
+
+export type { CardTextBudget };
+
 /** A photo bound to a step, already resolved to something an <img> can use. */
 export interface WorkInstructionPhoto {
   id: string;
@@ -140,18 +144,6 @@ export interface WorkInstructionSheet {
   cards: WorkInstructionCard[];
 }
 
-/** Cards per step sheet: the 3x2 grid is fixed, which is what makes pagination pure. */
-export const CARDS_PER_SHEET = 6;
-
-/**
- * Cards that share sheet 1 with the setup band.
- *
- * The setup band is sized to exactly one card row, so the bottom row of sheet 1
- * is a normal row of cards rather than white space. This is purely to conserve
- * sheets: an 8-step instruction is 2 sheets instead of 3.
- */
-export const CARDS_ON_FIRST_SHEET = 3;
-
 /**
  * A card-grid variant.
  *
@@ -170,12 +162,35 @@ export interface WorkInstructionLayout {
   cardsOnFirstSheet: number;
   /** CSS width of the photo column inside a card. */
   photoWidth: string;
-  instructionBudget: number;
-  continuationBudget: number;
+  /**
+   * What a first card's text box holds, in VISUAL LINES.
+   *
+   * MEASURED in the browser per card shape, never derived: for each, read
+   * `lineHeight` and `clientHeight` off the rendered `.wi-card-instruction` to
+   * get `lines`, and binary-search a detached probe of the same width for the
+   * longest single-line string to get `charsPerLine`. Measure the WORST CASE —
+   * a card crowded with all five check types and a six-tool list — because
+   * checks and tools steal lines from the text box.
+   *
+   * Lines, not characters. The box is `white-space: pre-wrap`, so a hard line
+   * break costs a full line however short it is; a character budget passed a
+   * 487-character step that rendered 20 lines into an 18-line box and clipped it.
+   * See `estimate-lines.ts`.
+   */
+  instruction: CardTextBudget;
+  /** Same, for a continuation card — no photo column, so text runs full width. */
+  continuation: CardTextBudget;
 }
 
+const MARGIN_LINES = 1;
+
 export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
-  /** 3x2. Six steps a sheet, 5.25in cards, 2.45in photo. */
+  /**
+   * 3x2. Six steps a sheet, 5.25in cards, 2.45in portrait photo.
+   *
+   * Budgets measured 2026-08-04: a crowded first card holds 16 lines at 45
+   * chars, a continuation 19 lines at 91.
+   */
   v1: {
     id: "v1",
     label: "6 per sheet",
@@ -183,12 +198,16 @@ export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
     cardsPerSheet: 6,
     cardsOnFirstSheet: 3,
     photoWidth: "2.45in",
-    instructionBudget: 600,
-    continuationBudget: 1700,
+    instruction: { lines: 16 - MARGIN_LINES, charsPerLine: 45 },
+    continuation: { lines: 19 - MARGIN_LINES, charsPerLine: 91 },
   },
   /**
-   * 2x2. Four steps a sheet, 7.94in cards, 4.40in photo — nearly double v1's
-   * photo width, at the cost of half again as many sheets.
+   * 2x2. Four steps a sheet, 7.94in cards, 4.40in LANDSCAPE photo — 80% wider
+   * than v1 and the right orientation for a shop photo, at the cost of roughly
+   * half again as many sheets.
+   *
+   * Budgets measured 2026-08-04: a crowded first card holds 16 lines at 58
+   * chars, a continuation 19 lines at 139.
    */
   v2: {
     id: "v2",
@@ -197,55 +216,24 @@ export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
     cardsPerSheet: 4,
     cardsOnFirstSheet: 2,
     photoWidth: "4.40in",
-    // MEASURED the same way as v1 (2026-08-04): worst case — five checks, six
-    // tools — is 954 on a first card and 2,587 on a continuation with the photo
-    // column dropped. Set ~7% under each.
-    instructionBudget: 880,
-    continuationBudget: 2400,
+    instruction: { lines: 16 - MARGIN_LINES, charsPerLine: 58 },
+    continuation: { lines: 19 - MARGIN_LINES, charsPerLine: 139 },
   },
 };
 
-export const DEFAULT_WORK_INSTRUCTION_LAYOUT = WORK_INSTRUCTION_LAYOUTS.v1;
-
 /**
- * Characters of instruction text a card can hold, by card shape.
+ * The layout the app generates unless a caller asks for another.
  *
- * MEASURED, not estimated (2026-08-04, Chrome at /design/work-instruction):
- * binary-search the rendered `.wi-card-instruction` box for the point where
- * scrollHeight first exceeds clientHeight.
- *
- * Measure the WORST CASE, not whatever the sample happens to contain — a card
- * crowded with all five check types and a six-tool list, since checks and tools
- * share the text column. The sample's own tightest card reads 725, which would
- * set a budget that clips on a busier step.
- *
- * Worst-case first card: 645 at a 1.20in header, 685 at 1.05in.
- *
- * Left at 600 through both. The convention is ~7% under, which would now allow
- * 640, but the value has survived two geometry changes untouched and raising it
- * buys almost nothing: steps are authored one sentence long, so a 600-character
- * card is already far past what a well-written step needs. Headroom here costs
- * nothing and protects against the next layout change.
- *
- * A first-principles estimate put this at 360, and would have split steps that
- * fit with room to spare. If the card layout changes, re-run the measurement
- * rather than re-deriving it.
+ * v2 since 2026-08-04: the bigger, landscape photo is what an operator actually
+ * works from, and steps authored one sentence long do not need six cards a
+ * sheet.
  */
-export const INSTRUCTION_BUDGET_CHARS = 600;
+export const DEFAULT_WORK_INSTRUCTION_LAYOUT = WORK_INSTRUCTION_LAYOUTS.v2;
 
-/**
- * Budget for a continuation card, which drops the photo column and runs text
- * the full card width.
- *
- * Worst-case measured the same way: 1,851 at a 1.20in header — roughly three
- * times a first card, which is why a long step usually needs only one
- * continuation. Crowding the checks does not move it, because they wrap across
- * the full width.
- *
- * Not re-measured since: the sample no longer contains a continuation to
- * measure against. Two changes have pulled in opposite directions — the shorter
- * header grew every card by 0.08in, and the always-reserved caption row took
- * 0.19in back — so the true figure is now nearer 1,760. 1700 remains under it.
- * Re-measure properly before raising this.
- */
-export const CONTINUATION_BUDGET_CHARS = 1700;
+// Convenience aliases for the default layout. Derived, never hardcoded, so
+// flipping DEFAULT_WORK_INSTRUCTION_LAYOUT cannot leave them describing a
+// layout the app no longer produces.
+export const CARDS_PER_SHEET = DEFAULT_WORK_INSTRUCTION_LAYOUT.cardsPerSheet;
+export const CARDS_ON_FIRST_SHEET = DEFAULT_WORK_INSTRUCTION_LAYOUT.cardsOnFirstSheet;
+export const INSTRUCTION_BUDGET = DEFAULT_WORK_INSTRUCTION_LAYOUT.instruction;
+export const CONTINUATION_BUDGET = DEFAULT_WORK_INSTRUCTION_LAYOUT.continuation;

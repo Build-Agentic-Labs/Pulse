@@ -13,9 +13,9 @@
  * continuation machinery still exists for real data that runs longer — see
  * `split-instruction.ts` and its tests — it is just not what the example models.
  *
- * Deliberately exercises the awkward cases: ten steps (so the document spans
- * the setup sheet plus two step sheets and ends part-filled) and a step with no
- * photo.
+ * Deliberately exercises the awkward cases: eleven steps, so the last sheet is
+ * part-filled and shows blank padding in BOTH layouts (v2 lands exactly full at
+ * ten), plus two steps with no photo.
  */
 
 import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "../step-photos";
@@ -123,6 +123,14 @@ const STEPS: SampleStep[] = [
     minutes: 3,
     tools: [],
     qualityCheck: check(["self_qc"]),
+  },
+  {
+    name: "Clear the work area",
+    instruction: "Remove all tooling and offcuts from the frame rail before inspection.",
+    minutes: 2,
+    tools: [],
+    qualityCheck: check(["self_qc"]),
+    noPhoto: true,
   },
   {
     name: "Final inspection",

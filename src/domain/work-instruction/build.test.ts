@@ -3,7 +3,7 @@ import { STEP_PHOTO_ATTACHMENTS_FIELD } from "../step-photos";
 import { STEP_TOOL_LISTS_FIELD } from "../step-tools";
 import type { Product, Task, Zone } from "../types";
 import { buildWorkInstruction } from "./build";
-import { INSTRUCTION_BUDGET_CHARS } from "./schema";
+import { INSTRUCTION_BUDGET } from "./schema";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -176,9 +176,8 @@ describe("buildWorkInstruction", () => {
   });
 
   it("keeps a step that fits on a single card", () => {
-    const task = makeTask({
-      manufacturingSteps: [{ id: "step-a", sequence: 1, instruction: "x".repeat(INSTRUCTION_BUDGET_CHARS) }],
-    });
+    const oneBox = "x".repeat(INSTRUCTION_BUDGET.charsPerLine * INSTRUCTION_BUDGET.lines);
+    const task = makeTask({ manufacturingSteps: [{ id: "step-a", sequence: 1, instruction: oneBox }] });
 
     const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
 
@@ -245,7 +244,10 @@ describe("buildWorkInstruction", () => {
 
   it("flags a card only when a single token is too wide to break", () => {
     const task = makeTask({
-      manufacturingSteps: [{ id: "step-a", sequence: 1, instruction: "x".repeat(INSTRUCTION_BUDGET_CHARS * 4) }],
+      // One unbreakable token, wider and taller than any card can hold.
+      manufacturingSteps: [
+        { id: "step-a", sequence: 1, instruction: "x".repeat(INSTRUCTION_BUDGET.charsPerLine * INSTRUCTION_BUDGET.lines * 4) },
+      ],
     });
 
     const wi = buildWorkInstruction({ task, product: makeProduct(), zone });

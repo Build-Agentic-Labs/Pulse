@@ -372,6 +372,37 @@ its blocks with ruled blank rows.
 
 Blank mode emits one setup sheet plus one step sheet of six empty cards.
 
+16. **v2 is the default, and the app generates it** (2026-08-04, fifth review).
+    `DEFAULT_WORK_INSTRUCTION_LAYOUT` is v2; the standalone `CARDS_PER_SHEET` /
+    `INSTRUCTION_BUDGET` constants are now *derived* from it, so flipping the
+    default cannot leave them describing a layout the app no longer produces.
+    Work Instructions rows carry a **Preview** action, the header a **Preview
+    all** batch and **Blank template**, and the print toolbar carries a v1/v2
+    switch (`?v=`) plus the ledger print settings.
+
+17. **The text budget is in LINES, not characters** (same review) — found on
+    real data, not the sample. FlexBoost CLU-SUB-10 step 1 is 487 characters
+    that pass an 880-character budget, and it was **silently clipped**: those
+    487 characters are 17 hard lines which `white-space: pre-wrap` renders as 20
+    visual lines into a box holding 18. A character count is only a proxy for
+    height when text actually flows, and the original measurement used
+    continuous filler that never wrapped like authored text.
+
+    `estimate-lines.ts` now models wrapping (`sum of max(1, ceil(len /
+    charsPerLine))` per hard line) and every budget is `{ lines, charsPerLine }`,
+    measured per card shape with a detached probe. The splitter packs whole hard
+    lines and **preserves the author's line breaks** — operators write steps as
+    blank-line-separated sub-actions, and reflowing them into a paragraph to save
+    space destroys the structure they wrote.
+
+    | | chars/line | lines (crowded) |
+    |---|---|---|
+    | v1 first / continuation | 45 / 91 | 16 / 19 |
+    | v2 first / continuation | 58 / 139 | 16 / 19 |
+
+    Verified across the whole FlexBoost project: 25 documents, 49 sheets, 97
+    step cards, **0 clipped**, 9 continuations, 72 real photos.
+
 ## Long steps: continuation cards
 
 A step whose text does not fit one card produces **several cards** — parts 1..n

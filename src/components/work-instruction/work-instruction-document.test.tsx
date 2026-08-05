@@ -66,14 +66,16 @@ function sheets(): HTMLElement[] {
 }
 
 describe("WorkInstructionDocument", () => {
-  it("fits a three-step instruction on one sheet", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3)])} />);
+  it("fits a first-row-sized instruction on one sheet", () => {
+    const cards = Array.from({ length: CARDS_ON_FIRST_SHEET }, (_, index) => makeCard(index + 1));
+    render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
 
     expect(sheets()).toHaveLength(1);
   });
 
   it("starts the procedure on the setup sheet to save a page", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
+    const cards = Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, index) => makeCard(index + 1));
+    render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
 
     const first = sheets()[0];
     expect(first.querySelector(".wi-setup-band")).not.toBeNull();
@@ -82,14 +84,22 @@ describe("WorkInstructionDocument", () => {
   });
 
   it("puts the ANA logo and document number in the header of every sheet", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
+    render(
+      <WorkInstructionDocument
+        instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
+      />,
+    );
 
     expect(screen.getAllByAltText("ANA Inc.")).toHaveLength(2);
     expect(screen.getAllByText("FA-INV-010-WI1")).toHaveLength(2);
   });
 
   it("numbers each sheet page N of M", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
+    render(
+      <WorkInstructionDocument
+        instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
+      />,
+    );
 
     expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
     expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
@@ -106,7 +116,11 @@ describe("WorkInstructionDocument", () => {
   });
 
   it("keeps safety on the sheet canvas, not in the header", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
+    render(
+      <WorkInstructionDocument
+        instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
+      />,
+    );
 
     // The header carries document control only; safety is a canvas block, so it
     // appears once on the setup sheet rather than on every sheet.
@@ -115,7 +129,11 @@ describe("WorkInstructionDocument", () => {
   });
 
   it("puts revision history and production data in every sheet header", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1), makeCard(2), makeCard(3), makeCard(4)])} />);
+    render(
+      <WorkInstructionDocument
+        instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
+      />,
+    );
 
     expect(screen.getAllByText("Revision history")).toHaveLength(2);
     expect(screen.getAllByText("Production data")).toHaveLength(2);

@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import type { PlannerState, WorkspaceProjectGroup } from "@/domain/types";
+import { WORK_INSTRUCTION_LAYOUTS } from "@/domain/work-instruction/schema";
 import { AppLoadingShell } from "./app-flow-panels";
 import { AuthProjectGate } from "./auth-project-gate";
 import {
@@ -173,12 +174,15 @@ export function WorkInstructionPrintRouteShell({
   taskIds,
   scenarioId,
   blank,
+  layoutId,
 }: {
   projectId: string;
   initialPlannerState?: PlannerState;
   taskIds: string[];
   scenarioId?: string;
   blank?: boolean;
+  /** Already validated by the route; undefined means the app default. */
+  layoutId?: string;
 } & ShellProps) {
   return (
     <AuthProjectGate projectId={projectId} routeKind="planner" initialGroups={initialGroups}>
@@ -189,6 +193,7 @@ export function WorkInstructionPrintRouteShell({
           taskIds={taskIds}
           blank={blank}
           initialPlannerState={initialPlannerState}
+          layout={layoutId ? WORK_INSTRUCTION_LAYOUTS[layoutId] : undefined}
           onReady={onReady}
         />
       )}

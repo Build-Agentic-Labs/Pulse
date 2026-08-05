@@ -29,6 +29,7 @@ import {
   type WorkInstructionPart,
   type WorkInstructionPhoto,
 } from "./schema";
+import { estimateLines } from "./estimate-lines";
 import { splitInstruction } from "./split-instruction";
 
 export interface BuildWorkInstructionInput {
@@ -116,14 +117,14 @@ export function buildWorkInstruction({
     const sequence = index + 1;
     const code = stepDisplayCode(task, step);
     const checks = buildChecks(step, definitions);
-    const chunks = splitInstruction(step.instruction, layout.instructionBudget, layout.continuationBudget);
+    const chunks = splitInstruction(step.instruction, layout.instruction, layout.continuation);
     // A step with no text still gets one card — the operator needs the slot.
     const parts = chunks.length > 0 ? chunks : [""];
 
     return parts.map((instruction, partIndex) => {
       const first = partIndex === 0;
       const last = partIndex === parts.length - 1;
-      const budget = first ? layout.instructionBudget : layout.continuationBudget;
+      const budget = first ? layout.instruction : layout.continuation;
 
       return {
         stepId: step.id,
@@ -135,7 +136,7 @@ export function buildWorkInstruction({
         instruction,
         // The splitter already broke what it could; anything still over budget
         // is a single token too wide to break, which only a human can fix.
-        overflowing: instruction.length > budget,
+        overflowing: estimateLines(instruction, budget.charsPerLine) > budget.lines,
         // Photo, tools and duration lead the step; checks close it.
         durationMinutes: first ? step.durationMinutes : undefined,
         tools: first ? (toolsByStep[step.id] ?? []) : [],

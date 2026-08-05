@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { sampleWorkInstruction } from "./sample";
-import { CARDS_PER_SHEET, INSTRUCTION_BUDGET_CHARS } from "./schema";
+import { estimateLines } from "./estimate-lines";
+import { CARDS_PER_SHEET, INSTRUCTION_BUDGET } from "./schema";
 import { paginateWorkInstruction } from "./paginate";
 
 /**
@@ -38,7 +39,9 @@ describe("sampleWorkInstruction", () => {
 
     expect(cards.every((card) => card.partCount === 1)).toBe(true);
     expect(cards.every((card) => !card.overflowing)).toBe(true);
-    expect(cards.every((card) => card.instruction.length <= INSTRUCTION_BUDGET_CHARS)).toBe(true);
+    expect(
+      cards.every((card) => estimateLines(card.instruction, INSTRUCTION_BUDGET.charsPerLine) <= INSTRUCTION_BUDGET.lines),
+    ).toBe(true);
   });
 
   it("includes a step with no photo so the ruled empty slot is visible", () => {

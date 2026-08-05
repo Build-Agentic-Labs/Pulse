@@ -3,6 +3,7 @@ import { paginateWorkInstruction } from "./paginate";
 import {
   CARDS_ON_FIRST_SHEET,
   CARDS_PER_SHEET,
+  WORK_INSTRUCTION_LAYOUTS,
   type WorkInstruction,
   type WorkInstructionCard,
 } from "./schema";
@@ -123,6 +124,22 @@ describe("paginateWorkInstruction", () => {
     // 8 steps: 3 on the setup sheet + 5 on one step sheet. A setup-only first
     // page would need 6 + 2 across two step sheets, so three sheets in total.
     expect(paginateWorkInstruction(makeInstruction(8))).toHaveLength(2);
+  });
+
+  it("paginates a v2 grid at four a sheet, two beside the setup band", () => {
+    const v2 = WORK_INSTRUCTION_LAYOUTS.v2;
+    const sheets = paginateWorkInstruction(makeInstruction(10), v2);
+
+    expect(sheets[0].cards.map((card) => card.sequence)).toEqual([1, 2]);
+    expect(sheets.map((sheet) => sheet.cards.length)).toEqual([2, 4, 4]);
+    expect(sheets).toHaveLength(3);
+  });
+
+  it("costs sheets to gain photo size", () => {
+    // The trade v2 makes. Nine steps is where the two diverge: v1 fits 3 + 6,
+    // v2 needs 2 + 4 + 3. (At ten they tie again, both on three sheets.)
+    expect(paginateWorkInstruction(makeInstruction(9), WORK_INSTRUCTION_LAYOUTS.v1)).toHaveLength(2);
+    expect(paginateWorkInstruction(makeInstruction(9), WORK_INSTRUCTION_LAYOUTS.v2)).toHaveLength(3);
   });
 
   it("gives a blank instruction ruled slots on both sheets", () => {

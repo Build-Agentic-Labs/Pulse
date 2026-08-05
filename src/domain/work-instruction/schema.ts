@@ -146,11 +146,66 @@ export const CARDS_PER_SHEET = 6;
 /**
  * Cards that share sheet 1 with the setup band.
  *
- * The setup band is sized to exactly one card row (4.32in), so the bottom row
- * of sheet 1 is a normal row of three cards rather than white space. This is
- * purely to conserve sheets: an 8-step instruction is 2 sheets instead of 3.
+ * The setup band is sized to exactly one card row, so the bottom row of sheet 1
+ * is a normal row of cards rather than white space. This is purely to conserve
+ * sheets: an 8-step instruction is 2 sheets instead of 3.
  */
 export const CARDS_ON_FIRST_SHEET = 3;
+
+/**
+ * A card-grid variant.
+ *
+ * The sheet is a fixed two-row grid; what changes between layouts is how many
+ * columns those rows carry, and therefore how large a card — and its photo —
+ * can be. Everything downstream (pagination, text budgets, the CSS grid) reads
+ * from here, so a variant is data rather than a forked renderer.
+ */
+export interface WorkInstructionLayout {
+  id: string;
+  label: string;
+  /** Columns in the card grid. Rows are always 2. */
+  columns: number;
+  cardsPerSheet: number;
+  /** Cards sharing sheet 1 with the setup band — always one row's worth. */
+  cardsOnFirstSheet: number;
+  /** CSS width of the photo column inside a card. */
+  photoWidth: string;
+  instructionBudget: number;
+  continuationBudget: number;
+}
+
+export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
+  /** 3x2. Six steps a sheet, 5.25in cards, 2.45in photo. */
+  v1: {
+    id: "v1",
+    label: "6 per sheet",
+    columns: 3,
+    cardsPerSheet: 6,
+    cardsOnFirstSheet: 3,
+    photoWidth: "2.45in",
+    instructionBudget: 600,
+    continuationBudget: 1700,
+  },
+  /**
+   * 2x2. Four steps a sheet, 7.94in cards, 4.40in photo — nearly double v1's
+   * photo width, at the cost of half again as many sheets.
+   */
+  v2: {
+    id: "v2",
+    label: "4 per sheet",
+    columns: 2,
+    cardsPerSheet: 4,
+    cardsOnFirstSheet: 2,
+    photoWidth: "4.40in",
+    // MEASURED the same way as v1 (2026-08-04): worst case — five checks, six
+    // tools — is 954 on a first card and 2,587 on a continuation with the photo
+    // column dropped. Set ~7% under each.
+    instructionBudget: 880,
+    continuationBudget: 2400,
+  },
+};
+
+export const DEFAULT_WORK_INSTRUCTION_LAYOUT = WORK_INSTRUCTION_LAYOUTS.v1;
 
 /**
  * Characters of instruction text a card can hold, by card shape.

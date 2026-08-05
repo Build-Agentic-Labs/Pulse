@@ -134,6 +134,34 @@ overrode the recommendation.
 13. **Header trimmed to 1.05in** (same review), which grows every card to
     5.25 × 4.25in.
 
+14. **The card grid is a layout variant, not a fork** (added 2026-08-04, fourth
+    review): *"can you create a v2 to show me what 4 work instructions per page
+    max would look like? mainly for a bigger photo. On the first page just show
+    2 steps."* `WORK_INSTRUCTION_LAYOUTS` holds both; pagination, text budgets
+    and the CSS grid all read from it, the last via custom properties. Two
+    renderers would have drifted within a week.
+
+    | | v1 | v2 |
+    |---|---|---|
+    | Grid | 3×2 | 2×2 |
+    | Steps per sheet | 6 | 4 |
+    | Steps beside the setup band | 3 | 2 |
+    | Card | 5.25 × 4.25in | 7.94 × 4.25in |
+    | **Photo** | **2.45 × 3.53in** | **4.40 × 3.53in** |
+    | Text budget (measured) | 600 (worst case 685) | 880 (worst case 954) |
+
+    The trade is sheets for photo size: nine steps is 2 sheets in v1 and 3 in
+    v2. Preview either at `/design/work-instruction` and `?v=2`.
+
+15. **A placeholder must not draw what its container already provides** (same
+    review). Twice now the step photo has read as two nested boxes: first from
+    the fixture SVG's own inset stroke, then — once v2 made the slot landscape
+    while the SVG stayed portrait — from `object-fit: contain` pillarboxing a
+    contrasting fill into a visible inner rectangle. The placeholder now draws
+    no frame and fills with `.wi-card-photo`'s exact background, which holds at
+    any aspect ratio. Real photos still letterbox against that neutral, which is
+    correct behind a photograph.
+
 ## Page geometry
 
 ```

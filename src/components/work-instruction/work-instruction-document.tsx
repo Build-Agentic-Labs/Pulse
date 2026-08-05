@@ -2,7 +2,9 @@
 
 /**
  * Print-ready assembly work instruction: 11x17 landscape ledger sheets, one
- * setup sheet followed by 3x2 photo-first step sheets.
+ * setup sheet followed by photo-first step sheets. The card grid is a layout
+ * variant (`WORK_INSTRUCTION_LAYOUTS`) — v1 is 3x2, v2 is 2x2 with a far larger
+ * photo — driven by CSS custom properties rather than a forked renderer.
  *
  * `WorkInstructionDocument` is a pure render — no data fetching, no planner
  * state — so the print route can load its data however it likes and hand the
@@ -20,10 +22,10 @@ import { formatMinutes } from "@/domain/calculations";
 import { formatDateControlled } from "@/domain/formatting";
 import { paginateWorkInstruction } from "@/domain/work-instruction/paginate";
 import {
-  CARDS_ON_FIRST_SHEET,
-  CARDS_PER_SHEET,
+  DEFAULT_WORK_INSTRUCTION_LAYOUT,
   type WorkInstruction,
   type WorkInstructionCard,
+  type WorkInstructionLayout,
   type WorkInstructionSheet,
 } from "@/domain/work-instruction/schema";
 
@@ -99,7 +101,7 @@ const PRINT_STYLES = `
    size wherever it lands. On sheet 1 the setup band spans row 1. */
 .wi-grid {
   height: 100%; display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--wi-columns, 3), minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 0.12in;
 }
@@ -122,7 +124,7 @@ const PRINT_STYLES = `
 }
 .wi-card-name { flex: 1; min-width: 0; font-size: 10pt; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wi-card-code { flex: none; font-family: var(--type-mono, monospace); font-size: 7pt; color: #666; }
-.wi-card-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 2.45in minmax(0, 1fr); gap: 0.1in; }
+.wi-card-main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--wi-photo-width, 2.45in) minmax(0, 1fr); gap: 0.1in; }
 .wi-card-photo { border: 1px solid #ccc; background: #f7f7f7; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .wi-card-photo img { width: 100%; height: 100%; object-fit: contain; }
 /* A REAL step that simply has no photo. Reads as absence, not as somewhere to
@@ -478,13 +480,25 @@ function CardCells({ cards, slots }: { cards: WorkInstructionCard[]; slots: numb
   );
 }
 
-export function WorkInstructionDocument({ instruction }: { instruction: WorkInstruction }) {
-  const sheets = paginateWorkInstruction(instruction);
+export function WorkInstructionDocument({
+  instruction,
+  layout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
+}: {
+  instruction: WorkInstruction;
+  layout?: WorkInstructionLayout;
+}) {
+  const sheets = paginateWorkInstruction(instruction, layout);
+  // Grid shape travels as custom properties so one stylesheet serves every
+  // variant — a forked renderer per layout would drift within a week.
+  const vars = {
+    "--wi-columns": String(layout.columns),
+    "--wi-photo-width": layout.photoWidth,
+  } as React.CSSProperties;
 
   return (
     <>
       <style>{PRINT_STYLES}</style>
-      <div className="wi-pages">
+      <div className="wi-pages" style={vars} data-wi-layout={layout.id}>
         {sheets.map((sheet) => (
           <article className="wi-sheet" key={`${instruction.taskId}-${sheet.page}`}>
             <HeaderBand instruction={instruction} sheet={sheet} />
@@ -495,10 +509,10 @@ export function WorkInstructionDocument({ instruction }: { instruction: WorkInst
                     <div className="wi-setup-band">
                       <SetupSheetBody instruction={instruction} />
                     </div>
-                    <CardCells cards={sheet.cards} slots={CARDS_ON_FIRST_SHEET} />
+                    <CardCells cards={sheet.cards} slots={layout.cardsOnFirstSheet} />
                   </>
                 ) : (
-                  <CardCells cards={sheet.cards} slots={CARDS_PER_SHEET} />
+                  <CardCells cards={sheet.cards} slots={layout.cardsPerSheet} />
                 )}
               </div>
             </main>

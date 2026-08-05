@@ -21,11 +21,11 @@ import { getTaskStepPhotoAttachmentMap, type StepPhotoAttachmentMap } from "../s
 import { getTaskStepToolListMap } from "../step-tools";
 import type { ManufacturingStep, Product, Task, Zone } from "../types";
 import {
-  CONTINUATION_BUDGET_CHARS,
-  INSTRUCTION_BUDGET_CHARS,
+  DEFAULT_WORK_INSTRUCTION_LAYOUT,
   type WorkInstruction,
   type WorkInstructionCard,
   type WorkInstructionCheck,
+  type WorkInstructionLayout,
   type WorkInstructionPart,
   type WorkInstructionPhoto,
 } from "./schema";
@@ -35,6 +35,8 @@ export interface BuildWorkInstructionInput {
   task: Task;
   product: Product;
   zone?: Zone;
+  /** Card-grid variant. Determines how much text a card holds, so splitting follows it. */
+  layout?: WorkInstructionLayout;
 }
 
 /** Case-insensitive de-dupe that keeps first-seen order and drops blanks. */
@@ -97,7 +99,12 @@ function buildParts(task: Task): WorkInstructionPart[] {
   return kit ? [{ partNumber: kit, description: "Material kit", quantity: 1 }, ...references] : references;
 }
 
-export function buildWorkInstruction({ task, product, zone }: BuildWorkInstructionInput): WorkInstruction {
+export function buildWorkInstruction({
+  task,
+  product,
+  zone,
+  layout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
+}: BuildWorkInstructionInput): WorkInstruction {
   const definitions = getManufacturingStepCheckDefinitions(product.customFields);
   const toolsByStep = getTaskStepToolListMap(task);
   const photosByStep = getTaskStepPhotoAttachmentMap(task);
@@ -109,14 +116,14 @@ export function buildWorkInstruction({ task, product, zone }: BuildWorkInstructi
     const sequence = index + 1;
     const code = stepDisplayCode(task, step);
     const checks = buildChecks(step, definitions);
-    const chunks = splitInstruction(step.instruction, INSTRUCTION_BUDGET_CHARS, CONTINUATION_BUDGET_CHARS);
+    const chunks = splitInstruction(step.instruction, layout.instructionBudget, layout.continuationBudget);
     // A step with no text still gets one card — the operator needs the slot.
     const parts = chunks.length > 0 ? chunks : [""];
 
     return parts.map((instruction, partIndex) => {
       const first = partIndex === 0;
       const last = partIndex === parts.length - 1;
-      const budget = first ? INSTRUCTION_BUDGET_CHARS : CONTINUATION_BUDGET_CHARS;
+      const budget = first ? layout.instructionBudget : layout.continuationBudget;
 
       return {
         stepId: step.id,

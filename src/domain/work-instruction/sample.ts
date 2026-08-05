@@ -22,19 +22,23 @@ import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "../step-
 import { STEP_TOOL_LISTS_FIELD } from "../step-tools";
 import type { ManufacturingStep, Product, Task, Zone } from "../types";
 import { buildWorkInstruction } from "./build";
-import type { WorkInstruction } from "./schema";
+import { DEFAULT_WORK_INSTRUCTION_LAYOUT, type WorkInstruction, type WorkInstructionLayout } from "./schema";
 
 /**
  * A flat panel standing in for a step photo, so the preview shows real photo
  * geometry without shipping a bitmap.
  *
- * Draws NO frame of its own: `.wi-card-photo` already borders it, and an inset
- * stroke here renders as a box inside a box. The viewBox matches the photo
- * slot's proportions so it fills the container rather than letterboxing under
- * `object-fit: contain`.
+ * Draws no frame, and its fill matches `.wi-card-photo`'s background exactly.
+ * Both matter for the same reason: anything the placeholder draws that the slot
+ * already provides reads as a box inside a box. A contrasting fill looks fine
+ * until the slot's aspect ratio stops matching the viewBox — as it does in v2,
+ * where the slot is landscape — and `object-fit: contain` pillarboxes the panel
+ * into a visible inner rectangle. Matching the fill makes that invisible at any
+ * aspect ratio, and real photos still letterbox against the same neutral, which
+ * is what you want behind a photograph.
  */
 function placeholderPhoto(label: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 576"><rect width="400" height="576" fill="#e8e8e8"/><text x="200" y="298" font-family="sans-serif" font-size="28" fill="#9a9a9a" text-anchor="middle">${label}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 576"><rect width="400" height="576" fill="#f7f7f7"/><text x="200" y="298" font-family="sans-serif" font-size="28" fill="#b4b4b4" text-anchor="middle">${label}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
@@ -249,11 +253,15 @@ function sampleTask(blank: boolean): Task {
   };
 }
 
-export function sampleWorkInstruction({ blank = false }: { blank?: boolean } = {}): WorkInstruction {
+export function sampleWorkInstruction({
+  blank = false,
+  layout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
+}: { blank?: boolean; layout?: WorkInstructionLayout } = {}): WorkInstruction {
   const built = buildWorkInstruction({
     task: sampleTask(blank),
     product: blank ? { ...PRODUCT, name: "", productCode: "", revision: "" } : PRODUCT,
     zone: blank ? undefined : ZONE,
+    layout,
   });
 
   return blank ? { ...built, context: { ...built.context, zoneName: "" } } : built;

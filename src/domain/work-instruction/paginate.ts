@@ -8,10 +8,10 @@
  */
 
 import {
-  CARDS_ON_FIRST_SHEET,
-  CARDS_PER_SHEET,
+  DEFAULT_WORK_INSTRUCTION_LAYOUT,
   type WorkInstruction,
   type WorkInstructionCard,
+  type WorkInstructionLayout,
   type WorkInstructionSheet,
 } from "./schema";
 
@@ -26,16 +26,19 @@ function chunk(cards: WorkInstructionCard[], size: number): WorkInstructionCard[
   }, []);
 }
 
-export function paginateWorkInstruction(instruction: WorkInstruction): WorkInstructionSheet[] {
+export function paginateWorkInstruction(
+  instruction: WorkInstruction,
+  layout: WorkInstructionLayout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
+): WorkInstructionSheet[] {
   // Sheet 1 carries the setup band plus the first row of cards; the band is
   // sized to exactly one card row, so the rest of the sheet is a normal row
   // rather than white space. Purely a page-count saving.
-  const onFirst = instruction.cards.slice(0, CARDS_ON_FIRST_SHEET);
-  const remaining = instruction.cards.slice(CARDS_ON_FIRST_SHEET);
+  const onFirst = instruction.cards.slice(0, layout.cardsOnFirstSheet);
+  const remaining = instruction.cards.slice(layout.cardsOnFirstSheet);
 
   // A blank instruction gets an extra sheet of ruled slots so the fill-in form
-  // has somewhere to write past the first three steps.
-  const stepGroups = instruction.blank ? [[]] : chunk(remaining, CARDS_PER_SHEET);
+  // has somewhere to write past the first row.
+  const stepGroups = instruction.blank ? [[]] : chunk(remaining, layout.cardsPerSheet);
   const total = stepGroups.length + 1;
 
   return [

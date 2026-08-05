@@ -4,7 +4,7 @@ import { mapApprovalsToDepartments, signerAfterDepartmentChange } from "./approv
 import type { SopApproval } from "./schema";
 
 function dept(id: string, code: string, name: string, isQualityGate = false): Department {
-  return { id, workspaceId: "ws", code, name, isQualityGate };
+  return { id, workspaceId: "ws", code, name, isQualityGate, sopTarget: 0 };
 }
 
 const DEPARTMENTS = [

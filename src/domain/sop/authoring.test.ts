@@ -9,7 +9,7 @@ import {
 } from "./authoring";
 
 function dept(id: string, code: string): Department {
-  return { id, workspaceId: "ws", code, name: `${code} dept`, isQualityGate: false };
+  return { id, workspaceId: "ws", code, name: `${code} dept`, isQualityGate: false, sopTarget: 0 };
 }
 
 describe("authoringMode", () => {

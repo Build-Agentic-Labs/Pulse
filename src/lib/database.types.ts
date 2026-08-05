@@ -219,6 +219,7 @@ export type Database = {
           id: string
           is_quality_gate: boolean
           name: string
+          sop_target: number
           updated_at: string
           updated_by: string | null
           workspace_id: string
@@ -230,6 +231,7 @@ export type Database = {
           id?: string
           is_quality_gate?: boolean
           name: string
+          sop_target?: number
           updated_at?: string
           updated_by?: string | null
           workspace_id: string
@@ -241,6 +243,7 @@ export type Database = {
           id?: string
           is_quality_gate?: boolean
           name?: string
+          sop_target?: number
           updated_at?: string
           updated_by?: string | null
           workspace_id?: string

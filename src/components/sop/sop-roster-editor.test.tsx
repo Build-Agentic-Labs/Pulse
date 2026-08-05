@@ -25,6 +25,7 @@ const departments: Department[] = [
     code: "MFG",
     name: "Manufacturing/Production",
     isQualityGate: false,
+    sopTarget: 0,
   },
   {
     id: "dept-quality",
@@ -32,6 +33,7 @@ const departments: Department[] = [
     code: "QAS",
     name: "Quality",
     isQualityGate: true,
+    sopTarget: 0,
   },
 ];
 
@@ -198,7 +200,7 @@ describe("SopRosterEditor — seating a converted approval", () => {
       <SopRosterEditor
         sopId="sop-1"
         departments={[
-          { id: "d-eng", workspaceId: "ws", code: "ENG", name: "Engineering", isQualityGate: false },
+          { id: "d-eng", workspaceId: "ws", code: "ENG", name: "Engineering", isQualityGate: false, sopTarget: 0 },
         ]}
         seats={[]}
         convertedApprovals={[{ role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" }]}
@@ -226,7 +228,7 @@ describe("SopRosterEditor — seating a converted approval", () => {
       <SopRosterEditor
         sopId="sop-1"
         departments={[
-          { id: "dept-mfg", workspaceId: "workspace", code: "MFG", name: "Manufacturing/Production", isQualityGate: false },
+          { id: "dept-mfg", workspaceId: "workspace", code: "MFG", name: "Manufacturing/Production", isQualityGate: false, sopTarget: 0 },
         ]}
         seats={[manufacturingSeat]}
         convertedApprovals={[{ role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" }]}
@@ -260,7 +262,7 @@ describe("SopRosterEditor — seating a converted approval", () => {
       <SopRosterEditor
         sopId="sop-1"
         departments={[
-          { id: "dept-mfg", workspaceId: "workspace", code: "MFG", name: "Manufacturing/Production", isQualityGate: false },
+          { id: "dept-mfg", workspaceId: "workspace", code: "MFG", name: "Manufacturing/Production", isQualityGate: false, sopTarget: 0 },
         ]}
         seats={[manufacturingSeat]}
         convertedApprovals={[{ role: "Approved By", name: "R. Miller", position: "IC Manager", date: "" }]}

@@ -24,10 +24,10 @@ export const metadata = {
   description: "Create standardized SOPs and convert legacy documents.",
 };
 
-type ServerTab = "all" | "review" | "library" | "retired" | "settings";
+type ServerTab = "dashboard" | "all" | "review" | "library" | "retired" | "settings";
 
 function parseServerTab(raw: string | string[] | undefined): ServerTab {
-  return raw === "review" || raw === "library" || raw === "retired" || raw === "settings"
+  return raw === "dashboard" || raw === "review" || raw === "library" || raw === "retired" || raw === "settings"
     ? raw
     : "all";
 }
@@ -64,6 +64,14 @@ export default async function SopsPage({
       const { data } = await supabase.auth.getUser();
       if (data.user) {
         switch (tab) {
+          case "dashboard": {
+            const [sops, departments] = await Promise.all([
+              listSops(workspaceId, supabase),
+              listDepartments(workspaceId, supabase),
+            ]);
+            initial = { tab, workspaceId, sops, departments };
+            break;
+          }
           case "all": {
             const [sops, departments, departmentRoles] = await Promise.all([
               listSops(workspaceId, supabase),

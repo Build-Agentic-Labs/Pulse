@@ -14,6 +14,8 @@ export interface Department {
   code: string;
   name: string;
   isQualityGate: boolean;
+  /** Required SOP count used to measure department completion. Zero means not configured. */
+  sopTarget: number;
 }
 
 export interface DepartmentMember {

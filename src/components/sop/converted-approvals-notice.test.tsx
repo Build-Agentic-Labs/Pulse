@@ -7,7 +7,7 @@ import type { SopApproval } from "@/domain/sop/schema";
 import { ConvertedApprovalsNotice } from "./converted-approvals-notice";
 
 function dept(id: string, code: string, name: string, isQualityGate = false): Department {
-  return { id, workspaceId: "ws", code, name, isQualityGate };
+  return { id, workspaceId: "ws", code, name, isQualityGate, sopTarget: 0 };
 }
 
 const DEPARTMENTS = [

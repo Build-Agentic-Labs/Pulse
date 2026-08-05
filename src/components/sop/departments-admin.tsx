@@ -6,6 +6,7 @@ import { useConfirm } from "@/components/confirm-provider";
 import { QuietLoading } from "@/components/quiet-loading";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
+import { isValidDepartmentSopTarget, MAX_DEPARTMENT_SOP_TARGET } from "@/domain/sop/dashboard";
 import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
 import type { MemberAccess } from "@/domain/types";
 import {
@@ -14,9 +15,11 @@ import {
   listMembersForDepartments,
   removeMember,
   saveDepartment,
+  setDepartmentSopTarget,
   setMember,
   setMemberPosition,
 } from "@/lib/departments/store";
+import { SOP_DEMAND_UPDATED_EVENT } from "@/lib/sop/dashboard-events";
 import { jobTitleOptions } from "@/domain/departments";
 import { addJobTitle, listJobTitles, type JobTitle } from "@/lib/sop/job-titles/store";
 import { JobTitlesAdmin } from "./job-titles-admin";
@@ -132,6 +135,11 @@ export function DepartmentsAdmin({
   const handleError = useCallback((message: string) => setError(message), []);
   const handleMembersChange = useCallback((departmentId: string, members: DepartmentMember[]) => {
     setMembersByDepartment((current) => ({ ...current, [departmentId]: members }));
+  }, []);
+  const handleDepartmentChange = useCallback((department: Department) => {
+    setDepartments((current) =>
+      current.map((entry) => (entry.id === department.id ? department : entry)),
+    );
   }, []);
 
   const refresh = useCallback(async (options: { background?: boolean } = {}) => {
@@ -314,6 +322,7 @@ export function DepartmentsAdmin({
                     <tr className="border-b border-line">
                       <th className="ui-settings-table-label px-4 py-2.5 text-left">Code</th>
                       <th className="ui-settings-table-label px-4 py-2.5 text-left">Department</th>
+                      <th className="ui-settings-table-label px-4 py-2.5 text-right">Demand</th>
                       <th className="ui-settings-table-label px-4 py-2.5 text-right">Members</th>
                     </tr>
                   </thead>
@@ -340,6 +349,9 @@ export function DepartmentsAdmin({
                                 Quality gate
                               </span>
                             ) : null}
+                          </td>
+                          <td className="px-4 py-3 text-right ui-mono-label text-ink-secondary">
+                            {dept.sopTarget > 0 ? dept.sopTarget : "—"}
                           </td>
                           <td className="px-4 py-3 text-right ui-mono-label text-ink-secondary">
                             {membersByDepartment[dept.id]?.length ?? 0}
@@ -384,6 +396,13 @@ export function DepartmentsAdmin({
                 </div>
               </div>
 
+              <DepartmentDemandTarget
+                key={`demand-${selected.id}`}
+                department={selected}
+                manage={manage}
+                onChanged={handleDepartmentChange}
+              />
+
               <MembersPanel
                 key={selected.id}
                 department={selected}
@@ -411,6 +430,95 @@ export function DepartmentsAdmin({
 
         <RasicRolesAdmin workspaceId={workspaceId} manage={manage} />
       </div>
+  );
+}
+
+function DepartmentDemandTarget({
+  department,
+  manage,
+  onChanged,
+}: {
+  department: Department;
+  manage: boolean;
+  onChanged: (department: Department) => void;
+}) {
+  const [value, setValue] = useState(String(department.sopTarget));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<"" | "saved" | "error">("");
+  const target = Number(value);
+  const valid = value.trim().length > 0 && isValidDepartmentSopTarget(target);
+  const dirty = valid && target !== department.sopTarget;
+
+  async function saveTarget() {
+    if (!manage || !dirty) return;
+    setSaving(true);
+    setStatus("");
+    try {
+      const saved = await setDepartmentSopTarget(department.id, target);
+      setValue(String(saved.sopTarget));
+      onChanged(saved);
+      setStatus("saved");
+      window.dispatchEvent(new Event(SOP_DEMAND_UPDATED_EVENT));
+    } catch {
+      setStatus("error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="mt-5 border-y border-line py-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="max-w-md">
+          <h3 className="ui-settings-section-title">SOP demand target</h3>
+          <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+            Required SOPs for this department. Completion counts only effective documents.
+          </p>
+        </div>
+        <div className="flex items-end gap-2">
+          <label className="block">
+            <span className="ui-mono-label mb-1 block text-ink-tertiary">Required SOPs</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={MAX_DEPARTMENT_SOP_TARGET}
+              step={1}
+              className="ui-field-standalone h-9 w-28 px-2.5 text-right tabular-nums"
+              value={value}
+              disabled={!manage || saving}
+              aria-invalid={!valid}
+              onChange={(event) => {
+                setValue(event.target.value);
+                setStatus("");
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void saveTarget();
+              }}
+            />
+          </label>
+          {manage ? (
+            <button
+              type="button"
+              className="ui-btn-primary h-9 px-3 disabled:opacity-40"
+              disabled={!dirty || saving}
+              onClick={() => void saveTarget()}
+            >
+              {saving ? "Saving…" : "Save target"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-2 min-h-4 text-right ui-mono-label" aria-live="polite">
+        {!valid ? (
+          <span className="text-danger">Enter a whole number from 0 to {MAX_DEPARTMENT_SOP_TARGET.toLocaleString()}.</span>
+        ) : status === "saved" ? (
+          <span className="text-success">[SAVED]</span>
+        ) : status === "error" ? (
+          <span className="text-danger">[ERROR] Target was not saved. Retry.</span>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

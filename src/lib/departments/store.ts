@@ -11,7 +11,7 @@ import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supaba
 import type { Database } from "@/lib/database.types";
 import { throwIfError as throwIfSupabaseError, type SupabaseResultError } from "@/lib/supabase-errors";
 
-const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate";
+const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate, sop_target";
 const MEMBER_COLUMNS = "department_id, user_id, dept_role, position_title";
 
 function newId(): string {
@@ -45,6 +45,7 @@ function mapDepartment(row: Record<string, unknown>): Department {
     code: String(row.code ?? ""),
     name: String(row.name ?? ""),
     isQualityGate: Boolean(row.is_quality_gate),
+    sopTarget: Number(row.sop_target ?? 0),
   };
 }
 
@@ -117,6 +118,21 @@ export async function saveDepartment(workspaceId: string, input: DepartmentInput
 export async function deleteDepartment(id: string): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   await throwIfError(supabase.from("departments").delete().eq("id", id));
+}
+
+/** Granular target write; department RLS restricts it to workspace owners/admins. */
+export async function setDepartmentSopTarget(id: string, sopTarget: number): Promise<Department> {
+  const supabase = createPlannerSupabaseClient();
+  const { data: userData } = await getUserFromSession(supabase);
+  const saved = await throwIfError(
+    supabase
+      .from("departments")
+      .update({ sop_target: sopTarget, updated_by: userData.user?.id ?? null })
+      .eq("id", id)
+      .select(DEPT_COLUMNS)
+      .single(),
+  );
+  return mapDepartment(saved as Record<string, unknown>);
 }
 
 export async function listMembers(departmentId: string): Promise<DepartmentMember[]> {

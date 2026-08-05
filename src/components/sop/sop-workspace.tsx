@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, Building2, FileText, Inbox, Library } from "lucide-react";
+import { Archive, Building2, FileText, Inbox, LayoutDashboard, Library } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -43,10 +43,15 @@ const DepartmentsAdmin = dynamic(
   () => import("./departments-admin").then((module) => module.DepartmentsAdmin),
   { loading: SopTabChunkLoading },
 );
+const SopDashboard = dynamic(
+  () => import("./sop-dashboard").then((module) => module.SopDashboard),
+  { loading: SopTabChunkLoading },
+);
 
-type Tab = "all" | "review" | "library" | "retired" | "settings";
+type Tab = "dashboard" | "all" | "review" | "library" | "retired" | "settings";
 
 const CRUMB: Record<Tab, string> = {
+  dashboard: "Quality / Dashboard",
   all: "Quality / SOPs",
   library: "Quality / Effective library",
   review: "Quality / Review queue",
@@ -55,7 +60,7 @@ const CRUMB: Record<Tab, string> = {
 };
 
 function parseTab(raw: string | null): Tab {
-  if (raw === "review" || raw === "library" || raw === "retired" || raw === "settings") return raw;
+  if (raw === "dashboard" || raw === "review" || raw === "library" || raw === "retired" || raw === "settings") return raw;
   return "all";
 }
 
@@ -72,6 +77,7 @@ function parseTab(raw: string | null): Tab {
  * module into a server component become client-reference proxies.
  */
 export type SopWorkspaceInitialData =
+  | { tab: "dashboard"; workspaceId: string; sops: SopListItem[]; departments: Department[] }
   | {
       tab: "all";
       workspaceId: string;
@@ -109,6 +115,7 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
   useEffect(() => {
     const warmPanels = () => {
       setMountedTabs(new Set<Tab>([
+        "dashboard",
         "all",
         "review",
         "library",
@@ -138,6 +145,17 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
 
   return (
     <SopShell sidebar={sidebar} crumb={CRUMB[tab]}>
+      <div hidden={tab !== "dashboard"} aria-hidden={tab !== "dashboard"}>
+        {mountedTabs.has("dashboard") ? (
+          <SopDashboard
+            active={tab === "dashboard"}
+            preload
+            initialSops={initial?.tab === "dashboard" ? initial.sops : undefined}
+            initialDepartments={initial?.tab === "dashboard" ? initial.departments : undefined}
+            initialWorkspaceId={initial?.tab === "dashboard" ? initial.workspaceId : undefined}
+          />
+        ) : null}
+      </div>
       <div hidden={tab !== "all"} aria-hidden={tab !== "all"}>
         {mountedTabs.has("all") ? (
           <SopList
@@ -297,9 +315,10 @@ function SopTabNav({
   return (
     <>
       <NavSelectionTrack
-        activeIndex={["all", "review", "library", "retired"].indexOf(active)}
+        activeIndex={["dashboard", "all", "review", "library", "retired"].indexOf(active)}
         className="space-y-0.5"
       >
+        {item("dashboard", <LayoutDashboard size={15} strokeWidth={1.75} />, "Dashboard")}
         {item("all", <FileText size={15} strokeWidth={1.75} />, "All SOPs")}
         {item("review", <Inbox size={15} strokeWidth={1.75} />, "Review queue")}
         {item("library", <Library size={15} strokeWidth={1.75} />, "Effective library")}

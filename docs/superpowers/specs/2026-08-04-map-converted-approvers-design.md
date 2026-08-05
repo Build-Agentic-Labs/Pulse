@@ -161,3 +161,50 @@ unsaved-SOP message. Split it:
 The read-only branch is what an account without org-tools `edit` sees; of the
 five accounts in production only three carry `edit`. Live verification of this
 feature requires one of those, and cannot be done from a `none` account.
+
+## Amendments — 2026-08-04, final whole-branch review
+
+Where this section disagrees with the text above, this section governs. Each
+item was **reproduced** by the reviewer, not theorised.
+
+1. **"A retry heals it" was false, and is now true.** The design claimed a
+   failed seat write left a row the author could simply re-map. It could not:
+   the picker excluded already-seated departments, so once the seat existed the
+   department the row needed was filtered out of its own options. The picker now
+   offers seated departments too, and `seatConvertedApproval` **skips
+   `upsertSeat` when that department is already seated**, performing only the
+   document write — because re-upserting with `signerId: null` would wipe a
+   reviewer already assigned to that seat. That skip is the load-bearing half.
+2. **Duplicate rows can both be mapped.** The same exclusion made a second
+   legacy row naming an already-seated department a permanent "No match" — the
+   exact dead end this feature exists to remove, on the duplicate rows the spec
+   itself calls normal (`Robbie Miller ×3`). Fixed by the same change.
+3. **The in-flight row must not claim a deletion.** Between the document write
+   and the seat refetch, the row resolved by `departmentCode` but was not yet
+   seated, so it rendered "Seat removed — the seat was created and then deleted"
+   plus a note telling the author to add the department manually — on the happy
+   path, every time, for ~250-700ms. The `pending` row now renders its own
+   in-flight label and is excluded from that note.
+4. **The picker respects the roster's busy lock.** `guarded()` returns silently
+   while another write is in flight; the pickers were disabled only by their own
+   pending key, so a second click vanished with no error and no visual trace.
+   The lock is now threaded into the notice.
+5. **Read-only viewers see no table at all**, not "today's table unchanged" as
+   §Which rows get a picker stated. `ConvertedApprovalsNotice` renders inside
+   `SopRosterEditor`, which the read-only branch does not render. The
+   callback-absent path therefore has no production caller today; its test
+   guards an API contract, not a user-visible state.
+6. **Fixture rule, learned three times.** Any test `position` must be an exact
+   `STANDARD_POSITION_TITLES` entry (`src/domain/departments.ts:27-37`) —
+   `findByPositionTitle` compares whole normalised strings. An invented title
+   resolves to nothing, the row silently becomes `no-match`, and a test
+   asserting any other status passes for the wrong reason.
+
+### Still required before production trust
+
+Live verification never ran: the available session (`rlopez@anacorp.com`) has
+`org_tool_access = none`, so the feature is structurally invisible to it. Needs
+`jli@`, `tbach@` or `tnguyen@`. The decisive check is **reload after mapping** —
+every test mocks the write, so a green suite proves nothing about whether the
+debounced autosave actually persists `departmentCode` into the `document` jsonb.
+

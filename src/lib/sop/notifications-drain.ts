@@ -43,11 +43,45 @@ export function isAuthorizedCronRequest(request: Request): boolean {
   return getBearerToken(request) === secret;
 }
 
+/**
+ * Whose fault a rejected send is, which decides whether the row may die:
+ * - `recipient`  — this address will never accept mail. Terminal.
+ * - `transient`  — provider hiccup or rate limit. Retry within the attempt cap.
+ * - `configuration` — OUR credentials/headers are wrong. Retrying is futile
+ *   until a human intervenes, but the row must NOT die: the moment the config
+ *   is fixed, the next drain should deliver it.
+ */
+export type EmailFailureKind = "recipient" | "transient" | "configuration";
+
 export type EmailSendResult =
   | { ok: true; id: string }
-  | { ok: false; status: number; error: string; permanent: boolean };
+  | { ok: false; status: number; error: string; failure: EmailFailureKind };
 
 export type EmailSender = (to: string, content: SopEmailContent) => Promise<EmailSendResult>;
+
+/** Fields whose rejection indicts the ADDRESS rather than our configuration. */
+const RECIPIENT_FIELDS = new Set(["to", "cc", "bcc"]);
+
+/**
+ * Sort a Resend rejection into the three buckets above.
+ *
+ * This exists because the old rule — "any 4xx except 429 is permanent" — could
+ * not tell a dead address from our own broken `from` header. On 2026-07-29 a
+ * malformed RESEND_FROM returned 422, was read as a bounce, and burned the
+ * attempt cap on first contact: the notification was dead forever over a
+ * one-line env fix, and nothing surfaced it for two weeks.
+ */
+export function classifyResendFailure(status: number, body: string): EmailFailureKind {
+  if (status === 429 || status >= 500 || status < 400) return "transient";
+  // A rejected key or an unverified sending domain is always ours.
+  if (status === 401 || status === 403) return "configuration";
+  // Resend names the offending field: "Invalid `from` field. ...".
+  const field = /invalid\s+`([a-z_]+)`\s+field/i.exec(body)?.[1]?.toLowerCase();
+  if (field) return RECIPIENT_FIELDS.has(field) ? "recipient" : "configuration";
+  // Unrecognised 4xx: bias toward configuration. A stuck, visible row beats a
+  // silently dead one — being wrong here costs a retry, the other way costs mail.
+  return "configuration";
+}
 
 /** Plain fetch to Resend — deliberately no SDK (zero new dependencies). */
 export function createResendSender(apiKey: string, from: string): EmailSender {
@@ -62,10 +96,12 @@ export function createResendSender(apiKey: string, from: string): EmailSender {
       return { ok: true, id: body.id ?? "" };
     }
     const error = await response.text().catch(() => "");
-    // 4xx (except 429) is a permanent rejection — a bounce-shaped failure we
-    // must not retry. 429 and 5xx are transient.
-    const permanent = response.status >= 400 && response.status < 500 && response.status !== 429;
-    return { ok: false, status: response.status, error: error.slice(0, 500), permanent };
+    return {
+      ok: false,
+      status: response.status,
+      error: error.slice(0, 500),
+      failure: classifyResendFailure(response.status, error),
+    };
   };
 }
 
@@ -115,7 +151,49 @@ export interface DrainReport {
   skippedDuplicate: number;
   skippedNoEmail: number;
   failed: number;
+  /** Sends refused by OUR configuration — held, not spent. Non-zero = act now. */
+  blocked: number;
   oldestUnnotifiedEventAgeHours: number | null;
+}
+
+/** Age at which a still-unsent event stops being latency and starts being an outage. */
+export const BACKLOG_ALERT_HOURS = 24;
+
+export interface DrainHealth {
+  healthy: boolean;
+  /** Human-readable, safe to log. Empty when healthy. */
+  problems: string[];
+}
+
+/**
+ * Turn drain reports into an actionable verdict.
+ *
+ * The RESEND_FROM outage ran for two weeks because every counter needed to spot
+ * it was already being computed and then thrown away. This is the consumer.
+ *
+ * Deliberately narrow: only `configured:false`, configuration blocks, and a
+ * backlog past the threshold count as unhealthy. Ordinary `failed` sends — a
+ * dead address, a 500 that will retry — do NOT, because a health check that
+ * cries wolf is a health check nobody reads.
+ */
+export function assessDrainHealth(reports: { label: string; report: DrainReport }[]): DrainHealth {
+  const problems: string[] = [];
+  for (const { label, report } of reports) {
+    if (!report.configured) {
+      problems.push(`${label}: email is not configured — no notification can send`);
+      continue;
+    }
+    if (report.blocked > 0) {
+      problems.push(
+        `${label}: ${report.blocked} send(s) blocked by configuration — check RESEND_FROM and RESEND_API_KEY`,
+      );
+    }
+    const age = report.oldestUnnotifiedEventAgeHours;
+    if (age !== null && age >= BACKLOG_ALERT_HOURS) {
+      problems.push(`${label}: oldest unnotified event is ${age}h old (threshold ${BACKLOG_ALERT_HOURS}h)`);
+    }
+  }
+  return { healthy: problems.length === 0, problems };
 }
 
 export async function runSopNotificationDrain<P = PendingNotification>(deps: {
@@ -133,6 +211,7 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
     skippedDuplicate: 0,
     skippedNoEmail: 0,
     failed: 0,
+    blocked: 0,
     oldestUnnotifiedEventAgeHours: batch.oldestUnnotifiedEventAgeHours,
   };
   // Unconfigured: report what WOULD send (and the age signal) but claim nothing,
@@ -154,6 +233,7 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
       }
       const outcome = await attemptSend(store, send, ledgerId, item.email, item.content, 0);
       if (outcome === "sent") report.sent += 1;
+      else if (outcome === "blocked") report.blocked += 1;
       else report.failed += 1;
     } catch {
       // A store-layer rejection (claim, or the failure bookkeeping itself) must
@@ -180,6 +260,7 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
       }
       const outcome = await attemptSend(store, send, retry.ledgerId, retry.email, retry.content, retry.attempts);
       if (outcome === "sent") report.retried += 1;
+      else if (outcome === "blocked") report.blocked += 1;
       else report.failed += 1;
     } catch {
       report.failed += 1;
@@ -196,18 +277,26 @@ async function attemptSend<P = PendingNotification>(
   email: string,
   content: SopEmailContent,
   priorAttempts: number,
-): Promise<"sent" | "failed"> {
+): Promise<"sent" | "failed" | "blocked"> {
   try {
     const result = await send(email, content);
     if (result.ok) {
       await store.markSent(ledgerId, result.id);
       return "sent";
     }
-    // Permanent rejections jump straight to the cap: dead row, never retried.
-    const attemptsAfter = result.permanent ? MAX_SEND_ATTEMPTS : priorAttempts + 1;
+    // A configuration fault HOLDS the attempt count: the row stays eligible so
+    // it delivers itself once someone fixes the credentials. Recipient
+    // rejections jump straight to the cap (dead row); transient ones step once.
+    const attemptsAfter =
+      result.failure === "configuration"
+        ? priorAttempts
+        : result.failure === "recipient"
+          ? MAX_SEND_ATTEMPTS
+          : priorAttempts + 1;
     await store.markFailed(ledgerId, `${result.status}: ${result.error}`, attemptsAfter);
-    return "failed";
+    return result.failure === "configuration" ? "blocked" : "failed";
   } catch (error: unknown) {
+    // A thrown fetch is a network failure, not a verdict on the address.
     const message = error instanceof Error ? error.message : "Unexpected send error";
     await store.markFailed(ledgerId, message, priorAttempts + 1);
     return "failed";

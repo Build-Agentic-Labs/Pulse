@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { SopEmailContent } from "@/domain/sop/notifications";
 import {
+  BACKLOG_ALERT_HOURS,
   RETRY_BASE_MINUTES,
+  assessDrainHealth,
+  classifyResendFailure,
   isAuthorizedCronRequest,
   isRetryDue,
   retryBackoffMinutes,
   runSopNotificationDrain,
   type DrainBatch,
   type DrainItem,
+  type DrainReport,
   type DrainStore,
   type RetryItem,
 } from "./notifications-drain";
@@ -99,9 +103,9 @@ describe("runSopNotificationDrain", () => {
     expect(calls.sent).toEqual([]);
   });
 
-  it("a permanent send failure jumps attempts to the cap (dead row, never retried)", async () => {
+  it("a recipient rejection jumps attempts to the cap (dead row, never retried)", async () => {
     const { store, calls } = fakeStore({ items: [item()], oldestUnnotifiedEventAgeHours: null });
-    const bouncer = async () => ({ ok: false as const, status: 422, error: "invalid to", permanent: true });
+    const bouncer = async () => ({ ok: false as const, status: 422, error: "invalid to", failure: "recipient" as const });
     const report = await runSopNotificationDrain({ store, send: bouncer, now, origin });
     expect(report.failed).toBe(1);
     expect(calls.failed).toEqual([{ id: 100, attempts: 3 }]);
@@ -109,9 +113,43 @@ describe("runSopNotificationDrain", () => {
 
   it("a transient failure increments attempts by one", async () => {
     const { store, calls } = fakeStore({ items: [item()], oldestUnnotifiedEventAgeHours: null });
-    const flaky = async () => ({ ok: false as const, status: 500, error: "boom", permanent: false });
+    const flaky = async () => ({ ok: false as const, status: 500, error: "boom", failure: "transient" as const });
     await runSopNotificationDrain({ store, send: flaky, now, origin });
     expect(calls.failed).toEqual([{ id: 100, attempts: 1 }]);
+  });
+
+  it("a CONFIGURATION rejection records the error without consuming an attempt", async () => {
+    // The RESEND_FROM outage: our own `from` header was malformed, every send
+    // 422'd, and the old blanket "4xx is permanent" rule burned the cap
+    // instantly — killing the notification forever for a fault that a one-line
+    // env fix would have cleared. Holding attempts lets the row deliver itself
+    // on the next drain after a human fixes the config.
+    const { store, calls } = fakeStore({ items: [item()], oldestUnnotifiedEventAgeHours: null });
+    const misconfigured = async () => ({
+      ok: false as const,
+      status: 422,
+      error: "Invalid `from` field",
+      failure: "configuration" as const,
+    });
+    const report = await runSopNotificationDrain({ store, send: misconfigured, now, origin });
+    expect(report.blocked).toBe(1);
+    expect(report.failed).toBe(0);
+    expect(calls.failed).toEqual([{ id: 100, attempts: 0 }]);
+  });
+
+  it("a configuration rejection on the retry lane holds that row's attempt count too", async () => {
+    const retries: RetryItem[] = [{ ledgerId: 55, email: "u1@example.com", content, attempts: 1 }];
+    const { store, calls } = fakeStore({ items: [], oldestUnnotifiedEventAgeHours: null }, retries);
+    const misconfigured = async () => ({
+      ok: false as const,
+      status: 401,
+      error: "API key is invalid",
+      failure: "configuration" as const,
+    });
+    const report = await runSopNotificationDrain({ store, send: misconfigured, now, origin });
+    expect(report.blocked).toBe(1);
+    expect(report.retried).toBe(0);
+    expect(calls.failed).toEqual([{ id: 55, attempts: 1 }]);
   });
 
   it("one thrown send never aborts the batch", async () => {
@@ -189,13 +227,95 @@ describe("runSopNotificationDrain", () => {
     const flakySender = async () => {
       if (first) {
         first = false;
-        return { ok: false as const, status: 500, error: "boom", permanent: false };
+        return { ok: false as const, status: 500, error: "boom", failure: "transient" as const };
       }
       return { ok: true as const, id: "re_2" };
     };
     const report = await runSopNotificationDrain({ store, send: flakySender, now, origin });
     expect(report.failed).toBe(1);
     expect(report.sent).toBe(1);
+  });
+});
+
+describe("assessDrainHealth", () => {
+  const clean: DrainReport = {
+    configured: true,
+    sent: 3,
+    retried: 0,
+    skippedDuplicate: 0,
+    skippedNoEmail: 0,
+    failed: 0,
+    blocked: 0,
+    oldestUnnotifiedEventAgeHours: 1,
+  };
+
+  it("a drain that sent its batch is healthy", () => {
+    expect(assessDrainHealth([{ label: "sop", report: clean }])).toEqual({ healthy: true, problems: [] });
+  });
+
+  it("flags a configuration block — the signal that was missing during the outage", () => {
+    const health = assessDrainHealth([{ label: "sop", report: { ...clean, sent: 0, blocked: 1 } }]);
+    expect(health.healthy).toBe(false);
+    expect(health.problems[0]).toContain("blocked by configuration");
+  });
+
+  it("flags an unconfigured sender — nothing can send at all", () => {
+    const health = assessDrainHealth([{ label: "sop", report: { ...clean, configured: false } }]);
+    expect(health.healthy).toBe(false);
+    expect(health.problems[0]).toContain("not configured");
+  });
+
+  it("flags a backlog older than the threshold", () => {
+    const stale = { ...clean, oldestUnnotifiedEventAgeHours: BACKLOG_ALERT_HOURS + 1 };
+    expect(assessDrainHealth([{ label: "sop", report: stale }]).healthy).toBe(false);
+    const fresh = { ...clean, oldestUnnotifiedEventAgeHours: BACKLOG_ALERT_HOURS - 1 };
+    expect(assessDrainHealth([{ label: "sop", report: fresh }]).healthy).toBe(true);
+  });
+
+  it("does NOT alert on ordinary bounces — a dead address is not an outage", () => {
+    // Noisy health checks get ignored, which is how the real one gets missed.
+    expect(assessDrainHealth([{ label: "sop", report: { ...clean, failed: 1 } }]).healthy).toBe(true);
+  });
+
+  it("reports every unhealthy store, labelled", () => {
+    const health = assessDrainHealth([
+      { label: "sop", report: { ...clean, blocked: 2 } },
+      { label: "workspace", report: { ...clean, configured: false } },
+    ]);
+    expect(health.problems).toHaveLength(2);
+    expect(health.problems[0]).toContain("sop");
+    expect(health.problems[1]).toContain("workspace");
+  });
+});
+
+describe("classifyResendFailure", () => {
+  // The exact body Resend returned during the 2026-07-29 outage.
+  const badFrom =
+    '{"statusCode":422,"name":"validation_error","message":"Invalid `from` field. The email address needs to follow the `email@example.com` or `Name <email@example.com>` format."}';
+
+  it("treats a malformed `from` as OUR configuration, not a dead recipient", () => {
+    expect(classifyResendFailure(422, badFrom)).toBe("configuration");
+  });
+
+  it("treats auth and domain rejections as configuration", () => {
+    expect(classifyResendFailure(401, '{"message":"API key is invalid"}')).toBe("configuration");
+    expect(classifyResendFailure(403, '{"message":"The domain is not verified"}')).toBe("configuration");
+  });
+
+  it("treats a rejected `to` address as a recipient fault", () => {
+    expect(classifyResendFailure(422, '{"message":"Invalid `to` field: not an email"}')).toBe("recipient");
+  });
+
+  it("treats rate limiting and provider errors as transient", () => {
+    expect(classifyResendFailure(429, "slow down")).toBe("transient");
+    expect(classifyResendFailure(500, "boom")).toBe("transient");
+    expect(classifyResendFailure(503, "unavailable")).toBe("transient");
+  });
+
+  it("defaults an unrecognised 4xx to configuration so the row survives", () => {
+    // Deliberate bias: a stuck-and-visible row beats a silently dead one. The
+    // outage this guards against was two weeks of mail nobody knew was lost.
+    expect(classifyResendFailure(400, "something we have never seen")).toBe("configuration");
   });
 });
 

@@ -10,6 +10,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import {
+  assessDrainHealth,
   createResendSender,
   isAuthorizedCronRequest,
   runSopNotificationDrain,
@@ -57,7 +58,28 @@ async function drain(request: Request): Promise<NextResponse> {
       now,
       origin,
     });
-    return NextResponse.json({ configured: send !== null, sop: sopReport, workspace: workspaceReport });
+    // A drain that "succeeds" while sending nothing is exactly how the
+    // RESEND_FROM outage hid for two weeks. Answer 503 when the pipeline is
+    // unhealthy so the failure is visible to anything that watches this route —
+    // Vercel's cron status, an uptime check, or a plain curl. The drain's own
+    // writes are already durable, so a non-2xx costs no work.
+    const health = assessDrainHealth([
+      { label: "sop", report: sopReport },
+      { label: "workspace", report: workspaceReport },
+    ]);
+    if (!health.healthy) {
+      console.error(`SOP notification drain unhealthy — ${health.problems.join("; ")}`);
+    }
+    return NextResponse.json(
+      {
+        configured: send !== null,
+        healthy: health.healthy,
+        problems: health.problems,
+        sop: sopReport,
+        workspace: workspaceReport,
+      },
+      { status: health.healthy ? 200 : 503 },
+    );
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Drain failed.";
     return NextResponse.json({ error: message }, { status: 500 });

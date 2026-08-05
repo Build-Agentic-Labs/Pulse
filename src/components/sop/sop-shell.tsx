@@ -4,7 +4,7 @@ import { ChevronLeft, PanelLeft, PanelLeftClose } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type MouseEvent, type ReactNode, type Ref } from "react";
-import { BackToDashboardButton, UserNav } from "@/components/user-nav";
+import { SpaceTopNav } from "@/components/space-top-nav";
 
 /**
  * App-shell layout for the SOP section, matching the settings page: a full-width
@@ -51,35 +51,23 @@ export function SopShell({
 
   return (
     <div className="ui-sop-shell fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink">
-      <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between px-3 sm:px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <BackToDashboardButton onNavigate={guardNavigation} />
-          <Link href="/" className="ui-brand-compact shrink-0" onClick={guardNavigation}>
-            Pulse
-          </Link>
+      <SpaceTopNav
+        onNavigate={guardNavigation}
+        context={crumb ?? "Quality"}
+        contextLeading={
           <button
             type="button"
             onClick={() => setMobileOpen((open) => !open)}
-            className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 text-ink-tertiary hover:text-ink lg:hidden"
+            className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0 text-ink-tertiary hover:text-ink lg:hidden"
             title={mobileOpen ? "Close SOP navigation" : "Open SOP navigation"}
             aria-label={mobileOpen ? "Close SOP navigation" : "Open SOP navigation"}
             aria-expanded={mobileOpen}
           >
             {mobileOpen ? <PanelLeftClose size={16} strokeWidth={1.75} /> : <PanelLeft size={16} strokeWidth={1.75} />}
           </button>
-          {crumb ? (
-            <>
-              <span className="ui-chrome-divider hidden sm:block" />
-              <span className="ui-chrome-context-label hidden truncate sm:inline">{crumb}</span>
-            </>
-          ) : null}
-        </div>
-
-        <div className="flex items-center gap-0.5 sm:gap-1">
-          {actions}
-          <UserNav showThemeToggle={false} />
-        </div>
-      </header>
+        }
+        actions={actions}
+      />
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {mobileOpen ? (

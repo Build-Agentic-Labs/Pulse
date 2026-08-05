@@ -163,6 +163,7 @@ import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from ".
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
 import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
+import { TopNav, plannerSaveStatus } from "./planner-top-nav";
 import { announceProjectSwitch, projectPlannerHref } from "./sidebar-workspace-panel";
 import { PlannerWorkspaceSkeleton, ProductLoadingState, SettingsLoadingState } from "./space-loading-states";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
@@ -175,10 +176,8 @@ import { ProcedureWorkspace } from "./line-workspace/procedure";
 import {
   Sidebar,
   SidebarReopenButton,
-  TopNav,
   comingSoonModuleIds,
   plannerModules,
-  plannerSaveStatus,
   quickSwitchModules,
   type SetupSection,
 } from "./line-workspace/nav";
@@ -545,7 +544,16 @@ export function LineWorkspace({
       activeZoneId: params.get("zone") ?? undefined,
     };
   }, [plannerQueryString]);
-  const [plannerState, setPlannerState] = useState<PlannerState>(emptyPlannerState);
+  const initialPlannerStateMatchesProject = Boolean(
+    initialPlannerState &&
+      projectId &&
+      String(initialPlannerState.product.projectId ?? "") === String(projectId),
+  );
+  const [plannerState, setPlannerState] = useState<PlannerState>(() =>
+    initialPlannerStateMatchesProject && initialPlannerState
+      ? ensureNomenclatureCollections(initialPlannerState)
+      : emptyPlannerState,
+  );
   // Scenario switcher: lightweight list for the tabs + an in-flight flag for the reload-on-switch.
   // The "active" scenario is always derivedState.scenario.id (the currently loaded one), so we don't
   // track a separate id that could drift out of sync with the loaded planner state.
@@ -558,7 +566,7 @@ export function LineWorkspace({
   // The active scenario's latest state is mirrored here continuously (see the effect below), so the
   // cache always matches what's saved; switching to a cached scenario is a pure in-memory setState.
   const scenarioCacheRef = useRef<Map<string, PlannerState>>(new Map());
-  const [activeModule, setActiveModule] = useState("dashboard");
+  const [activeModule, setActiveModule] = useState(() => urlWorkspaceSnapshot.activeModule ?? "dashboard");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("account");
   const [setupSection, setSetupSection] = useState<SetupSection>("product");
   const [selectedTaskId, setSelectedTaskId] = useState(emptyPlannerState.tasks[0]?.id);
@@ -3235,12 +3243,15 @@ export function LineWorkspace({
     "--workspace-sidebar-width": sidebarCollapsed ? "0px" : "var(--shell-sidebar)",
     "--detail-drawer-width": detailDrawerCollapsed ? "44px" : `${detailDrawerWidth}px`,
   } as CSSProperties;
+  const hasDisplayablePlannerState = Boolean(
+    projectId && String(plannerState.product.projectId ?? "") === String(projectId),
+  );
 
   if (urlWorkspaceSnapshot.activeModule === "settings" && (!hasLoadedRemoteState || isProjectSwitching)) {
     return <SettingsLoadingState />;
   }
 
-  if (!hasLoadedRemoteState) {
+  if (!hasLoadedRemoteState && !hasDisplayablePlannerState) {
     if (!isProjectSwitching) {
       return <ProductLoadingState />;
     }

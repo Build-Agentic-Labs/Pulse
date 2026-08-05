@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { SpaceIcon, type SpaceKey } from "./spaces";
-import { BackToDashboardButton, UserNav } from "./user-nav";
+import { SpaceTopNav } from "./space-top-nav";
 
 type SpacePlaceholderProps = {
   space: SpaceKey;
@@ -22,16 +21,9 @@ type SpacePlaceholderProps = {
 export function SpacePlaceholder({ space, name, description, planned, children }: SpacePlaceholderProps) {
   return (
     <div className="h-[100dvh] overflow-y-auto bg-canvas text-ink">
-      <header className="ui-chrome sticky top-0 z-10 flex h-12 items-center gap-3 px-4">
-        <BackToDashboardButton />
-        <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
-          Pulse
-        </Link>
-        <span className="ui-chrome-divider" />
-        <span className="ui-chrome-context-label truncate">{name}</span>
-        <span className="flex-1" />
-        <UserNav />
-      </header>
+      <div className="sticky top-0 z-10">
+        <SpaceTopNav context={name} />
+      </div>
 
       <main className="mx-auto max-w-[760px] px-8 py-16">
         <span className="grid h-11 w-11 place-items-center rounded-sm border border-line bg-gradient-to-b from-surface-raised to-canvas text-ink-secondary">

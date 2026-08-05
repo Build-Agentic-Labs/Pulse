@@ -2,7 +2,7 @@
 
 import "./app-settings-panel.css";
 
-import { Check, CircleUserRound, FolderKanban, Moon, Palette, Settings, Sun, UsersRound } from "lucide-react";
+import { Check, Moon, Sun } from "lucide-react";
 
 import { useState, type ReactNode } from "react";
 
@@ -22,29 +22,17 @@ import { ProjectSettings } from "@/components/project-settings";
 
 import { PlanningSettings } from "@/components/planning/planning-settings";
 
-import { NavSelectionTrack } from "@/components/nav-selection-track";
+import {
+  SettingsNavigation,
+  settingsSections,
+  type SettingsSection,
+} from "@/components/settings-navigation";
 
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
 
 import type { ThemeMode } from "@/lib/theme-init";
 
 
-
-const settingsSections = [
-
-  { id: "account", label: "Account", icon: CircleUserRound },
-
-  { id: "appearance", label: "Appearance", icon: Palette },
-
-  { id: "organization", label: "Organization", icon: UsersRound },
-
-  { id: "projects", label: "Projects", icon: FolderKanban },
-
-  { id: "planning", label: "Planning", icon: Settings },
-
-] as const;
-
-const embeddedSettingsSections = settingsSections.slice(0, 3);
 
 const appearanceColorKeys: AppearanceColorKey[] = ["canvas", "surface", "raised", "accent"];
 
@@ -198,13 +186,8 @@ function AppearancePresetGrid({
 
 
 
-type SettingsSection = (typeof settingsSections)[number]["id"];
-
-
-
-export { embeddedSettingsSections, settingsSections };
-
-export type { SettingsSection };
+export { embeddedSettingsSections, settingsSections } from "@/components/settings-navigation";
+export type { SettingsSection } from "@/components/settings-navigation";
 
 
 
@@ -355,10 +338,6 @@ export function AppSettingsPanel({
   const [internalSection, setInternalSection] = useState<SettingsSection>("account");
 
   const activeSection = section ?? internalSection;
-  const activeSectionIndex = sections.findIndex((item) => item.id === activeSection);
-
-
-
   function setSection(nextSection: SettingsSection) {
 
     if (section === undefined) {
@@ -378,90 +357,7 @@ export function AppSettingsPanel({
     <div className="ui-settings-layout flex h-full min-h-0 flex-col overflow-hidden bg-surface md:flex-row">
 
       {showSubnav ? (
-
-        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-line bg-surface px-2 py-2 md:hidden" aria-label="Settings sections">
-
-          {sections.map((item) => {
-
-            const Icon = item.icon;
-
-            const active = activeSection === item.id;
-
-            return (
-
-              <button
-
-                key={item.id}
-
-                type="button"
-
-                onClick={() => setSection(item.id)}
-
-                className={`ui-settings-subnav-item mx-0 shrink-0 ${active ? "ui-settings-subnav-item-active" : "ui-settings-subnav-item-idle"}`}
-
-              >
-
-                <Icon size={14} strokeWidth={1.75} />
-
-                {item.label}
-
-              </button>
-
-            );
-
-          })}
-
-        </nav>
-
-      ) : null}
-
-      {showSubnav ? (
-
-        <aside className="ui-settings-subnav">
-
-          <div className="ui-nav-section px-4">Settings</div>
-
-          <NavSelectionTrack
-            activeIndex={activeSectionIndex}
-            as="nav"
-            inset
-            className="mt-1 flex flex-col gap-0.5"
-          >
-
-            {sections.map((item) => {
-
-              const Icon = item.icon;
-
-              const active = activeSection === item.id;
-
-              return (
-
-                <button
-
-                  key={item.id}
-
-                  type="button"
-
-                  onClick={() => setSection(item.id)}
-
-                  className={`ui-settings-subnav-item ${active ? "ui-settings-subnav-item-active" : "ui-settings-subnav-item-idle"}`}
-
-                >
-
-                  <Icon size={14} strokeWidth={1.75} />
-
-                  {item.label}
-
-                </button>
-
-              );
-
-            })}
-
-          </NavSelectionTrack>
-
-        </aside>
-
+        <SettingsNavigation activeSection={activeSection} sections={sections} onSelect={setSection} />
       ) : null}
 
 

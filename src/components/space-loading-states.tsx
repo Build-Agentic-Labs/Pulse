@@ -1,64 +1,16 @@
-import {
-  Archive,
-  ArrowLeft,
-  CircleUserRound,
-  ClipboardList,
-  FileText,
-  FileSpreadsheet,
-  FolderKanban,
-  Inbox,
-  Library,
-  Palette,
-  PanelLeftClose,
-  Settings,
-  Settings2,
-  UsersRound,
-} from "lucide-react";
-import type { CSSProperties } from "react";
-import { UserNav } from "@/components/user-nav";
+import { PanelLeftClose } from "lucide-react";
+import { CompanyTopNav } from "@/components/company-top-nav";
+import { PlanningNav } from "@/components/planning/planning-nav";
+import { TopNav } from "@/components/planner-top-nav";
+import { SettingsNavigation } from "@/components/settings-navigation";
+import { SpaceTopNav } from "@/components/space-top-nav";
+import { SopTabNav } from "@/components/sop/sop-tab-nav";
 
 function LoadingStatus({ label }: { label: string }) {
   return (
     <span className="ui-transition-status" role="status" aria-live="polite">
       {label}
     </span>
-  );
-}
-
-function ChromePlaceholder({
-  space,
-  label,
-  persistentUserNav = false,
-}: {
-  space?: string;
-  label: string;
-  persistentUserNav?: boolean;
-}) {
-  return (
-    <header className="ui-chrome flex h-12 shrink-0 items-center gap-3 px-4">
-      <span className="grid h-8 w-8 place-items-center text-ink-tertiary" aria-hidden="true">
-        <ArrowLeft size={15} strokeWidth={1.75} />
-      </span>
-      <span className="ui-brand-compact">Pulse</span>
-      {space ? (
-        <>
-          <span className="ui-chrome-divider" />
-          <span className="ui-chrome-context-label truncate">{space}</span>
-        </>
-      ) : null}
-      <span className="flex-1" />
-      {persistentUserNav ? (
-        <div className="flex items-center gap-1">
-          <LoadingStatus label={label} />
-          <UserNav showThemeToggle={false} />
-        </div>
-      ) : (
-        <>
-          <LoadingStatus label={label} />
-          <span className="h-7 w-7 rounded-full border border-line bg-surface-muted" aria-hidden="true" />
-        </>
-      )}
-    </header>
   );
 }
 
@@ -69,7 +21,7 @@ function SkeletonLine({ className = "" }: { className?: string }) {
 export function DashboardLoadingState({ label = "Opening dashboard" }: { label?: string }) {
   return (
     <div className="h-[100dvh] overflow-hidden bg-canvas text-ink" aria-busy="true">
-      <ChromePlaceholder label={label} />
+      <CompanyTopNav loading loadingLabel={label} />
       <main className="mx-auto max-w-[940px] px-8 py-16">
         <div className="mb-10">
           <SkeletonLine className="h-2 w-44" />
@@ -97,8 +49,11 @@ export function PlannerWorkspaceSkeleton({ label = "Opening workspace" }: { labe
   const metricWidths = ["w-28", "w-24", "w-32", "w-24", "w-28"];
 
   return (
-    <main className="ui-workspace-content p-0 pb-6" aria-busy="true">
-      <div className="ui-planner-dashboard">
+    <main
+      className="min-h-0 min-w-0 overflow-auto rounded-l-xl bg-canvas transition-[border-radius] duration-300 ease-out"
+      aria-busy="true"
+    >
+      <div className="space-y-4 p-4 pb-2">
         <section className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
           <div>
             <SkeletonLine className="h-3 w-40" />
@@ -159,41 +114,23 @@ export function PlannerWorkspaceSkeleton({ label = "Opening workspace" }: { labe
 
 export function ProductLoadingState({ label = "Opening workspace" }: { label?: string }) {
   return (
-    <div
-      className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink"
-      style={{ "--workspace-sidebar-width": "var(--shell-sidebar)" } as CSSProperties}
-    >
-      <header className="ui-chrome ui-chrome-planner z-40 h-12 shrink-0">
-        <div className="ui-chrome-planner-brand">
-          <span className="grid h-8 w-8 place-items-center text-ink-tertiary" aria-hidden="true">
-            <ArrowLeft size={15} strokeWidth={1.75} />
-          </span>
-          <span className="ui-brand-compact">Pulse</span>
-        </div>
-        <div className="ui-chrome-planner-context">
-          <SkeletonLine className="h-3 w-36" />
-        </div>
-        <div className="ui-chrome-planner-actions">
-          <span className="h-7 w-7 rounded-full border border-line bg-surface-muted" aria-hidden="true" />
-        </div>
-      </header>
-      <div className="relative ui-workspace-shell">
-        <div className="ui-workspace-sidebar-slot">
-          <aside className="ui-nav-sidebar">
-            <div className="flex h-9 shrink-0 items-center justify-end px-2 text-ink-tertiary">
-              <PanelLeftClose size={15} strokeWidth={1.75} aria-hidden="true" />
-            </div>
-            <div className="space-y-3 border-b border-line px-4 pb-4 pt-2">
-              <SkeletonLine className="h-3 w-32" />
-              <SkeletonLine className="h-2 w-24" />
-            </div>
-            <div className="space-y-4 px-4 py-5">
-              {["w-24", "w-32", "w-28", "w-20", "w-28"].map((width, index) => (
-                <SkeletonLine key={index} className={`h-2 ${width}`} />
-              ))}
-            </div>
-          </aside>
-        </div>
+    <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink" aria-busy="true">
+      <TopNav loading />
+      <div className="grid h-[calc(100dvh-48px)] min-h-0 grid-cols-1 overflow-hidden bg-surface lg:grid-cols-[var(--shell-sidebar)_minmax(0,1fr)]">
+        <aside className="hidden h-full w-[var(--shell-sidebar)] shrink-0 flex-col bg-surface lg:flex">
+          <div className="flex h-9 shrink-0 items-center justify-end px-2 text-ink-tertiary">
+            <PanelLeftClose size={15} strokeWidth={1.75} aria-hidden="true" />
+          </div>
+          <div className="space-y-3 border-b border-line px-4 pb-4 pt-2">
+            <SkeletonLine className="h-3 w-32" />
+            <SkeletonLine className="h-2 w-24" />
+          </div>
+          <div className="space-y-4 px-4 py-5">
+            {["w-24", "w-32", "w-28", "w-20", "w-28"].map((width, index) => (
+              <SkeletonLine key={index} className={`h-2 ${width}`} />
+            ))}
+          </div>
+        </aside>
         <PlannerWorkspaceSkeleton label={label} />
       </div>
     </div>
@@ -201,37 +138,16 @@ export function ProductLoadingState({ label = "Opening workspace" }: { label?: s
 }
 
 export function SettingsLoadingState({ label = "Opening Settings" }: { label?: string }) {
-  const settingsItems = [
-    { label: "Account", icon: CircleUserRound },
-    { label: "Appearance", icon: Palette },
-    { label: "Organization", icon: UsersRound },
-    { label: "Projects", icon: FolderKanban },
-    { label: "Planning", icon: Settings },
-  ];
-
   return (
     <div
       className="ui-settings-workspace fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink"
       aria-busy="true"
     >
-      <ChromePlaceholder space="Settings" label={label} />
+      <SpaceTopNav context="Settings" loading loadingLabel={label} />
       <div className="ui-settings-layout flex min-h-0 flex-1 flex-col overflow-hidden bg-surface md:flex-row">
-        <aside className="ui-settings-subnav">
-          <div className="ui-nav-section px-4">Settings</div>
-          <nav className="mt-1 flex flex-col gap-0.5">
-            {settingsItems.map((item, index) => {
-              const Icon = item.icon;
-              return (
-                <span key={item.label} className={`ui-settings-subnav-item ${index === 0 ? "ui-settings-subnav-item-active" : "ui-settings-subnav-item-idle"}`}>
-                  <Icon size={14} strokeWidth={1.75} aria-hidden="true" />
-                  <span>{item.label}</span>
-                </span>
-              );
-            })}
-          </nav>
-        </aside>
+        <SettingsNavigation activeSection="account" />
 
-        <main className="ui-settings-content">
+        <div className="ui-settings-content">
           <div className="ui-settings-page">
             <h2 className="ui-settings-page-title">Account</h2>
             <p className="ui-settings-page-desc">Your profile and sign-in credentials.</p>
@@ -251,7 +167,7 @@ export function SettingsLoadingState({ label = "Opening Settings" }: { label?: s
               </div>
             </section>
           </div>
-        </main>
+        </div>
       </div>
     </div>
   );
@@ -290,34 +206,13 @@ export function WorkOrderTableSkeleton() {
 }
 
 export function PlanningLoadingState({ label = "Opening Planning" }: { label?: string }) {
-  const navItems = [
-    { label: "Sales orders", icon: FileSpreadsheet },
-    { label: "Work orders", icon: ClipboardList },
-  ];
-
   return (
     <div className="fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink" aria-busy="true">
-      <ChromePlaceholder space="Planning" label={label} />
+      <SpaceTopNav context="Planning" loading loadingLabel={label} />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <aside className="ui-nav-sidebar shrink-0 flex-col overflow-hidden">
-          <nav className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-3">
-            <div className="ui-nav-section">Planning</div>
-            <div className="space-y-0.5">
-              {navItems.map(({ label: itemLabel, icon: Icon }, index) => (
-                <span
-                  key={itemLabel}
-                  className={`ui-nav-item ${index === 1 ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
-                >
-                  <Icon size={15} strokeWidth={1.75} />
-                  <span>{itemLabel}</span>
-                </span>
-              ))}
-            </div>
-            <div className="ui-nav-section mt-3">Setup</div>
-            <span className="ui-nav-item ui-nav-item-idle">
-              <Settings2 size={15} strokeWidth={1.75} />
-              <span>Product configuration</span>
-            </span>
+          <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-3">
+            <PlanningNav />
           </nav>
         </aside>
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -344,7 +239,7 @@ export function PlanningLoadingState({ label = "Opening Planning" }: { label?: s
 export function ProductionLoadingState({ label = "Opening Production" }: { label?: string }) {
   return (
     <div className="h-[100dvh] overflow-hidden bg-canvas text-ink" aria-busy="true">
-      <ChromePlaceholder space="Production" label={label} />
+      <SpaceTopNav context="Production" loading loadingLabel={label} />
       <main className="mx-auto max-w-[760px] px-8 py-16">
         <span className="block h-11 w-11 rounded-sm border border-line bg-surface-muted" aria-hidden="true" />
         <SkeletonLine className="mt-5 h-5 w-40" />
@@ -414,30 +309,18 @@ export function QualityListLoadingContent() {
 }
 
 export function QualityLoadingState({ label = "Opening Quality" }: { label?: string }) {
-  const navItems = [
-    { label: "All SOPs", icon: FileText },
-    { label: "Review queue", icon: Inbox },
-    { label: "Effective library", icon: Library },
-    { label: "Retired", icon: Archive },
-  ];
-
   return (
     <div className="ui-sop-shell fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink" aria-busy="true">
-      <ChromePlaceholder space="Quality / SOPs" label={label} persistentUserNav />
+      <SpaceTopNav
+        context="Quality / SOPs"
+        contextLeading={<span className="block h-8 w-8 shrink-0 lg:hidden" aria-hidden="true" />}
+        loading
+        loadingLabel={label}
+      />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <aside className="ui-nav-sidebar">
           <nav className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-3">
-            <div className="space-y-0.5">
-              {navItems.map(({ label: itemLabel, icon: Icon }, index) => (
-                <span
-                  key={itemLabel}
-                  className={`ui-nav-item ${index === 0 ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
-                >
-                  <Icon size={15} strokeWidth={1.75} />
-                  <span>{itemLabel}</span>
-                </span>
-              ))}
-            </div>
+            <SopTabNav active="all" manage={false} />
           </nav>
         </aside>
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">

@@ -1,10 +1,9 @@
 "use client";
 
-import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { PlanningLoadingState } from "@/components/space-loading-states";
-import { BackToDashboardButton, UserNav } from "@/components/user-nav";
+import { SpaceTopNav } from "@/components/space-top-nav";
 import { usePlanningWorkspace } from "./planning-workspace-provider";
 
 type PlanningShellProps = {
@@ -31,37 +30,24 @@ export function PlanningShell({ title, actions, backHref, backLabel = "Back to w
   // access-gate renderings.
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface pt-12 text-ink">
-      <header className="ui-chrome fixed inset-x-0 top-0 z-40 flex h-12 shrink-0 items-center gap-3 px-3 sm:px-4">
-        {backHref ? (
-          <Link
-            href={backHref}
-            className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
-            title={backLabel}
-            aria-label={backLabel}
-          >
-            <ArrowLeft size={15} strokeWidth={1.75} />
-          </Link>
-        ) : (
-          <BackToDashboardButton />
-        )}
-        <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
-          Pulse
-        </Link>
-        <span className="ui-chrome-divider" />
-        <span className="ui-chrome-context-label truncate">
-          {backHref ? (
-            <Link href="/planning" className="hover:text-ink" title="Work orders">
-              Planning
-            </Link>
-          ) : (
-            "Planning"
-          )}
-          {title ? <> · {title}</> : null}
-        </span>
-        <span className="flex-1" />
-        {actions}
-        <UserNav />
-      </header>
+      <SpaceTopNav
+        fixed
+        backHref={backHref}
+        backLabel={backLabel}
+        actions={actions}
+        context={
+          <>
+            {backHref ? (
+              <Link href="/planning" className="hover:text-ink" title="Work orders">
+                Planning
+              </Link>
+            ) : (
+              "Planning"
+            )}
+            {title ? <> · {title}</> : null}
+          </>
+        }
+      />
 
       <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="ui-planning-space h-full overflow-y-auto bg-canvas lg:rounded-tl-2xl">

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -11,7 +10,7 @@ import {
 import type { DashboardHomeContext } from "@/components/auth-project-gate";
 import { PlanningWorkspaceProvider } from "@/components/planning/planning-workspace-provider";
 import { SopWorkspaceFromGroupsProvider } from "@/components/sop/sop-workspace-provider";
-import { BackToDashboardButton, UserNav } from "@/components/user-nav";
+import { SpaceTopNav } from "@/components/space-top-nav";
 import type { PlannerProjectContext } from "@/domain/types";
 
 function parseSection(value: string | null): SettingsSection {
@@ -60,16 +59,8 @@ export function SettingsWorkspace(home: DashboardHomeContext) {
   return (
     <PlanningWorkspaceProvider groups={home.groups}>
       <SopWorkspaceFromGroupsProvider groups={home.groups}>
-        <div className="ui-settings-workspace ui-sop-shell fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink">
-          <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between px-3 sm:px-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <BackToDashboardButton />
-              <Link href="/" className="ui-brand-compact shrink-0">Pulse</Link>
-              <span className="ui-chrome-divider hidden sm:block" />
-              <span className="ui-chrome-context-label hidden truncate sm:inline">Settings</span>
-            </div>
-            <UserNav />
-          </header>
+        <div className="ui-settings-workspace fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink">
+          <SpaceTopNav context="Settings" />
 
           <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <AppSettingsPanel

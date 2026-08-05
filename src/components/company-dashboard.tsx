@@ -6,9 +6,9 @@ import { useEffect, useState } from "react";
 import type { Project } from "@/domain/types";
 import { fetchMySpaceAccess } from "@/lib/planning/store";
 import type { DashboardHomeContext } from "./auth-project-gate";
+import { CompanyTopNav } from "./company-top-nav";
 import { announceProjectSwitch } from "./sidebar-workspace-panel";
 import { SPACE_META, SPACE_ORDER, spaceDisabledLabel, spaceHref, type SpaceKey } from "./spaces";
-import { UserNav } from "./user-nav";
 
 type SpaceCard = {
   space: SpaceKey;
@@ -172,19 +172,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
         className="pointer-events-none fixed inset-0 bg-[radial-gradient(720px_340px_at_50%_-120px,color-mix(in_srgb,var(--color-ink)_5%,transparent),transparent_70%)]"
       />
 
-      <header className="ui-chrome sticky top-0 z-10 flex h-12 items-center gap-3 px-4">
-        <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
-          Pulse
-        </Link>
-        {workspaceName ? (
-          <>
-            <span className="ui-chrome-divider" />
-            <span className="ui-chrome-context-label truncate">{workspaceName}</span>
-          </>
-        ) : null}
-        <span className="flex-1" />
-        <UserNav showSpacesLink={false} />
-      </header>
+      <CompanyTopNav workspaceName={workspaceName} />
 
       <main className="relative mx-auto max-w-[940px] px-8 py-16">
         <div className="mb-10">

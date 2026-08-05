@@ -18,15 +18,10 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { type SaveState } from "@/domain/supabase-planner";
 import type { PlannerProjectContext } from "@/domain/types";
-import { type PresencePeer } from "@/lib/use-planner-presence";
 import { embeddedSettingsSections, type SettingsSection } from "../app-settings-panel";
 import { NavSelectionTrack } from "../nav-selection-track";
-import { NothingStatus } from "../nothing-ui";
-import { buildPlannerChromeContext } from "../planner-dashboard-panel";
 import { SidebarWorkspacePanel } from "../sidebar-workspace-panel";
-import { BackToDashboardButton, UserNav } from "../user-nav";
 
 export const plannerModules = [
   { id: "dashboard", label: "Dashboard", icon: Factory },
@@ -52,133 +47,6 @@ export const comingSoonModuleIds = new Set(["balance", "reports"]);
 
 // Modules reachable via Alt+1..N and the command palette (coming-soon ones excluded).
 export const quickSwitchModules = plannerModules.filter((module) => !comingSoonModuleIds.has(module.id));
-
-function presenceInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "?";
-  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
-  return `${first}${last}`.toUpperCase();
-}
-
-function PresenceStack({ peers }: { peers: PresencePeer[] }) {
-  if (!peers.length) {
-    return null;
-  }
-
-  const visible = peers.slice(0, 4);
-  return (
-    <div
-      className="hidden items-center -space-x-1.5 sm:flex"
-      title={`Also viewing this project: ${peers.map((peer) => peer.name).join(", ")}`}
-    >
-      {visible.map((peer) => (
-        <span
-          key={peer.key}
-          className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-surface-active text-[10px] font-medium text-ink-secondary"
-          title={peer.name}
-        >
-          {presenceInitials(peer.name)}
-        </span>
-      ))}
-      {peers.length > visible.length ? (
-        <span className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-surface text-[10px] text-ink-tertiary">
-          +{peers.length - visible.length}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-// Maps the persistent planner save state to the chrome status chip. Returns null for
-// states that need no indicator (idle/loading/draft) so the chip only appears when it matters.
-export function plannerSaveStatus(state: SaveState): { message: string; error?: boolean } | null {
-  switch (state) {
-    case "saving":
-    case "retrying":
-      return { message: "Saving…" };
-    case "saved":
-      return { message: "Saved" };
-    case "error":
-    case "conflict":
-      return { message: "Save failed", error: true };
-    default:
-      return null;
-  }
-}
-
-export function TopNav({
-  context,
-  chromeStatus,
-  saveStatus,
-  presence,
-}: {
-  context?: ReturnType<typeof buildPlannerChromeContext>;
-  chromeStatus?: { message: string; error?: boolean } | null;
-  saveStatus?: { message: string; error?: boolean } | null;
-  presence?: PresencePeer[];
-}) {
-  // A transient chrome event (notifyFeedback) takes priority; otherwise show the
-  // persistent save indicator so the planner always signals its save state.
-  const status = chromeStatus ?? saveStatus ?? null;
-
-  if (context) {
-    return (
-      <header className="ui-chrome ui-chrome-planner z-40 h-12 shrink-0">
-        <div className="ui-chrome-planner-brand">
-          <BackToDashboardButton />
-          <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
-            Pulse
-          </Link>
-        </div>
-
-        <div className="ui-chrome-planner-context min-w-0">
-          <span className="ui-chrome-context-title truncate">{context.title}</span>
-          <span className="ui-chrome-context-meta hidden min-w-0 truncate sm:inline">
-            <span className={context.statusClass}>{context.status}</span>
-            {context.detail ? (
-              <>
-                <span aria-hidden> · </span>
-                <span>{context.detail}</span>
-              </>
-            ) : null}
-          </span>
-        </div>
-
-        <div className="ui-chrome-planner-actions">
-          {presence ? <PresenceStack peers={presence} /> : null}
-          {status ? (
-            <div className="ui-chrome-status max-w-[min(28rem,42vw)]">
-              <NothingStatus error={status.error}>{status.message}</NothingStatus>
-            </div>
-          ) : null}
-          <UserNav />
-        </div>
-      </header>
-    );
-  }
-
-  return (
-    <header className="ui-chrome z-40 flex h-12 shrink-0 items-center justify-between gap-3 px-3 sm:px-4 lg:px-0">
-      <div className="ui-chrome-brand flex min-w-0 items-center gap-1 sm:gap-2 lg:gap-0.5 lg:px-2">
-        <BackToDashboardButton />
-        <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
-          Pulse
-        </Link>
-      </div>
-
-      <div className="flex min-w-0 flex-1 lg:hidden" />
-
-      <div className="flex shrink-0 items-center gap-0.5 sm:gap-1 lg:pr-4">
-        {status ? (
-          <div className="ui-chrome-status max-w-[min(24rem,38vw)]">
-            <NothingStatus error={status.error}>{status.message}</NothingStatus>
-          </div>
-        ) : null}
-        <UserNav />
-      </div>
-    </header>
-  );
-}
 
 /** Floating control that reappears when the sidebar is collapsed, so it can be reopened. */
 export function SidebarReopenButton({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
@@ -342,4 +210,3 @@ export function Sidebar({
     </aside>
   );
 }
-

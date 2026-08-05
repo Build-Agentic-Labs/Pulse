@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import type { PlannerState, WorkspaceProjectGroup } from "@/domain/types";
+import { WORK_INSTRUCTION_LAYOUTS } from "@/domain/work-instruction/schema";
 import { AppLoadingShell } from "./app-flow-panels";
 import { AuthProjectGate } from "./auth-project-gate";
 import {
@@ -24,6 +25,10 @@ function ProjectRouteLoading() {
 const CompanyDashboard = dynamic(
   () => import("./company-dashboard").then((module) => module.CompanyDashboard),
   { loading: () => <DashboardLoadingState /> },
+);
+const WorkInstructionPrintPreview = dynamic(
+  () => import("./work-instruction/work-instruction-print").then((module) => module.WorkInstructionPrintPreview),
+  { loading: () => <ProductLoadingState /> },
 );
 const LineWorkspace = dynamic(
   () => import("./line-workspace").then((module) => module.LineWorkspace),
@@ -151,6 +156,45 @@ export function PlannerRouteShell({
           projectId={project?.projectId ?? projectId}
           onReady={onReady}
           initialPlannerState={initialPlannerState}
+        />
+      )}
+    </AuthProjectGate>
+  );
+}
+
+/**
+ * Print sub-route of the planner. Same access requirements as the planner
+ * itself, so it reuses `routeKind: "planner"`; the print view deliberately
+ * renders without workspace chrome.
+ */
+export function WorkInstructionPrintRouteShell({
+  projectId,
+  initialGroups,
+  initialPlannerState,
+  taskIds,
+  scenarioId,
+  blank,
+  layoutId,
+}: {
+  projectId: string;
+  initialPlannerState?: PlannerState;
+  taskIds: string[];
+  scenarioId?: string;
+  blank?: boolean;
+  /** Already validated by the route; undefined means the app default. */
+  layoutId?: string;
+} & ShellProps) {
+  return (
+    <AuthProjectGate projectId={projectId} routeKind="planner" initialGroups={initialGroups}>
+      {(project, onReady) => (
+        <WorkInstructionPrintPreview
+          projectId={project?.projectId ?? projectId}
+          scenarioId={scenarioId}
+          taskIds={taskIds}
+          blank={blank}
+          initialPlannerState={initialPlannerState}
+          layout={layoutId ? WORK_INSTRUCTION_LAYOUTS[layoutId] : undefined}
+          onReady={onReady}
         />
       )}
     </AuthProjectGate>

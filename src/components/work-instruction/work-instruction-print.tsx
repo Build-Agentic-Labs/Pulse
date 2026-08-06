@@ -115,11 +115,6 @@ function PrintToolbar({
 
       {onClose ? null : <span className="flex-1" />}
 
-      {/* Ledger landscape at 100% is easy to get wrong in the print dialog and
-          silently yields a shrunken Letter page, so the settings ride along. */}
-      <span className="hidden text-xs text-ink-tertiary lg:inline">
-        Print: Ledger 11&times;17 · Landscape · Margins none · Scale 100%
-      </span>
       {onClose ? null : <span className="ui-mono-label text-ink-tertiary">{label}</span>}
       <button
         type="button"

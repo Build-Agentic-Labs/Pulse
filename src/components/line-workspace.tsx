@@ -169,7 +169,7 @@ import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from ".
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
 import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
-import { TopNav, plannerSaveStatus } from "./planner-top-nav";
+import { TopNav } from "./planner-top-nav";
 import { announceProjectSwitch, projectPlannerHref } from "./sidebar-workspace-panel";
 import { PlannerWorkspaceSkeleton, ProductLoadingState, SettingsLoadingState } from "./space-loading-states";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
@@ -3458,7 +3458,6 @@ export function LineWorkspace({
         <TopNav
           context={displayedPlannerChromeContext}
           chromeStatus={chromeStatus}
-          saveStatus={plannerSaveStatus(saveState)}
         />
         <div className={`relative ${workspaceGridClass}`}>
           <SidebarReopenButton
@@ -5767,7 +5766,6 @@ export function LineWorkspace({
       <TopNav
         context={displayedPlannerChromeContext}
         chromeStatus={chromeStatus}
-        saveStatus={plannerSaveStatus(saveState)}
         presence={presencePeers}
       />
 

@@ -70,6 +70,8 @@ describe("WorkInstructionDocument", () => {
     const { container } = render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
     const printStyles = container.querySelector("style")?.textContent ?? "";
 
+    expect(printStyles).toContain("html, body");
+    expect(printStyles).toContain("height: auto !important");
     expect(printStyles).toContain(".wi-print-root.wi-print-modal");
     expect(printStyles).toContain("position: static !important");
     expect(printStyles).toContain(".wi-print-root.wi-print-modal .wi-print-body");

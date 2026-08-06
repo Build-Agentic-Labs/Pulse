@@ -3538,19 +3538,13 @@ export function MobilePhotoPortal({
               ) : null}
             </div>
             <div className="ui-photo-mobile-header-nav flex shrink-0 items-center gap-1.5">
-              {saveState === "saving" || saveState === "saved" || saveState === "error" ? (
+              {saveState === "error" ? (
                 <span
-                  className="ui-mono-label whitespace-nowrap text-ink-tertiary"
-                  aria-live="polite"
-                  title={
-                    saveState === "error"
-                      ? "Changes could not be saved"
-                      : saveState === "saving"
-                        ? "Saving changes…"
-                        : "All changes saved"
-                  }
+                  className="ui-mono-label whitespace-nowrap text-danger"
+                  role="alert"
+                  title="Changes could not be saved"
                 >
-                  {saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}
+                  Not saved
                 </span>
               ) : null}
               <BackToDashboardButton />

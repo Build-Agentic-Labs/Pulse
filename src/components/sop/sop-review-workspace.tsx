@@ -304,22 +304,11 @@ export function SopReviewWorkspace({
             <div className="ui-mono-label text-ink-tertiary">Structured review remarks</div>
             <p className="ui-section-subtitle mt-1 text-ink-secondary">Add remarks under the section they apply to.</p>
           </div>
-          <div
-            role="status"
-            aria-live="polite"
-            className={`flex shrink-0 items-center gap-1.5 text-[11px] ${
-              autosaveStatus === "error" ? "text-danger" : "text-ink-tertiary"
-            }`}
-          >
-            {autosaveStatus === "saving" ? <Loader2 size={12} className="animate-spin" /> : null}
-            {autosaveStatus === "waiting"
-              ? "Autosave pending"
-              : autosaveStatus === "saving"
-                ? "Saving…"
-                : autosaveStatus === "error"
-                  ? "Autosave failed"
-                  : "Saved"}
-          </div>
+          {autosaveStatus === "error" ? (
+            <div role="alert" className="shrink-0 text-[11px] text-danger">
+              Autosave failed
+            </div>
+          ) : null}
         </div>
       </div>
 

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import type { SaveState } from "@/domain/supabase-planner";
 import type { PresencePeer } from "@/lib/use-planner-presence";
 import { NothingStatus } from "./nothing-ui";
 import { buildPlannerChromeContext } from "./planner-dashboard-panel";
@@ -43,36 +42,18 @@ function PresenceStack({ peers }: { peers: PresencePeer[] }) {
   );
 }
 
-export function plannerSaveStatus(state: SaveState): { message: string; error?: boolean } | null {
-  switch (state) {
-    case "saving":
-    case "retrying":
-      return { message: "Saving…" };
-    case "saved":
-      return { message: "Saved" };
-    case "error":
-      return null;
-    case "conflict":
-      return { message: "Save conflict", error: true };
-    default:
-      return null;
-  }
-}
-
 export function TopNav({
   context,
   loading = false,
   chromeStatus,
-  saveStatus,
   presence,
 }: {
   context?: ReturnType<typeof buildPlannerChromeContext>;
   loading?: boolean;
   chromeStatus?: { message: string; error?: boolean } | null;
-  saveStatus?: { message: string; error?: boolean } | null;
   presence?: PresencePeer[];
 }) {
-  const status = chromeStatus ?? saveStatus ?? null;
+  const status = chromeStatus ?? null;
 
   return (
     <header className="ui-chrome ui-chrome-planner z-40 h-12 shrink-0" aria-busy={loading || undefined}>

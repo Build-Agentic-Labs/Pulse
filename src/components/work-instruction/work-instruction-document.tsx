@@ -197,6 +197,15 @@ const PRINT_STYLES = `
    signature is required it belongs on the referenced checklist action. */
 
 @media print {
+  /* The app shell pins html/body to one viewport and hides overflow. Even when
+     the modal itself returns to normal flow, that ancestor still clips the
+     printable sheet stack after page 1. Release both shell elements so every
+     generated sheet participates in the same print job. */
+  html, body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
   body { visibility: hidden !important; margin: 0 !important; }
   .wi-print-root { position: absolute; inset: 0; display: block; background: #fff; z-index: 0; }
   .wi-print-root, .wi-pages, .wi-sheet, .wi-sheet * { visibility: visible !important; }

@@ -2,7 +2,7 @@
 
 import { ImageIcon, Trash2 } from "lucide-react";
 import NextImage from "next/image";
-import { useState } from "react";
+import { useState, type ClipboardEvent as ReactClipboardEvent } from "react";
 import {
   getManufacturingStepCheckState,
   serializeManufacturingStepCheckState,
@@ -42,6 +42,16 @@ type StepPhotoAttachmentEditorProps = {
   onUpdatePhoto?: (photoId: string, patch: Partial<StepPhotoAttachment>) => void;
 };
 
+function clipboardImageFiles(event: ReactClipboardEvent<HTMLDivElement>) {
+  const itemFiles = Array.from(event.clipboardData.items)
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+
+  const candidates = itemFiles.length > 0 ? itemFiles : Array.from(event.clipboardData.files);
+  return candidates.filter((file) => file.type.startsWith("image/"));
+}
+
 export function StepPhotoAttachmentEditor({
   step,
   photos,
@@ -54,35 +64,58 @@ export function StepPhotoAttachmentEditor({
   const thumbnailClass = compact ? "h-24 w-28" : "h-36 w-48";
   const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
 
+  function handlePaste(event: ReactClipboardEvent<HTMLDivElement>) {
+    if (isUploading) {
+      return;
+    }
+
+    const files = clipboardImageFiles(event);
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    onFilesSelected(files);
+  }
+
   return (
-    <div className="space-y-2">
+    <div
+      className="space-y-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+      role="region"
+      aria-label={`Step ${step.sequence} photos. Paste an image or use Upload.`}
+      tabIndex={isUploading ? -1 : 0}
+      onPaste={handlePaste}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="ui-field-label mb-0 flex items-center gap-1">
           Photos
           {photos.length > 0 ? <span className="text-ink-secondary/70">({photos.length})</span> : null}
         </div>
-        <label
-          className={`ui-btn-ghost cursor-pointer ${compact ? "h-8 gap-1.5 px-2" : "h-10 gap-2"} ${
-            isUploading ? "pointer-events-none opacity-60" : ""
-          }`}
-        >
-          <ImageIcon size={compact ? 14 : 16} />
-          {isUploading ? "Uploading" : "Upload"}
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            className="sr-only"
-            disabled={isUploading}
-            onChange={(event) => {
-              const files = Array.from(event.currentTarget.files ?? []);
-              event.currentTarget.value = "";
-              if (files.length > 0) {
-                onFilesSelected(files);
-              }
-            }}
-          />
-        </label>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold text-ink-tertiary">Paste image</span>
+          <label
+            className={`ui-btn-ghost cursor-pointer ${compact ? "h-8 gap-1.5 px-2" : "h-10 gap-2"} ${
+              isUploading ? "pointer-events-none opacity-60" : ""
+            }`}
+          >
+            <ImageIcon size={compact ? 14 : 16} />
+            {isUploading ? "Uploading" : "Upload"}
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="sr-only"
+              disabled={isUploading}
+              onChange={(event) => {
+                const files = Array.from(event.currentTarget.files ?? []);
+                event.currentTarget.value = "";
+                if (files.length > 0) {
+                  onFilesSelected(files);
+                }
+              }}
+            />
+          </label>
+        </div>
       </div>
 
       {photos.length > 0 ? (
@@ -125,7 +158,7 @@ export function StepPhotoAttachmentEditor({
         </div>
       ) : (
         <div className="border-t border-dashed border-line pt-2 text-xs font-semibold text-ink-secondary">
-          No photos attached to this step yet.
+          No photos attached yet. Click here and paste an image.
         </div>
       )}
       {previewPhoto ? (

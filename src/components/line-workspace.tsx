@@ -677,6 +677,10 @@ export function LineWorkspace({
   const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
   const chromeStatusTimerRef = useRef<number | null>(null);
   const detailDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const workspaceToasts = useMemo<FeedbackToast[]>(
+    () => (workspaceNotice ? [{ id: 1, ...workspaceNotice }] : []),
+    [workspaceNotice],
+  );
 
   const derivedState = useMemo<PlannerState>(() => {
     const planningContext = normalizeTaskPlanningContext(
@@ -3098,12 +3102,19 @@ export function LineWorkspace({
   }) {
     setWorkspaceNotice({
       title,
-      tone: "warning",
-      persistent: true,
+      tone: "neutral",
+      autoDismissMs: 4000,
       content: (
-        <div className="space-y-3">
-          <p className="ui-workspace-notice-body">{body}</p>
-          <button type="button" onClick={onRestore} className="ui-btn-secondary h-8 px-3">
+        <div className="mt-1.5 flex items-center gap-2">
+          <p className="min-w-0 flex-1 text-xs leading-snug text-ink-secondary">{body}</p>
+          <button
+            type="button"
+            onClick={() => {
+              dismissWorkspaceNotice();
+              onRestore();
+            }}
+            className="ui-btn-ghost h-7 shrink-0 px-2 text-xs"
+          >
             {restoreLabel}
           </button>
         </div>
@@ -4488,8 +4499,8 @@ export function LineWorkspace({
       if (removedPhoto) {
         notifyRestoreAction({
           title: "Deleted photo",
-          body: "Restore will attach this photo back to the same manufacturing step.",
-          restoreLabel: "Restore Photo",
+          body: "Removed from this manufacturing step.",
+          restoreLabel: "Restore",
           onRestore: () => {
             setSaveError(undefined);
             setSaveState("saving");
@@ -5790,24 +5801,6 @@ export function LineWorkspace({
         </section>
       ) : null}
 
-      {workspaceNotice ? (
-        <section className="ui-workspace-notice">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <NothingStatus error={workspaceNotice.tone === "danger" || workspaceNotice.tone === "warning"}>
-                {workspaceNotice.title}
-              </NothingStatus>
-              {workspaceNotice.content ?? (
-                workspaceNotice.body ? <p className="ui-workspace-notice-body">{workspaceNotice.body}</p> : null
-              )}
-            </div>
-            <button type="button" onClick={dismissWorkspaceNotice} className="ui-btn-ghost h-8 shrink-0 px-2">
-              Dismiss
-            </button>
-          </div>
-        </section>
-      ) : null}
-
       <div className={`relative ${workspaceGridClass}`}>
         <SidebarReopenButton
           collapsed={sidebarCollapsed}
@@ -6107,10 +6100,10 @@ export function LineWorkspace({
       ) : null}
       <ThemedFeedbackLayer
         confirm={feedbackConfirm}
-        toasts={[]}
+        toasts={workspaceToasts}
         onCancelConfirm={() => setFeedbackConfirm(undefined)}
         onConfirm={confirmFeedbackAction}
-        onDismissToast={() => {}}
+        onDismissToast={dismissWorkspaceNotice}
       />
     </div>
   );

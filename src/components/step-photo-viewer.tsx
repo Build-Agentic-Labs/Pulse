@@ -2,14 +2,12 @@
 
 import {
   ArrowRight,
-  Check,
   ChevronLeft,
   ChevronRight,
   Circle,
   Download,
   Highlighter,
   Loader2,
-  MousePointer2,
   PanelTopClose,
   PanelTopOpen,
   Pencil,
@@ -137,7 +135,6 @@ type TextBoxDragPending = {
 const DRAG_THRESHOLD_PX = 4;
 
 type ToolbarVisibility = "expanded" | "minimized";
-type AnnotationSaveStatus = "idle" | "saving" | "saved";
 type PhotoExportAction = "download" | "print" | null;
 
 const DEFAULT_CALLOUT_WIDTH = 0.22;
@@ -510,7 +507,6 @@ export function StepPhotoViewer({
   const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
   const [contextMenu, setContextMenu] = useState<AnnotationContextMenu | null>(null);
   const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("expanded");
-  const [annotationSaveStatus, setAnnotationSaveStatus] = useState<AnnotationSaveStatus>("idle");
   const [exportAction, setExportAction] = useState<PhotoExportAction>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   // Signed URLs expire after an hour, so an idle tab's <img> starts 4xx-ing. On the first load
@@ -555,7 +551,7 @@ export function StepPhotoViewer({
   );
 
   const flushPendingAnnotations = useCallback(
-    (showSavedStatus: boolean) => {
+    () => {
       const pending = pendingSaveRef.current;
       const updatePhoto = onUpdatePhotoRef.current;
       if (!pending || !updatePhoto) {
@@ -573,9 +569,6 @@ export function StepPhotoViewer({
           items: pending.items,
         } satisfies PhotoAnnotationDocument,
       });
-      if (showSavedStatus) {
-        setAnnotationSaveStatus("saved");
-      }
     },
     [],
   );
@@ -587,13 +580,12 @@ export function StepPhotoViewer({
       }
 
       pendingSaveRef.current = { photoId: photo.id, items: nextItems };
-      setAnnotationSaveStatus("saving");
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
       }
 
       saveTimerRef.current = window.setTimeout(() => {
-        flushPendingAnnotations(true);
+        flushPendingAnnotations();
       }, 350);
     },
     [flushPendingAnnotations, photo.id],
@@ -735,9 +727,8 @@ export function StepPhotoViewer({
   );
 
   useEffect(() => {
-    flushPendingAnnotations(false);
+    flushPendingAnnotations();
     setAnnotations(annotationDocumentFromPhoto(selectedPhotoRef.current).items);
-    setAnnotationSaveStatus("idle");
     setExportError(null);
     setSelectedId(null);
     setDraftArrow(null);
@@ -822,7 +813,7 @@ export function StepPhotoViewer({
 
   useEffect(() => {
     return () => {
-      flushPendingAnnotations(false);
+      flushPendingAnnotations();
     };
   }, [flushPendingAnnotations]);
 
@@ -1966,7 +1957,7 @@ export function StepPhotoViewer({
   return (
     <div
       ref={viewerRef}
-      className="ui-photo-viewer fixed inset-0 z-[95] flex items-center justify-center p-4 md:p-8"
+      className="ui-photo-viewer fixed inset-0 z-[95] !m-0 flex items-center justify-center p-4 md:p-8"
       role="dialog"
       aria-modal="true"
       aria-label={`Step ${stepSequence} photo preview`}
@@ -2091,20 +2082,12 @@ export function StepPhotoViewer({
               <ChevronRight size={15} strokeWidth={1.75} />
             </button>
           </div>
-          {toolbarVisibility === "expanded" ? (
-            <div className="ui-photo-viewer-toolbar-tools-wrap">
-              <div className="ui-photo-viewer-toolbar-tools">
-                <button
-                  type="button"
-                  className={`ui-photo-viewer-tool ${activeTool === "select" ? "ui-photo-viewer-tool-active" : ""}`}
-                  onClick={() => setActiveTool("select")}
-                  aria-label="Select annotation"
-                  aria-pressed={activeTool === "select"}
-                  aria-keyshortcuts="V"
-                  title="Select (V)"
-                >
-                  <MousePointer2 size={15} strokeWidth={1.75} />
-                </button>
+          <div
+            className="ui-photo-viewer-toolbar-tools-wrap"
+            aria-hidden={toolbarVisibility === "minimized"}
+            inert={toolbarVisibility === "minimized"}
+          >
+            <div className="ui-photo-viewer-toolbar-tools">
                 <button
                   type="button"
                   className={`ui-photo-viewer-tool ${activeTool === "arrow" ? "ui-photo-viewer-tool-active" : ""}`}
@@ -2225,26 +2208,17 @@ export function StepPhotoViewer({
                 >
                   <Trash2 size={15} strokeWidth={1.75} />
                 </button>
-                {onUpdatePhoto && annotationSaveStatus !== "idle" ? (
-                  <span className="ui-photo-viewer-save-status" role="status" aria-live="polite">
-                    {annotationSaveStatus === "saving" ? (
-                      <Loader2 size={13} className="animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Check size={13} aria-hidden="true" />
-                    )}
-                    {annotationSaveStatus === "saving" ? "Saving" : "Saved"}
-                  </span>
-                ) : null}
-              </div>
             </div>
-          ) : null}
+          </div>
           <div className="ui-photo-viewer-toolbar-actions">
             <button
               type="button"
               onClick={() => void downloadCurrentPhoto()}
-              className="ui-btn-ghost-overlay ui-photo-viewer-toolbar-action"
+              className="ui-btn-ghost-overlay ui-photo-viewer-toolbar-action ui-photo-viewer-toolbar-secondary-action"
               disabled={exportAction !== null}
               aria-label="Download photo"
+              aria-hidden={toolbarVisibility === "minimized"}
+              tabIndex={toolbarVisibility === "minimized" ? -1 : undefined}
               title="Download photo"
               aria-busy={exportAction === "download"}
             >
@@ -2253,14 +2227,15 @@ export function StepPhotoViewer({
               ) : (
                 <Download size={15} strokeWidth={1.75} />
               )}
-              <span className="ui-photo-viewer-toolbar-action-text">Download</span>
             </button>
             <button
               type="button"
               onClick={() => void printCurrentPhoto()}
-              className="ui-btn-ghost-overlay ui-photo-viewer-toolbar-action"
+              className="ui-btn-ghost-overlay ui-photo-viewer-toolbar-action ui-photo-viewer-toolbar-secondary-action"
               disabled={exportAction !== null}
               aria-label="Print photo"
+              aria-hidden={toolbarVisibility === "minimized"}
+              tabIndex={toolbarVisibility === "minimized" ? -1 : undefined}
               title="Print photo"
               aria-busy={exportAction === "print"}
             >
@@ -2269,7 +2244,6 @@ export function StepPhotoViewer({
               ) : (
                 <Printer size={15} strokeWidth={1.75} />
               )}
-              <span className="ui-photo-viewer-toolbar-action-text">Print</span>
             </button>
             <button
               type="button"

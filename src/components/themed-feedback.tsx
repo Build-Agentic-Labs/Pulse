@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 
 export type FeedbackTone = "neutral" | "success" | "warning" | "danger";
 
@@ -22,6 +22,7 @@ export interface FeedbackToast {
   tone?: FeedbackTone;
   placement?: "corner" | "center";
   persistent?: boolean;
+  autoDismissMs?: number;
 }
 
 export interface FeedbackConfirm {
@@ -146,6 +147,18 @@ export function ThemedFeedbackLayer({
 }) {
   const cornerToasts = toasts.filter((toast) => toast.placement !== "center");
   const centerToasts = toasts.filter((toast) => toast.placement === "center");
+  const onDismissToastRef = useRef(onDismissToast);
+  onDismissToastRef.current = onDismissToast;
+
+  useEffect(() => {
+    const timers = toasts.flatMap((toast) =>
+      toast.autoDismissMs
+        ? [window.setTimeout(() => onDismissToastRef.current(toast.id), toast.autoDismissMs)]
+        : [],
+    );
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [toasts]);
 
   // Escape cancels an open confirm, matching every menu/popover in the app.
   useEffect(() => {
@@ -163,7 +176,7 @@ export function ThemedFeedbackLayer({
 
   return (
     <>
-      <div className="pointer-events-none fixed right-4 top-20 z-[90] flex w-[min(420px,calc(100vw-2rem))] flex-col gap-3">
+      <div className="pointer-events-none fixed right-4 top-20 z-[90] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
         {cornerToasts.map((toast) => {
           const tone = toast.tone ?? "neutral";
           const style = toneStyles[tone];
@@ -171,10 +184,17 @@ export function ThemedFeedbackLayer({
           return (
             <div
               key={toast.id}
-              className={`pointer-events-auto overflow-hidden rounded-md border bg-surface  ${style.border}`}
+              className={`ui-feedback-toast pointer-events-auto overflow-hidden rounded-lg border bg-surface ${
+                toast.autoDismissMs ? "ui-feedback-toast-auto" : ""
+              } ${style.border}`}
+              style={
+                toast.autoDismissMs
+                  ? ({ "--toast-duration": `${toast.autoDismissMs}ms` } as CSSProperties)
+                  : undefined
+              }
               role="status"
             >
-              <div className="flex items-start gap-3 p-3">
+              <div className="flex items-start gap-2.5 p-2.5">
                 <div className="min-w-0 flex-1">
                   <div className="ui-mono-label">{style.label}</div>
                   <div className="ui-section-title mt-1">{toast.title}</div>

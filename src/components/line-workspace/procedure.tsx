@@ -694,7 +694,7 @@ export function ProcedureWorkspace({
         style={procedureGridStyle}
         className="ui-procedure-sidebar relative shrink-0 overflow-x-hidden overflow-y-auto"
       >
-        <div className="sticky top-0 z-10 bg-surface-raised px-2 pb-2 pt-3">
+        <div className="sticky top-0 z-10 rounded-tl-xl bg-canvas px-2 pb-2 pt-3">
           <div className="ui-nav-section mb-0 px-0">Procedure tasks</div>
           <div className="mt-1 text-[11px] text-ink-tertiary">{tasks.length} task rows</div>
         </div>

@@ -61,7 +61,7 @@ function prepareOverlay(container: HTMLElement) {
 describe("StepPhotoViewer toolbar", () => {
   it("opens with discoverable annotation tools and visible photo navigation", () => {
     const onPhotoChange = vi.fn();
-    render(
+    const { container } = render(
       <StepPhotoViewer
         stepSequence={2}
         photo={photos[0]}
@@ -72,12 +72,17 @@ describe("StepPhotoViewer toolbar", () => {
     );
 
     const collapseButton = screen.getByRole("button", { name: "Collapse photo toolbar" });
+    expect(screen.getByRole("dialog", { name: "Step 2 photo preview" })).toHaveClass("!m-0");
     expect(collapseButton).toHaveAttribute("aria-expanded", "true");
     expect(collapseButton).toHaveFocus();
-    expect(screen.getByRole("button", { name: "Select annotation" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    expect(screen.queryByRole("button", { name: "Select annotation" })).not.toBeInTheDocument();
+    expect(container.querySelector(".ui-photo-viewer-annotation-layer")).toHaveClass(
+      "ui-photo-viewer-annotation-layer-select",
     );
+    expect(screen.getByRole("button", { name: "Download photo" })).not.toHaveTextContent(
+      "Download",
+    );
+    expect(screen.getByRole("button", { name: "Print photo" })).not.toHaveTextContent("Print");
     expect(screen.getByText("1 of 3")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Next photo" }));
@@ -87,7 +92,7 @@ describe("StepPhotoViewer toolbar", () => {
     expect(onPhotoChange).toHaveBeenLastCalledWith(photos[2]);
   });
 
-  it("fully removes annotation controls when the toolbar is collapsed", () => {
+  it("keeps the minimized toolbar compact and restores the full toolset when expanded", () => {
     render(
       <StepPhotoViewer
         stepSequence={2}
@@ -104,10 +109,23 @@ describe("StepPhotoViewer toolbar", () => {
       "aria-expanded",
       "false",
     );
+    expect(document.querySelector(".ui-photo-viewer-toolbar")).toHaveClass(
+      "ui-photo-viewer-toolbar-minimized",
+    );
+    expect(document.querySelector(".ui-photo-viewer-toolbar-tools-wrap")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
     expect(screen.queryByRole("button", { name: "Draw arrow" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download photo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Print photo" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close photo preview" })).toBeInTheDocument();
+    expect(screen.getByText("1 of 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand photo toolbar" }));
+    expect(screen.getByRole("button", { name: "Draw arrow" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download photo" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Print photo" })).toBeInTheDocument();
-    expect(screen.getByText("1 of 3")).toBeInTheDocument();
   });
 
   it("flushes a pending annotation update when the viewer closes", () => {
@@ -128,6 +146,9 @@ describe("StepPhotoViewer toolbar", () => {
     fireEvent.pointerDown(overlay, { clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(overlay, { clientX: 300, clientY: 250, pointerId: 1 });
     fireEvent.pointerUp(overlay, { clientX: 300, clientY: 250, pointerId: 1 });
+
+    expect(overlay).toHaveClass("ui-photo-viewer-annotation-layer-select");
+    expect(screen.queryByText(/^(Saving|Saved)$/)).not.toBeInTheDocument();
     unmount();
 
     expect(onUpdatePhoto).toHaveBeenCalledTimes(1);

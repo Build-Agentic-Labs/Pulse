@@ -31,10 +31,9 @@ import { EXPLODED_VIEWS_FIELD, normalizeComponents, type ExplodedView } from "./
 import { TASK_VIDEOS_FIELD, type TaskVideo } from "./task-videos";
 import { mergeStepDependencyRefs, splitStepDependencyRefs } from "./step-part-references";
 import { STEP_TOOL_LISTS_FIELD, getTaskStepToolListMap } from "./step-tools";
-import { applyCalculatedFields } from "./calculations";
-import { defaultDocumentTypeCodes } from "./nomenclature";
 import { formatDisplayTitle } from "@/lib/display-names";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
+import { displayNameValidationMessage, normalizeDisplayName } from "@/lib/profile-name";
 import { kickSopNotifications } from "@/lib/sop/notify-kick";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -1531,129 +1530,6 @@ function newScopedId(prefix: string) {
   return `${prefix}-${randomId}`;
 }
 
-async function insertNewProjectPlannerState(state: PlannerState) {
-  if (!state.product.projectId) {
-    throw new Error("Workspace id is required to seed planner data.");
-  }
-
-  const supabase = plannerClient();
-
-  await throwIfError(supabase.from("products").insert(productRow(state.product)));
-  await throwIfError(supabase.from("scenarios").insert(scenarioRow(state.scenario)));
-
-  if (state.stations.length) {
-    await throwIfError(supabase.from("stations").insert(state.stations.map(stationRow)));
-  }
-
-  if (state.zones.length) {
-    await throwIfError(supabase.from("zones").insert(state.zones.map(zoneRow)));
-  }
-
-  if (state.components.length) {
-    await throwIfError(supabase.from("manufacturing_components").insert(state.components.map(manufacturingComponentRow)));
-  }
-
-  if (state.documentTypes.length) {
-    await throwIfError(supabase.from("document_type_codes").insert(state.documentTypes.map(documentTypeCodeRow)));
-  }
-
-  if (state.tasks.length) {
-    await throwIfError(supabase.from("tasks").insert(state.tasks.map(taskRow)));
-  }
-
-  if (state.dependencies.length) {
-    await throwIfError(supabase.from("task_dependencies").insert(state.dependencies.map(dependencyRow)));
-  }
-
-  const steps = manufacturingStepRows(state.tasks);
-  if (steps.length) {
-    await throwIfError(supabase.from("manufacturing_steps").insert(steps));
-  }
-
-  const parts = partReferenceRows(state.tasks);
-  if (parts.length) {
-    await throwIfError(supabase.from("part_references").insert(parts));
-  }
-
-  if (state.actualEvents.length) {
-    await throwIfError(supabase.from("actual_events").insert(state.actualEvents.map(actualEventRow)));
-  }
-
-  if (state.customColumns.length) {
-    await throwIfError(supabase.from("custom_columns").insert(state.customColumns.map(customColumnRow)));
-  }
-}
-
-function createEmptyPlannerStateForProject(projectId: string, projectName: string): PlannerState {
-  const token = newScopedId("seed").replace(/^seed-/, "");
-  const productId = `product-${token}`;
-  const scenarioId = `scenario-${token}`;
-  const now = new Date().toISOString();
-
-  const { product } = applyCalculatedFields(
-    {
-      id: productId,
-      projectId,
-      name: projectName,
-      revision: "",
-      ownerName: "",
-      status: "draft",
-      targetManHours: 0,
-      demandQuantity: 1,
-      demandPeriod: "day",
-      grossAvailableMinutes: 540,
-      breakMinutes: 30,
-      lunchMinutes: 60,
-      meetingMinutes: 15,
-      plannedDowntimeMinutes: 15,
-      workDaysPerWeek: 5,
-      workWeeksPerMonth: 4.33,
-      availableWorkDaysPerMonth: 0,
-      netAvailableMinutes: 0,
-      weeklyAvailableMinutes: 0,
-      monthlyAvailableMinutes: 0,
-      calculatedTaktMinutes: 0,
-      activeTaktMinutes: 0,
-      createdAt: now,
-      updatedAt: now,
-    },
-    [],
-    [],
-  );
-
-  return {
-    project: undefined,
-    product,
-    scenario: {
-      id: scenarioId,
-      productId,
-      name: "Current State",
-      type: "current_state",
-      status: "draft",
-      targetOutput: 1,
-      targetOutputPeriod: "day",
-      createdAt: now,
-      updatedAt: now,
-    },
-    stations: [],
-    zones: [],
-    components: [],
-    documentTypes: defaultDocumentTypeCodes.map((documentType) => ({
-      id: `document-type-${productId}-${documentType.code.toLowerCase()}`,
-      productId,
-      code: documentType.code,
-      name: documentType.name,
-      active: documentType.active,
-      createdAt: now,
-      updatedAt: now,
-    })),
-    tasks: [],
-    dependencies: [],
-    actualEvents: [],
-    customColumns: [],
-  };
-}
-
 async function loadProjectContext(
   supabase: ReturnType<typeof plannerClient>,
   projectId: string,
@@ -2013,42 +1889,22 @@ export async function loadWorkspaceProjectGroups(
   });
 }
 
-export async function createProjectWithStarterPlan(workspaceId: string, name: string): Promise<PlannerProjectContext> {
-  const supabase = plannerClient();
-  const { data: userData } = await getUserFromSession(supabase);
-  const projectId = newScopedId("project");
-  const projectName = name.trim() || "New Process Map";
-
-  await throwIfError(
-    supabase.from("projects").insert({
-      id: projectId,
-      workspace_id: workspaceId,
-      name: projectName,
-      status: "active",
-      created_by: userData.user?.id ?? null,
+export async function createProjectWithStarterPlan(
+  workspaceId: string,
+  name: string,
+  client?: ReturnType<typeof plannerClient>,
+): Promise<PlannerProjectContext> {
+  const supabase = client ?? plannerClient();
+  const projectName = name.trim();
+  const projectId = await throwIfError(
+    supabase.rpc("create_project_with_starter_plan", {
+      p_workspace_id: workspaceId,
+      p_name: projectName,
     }),
   );
 
-  const starterState = createEmptyPlannerStateForProject(projectId, projectName);
-
-  try {
-    await insertNewProjectPlannerState(starterState);
-  } catch (error) {
-    await supabase.from("projects").delete().eq("id", projectId);
-    throw error;
-  }
-
-  // Grant the creator edit access on the new project (no-op if the table doesn't exist yet).
-  if (userData.user) {
-    const { error: accessError } = await supabase
-      .from("project_access")
-      .upsert(
-        { project_id: projectId, user_id: userData.user.id, level: "edit", granted_by: userData.user.id },
-        { onConflict: "project_id,user_id" },
-      );
-    if (accessError && !isMissingRelationError(accessError)) {
-      throw accessError;
-    }
+  if (typeof projectId !== "string" || !projectId) {
+    throw new Error("Project creation did not return a project id.");
   }
 
   return loadProjectContext(supabase, projectId);
@@ -2264,18 +2120,29 @@ export async function updateWorkspaceMemberRoleInSupabase(
 }
 
 export async function updateOwnProfileNameInSupabase(fullName: string): Promise<void> {
-  const name = fullName.trim();
-  if (!name) {
-    throw new Error("Display name is required.");
-  }
-
   const supabase = plannerClient();
   const { data: userData } = await getUserFromSession(supabase);
   if (!userData.user) {
     throw new Error("Sign in first.");
   }
 
-  await throwIfError(supabase.from("profiles").update({ full_name: name }).eq("id", userData.user.id));
+  const name = normalizeDisplayName(fullName);
+  const validationError = displayNameValidationMessage(name);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const profile = await throwIfError(
+    supabase
+      .from("profiles")
+      .upsert({ id: userData.user.id, full_name: name }, { onConflict: "id" })
+      .select("id")
+      .maybeSingle(),
+  );
+  if (!profile) {
+    throw new Error("Unable to update the display name.");
+  }
+
   // Keep auth metadata in sync so the next profile bootstrap doesn't revert the name.
   const { error } = await supabase.auth.updateUser({ data: { full_name: name } });
   if (error) {

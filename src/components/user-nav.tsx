@@ -1,12 +1,11 @@
 "use client";
 
-import { ArrowLeft, LayoutGrid, LogOut, Moon, Settings, Sun } from "lucide-react";
+import { ArrowLeft, LayoutGrid, LogOut, Settings } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { NotificationBell } from "@/components/notification-bell";
-import { useTheme } from "@/components/theme-provider";
 import { SPACE_META, SPACE_ORDER, SpaceIcon, spaceDisabledLabel, spaceHref } from "@/components/spaces";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
@@ -240,16 +239,9 @@ export function BackToDashboardButton({
  * (identity + sign out). Replaces the per-surface back links and the old sidebar
  * user panel.
  */
-export function UserNav({
-  showSpacesLink = true,
-  showThemeToggle = true,
-}: {
-  showSpacesLink?: boolean;
-  showThemeToggle?: boolean;
-}) {
+export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean }) {
   const router = useRouter();
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
-  const { theme, toggleTheme } = useTheme();
   const profile = useUserProfile(supabase);
   const [openMenu, setOpenMenu] = useState<"spaces" | "account" | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -298,18 +290,6 @@ export function UserNav({
 
   return (
     <div ref={containerRef} className="relative flex shrink-0 items-center gap-1">
-      {showThemeToggle ? (
-        <button
-          type="button"
-          onClick={toggleTheme}
-          className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0"
-          title="Toggle theme"
-          aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-        >
-          {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
-        </button>
-      ) : null}
-
       <NotificationBell />
 
       {showSpacesLink ? (

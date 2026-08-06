@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPlannerSupabaseClient, updateOwnProfileNameInSupabase } from "@/domain/supabase-planner";
+import {
+  announceProfileNameUpdated,
+  normalizeDisplayName,
+  PROFILE_NAME_UPDATED_EVENT,
+} from "@/lib/profile-name";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 /**
@@ -50,13 +55,29 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
     };
   }, [supabase]);
 
+  useEffect(() => {
+    function syncDisplayName(event: Event) {
+      const name = (event as CustomEvent<string>).detail;
+      if (!name) return;
+      setFullName(name);
+      setSavedFullName(name);
+      setNameMessage("Display name updated.");
+    }
+
+    window.addEventListener(PROFILE_NAME_UPDATED_EVENT, syncDisplayName);
+    return () => window.removeEventListener(PROFILE_NAME_UPDATED_EVENT, syncDisplayName);
+  }, []);
+
   async function saveName() {
     setIsSaving(true);
     setNameMessage("");
     try {
       await updateOwnProfileNameInSupabase(fullName);
-      setSavedFullName(fullName.trim());
+      const name = normalizeDisplayName(fullName);
+      setFullName(name);
+      setSavedFullName(name);
       setNameMessage("Display name updated.");
+      announceProfileNameUpdated(name);
     } catch (error) {
       setNameMessage(error instanceof Error ? error.message : "Unable to update the display name.");
     } finally {

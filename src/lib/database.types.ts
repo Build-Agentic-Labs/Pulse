@@ -3163,6 +3163,10 @@ export type Database = {
         Returns: boolean
       }
       close_moot_objections: { Args: { p_sop: string }; Returns: undefined }
+      create_project_with_starter_plan: {
+        Args: { p_name: string; p_workspace_id: string }
+        Returns: string
+      }
       custom_column_project_id: {
         Args: { target_product_id: string; target_scenario_id: string }
         Returns: string

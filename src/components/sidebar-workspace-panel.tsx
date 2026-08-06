@@ -3,7 +3,7 @@
 import { Check, FolderKanban, MoreHorizontal, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   createPlannerSupabaseClient,
   createProjectWithStarterPlan,
@@ -147,6 +147,7 @@ export function SidebarWorkspacePanel({
   const [isAdding, setIsAdding] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const createPendingRef = useRef(false);
   const [createError, setCreateError] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
@@ -282,10 +283,11 @@ export function SidebarWorkspacePanel({
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!workspaceId || !newProjectName.trim()) {
+    if (createPendingRef.current || !workspaceId || !newProjectName.trim()) {
       return;
     }
 
+    createPendingRef.current = true;
     setIsSubmitting(true);
     setCreateError("");
     try {
@@ -297,6 +299,7 @@ export function SidebarWorkspacePanel({
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "Unable to create project.");
     } finally {
+      createPendingRef.current = false;
       setIsSubmitting(false);
     }
   }

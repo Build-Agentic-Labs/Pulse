@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { ConfirmProvider } from "@/components/confirm-provider";
+import { DisplayNamePrompt } from "@/components/display-name-prompt";
 import { ThemeProvider } from "@/components/theme-provider";
 import { WebVitalsReporter } from "@/components/web-vitals-reporter";
 import { themeInitScript } from "@/lib/theme-init";
@@ -79,7 +80,10 @@ export default function RootLayout({
       </head>
       <body className="h-full overflow-hidden font-sans">
         <ThemeProvider>
-          <ConfirmProvider>{children}</ConfirmProvider>
+          <ConfirmProvider>
+            {children}
+            <DisplayNamePrompt />
+          </ConfirmProvider>
         </ThemeProvider>
         <WebVitalsReporter />
       </body>

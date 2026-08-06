@@ -2,7 +2,7 @@
 
 import { Archive, Check, ExternalLink, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createProjectWithStarterPlan,
   deleteProjectFromSupabase,
@@ -50,6 +50,7 @@ export function ProjectSettings({
     Object.fromEntries(projects.map((project) => [project.id, project.name])),
   );
   const [busyId, setBusyId] = useState<string>();
+  const createPendingRef = useRef(false);
   const [message, setMessage] = useState("");
   const [confirm, setConfirm] = useState<FeedbackConfirm>();
 
@@ -81,7 +82,8 @@ export function ProjectSettings({
 
   async function createProject() {
     const name = newProjectName.trim();
-    if (!name || !createWorkspaceId) return;
+    if (createPendingRef.current || !name || !createWorkspaceId) return;
+    createPendingRef.current = true;
     setBusyId("create");
     setMessage("");
     try {
@@ -104,6 +106,7 @@ export function ProjectSettings({
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to create the project.");
     } finally {
+      createPendingRef.current = false;
       setBusyId(undefined);
     }
   }

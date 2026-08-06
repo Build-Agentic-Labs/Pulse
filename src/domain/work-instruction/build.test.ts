@@ -147,6 +147,52 @@ describe("buildWorkInstruction", () => {
     expect(wi.cards[0].photo).toEqual({ id: "photo-1", url: "https://example.test/a.jpg", caption: "Bracket seated" });
   });
 
+  it("carries photo annotations and intrinsic dimensions into the printable WI", () => {
+    const task = makeTask({
+      manufacturingSteps: [{ id: "step-a", sequence: 1, instruction: "Position the bracket" }],
+      customFields: {
+        [STEP_PHOTO_ATTACHMENTS_FIELD]: {
+          "step-a": [
+            {
+              id: "photo-1",
+              name: "Bracket",
+              dataUrl: "https://example.test/a.jpg",
+              capturedAt: "2026-08-01T00:00:00.000Z",
+              width: 1600,
+              height: 1200,
+              annotations: {
+                version: 2,
+                items: [
+                  {
+                    id: "rectangle-1",
+                    type: "rectangle",
+                    color: "#d71921",
+                    strokeWidth: 3,
+                    x: 0.1,
+                    y: 0.2,
+                    width: 0.4,
+                    height: 0.3,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
+
+    expect(wi.cards[0].photo).toMatchObject({
+      width: 1600,
+      height: 1200,
+      annotations: {
+        version: 2,
+        items: [expect.objectContaining({ id: "rectangle-1", type: "rectangle" })],
+      },
+    });
+  });
+
   it("leaves the photo undefined when a step has none", () => {
     const task = makeTask({ manufacturingSteps: [{ id: "step-a", sequence: 1, instruction: "Position" }] });
 

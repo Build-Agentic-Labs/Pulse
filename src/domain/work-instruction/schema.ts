@@ -10,6 +10,7 @@
  */
 
 import type { CardTextBudget } from "./split-instruction";
+import type { PhotoAnnotationDocument } from "../photo-annotations";
 
 export type { CardTextBudget };
 
@@ -18,6 +19,10 @@ export interface WorkInstructionPhoto {
   id: string;
   url: string;
   caption: string;
+  /** Intrinsic dimensions keep normalized annotation geometry aligned in print. */
+  width?: number;
+  height?: number;
+  annotations?: PhotoAnnotationDocument;
 }
 
 /** A single quality check, flattened from ManufacturingStepCheckState. */

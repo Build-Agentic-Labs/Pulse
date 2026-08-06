@@ -1,16 +1,24 @@
-export const PHOTO_ANNOTATION_VERSION = 1 as const;
+export const PHOTO_ANNOTATION_VERSION = 2 as const;
 
 export const PHOTO_ANNOTATION_COLORS = [
   { value: "#d71921", label: "Red" },
   { value: "#007aff", label: "Blue" },
   { value: "#4a9e5c", label: "Green" },
+  { value: "#ffcc00", label: "Yellow" },
   { value: "#ffffff", label: "White" },
   { value: "#1a1a1a", label: "Black" },
 ] as const;
 
 export const PHOTO_ANNOTATION_FONT_SIZES = [12, 14, 16, 20] as const;
 
-export type PhotoAnnotationTool = "select" | "arrow" | "text";
+export type PhotoAnnotationTool =
+  | "select"
+  | "arrow"
+  | "rectangle"
+  | "ellipse"
+  | "freehand"
+  | "text"
+  | "highlight";
 
 export type PhotoArrowAnnotation = {
   id: string;
@@ -37,7 +45,52 @@ export type PhotoTextAnnotation = {
   text: string;
 };
 
-export type PhotoAnnotation = PhotoArrowAnnotation | PhotoTextAnnotation;
+type PhotoBoxGeometry = {
+  id: string;
+  color: string;
+  strokeWidth: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type PhotoRectangleAnnotation = PhotoBoxGeometry & {
+  type: "rectangle";
+};
+
+export type PhotoEllipseAnnotation = PhotoBoxGeometry & {
+  type: "ellipse";
+};
+
+export type PhotoHighlightAnnotation = PhotoBoxGeometry & {
+  type: "highlight";
+  opacity: number;
+};
+
+export type PhotoFreehandPoint = {
+  x: number;
+  y: number;
+};
+
+export type PhotoFreehandAnnotation = {
+  id: string;
+  type: "freehand";
+  color: string;
+  strokeWidth: number;
+  points: PhotoFreehandPoint[];
+};
+
+export type PhotoBoxAnnotation =
+  | PhotoRectangleAnnotation
+  | PhotoEllipseAnnotation
+  | PhotoHighlightAnnotation;
+
+export type PhotoAnnotation =
+  | PhotoArrowAnnotation
+  | PhotoTextAnnotation
+  | PhotoBoxAnnotation
+  | PhotoFreehandAnnotation;
 
 export type PhotoAnnotationDocument = {
   version: typeof PHOTO_ANNOTATION_VERSION;
@@ -67,7 +120,29 @@ export function normalizePhotoAnnotationDocument(value: unknown): PhotoAnnotatio
 }
 
 function clamp01(value: number) {
-  return Math.min(Math.max(value, 0), 1);
+  return Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0;
+}
+
+function clampBetween(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function sanitizeBoxGeometry(record: Record<string, unknown>) {
+  // Keep enough room for the minimum drawable box even when imported data
+  // places its origin exactly on the bottom or right edge.
+  const x = clampBetween(clamp01(Number(record.x)), 0, 0.99);
+  const y = clampBetween(clamp01(Number(record.y)), 0, 0.99);
+  const width = Math.min(Math.max(Number(record.width) || 0.1, 0.01), 1 - x);
+  const height = Math.min(Math.max(Number(record.height) || 0.1, 0.01), 1 - y);
+
+  return {
+    color: typeof record.color === "string" ? record.color : PHOTO_ANNOTATION_COLORS[0].value,
+    strokeWidth: typeof record.strokeWidth === "number" ? record.strokeWidth : 2.5,
+    x,
+    y,
+    width,
+    height,
+  };
 }
 
 function sanitizePhotoAnnotation(value: unknown): PhotoAnnotation | null {
@@ -117,6 +192,49 @@ function sanitizePhotoAnnotation(value: unknown): PhotoAnnotation | null {
           ? Math.min(Math.max(Number(record.height), 0.04), 0.85)
           : undefined,
       text: typeof record.text === "string" ? record.text : "",
+    };
+  }
+
+  if (record.type === "rectangle" || record.type === "ellipse") {
+    return {
+      id,
+      type: record.type,
+      ...sanitizeBoxGeometry(record),
+    };
+  }
+
+  if (record.type === "highlight") {
+    return {
+      id,
+      type: "highlight",
+      ...sanitizeBoxGeometry(record),
+      opacity:
+        typeof record.opacity === "number"
+          ? clampBetween(record.opacity, 0.1, 0.6)
+          : 0.26,
+    };
+  }
+
+  if (record.type === "freehand" && Array.isArray(record.points)) {
+    const points = record.points
+      .slice(0, 2_000)
+      .filter(
+        (point): point is Record<string, unknown> =>
+          Boolean(point) && typeof point === "object" && !Array.isArray(point),
+      )
+      .filter((point) => Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)))
+      .map((point) => ({ x: clamp01(Number(point.x)), y: clamp01(Number(point.y)) }));
+
+    if (points.length < 2) {
+      return null;
+    }
+
+    return {
+      id,
+      type: "freehand",
+      color: typeof record.color === "string" ? record.color : PHOTO_ANNOTATION_COLORS[0].value,
+      strokeWidth: typeof record.strokeWidth === "number" ? record.strokeWidth : 2.5,
+      points,
     };
   }
 
@@ -373,6 +491,22 @@ export function moveTextCalloutAnchor(annotation: PhotoTextAnnotation, deltaX: n
   };
 }
 
+export function isPhotoBoxAnnotation(annotation: PhotoAnnotation): annotation is PhotoBoxAnnotation {
+  return annotation.type === "rectangle" || annotation.type === "ellipse" || annotation.type === "highlight";
+}
+
+export function resizePhotoBoxAnnotation(
+  annotation: PhotoBoxAnnotation,
+  pointerX: number,
+  pointerY: number,
+): PhotoBoxAnnotation {
+  return {
+    ...annotation,
+    width: clampBetween(pointerX - annotation.x, 0.015, 1 - annotation.x),
+    height: clampBetween(pointerY - annotation.y, 0.015, 1 - annotation.y),
+  };
+}
+
 export function movePhotoAnnotation(annotation: PhotoAnnotation, deltaX: number, deltaY: number): PhotoAnnotation {
   if (annotation.type === "arrow") {
     return {
@@ -384,5 +518,28 @@ export function movePhotoAnnotation(annotation: PhotoAnnotation, deltaX: number,
     };
   }
 
-  return moveTextCalloutBox(annotation, deltaX, deltaY);
+  if (annotation.type === "text") {
+    return moveTextCalloutBox(annotation, deltaX, deltaY);
+  }
+
+  if (isPhotoBoxAnnotation(annotation)) {
+    return {
+      ...annotation,
+      x: clampBetween(annotation.x + deltaX, 0, 1 - annotation.width),
+      y: clampBetween(annotation.y + deltaY, 0, 1 - annotation.height),
+    };
+  }
+
+  const xs = annotation.points.map((point) => point.x);
+  const ys = annotation.points.map((point) => point.y);
+  const safeDeltaX = clampBetween(deltaX, -Math.min(...xs), 1 - Math.max(...xs));
+  const safeDeltaY = clampBetween(deltaY, -Math.min(...ys), 1 - Math.max(...ys));
+
+  return {
+    ...annotation,
+    points: annotation.points.map((point) => ({
+      x: point.x + safeDeltaX,
+      y: point.y + safeDeltaY,
+    })),
+  };
 }

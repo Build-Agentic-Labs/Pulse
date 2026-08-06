@@ -20,14 +20,22 @@
 
 import { formatMinutes } from "@/domain/calculations";
 import { formatDateControlled } from "@/domain/formatting";
+import {
+  isPhotoBoxAnnotation,
+  textCalloutLeaderPoint,
+  type PhotoAnnotation,
+  type PhotoTextAnnotation,
+} from "@/domain/photo-annotations";
 import { paginateWorkInstruction } from "@/domain/work-instruction/paginate";
 import {
   DEFAULT_WORK_INSTRUCTION_LAYOUT,
   type WorkInstruction,
   type WorkInstructionCard,
   type WorkInstructionLayout,
+  type WorkInstructionPhoto,
   type WorkInstructionSheet,
 } from "@/domain/work-instruction/schema";
+import { useId } from "react";
 
 const CONFIDENTIAL_LINE =
   "ANA INC. CONFIDENTIAL: This copyrighted work and all information is the property of ANA INC. All rights reserved";
@@ -126,7 +134,15 @@ const PRINT_STYLES = `
 .wi-card-code { flex: none; font-family: var(--type-mono, monospace); font-size: 7pt; color: #666; }
 .wi-card-main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--wi-photo-width, 2.45in) minmax(0, 1fr); gap: 0.1in; }
 .wi-card-photo { border: 1px solid #ccc; background: #f7f7f7; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.wi-card-photo img { width: 100%; height: 100%; object-fit: contain; }
+.wi-card-photo-populated { border: 0; background: transparent; }
+.wi-card-photo img, .wi-card-photo-svg { width: 100%; height: 100%; object-fit: contain; }
+.wi-card-photo-svg { display: block; }
+.wi-card-photo-callout {
+  box-sizing: border-box; width: 100%; height: 100%; overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.18); background: rgba(255,255,255,0.94);
+  color: #1a1a1a; font-family: var(--type-sans, var(--font-ui-family)); font-weight: 600;
+  line-height: 1.25; white-space: pre-wrap; overflow-wrap: anywhere;
+}
 /* A REAL step that simply has no photo. Reads as absence, not as somewhere to
    write — deliberately distinct from .wi-rule-lines, which the two shared until
    a populated card started printing a ruled writing box where its photo goes. */
@@ -196,7 +212,21 @@ const PRINT_STYLES = `
      the print route, the design preview, an exported standalone file — prints
      the same sheet count. */
   .wi-pages { display: block; gap: 0; padding: 0 !important; margin: 0 !important; }
+  .wi-preview-scale { width: auto !important; zoom: 1 !important; }
   .wi-print-body { padding: 0 !important; margin: 0 !important; }
+  /* A modal is fixed and scrollable on screen. Both properties create a
+     one-viewport print box in Chromium, which clips every sheet after page 1.
+     Put only the modal host back in normal flow and let its body fully expand
+     so the explicit sheet page breaks can paginate the entire instruction. */
+  .wi-print-root.wi-print-modal {
+    position: static !important; inset: auto !important;
+    width: auto !important; height: auto !important;
+    overflow: visible !important;
+  }
+  .wi-print-root.wi-print-modal .wi-print-body {
+    width: auto !important; height: auto !important;
+    overflow: visible !important;
+  }
   .wi-sheet {
     width: 17in; height: 11in; margin: 0; box-shadow: none;
     break-after: page; page-break-after: always;
@@ -389,6 +419,204 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
   );
 }
 
+function photoRenderScale(width: number, height: number) {
+  // Annotation sizes are authored against a roughly 700px viewer. Scale them
+  // into intrinsic-photo coordinates so they retain that visual weight when
+  // the complete SVG is reduced into a WI card or printed to PDF.
+  return Math.max(1, Math.min(width, height) / 700);
+}
+
+function StaticPhotoAnnotation({
+  annotation,
+  width,
+  height,
+  markerId,
+}: {
+  annotation: PhotoAnnotation;
+  width: number;
+  height: number;
+  markerId: string;
+}) {
+  const scale = photoRenderScale(width, height);
+
+  if (annotation.type === "arrow") {
+    return (
+      <line
+        data-annotation-type="arrow"
+        x1={annotation.x1 * width}
+        y1={annotation.y1 * height}
+        x2={annotation.x2 * width}
+        y2={annotation.y2 * height}
+        stroke={annotation.color}
+        strokeWidth={annotation.strokeWidth * scale}
+        strokeLinecap="round"
+        markerEnd={`url(#${markerId})`}
+      />
+    );
+  }
+
+  if (isPhotoBoxAnnotation(annotation)) {
+    const x = annotation.x * width;
+    const y = annotation.y * height;
+    const boxWidth = annotation.width * width;
+    const boxHeight = annotation.height * height;
+    const common = {
+      "data-annotation-type": annotation.type,
+      fill: annotation.type === "highlight" ? annotation.color : "none",
+      fillOpacity: annotation.type === "highlight" ? annotation.opacity : undefined,
+      stroke: annotation.color,
+      strokeOpacity:
+        annotation.type === "highlight" ? Math.min(annotation.opacity + 0.35, 0.75) : undefined,
+      strokeWidth: annotation.strokeWidth * scale,
+    };
+
+    return annotation.type === "ellipse" ? (
+      <ellipse
+        {...common}
+        cx={x + boxWidth / 2}
+        cy={y + boxHeight / 2}
+        rx={boxWidth / 2}
+        ry={boxHeight / 2}
+      />
+    ) : (
+      <rect {...common} x={x} y={y} width={boxWidth} height={boxHeight} />
+    );
+  }
+
+  if (annotation.type === "freehand") {
+    return (
+      <polyline
+        data-annotation-type="freehand"
+        points={annotation.points.map((point) => `${point.x * width},${point.y * height}`).join(" ")}
+        fill="none"
+        stroke={annotation.color}
+        strokeWidth={annotation.strokeWidth * scale}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    );
+  }
+
+  return <StaticTextCallout annotation={annotation} width={width} height={height} scale={scale} />;
+}
+
+function StaticTextCallout({
+  annotation,
+  width,
+  height,
+  scale,
+}: {
+  annotation: PhotoTextAnnotation;
+  width: number;
+  height: number;
+  scale: number;
+}) {
+  const boxHeightNorm = annotation.height ?? Math.max(0.08, (annotation.fontSize * 3.4 * scale) / height);
+  const leader = textCalloutLeaderPoint(
+    annotation.anchorX,
+    annotation.anchorY,
+    annotation.x,
+    annotation.y,
+    annotation.width,
+    boxHeightNorm,
+  );
+  const accentWidth = 3 * scale;
+
+  return (
+    <g data-annotation-type="text">
+      <line
+        x1={annotation.anchorX * width}
+        y1={annotation.anchorY * height}
+        x2={leader.x * width}
+        y2={leader.y * height}
+        stroke={annotation.color}
+        strokeWidth={2 * scale}
+        strokeLinecap="round"
+      />
+      <circle
+        cx={annotation.anchorX * width}
+        cy={annotation.anchorY * height}
+        r={3 * scale}
+        fill={annotation.color}
+      />
+      <foreignObject
+        x={annotation.x * width}
+        y={annotation.y * height}
+        width={annotation.width * width}
+        height={boxHeightNorm * height}
+      >
+        <div
+          className="wi-card-photo-callout"
+          style={{
+            borderLeft: `${accentWidth}px solid ${annotation.color}`,
+            fontSize: `${annotation.fontSize * scale}px`,
+            padding: `${5 * scale}px ${7 * scale}px`,
+          }}
+        >
+          {annotation.text}
+        </div>
+      </foreignObject>
+    </g>
+  );
+}
+
+function WorkInstructionPhotoMedia({
+  photo,
+  sequence,
+}: {
+  photo: WorkInstructionPhoto;
+  sequence: number;
+}) {
+  const markerId = `wi-arrow-${useId().replace(/:/g, "")}`;
+  const annotations = photo.annotations?.items ?? [];
+  // Match the viewer's legacy fallback so annotations remain available for
+  // older attachments that predate stored intrinsic dimensions.
+  const width = photo.width ?? 1280;
+  const height = photo.height ?? 960;
+  const alt = photo.caption || `Step ${sequence}`;
+
+  if (annotations.length === 0) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- self-contained print document; src is a data: or signed URL
+      <img src={photo.url} alt={alt} />
+    );
+  }
+
+  return (
+    <svg
+      className="wi-card-photo-svg"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={alt}
+    >
+      <defs>
+        <marker
+          id={markerId}
+          markerWidth="8"
+          markerHeight="8"
+          refX="6"
+          refY="4"
+          orient="auto"
+          markerUnits="strokeWidth"
+        >
+          <path d="M0,0 L8,4 L0,8 Z" fill="context-stroke" />
+        </marker>
+      </defs>
+      <image href={photo.url} width={width} height={height} preserveAspectRatio="none" />
+      {annotations.map((annotation) => (
+        <StaticPhotoAnnotation
+          key={annotation.id}
+          annotation={annotation}
+          width={width}
+          height={height}
+          markerId={markerId}
+        />
+      ))}
+    </svg>
+  );
+}
+
 function StepCardCell({ card }: { card: WorkInstructionCard }) {
   const continued = card.part > 1;
   return (
@@ -406,9 +634,8 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
       </div>
       <div className="wi-card-main">
         {continued ? null : card.photo ? (
-          <div className="wi-card-photo">
-            {/* eslint-disable-next-line @next/next/no-img-element -- self-contained print document; src is a data: or signed URL */}
-            <img src={card.photo.url} alt={card.photo.caption || `Step ${card.sequence}`} />
+          <div className="wi-card-photo wi-card-photo-populated">
+            <WorkInstructionPhotoMedia photo={card.photo} sequence={card.sequence} />
           </div>
         ) : (
           <div className="wi-card-photo wi-card-photo-missing">No photo</div>

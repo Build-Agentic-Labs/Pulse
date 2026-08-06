@@ -22,6 +22,7 @@ import type {
 } from "@/domain/types";
 import { ClearableNumberInput } from "../clearable-number-input";
 import { ThemedSelect } from "../themed-select";
+import { WorkInstructionPrintPreview } from "../work-instruction/work-instruction-print";
 import { type FeedbackConfirm } from "../themed-feedback";
 import { NumericField, StatCard, type ProductNumberField, type ProductTextField } from "./shared";
 
@@ -428,6 +429,7 @@ export function WorkInstructionsPanel({
   const createdCount = workTasks.filter(hasWorkInstruction).length;
   const readyCount = workTasks.filter((task) => !hasWorkInstruction(task) && isReady(task)).length;
   const incompleteCount = workTasks.filter((task) => !hasWorkInstruction(task) && !isReady(task)).length;
+  const [previewSelection, setPreviewSelection] = useState<{ taskIds: string[]; scenarioId?: string } | null>(null);
 
   const UNZONED_KEY = "__unzoned__";
   const zoneById = new Map(zones.map((zone) => [zone.id, zone]));
@@ -455,15 +457,9 @@ export function WorkInstructionsPanel({
   // project behind it cannot produce a shareable document.
   const projectId = product.projectId;
 
-  function printHref(tasks: Task[]) {
-    const ids = tasks.map((task) => task.id).join(",");
-    const scenarioId = tasks[0]?.scenarioId ?? "";
-    return `/projects/${projectId}/planner/work-instructions/print?taskIds=${ids}&scenarioId=${scenarioId}`;
-  }
-
   // Batch preview stacks one document per task in a single print job, so a whole
   // line can go to the printer in one pass.
-  const previewAllHref = workTasks.length > 0 ? printHref(workTasks) : "";
+  const canPreviewAll = workTasks.length > 0;
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-6">
@@ -481,11 +477,20 @@ export function WorkInstructionsPanel({
         </div>
         {projectId ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {previewAllHref ? (
-              <Link href={previewAllHref} target="_blank" className="ui-btn-ghost h-9 gap-2 px-3">
+            {canPreviewAll ? (
+              <button
+                type="button"
+                className="ui-btn-ghost h-9 gap-2 px-3"
+                onClick={() =>
+                  setPreviewSelection({
+                    taskIds: workTasks.map((task) => task.id),
+                    scenarioId: workTasks[0]?.scenarioId,
+                  })
+                }
+              >
                 <Eye size={15} />
                 Preview all ({workTasks.length})
-              </Link>
+              </button>
             ) : null}
             <Link
               href={`/projects/${projectId}/planner/work-instructions/print?blank=1`}
@@ -557,15 +562,15 @@ export function WorkInstructionsPanel({
                           </span>
                         </button>
                         {projectId ? (
-                          <Link
-                            href={printHref([task])}
-                            target="_blank"
+                          <button
+                            type="button"
+                            onClick={() => setPreviewSelection({ taskIds: [task.id], scenarioId: task.scenarioId })}
                             className="ui-btn-ghost h-7 shrink-0 gap-1.5 px-2 text-xs"
                             title={`Preview the work instruction for ${task.name}`}
                           >
                             <Eye size={13} />
                             Preview
-                          </Link>
+                          </button>
                         ) : null}
                       </div>
                     );
@@ -576,6 +581,15 @@ export function WorkInstructionsPanel({
           })}
         </div>
       )}
+
+      {projectId && previewSelection ? (
+        <WorkInstructionPrintPreview
+          projectId={projectId}
+          taskIds={previewSelection.taskIds}
+          scenarioId={previewSelection.scenarioId}
+          onClose={() => setPreviewSelection(null)}
+        />
+      ) : null}
     </div>
   );
 }

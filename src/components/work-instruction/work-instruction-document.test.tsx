@@ -66,6 +66,16 @@ function sheets(): HTMLElement[] {
 }
 
 describe("WorkInstructionDocument", () => {
+  it("lets modal previews expand across every printed sheet", () => {
+    const { container } = render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    const printStyles = container.querySelector("style")?.textContent ?? "";
+
+    expect(printStyles).toContain(".wi-print-root.wi-print-modal");
+    expect(printStyles).toContain("position: static !important");
+    expect(printStyles).toContain(".wi-print-root.wi-print-modal .wi-print-body");
+    expect(printStyles).toContain("overflow: visible !important");
+  });
+
   it("fits a first-row-sized instruction on one sheet", () => {
     const cards = Array.from({ length: CARDS_ON_FIRST_SHEET }, (_, index) => makeCard(index + 1));
     render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
@@ -187,6 +197,7 @@ describe("WorkInstructionDocument", () => {
     render(<WorkInstructionDocument instruction={makeInstruction([withPhoto, makeCard(2)])} />);
 
     expect(screen.getByAltText("Bracket seated")).toBeInTheDocument();
+    expect(screen.getByAltText("Bracket seated").parentElement?.classList.contains("wi-card-photo-populated")).toBe(true);
 
     // The photo-less REAL card reads as absence, not as somewhere to write.
     const missing = document.querySelectorAll(".wi-card-photo-missing");
@@ -198,6 +209,95 @@ describe("WorkInstructionDocument", () => {
     for (const ruled of document.querySelectorAll(".wi-rule-lines")) {
       expect(ruled.closest(".wi-card-blank")).not.toBeNull();
     }
+  });
+
+  it("renders saved photo annotations into WI preview and print markup", () => {
+    const annotated = makeCard(1, {
+      photo: {
+        id: "p1",
+        url: "https://example.test/a.jpg",
+        caption: "Annotated bracket",
+        width: 800,
+        height: 600,
+        annotations: {
+          version: 2,
+          items: [
+            {
+              id: "arrow-1",
+              type: "arrow",
+              color: "#d71921",
+              strokeWidth: 3,
+              x1: 0.1,
+              y1: 0.1,
+              x2: 0.3,
+              y2: 0.3,
+            },
+            {
+              id: "rectangle-1",
+              type: "rectangle",
+              color: "#007aff",
+              strokeWidth: 2.5,
+              x: 0.2,
+              y: 0.2,
+              width: 0.3,
+              height: 0.25,
+            },
+            {
+              id: "ellipse-1",
+              type: "ellipse",
+              color: "#4a9e5c",
+              strokeWidth: 2.5,
+              x: 0.45,
+              y: 0.15,
+              width: 0.25,
+              height: 0.3,
+            },
+            {
+              id: "highlight-1",
+              type: "highlight",
+              color: "#ffcc00",
+              strokeWidth: 2,
+              x: 0.1,
+              y: 0.55,
+              width: 0.4,
+              height: 0.15,
+              opacity: 0.26,
+            },
+            {
+              id: "freehand-1",
+              type: "freehand",
+              color: "#d71921",
+              strokeWidth: 3,
+              points: [
+                { x: 0.6, y: 0.6 },
+                { x: 0.7, y: 0.7 },
+              ],
+            },
+            {
+              id: "text-1",
+              type: "text",
+              color: "#d71921",
+              fontSize: 14,
+              anchorX: 0.72,
+              anchorY: 0.45,
+              x: 0.5,
+              y: 0.75,
+              width: 0.3,
+              height: 0.12,
+              text: "Inspect here",
+            },
+          ],
+        },
+      },
+    });
+
+    render(<WorkInstructionDocument instruction={makeInstruction([annotated])} />);
+
+    expect(screen.getByRole("img", { name: "Annotated bracket" })).toHaveClass("wi-card-photo-svg");
+    for (const type of ["arrow", "rectangle", "ellipse", "highlight", "freehand", "text"]) {
+      expect(document.querySelector(`[data-annotation-type="${type}"]`)).not.toBeNull();
+    }
+    expect(screen.getByText("Inspect here")).toBeInTheDocument();
   });
 
   it("shows per-step tools and checks on the card", () => {

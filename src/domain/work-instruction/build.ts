@@ -80,7 +80,14 @@ function buildPhoto(attachments: StepPhotoAttachmentMap, stepId: string): WorkIn
   }
   // dataUrl, never thumbnailUrl — this prints into a 2.45 x 3.20in box, where a
   // thumbnail would visibly pixelate.
-  return { id: first.id, url: first.dataUrl, caption: first.caption ?? "" };
+  return {
+    id: first.id,
+    url: first.dataUrl,
+    caption: first.caption ?? "",
+    ...(first.width ? { width: first.width } : {}),
+    ...(first.height ? { height: first.height } : {}),
+    ...(first.annotations?.items.length ? { annotations: first.annotations } : {}),
+  };
 }
 
 /**

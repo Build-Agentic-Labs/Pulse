@@ -51,8 +51,9 @@ export function plannerSaveStatus(state: SaveState): { message: string; error?: 
     case "saved":
       return { message: "Saved" };
     case "error":
+      return null;
     case "conflict":
-      return { message: "Save failed", error: true };
+      return { message: "Save conflict", error: true };
     default:
       return null;
   }

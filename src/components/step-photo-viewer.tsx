@@ -506,7 +506,7 @@ export function StepPhotoViewer({
   const [textBoxDragPending, setTextBoxDragPending] = useState<TextBoxDragPending | null>(null);
   const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
   const [contextMenu, setContextMenu] = useState<AnnotationContextMenu | null>(null);
-  const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("expanded");
+  const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("minimized");
   const [exportAction, setExportAction] = useState<PhotoExportAction>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   // Signed URLs expire after an hour, so an idle tab's <img> starts 4xx-ing. On the first load

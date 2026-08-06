@@ -1,8 +1,7 @@
 "use client";
 
 import { ImageIcon, Trash2 } from "lucide-react";
-import NextImage from "next/image";
-import { useState, type ClipboardEvent as ReactClipboardEvent } from "react";
+import { useId, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
 import {
   getManufacturingStepCheckState,
   serializeManufacturingStepCheckState,
@@ -11,10 +10,12 @@ import {
 } from "@/domain/manufacturing-step-checks";
 import { type MasterBom } from "@/domain/master-bom";
 import { getStepPartReferenceIds, getStepPartReferences } from "@/domain/step-part-references";
+import { normalizePhotoAnnotationDocument } from "@/domain/photo-annotations";
 import { type StepPhotoAttachment } from "@/domain/step-photos";
 import type { ManufacturingStep, PartReference, Task } from "@/domain/types";
 import { BomPartSearch, type BomPartSelection } from "../bom-part-search";
 import { ClearableNumberInput } from "../clearable-number-input";
+import { StaticPhotoAnnotation } from "../static-photo-annotation";
 import { StepPhotoViewer } from "../step-photo-viewer";
 import { ThemedSelect } from "../themed-select";
 
@@ -52,6 +53,67 @@ function clipboardImageFiles(event: ReactClipboardEvent<HTMLDivElement>) {
   return candidates.filter((file) => file.type.startsWith("image/"));
 }
 
+function StepPhotoThumbnail({
+  photo,
+  stepSequence,
+  compact,
+}: {
+  photo: StepPhotoAttachment;
+  stepSequence: number;
+  compact: boolean;
+}) {
+  const markerId = `step-photo-thumbnail-arrow-${useId().replace(/:/g, "")}`;
+  const annotations = normalizePhotoAnnotationDocument(photo.annotations).items;
+  const width = photo.width ?? 1280;
+  const height = photo.height ?? 960;
+  const frameHeight = compact ? 112 : 160;
+  const frameWidth = Math.round(
+    Math.min(compact ? 128 : 216, Math.max(compact ? 72 : 92, (frameHeight * width) / height)),
+  );
+
+  return (
+    <svg
+      className={`${compact ? "h-28" : "h-40"} block rounded border border-line bg-surface-muted transition group-hover:border-accent`}
+      style={{ width: frameWidth }}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={`Step ${stepSequence} photo`}
+    >
+      <defs>
+        <marker
+          id={markerId}
+          markerWidth="8"
+          markerHeight="8"
+          refX="6"
+          refY="4"
+          orient="auto"
+          markerUnits="strokeWidth"
+        >
+          <path d="M0,0 L8,4 L0,8 Z" fill="context-stroke" />
+        </marker>
+      </defs>
+      <image
+        href={photo.thumbnailUrl ?? photo.dataUrl}
+        width={width}
+        height={height}
+        preserveAspectRatio="none"
+      />
+      {annotations.map((annotation) => (
+        <StaticPhotoAnnotation
+          key={annotation.id}
+          annotation={annotation}
+          width={width}
+          height={height}
+          markerId={markerId}
+          targetSize={compact ? 150 : 220}
+          calloutClassName="step-photo-thumbnail-callout"
+        />
+      ))}
+    </svg>
+  );
+}
+
 export function StepPhotoAttachmentEditor({
   step,
   photos,
@@ -61,7 +123,6 @@ export function StepPhotoAttachmentEditor({
   onRequestRemove,
   onUpdatePhoto,
 }: StepPhotoAttachmentEditorProps) {
-  const thumbnailClass = compact ? "h-24 w-28" : "h-36 w-48";
   const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
 
   function handlePaste(event: ReactClipboardEvent<HTMLDivElement>) {
@@ -121,7 +182,7 @@ export function StepPhotoAttachmentEditor({
       {photos.length > 0 ? (
         <div className="step-photo-strip flex max-w-full gap-3 overflow-x-auto overscroll-x-contain pb-2">
           {photos.map((photo) => (
-            <div key={photo.id} className={compact ? "w-28 shrink-0" : "w-48 shrink-0"}>
+            <div key={photo.id} className="shrink-0">
               <div className="group relative">
                 <button
                   type="button"
@@ -130,15 +191,7 @@ export function StepPhotoAttachmentEditor({
                   aria-label={`Open step ${step.sequence} photo ${photo.name}`}
                   title="Open photo"
                 >
-                  <NextImage
-                    src={photo.thumbnailUrl ?? photo.dataUrl}
-                    alt={`Step ${step.sequence} photo`}
-                    width={192}
-                    height={144}
-                    unoptimized
-                    loading="lazy"
-                    className={`${thumbnailClass} rounded border border-line object-cover transition group-hover:border-accent`}
-                  />
+                  <StepPhotoThumbnail photo={photo} stepSequence={step.sequence} compact={compact} />
                 </button>
                 <button
                   type="button"

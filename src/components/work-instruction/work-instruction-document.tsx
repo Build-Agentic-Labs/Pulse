@@ -20,12 +20,6 @@
 
 import { formatMinutes } from "@/domain/calculations";
 import { formatDateControlled } from "@/domain/formatting";
-import {
-  isPhotoBoxAnnotation,
-  textCalloutLeaderPoint,
-  type PhotoAnnotation,
-  type PhotoTextAnnotation,
-} from "@/domain/photo-annotations";
 import { paginateWorkInstruction } from "@/domain/work-instruction/paginate";
 import {
   DEFAULT_WORK_INSTRUCTION_LAYOUT,
@@ -36,6 +30,7 @@ import {
   type WorkInstructionSheet,
 } from "@/domain/work-instruction/schema";
 import { useId } from "react";
+import { StaticPhotoAnnotation } from "../static-photo-annotation";
 
 const CONFIDENTIAL_LINE =
   "ANA INC. CONFIDENTIAL: This copyrighted work and all information is the property of ANA INC. All rights reserved";
@@ -416,147 +411,6 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
         </div>
       </Block>
     </div>
-  );
-}
-
-function photoRenderScale(width: number, height: number) {
-  // Annotation sizes are authored against a roughly 700px viewer. Scale them
-  // into intrinsic-photo coordinates so they retain that visual weight when
-  // the complete SVG is reduced into a WI card or printed to PDF.
-  return Math.max(1, Math.min(width, height) / 700);
-}
-
-function StaticPhotoAnnotation({
-  annotation,
-  width,
-  height,
-  markerId,
-}: {
-  annotation: PhotoAnnotation;
-  width: number;
-  height: number;
-  markerId: string;
-}) {
-  const scale = photoRenderScale(width, height);
-
-  if (annotation.type === "arrow") {
-    return (
-      <line
-        data-annotation-type="arrow"
-        x1={annotation.x1 * width}
-        y1={annotation.y1 * height}
-        x2={annotation.x2 * width}
-        y2={annotation.y2 * height}
-        stroke={annotation.color}
-        strokeWidth={annotation.strokeWidth * scale}
-        strokeLinecap="round"
-        markerEnd={`url(#${markerId})`}
-      />
-    );
-  }
-
-  if (isPhotoBoxAnnotation(annotation)) {
-    const x = annotation.x * width;
-    const y = annotation.y * height;
-    const boxWidth = annotation.width * width;
-    const boxHeight = annotation.height * height;
-    const common = {
-      "data-annotation-type": annotation.type,
-      fill: annotation.type === "highlight" ? annotation.color : "none",
-      fillOpacity: annotation.type === "highlight" ? annotation.opacity : undefined,
-      stroke: annotation.color,
-      strokeOpacity:
-        annotation.type === "highlight" ? Math.min(annotation.opacity + 0.35, 0.75) : undefined,
-      strokeWidth: annotation.strokeWidth * scale,
-    };
-
-    return annotation.type === "ellipse" ? (
-      <ellipse
-        {...common}
-        cx={x + boxWidth / 2}
-        cy={y + boxHeight / 2}
-        rx={boxWidth / 2}
-        ry={boxHeight / 2}
-      />
-    ) : (
-      <rect {...common} x={x} y={y} width={boxWidth} height={boxHeight} />
-    );
-  }
-
-  if (annotation.type === "freehand") {
-    return (
-      <polyline
-        data-annotation-type="freehand"
-        points={annotation.points.map((point) => `${point.x * width},${point.y * height}`).join(" ")}
-        fill="none"
-        stroke={annotation.color}
-        strokeWidth={annotation.strokeWidth * scale}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    );
-  }
-
-  return <StaticTextCallout annotation={annotation} width={width} height={height} scale={scale} />;
-}
-
-function StaticTextCallout({
-  annotation,
-  width,
-  height,
-  scale,
-}: {
-  annotation: PhotoTextAnnotation;
-  width: number;
-  height: number;
-  scale: number;
-}) {
-  const boxHeightNorm = annotation.height ?? Math.max(0.08, (annotation.fontSize * 3.4 * scale) / height);
-  const leader = textCalloutLeaderPoint(
-    annotation.anchorX,
-    annotation.anchorY,
-    annotation.x,
-    annotation.y,
-    annotation.width,
-    boxHeightNorm,
-  );
-  const accentWidth = 3 * scale;
-
-  return (
-    <g data-annotation-type="text">
-      <line
-        x1={annotation.anchorX * width}
-        y1={annotation.anchorY * height}
-        x2={leader.x * width}
-        y2={leader.y * height}
-        stroke={annotation.color}
-        strokeWidth={2 * scale}
-        strokeLinecap="round"
-      />
-      <circle
-        cx={annotation.anchorX * width}
-        cy={annotation.anchorY * height}
-        r={3 * scale}
-        fill={annotation.color}
-      />
-      <foreignObject
-        x={annotation.x * width}
-        y={annotation.y * height}
-        width={annotation.width * width}
-        height={boxHeightNorm * height}
-      >
-        <div
-          className="wi-card-photo-callout"
-          style={{
-            borderLeft: `${accentWidth}px solid ${annotation.color}`,
-            fontSize: `${annotation.fontSize * scale}px`,
-            padding: `${5 * scale}px ${7 * scale}px`,
-          }}
-        >
-          {annotation.text}
-        </div>
-      </foreignObject>
-    </g>
   );
 }
 

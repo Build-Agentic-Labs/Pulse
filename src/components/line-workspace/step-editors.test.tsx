@@ -3,6 +3,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { StepPhotoAttachment } from "@/domain/step-photos";
 import type { ManufacturingStep } from "@/domain/types";
 import { StepPhotoAttachmentEditor } from "./step-editors";
 
@@ -12,12 +13,16 @@ const step: ManufacturingStep = {
   instruction: "Drain the system.",
 };
 
-function renderEditor(overrides: { isUploading?: boolean; onFilesSelected?: (files: File[]) => void } = {}) {
+function renderEditor(overrides: {
+  isUploading?: boolean;
+  onFilesSelected?: (files: File[]) => void;
+  photos?: StepPhotoAttachment[];
+} = {}) {
   const onFilesSelected = overrides.onFilesSelected ?? vi.fn();
   render(
     <StepPhotoAttachmentEditor
       step={step}
-      photos={[]}
+      photos={overrides.photos ?? []}
       isUploading={overrides.isUploading}
       onFilesSelected={onFilesSelected}
       onRequestRemove={vi.fn()}
@@ -77,5 +82,41 @@ describe("StepPhotoAttachmentEditor clipboard paste", () => {
 
     expect(onFilesSelected).not.toHaveBeenCalled();
     expect(pasteTarget).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("shows the full photo aspect ratio and saved markups in the compact strip", () => {
+    const photo: StepPhotoAttachment = {
+      id: "photo-1",
+      name: "Portrait.png",
+      dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+      capturedAt: "2026-08-06T00:00:00.000Z",
+      width: 600,
+      height: 1200,
+      annotations: {
+        version: 2,
+        items: [
+          {
+            id: "rectangle-1",
+            type: "rectangle",
+            color: "#d71921",
+            strokeWidth: 3,
+            x: 0.2,
+            y: 0.25,
+            width: 0.4,
+            height: 0.3,
+          },
+        ],
+      },
+    };
+
+    renderEditor({ photos: [photo] });
+
+    const preview = screen.getByRole("img", { name: "Step 1 photo" });
+    expect(preview).toHaveClass("h-40");
+    expect(preview).toHaveStyle({ width: "92px" });
+    expect(preview).toHaveAttribute("viewBox", "0 0 600 1200");
+    expect(preview).toHaveAttribute("preserveAspectRatio", "xMidYMid meet");
+    expect(preview.querySelector("image")).toHaveAttribute("preserveAspectRatio", "none");
+    expect(preview.querySelector('[data-annotation-type="rectangle"]')).not.toBeNull();
   });
 });

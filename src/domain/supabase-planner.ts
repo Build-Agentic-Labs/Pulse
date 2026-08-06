@@ -2433,11 +2433,13 @@ export async function loadPlannerStateWithProjectFromSupabase(
   projectId?: string,
   scenarioId?: string,
   client?: ReturnType<typeof plannerClient>,
+  options: { includeTaskMedia?: boolean } = {},
 ): Promise<{
   state: PlannerState;
   project: PlannerProjectContext;
 } | null> {
   const supabase = client ?? plannerClient();
+  const includeTaskMedia = options.includeTaskMedia !== false;
   let project: PlannerProjectContext | undefined;
   const product = projectId
     ? await throwIfError(
@@ -2514,12 +2516,23 @@ export async function loadPlannerStateWithProjectFromSupabase(
         throwIfError(supabase.from("manufacturing_steps").select("*").in("task_id", taskIds).order("sequence")),
         throwIfError(supabase.from("part_references").select("*").in("task_id", taskIds).order("created_at")),
         throwIfError(supabase.from("actual_events").select("*").in("task_id", taskIds).order("timestamp")),
-        throwIfError(supabase.from("step_photos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at")),
+        includeTaskMedia
+          ? throwIfError(supabase.from("step_photos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at"))
+          : Promise.resolve([]),
         throwIfError(supabase.from("step_tools").select("*").in("task_id", taskIds).order("sequence")),
-        throwIfError(supabase.from("step_exploded_views").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at")),
-        throwIfError(supabase.from("task_videos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at")),
+        includeTaskMedia
+          ? throwIfError(supabase.from("step_exploded_views").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at"))
+          : Promise.resolve([]),
+        includeTaskMedia
+          ? throwIfError(supabase.from("task_videos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at"))
+          : Promise.resolve([]),
       ])
     : [[], [], [], [], [], [], [], []];
+  // Private procedure media is the expensive part of a Product load: three more
+  // relational reads followed by storage URL signing. The initial editable-core
+  // confirmation deliberately skips it; loadTaskFromSupabase hydrates only the
+  // selected task when Procedure is opened. Full callers keep the legacy behavior
+  // and all eight task-child queries remain parallel.
   const scenarioTaskIds = new Set(taskIds);
   const dependencyIdsByTaskId = new Map<string, string[]>();
   const stepsByTaskId = new Map<string, ManufacturingStep[]>();
@@ -2573,6 +2586,9 @@ export async function loadPlannerStateWithProjectFromSupabase(
     tasks: (taskRows ?? []).map((task) => {
       const mappedTask = mapTask({
         ...task,
+        // Old rows can still contain denormalized media in custom_fields. Do
+        // not let those bypass the lazy-media boundary in a core-only load.
+        custom_fields: includeTaskMedia ? task.custom_fields : customFieldsRow(jsonObject(task.custom_fields)),
         dependency_ids: dependencyIdsByTaskId.get(String(task.id)) ?? [],
         manufacturing_steps: stepsByTaskId.get(String(task.id)) ?? [],
         part_references: partsByTaskId.get(String(task.id)) ?? [],
@@ -2594,12 +2610,137 @@ export async function loadPlannerStateWithProjectFromSupabase(
   return { state, project: projectContext };
 }
 
+type PlannerSummaryRows = {
+  product: Record<string, unknown>;
+  scenario: Record<string, unknown>;
+  stations: Record<string, unknown>[];
+  zones: Record<string, unknown>[];
+  tasks: Record<string, unknown>[];
+};
+
+const PRODUCT_SUMMARY_COLUMNS =
+  "id,project_id,product_code,name,sku,family,revision,description,owner_id,owner_name,status,target_man_hours,demand_quantity,demand_period,gross_available_minutes,break_minutes,lunch_minutes,meeting_minutes,planned_downtime_minutes,work_days_per_week,work_weeks_per_month,available_work_days_per_month,net_available_minutes,weekly_available_minutes,monthly_available_minutes,calculated_takt_minutes,manual_takt_minutes,active_takt_minutes,created_at,updated_at";
+
+/**
+ * Build the deliberately narrow Product-dashboard snapshot.
+ *
+ * This is not a complete editable PlannerState: task children, dependencies,
+ * nomenclature, custom columns and media stay absent until the client's
+ * editable-core load confirms them. Keeping this transformation explicit prevents a
+ * future relational select from accidentally putting procedures or media back
+ * into the route's initial RSC payload.
+ */
+export function buildPlannerSummaryState({
+  product,
+  scenario,
+  stations,
+  zones,
+  tasks,
+}: PlannerSummaryRows): PlannerState {
+  return {
+    project: undefined,
+    // Product custom fields currently hold the master BOM and procedure check
+    // definitions. Neither is used by the dashboard, so keep that potentially
+    // large editable payload in the complete background load as well.
+    product: mapProduct({ ...product, custom_fields: {} }),
+    scenario: mapScenario(scenario),
+    stations: stations.map(mapStation),
+    zones: zones.map(mapZone),
+    components: [],
+    documentTypes: [],
+    tasks: tasks.map((task) =>
+      mapTask({
+        ...task,
+        custom_fields: customFieldsRow(jsonObject(task.custom_fields)),
+        dependency_ids: [],
+        manufacturing_steps: [],
+        part_references: [],
+      }),
+    ),
+    dependencies: [],
+    actualEvents: [],
+    customColumns: [],
+  };
+}
+
+/**
+ * Product-dashboard first paint. Unlike loadPlannerStateFromSupabase, this
+ * intentionally stops at the task rows and never reads task children or signs
+ * media URLs. It is safe to display immediately, but callers must keep writes
+ * disabled until the editable-core load has confirmed the graph.
+ */
+export async function loadPlannerSummaryStateFromSupabase(
+  projectId: string,
+  client?: ReturnType<typeof plannerClient>,
+): Promise<PlannerState | null> {
+  const supabase = client ?? plannerClient();
+  const product = await throwIfError(
+    supabase
+      .from("products")
+      .select(PRODUCT_SUMMARY_COLUMNS)
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  );
+
+  if (!product) {
+    return null;
+  }
+
+  const scenario = await throwIfError(
+    supabase
+      .from("scenarios")
+      .select("*")
+      .eq("product_id", product.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  );
+
+  if (!scenario) {
+    return null;
+  }
+
+  const [stations, zones, tasks] = await Promise.all([
+    throwIfError(supabase.from("stations").select("*").eq("scenario_id", scenario.id).order("sequence")),
+    throwIfError(supabase.from("zones").select("*").eq("scenario_id", scenario.id).order("sequence")),
+    throwIfError(supabase.from("tasks").select("*").eq("scenario_id", scenario.id).order("wbs")),
+  ]);
+
+  return buildPlannerSummaryState({
+    product,
+    scenario,
+    stations: (stations ?? []) as Record<string, unknown>[],
+    zones: (zones ?? []) as Record<string, unknown>[],
+    tasks: (tasks ?? []) as Record<string, unknown>[],
+  });
+}
+
 export async function loadPlannerStateFromSupabase(
   projectId?: string,
   scenarioId?: string,
   client?: ReturnType<typeof plannerClient>,
 ): Promise<PlannerState | null> {
   const loaded = await loadPlannerStateWithProjectFromSupabase(projectId, scenarioId, client);
+  return loaded?.state ?? null;
+}
+
+/**
+ * Editable Product planner graph without private procedure media.
+ *
+ * This confirms the shell, planning rows, steps, parts and tools so autosave is
+ * safe without paying to fetch and sign every task's photos, exploded views and
+ * videos. Procedure hydrates those assets one selected task at a time.
+ */
+export async function loadPlannerCoreStateFromSupabase(
+  projectId?: string,
+  scenarioId?: string,
+  client?: ReturnType<typeof plannerClient>,
+): Promise<PlannerState | null> {
+  const loaded = await loadPlannerStateWithProjectFromSupabase(projectId, scenarioId, client, {
+    includeTaskMedia: false,
+  });
   return loaded?.state ?? null;
 }
 

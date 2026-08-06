@@ -3,8 +3,9 @@
 import "./app-settings-panel.css";
 
 import { Check, Moon, Sun } from "lucide-react";
+import dynamic from "next/dynamic";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { useTheme, type AppearanceColorKey, type AppearancePalette } from "@/components/theme-provider";
 
@@ -12,15 +13,7 @@ import { projectContextLabel } from "@/lib/display-names";
 
 import { AccountSettings } from "@/components/account-settings";
 
-import { WorkspaceActivitySettings } from "@/components/workspace-activity-settings";
-
-import { WorkspaceMembersSettings } from "@/components/workspace-members-settings";
-
-import { WorkspaceListSettings } from "@/components/workspace-list-settings";
-
-import { ProjectSettings } from "@/components/project-settings";
-
-import { PlanningSettings } from "@/components/planning/planning-settings";
+import { SettingsSectionLoadingContent } from "@/components/space-loading-states";
 
 import {
   SettingsNavigation,
@@ -31,6 +24,21 @@ import {
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
 
 import type { ThemeMode } from "@/lib/theme-init";
+
+const OrganizationSettings = dynamic(
+  () => import("@/components/organization-settings").then((module) => module.OrganizationSettings),
+  { loading: () => <SettingsSectionLoadingContent /> },
+);
+
+const ProjectSettings = dynamic(
+  () => import("@/components/project-settings").then((module) => module.ProjectSettings),
+  { loading: () => <SettingsSectionLoadingContent /> },
+);
+
+const PlanningSettings = dynamic(
+  () => import("@/components/planning/planning-settings").then((module) => module.PlanningSettings),
+  { loading: () => <SettingsSectionLoadingContent /> },
+);
 
 
 
@@ -338,7 +346,20 @@ export function AppSettingsPanel({
   const [internalSection, setInternalSection] = useState<SettingsSection>("account");
 
   const activeSection = section ?? internalSection;
+  const [mountedSections, setMountedSections] = useState<Set<SettingsSection>>(
+    () => new Set([activeSection]),
+  );
+
+  useEffect(() => {
+    setMountedSections((current) => {
+      if (current.has(activeSection)) return current;
+      return new Set(current).add(activeSection);
+    });
+  }, [activeSection]);
+
   function setSection(nextSection: SettingsSection) {
+
+    setMountedSections((current) => current.has(nextSection) ? current : new Set(current).add(nextSection));
 
     if (section === undefined) {
 
@@ -364,7 +385,9 @@ export function AppSettingsPanel({
 
       <div className="ui-settings-content">
 
-        {activeSection === "account" ? (
+        {mountedSections.has("account") ? (
+
+          <div hidden={activeSection !== "account"} aria-hidden={activeSection !== "account"}>
 
           <SettingsPage title="Account" description="Your profile and sign-in credentials.">
 
@@ -372,11 +395,15 @@ export function AppSettingsPanel({
 
           </SettingsPage>
 
+          </div>
+
         ) : null}
 
 
 
-        {activeSection === "appearance" ? (
+        {mountedSections.has("appearance") ? (
+
+          <div hidden={activeSection !== "appearance"} aria-hidden={activeSection !== "appearance"}>
 
           <SettingsPage title="Appearance" description="Theme, surface layout, and interface colors.">
 
@@ -524,11 +551,15 @@ export function AppSettingsPanel({
 
           </SettingsPage>
 
+          </div>
+
         ) : null}
 
 
 
-        {activeSection === "organization" ? (
+        {mountedSections.has("organization") ? (
+
+          <div hidden={activeSection !== "organization"} aria-hidden={activeSection !== "organization"}>
 
           <SettingsPage title="Organization" description="Rename the organization, manage members, and control who can access each project.">
 
@@ -546,19 +577,19 @@ export function AppSettingsPanel({
 
             </SettingsSectionBlock>
 
-            <WorkspaceListSettings />
-
-            <WorkspaceMembersSettings project={project} />
-
-            <WorkspaceActivitySettings project={project} />
+            <OrganizationSettings project={project} />
 
           </SettingsPage>
+
+          </div>
 
         ) : null}
 
 
 
-        {activeSection === "projects" ? (
+        {mountedSections.has("projects") ? (
+
+          <div hidden={activeSection !== "projects"} aria-hidden={activeSection !== "projects"}>
 
           <SettingsPage title="Projects" description="Manage projects and project-specific tools.">
 
@@ -566,17 +597,23 @@ export function AppSettingsPanel({
 
           </SettingsPage>
 
+          </div>
+
         ) : null}
 
 
 
-        {activeSection === "planning" ? (
+        {mountedSections.has("planning") ? (
+
+          <div hidden={activeSection !== "planning"} aria-hidden={activeSection !== "planning"}>
 
           <SettingsPage title="Planning" description="Catalog and production-planning configuration.">
 
             <PlanningSettings />
 
           </SettingsPage>
+
+          </div>
 
         ) : null}
 

@@ -2,6 +2,7 @@
 
 import { ArrowLeft, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { PlanningContentLoadingState } from "@/components/space-loading-states";
 import { formatDateTime } from "@/domain/formatting";
 import {
   getImportLines,
@@ -25,18 +26,44 @@ type View =
   | { kind: "upload" }
   | { kind: "import"; scheduleImport: ScheduleImportSummary };
 
-export function SalesOrdersWorkspace() {
-  const { workspaceId, canWrite } = usePlanningWorkspace();
+const SALES_ORDER_CACHE_KEY = "sales-orders";
 
-  const [salesOrders, setSalesOrders] = useState<SalesOrderSummary[]>([]);
-  const [imports, setImports] = useState<ScheduleImportSummary[]>([]);
+type SalesOrderScreenData = {
+  salesOrders: SalesOrderSummary[];
+  imports: ScheduleImportSummary[];
+};
+
+export function SalesOrdersWorkspace({
+  initialSalesOrders,
+  initialImports,
+  initialWorkspaceId,
+}: {
+  initialSalesOrders?: SalesOrderSummary[];
+  initialImports?: ScheduleImportSummary[];
+  initialWorkspaceId?: string;
+} = {}) {
+  const { workspaceId, canWrite, readScreenCache, writeScreenCache } = usePlanningWorkspace();
+  const firstPaint =
+    initialSalesOrders !== undefined && initialImports !== undefined && initialWorkspaceId === workspaceId
+      ? { salesOrders: initialSalesOrders, imports: initialImports }
+      : readScreenCache<SalesOrderScreenData>(SALES_ORDER_CACHE_KEY);
+
+  const [salesOrders, setSalesOrders] = useState<SalesOrderSummary[]>(() => firstPaint?.salesOrders ?? []);
+  const [imports, setImports] = useState<ScheduleImportSummary[]>(() => firstPaint?.imports ?? []);
   const [lines, setLines] = useState<SalesOrderLineRow[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    firstPaint === undefined ? "loading" : "ready",
+  );
   const [error, setError] = useState("");
   const [view, setView] = useState<View>({ kind: "list" });
+  const [firstPaintData] = useState(firstPaint);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) return;
+    if (!options.background) {
+      setStatus("loading");
+      setError("");
+    }
     try {
       const [nextOrders, nextImports] = await Promise.all([
         listSalesOrders(workspaceId),
@@ -44,16 +71,20 @@ export function SalesOrdersWorkspace() {
       ]);
       setSalesOrders(nextOrders);
       setImports(nextImports);
+      writeScreenCache(SALES_ORDER_CACHE_KEY, { salesOrders: nextOrders, imports: nextImports });
       setStatus("ready");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load sales orders.");
       setStatus("error");
     }
-  }, [workspaceId]);
+  }, [workspaceId, writeScreenCache]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (firstPaintData !== undefined) {
+      writeScreenCache(SALES_ORDER_CACHE_KEY, firstPaintData);
+    }
+    void refresh({ background: firstPaintData !== undefined });
+  }, [firstPaintData, refresh, writeScreenCache]);
 
   const openImport = useCallback(
     async (scheduleImport: ScheduleImportSummary) => {
@@ -71,7 +102,7 @@ export function SalesOrdersWorkspace() {
   );
 
   if (status === "loading") {
-    return <div className="ui-panel p-5 text-sm text-ink-secondary">Loading sales orders…</div>;
+    return <PlanningContentLoadingState label="Loading sales orders" />;
   }
 
   if (status === "error") {

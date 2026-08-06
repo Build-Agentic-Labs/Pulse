@@ -1,4 +1,5 @@
 import { PlanningRouteShell } from "@/components/project-route-shells";
+import { fetchInitialPlanningWorkOrders } from "@/lib/supabase/server-data";
 
 export const metadata = {
   title: "Work orders | Pulse",
@@ -11,6 +12,12 @@ export const metadata = {
  * The workspace fetch that used to live here moved to `app/planning/layout.tsx`, which performs
  * it once for every route in the space.
  */
-export default function PlanningPage() {
-  return <PlanningRouteShell />;
+export default async function PlanningPage() {
+  const initial = await fetchInitialPlanningWorkOrders();
+  return (
+    <PlanningRouteShell
+      initialOrders={initial?.data}
+      initialWorkspaceId={initial?.workspaceId}
+    />
+  );
 }

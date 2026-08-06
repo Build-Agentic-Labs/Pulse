@@ -12,6 +12,7 @@ import {
   updateProjectInSupabase,
 } from "@/domain/supabase-planner";
 import type { PlannerProjectContext, Project, WorkspaceRole } from "@/domain/types";
+import { readCachedMainPlannerStateSync, readCachedPlannerState } from "@/lib/planner-state-cache";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import { ThemedFeedbackLayer, type FeedbackConfirm } from "./themed-feedback";
 import { UiContextMenu } from "./ui-context-menu";
@@ -107,19 +108,19 @@ function mergeProjects(projects: Project[], activeProject?: PlannerProjectContex
   return [...byId.values()];
 }
 
-export function announceProjectSwitch(project: Project) {
+export function announceProjectSwitch(project: Project, hasCachedState = false) {
   if (typeof window !== "undefined") {
     try {
       window.sessionStorage.setItem(PROJECT_SWITCH_SESSION_KEY, String(Date.now()));
       window.sessionStorage.setItem(
         PROJECT_SWITCH_TARGET_SESSION_KEY,
-        JSON.stringify({ projectId: project.id, title: project.name }),
+        JSON.stringify({ projectId: project.id, title: project.name, hasCachedState }),
       );
     } catch {
       // Ignore storage failures in private browsing.
     }
     window.dispatchEvent(new CustomEvent(PROJECT_SWITCH_EVENT, {
-      detail: { projectId: project.id, title: project.name },
+      detail: { projectId: project.id, title: project.name, hasCachedState },
     }));
   }
 }
@@ -185,6 +186,37 @@ export function SidebarWorkspacePanel({
       return [...current, fallbackProject];
     });
   }, [activeProjectId, activeProjectName, activeProjectRole, activeWorkspaceId]);
+
+  // Keep previously opened Product routes in Next's router cache. Combined
+  // with the synchronous planner snapshot, returning to a project becomes an
+  // immediate client transition while freshness validation continues behind it.
+  useEffect(() => {
+    if (status !== "ready") {
+      return;
+    }
+
+    let cancelled = false;
+    void Promise.all(
+      projects.map(async (project) => {
+        if (project.id === activeProjectId) {
+          return;
+        }
+        // Warm the synchronous layer from IndexedDB as well, so previously
+        // opened projects remain instant after a browser refresh—not just
+        // during the current JavaScript session.
+        if (!readCachedMainPlannerStateSync(project.id)) {
+          await readCachedPlannerState(project.id).catch(() => null);
+        }
+        if (!cancelled && readCachedMainPlannerStateSync(project.id)) {
+          router.prefetch(projectPlannerHref(project.id));
+        }
+      }),
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId, projects, router, status]);
 
   const hydrate = useCallback(async () => {
     try {
@@ -390,9 +422,10 @@ export function SidebarWorkspacePanel({
       return;
     }
 
+    const hasCachedState = Boolean(readCachedMainPlannerStateSync(project.id));
     setSelectedProjectId(project.id);
     window.requestAnimationFrame(() => {
-      announceProjectSwitch(project);
+      announceProjectSwitch(project, hasCachedState);
       router.push(projectPlannerHref(project.id));
     });
   }
@@ -497,6 +530,8 @@ export function SidebarWorkspacePanel({
                         title={project.name}
                         className="flex min-w-0 flex-1 items-center gap-2 text-left text-inherit"
                         onClick={() => navigateToProject(project, active)}
+                        onPointerEnter={() => router.prefetch(projectPlannerHref(project.id))}
+                        onFocus={() => router.prefetch(projectPlannerHref(project.id))}
                         disabled={isSubmitting}
                       >
                         <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />

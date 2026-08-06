@@ -262,8 +262,11 @@ function mapTrailerConfig(row: Record<string, unknown>): TrailerConfig {
 
 // ── work orders ───────────────────────────────────────────────────────────
 
-export async function listWorkOrders(workspaceId: string): Promise<WorkOrderSummary[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listWorkOrders(
+  workspaceId: string,
+  client?: PlannerSupabaseClient,
+): Promise<WorkOrderSummary[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const { data, error } = await supabase
     .from("work_orders")
     .select(WORK_ORDER_LIST_COLUMNS)
@@ -1040,8 +1043,11 @@ export async function purgeLegacyWorkOrderTemplates(workspaceId: string): Promis
 
 // ── trailer configs ─────────────────────────────────────────────────────────
 
-export async function listTrailerConfigs(workspaceId: string): Promise<TrailerConfig[]> {
-  const supabase = createPlannerSupabaseClient();
+export async function listTrailerConfigs(
+  workspaceId: string,
+  client?: PlannerSupabaseClient,
+): Promise<TrailerConfig[]> {
+  const supabase = client ?? createPlannerSupabaseClient();
   const { data, error } = await supabase
     .from("trailer_configs")
     .select(TRAILER_CONFIG_COLUMNS)

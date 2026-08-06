@@ -173,6 +173,30 @@ export function SettingsLoadingState({ label = "Opening Settings" }: { label?: s
   );
 }
 
+/** Section-only Settings fallback; navigation and previously visited sections remain mounted. */
+export function SettingsSectionLoadingContent() {
+  return (
+    <div className="space-y-5 py-3" aria-busy="true">
+      {[0, 1, 2].map((row) => (
+        <section key={row} className="ui-settings-section">
+          <SkeletonLine className="h-3 w-36" />
+          <div className="ui-settings-group mt-3">
+            {[0, 1].map((item) => (
+              <div key={item} className="ui-settings-group-row">
+                <div className="ui-settings-group-row-copy">
+                  <SkeletonLine className="h-3 w-28" />
+                  <SkeletonLine className="mt-2 h-2 w-48 max-w-full" />
+                </div>
+                <SkeletonLine className="h-8 w-36" />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 /** Backward-compatible alias for older project settings deep links. */
 export const PeopleLoadingState = SettingsLoadingState;
 
@@ -233,6 +257,25 @@ export function PlanningLoadingState({ label = "Opening Planning" }: { label?: s
         </main>
       </div>
     </div>
+  );
+}
+
+/** Content-only Planning fallback; the persistent top bar and sidebar remain mounted. */
+export function PlanningContentLoadingState({ label }: { label: string }) {
+  return (
+    <section className="space-y-5" aria-busy="true" aria-label={label}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <SkeletonLine className="h-4 w-36" />
+          <SkeletonLine className="mt-3 h-2 w-72 max-w-full" />
+        </div>
+        <SkeletonLine className="h-9 w-32" />
+      </div>
+      <SkeletonLine className="h-2 w-28" />
+      <section className="ui-panel overflow-hidden">
+        <WorkOrderTableSkeleton />
+      </section>
+    </section>
   );
 }
 

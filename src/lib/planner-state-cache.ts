@@ -6,6 +6,10 @@ const STORE_NAME = "project-snapshots";
 const SNAPSHOT_SCHEMA_VERSION = 1;
 
 let plannerCacheDbPromise: Promise<IDBDatabase> | null = null;
+// Fast, per-project session layer. IndexedDB remains the durable cache, but an
+// already-opened project must be readable synchronously during a sidebar click
+// so the next workspace can paint without a skeleton frame.
+const plannerStateMemoryCache = new Map<string, CachedPlannerSnapshot>();
 
 type PlannerStateCacheRecord = {
   projectId: string;
@@ -24,6 +28,23 @@ export type CachedPlannerSnapshot = {
   scenarioId?: string;
   mainScenarioId?: string;
 };
+
+function isMainScenarioSnapshot(snapshot: CachedPlannerSnapshot) {
+  return Boolean(
+    snapshot.scenarioId &&
+      snapshot.mainScenarioId &&
+      snapshot.scenarioId === snapshot.mainScenarioId,
+  );
+}
+
+export function readCachedMainPlannerStateSync(projectId?: string) {
+  if (!projectId) {
+    return null;
+  }
+
+  const snapshot = plannerStateMemoryCache.get(projectId);
+  return snapshot && isMainScenarioSnapshot(snapshot) ? snapshot : null;
+}
 
 function canUseIndexedDb() {
   return typeof window !== "undefined" && typeof window.indexedDB !== "undefined";
@@ -71,7 +92,16 @@ function openPlannerCacheDb() {
 }
 
 export async function readCachedPlannerState(projectId?: string) {
-  if (!projectId || !canUseIndexedDb()) {
+  if (!projectId) {
+    return null;
+  }
+
+  const memorySnapshot = readCachedMainPlannerStateSync(projectId);
+  if (memorySnapshot) {
+    return memorySnapshot;
+  }
+
+  if (!canUseIndexedDb()) {
     return null;
   }
 
@@ -86,11 +116,15 @@ export async function readCachedPlannerState(projectId?: string) {
         resolve(null);
         return;
       }
-      resolve({
+      const snapshot = {
         state: record.state,
         scenarioId: record.scenarioId,
         mainScenarioId: record.mainScenarioId,
-      });
+      } satisfies CachedPlannerSnapshot;
+      if (isMainScenarioSnapshot(snapshot)) {
+        plannerStateMemoryCache.set(projectId, snapshot);
+      }
+      resolve(snapshot);
     };
     request.onerror = () => reject(request.error ?? new Error("Unable to read planner cache."));
   });
@@ -101,7 +135,23 @@ export async function writeCachedPlannerState(
   state: PlannerState,
   mainScenarioId?: string,
 ) {
-  if (!projectId || !canUseIndexedDb()) {
+  if (!projectId) {
+    return;
+  }
+
+  const snapshot = {
+    state,
+    scenarioId: state.scenario.id,
+    mainScenarioId,
+  } satisfies CachedPlannerSnapshot;
+  // Keep the confirmed Main snapshot even while a projection is open. Product
+  // project navigation always returns to Main, so a projection must not evict
+  // the warm snapshot that makes that return instant.
+  if (isMainScenarioSnapshot(snapshot)) {
+    plannerStateMemoryCache.set(projectId, snapshot);
+  }
+
+  if (!canUseIndexedDb()) {
     return;
   }
 

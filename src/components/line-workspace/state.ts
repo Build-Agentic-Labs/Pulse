@@ -43,6 +43,7 @@ export const PROJECT_SWITCH_SKELETON_MIN_MS = 320;
 export type ProjectSwitchTarget = {
   projectId: string;
   title: string;
+  hasCachedState?: boolean;
 };
 
 export type WorkspaceSnapshot = {
@@ -125,7 +126,11 @@ export function readProjectSwitchTarget(): ProjectSwitchTarget | undefined {
 
     const parsed = JSON.parse(raw) as Partial<ProjectSwitchTarget>;
     return typeof parsed.projectId === "string" && typeof parsed.title === "string"
-      ? { projectId: parsed.projectId, title: parsed.title }
+      ? {
+          projectId: parsed.projectId,
+          title: parsed.title,
+          hasCachedState: parsed.hasCachedState === true,
+        }
       : undefined;
   } catch {
     return undefined;

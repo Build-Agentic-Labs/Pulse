@@ -111,25 +111,29 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
   }, [tab]);
 
   useEffect(() => {
-    const warmPanels = () => {
-      setMountedTabs(new Set<Tab>([
-        "dashboard",
-        "all",
-        "review",
-        "library",
-        "retired",
-        ...(manage ? ["settings" as const] : []),
-      ]));
+    // Warm only the route chunks. Mounting every hidden panel here also started
+    // every panel's Supabase reads, duplicating SOP and department queries before
+    // the user visited those screens. A selected panel stays mounted afterward,
+    // so first use is cold once and return navigation remains instant.
+    const warmPanelChunks = () => {
+      void Promise.all([
+        import("./sop-dashboard"),
+        import("./sop-list"),
+        import("./review-queue"),
+        import("./effective-library"),
+        import("./retired-sops"),
+        ...(manage ? [import("./departments-admin")] : []),
+      ]).catch(() => undefined);
     };
     const idleWindow = window as Window & {
       requestIdleCallback?: Window["requestIdleCallback"];
       cancelIdleCallback?: Window["cancelIdleCallback"];
     };
     if (idleWindow.requestIdleCallback) {
-      const id = idleWindow.requestIdleCallback(warmPanels, { timeout: 750 });
+      const id = idleWindow.requestIdleCallback(warmPanelChunks, { timeout: 750 });
       return () => idleWindow.cancelIdleCallback?.(id);
     }
-    const id = window.setTimeout(warmPanels, 150);
+    const id = window.setTimeout(warmPanelChunks, 150);
     return () => window.clearTimeout(id);
   }, [manage]);
 
@@ -152,7 +156,6 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("dashboard") ? (
           <SopDashboard
             active={tab === "dashboard"}
-            preload
             initialSops={initial?.tab === "dashboard" ? initial.sops : undefined}
             initialDepartments={initial?.tab === "dashboard" ? initial.departments : undefined}
             initialWorkspaceId={initial?.tab === "dashboard" ? initial.workspaceId : undefined}
@@ -163,7 +166,6 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("all") ? (
           <SopList
             active={tab === "all"}
-            preload
             initialSops={initial?.tab === "all" ? initial.sops : undefined}
             initialDepartments={initial?.tab === "all" ? initial.departments : undefined}
             initialMemberDepartments={initial?.tab === "all" ? initial.memberDepartments : undefined}
@@ -176,7 +178,6 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("review") ? (
           <ReviewQueue
             active={tab === "review"}
-            preload
             initialQueue={initial?.tab === "review" ? initial.queue : undefined}
             initialWorkspaceId={initial?.tab === "review" ? initial.workspaceId : undefined}
           />
@@ -186,7 +187,6 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("library") ? (
           <EffectiveLibrary
             active={tab === "library"}
-            preload
             initialSops={initial?.tab === "library" ? initial.sops : undefined}
             initialDepartments={initial?.tab === "library" ? initial.departments : undefined}
             initialWorkspaceId={initial?.tab === "library" ? initial.workspaceId : undefined}
@@ -197,7 +197,6 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("retired") ? (
           <RetiredSops
             active={tab === "retired"}
-            preload
             initialSops={initial?.tab === "retired" ? initial.sops : undefined}
             initialRevisions={initial?.tab === "retired" ? initial.revisions : undefined}
             initialWorkspaceId={initial?.tab === "retired" ? initial.workspaceId : undefined}
@@ -208,7 +207,6 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("settings") && manage ? (
           <QualitySettingsPanel
             active={tab === "settings"}
-            preload
             initialDepartments={initial?.tab === "settings" ? initial.departments : undefined}
             initialMembers={initial?.tab === "settings" ? initial.members : undefined}
             initialDirectory={initial?.tab === "settings" ? initial.directory : undefined}
@@ -222,14 +220,12 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
 
 function QualitySettingsPanel({
   active,
-  preload,
   initialDepartments,
   initialMembers,
   initialDirectory,
   initialWorkspaceId,
 }: {
   active: boolean;
-  preload: boolean;
   initialDepartments?: Department[];
   initialMembers?: DepartmentMember[];
   initialDirectory?: MemberAccess[];
@@ -245,7 +241,6 @@ function QualitySettingsPanel({
       </div>
       <DepartmentsAdmin
         active={active}
-        preload={preload}
         embedded
         initialDepartments={initialDepartments}
         initialMembers={initialMembers}

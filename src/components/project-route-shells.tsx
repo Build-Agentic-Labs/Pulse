@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import type { PlannerState, WorkspaceProjectGroup } from "@/domain/types";
+import type { WorkOrderSummary } from "@/lib/planning/store";
 import { WORK_INSTRUCTION_LAYOUTS } from "@/domain/work-instruction/schema";
 import { AppLoadingShell } from "./app-flow-panels";
 import { AuthProjectGate } from "./auth-project-gate";
@@ -77,8 +78,14 @@ export function HomeRouteShell({ initialGroups }: ShellProps = {}) {
  * on every navigation, which is the flash the layout exists to remove. The dynamic import stays:
  * it keeps the board out of the initial bundle.
  */
-export function PlanningRouteShell() {
-  return <WorkOrderBoard />;
+export function PlanningRouteShell({
+  initialOrders,
+  initialWorkspaceId,
+}: {
+  initialOrders?: WorkOrderSummary[];
+  initialWorkspaceId?: string;
+} = {}) {
+  return <WorkOrderBoard initialOrders={initialOrders} initialWorkspaceId={initialWorkspaceId} />;
 }
 
 /**

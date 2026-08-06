@@ -43,7 +43,11 @@ import type { IeSmartAllocationPlan, IeSmartAllocationRequest } from "@/domain/i
 import { getTaskOperatorIds, getTaskOperatorResetPatch, syncTaskOperatorCount } from "@/domain/operator-assignments";
 import { buildStationSetupDocumentHtml } from "@/domain/report";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
-import { readCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
+import {
+  readCachedMainPlannerStateSync,
+  readCachedPlannerState,
+  writeCachedPlannerState,
+} from "@/lib/planner-state-cache";
 import { buildStepPhotoAttachment } from "@/lib/step-photo-image";
 import { buildPlaybackEvents } from "@/domain/playback";
 import {
@@ -67,13 +71,14 @@ import {
   issueReviewLabel,
 } from "@/domain/smart-allocation-report";
 import {
+  STEP_PHOTO_ATTACHMENTS_FIELD,
   getStepPhotoAttachments,
   removeStepPhotoAttachment,
   upsertStepPhotoAttachments,
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
-import { removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
-import { removeTaskVideo, type TaskVideo } from "@/domain/task-videos";
+import { EXPLODED_VIEWS_FIELD, removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
+import { TASK_VIDEOS_FIELD, removeTaskVideo, type TaskVideo } from "@/domain/task-videos";
 import { buildStepToolLibrary, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
 import { removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
 import { buildProjectToolRegistry } from "@/domain/tool-registry";
@@ -117,6 +122,7 @@ import {
   duplicateScenario,
   listSopSummariesFromSupabase,
   type SopSummary,
+  loadPlannerCoreStateFromSupabase,
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
   loadWorkspaceProjectGroups,
@@ -523,8 +529,8 @@ export function LineWorkspace({
   /**
    * Server-fetched planner state (refactor plan, Stage 5): painted through the
    * same path as the IndexedDB cache — content on the first frame, destructive
-   * shell autosave stays DISABLED until this client's own remote load confirms
-   * the state (which also closes the realtime stale window). Consumed once, for
+   * shell autosave stays DISABLED until this client's own editable-core load
+   * confirms the state (which also closes the realtime stale window). Consumed once, for
    * the first project only.
    */
   initialPlannerState?: PlannerState;
@@ -549,8 +555,18 @@ export function LineWorkspace({
       projectId &&
       String(initialPlannerState.product.projectId ?? "") === String(projectId),
   );
+  const initialCachedPlannerSnapshotRef = useRef(readCachedMainPlannerStateSync(projectId));
+  const initialCachedPlannerState = initialCachedPlannerSnapshotRef.current?.state;
+  const initialCachedPlannerStateMatchesProject = Boolean(
+    initialCachedPlannerState &&
+      projectId &&
+      String(initialCachedPlannerState.product.projectId ?? "") === String(projectId),
+  );
+  const hasInitialDisplayablePlannerState = initialCachedPlannerStateMatchesProject || initialPlannerStateMatchesProject;
   const [plannerState, setPlannerState] = useState<PlannerState>(() =>
-    initialPlannerStateMatchesProject && initialPlannerState
+    initialCachedPlannerStateMatchesProject && initialCachedPlannerState
+      ? ensureNomenclatureCollections(initialCachedPlannerState)
+      : initialPlannerStateMatchesProject && initialPlannerState
       ? ensureNomenclatureCollections(initialPlannerState)
       : emptyPlannerState,
   );
@@ -585,8 +601,19 @@ export function LineWorkspace({
   // Mirror of saveState readable synchronously inside async flows (e.g. save-before-scenario-switch).
   const saveStateRef = useRef<SaveState>("loading");
   const [saveError, setSaveError] = useState<string>();
-  const [hasLoadedRemoteState, setHasLoadedRemoteState] = useState(() => hasRecentProjectSwitchSession());
-  const [isProjectSwitching, setIsProjectSwitching] = useState(() => hasRecentProjectSwitchSession());
+  const [hasLoadedRemoteState, setHasLoadedRemoteState] = useState(
+    () => hasInitialDisplayablePlannerState || hasRecentProjectSwitchSession(),
+  );
+  // A server summary or IndexedDB snapshot is displayable but intentionally not
+  // editable. Detail modules stay behind the in-workspace skeleton until the
+  // complete editable core has arrived and enabled the write safety contract.
+  const [hasConfirmedRemoteState, setHasConfirmedRemoteState] = useState(false);
+  const [taskDetailHydrationStatus, setTaskDetailHydrationStatus] = useState<
+    Record<string, "loading" | "loaded" | "error">
+  >({});
+  const [isProjectSwitching, setIsProjectSwitching] = useState(
+    () => hasRecentProjectSwitchSession() && !hasInitialDisplayablePlannerState,
+  );
   const [dirtyVersion, setDirtyVersion] = useState(0);
   const [smartAllocationPending, setSmartAllocationPending] = useState(false);
   const [dismissedPlanningRecommendationKey, setDismissedPlanningRecommendationKey] = useState("");
@@ -608,8 +635,11 @@ export function LineWorkspace({
   const pendingRemoteRefreshRef = useRef(false);
   const remoteTaskRefreshTimerRef = useRef<number | null>(null);
   const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
+  const taskDetailHydrationRequestsRef = useRef<Set<string>>(new Set());
+  const fullyHydratedScenarioIdsRef = useRef<Set<string>>(new Set());
   const flushPendingPlannerSaveRef = useRef(flushPendingPlannerSave);
   const applyProcedureDraftsToTaskRef = useRef(applyProcedureDraftsToTask);
+  const mergeServerTaskIntoLocalTaskRef = useRef(mergeServerTaskIntoLocalTask);
   const scheduleProcedureTaskSaveRef = useRef(scheduleProcedureTaskSave);
   const requestRemotePlannerRefreshRef = useRef(requestRemotePlannerRefresh);
   const requestRemoteTaskRefreshRef = useRef(requestRemoteTaskRefresh);
@@ -618,6 +648,7 @@ export function LineWorkspace({
   const urlWorkspaceSnapshotRef = useRef(urlWorkspaceSnapshot);
   flushPendingPlannerSaveRef.current = flushPendingPlannerSave;
   applyProcedureDraftsToTaskRef.current = applyProcedureDraftsToTask;
+  mergeServerTaskIntoLocalTaskRef.current = mergeServerTaskIntoLocalTask;
   scheduleProcedureTaskSaveRef.current = scheduleProcedureTaskSave;
   requestRemotePlannerRefreshRef.current = requestRemotePlannerRefresh;
   requestRemoteTaskRefreshRef.current = requestRemoteTaskRefresh;
@@ -633,7 +664,7 @@ export function LineWorkspace({
   // Recorded alongside cache writes so a reload can tell whether the cached snapshot matches the
   // scenario the remote load will return.
   const mainScenarioIdRef = useRef<string | undefined>(undefined);
-  const hasLoadedAnyProjectRef = useRef(hasRecentProjectSwitchSession());
+  const hasLoadedAnyProjectRef = useRef(hasInitialDisplayablePlannerState || hasRecentProjectSwitchSession());
   const projectSwitchStartedAtRef = useRef<number | undefined>(recentProjectSwitchStartedAt());
   const projectSwitchSkeletonTimerRef = useRef<number | null>(null);
   const stablePlannerChromeContextRef = useRef<ReturnType<typeof buildPlannerChromeContext> | undefined>(undefined);
@@ -902,7 +933,11 @@ export function LineWorkspace({
       return;
     }
 
-    const params = new URLSearchParams(plannerQueryString);
+    // Read the live address bar rather than the hook snapshot. Native history
+    // updates are intentionally local and may not cause useSearchParams to
+    // publish a new value in every supported Next/browser combination.
+    const currentQueryString = window.location.search.replace(/^\?/, "");
+    const params = new URLSearchParams(currentQueryString);
     params.set("view", activeModule);
     if (selectedTaskId) {
       params.set("task", selectedTaskId);
@@ -921,11 +956,17 @@ export function LineWorkspace({
     }
 
     const nextQueryString = params.toString();
-    if (nextQueryString === plannerQueryString) {
+    if (nextQueryString === currentQueryString) {
       return;
     }
 
-    router.replace(nextQueryString ? `${pathname}?${nextQueryString}` : pathname, { scroll: false });
+    // These parameters mirror state that already lives in this mounted Product
+    // workspace. A Next router navigation would rerun the dynamic server page
+    // (and its summary queries) for every sidebar click or task selection. The
+    // native History API keeps the shareable URL in sync without a server/RSC
+    // round trip; Next patches it so useSearchParams still receives the update.
+    const nextUrl = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
+    window.history.replaceState(window.history.state, "", nextUrl);
   }, [
     activeModule,
     activeZoneId,
@@ -1923,6 +1964,12 @@ export function LineWorkspace({
     setSelectedStationId(normalized.stations[0]?.id ?? "");
     setActiveZoneId(undefined);
     setFocusedProcedureStepId(undefined);
+    setTaskDetailHydrationStatus(
+      fullyHydratedScenarioIdsRef.current.has(normalized.scenario.id)
+        ? Object.fromEntries(normalized.tasks.map((task) => [task.id, "loaded" as const]))
+        : {},
+    );
+    taskDetailHydrationRequestsRef.current.clear();
   }
 
   // Switch the Gantt to another scenario. Hard rule (spec §4.2 / §7.4): save first; if the save fails
@@ -1963,6 +2010,7 @@ export function LineWorkspace({
     if (!loaded) {
       throw new Error("That scenario could not be loaded.");
     }
+    fullyHydratedScenarioIdsRef.current.add(loaded.scenario.id);
     scenarioCacheRef.current.set(scenarioId, loaded);
     applyScenarioSwitch(loaded);
   }
@@ -2192,6 +2240,11 @@ export function LineWorkspace({
           return;
         }
 
+        setTaskDetailHydrationStatus((current) => ({
+          ...current,
+          ...Object.fromEntries([...taskById.keys()].map((taskId) => [taskId, "loaded" as const])),
+        }));
+
         remoteRefreshAppliedRef.current = true;
         setPlannerState((current) => {
           const existingTaskIds = new Set(current.tasks.map((task) => task.id));
@@ -2278,6 +2331,10 @@ export function LineWorkspace({
 
         pendingRemoteRefreshRef.current = false;
         remoteRefreshAppliedRef.current = true;
+        fullyHydratedScenarioIdsRef.current.add(savedState.scenario.id);
+        setTaskDetailHydrationStatus(
+          Object.fromEntries(savedState.tasks.map((task) => [task.id, "loaded" as const])),
+        );
         setPlannerState((current) => {
           const localTaskById = new Map(current.tasks.map((task) => [task.id, task]));
           const savedTaskIds = new Set(savedState.tasks.map((task) => task.id));
@@ -2409,6 +2466,7 @@ export function LineWorkspace({
   // Seed once per project: a project switch re-renders the server page with the new
   // project's state, which is a legitimate fresh seed.
   const consumedInitialPlannerStateForRef = useRef<string | undefined>(undefined);
+  const consumedInitialCachedPlannerStateForRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     let mounted = true;
@@ -2416,6 +2474,14 @@ export function LineWorkspace({
     let serverSeededThisLoad = false;
     const currentProjectId = projectId ?? "";
     const initialUrlWorkspaceSnapshot = urlWorkspaceSnapshotRef.current;
+    const cachedSeedSnapshot = initialCachedPlannerSnapshotRef.current;
+    const hasWarmCachedProject = Boolean(
+      cachedSeedSnapshot &&
+        String(cachedSeedSnapshot.state.product.projectId ?? "") === currentProjectId &&
+        cachedSeedSnapshot.scenarioId &&
+        cachedSeedSnapshot.mainScenarioId &&
+        cachedSeedSnapshot.scenarioId === cachedSeedSnapshot.mainScenarioId,
+    );
     const isSwitchingProject = hasLoadedAnyProjectRef.current && loadedProjectIdRef.current !== currentProjectId;
 
     if (isSwitchingProject && !projectSwitchStartedAtRef.current) {
@@ -2424,13 +2490,17 @@ export function LineWorkspace({
     if (isSwitchingProject) {
       setProjectSwitchTargetContext(buildProjectSwitchTargetContext(readProjectSwitchTarget()));
     }
-    setIsProjectSwitching(isSwitchingProject);
-    setHasLoadedRemoteState((loaded) => (isSwitchingProject && loaded ? true : false));
+    setIsProjectSwitching(isSwitchingProject && !hasWarmCachedProject);
+    setHasLoadedRemoteState((loaded) => (hasWarmCachedProject || (isSwitchingProject && loaded) ? true : false));
+    setHasConfirmedRemoteState(false);
     setSaveState("loading");
     // The shell autosave stays disabled until THIS project's remote load confirms the state; a
     // cached snapshot alone must never be diff-saved back to the database.
     remoteStateConfirmedRef.current = false;
     mainScenarioIdRef.current = undefined;
+    taskDetailHydrationRequestsRef.current.clear();
+    fullyHydratedScenarioIdsRef.current.clear();
+    setTaskDetailHydrationStatus({});
 
     function applyLoadedPlannerState(savedState: PlannerState, source: "cache" | "remote") {
       const normalizedSavedState = ensureNomenclatureCollections(savedState);
@@ -2526,6 +2596,7 @@ export function LineWorkspace({
       setHasLoadedRemoteState(true);
 
       if (source === "cache") {
+        setHasConfirmedRemoteState(false);
         setSaveState("loading");
         return;
       }
@@ -2533,6 +2604,7 @@ export function LineWorkspace({
       // Only a confirmed remote load may enable the shell autosave. An unqualified remote load
       // always returns the product's Main scenario, so record its id for future cache writes.
       remoteStateConfirmedRef.current = true;
+      setHasConfirmedRemoteState(true);
       mainScenarioIdRef.current = hydratedState.scenario.id;
       // The remote state just replaced whatever was on screen (including any cache-era edits, by
       // design), so no unsaved shell work remains; a dangling dirty flag would defer realtime
@@ -2566,10 +2638,25 @@ export function LineWorkspace({
 
     // Server-fetched state paints first when it matches this project (Stage 5).
     // "cache" source: the destructive shell autosave stays disabled until the
-    // client's own remote load below confirms — that load also closes the window
-    // between the server snapshot and the realtime subscription.
+    // client's own editable-core load below confirms — that load also closes the
+    // window between the server snapshot and the realtime subscription.
+    if (
+      cachedSeedSnapshot &&
+      hasWarmCachedProject &&
+      consumedInitialCachedPlannerStateForRef.current !== currentProjectId
+    ) {
+      consumedInitialCachedPlannerStateForRef.current = currentProjectId;
+      serverSeededThisLoad = true;
+      applyLoadedPlannerState(cachedSeedSnapshot.state, "cache");
+      clearProjectSwitchSession();
+      projectSwitchStartedAtRef.current = undefined;
+      setProjectSwitchTargetContext(undefined);
+      setIsProjectSwitching(false);
+    }
+
     const serverSeedState = initialPlannerStateRef.current;
     if (
+      !serverSeededThisLoad &&
       serverSeedState &&
       consumedInitialPlannerStateForRef.current !== currentProjectId &&
       String(serverSeedState.product.projectId ?? "") === currentProjectId
@@ -2598,7 +2685,7 @@ export function LineWorkspace({
       })
       .catch(() => undefined);
 
-    loadPlannerStateFromSupabase(projectId)
+    loadPlannerCoreStateFromSupabase(projectId)
       .then((savedState) => {
         if (!mounted) {
           return;
@@ -2629,6 +2716,7 @@ export function LineWorkspace({
         hasLoadedAnyProjectRef.current = true;
         // The remote answered (an empty project); local edits from here start from confirmed state.
         remoteStateConfirmedRef.current = true;
+        setHasConfirmedRemoteState(true);
         finishProjectSwitch();
         setHasLoadedRemoteState(true);
         setSaveState("idle");
@@ -2653,6 +2741,88 @@ export function LineWorkspace({
     };
   }, [projectId]);
 
+  // The confirmed Product shell includes procedure steps, parts and tools, but
+  // intentionally excludes private media. Hydrate one task at a time only when
+  // Procedure needs it, avoiding three all-task media reads and URL signing on
+  // every Product entry. The procedure skeleton prevents edits from racing the
+  // selected task's authoritative media snapshot.
+  useEffect(() => {
+    if (
+      activeModule !== "procedure" ||
+      !hasConfirmedRemoteState ||
+      !selectedTaskId ||
+      taskDetailHydrationStatus[selectedTaskId] === "loaded" ||
+      taskDetailHydrationStatus[selectedTaskId] === "error" ||
+      taskDetailHydrationRequestsRef.current.has(selectedTaskId)
+    ) {
+      return;
+    }
+
+    const taskId = selectedTaskId;
+    const forProjectId = projectId ?? "";
+    const forScenarioId = derivedState.scenario.id;
+    taskDetailHydrationRequestsRef.current.add(taskId);
+    setTaskDetailHydrationStatus((current) => ({ ...current, [taskId]: "loading" }));
+
+    void loadTaskFromSupabase(taskId, projectId)
+      .then((serverTask) => {
+        if (!serverTask) {
+          throw new Error("This procedure task is no longer available.");
+        }
+        if (
+          loadedProjectIdRef.current !== forProjectId ||
+          latestDerivedStateRef.current.scenario.id !== forScenarioId
+        ) {
+          return;
+        }
+
+        setPlannerState((current) => {
+          const localTask = current.tasks.find((task) => task.id === taskId);
+          if (!localTask) {
+            return current;
+          }
+          const mergedTask = mergeServerTaskIntoLocalTaskRef.current(localTask, serverTask, procedureDraftsRef.current, {
+            source: "lazyProcedureHydration",
+          });
+          const hydratedCustomFields = { ...mergedTask.customFields };
+          for (const field of [STEP_PHOTO_ATTACHMENTS_FIELD, EXPLODED_VIEWS_FIELD, TASK_VIDEOS_FIELD]) {
+            if (field in serverTask.customFields) {
+              hydratedCustomFields[field] = serverTask.customFields[field];
+            } else {
+              delete hydratedCustomFields[field];
+            }
+          }
+          const hydratedTask = { ...mergedTask, customFields: hydratedCustomFields };
+          const nextState = {
+            ...current,
+            tasks: current.tasks.map((task) => (task.id === taskId ? hydratedTask : task)),
+          };
+          void writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
+          return nextState;
+        });
+        setTaskDetailHydrationStatus((current) => ({ ...current, [taskId]: "loaded" }));
+      })
+      .catch((error: unknown) => {
+        if (
+          loadedProjectIdRef.current !== forProjectId ||
+          latestDerivedStateRef.current.scenario.id !== forScenarioId
+        ) {
+          return;
+        }
+        setTaskDetailHydrationStatus((current) => ({ ...current, [taskId]: "error" }));
+        setWorkspaceNotice({
+          title: "Procedure media couldn't be loaded",
+          body: error instanceof Error
+            ? error.message
+            : "Steps remain available, but this task's photos and videos could not be refreshed.",
+          tone: "warning",
+        });
+      })
+      .finally(() => {
+        taskDetailHydrationRequestsRef.current.delete(taskId);
+      });
+  }, [activeModule, derivedState.scenario.id, hasConfirmedRemoteState, projectId, selectedTaskId, taskDetailHydrationStatus]);
+
   useEffect(() => {
     if (hasLoadedRemoteState) {
       onReady?.();
@@ -2668,6 +2838,10 @@ export function LineWorkspace({
           : readProjectSwitchTarget();
         setProjectSwitchTargetContext(buildProjectSwitchTargetContext(target));
         setActiveModule("dashboard");
+        // A project switch is a context change, so acknowledge it immediately in
+        // the canvas even when the target has a warm cache. The cache still makes
+        // the transition brief, but the previous project's canvas is never left
+        // looking active while the new route commits.
         setIsProjectSwitching(true);
         setSaveState("loading");
       }
@@ -3222,6 +3396,7 @@ export function LineWorkspace({
   const isProcedureModule = activeModule === "procedure";
   const isDashboardModule = activeModule === "dashboard";
   const isSettingsModule = activeModule === "settings";
+  const requiresCompletePlannerState = !isDashboardModule && !isSettingsModule;
   const sidebarActiveModule = isProjectSwitching ? "dashboard" : activeModule;
   const isComingSoonModule = comingSoonModuleIds.has(activeModule);
   const comingSoonModuleLabel = plannerModules.find((module) => module.id === activeModule)?.label ?? "Workspace";
@@ -3235,6 +3410,14 @@ export function LineWorkspace({
   const showDetailDrawer = false;
   const showsSchedulingWorkspace = activeModule === "gantt";
   const selectedTask = derivedState.tasks.find((task) => task.id === selectedTaskId) ?? derivedState.tasks[0];
+  const selectedProcedureTaskHydrationStatus = selectedTask
+    ? taskDetailHydrationStatus[selectedTask.id]
+    : "loaded";
+  const isSelectedProcedureTaskHydrating =
+    isProcedureModule &&
+    Boolean(selectedTask) &&
+    selectedProcedureTaskHydrationStatus !== "loaded" &&
+    selectedProcedureTaskHydrationStatus !== "error";
   const selectedStation = selectedTask
     ? buildProcessStationForTask(selectedTask, derivedState.tasks, kpis.bottleneckStation?.id)
     : undefined;
@@ -5643,7 +5826,9 @@ export function LineWorkspace({
           />
         </div>
 
-        {isProjectSwitching ? (
+        {isProjectSwitching ||
+        (requiresCompletePlannerState && !hasConfirmedRemoteState) ||
+        isSelectedProcedureTaskHydrating ? (
           <PlannerWorkspaceSkeleton />
         ) : isProcedureModule ? (
           <ProcedureWorkspace

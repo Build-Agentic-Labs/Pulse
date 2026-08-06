@@ -1,10 +1,25 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import {
   fetchOrgToolAccess,
   loadPlannerStateFromSupabase,
+  loadPlannerSummaryStateFromSupabase,
   loadWorkspaceProjectGroups,
 } from "@/domain/supabase-planner";
 import type { AccessLevel, PlannerState, WorkspaceProjectGroup } from "@/domain/types";
+import { listConfigs, type ConfigSummary } from "@/lib/planning/config-store";
+import {
+  listImports,
+  listSalesOrders,
+  type SalesOrderSummary,
+  type ScheduleImportSummary,
+} from "@/lib/planning/sales-order-store";
+import {
+  listTrailerConfigs,
+  listWorkOrders,
+  type TrailerConfig,
+  type WorkOrderSummary,
+} from "@/lib/planning/store";
 import { SOP_WORKSPACE_COOKIE } from "@/lib/sop/workspace-cookie";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -29,7 +44,7 @@ export type InitialSopWorkspaceData = {
  *
  * Every failure path returns undefined and the shell behaves exactly as before.
  */
-export async function fetchInitialWorkspaceGroups(): Promise<WorkspaceProjectGroup[] | undefined> {
+export const fetchInitialWorkspaceGroups = cache(async (): Promise<WorkspaceProjectGroup[] | undefined> => {
   try {
     const supabase = await createSupabaseServerClient();
     // getUser(), not getSession(): the cookie payload is unverified input on the
@@ -39,6 +54,87 @@ export async function fetchInitialWorkspaceGroups(): Promise<WorkspaceProjectGro
       return undefined;
     }
     return await loadWorkspaceProjectGroups(data.user.id, supabase);
+  } catch {
+    return undefined;
+  }
+});
+
+type InitialPlanningData<T> = {
+  workspaceId: string;
+  data: T;
+};
+
+async function planningServerWorkspace(): Promise<{
+  workspaceId: string;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+} | undefined> {
+  const [groups, cookieStore] = await Promise.all([fetchInitialWorkspaceGroups(), cookies()]);
+  if (!groups?.length) {
+    return undefined;
+  }
+
+  const requestedWorkspaceId = cookieStore.get(SOP_WORKSPACE_COOKIE)?.value;
+  const workspaceId =
+    groups.find((group) => group.workspace.id === requestedWorkspaceId)?.workspace.id ??
+    groups[0]?.workspace.id;
+  if (!workspaceId) {
+    return undefined;
+  }
+
+  return { workspaceId, supabase: await createSupabaseServerClient() };
+}
+
+/** Active Planning board data for first paint. Client refresh remains authoritative after hydration. */
+export async function fetchInitialPlanningWorkOrders(): Promise<
+  InitialPlanningData<WorkOrderSummary[]> | undefined
+> {
+  try {
+    const context = await planningServerWorkspace();
+    if (!context) return undefined;
+    return {
+      workspaceId: context.workspaceId,
+      data: await listWorkOrders(context.workspaceId, context.supabase),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Sales-order summaries and import history for the Planning intake screen's first paint. */
+export async function fetchInitialPlanningSalesOrders(): Promise<
+  InitialPlanningData<{
+    salesOrders: SalesOrderSummary[];
+    imports: ScheduleImportSummary[];
+  }> | undefined
+> {
+  try {
+    const context = await planningServerWorkspace();
+    if (!context) return undefined;
+    const [salesOrders, imports] = await Promise.all([
+      listSalesOrders(context.workspaceId, context.supabase),
+      listImports(context.workspaceId, context.supabase),
+    ]);
+    return { workspaceId: context.workspaceId, data: { salesOrders, imports } };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Product-configuration summaries and trailers for the Planning catalog's first paint. */
+export async function fetchInitialPlanningConfigurations(): Promise<
+  InitialPlanningData<{
+    configs: ConfigSummary[];
+    trailers: TrailerConfig[];
+  }> | undefined
+> {
+  try {
+    const context = await planningServerWorkspace();
+    if (!context) return undefined;
+    const [configs, trailers] = await Promise.all([
+      listConfigs(context.workspaceId, context.supabase),
+      listTrailerConfigs(context.workspaceId, context.supabase),
+    ]);
+    return { workspaceId: context.workspaceId, data: { configs, trailers } };
   } catch {
     return undefined;
   }
@@ -97,6 +193,33 @@ export async function fetchInitialPlannerData(projectId: string): Promise<{
     const [groups, plannerState] = await Promise.all([
       loadWorkspaceProjectGroups(data.user.id, supabase).catch(() => undefined),
       loadPlannerStateFromSupabase(projectId, undefined, supabase).catch(() => undefined),
+    ]);
+    return { groups, plannerState: plannerState ?? undefined };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Product-dashboard first paint: workspace chrome and a narrow planner summary
+ * are fetched in parallel. The summary deliberately omits task children and
+ * media, so the route does not wait for the editable core or Storage
+ * URL signing before it can paint. LineWorkspace treats this as display-only
+ * until its client-side core load confirms the remote state.
+ */
+export async function fetchInitialPlannerSummaryData(projectId: string): Promise<{
+  groups?: WorkspaceProjectGroup[];
+  plannerState?: PlannerState;
+}> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) {
+      return {};
+    }
+    const [groups, plannerState] = await Promise.all([
+      loadWorkspaceProjectGroups(data.user.id, supabase).catch(() => undefined),
+      loadPlannerSummaryStateFromSupabase(projectId, supabase).catch(() => undefined),
     ]);
     return { groups, plannerState: plannerState ?? undefined };
   } catch {

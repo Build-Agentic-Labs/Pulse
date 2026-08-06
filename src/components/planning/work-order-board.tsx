@@ -13,6 +13,7 @@ import { usePlanningWorkspace } from "./planning-workspace-provider";
 
 /** One-time client flag so we only attempt the MTS-template purge once per browser session. */
 const PURGE_SESSION_KEY = "pulse:planning:purged-legacy-templates";
+const WORK_ORDER_CACHE_KEY = "work-orders";
 
 const ALL_FILTER = "all";
 
@@ -79,12 +80,24 @@ function SetCell({ order, onOpenMain }: { order: WorkOrderSummary; onOpenMain: (
  * project-route-shells.tsx's `PlanningRouteShell`, which renders provider > gate > this component
  * with no extra shell wrapper).
  */
-export function WorkOrderBoard() {
+export function WorkOrderBoard({
+  initialOrders,
+  initialWorkspaceId,
+}: {
+  initialOrders?: WorkOrderSummary[];
+  initialWorkspaceId?: string;
+} = {}) {
   const router = useRouter();
-  const { workspaceId, canWrite } = usePlanningWorkspace();
+  const { workspaceId, canWrite, readScreenCache, writeScreenCache } = usePlanningWorkspace();
+  const firstPaintOrders =
+    initialOrders !== undefined && initialWorkspaceId === workspaceId
+      ? initialOrders
+      : readScreenCache<WorkOrderSummary[]>(WORK_ORDER_CACHE_KEY);
 
-  const [orders, setOrders] = useState<WorkOrderSummary[]>([]);
-  const [listStatus, setListStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [orders, setOrders] = useState<WorkOrderSummary[]>(() => firstPaintOrders ?? []);
+  const [listStatus, setListStatus] = useState<"loading" | "ready" | "error">(
+    firstPaintOrders === undefined ? "loading" : "ready",
+  );
   const [error, setError] = useState("");
   const [purgeNotice, setPurgeNotice] = useState("");
 
@@ -101,35 +114,43 @@ export function WorkOrderBoard() {
   // may commit state. Covers both the workspace-change effect and the manual Retry path, which
   // share `refresh`.
   const loadSeqRef = useRef(0);
+  const firstPaintOrdersRef = useRef(firstPaintOrders);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { background?: boolean } = {}) => {
     const seq = ++loadSeqRef.current;
     if (!workspaceId) {
       setOrders([]);
       setListStatus("ready");
       return;
     }
-    setListStatus("loading");
-    setError("");
+    if (!options.background) {
+      setListStatus("loading");
+      setError("");
+    }
     try {
       const next = await listWorkOrders(workspaceId);
       if (seq !== loadSeqRef.current) return;
       setOrders(next);
+      writeScreenCache(WORK_ORDER_CACHE_KEY, next);
       setListStatus("ready");
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;
       setError(caught instanceof Error ? caught.message : "Could not load work orders.");
       setListStatus("error");
     }
-  }, [workspaceId]);
+  }, [workspaceId, writeScreenCache]);
 
   useEffect(() => {
-    void refresh();
+    const firstPaint = firstPaintOrdersRef.current;
+    if (firstPaint !== undefined) {
+      writeScreenCache(WORK_ORDER_CACHE_KEY, firstPaint);
+    }
+    void refresh({ background: firstPaint !== undefined });
     return () => {
       // Invalidate any in-flight load when the workspace changes or the board unmounts.
       loadSeqRef.current += 1;
     };
-  }, [refresh]);
+  }, [refresh, writeScreenCache]);
 
   useEffect(() => {
     if (!filtersOpen) return;

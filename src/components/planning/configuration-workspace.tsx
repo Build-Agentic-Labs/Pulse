@@ -3,6 +3,7 @@
 import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
+import { PlanningContentLoadingState } from "@/components/space-loading-states";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
 import { ThemedFeedbackLayer, type FeedbackToast } from "@/components/themed-feedback";
 import { WORK_ORDER_TYPE_LABELS } from "@/domain/work-orders";
@@ -57,6 +58,12 @@ type EditorState = {
 let toastSeq = 0;
 
 let lineKeySeq = 0;
+const CONFIGURATION_CACHE_KEY = "configurations";
+
+type ConfigurationScreenData = {
+  configs: ConfigSummary[];
+  trailers: TrailerConfig[];
+};
 function nextLineKey(): string {
   lineKeySeq += 1;
   return `new-${lineKeySeq}`;
@@ -91,17 +98,32 @@ function editorFromDetail(detail: ConfigDetail): EditorState {
   };
 }
 
-export function ConfigurationWorkspace() {
+export function ConfigurationWorkspace({
+  initialConfigs,
+  initialTrailers,
+  initialWorkspaceId,
+}: {
+  initialConfigs?: ConfigSummary[];
+  initialTrailers?: TrailerConfig[];
+  initialWorkspaceId?: string;
+} = {}) {
   const confirm = useConfirm();
-  const { workspaceId, canWrite } = usePlanningWorkspace();
+  const { workspaceId, canWrite, readScreenCache, writeScreenCache } = usePlanningWorkspace();
+  const firstPaint =
+    initialConfigs !== undefined && initialTrailers !== undefined && initialWorkspaceId === workspaceId
+      ? { configs: initialConfigs, trailers: initialTrailers }
+      : readScreenCache<ConfigurationScreenData>(CONFIGURATION_CACHE_KEY);
 
-  const [configs, setConfigs] = useState<ConfigSummary[]>([]);
-  const [trailers, setTrailers] = useState<TrailerConfig[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [configs, setConfigs] = useState<ConfigSummary[]>(() => firstPaint?.configs ?? []);
+  const [trailers, setTrailers] = useState<TrailerConfig[]>(() => firstPaint?.trailers ?? []);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    firstPaint === undefined ? "loading" : "ready",
+  );
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [saving, setSaving] = useState(false);
   const [toasts, setToasts] = useState<FeedbackToast[]>([]);
+  const [firstPaintData] = useState(firstPaint);
 
   const notify = useCallback((toast: Omit<FeedbackToast, "id">) => {
     toastSeq += 1;
@@ -112,8 +134,12 @@ export function ConfigurationWorkspace() {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { background?: boolean } = {}) => {
     if (!workspaceId) return;
+    if (!options.background) {
+      setStatus("loading");
+      setError("");
+    }
     try {
       const [nextConfigs, nextTrailers] = await Promise.all([
         listConfigs(workspaceId),
@@ -121,16 +147,20 @@ export function ConfigurationWorkspace() {
       ]);
       setConfigs(nextConfigs);
       setTrailers(nextTrailers);
+      writeScreenCache(CONFIGURATION_CACHE_KEY, { configs: nextConfigs, trailers: nextTrailers });
       setStatus("ready");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load product configurations.");
       setStatus("error");
     }
-  }, [workspaceId]);
+  }, [workspaceId, writeScreenCache]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (firstPaintData !== undefined) {
+      writeScreenCache(CONFIGURATION_CACHE_KEY, firstPaintData);
+    }
+    void refresh({ background: firstPaintData !== undefined });
+  }, [firstPaintData, refresh, writeScreenCache]);
 
   async function openConfig(id: string) {
     if (!workspaceId) return;
@@ -208,7 +238,7 @@ export function ConfigurationWorkspace() {
   ];
 
   if (status === "loading") {
-    return <div className="ui-panel p-5 text-sm text-ink-secondary">Loading product configurations…</div>;
+    return <PlanningContentLoadingState label="Loading product configurations" />;
   }
 
   if (status === "error") {

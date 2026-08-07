@@ -66,6 +66,11 @@ describe("buildProcedureSvgPages", () => {
 
     expect(allSvg).toContain("compliant?");
     expect(allSvg).toContain("Approved SOP");
+    expect((allSvg.match(/class="input-step-number"/g) || []).length).toBe(acts.length);
+    acts.forEach((activity) => {
+      expect(allSvg).toContain(`class="input-step-number" x="16"`);
+      expect(allSvg).toContain(`>Step ${activity.step}</text>`);
+    });
   });
 
   it("splits a long flow across pages, repeating headers with a continued label", () => {
@@ -84,6 +89,8 @@ describe("buildProcedureSvgPages", () => {
     expect(pages.length).toBeGreaterThan(1);
     pages.forEach((p) => expect(p.svg).toContain("Process step")); // headers repeat on every page
     expect(pages[1].svg).toContain("continued"); // continuation pages are labelled
+    expect(pages.flatMap((page) => page.svg.match(/class="input-step-number"/g) ?? [])).toHaveLength(40);
+    expect(pages.at(-1)?.svg).toContain(">Step 40</text>");
   });
 
   it("renders a labelled cross-page stub and a side terminal for an End branch", () => {

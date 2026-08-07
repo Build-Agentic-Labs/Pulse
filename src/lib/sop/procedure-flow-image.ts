@@ -144,6 +144,19 @@ function textBlock(x: number, vCenter: number, lines: string[], anchor: "start" 
     .join("");
 }
 
+function inputBlock(x: number, vCenter: number, step: number, lines: string[], fontPx: number, lh: number): string {
+  const totalLines = lines.length + 1;
+  const top = vCenter - (totalLines * lh) / 2 + lh * 0.72;
+  const stepLabel = `<text class="input-step-number" x="${x}" y="${top}" font-family="Inter, Arial, sans-serif" font-size="10" font-weight="bold" fill="${COLOR.muted}" text-anchor="start">Step ${step}</text>`;
+  const inputText = lines
+    .map(
+      (line, index) =>
+        `<text class="input-step-text" x="${x}" y="${top + (index + 1) * lh}" font-family="Inter, Arial, sans-serif" font-size="${fontPx}" fill="${COLOR.ink}" text-anchor="start">${escapeXml(line)}</text>`,
+    )
+    .join("");
+  return stepLabel + inputText;
+}
+
 function arrow(x: number, y1: number, y2: number): string {
   const head = 5;
   return (
@@ -274,7 +287,7 @@ function computeRows(sop: Sop): RowLayout[] {
     const nodeH = decision ? Math.max(textH * 2 + 30, 88) : Math.max(textH + 2 * nodePadY, 44);
     const cellH = Math.max(
       nodeH + branchBandH,
-      inputLines.length * sideLh,
+      (inputLines.length + 1) * sideLh,
       outputLines.length * sideLh,
       rasicLines.length * sideLh,
     );
@@ -385,7 +398,7 @@ function renderPageSvg(pageRows: RowLayout[], continued: boolean): { svg: string
     }
 
     parts.push(textBlock(CX, center, row.descLines, "middle", stepFont, stepLh, COLOR.ink));
-    parts.push(textBlock(COL.input.x, center, row.inputLines, "start", sideFont, sideLh, COLOR.ink));
+    parts.push(inputBlock(COL.input.x, center, row.step, row.inputLines, sideFont, sideLh));
     parts.push(textBlock(COL.output.x, center, row.outputLines, "start", sideFont, sideLh, COLOR.ink));
     parts.push(textBlock(COL.rasic.x, center, row.rasicLines, "start", sideFont, sideLh, COLOR.ink));
   });

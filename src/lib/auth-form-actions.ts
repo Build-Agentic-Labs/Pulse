@@ -109,8 +109,8 @@ export function useAuthFormActions(supabase: SupabaseClient) {
   async function handleVerifyRecoveryCode(email: string, code: string) {
     const normalizedEmail = email.trim();
     const normalizedCode = code.replace(/\s/g, "");
-    if (!normalizedEmail || !/^\d{6}$/.test(normalizedCode)) {
-      setMessage("Enter the six-digit recovery code from your email.");
+    if (!normalizedEmail || !/^\d{6,8}$/.test(normalizedCode)) {
+      setMessage("Enter the recovery code from your email.");
       return false;
     }
 

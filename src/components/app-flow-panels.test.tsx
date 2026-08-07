@@ -47,15 +47,36 @@ describe("AuthFormPanel password recovery", () => {
     expect(await screen.findByRole("heading", { name: "Enter recovery code" })).toBeInTheDocument();
     expect(screen.getByLabelText("Work email")).toBeDisabled();
 
-    readClipboard.mockResolvedValueOnce("98 76-54");
+    readClipboard.mockResolvedValueOnce("98 76-54 32");
     fireEvent.click(screen.getByRole("button", { name: "Paste code" }));
-    await waitFor(() => expect(screen.getByLabelText("Recovery code")).toHaveValue("987654"));
+    await waitFor(() => expect(screen.getByLabelText("Recovery code")).toHaveValue("98765432"));
 
-    fireEvent.change(screen.getByLabelText("Recovery code"), { target: { value: "12a34567" } });
+    fireEvent.change(screen.getByLabelText("Recovery code"), { target: { value: "12a3456789" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify code" }));
 
     await waitFor(() =>
-      expect(onVerifyRecoveryCode).toHaveBeenCalledWith("person@example.com", "123456"),
+      expect(onVerifyRecoveryCode).toHaveBeenCalledWith("person@example.com", "12345678"),
     );
+  });
+
+  it("opens an emailed recovery link directly on the code-entry step", async () => {
+    window.history.replaceState(null, "", "/#auth=recovery&email=person%40example.com");
+
+    render(
+      <AuthFormPanel
+        message=""
+        isSubmitting={false}
+        onSignIn={vi.fn()}
+        onCreateAccount={vi.fn()}
+        onResetPassword={vi.fn().mockResolvedValue(true)}
+        onVerifyRecoveryCode={vi.fn().mockResolvedValue(true)}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Enter recovery code" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Work email")).toHaveValue("person@example.com");
+    expect(screen.getByLabelText("Work email")).toBeDisabled();
+    expect(screen.getByLabelText("Recovery code")).toHaveAttribute("maxlength", "8");
+    expect(window.location.hash).toBe("");
   });
 });

@@ -35,7 +35,7 @@ describe("password recovery request route", () => {
 
   it("generates a recovery OTP and sends it through the Pulse email sender", async () => {
     mocks.generateLink.mockResolvedValue({
-      data: { properties: { email_otp: "654321" } },
+      data: { properties: { email_otp: "65432109" } },
       error: null,
     });
     mocks.send.mockResolvedValue({ ok: true, id: "email-1" });
@@ -54,7 +54,10 @@ describe("password recovery request route", () => {
     });
     expect(mocks.send).toHaveBeenCalledOnce();
     expect(mocks.send.mock.calls[0]?.[0]).toBe("person@example.com");
-    expect(mocks.send.mock.calls[0]?.[1].html).toContain("654321");
+    expect(mocks.send.mock.calls[0]?.[1].html).toContain("65432109");
+    expect(mocks.send.mock.calls[0]?.[1].html).toContain(
+      "#auth=recovery&email=person%40example.com",
+    );
     expect(mocks.send.mock.calls[0]?.[1].html).not.toContain("supabase.co");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
   });

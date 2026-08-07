@@ -2,6 +2,7 @@ import { escapeHtml, renderEmailShell } from "@/domain/notification-email-shell"
 
 export interface PasswordRecoveryEmailInput {
   code: string;
+  email: string;
   origin: string;
 }
 
@@ -19,9 +20,13 @@ const RECOVERY_REASON = "You are receiving this because someone requested a pass
  */
 export function renderPasswordRecoveryEmail({
   code,
+  email,
   origin,
 }: PasswordRecoveryEmailInput): PasswordRecoveryEmailContent {
   const normalizedOrigin = origin.replace(/\/$/, "");
+  // Route directly to the recovery form without putting the one-time code in
+  // the URL. A fragment is not sent to the web server and is consumed by Pulse.
+  const recoveryHref = `${normalizedOrigin}/#auth=recovery&email=${encodeURIComponent(email)}`;
   const safeCode = escapeHtml(code);
   const body =
     `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#3f3f46;">` +
@@ -40,7 +45,7 @@ export function renderPasswordRecoveryEmail({
       "Reset your Pulse password",
       `Your one-time recovery code is: ${code}`,
       "Enter this code in Pulse to continue. It expires and can only be used once.",
-      `Open Pulse: ${normalizedOrigin}`,
+      `Open Pulse: ${recoveryHref}`,
       "If you did not request a password reset, you can ignore this email.",
     ].join("\n\n"),
     html: renderEmailShell({
@@ -50,7 +55,7 @@ export function renderPasswordRecoveryEmail({
       heading: "Reset your Pulse password",
       bodyParagraphsHtml: body,
       ctaLabel: "Open Pulse",
-      ctaHref: normalizedOrigin,
+      ctaHref: recoveryHref,
       reason: RECOVERY_REASON,
       origin: normalizedOrigin,
     }),

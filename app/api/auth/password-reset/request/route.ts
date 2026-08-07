@@ -125,7 +125,7 @@ export async function POST(request: Request) {
     const send = createResendSender(resendApiKey, resendFrom);
     const result = await send(
       email,
-      renderPasswordRecoveryEmail({ code: data.properties.email_otp, origin }),
+      renderPasswordRecoveryEmail({ code: data.properties.email_otp, email, origin }),
     );
     if (!result.ok) {
       console.error("Password recovery email delivery request failed", {

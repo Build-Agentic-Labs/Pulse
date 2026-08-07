@@ -217,7 +217,7 @@ const AUTH_MODE_COPY: Record<AuthFormMode, { title: string; subtitle: string; su
   },
   reset: {
     title: "Reset password",
-    subtitle: "We'll email you a six-digit recovery code.",
+    subtitle: "We'll email you a one-time recovery code.",
     submit: "Send recovery code",
     busy: "Sending code",
   },
@@ -253,13 +253,33 @@ export function AuthFormPanel({
   const [recoveryCode, setRecoveryCode] = useState("");
   const [recoveryCodeRequested, setRecoveryCodeRequested] = useState(false);
   const [recoveryCodeHelp, setRecoveryCodeHelp] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    if (params.get("auth") !== "recovery") return;
+
+    setEmail(params.get("email") ?? "");
+    setMode("reset");
+    setRecoveryCodeRequested(true);
+
+    // Consume the intent so refreshing or signing out later does not reopen it.
+    try {
+      const url = new URL(window.location.href);
+      url.hash = "";
+      window.history.replaceState(null, "", url.toString());
+    } catch {
+      // The recovery form still works if the address bar cannot be rewritten.
+    }
+  }, []);
   const visibleMessage = normalizeAuthMessage(message);
   const messageTone = visibleMessage ? authMessageTone(visibleMessage) : null;
   const copy =
     mode === "reset" && recoveryCodeRequested
       ? {
           title: "Enter recovery code",
-          subtitle: `Enter the six-digit code sent to ${email.trim()}.`,
+          subtitle: email.trim()
+            ? `Enter the code sent to ${email.trim()}.`
+            : "Enter the email address and recovery code from your message.",
           submit: "Verify code",
           busy: "Verifying code",
         }
@@ -296,9 +316,9 @@ export function AuthFormPanel({
     try {
       if (!navigator.clipboard?.readText) throw new Error("Clipboard unavailable");
       const clipboardText = await navigator.clipboard.readText();
-      const pastedCode = clipboardText.replace(/\D/g, "").slice(0, 6);
-      if (pastedCode.length !== 6) {
-        setRecoveryCodeHelp("Copy the six-digit code from the email, then try again.");
+      const pastedCode = clipboardText.replace(/\D/g, "").slice(0, 8);
+      if (!/^\d{6,8}$/.test(pastedCode)) {
+        setRecoveryCodeHelp("Copy the recovery code from the email, then try again.");
         return;
       }
       setRecoveryCode(pastedCode);
@@ -350,7 +370,7 @@ export function AuthFormPanel({
                 onChange={(event) => setEmail(event.target.value)}
                 autoComplete="email"
                 placeholder="you@anacorp.com"
-                disabled={mode === "reset" && recoveryCodeRequested}
+                disabled={mode === "reset" && recoveryCodeRequested && Boolean(email.trim())}
                 required
               />
             </div>
@@ -369,11 +389,11 @@ export function AuthFormPanel({
                   type="text"
                   inputMode="numeric"
                   value={recoveryCode}
-                  onChange={(event) => setRecoveryCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onChange={(event) => setRecoveryCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
                   autoComplete="one-time-code"
-                  placeholder="000000"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
+                  placeholder="Enter code"
+                  pattern="[0-9]{6,8}"
+                  maxLength={8}
                   autoFocus
                   required
                 />

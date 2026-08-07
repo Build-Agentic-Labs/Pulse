@@ -143,7 +143,11 @@ function normalizeAuthMessage(message: string) {
 }
 
 function authMessageTone(message: string): "error" | "info" {
-  if (/account created|confirm the email|email sent|check your inbox|password updated/i.test(message)) {
+  if (
+    /account created|confirm the email|email sent|check your inbox|password updated|recovery code|account exists/i.test(
+      message,
+    )
+  ) {
     return "info";
   }
 
@@ -213,9 +217,9 @@ const AUTH_MODE_COPY: Record<AuthFormMode, { title: string; subtitle: string; su
   },
   reset: {
     title: "Reset password",
-    subtitle: "We'll email you a link to set a new password.",
-    submit: "Send reset link",
-    busy: "Sending link",
+    subtitle: "We'll email you a six-digit recovery code.",
+    submit: "Send recovery code",
+    busy: "Sending code",
   },
 };
 
@@ -226,6 +230,7 @@ export function AuthFormPanel({
   onCreateAccount,
   onMicrosoftSignIn,
   onResetPassword,
+  onVerifyRecoveryCode,
   onResendConfirmation,
 }: {
   /** Retained for API compatibility; the split screen derives its heading per mode. */
@@ -236,7 +241,8 @@ export function AuthFormPanel({
   onSignIn: (email: string, password: string) => void;
   onCreateAccount: (email: string, password: string, fullName?: string) => void;
   onMicrosoftSignIn?: () => void;
-  onResetPassword?: (email: string) => void;
+  onResetPassword?: (email: string) => Promise<boolean>;
+  onVerifyRecoveryCode?: (email: string, code: string) => Promise<boolean>;
   onResendConfirmation?: (email: string) => void;
 }) {
   const { theme, toggleTheme } = useTheme();
@@ -244,22 +250,61 @@ export function AuthFormPanel({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [recoveryCodeRequested, setRecoveryCodeRequested] = useState(false);
+  const [recoveryCodeHelp, setRecoveryCodeHelp] = useState("");
   const visibleMessage = normalizeAuthMessage(message);
   const messageTone = visibleMessage ? authMessageTone(visibleMessage) : null;
-  const copy = AUTH_MODE_COPY[mode];
+  const copy =
+    mode === "reset" && recoveryCodeRequested
+      ? {
+          title: "Enter recovery code",
+          subtitle: `Enter the six-digit code sent to ${email.trim()}.`,
+          submit: "Verify code",
+          busy: "Verifying code",
+        }
+      : AUTH_MODE_COPY[mode];
   // Offer a resend only where it helps: after signup or an unconfirmed sign-in attempt.
   const showResend = Boolean(
     onResendConfirmation && visibleMessage && /confirm/i.test(visibleMessage) && messageTone !== null,
   );
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (mode === "signin") {
       onSignIn(email, password);
     } else if (mode === "signup") {
       onCreateAccount(email, password, fullName);
+    } else if (recoveryCodeRequested) {
+      await onVerifyRecoveryCode?.(email, recoveryCode);
     } else {
-      onResetPassword?.(email);
+      const requested = await onResetPassword?.(email);
+      if (requested) {
+        setRecoveryCodeRequested(true);
+      }
+    }
+  }
+
+  function returnToSignIn() {
+    setMode("signin");
+    setRecoveryCode("");
+    setRecoveryCodeRequested(false);
+    setRecoveryCodeHelp("");
+  }
+
+  async function pasteRecoveryCode() {
+    try {
+      if (!navigator.clipboard?.readText) throw new Error("Clipboard unavailable");
+      const clipboardText = await navigator.clipboard.readText();
+      const pastedCode = clipboardText.replace(/\D/g, "").slice(0, 6);
+      if (pastedCode.length !== 6) {
+        setRecoveryCodeHelp("Copy the six-digit code from the email, then try again.");
+        return;
+      }
+      setRecoveryCode(pastedCode);
+      setRecoveryCodeHelp("");
+    } catch {
+      setRecoveryCodeHelp("Clipboard access was blocked. Paste the code into the field.");
     }
   }
 
@@ -305,9 +350,40 @@ export function AuthFormPanel({
                 onChange={(event) => setEmail(event.target.value)}
                 autoComplete="email"
                 placeholder="you@anacorp.com"
+                disabled={mode === "reset" && recoveryCodeRequested}
                 required
               />
             </div>
+
+            {mode === "reset" && recoveryCodeRequested ? (
+              <div className="ui-auth-field">
+                <div className="ui-auth-field-row">
+                  <label htmlFor="auth-recovery-code">Recovery code</label>
+                  <button type="button" className="ui-auth-forgot" onClick={() => void pasteRecoveryCode()}>
+                    Paste code
+                  </button>
+                </div>
+                <input
+                  id="auth-recovery-code"
+                  className="ui-auth2-input font-mono tracking-[0.22em]"
+                  type="text"
+                  inputMode="numeric"
+                  value={recoveryCode}
+                  onChange={(event) => setRecoveryCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  autoComplete="one-time-code"
+                  placeholder="000000"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  autoFocus
+                  required
+                />
+                {recoveryCodeHelp ? (
+                  <p className="mt-1 text-xs text-ink-secondary" role="status">
+                    {recoveryCodeHelp}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             {mode !== "reset" ? (
               <div className="ui-auth-field">
@@ -365,6 +441,17 @@ export function AuthFormPanel({
               )}
             </button>
 
+            {mode === "reset" && recoveryCodeRequested ? (
+              <button
+                className="ui-auth-btn ui-auth-btn-ghost"
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => void onResetPassword?.(email)}
+              >
+                Send another code
+              </button>
+            ) : null}
+
             {mode !== "reset" ? (
               <>
                 <div className="ui-auth-or">
@@ -388,7 +475,13 @@ export function AuthFormPanel({
               className="ui-auth-btn ui-auth-btn-ghost"
               type="button"
               disabled={isSubmitting}
-              onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+              onClick={() => {
+                if (mode === "signin") {
+                  setMode("signup");
+                } else {
+                  returnToSignIn();
+                }
+              }}
             >
               {mode === "signin" ? "Create account" : "Back to sign in"}
             </button>

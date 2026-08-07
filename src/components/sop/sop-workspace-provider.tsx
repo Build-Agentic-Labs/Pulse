@@ -2,7 +2,7 @@
 
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AuthFormPanel, ErrorRecoveryPanel } from "@/components/app-flow-panels";
+import { AuthFormPanel, ErrorRecoveryPanel, PasswordUpdatePanel } from "@/components/app-flow-panels";
 import { QualityLoadingState } from "@/components/space-loading-states";
 import { ThemedSelect } from "@/components/themed-select";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrgToolAccess } from "@/domain/supabase-planner";
@@ -137,6 +137,7 @@ export function SopWorkspaceProvider({
     seededFromServer ? "ready" : "loading",
   );
   const [message, setMessage] = useState("");
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const auth = useAuthFormActions(supabase);
   const statusRef = useRef(status);
 
@@ -204,6 +205,11 @@ export function SopWorkspaceProvider({
       setSession(nextSession);
       setSessionReady(true);
 
+      if (event === "PASSWORD_RECOVERY") {
+        setRecoveryMode(true);
+        return;
+      }
+
       if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
         return;
       }
@@ -248,6 +254,20 @@ export function SopWorkspaceProvider({
     [workspaceId, role, orgToolAccess, groups, setWorkspaceId],
   );
 
+  if (recoveryMode) {
+    return (
+      <PasswordUpdatePanel
+        message={auth.message}
+        isSubmitting={auth.isSubmitting}
+        onUpdatePassword={(password) => {
+          void auth.handleUpdatePassword(password).then((updated) => {
+            if (updated) setRecoveryMode(false);
+          });
+        }}
+      />
+    );
+  }
+
   if ((!sessionReady && !seededFromServer) || (session && status === "loading")) {
     return <QualityLoadingState />;
   }
@@ -271,7 +291,12 @@ export function SopWorkspaceProvider({
         onSignIn={(email, password) => void auth.handleSignIn(email, password)}
         onCreateAccount={(email, password, fullName) => void auth.handleCreateAccount(email, password, fullName)}
         onMicrosoftSignIn={() => void auth.handleMicrosoftSignIn()}
-        onResetPassword={(email) => void auth.handleResetPassword(email)}
+        onResetPassword={auth.handleResetPassword}
+        onVerifyRecoveryCode={async (email, code) => {
+          const verified = await auth.handleVerifyRecoveryCode(email, code);
+          if (verified) setRecoveryMode(true);
+          return verified;
+        }}
         onResendConfirmation={(email) => void auth.handleResendConfirmation(email)}
       />
     );

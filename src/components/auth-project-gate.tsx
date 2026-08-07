@@ -437,7 +437,12 @@ export function AuthProjectGate({
         onSignIn={(email, password) => void auth.handleSignIn(email, password)}
         onCreateAccount={(email, password, fullName) => void auth.handleCreateAccount(email, password, fullName)}
         onMicrosoftSignIn={() => void auth.handleMicrosoftSignIn()}
-        onResetPassword={(email) => void auth.handleResetPassword(email)}
+        onResetPassword={auth.handleResetPassword}
+        onVerifyRecoveryCode={async (email, code) => {
+          const verified = await auth.handleVerifyRecoveryCode(email, code);
+          if (verified) setRecoveryMode(true);
+          return verified;
+        }}
         onResendConfirmation={(email) => void auth.handleResendConfirmation(email)}
       />
     );

@@ -85,16 +85,47 @@ export function useAuthFormActions(supabase: SupabaseClient) {
 
   async function handleResetPassword(email: string) {
     if (!email.trim()) {
-      setMessage("Enter your email first, then request the reset link.");
-      return;
+      setMessage("Enter your email first, then request a recovery code.");
+      return false;
     }
 
+    let requested = false;
     await run(async () => {
-      const redirectTo = typeof window !== "undefined" ? window.location.origin : undefined;
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
+      const response = await fetch("/api/auth/password-reset/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to send the recovery code.");
+      }
+      requested = true;
+      return payload.message || "If an account exists, a recovery code has been sent.";
+    }, "Unable to send the recovery code.");
+    return requested;
+  }
+
+  async function handleVerifyRecoveryCode(email: string, code: string) {
+    const normalizedEmail = email.trim();
+    const normalizedCode = code.replace(/\s/g, "");
+    if (!normalizedEmail || !/^\d{6}$/.test(normalizedCode)) {
+      setMessage("Enter the six-digit recovery code from your email.");
+      return false;
+    }
+
+    let verified = false;
+    await run(async () => {
+      const { error } = await supabase.auth.verifyOtp({
+        email: normalizedEmail,
+        token: normalizedCode,
+        type: "recovery",
+      });
       if (error) throw error;
-      return "Password reset email sent. Follow the link in your inbox to set a new password.";
-    }, "Unable to send the reset email.");
+      verified = true;
+      return "Recovery code verified. Choose a new password.";
+    }, "Unable to verify the recovery code.");
+    return verified;
   }
 
   async function handleResendConfirmation(email: string) {
@@ -129,6 +160,7 @@ export function useAuthFormActions(supabase: SupabaseClient) {
     handleCreateAccount,
     handleMicrosoftSignIn,
     handleResetPassword,
+    handleVerifyRecoveryCode,
     handleResendConfirmation,
     handleUpdatePassword,
   };

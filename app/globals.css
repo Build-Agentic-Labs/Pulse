@@ -1488,10 +1488,49 @@ body {
     animation: ui-feedback-toast-lifecycle var(--toast-duration, 4000ms) var(--ease-ui) both;
   }
 
+  .ui-display-name-prompt-track {
+    transform: translateX(0);
+    transition: transform 340ms cubic-bezier(0.34, 1.25, 0.64, 1);
+    will-change: transform;
+  }
+
+  .ui-display-name-prompt-tab {
+    box-shadow: -5px 5px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  @keyframes ui-display-name-prompt-tab-bounce {
+    0%,
+    72%,
+    100% {
+      transform: translateX(0);
+    }
+    82% {
+      transform: translateX(-0.25rem);
+    }
+    90% {
+      transform: translateX(-0.06rem);
+    }
+  }
+
+  .ui-display-name-prompt-boundary[data-peeked="true"] .ui-display-name-prompt-track {
+    transform: translateX(calc(100% + 1rem));
+  }
+
+  .ui-display-name-prompt-boundary[data-peeked="true"] .ui-display-name-prompt-tab {
+    animation: ui-display-name-prompt-tab-bounce 2.8s ease-in-out 600ms infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .ui-feedback-toast,
     .ui-feedback-toast-auto {
       animation: none;
+    }
+
+    .ui-display-name-prompt-track,
+    .ui-display-name-prompt-boundary[data-peeked="true"] .ui-display-name-prompt-track,
+    .ui-display-name-prompt-boundary[data-peeked="true"] .ui-display-name-prompt-tab {
+      animation: none;
+      transition: none;
     }
   }
 

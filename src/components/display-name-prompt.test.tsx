@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DisplayNamePrompt } from "./display-name-prompt";
+import { ACCOUNT_MENU_VISIBILITY_EVENT } from "@/lib/app-chrome-events";
 
 const mocks = vi.hoisted(() => ({
   profileResult: { data: { full_name: "Rosendo Lopez" }, error: null } as {
@@ -53,12 +54,15 @@ describe("DisplayNamePrompt", () => {
     mocks.updateName.mockResolvedValue(undefined);
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
 
   it("stays out of the way for signed-out users", async () => {
     render(<DisplayNamePrompt />);
     await waitFor(() => expect(mocks.authCallback).not.toBeNull());
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add your name" })).toBeNull();
     expect(mocks.profileReads).toBe(0);
   });
 
@@ -66,7 +70,7 @@ describe("DisplayNamePrompt", () => {
     mocks.session = userSession;
     render(<DisplayNamePrompt />);
     await waitFor(() => expect(mocks.profileReads).toBe(1));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add your name" })).toBeNull();
   });
 
   it("prompts on app open when the profile name is blank", async () => {
@@ -74,8 +78,9 @@ describe("DisplayNamePrompt", () => {
     mocks.profileResult = { data: { full_name: null }, error: null };
     render(<DisplayNamePrompt />);
 
-    expect(await screen.findByRole("dialog", { name: "Finish your profile" })).toBeTruthy();
-    expect(screen.getByText(/SOP authorship, reviews, and approvals/)).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Add your name" })).toBeTruthy();
+    expect(screen.getByText("Replace your email with your first and last name.")).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
   it("prompts after login when the stored name is blank", async () => {
@@ -87,16 +92,15 @@ describe("DisplayNamePrompt", () => {
       mocks.authCallback?.("SIGNED_IN", userSession);
     });
 
-    expect(await screen.findByRole("dialog", { name: "Finish your profile" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Add your name" })).toBeTruthy();
   });
 
-  it("does not reinterpret an existing display-name value", async () => {
+  it("prompts when an email address is stored as the display name", async () => {
     mocks.session = userSession;
     mocks.profileResult = { data: { full_name: "rlopez@anacorp.com" }, error: null };
     render(<DisplayNamePrompt />);
 
-    await waitFor(() => expect(mocks.profileReads).toBe(1));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByRole("region", { name: "Add your name" })).toBeTruthy();
   });
 
   it("does not interrupt password recovery", async () => {
@@ -108,7 +112,7 @@ describe("DisplayNamePrompt", () => {
       mocks.authCallback?.("PASSWORD_RECOVERY", userSession);
     });
 
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add your name" })).toBeNull();
     expect(mocks.profileReads).toBe(0);
   });
 
@@ -117,12 +121,18 @@ describe("DisplayNamePrompt", () => {
     mocks.profileResult = { data: { full_name: "" }, error: null };
     render(<DisplayNamePrompt />);
 
-    const input = await screen.findByRole("textbox", { name: "Display name" });
-    fireEvent.change(input, { target: { value: "  Rosendo   Lopez  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
+    await screen.findByRole("region", { name: "Add your name" });
+    fireEvent.click(screen.getByRole("button", { name: "Update name" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "First name" }), {
+      target: { value: "  Rosendo  " },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Last name" }), {
+      target: { value: "  Lopez  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
 
     await waitFor(() => expect(mocks.updateName).toHaveBeenCalledWith("Rosendo Lopez"));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Add your name" })).toBeNull());
   });
 
   it("keeps the prompt open when saving fails", async () => {
@@ -131,11 +141,174 @@ describe("DisplayNamePrompt", () => {
     mocks.updateName.mockRejectedValue(new Error("Unable to update the display name."));
     render(<DisplayNamePrompt />);
 
-    const input = await screen.findByRole("textbox", { name: "Display name" });
-    fireEvent.change(input, { target: { value: "Rosendo Lopez" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
+    await screen.findByRole("region", { name: "Add your name" });
+    fireEvent.click(screen.getByRole("button", { name: "Update name" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "First name" }), {
+      target: { value: "Rosendo" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Last name" }), {
+      target: { value: "Lopez" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to update the display name.");
-    expect(screen.getByRole("dialog", { name: "Finish your profile" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Add your name" })).toBeTruthy();
+  });
+
+  it("keeps the compact toast visible when the form is collapsed", async () => {
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: "rlopez@anacorp.com" }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await screen.findByRole("region", { name: "Add your name" });
+    const formReveal = screen.getByTestId("display-name-form-reveal");
+    expect(formReveal).toHaveClass("grid-rows-[0fr]", "opacity-0");
+
+    fireEvent.click(screen.getByRole("button", { name: "Update name" }));
+    expect(formReveal).toHaveClass("grid-rows-[1fr]", "opacity-100", "duration-300");
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+
+    expect(screen.getByRole("region", { name: "Add your name" })).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(formReveal).toHaveClass("grid-rows-[0fr]", "opacity-0");
+  });
+
+  it("rejects an email address before attempting to save", async () => {
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: "rlopez@anacorp.com" }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await screen.findByRole("region", { name: "Add your name" });
+    fireEvent.click(screen.getByRole("button", { name: "Update name" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "First name" }), {
+      target: { value: "rlopez@anacorp.com" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Last name" }), {
+      target: { value: "Lopez" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("first name, not an email address");
+    expect(mocks.updateName).not.toHaveBeenCalled();
+  });
+
+  it("requires the last-name field before attempting to save", async () => {
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: null }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await screen.findByRole("region", { name: "Add your name" });
+    fireEvent.click(screen.getByRole("button", { name: "Update name" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "First name" }), {
+      target: { value: "Rosendo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter your last name.");
+    expect(mocks.updateName).not.toHaveBeenCalled();
+  });
+
+  it("peeks aside immediately for the account menu", async () => {
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: null }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await screen.findByRole("region", { name: "Add your name" });
+    const shell = screen.getByTestId("display-name-prompt-shell");
+    vi.useFakeTimers();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(ACCOUNT_MENU_VISIBILITY_EVENT, { detail: true }));
+    });
+    expect(shell).toHaveAttribute("data-peeked", "true");
+    expect(screen.getByRole("button", { name: "Open name reminder" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open name reminder" }));
+    expect(shell).not.toHaveAttribute("data-peeked");
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(ACCOUNT_MENU_VISIBILITY_EVENT, { detail: true }));
+    });
+    expect(shell).toHaveAttribute("data-peeked", "true");
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(ACCOUNT_MENU_VISIBILITY_EVENT, { detail: false }));
+    });
+    expect(shell).toHaveAttribute("data-peeked", "true");
+
+    vi.useRealTimers();
+  });
+
+  it("minimizes after five seconds unattended without requiring the account menu", async () => {
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: null }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await screen.findByRole("region", { name: "Add your name" });
+    const shell = screen.getByTestId("display-name-prompt-shell");
+    const updateButton = screen.getByRole("button", { name: "Update name" });
+    vi.useFakeTimers();
+
+    fireEvent.focus(updateButton);
+    fireEvent.blur(updateButton);
+
+    act(() => vi.advanceTimersByTime(4999));
+    expect(shell).not.toHaveAttribute("data-peeked");
+    act(() => vi.advanceTimersByTime(1));
+    expect(shell).toHaveAttribute("data-peeked", "true");
+  });
+
+  it("minimizes immediately after leaving an opened but untouched form", async () => {
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: null }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await screen.findByRole("region", { name: "Add your name" });
+    const shell = screen.getByTestId("display-name-prompt-shell");
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(shell);
+    fireEvent.click(screen.getByRole("button", { name: "Update name" }));
+    expect(screen.getByRole("textbox", { name: "First name" })).toHaveFocus();
+
+    fireEvent.mouseLeave(shell);
+
+    expect(shell).toHaveAttribute("data-peeked", "true");
+    expect(screen.queryByRole("textbox", { name: "First name" })).toBeNull();
+  });
+
+  it("keeps the screen-edge gap inside the hover boundary", async () => {
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: null }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await screen.findByRole("region", { name: "Add your name" });
+    const shell = screen.getByTestId("display-name-prompt-shell");
+    const edgeBridge = screen.getByTestId("display-name-prompt-edge-bridge");
+
+    expect(edgeBridge).toHaveClass("pointer-events-auto", "right-0", "h-full", "w-4");
+    fireEvent.mouseEnter(shell);
+    fireEvent.mouseEnter(edgeBridge);
+
+    expect(shell).not.toHaveAttribute("data-peeked");
+  });
+
+  it("stays visible while the user is entering a name", async () => {
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: null }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await screen.findByRole("region", { name: "Add your name" });
+    const shell = screen.getByTestId("display-name-prompt-shell");
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(shell);
+    fireEvent.click(screen.getByRole("button", { name: "Update name" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "First name" }), {
+      target: { value: "Rosendo" },
+    });
+    fireEvent.mouseLeave(shell);
+    act(() => vi.advanceTimersByTime(5000));
+
+    expect(shell).not.toHaveAttribute("data-peeked");
+    vi.useRealTimers();
   });
 });

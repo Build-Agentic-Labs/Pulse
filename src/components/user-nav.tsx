@@ -7,6 +7,8 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { NotificationBell } from "@/components/notification-bell";
 import { SPACE_META, SPACE_ORDER, SpaceIcon, spaceDisabledLabel, spaceHref } from "@/components/spaces";
+import { announceAccountMenuVisibility } from "@/lib/app-chrome-events";
+import { normalizeDisplayName, PROFILE_NAME_UPDATED_EVENT } from "@/lib/profile-name";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
@@ -201,9 +203,20 @@ function useUserProfile(supabase: ReturnType<typeof createPlannerSupabaseClient>
       void hydrateUser();
     });
 
+    function syncDisplayName(event: Event) {
+      const fullName = normalizeDisplayName((event as CustomEvent<string>).detail ?? "");
+      if (!fullName || !lastKnownProfile) {
+        return;
+      }
+      applyProfile({ ...lastKnownProfile, fullName });
+    }
+
+    window.addEventListener(PROFILE_NAME_UPDATED_EVENT, syncDisplayName);
+
     return () => {
       mounted = false;
       listener.subscription.unsubscribe();
+      window.removeEventListener(PROFILE_NAME_UPDATED_EVENT, syncDisplayName);
     };
   }, [supabase]);
 
@@ -247,6 +260,12 @@ export function UserNav({ showSpacesLink = true }: { showSpacesLink?: boolean })
   const [isSigningOut, setIsSigningOut] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const accountOpen = openMenu === "account";
+
+  useEffect(() => {
+    announceAccountMenuVisibility(accountOpen);
+  }, [accountOpen]);
+
+  useEffect(() => () => announceAccountMenuVisibility(false), []);
 
   useEffect(() => {
     if (!openMenu) {

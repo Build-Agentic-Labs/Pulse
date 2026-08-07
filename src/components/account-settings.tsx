@@ -4,8 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createPlannerSupabaseClient, updateOwnProfileNameInSupabase } from "@/domain/supabase-planner";
 import {
   announceProfileNameUpdated,
+  displayNamePartsValidationMessage,
+  hasCompletedDisplayName,
+  joinDisplayNameParts,
   normalizeDisplayName,
   PROFILE_NAME_UPDATED_EVENT,
+  splitDisplayName,
 } from "@/lib/profile-name";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
@@ -18,11 +22,13 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [email, setEmail] = useState("");
   const [isPasswordAccount, setIsPasswordAccount] = useState(false);
-  const [fullName, setFullName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [savedFullName, setSavedFullName] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [nameMessage, setNameMessage] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -45,7 +51,9 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
       const { data } = await supabase.from("profiles").select("full_name").eq("id", session.user.id).maybeSingle();
       if (mounted) {
         const name = typeof data?.full_name === "string" ? data.full_name : "";
-        setFullName(name);
+        const parts = hasCompletedDisplayName(name) ? splitDisplayName(name) : { firstName: "", lastName: "" };
+        setFirstName(parts.firstName);
+        setLastName(parts.lastName);
         setSavedFullName(name);
       }
     })();
@@ -59,9 +67,12 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
     function syncDisplayName(event: Event) {
       const name = (event as CustomEvent<string>).detail;
       if (!name) return;
-      setFullName(name);
+      const parts = splitDisplayName(name);
+      setFirstName(parts.firstName);
+      setLastName(parts.lastName);
       setSavedFullName(name);
       setNameMessage("Display name updated.");
+      setNameTouched(false);
     }
 
     window.addEventListener(PROFILE_NAME_UPDATED_EVENT, syncDisplayName);
@@ -69,14 +80,24 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
   }, []);
 
   async function saveName() {
+    const validationError = displayNamePartsValidationMessage(firstName, lastName);
+    if (validationError) {
+      setNameMessage(validationError);
+      setNameTouched(true);
+      return;
+    }
+
     setIsSaving(true);
     setNameMessage("");
     try {
-      await updateOwnProfileNameInSupabase(fullName);
-      const name = normalizeDisplayName(fullName);
-      setFullName(name);
+      const name = joinDisplayNameParts(firstName, lastName);
+      await updateOwnProfileNameInSupabase(name);
+      const parts = splitDisplayName(name);
+      setFirstName(parts.firstName);
+      setLastName(parts.lastName);
       setSavedFullName(name);
       setNameMessage("Display name updated.");
+      setNameTouched(false);
       announceProfileNameUpdated(name);
     } catch (error) {
       setNameMessage(error instanceof Error ? error.message : "Unable to update the display name.");
@@ -112,7 +133,13 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  const nameDirty = fullName.trim() !== savedFullName && fullName.trim().length > 0;
+  const name = joinDisplayNameParts(firstName, lastName);
+  const nameValidationMessage = displayNamePartsValidationMessage(firstName, lastName);
+  const shouldShowNameValidation =
+    Boolean(nameValidationMessage) && (nameTouched || (Boolean(savedFullName) && !hasCompletedDisplayName(savedFullName)));
+  const visibleNameMessage = shouldShowNameValidation ? nameValidationMessage : nameMessage;
+  const nameDirty =
+    name !== normalizeDisplayName(savedFullName) && !nameValidationMessage;
 
   return (
     <section className={embedded ? "ui-settings-section ui-settings-section-embedded" : "ui-settings-section"}>
@@ -136,17 +163,54 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
         <div className="ui-settings-group-row">
           <div className="ui-settings-group-row-copy">
             <div className="ui-settings-group-row-label">Display name</div>
-            {nameMessage ? <div className="ui-settings-group-row-desc">{nameMessage}</div> : null}
+            <div
+              id="account-display-name-message"
+              className={`ui-settings-group-row-desc ${shouldShowNameValidation ? "text-danger" : ""}`}
+            >
+              {visibleNameMessage || "Use your first and last name."}
+            </div>
           </div>
-          <div className="ui-settings-group-row-control flex items-center gap-1.5">
-            <input
-              className="ui-field-standalone h-9 px-3"
-              type="text"
-              value={fullName}
-              onChange={(event) => setFullName(event.target.value)}
-              placeholder="Your name"
-              disabled={isSaving}
-            />
+          <div className="ui-settings-group-row-control flex items-end gap-1.5">
+            <div className="grid min-w-0 flex-1 grid-cols-2 gap-1.5 text-left">
+              <label className="min-w-0 text-[10px] text-ink-secondary">
+                <span className="mb-1 block">First name</span>
+                <input
+                  className={`ui-field-standalone h-9 w-full px-3 ${shouldShowNameValidation ? "!border-danger" : ""}`}
+                  type="text"
+                  value={firstName}
+                  onChange={(event) => {
+                    setFirstName(event.target.value);
+                    setNameMessage("");
+                    setNameTouched(true);
+                  }}
+                  placeholder="First name"
+                  aria-label="First name"
+                  aria-invalid={shouldShowNameValidation || undefined}
+                  aria-describedby="account-display-name-message"
+                  autoComplete="given-name"
+                  disabled={isSaving}
+                />
+              </label>
+              <label className="min-w-0 text-[10px] text-ink-secondary">
+                <span className="mb-1 block">Last name</span>
+                <input
+                  className={`ui-field-standalone h-9 w-full px-3 ${shouldShowNameValidation ? "!border-danger" : ""}`}
+                  type="text"
+                  value={lastName}
+                  onChange={(event) => {
+                    setLastName(event.target.value);
+                    setNameMessage("");
+                    setNameTouched(true);
+                  }}
+                  placeholder="Last name"
+                  aria-label="Last name"
+                  aria-invalid={shouldShowNameValidation || undefined}
+                  aria-describedby="account-display-name-message"
+                  autoComplete="family-name"
+                  disabled={isSaving}
+                />
+              </label>
+            </div>
             <button
               type="button"
               className="ui-btn-ghost h-9 px-3 disabled:opacity-50"

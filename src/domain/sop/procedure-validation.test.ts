@@ -47,7 +47,7 @@ describe("decision branch requirements", () => {
 
     expect(decisionBranchRequirement(activities[0], activities)).toMatchObject({
       affectedOutcomes: ["yes", "no"],
-      message: expect.stringContaining("lead to the same destination"),
+      message: expect.stringContaining("cannot point to the same destination"),
     });
   });
 

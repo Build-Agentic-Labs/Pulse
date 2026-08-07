@@ -124,6 +124,17 @@ describe("ProcessFlowchart decision branches", () => {
       />,
     );
 
-    expect(screen.getByRole("img", { name: /Yes and No lead to the same destination/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Yes and No cannot point to the same destination/ })).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Yes and No cannot point to the same destination",
+    );
+    expect(alert.parentElement).toHaveClass("border-danger", "bg-danger-muted");
+    expect(screen.getByRole("button", { name: "Yes branch destination for activity 1" })).toHaveClass(
+      "!border-danger",
+    );
+    expect(screen.getByRole("button", { name: "No branch destination for activity 1" })).toHaveClass(
+      "!border-danger",
+    );
   });
 });

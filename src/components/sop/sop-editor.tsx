@@ -1519,6 +1519,8 @@ export function SopEditor({
       <div className="space-y-0.5">
         {steps.map((entry, index) => {
           const active = index === stepIndex;
+          const issueCount = entry.id === "procedure" ? decisionBranchRequirements.length : 0;
+          const hasIssues = issueCount > 0;
           const reviewStep =
             entry.id === "draftReview" || entry.id === "finalApproval" || entry.id === "qualityApproval";
           const firstReviewStepIndex = steps.findIndex(
@@ -1537,16 +1539,33 @@ export function SopEditor({
           const stepButton = (
             <button
               type="button"
-              className={`ui-nav-item w-full ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
+              className={`ui-nav-item w-full ${
+                hasIssues
+                  ? "border border-danger/40 bg-danger-muted text-danger hover:bg-danger-muted"
+                  : active
+                    ? "ui-nav-item-active"
+                    : "ui-nav-item-idle"
+              }`}
               onClick={() => void handleStepSelect(index)}
+              title={hasIssues ? decisionBranchRequirements[0]?.message : undefined}
+              data-has-issues={hasIssues || undefined}
             >
               <SopStepNavIcon
                 active={active}
                 complete={filled}
+                issueCount={issueCount}
                 pending={reviewStep}
                 number={index + 1}
               />
               <span className="min-w-0 flex-1 truncate text-left">{entry.label}</span>
+              {hasIssues ? (
+                <span
+                  className="inline-flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[9px] font-bold leading-4 text-white"
+                  aria-hidden="true"
+                >
+                  {issueCount}
+                </span>
+              ) : null}
             </button>
           );
           return reviewStep && index === firstReviewStepIndex ? (
@@ -2471,7 +2490,13 @@ export function SopEditor({
                         type="button"
                         className="ui-btn-primary h-9 gap-1.5 whitespace-nowrap px-4 disabled:opacity-50"
                         onClick={handleStartApproval}
-                        disabled={saveDisabled || submittingForApproval || approvalRoutingLoading || !approvalRoutingReady}
+                        disabled={
+                          saveDisabled ||
+                          submittingForApproval ||
+                          approvalRoutingLoading ||
+                          !approvalRoutingReady ||
+                          decisionBranchRequirements.length > 0
+                        }
                         title={
                           decisionBranchRequirements[0]?.message ?? (approvalRoutingReady
                             ? reviewGate.allResponded

@@ -560,14 +560,31 @@ function MatrixView({
                 </div>
                 {activity.shape === "decision" ? (
                   <div
-                    className={`mt-1.5 space-y-1.5 rounded-md border bg-surface-muted p-1.5 ${
-                      branchRequirement ? "border-danger/35" : "border-line"
+                    className={`mt-1.5 space-y-1.5 rounded-md border p-1.5 ${
+                      branchRequirement
+                        ? "border-danger bg-danger-muted ring-1 ring-danger/20"
+                        : "border-line bg-surface-muted"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 px-0.5">
-                      <span className="ui-mono-label text-[9px] text-ink-tertiary">Decision branches</span>
+                      <span
+                        className={`ui-mono-label text-[9px] ${
+                          branchRequirement ? "text-danger" : "text-ink-tertiary"
+                        }`}
+                      >
+                        Decision branches
+                      </span>
                       {branchRequirement ? <DecisionRequirementFlag requirement={branchRequirement} /> : null}
                     </div>
+                    {branchRequirement ? (
+                      <p
+                        role="alert"
+                        className="mx-0.5 flex items-start gap-1.5 rounded border border-danger/30 bg-surface px-2 py-1.5 text-[10px] font-medium leading-4 text-danger"
+                      >
+                        <AlertTriangle className="mt-0.5 shrink-0" size={11} strokeWidth={2.5} aria-hidden="true" />
+                        <span>{branchRequirement.message}</span>
+                      </p>
+                    ) : null}
                     {(["yes", "no"] as const).map((outcome) => {
                       const targetActivityId =
                         outcome === "yes"
@@ -589,7 +606,9 @@ function MatrixView({
                           <ThemedSelect
                             variant="sop"
                             className="min-w-0"
-                            triggerClassName={`ui-sop-select-compact ${needsAttention ? "!border-danger/50" : ""}`}
+                            triggerClassName={`ui-sop-select-compact ${
+                              needsAttention ? "!border-danger !bg-surface ring-1 ring-danger/20" : ""
+                            }`}
                             ariaLabel={`${outcome === "yes" ? "Yes" : "No"} branch destination for activity ${index + 1}`}
                             value={value}
                             selectedLabel={decisionTargetLabel(targetActivityId, activities)}

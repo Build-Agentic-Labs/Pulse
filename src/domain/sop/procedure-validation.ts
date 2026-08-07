@@ -57,7 +57,7 @@ export function decisionBranchRequirement(
       activityId: activity.id,
       step: activity.step,
       affectedOutcomes: ["yes", "no"],
-      message: `Required: Yes and No lead to the same destination in decision step ${activity.step}. Choose different paths so the outcome is clear.`,
+      message: `Required: Yes and No cannot point to the same destination in decision step ${activity.step}. Choose a different step or End process for one branch.`,
     };
   }
 

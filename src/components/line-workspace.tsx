@@ -73,6 +73,7 @@ import {
 import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
   getStepPhotoAttachments,
+  getTaskStepPhotoAnnotationMap,
   removeStepPhotoAttachment,
   upsertStepPhotoAttachments,
   type StepPhotoAttachment,
@@ -136,6 +137,7 @@ import {
   savePlannerShellToSupabase,
   savePlannerStateToSupabase,
   saveProcedureTaskUpdateToSupabase,
+  saveTaskCustomFieldsToSupabase,
   saveTasksToSupabase,
   softDeleteExplodedViewFromSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
@@ -627,6 +629,7 @@ export function LineWorkspace({
   const procedureSaveQueuesRef = useRef<Record<string, ProcedureTaskSaveQueue>>({});
   const procedureSaveTimersRef = useRef<Record<string, number>>({});
   const procedureRetryTimersRef = useRef<Record<string, number>>({});
+  const photoAnnotationSaveQueuesRef = useRef<Record<string, Promise<void>>>({});
   const deferredProcedureServerUpdatesRef = useRef<Record<string, DeferredProcedureServerUpdate>>({});
   const autosaveHarnessRanRef = useRef(false);
   const [, setProcedureDraftVersion] = useState(0);
@@ -702,6 +705,15 @@ export function LineWorkspace({
   const masterBom = useMemo(
     () => getMasterBom(derivedState.product.customFields),
     [derivedState.product.customFields],
+  );
+  const hydratedTaskIds = useMemo(
+    () =>
+      new Set(
+        Object.entries(taskDetailHydrationStatus)
+          .filter(([, status]) => status === "loaded")
+          .map(([taskId]) => taskId),
+      ),
+    [taskDetailHydrationStatus],
   );
 
   useEffect(() => {
@@ -4083,6 +4095,35 @@ export function LineWorkspace({
 
     const patchKeys = Object.keys(patch) as Array<keyof Task>;
     const isNormalizedAssetPatch = patchKeys.length === 1 && patchKeys[0] === "customFields";
+    const currentTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
+    const annotationCustomFields = patch.customFields;
+    const photoAnnotationsChanged = Boolean(
+      annotationCustomFields &&
+        currentTask &&
+        JSON.stringify(getTaskStepPhotoAnnotationMap(currentTask)) !==
+          JSON.stringify(getTaskStepPhotoAnnotationMap({ customFields: annotationCustomFields })),
+    );
+
+    if (photoAnnotationsChanged && annotationCustomFields) {
+      const previousSave = photoAnnotationSaveQueuesRef.current[taskId] ?? Promise.resolve();
+      const nextSave = previousSave
+        .catch(() => undefined)
+        .then(() => saveTaskCustomFieldsToSupabase(taskId, annotationCustomFields, projectId));
+      photoAnnotationSaveQueuesRef.current[taskId] = nextSave;
+      void nextSave
+        .catch((error: unknown) => {
+          notifyFeedback({
+            title: "Photo annotations could not be saved",
+            body: error instanceof Error ? error.message : "Try editing the photo again.",
+            tone: "danger",
+          });
+        })
+        .finally(() => {
+          if (photoAnnotationSaveQueuesRef.current[taskId] === nextSave) {
+            delete photoAnnotationSaveQueuesRef.current[taskId];
+          }
+        });
+    }
 
     setPlannerState((current) => {
       const currentTask = current.tasks.find((task) => task.id === taskId);
@@ -5934,6 +5975,8 @@ export function LineWorkspace({
                     tasks={derivedState.tasks}
                     zones={derivedState.zones}
                     product={derivedState.product}
+                    initialPlannerState={derivedState}
+                    hydratedTaskIds={hydratedTaskIds}
                     onOpenTask={(taskId) => {
                       selectTask(taskId);
                       setActiveModule("procedure");

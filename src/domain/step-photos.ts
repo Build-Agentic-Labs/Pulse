@@ -1,6 +1,7 @@
 import type { Task } from "./types";
 
 export const STEP_PHOTO_ATTACHMENTS_FIELD = "stepPhotoAttachments";
+export const STEP_PHOTO_ANNOTATIONS_FIELD = "stepPhotoAnnotations";
 
 import type { PhotoAnnotationDocument } from "./photo-annotations";
 import { normalizePhotoAnnotationDocument } from "./photo-annotations";
@@ -22,6 +23,7 @@ export interface StepPhotoAttachment {
 }
 
 export type StepPhotoAttachmentMap = Record<string, StepPhotoAttachment[]>;
+export type StepPhotoAnnotationMap = Record<string, PhotoAnnotationDocument>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -83,6 +85,27 @@ export function getTaskStepPhotoAttachmentMap(task: Pick<Task, "customFields">):
   }, {});
 }
 
+/**
+ * Photo rows are normalized into `step_photos`, while their lightweight SVG
+ * markup stays in task custom fields. Keeping the two maps separate prevents a
+ * task save from duplicating signed URLs or stale photo metadata.
+ */
+export function getTaskStepPhotoAnnotationMap(task: Pick<Task, "customFields">): StepPhotoAnnotationMap {
+  const rawMap = task.customFields?.[STEP_PHOTO_ANNOTATIONS_FIELD];
+
+  if (!isRecord(rawMap)) {
+    return {};
+  }
+
+  return Object.entries(rawMap).reduce<StepPhotoAnnotationMap>((accumulator, [photoId, rawDocument]) => {
+    const document = normalizePhotoAnnotationDocument(rawDocument);
+    if (photoId && document.items.length > 0) {
+      accumulator[photoId] = document;
+    }
+    return accumulator;
+  }, {});
+}
+
 export function getStepPhotoAttachments(task: Pick<Task, "customFields">, stepId: string) {
   return getTaskStepPhotoAttachmentMap(task)[stepId] ?? [];
 }
@@ -106,6 +129,22 @@ function writePhotoAttachmentMap(task: Task, map: StepPhotoAttachmentMap): Task 
     nextCustomFields[STEP_PHOTO_ATTACHMENTS_FIELD] = cleanedMap;
   } else {
     delete nextCustomFields[STEP_PHOTO_ATTACHMENTS_FIELD];
+  }
+
+  const annotationMap = Object.values(cleanedMap)
+    .flat()
+    .reduce<StepPhotoAnnotationMap>((accumulator, photo) => {
+      const document = normalizePhotoAnnotationDocument(photo.annotations);
+      if (document.items.length > 0) {
+        accumulator[photo.id] = document;
+      }
+      return accumulator;
+    }, {});
+
+  if (Object.keys(annotationMap).length > 0) {
+    nextCustomFields[STEP_PHOTO_ANNOTATIONS_FIELD] = annotationMap;
+  } else {
+    delete nextCustomFields[STEP_PHOTO_ANNOTATIONS_FIELD];
   }
 
   return {

@@ -73,6 +73,7 @@ function PrintToolbar({
   label,
   layout,
   hrefForLayout,
+  onLayoutChange,
   onClose,
   canPrint,
 }: {
@@ -80,6 +81,7 @@ function PrintToolbar({
   label: string;
   layout: WorkInstructionLayout;
   hrefForLayout: (layoutId: string) => string;
+  onLayoutChange: (layout: WorkInstructionLayout) => void;
   onClose?: () => void;
   canPrint: boolean;
 }) {
@@ -96,22 +98,36 @@ function PrintToolbar({
         </Link>
       )}
 
-      {onClose ? null : (
-        <div className="flex items-center gap-1 rounded border border-line p-0.5">
-          {Object.values(WORK_INSTRUCTION_LAYOUTS).map((option) => (
-            <Link
-              key={option.id}
-              href={hrefForLayout(option.id)}
-              aria-current={option.id === layout.id ? "page" : undefined}
-              className={`h-7 rounded px-2.5 text-xs leading-7 transition ${
-                option.id === layout.id ? "bg-surface-sunken font-semibold text-ink" : "text-ink-tertiary hover:text-ink"
-              }`}
-            >
-              {option.label}
-            </Link>
-          ))}
-        </div>
-      )}
+      <div className="flex items-center gap-1 rounded border border-line p-0.5" role="group" aria-label="Steps per sheet">
+        {Object.values(WORK_INSTRUCTION_LAYOUTS)
+          .sort((left, right) => left.cardsPerSheet - right.cardsPerSheet)
+          .map((option) => {
+            const className = `h-7 rounded px-2.5 text-xs leading-7 transition ${
+              option.id === layout.id ? "bg-surface-sunken font-semibold text-ink" : "text-ink-tertiary hover:text-ink"
+            }`;
+
+            return onClose ? (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={option.id === layout.id}
+                className={className}
+                onClick={() => onLayoutChange(option)}
+              >
+                {option.label}
+              </button>
+            ) : (
+              <Link
+                key={option.id}
+                href={hrefForLayout(option.id)}
+                aria-current={option.id === layout.id ? "page" : undefined}
+                className={className}
+              >
+                {option.label}
+              </Link>
+            );
+          })}
+      </div>
 
       {onClose ? null : <span className="flex-1" />}
 
@@ -276,10 +292,11 @@ export function WorkInstructionPrintPreview({
   taskIds,
   blank,
   initialPlannerState,
-  layout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
+  layout: initialLayout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
   onReady,
   onClose,
 }: WorkInstructionPrintPreviewProps) {
+  const [layout, setLayout] = useState(initialLayout);
   const seeded = blank
     ? [blankInstruction()]
     : serverStateIsUsable(initialPlannerState, scenarioId)
@@ -291,6 +308,9 @@ export function WorkInstructionPrintPreview({
   const [error, setError] = useState("");
   const [previewScale, setPreviewScale] = useState(1);
   const previewBodyRef = useRef<HTMLDivElement | null>(null);
+  const loadedStateRef = useRef<PlannerState | undefined>(
+    serverStateIsUsable(initialPlannerState, scenarioId) ? initialPlannerState : undefined,
+  );
 
   // Stale-response guard, same idiom as work-order-print.tsx: only the latest
   // load may commit state.
@@ -303,6 +323,19 @@ export function WorkInstructionPrintPreview({
     if (blank) {
       setInstructions([blankInstruction()]);
       setStatus("ready");
+      return;
+    }
+    if (serverStateIsUsable(initialPlannerState, scenarioId)) {
+      loadedStateRef.current = initialPlannerState;
+      const built = buildFromState(initialPlannerState, taskIds, layout);
+      setInstructions(built);
+      setStatus(built.length > 0 ? "ready" : "empty");
+      return;
+    }
+    if (serverStateIsUsable(loadedStateRef.current, scenarioId)) {
+      const built = buildFromState(loadedStateRef.current, taskIds, layout);
+      setInstructions(built);
+      setStatus(built.length > 0 ? "ready" : "empty");
       return;
     }
     const seq = ++loadSeqRef.current;
@@ -321,6 +354,7 @@ export function WorkInstructionPrintPreview({
         setStatus("empty");
         return;
       }
+      loadedStateRef.current = state;
       const built = buildFromState(state, taskIds, layout);
       setInstructions(built);
       setStatus(built.length > 0 ? "ready" : "empty");
@@ -329,7 +363,11 @@ export function WorkInstructionPrintPreview({
       setError(caught instanceof Error ? caught.message : "Could not load the work instruction.");
       setStatus("error");
     }
-  }, [blank, layout, projectId, scenarioId, taskIds]);
+  }, [blank, initialPlannerState, layout, projectId, scenarioId, taskIds]);
+
+  useEffect(() => {
+    setLayout(initialLayout);
+  }, [initialLayout]);
 
   useEffect(() => {
     if (seededRef.current) {
@@ -408,6 +446,7 @@ export function WorkInstructionPrintPreview({
         label={blank ? "Blank template" : label}
         layout={layout}
         hrefForLayout={hrefForLayout}
+        onLayoutChange={setLayout}
         onClose={onClose}
         canPrint={status === "ready"}
       />

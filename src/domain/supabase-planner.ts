@@ -26,7 +26,11 @@ import type {
   WorkspaceRole,
   Zone,
 } from "./types";
-import { STEP_PHOTO_ATTACHMENTS_FIELD, type StepPhotoAttachment } from "./step-photos";
+import {
+  STEP_PHOTO_ATTACHMENTS_FIELD,
+  getTaskStepPhotoAnnotationMap,
+  type StepPhotoAttachment,
+} from "./step-photos";
 import { EXPLODED_VIEWS_FIELD, normalizeComponents, type ExplodedView } from "./step-exploded-views";
 import { TASK_VIDEOS_FIELD, type TaskVideo } from "./task-videos";
 import { mergeStepDependencyRefs, splitStepDependencyRefs } from "./step-part-references";
@@ -1304,7 +1308,16 @@ function withNormalizedStepAssets(
   const customFields = { ...task.customFields };
 
   if (photoMap) {
-    customFields[STEP_PHOTO_ATTACHMENTS_FIELD] = Object.fromEntries(photoMap);
+    const annotationMap = getTaskStepPhotoAnnotationMap(task);
+    customFields[STEP_PHOTO_ATTACHMENTS_FIELD] = Object.fromEntries(
+      [...photoMap.entries()].map(([stepId, photos]) => [
+        stepId,
+        photos.map((photo) => {
+          const annotations = annotationMap[photo.id];
+          return annotations ? { ...photo, annotations } : photo;
+        }),
+      ]),
+    );
   }
 
   if (toolMap) {

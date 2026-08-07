@@ -44,7 +44,14 @@ export async function proxy(request: NextRequest) {
   // token, trip reuse detection, and get the whole session revoked. Expiry gating
   // narrows refreshing to the one moment it is actually needed.
   if (sessionNeedsRefresh(request)) {
-    await supabase.auth.getUser();
+    try {
+      await supabase.auth.getUser();
+    } catch (error) {
+      // Refresh is best-effort here; authorization still happens in the route's
+      // Supabase reads under RLS. A temporary GoTrue/network failure should flow
+      // into the existing auth recovery UI instead of crashing the whole route.
+      console.warn("Supabase session refresh failed in proxy; continuing request.", error);
+    }
   }
 
   return response;

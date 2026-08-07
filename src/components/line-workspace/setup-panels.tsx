@@ -15,6 +15,7 @@ import type {
   DemandPeriod,
   DocumentTypeCode,
   ManufacturingComponent,
+  PlannerState,
   Product,
   ProductStatus,
   Task,
@@ -407,11 +408,15 @@ export function WorkInstructionsPanel({
   tasks,
   zones,
   product,
+  initialPlannerState,
+  hydratedTaskIds,
   onOpenTask,
 }: {
   tasks: Task[];
   zones: Zone[];
   product: Product;
+  initialPlannerState?: PlannerState;
+  hydratedTaskIds?: ReadonlySet<string>;
   onOpenTask: (taskId: string) => void;
 }) {
   const parentIds = new Set(tasks.map((task) => task.parentTaskId).filter((id): id is string => Boolean(id)));
@@ -587,6 +592,11 @@ export function WorkInstructionsPanel({
           projectId={projectId}
           taskIds={previewSelection.taskIds}
           scenarioId={previewSelection.scenarioId}
+          initialPlannerState={
+            previewSelection.taskIds.every((taskId) => hydratedTaskIds?.has(taskId))
+              ? initialPlannerState
+              : undefined
+          }
           onClose={() => setPreviewSelection(null)}
         />
       ) : null}

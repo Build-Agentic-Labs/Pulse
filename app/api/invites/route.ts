@@ -1,9 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { renderQualityModuleInviteEmail } from "@/domain/workspace/invite-email";
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
 import type { Database } from "@/lib/database.types";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
-import { qualityModuleAccessForRole, qualityModuleInviteRedirect } from "@/domain/workspace/invite";
+import {
+  qualityModuleAccessForRole,
+  qualityModuleAccessLabel,
+  qualityModuleInviteRedirect,
+} from "@/domain/workspace/invite";
+import { createResendSender } from "@/lib/sop/notifications-drain";
 
 export const dynamic = "force-dynamic";
 
@@ -77,12 +83,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: revocationError.message }, { status: 500 });
   }
 
+  const qualityAccess = qualityModuleAccessForRole(role);
   const { error: grantError } = await supabase.from("workspace_access_grants").upsert(
     {
       workspace_id: workspaceId,
       email,
       role,
-      quality_access: qualityModuleAccessForRole(role),
+      quality_access: qualityAccess,
       granted_by: auth.userId,
       expires_at: new Date(Date.now() + GRANT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString(),
       redeemed_by: null,
@@ -95,10 +102,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: grantError.message }, { status });
   }
 
-  // Best-effort email. Supabase's invite creates the auth user and emails a magic
-  // sign-up link; "already registered" just means they should sign in normally.
+  // First-time invitations use a Supabase-generated one-time action link delivered
+  // through Pulse's verified Resend sender. This keeps the subject, destination,
+  // and create-password wording under application control. Supabase mail remains a
+  // fallback when Resend is not configured.
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const resendApiKey = process.env.RESEND_API_KEY ?? "";
+  const resendFrom = process.env.RESEND_FROM ?? "";
 
   if (!serviceRoleKey) {
     return NextResponse.json({
@@ -111,7 +122,59 @@ export async function POST(request: Request) {
   const admin = createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const redirectTo = qualityModuleInviteRedirect(request.url);
+  const configuredSiteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : undefined);
+  const redirectTo = qualityModuleInviteRedirect(request.url, configuredSiteUrl);
+
+  if (resendApiKey && resendFrom) {
+    const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
+      type: "invite",
+      email,
+      options: { redirectTo },
+    });
+
+    if (!linkError && linkData.properties?.action_link) {
+      try {
+        const send = createResendSender(resendApiKey, resendFrom);
+        const result = await send(
+          email,
+          renderQualityModuleInviteEmail({
+            actionLink: linkData.properties.action_link,
+            accessLabel: qualityModuleAccessLabel(qualityAccess),
+            email,
+            origin: new URL(redirectTo).origin,
+          }),
+        );
+        if (result.ok) {
+          return NextResponse.json({ granted: true, emailSent: true });
+        }
+        return NextResponse.json({
+          granted: true,
+          emailSent: false,
+          reason: "The invitation email could not be sent. Try Resend again.",
+        });
+      } catch {
+        return NextResponse.json({
+          granted: true,
+          emailSent: false,
+          reason: "The invitation email could not be sent. Try Resend again.",
+        });
+      }
+    }
+
+    if (linkError && /already.*(registered|exists|been invited)/i.test(linkError.message)) {
+      return NextResponse.json({
+        granted: true,
+        emailSent: false,
+        alreadyRegistered: true,
+        reason: "They already have an account — access applies the next time they sign in.",
+      });
+    }
+  }
+
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
 
   if (inviteError) {

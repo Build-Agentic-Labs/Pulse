@@ -24,4 +24,13 @@ describe("Quality Module invitations", () => {
       "https://pulse.example.com/?invite=1",
     );
   });
+
+  it("uses the public Pulse URL when an invite is sent from local support", () => {
+    expect(
+      qualityModuleInviteRedirect(
+        "http://localhost:3000/api/invites",
+        "https://pulse.anacorp.com/settings",
+      ),
+    ).toBe("https://pulse.anacorp.com/?invite=1");
+  });
 });

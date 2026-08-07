@@ -10,6 +10,13 @@ export function qualityModuleAccessLabel(level: AccessLevel): string {
   return "No access";
 }
 
-export function qualityModuleInviteRedirect(requestUrl: string): string {
+export function qualityModuleInviteRedirect(requestUrl: string, configuredSiteUrl?: string): string {
+  if (configuredSiteUrl) {
+    try {
+      return new URL("/?invite=1", configuredSiteUrl).toString();
+    } catch {
+      // Fall through to the request origin for an invalid deployment setting.
+    }
+  }
   return new URL("/?invite=1", requestUrl).toString();
 }

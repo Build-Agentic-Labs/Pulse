@@ -86,6 +86,7 @@ describe("PasswordUpdatePanel invitation setup", () => {
     render(
       <PasswordUpdatePanel
         mode="invite"
+        email="first.user@anacorp.com"
         message=""
         isSubmitting={false}
         onUpdatePassword={vi.fn()}
@@ -97,6 +98,8 @@ describe("PasswordUpdatePanel invitation setup", () => {
     expect(
       screen.getByText("Choose a password to finish setting up your Pulse account."),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("Work email")).toHaveValue("first.user@anacorp.com");
+    expect(screen.getByLabelText("Work email")).toHaveAttribute("readonly");
     expect(screen.getByRole("button", { name: "Create password" })).toBeInTheDocument();
   });
 });

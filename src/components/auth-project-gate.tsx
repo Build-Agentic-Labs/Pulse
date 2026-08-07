@@ -436,6 +436,7 @@ export function AuthProjectGate({
     return (
       <PasswordUpdatePanel
         mode={inviteSetupMode ? "invite" : "reset"}
+        email={inviteSetupMode ? session?.user.email : undefined}
         message={auth.message}
         isSubmitting={auth.isSubmitting}
         onUpdatePassword={(password) => void handleUpdatePassword(password)}

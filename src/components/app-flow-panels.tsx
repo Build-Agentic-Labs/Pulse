@@ -518,11 +518,13 @@ export function AuthFormPanel({
  */
 export function PasswordUpdatePanel({
   mode = "reset",
+  email,
   message,
   isSubmitting,
   onUpdatePassword,
 }: {
   mode?: "reset" | "invite";
+  email?: string;
   message: string;
   isSubmitting: boolean;
   onUpdatePassword: (password: string) => void;
@@ -566,6 +568,19 @@ export function PasswordUpdatePanel({
 
         <div className="ui-auth-card-body">
           <form className="ui-field-group" onSubmit={submit}>
+            {inviteSetup && email ? (
+              <label className="block">
+                <span className="ui-field-label">Work email</span>
+                <input
+                  className="ui-field-standalone"
+                  type="email"
+                  value={email}
+                  autoComplete="email"
+                  readOnly
+                />
+              </label>
+            ) : null}
+
             <label className="block">
               <span className="ui-field-label">New password</span>
               <input

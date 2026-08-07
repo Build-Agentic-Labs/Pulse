@@ -517,10 +517,12 @@ export function AuthFormPanel({
  * Sets the new password on the recovery session, then hands back to the app.
  */
 export function PasswordUpdatePanel({
+  mode = "reset",
   message,
   isSubmitting,
   onUpdatePassword,
 }: {
+  mode?: "reset" | "invite";
   message: string;
   isSubmitting: boolean;
   onUpdatePassword: (password: string) => void;
@@ -530,6 +532,7 @@ export function PasswordUpdatePanel({
   const [localError, setLocalError] = useState("");
   const visibleMessage = normalizeAuthMessage(localError || message);
   const messageTone = visibleMessage ? authMessageTone(visibleMessage) : null;
+  const inviteSetup = mode === "invite";
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -550,9 +553,15 @@ export function PasswordUpdatePanel({
       <section className="ui-auth-card">
         <header className="ui-auth-card-header">
           <div className="ui-auth-brand font-display">Pulse</div>
-          <p className="ui-eyebrow mt-3">Password reset</p>
-          <h1 className="ui-section-title mt-2">Set a new password</h1>
-          <p className="ui-section-subtitle mt-1">Choose a new password for your account.</p>
+          <p className="ui-eyebrow mt-3">{inviteSetup ? "Account setup" : "Password reset"}</p>
+          <h1 className="ui-section-title mt-2">
+            {inviteSetup ? "Create your password" : "Set a new password"}
+          </h1>
+          <p className="ui-section-subtitle mt-1">
+            {inviteSetup
+              ? "Choose a password to finish setting up your Pulse account."
+              : "Choose a new password for your account."}
+          </p>
         </header>
 
         <div className="ui-auth-card-body">
@@ -597,10 +606,10 @@ export function PasswordUpdatePanel({
                 {isSubmitting ? (
                   <span className="flex items-center gap-3">
                     <NothingSpinner inline />
-                    <NothingStatus>Updating password</NothingStatus>
+                    <NothingStatus>{inviteSetup ? "Creating password" : "Updating password"}</NothingStatus>
                   </span>
                 ) : (
-                  "Update password"
+                  inviteSetup ? "Create password" : "Update password"
                 )}
               </button>
             </div>

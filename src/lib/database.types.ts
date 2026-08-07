@@ -2798,6 +2798,7 @@ export type Database = {
           expires_at: string
           granted_by: string | null
           modules: string[] | null
+          quality_access: Database["public"]["Enums"]["access_level"]
           redeemed_at: string | null
           redeemed_by: string | null
           role: Database["public"]["Enums"]["workspace_role"]
@@ -2810,6 +2811,7 @@ export type Database = {
           expires_at?: string
           granted_by?: string | null
           modules?: string[] | null
+          quality_access?: Database["public"]["Enums"]["access_level"]
           redeemed_at?: string | null
           redeemed_by?: string | null
           role?: Database["public"]["Enums"]["workspace_role"]
@@ -2822,6 +2824,7 @@ export type Database = {
           expires_at?: string
           granted_by?: string | null
           modules?: string[] | null
+          quality_access?: Database["public"]["Enums"]["access_level"]
           redeemed_at?: string | null
           redeemed_by?: string | null
           role?: Database["public"]["Enums"]["workspace_role"]

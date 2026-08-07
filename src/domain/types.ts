@@ -52,7 +52,7 @@ export type CustomColumnScope = "product" | "scenario" | "station" | "task" | "a
 export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer";
 export type ProjectStatus = "active" | "archived";
 
-// Per-user access level for a workspace (project) or the Org tools area.
+// Per-user access level for a workspace project or the Quality Module.
 export type AccessLevel = "none" | "view" | "edit";
 
 // Aggregated access for one member, used by the admin Users matrix.
@@ -147,6 +147,7 @@ export interface WorkspaceAccessGrant {
   workspaceId: string;
   email: string;
   role: WorkspaceRole;
+  qualityAccess: AccessLevel;
   grantedBy?: string;
   redeemedBy?: string;
   redeemedAt?: string;

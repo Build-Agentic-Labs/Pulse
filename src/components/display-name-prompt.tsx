@@ -12,6 +12,10 @@ import {
   PROFILE_NAME_UPDATED_EVENT,
 } from "@/lib/profile-name";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
+import {
+  INVITE_PASSWORD_SETUP_COMPLETED_EVENT,
+  isInvitePasswordSetupActive,
+} from "@/lib/invite-password-setup";
 
 type PromptState =
   | { status: "hidden" }
@@ -49,6 +53,10 @@ export function DisplayNamePrompt() {
     let requestVersion = 0;
 
     async function checkProfile(userId: string) {
+      if (isInvitePasswordSetupActive()) {
+        setPrompt({ status: "hidden" });
+        return;
+      }
       const version = ++requestVersion;
       const { data, error } = await supabase
         .from("profiles")
@@ -98,6 +106,12 @@ export function DisplayNamePrompt() {
 
     void hydrate();
 
+    function resumeAfterInviteSetup() {
+      void hydrate();
+    }
+
+    window.addEventListener(INVITE_PASSWORD_SETUP_COMPLETED_EVENT, resumeAfterInviteSetup);
+
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!session) {
         requestVersion += 1;
@@ -122,6 +136,7 @@ export function DisplayNamePrompt() {
       mounted = false;
       requestVersion += 1;
       listener.subscription.unsubscribe();
+      window.removeEventListener(INVITE_PASSWORD_SETUP_COMPLETED_EVENT, resumeAfterInviteSetup);
     };
   }, [supabase]);
 

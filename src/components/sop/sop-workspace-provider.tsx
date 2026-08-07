@@ -11,6 +11,7 @@ import type { AccessLevel, WorkspaceProjectGroup, WorkspaceRole } from "@/domain
 import { useAuthFormActions } from "@/lib/auth-form-actions";
 import type { InitialSopWorkspaceData } from "@/lib/supabase/server-data";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
+import { activateInvitePasswordSetup, completeInvitePasswordSetup } from "@/lib/invite-password-setup";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 
@@ -138,6 +139,7 @@ export function SopWorkspaceProvider({
   );
   const [message, setMessage] = useState("");
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [inviteSetupMode, setInviteSetupMode] = useState(false);
   const auth = useAuthFormActions(supabase);
   const statusRef = useRef(status);
 
@@ -198,6 +200,10 @@ export function SopWorkspaceProvider({
 
       setSession(nextSession);
       setSessionReady(true);
+      if (nextSession && activateInvitePasswordSetup()) {
+        setInviteSetupMode(true);
+        setRecoveryMode(true);
+      }
       void refreshWorkspaces(nextSession);
     });
 
@@ -206,8 +212,14 @@ export function SopWorkspaceProvider({
       setSessionReady(true);
 
       if (event === "PASSWORD_RECOVERY") {
+        setInviteSetupMode(false);
         setRecoveryMode(true);
         return;
+      }
+
+      if (nextSession && activateInvitePasswordSetup()) {
+        setInviteSetupMode(true);
+        setRecoveryMode(true);
       }
 
       if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
@@ -257,11 +269,16 @@ export function SopWorkspaceProvider({
   if (recoveryMode) {
     return (
       <PasswordUpdatePanel
+        mode={inviteSetupMode ? "invite" : "reset"}
         message={auth.message}
         isSubmitting={auth.isSubmitting}
         onUpdatePassword={(password) => {
           void auth.handleUpdatePassword(password).then((updated) => {
-            if (updated) setRecoveryMode(false);
+            if (updated) {
+              if (inviteSetupMode) completeInvitePasswordSetup();
+              setInviteSetupMode(false);
+              setRecoveryMode(false);
+            }
           });
         }}
       />

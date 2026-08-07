@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
 import type { Database } from "@/lib/database.types";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
+import { qualityModuleAccessForRole, qualityModuleInviteRedirect } from "@/domain/workspace/invite";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
       workspace_id: workspaceId,
       email,
       role,
+      quality_access: qualityModuleAccessForRole(role),
       granted_by: auth.userId,
       expires_at: new Date(Date.now() + GRANT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString(),
       redeemed_by: null,
@@ -109,7 +111,7 @@ export async function POST(request: Request) {
   const admin = createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const redirectTo = new URL(request.url).origin;
+  const redirectTo = qualityModuleInviteRedirect(request.url);
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
 
   if (inviteError) {

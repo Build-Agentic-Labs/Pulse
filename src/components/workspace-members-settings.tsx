@@ -27,6 +27,7 @@ import type {
   WorkspaceRole,
 } from "@/domain/types";
 import { grantSpaceAccess, listSpaceAccess, revokeSpaceAccess, type SpaceAccessRow } from "@/lib/planning/store";
+import { qualityModuleAccessForRole, qualityModuleAccessLabel } from "@/domain/workspace/invite";
 
 // Local copies of the settings primitives (kept here to avoid a circular import with
 // app-settings-panel, which imports this component).
@@ -65,6 +66,13 @@ const ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
   viewer: "Read-only on the projects they've been granted View access to.",
 };
 
+const QUALITY_INVITE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
+  viewer: "Views Quality Module SOPs and controlled documents without editing.",
+  editor: "Creates and edits Quality Module SOPs and controlled documents.",
+  admin: "Manages members and has full Quality Module and project access.",
+  owner: "Full organization control, including Quality Module access and ownership.",
+};
+
 const workspaceRoleOptions: Array<{ value: WorkspaceRole; label: string; description: string }> = (
   ["viewer", "editor", "admin", "owner"] as const
 ).map((role) => ({
@@ -72,6 +80,13 @@ const workspaceRoleOptions: Array<{ value: WorkspaceRole; label: string; descrip
   label: role.charAt(0).toUpperCase() + role.slice(1),
   description: ROLE_DESCRIPTIONS[role],
 }));
+
+const qualityInviteRoleOptions = workspaceRoleOptions
+  .filter((option) => option.value === "viewer" || option.value === "editor")
+  .map((option) => ({
+    ...option,
+    description: QUALITY_INVITE_DESCRIPTIONS[option.value],
+  }));
 
 function isManagerRole(role?: WorkspaceRole) {
   return role === "owner" || role === "admin";
@@ -181,7 +196,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     try {
       await setOrgToolAccessInSupabase(userId, level);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to update Org tools access.");
+      setMessage(error instanceof Error ? error.message : "Unable to update Quality Module access.");
       await load();
     }
   }
@@ -261,7 +276,10 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     }
 
     if (payload.emailSent) {
-      return { text: `Invitation email sent to ${email}. The invite expires in 30 days.`, tone: "info" };
+      return {
+        text: `Invitation email sent to ${email}. They'll create a password to finish setup; the invite expires in 30 days.`,
+        tone: "info",
+      };
     }
 
     return {
@@ -448,8 +466,8 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                       <span className="ui-chip shrink-0">{expired ? "Expired" : "Pending"}</span>
                     </div>
                     <div className="ui-settings-group-row-desc">
-                      <span className="capitalize" title={ROLE_DESCRIPTIONS[grant.role]}>
-                        {grant.role}
+                      <span title={QUALITY_INVITE_DESCRIPTIONS[grant.role]}>
+                        Quality Module · {qualityModuleAccessLabel(grant.qualityAccess)}
                       </span>
                       {expires ? ` · ${expired ? "expired" : "expires"} ${expires}` : ""}
                     </div>
@@ -513,8 +531,8 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
           title={`Access · ${memberLabel(selected)}`}
           description={
             isManagerRole(selected.role)
-              ? "Owners and admins automatically have full access to every project and Org tools."
-              : "Set this member's access to each project and to Org tools."
+              ? "Owners and admins automatically have full access to every project and the Quality Module."
+              : "Set this member's access to each project and the Quality Module."
           }
         >
           <Row label="Role" description={ROLE_DESCRIPTIONS[selected.role]}>
@@ -552,7 +570,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
           {isManagerRole(selected.role) ? (
             <div className="flex items-center gap-2 p-3.5 ui-settings-group-row-value">
               <ShieldCheck size={14} className="text-ink-tertiary" />
-              Full access to all projects and Org tools (manager role).
+              Full access to all projects and the Quality Module (manager role).
             </div>
           ) : (
             <>
@@ -567,7 +585,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                   />
                 </Row>
               ))}
-              <Row label="Org tools" description="SOP builder">
+              <Row label="Quality Module" description="SOPs, reviews and controlled documents">
                 <ThemedSelect
                   triggerClassName="h-9 px-3"
                   value={selected.orgTools}
@@ -623,22 +641,32 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
 
       <Block
         title="Invite a user"
-        description="Anacorp work emails only. They'll get an email invitation; access starts at the role you pick, with no project access until you grant it."
+        description="Anacorp work emails only. Choose their Quality Module access; they'll receive an email to create a password and sign in."
       >
         <div className="space-y-2 p-3.5">
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_170px_140px_auto]">
             <input
               className="ui-field-standalone h-9 px-3"
               type="email"
+              aria-label="Invite email"
               placeholder="name@anacorp.com"
               value={inviteEmail}
               onChange={(event) => setInviteEmail(event.target.value)}
               disabled={isSubmitting}
             />
+            <input
+              className="ui-field-standalone h-9 px-3 text-ink-secondary"
+              aria-label="Module"
+              value="Quality Module"
+              readOnly
+              disabled={isSubmitting}
+            />
             <ThemedSelect
               triggerClassName="h-9 px-3"
+              ariaLabel="Quality Module access type"
               value={inviteRole}
-              options={callerIsOwner ? workspaceRoleOptions : workspaceRoleOptions.filter((o) => o.value !== "owner")}
+              options={qualityInviteRoleOptions}
+              selectedLabel={qualityModuleAccessLabel(qualityModuleAccessForRole(inviteRole))}
               onChange={(value) => setInviteRole(value as WorkspaceRole)}
               disabled={isSubmitting}
             />
@@ -653,7 +681,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
             </button>
           </div>
           <p className="ui-settings-group-row-desc">
-            {ROLE_DESCRIPTIONS[inviteRole]}
+            {QUALITY_INVITE_DESCRIPTIONS[inviteRole]}
           </p>
         </div>
       </Block>

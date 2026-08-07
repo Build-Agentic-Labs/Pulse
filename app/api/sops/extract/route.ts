@@ -157,7 +157,7 @@ export async function POST(request: Request) {
   const isManager = (managerMembership.data?.length ?? 0) > 0 || superAdmin.data === true;
   if (!isManager && orgAccess.data?.level !== "edit") {
     return Response.json(
-      { error: "You need Org tools edit access to convert SOPs." },
+      { error: "You need Quality Module Editor access to convert SOPs." },
       { status: 403 },
     );
   }

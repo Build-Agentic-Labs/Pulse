@@ -11,6 +11,7 @@ import {
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
 import { useAuthFormActions } from "@/lib/auth-form-actions";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
+import { activateInvitePasswordSetup, completeInvitePasswordSetup } from "@/lib/invite-password-setup";
 
 type ProjectRouteKind = "planner" | "mobile-photos";
 
@@ -240,6 +241,7 @@ export function AuthProjectGate({
   );
   const [message, setMessage] = useState("");
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [inviteSetupMode, setInviteSetupMode] = useState(false);
   const [childReady, setChildReady] = useState(false);
   const auth = useAuthFormActions(supabase);
   const statusRef = useRef(status);
@@ -342,6 +344,10 @@ export function AuthProjectGate({
 
       setSession(nextSession);
       setSessionReady(true);
+      if (nextSession && activateInvitePasswordSetup()) {
+        setInviteSetupMode(true);
+        setRecoveryMode(true);
+      }
       void refreshWorkspaceProjects(nextSession);
     });
 
@@ -352,8 +358,14 @@ export function AuthProjectGate({
       if (event === "PASSWORD_RECOVERY") {
         // The user arrived from a reset email: collect the new password before
         // letting them into the app.
+        setInviteSetupMode(false);
         setRecoveryMode(true);
         return;
+      }
+
+      if (nextSession && activateInvitePasswordSetup()) {
+        setInviteSetupMode(true);
+        setRecoveryMode(true);
       }
 
       if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
@@ -397,6 +409,8 @@ export function AuthProjectGate({
   async function handleUpdatePassword(password: string) {
     const updated = await auth.handleUpdatePassword(password);
     if (updated) {
+      if (inviteSetupMode) completeInvitePasswordSetup();
+      setInviteSetupMode(false);
       setRecoveryMode(false);
     }
   }
@@ -421,6 +435,7 @@ export function AuthProjectGate({
   if (recoveryMode) {
     return (
       <PasswordUpdatePanel
+        mode={inviteSetupMode ? "invite" : "reset"}
         message={auth.message}
         isSubmitting={auth.isSubmitting}
         onUpdatePassword={(password) => void handleUpdatePassword(password)}

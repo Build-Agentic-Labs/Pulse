@@ -7,7 +7,7 @@ vi.mock("@/components/theme-provider", () => ({
   useTheme: () => ({ theme: "light", toggleTheme: vi.fn() }),
 }));
 
-import { AuthFormPanel } from "./app-flow-panels";
+import { AuthFormPanel, PasswordUpdatePanel } from "./app-flow-panels";
 
 const readClipboard = vi.fn();
 
@@ -78,5 +78,25 @@ describe("AuthFormPanel password recovery", () => {
     expect(screen.getByLabelText("Work email")).toBeDisabled();
     expect(screen.getByLabelText("Recovery code")).toHaveAttribute("maxlength", "8");
     expect(window.location.hash).toBe("");
+  });
+});
+
+describe("PasswordUpdatePanel invitation setup", () => {
+  it("asks an invited user to create a password", () => {
+    render(
+      <PasswordUpdatePanel
+        mode="invite"
+        message=""
+        isSubmitting={false}
+        onUpdatePassword={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Account setup")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Create your password" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Choose a password to finish setting up your Pulse account."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create password" })).toBeInTheDocument();
   });
 });

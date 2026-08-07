@@ -64,8 +64,8 @@ function describeEntry(
       return `set ${target}'s access to ${projectName} to ${detailText(next.level) || "none"}`;
     }
     case "org_tool_access": {
-      if (op === "delete") return `cleared ${target}'s Org tools access`;
-      return `set ${target}'s Org tools access to ${detailText(next.level) || "none"}`;
+      if (op === "delete") return `cleared ${target}'s Quality Module access`;
+      return `set ${target}'s Quality Module access to ${detailText(next.level) || "none"}`;
     }
     case "workspace_auto_join_domains": {
       const domain = detailText(next.domain) || detailText(entry.details?.old?.domain);

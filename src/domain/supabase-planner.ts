@@ -39,6 +39,7 @@ import { formatDisplayTitle } from "@/lib/display-names";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import { displayNameValidationMessage, normalizeDisplayName } from "@/lib/profile-name";
 import { kickSopNotifications } from "@/lib/sop/notify-kick";
+import { qualityModuleAccessForRole } from "@/domain/workspace/invite";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -493,6 +494,7 @@ function mapWorkspaceAccessGrant(row: Record<string, unknown>): WorkspaceAccessG
     workspaceId: String(row.workspace_id),
     email: String(row.email ?? ""),
     role: String(row.role ?? "editor") as WorkspaceRole,
+    qualityAccess: normalizeAccessLevel(row.quality_access),
     grantedBy: maybeText(row.granted_by),
     redeemedBy: maybeText(row.redeemed_by),
     redeemedAt: maybeText(row.redeemed_at),
@@ -1675,7 +1677,7 @@ async function fetchUserProjectAccessMap(
   return new Map((data ?? []).map((row) => [String(row.project_id), normalizeAccessLevel(row.level)]));
 }
 
-// The signed-in user's Org tools access level ("edit" for superadmins).
+// The signed-in user's Quality Module access level ("edit" for superadmins).
 export async function fetchOrgToolAccess(
   supabase: ReturnType<typeof plannerClient> = plannerClient(),
 ): Promise<AccessLevel> {
@@ -2084,6 +2086,7 @@ export async function upsertWorkspaceAccessGrantInSupabase(
         workspace_id: workspaceId,
         email: normalizedEmail,
         role,
+        quality_access: qualityModuleAccessForRole(role),
         granted_by: userData.user?.id ?? null,
         expires_at: new Date(Date.now() + GRANT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString(),
         redeemed_by: null,
@@ -2175,7 +2178,7 @@ export async function deleteWorkspaceAccessGrantFromSupabase(workspaceId: string
 }
 
 // Per-member access matrix for a workspace: each member's role plus their per-project level
-// and Org tools level. Readable by workspace managers and superadmins.
+// and Quality Module level. Readable by workspace managers and superadmins.
 export async function loadMembersAccessForWorkspace(
   workspaceId: string,
   client?: SupabaseClient<Database>,

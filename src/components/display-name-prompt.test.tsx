@@ -4,6 +4,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DisplayNamePrompt } from "./display-name-prompt";
 import { ACCOUNT_MENU_VISIBILITY_EVENT } from "@/lib/app-chrome-events";
+import {
+  activateInvitePasswordSetup,
+  completeInvitePasswordSetup,
+} from "@/lib/invite-password-setup";
 
 const mocks = vi.hoisted(() => ({
   profileResult: { data: { full_name: "Rosendo Lopez" }, error: null } as {
@@ -46,6 +50,8 @@ const userSession = {
 
 describe("DisplayNamePrompt", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", "/");
+    window.sessionStorage.clear();
     mocks.profileResult = { data: { full_name: "Rosendo Lopez" }, error: null };
     mocks.session = null;
     mocks.authCallback = null;
@@ -114,6 +120,23 @@ describe("DisplayNamePrompt", () => {
 
     expect(screen.queryByRole("region", { name: "Add your name" })).toBeNull();
     expect(mocks.profileReads).toBe(0);
+  });
+
+  it("waits for invitation password setup before prompting for a name", async () => {
+    window.history.replaceState(null, "", "/?invite=1");
+    expect(activateInvitePasswordSetup()).toBe(true);
+    mocks.session = userSession;
+    mocks.profileResult = { data: { full_name: null }, error: null };
+    render(<DisplayNamePrompt />);
+
+    await waitFor(() => expect(mocks.authCallback).not.toBeNull());
+    expect(screen.queryByRole("region", { name: "Add your name" })).toBeNull();
+    expect(mocks.profileReads).toBe(0);
+
+    act(() => completeInvitePasswordSetup());
+
+    expect(await screen.findByRole("region", { name: "Add your name" })).toBeTruthy();
+    expect(mocks.profileReads).toBe(1);
   });
 
   it("saves a normalized name and lets the user continue", async () => {

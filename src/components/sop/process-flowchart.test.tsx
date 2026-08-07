@@ -52,6 +52,7 @@ describe("ProcessFlowchart decision branches", () => {
     expect(screen.getByRole("button", { name: "No branch destination for activity 1" })).toHaveTextContent(
       "3. Revise request",
     );
+    expect(screen.queryByRole("img", { name: /Required:/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Viewer" }));
 
@@ -80,5 +81,49 @@ describe("ProcessFlowchart decision branches", () => {
 
     const [, updatedActivities] = onChange.mock.calls.at(-1) as [string[], SopActivity[]];
     expect(updatedActivities[0].decisionBranches?.yesTargetActivityId).toBe("approve");
+  });
+
+  it("marks incomplete decision input with a compact required tooltip", () => {
+    const incomplete = activities.map((activity, index) =>
+      index === 0 ? { ...activity, decisionBranches: undefined } : activity,
+    );
+    render(
+      <ProcessFlowchart
+        roles={[]}
+        activities={incomplete}
+        departments={[]}
+        onChange={() => {}}
+      />,
+    );
+
+    const flag = screen.getByRole("img", { name: /choose a destination or End process/ });
+    expect(flag).toHaveAttribute("title", expect.stringContaining("Required:"));
+    expect(screen.getByRole("tooltip", { hidden: true })).toHaveTextContent(
+      "choose a destination or End process",
+    );
+  });
+
+  it("marks converted decisions whose Yes and No paths are identical", () => {
+    const duplicate = activities.map((activity, index) =>
+      index === 0
+        ? {
+            ...activity,
+            decisionBranches: {
+              yesTargetActivityId: "approve",
+              noTargetActivityId: "approve",
+            },
+          }
+        : activity,
+    );
+    render(
+      <ProcessFlowchart
+        roles={[]}
+        activities={duplicate}
+        departments={[]}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: /Yes and No lead to the same destination/ })).toBeInTheDocument();
   });
 });

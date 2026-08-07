@@ -85,4 +85,46 @@ describe("buildProcedureSvgPages", () => {
     pages.forEach((p) => expect(p.svg).toContain("Process step")); // headers repeat on every page
     expect(pages[1].svg).toContain("continued"); // continuation pages are labelled
   });
+
+  it("renders a labelled cross-page stub and a side terminal for an End branch", () => {
+    const boundary = createEmptySop("boundary", "2026-01-01T00:00:00.000Z");
+    boundary.procedure.activities = [
+      ...Array.from({ length: 6 }, (_, index) => ({
+        id: `before-${index}`,
+        step: index + 1,
+        shape: "process" as const,
+        description: `Prepare item ${index + 1}`,
+        assignments: {},
+      })),
+      {
+        id: "page-end-decision",
+        step: 7,
+        shape: "decision" as const,
+        description: "Has every required condition been reviewed and accepted for release?",
+        decisionBranches: { yesTargetActivityId: "next-page", noTargetActivityId: null },
+        assignments: {},
+      },
+      {
+        id: "next-page",
+        step: 8,
+        shape: "process" as const,
+        description: "Release item",
+        assignments: {},
+      },
+    ];
+
+    const pages = buildProcedureSvgPages(boundary);
+
+    expect(pages).toHaveLength(2);
+    expect(pages[0].svg).toContain("Yes → Step 8");
+    expect(pages[0].svg).toContain('class="decision-branch-stub decision-branch-stub-yes" x="172"');
+    expect(pages[0].svg).not.toContain("No → End");
+    expect(pages[0].svg).toContain(
+      'class="decision-branch decision-branch-no decision-branch-end" data-branch="no" d="M 388',
+    );
+    expect(pages[0].svg).toContain(
+      'class="decision-branch-terminal decision-branch-terminal-no" cx="405"',
+    );
+    expect(pages[0].svg).toContain(">End</text>");
+  });
 });

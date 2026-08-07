@@ -321,6 +321,7 @@ export function SopPrintPreview({
   const previewRootRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [pageScale, setPageScale] = useState(1);
+  const [flowRendererReady, setFlowRendererReady] = useState(false);
   // Block ids already warned about this mount — re-measures (debounced edits,
   // resize) repeat the same overflowing block on every pass otherwise.
   const warnedOverflowBlockIds = useRef<Set<string>>(new Set());
@@ -343,6 +344,12 @@ export function SopPrintPreview({
 
   useEffect(() => () => {
     if (reviewScrollFrame.current !== null) window.cancelAnimationFrame(reviewScrollFrame.current);
+  }, []);
+
+  useEffect(() => {
+    // Procedure-flow text wrapping is measured with a browser canvas. Wait until after hydration
+    // so the server never touches `document` and the server/client page trees stay identical.
+    setFlowRendererReady(true);
   }, []);
 
   useEffect(() => {
@@ -378,8 +385,8 @@ export function SopPrintPreview({
   // This is the same SVG source that Export rasterizes and embeds in the Word document.
   // Reusing it here keeps flowchart shapes, pagination, columns, and RASIC assignments aligned.
   const flowPages = useMemo(
-    () => (sop.procedure.activities.length ? buildProcedureSvgPages(sop) : []),
-    [sop],
+    () => (flowRendererReady && sop.procedure.activities.length ? buildProcedureSvgPages(sop) : []),
+    [flowRendererReady, sop],
   );
   const annexById = useMemo(
     () => new Map(sop.annexes.flatMap((annex) => (annex.id ? [[annex.id, annex] as const] : []))),

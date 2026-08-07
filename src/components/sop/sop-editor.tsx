@@ -20,6 +20,7 @@ import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { draftReviewGate } from "@/domain/sop/review-gate";
 import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc } from "@/domain/sop/schema";
+import { listDecisionBranchRequirements } from "@/domain/sop/procedure-validation";
 import { nextVersionLabel, versionLabel, type ChangeSignificance } from "@/domain/sop/version";
 import { authoringMode, DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
@@ -156,7 +157,7 @@ function stepFilled(sop: Sop, id: StepId): boolean {
           sop.measurements.length ||
           sop.procedure.processFlowDescription ||
           sop.procedure.activities.length,
-      );
+      ) && listDecisionBranchRequirements(sop.procedure.activities).length === 0;
     case "annexes":
       return Boolean(sop.annexes.length || sop.changeHistory.length);
     case "approvals":
@@ -738,6 +739,10 @@ export function SopEditor({
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === steps.length - 1;
   const saveDisabled = !canEdit || !workspaceId || saveStatus === "saving";
+  const decisionBranchRequirements = useMemo(
+    () => listDecisionBranchRequirements(sop.procedure.activities),
+    [sop.procedure.activities],
+  );
   const approvalRoutingReady =
     approvalSeats.length > 0 &&
     approvalSeats.every((seat) => Boolean(seat.signerId)) &&
@@ -1326,6 +1331,11 @@ export function SopEditor({
   // and move the SOP into draft review. Assigned seat holders see it in their review queue.
   async function handleStartApproval() {
     if (submittingForApproval) return;
+    if (decisionBranchRequirements.length > 0) {
+      setStepIndex(CREATOR_STEPS.findIndex((creatorStep) => creatorStep.id === "procedure"));
+      contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     // Single review round: after every reviewer has responded, resubmitting
     // routes to final approval — the remarks must be addressed first.
     if (reviewGate.allResponded && reviewAnnotations.length > 0) {
@@ -2463,11 +2473,11 @@ export function SopEditor({
                         onClick={handleStartApproval}
                         disabled={saveDisabled || submittingForApproval || approvalRoutingLoading || !approvalRoutingReady}
                         title={
-                          approvalRoutingReady
+                          decisionBranchRequirements[0]?.message ?? (approvalRoutingReady
                             ? reviewGate.allResponded
                               ? "The review round is complete — save this draft and send it to the formal approvers for signature"
                               : "Save this draft and send it to every required departmental approver"
-                            : "Assign at least one required departmental approver who is not the SOP author"
+                            : "Assign at least one required departmental approver who is not the SOP author")
                         }
                       >
                         <ShieldCheck size={14} />

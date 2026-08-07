@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { rasicRoleOptions, type Department } from "@/domain/departments";
 import {
@@ -10,6 +10,11 @@ import {
   type SopActivity,
   type SopShape,
 } from "@/domain/sop/schema";
+import {
+  decisionBranchRequirement,
+  type DecisionBranchRequirement,
+  type DecisionOutcome,
+} from "@/domain/sop/procedure-validation";
 import { ThemedSelect, type ThemedSelectOption } from "@/components/themed-select";
 import { AutoTextarea } from "./auto-textarea";
 
@@ -37,7 +42,6 @@ const SHAPE_META: Record<SopShape, { label: string }> = {
 };
 
 const DECISION_END_VALUE = "__end__";
-type DecisionOutcome = "yes" | "no";
 
 function decisionTargetLabel(
   targetActivityId: string | null | undefined,
@@ -49,6 +53,26 @@ function decisionTargetLabel(
   return target
     ? `${target.step}. ${target.description.trim() || "Untitled step"}`
     : "Missing step";
+}
+
+function DecisionRequirementFlag({ requirement }: { requirement: DecisionBranchRequirement }) {
+  return (
+    <span
+      role="img"
+      tabIndex={0}
+      aria-label={requirement.message}
+      title={requirement.message}
+      className="group relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] border border-danger/50 bg-danger-muted text-danger outline-none ring-offset-1 ring-offset-surface focus:ring-2 focus:ring-danger"
+    >
+      <AlertTriangle size={10} strokeWidth={2.5} aria-hidden="true" />
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute right-0 top-5 z-50 hidden w-64 rounded-md border border-danger/30 bg-surface-raised px-2.5 py-2 text-left text-[11px] font-medium leading-4 text-ink shadow-lg group-hover:block group-focus:block"
+      >
+        {requirement.message}
+      </span>
+    </span>
+  );
 }
 
 // Keep the stored 1-based `step` aligned with array order after any structural edit.
@@ -309,15 +333,28 @@ function DecisionBranchSummary({
   activities: SopActivity[];
 }) {
   const branches = activity.decisionBranches;
+  const requirement = decisionBranchRequirement(activity, activities);
   const outcomes: Array<{ label: string; targetActivityId: string | null | undefined }> = [
     { label: "Yes", targetActivityId: branches?.yesTargetActivityId },
     { label: "No", targetActivityId: branches?.noTargetActivityId },
   ];
 
   return (
-    <div className="mx-auto mt-1.5 grid max-w-[280px] grid-cols-2 gap-1.5">
+    <div className="relative mx-auto mt-1.5 grid max-w-[280px] grid-cols-2 gap-1.5">
+      {requirement ? (
+        <div className="absolute right-0 top-0 z-10 -translate-y-1/2 translate-x-1/2">
+          <DecisionRequirementFlag requirement={requirement} />
+        </div>
+      ) : null}
       {outcomes.map(({ label, targetActivityId }) => (
-        <div key={label} className="min-w-0 rounded-md border border-line bg-surface-muted px-2 py-1.5 text-left">
+        <div
+          key={label}
+          className={`min-w-0 rounded-md border bg-surface-muted px-2 py-1.5 text-left ${
+            requirement?.affectedOutcomes.includes(label.toLowerCase() as DecisionOutcome)
+              ? "border-danger/40"
+              : "border-line"
+          }`}
+        >
           <span className="ui-mono-label text-[9px] text-ink-tertiary">{label} →</span>
           <p className="mt-0.5 text-[10px] leading-3 text-ink">
             {decisionTargetLabel(targetActivityId, activities)}
@@ -449,6 +486,7 @@ function MatrixView({
         </thead>
         <tbody>
           {activities.map((activity, index) => {
+            const branchRequirement = decisionBranchRequirement(activity, activities);
             const decisionTargetOptions: ThemedSelectOption[] = [
               { value: "", label: "Select destination" },
               { value: DECISION_END_VALUE, label: "End process" },
@@ -521,7 +559,15 @@ function MatrixView({
                   />
                 </div>
                 {activity.shape === "decision" ? (
-                  <div className="mt-1.5 space-y-1.5 rounded-md border border-line bg-surface-muted p-1.5">
+                  <div
+                    className={`mt-1.5 space-y-1.5 rounded-md border bg-surface-muted p-1.5 ${
+                      branchRequirement ? "border-danger/35" : "border-line"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 px-0.5">
+                      <span className="ui-mono-label text-[9px] text-ink-tertiary">Decision branches</span>
+                      {branchRequirement ? <DecisionRequirementFlag requirement={branchRequirement} /> : null}
+                    </div>
                     {(["yes", "no"] as const).map((outcome) => {
                       const targetActivityId =
                         outcome === "yes"
@@ -531,6 +577,7 @@ function MatrixView({
                         targetActivityId === null
                           ? DECISION_END_VALUE
                           : targetActivityId ?? "";
+                      const needsAttention = branchRequirement?.affectedOutcomes.includes(outcome) ?? false;
                       return (
                         <div
                           key={outcome}
@@ -542,7 +589,7 @@ function MatrixView({
                           <ThemedSelect
                             variant="sop"
                             className="min-w-0"
-                            triggerClassName="ui-sop-select-compact"
+                            triggerClassName={`ui-sop-select-compact ${needsAttention ? "!border-danger/50" : ""}`}
                             ariaLabel={`${outcome === "yes" ? "Yes" : "No"} branch destination for activity ${index + 1}`}
                             value={value}
                             selectedLabel={decisionTargetLabel(targetActivityId, activities)}

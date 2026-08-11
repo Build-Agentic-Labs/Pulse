@@ -394,6 +394,7 @@ export function SopList({
 
       const body = new FormData();
       body.append("file", file);
+      body.append("workspaceId", workspaceId);
       const response = await fetch("/api/sops/extract", {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}` },

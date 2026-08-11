@@ -163,12 +163,8 @@ export function SopWorkspaceProvider({
       setMessage("");
 
       try {
-        const [nextGroups, nextOrgToolAccess] = await Promise.all([
-          ensureDefaultWorkspaceMembership(),
-          fetchOrgToolAccess(supabase).catch(() => "none" as const),
-        ]);
+        const nextGroups = await ensureDefaultWorkspaceMembership();
         setGroups(nextGroups);
-        setOrgToolAccess(nextOrgToolAccess);
         setWorkspaceIdState((current) => {
           // Keep a still-valid current selection across re-hydrations; otherwise re-pick.
           if (current && nextGroups.some((group) => group.workspace.id === current)) {
@@ -182,7 +178,7 @@ export function SopWorkspaceProvider({
         setStatus("error");
       }
     },
-    [supabase],
+    [],
   );
 
   useEffect(() => {
@@ -236,6 +232,7 @@ export function SopWorkspaceProvider({
   }, [refreshWorkspaces, supabase]);
 
   const setWorkspaceId = useCallback((nextId: string) => {
+    setOrgToolAccess(undefined);
     setWorkspaceIdState(nextId);
     writeStoredWorkspaceId(nextId);
   }, []);
@@ -247,6 +244,29 @@ export function SopWorkspaceProvider({
       writeWorkspaceCookie(workspaceId);
     }
   }, [workspaceId]);
+
+  // Quality access is organization-scoped. Re-read it whenever the selected
+  // organization changes so a grant in one organization never leaks into another.
+  useEffect(() => {
+    let active = true;
+    if (!workspaceId) {
+      setOrgToolAccess(undefined);
+      return;
+    }
+
+    setOrgToolAccess(undefined);
+    void fetchOrgToolAccess(workspaceId, supabase)
+      .then((level) => {
+        if (active) setOrgToolAccess(level);
+      })
+      .catch(() => {
+        if (active) setOrgToolAccess("none");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [supabase, workspaceId]);
 
   const role = useMemo(
     () => groups.find((group) => group.workspace.id === workspaceId)?.role,

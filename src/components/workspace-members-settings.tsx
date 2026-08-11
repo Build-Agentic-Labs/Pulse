@@ -1,10 +1,10 @@
 "use client";
 
 import { formatDate } from "@/domain/formatting";
-import { ChevronRight, MailPlus, Plus, RotateCw, Search, ShieldCheck,Trash2, UserMinus } from "lucide-react";
+import { ChevronRight, MailPlus, RotateCw, Search, ShieldCheck, Trash2, UserMinus } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ThemedSelect } from "@/components/themed-select";
-import { SIGNUP_DOMAIN_MESSAGE, isAllowedSignupEmail } from "@/lib/allowed-signup-domain";
+import { WorkspaceInviteComposer } from "@/components/workspace-invite-composer";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import {
   createPlannerSupabaseClient,
@@ -27,7 +27,14 @@ import type {
   WorkspaceRole,
 } from "@/domain/types";
 import { grantSpaceAccess, listSpaceAccess, revokeSpaceAccess, type SpaceAccessRow } from "@/lib/planning/store";
-import { qualityModuleAccessForRole, qualityModuleAccessLabel } from "@/domain/workspace/invite";
+import { listDepartments } from "@/lib/departments/store";
+import type { Department } from "@/domain/departments";
+import {
+  compactInviteEntitlementSummary,
+  entitlementsFromWorkspaceAccessGrant,
+  organizationRoleLabel,
+  type WorkspaceInviteEntitlements,
+} from "@/domain/workspace/invite-access";
 
 // Local copies of the settings primitives (kept here to avoid a circular import with
 // app-settings-panel, which imports this component).
@@ -61,32 +68,16 @@ const accessLevelOptions: Array<{ value: AccessLevel; label: string }> = [
 
 const ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
   owner: "Full control: members, roles, owners, and organization settings.",
-  admin: "Manages members, invites, and every project. Cannot manage owners.",
-  editor: "Edits the projects they've been granted Edit access to.",
-  viewer: "Read-only on the projects they've been granted View access to.",
+  admin: "Manages members and automatically has full module and project access.",
+  editor: "Uses only the modules, projects, and SOP duties explicitly assigned.",
+  viewer: "Uses only the modules, projects, and SOP duties explicitly assigned.",
 };
 
-const QUALITY_INVITE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
-  viewer: "Views Quality Module SOPs and controlled documents without editing.",
-  editor: "Creates and edits Quality Module SOPs and controlled documents.",
-  admin: "Manages members and has full Quality Module and project access.",
-  owner: "Full organization control, including Quality Module access and ownership.",
-};
-
-const workspaceRoleOptions: Array<{ value: WorkspaceRole; label: string; description: string }> = (
-  ["viewer", "editor", "admin", "owner"] as const
-).map((role) => ({
-  value: role,
-  label: role.charAt(0).toUpperCase() + role.slice(1),
-  description: ROLE_DESCRIPTIONS[role],
-}));
-
-const qualityInviteRoleOptions = workspaceRoleOptions
-  .filter((option) => option.value === "viewer" || option.value === "editor")
-  .map((option) => ({
-    ...option,
-    description: QUALITY_INVITE_DESCRIPTIONS[option.value],
-  }));
+const workspaceRoleOptions: Array<{ value: WorkspaceRole; label: string; description: string }> = [
+  { value: "editor", label: "Member", description: ROLE_DESCRIPTIONS.editor },
+  { value: "admin", label: "Admin", description: ROLE_DESCRIPTIONS.admin },
+  { value: "owner", label: "Owner", description: ROLE_DESCRIPTIONS.owner },
+];
 
 function isManagerRole(role?: WorkspaceRole) {
   return role === "owner" || role === "admin";
@@ -108,13 +99,12 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [members, setMembers] = useState<MemberAccess[]>([]);
   const [grants, setGrants] = useState<WorkspaceAccessGrant[]>([]);
   const [spaceAccess, setSpaceAccess] = useState<SpaceAccessRow[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>();
   const [search, setSearch] = useState("");
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<WorkspaceRole>("editor");
   // Two-step confirmation targets for destructive actions.
   const [confirmRemoveUserId, setConfirmRemoveUserId] = useState<string>();
   const [confirmCancelEmail, setConfirmCancelEmail] = useState<string>();
@@ -153,14 +143,16 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
       setWorkspaceId(group.workspace.id);
       setProjects(group.projects);
 
-      const [nextMembers, nextGrants, nextSpaceAccess] = await Promise.all([
+      const [nextMembers, nextGrants, nextSpaceAccess, nextDepartments] = await Promise.all([
         loadMembersAccessForWorkspace(group.workspace.id),
         loadWorkspaceAccessGrantsFromSupabase(group.workspace.id).catch(() => []),
         listSpaceAccess(group.workspace.id).catch(() => []),
+        listDepartments(group.workspace.id).catch(() => []),
       ]);
       setMembers(nextMembers);
       setGrants(nextGrants);
       setSpaceAccess(nextSpaceAccess);
+      setDepartments(nextDepartments);
       setStatus("ready");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load members.");
@@ -194,7 +186,8 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
       current.map((member) => (member.userId === userId ? { ...member, orgTools: level } : member)),
     );
     try {
-      await setOrgToolAccessInSupabase(userId, level);
+      if (!workspaceId) return;
+      await setOrgToolAccessInSupabase(workspaceId, userId, level);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to update Quality Module access.");
       await load();
@@ -239,7 +232,10 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
 
   // Writes the grant and asks the server to send the invitation email. Falls back to a
   // grant-only write when the API route is unreachable, and says so honestly.
-  async function sendInvite(email: string, role: WorkspaceRole): Promise<InviteResult> {
+  async function sendInvite(
+    email: string,
+    entitlements: WorkspaceInviteEntitlements,
+  ): Promise<InviteResult> {
     if (!workspaceId) {
       return { text: "Select an organization first.", tone: "error" };
     }
@@ -255,10 +251,10 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
       response = await fetch("/api/invites", {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId, email, role }),
+        body: JSON.stringify({ workspaceId, email, ...entitlements }),
       });
     } catch {
-      await upsertWorkspaceAccessGrantInSupabase(workspaceId, email, role);
+      await upsertWorkspaceAccessGrantInSupabase(workspaceId, email, entitlements);
       return {
         text: `Access granted for ${email}, but the invitation email could not be sent — ask them to sign in with this address.`,
         tone: "info",
@@ -288,28 +284,21 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     };
   }
 
-  async function invite(email = inviteEmail, role = inviteRole) {
+  async function invite(email: string, entitlements: WorkspaceInviteEntitlements): Promise<boolean> {
     const normalized = email.trim().toLowerCase();
-    if (!normalized) {
-      setMessage("Add a work email first.");
-      return;
-    }
-    if (!isAllowedSignupEmail(normalized)) {
-      setMessage(SIGNUP_DOMAIN_MESSAGE);
-      return;
-    }
 
     setIsSubmitting(true);
     setMessage("");
     try {
-      const result = await sendInvite(normalized, role);
+      const result = await sendInvite(normalized, entitlements);
       if (result.tone === "info") {
-        setInviteEmail("");
         await load();
       }
       setMessage(result.text);
+      return result.tone === "info";
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to invite user.");
+      return false;
     } finally {
       setIsSubmitting(false);
     }
@@ -389,12 +378,12 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
   const pendingGrants = grants.filter(
     (grant) => !grant.redeemedAt && (!query || grant.email.toLowerCase().includes(query)),
   );
-  const selectedIsOwner = selected?.role === "owner";
-  // Mirrors the DB role ceiling: admins cannot touch owner rows or mint owners.
-  const canEditSelectedRole = Boolean(selected && !selected.isSelf && (callerIsOwner || !selectedIsOwner));
+  const selectedIsManager = isManagerRole(selected?.role);
+  // Ownership controls elevation: admins may manage Member access but cannot mint or demote managers.
+  const canEditSelectedRole = Boolean(selected && !selected.isSelf && (callerIsOwner || !selectedIsManager));
   const roleOptionsForSelected = callerIsOwner
     ? workspaceRoleOptions
-    : workspaceRoleOptions.filter((option) => option.value !== "owner");
+    : workspaceRoleOptions.filter((option) => option.value === "editor");
 
   return (
     <>
@@ -435,8 +424,8 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                       {member.isSelf ? " (you)" : ""}
                     </div>
                     <div className="ui-settings-group-row-desc">
-                      <span className="capitalize" title={ROLE_DESCRIPTIONS[member.role]}>
-                        {member.role}
+                      <span title={ROLE_DESCRIPTIONS[member.role]}>
+                        {organizationRoleLabel(member.role)}
                       </span>
                       {manager ? " · full access" : ""}
                       {member.email ? ` · ${member.email}` : ""}
@@ -466,9 +455,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                       <span className="ui-chip shrink-0">{expired ? "Expired" : "Pending"}</span>
                     </div>
                     <div className="ui-settings-group-row-desc">
-                      <span title={QUALITY_INVITE_DESCRIPTIONS[grant.role]}>
-                        Quality Module · {qualityModuleAccessLabel(grant.qualityAccess)}
-                      </span>
+                      <span>{compactInviteEntitlementSummary(entitlementsFromWorkspaceAccessGrant(grant))}</span>
                       {expires ? ` · ${expired ? "expired" : "expires"} ${expires}` : ""}
                     </div>
                   </div>
@@ -497,7 +484,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                         <button
                           type="button"
                           className="ui-btn-ghost h-7 w-7 shrink-0 px-0 disabled:opacity-50"
-                          onClick={() => void invite(grant.email, grant.role)}
+                          onClick={() => void invite(grant.email, entitlementsFromWorkspaceAccessGrant(grant))}
                           disabled={isSubmitting}
                           title="Resend invite (refreshes the 30-day expiry)"
                         >
@@ -531,22 +518,23 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
           title={`Access · ${memberLabel(selected)}`}
           description={
             isManagerRole(selected.role)
-              ? "Owners and admins automatically have full access to every project and the Quality Module."
-              : "Set this member's access to each project and the Quality Module."
+              ? "Owners and admins automatically have full module and project access."
+              : "Set this Member's module and project access. SOP workflow duties remain department-specific."
           }
         >
-          <Row label="Role" description={ROLE_DESCRIPTIONS[selected.role]}>
+          <Row label="Organization role" description={ROLE_DESCRIPTIONS[selected.role]}>
             {canEditSelectedRole ? (
               <ThemedSelect
                 triggerClassName="h-9 px-3"
                 value={selected.role}
                 options={roleOptionsForSelected}
+                selectedLabel={organizationRoleLabel(selected.role)}
                 onChange={(value) => void changeMemberRole(selected.userId, value as WorkspaceRole)}
                 disabled={isSubmitting}
               />
             ) : (
-              <span className="ui-settings-group-row-value capitalize">
-                {selected.role}
+              <span className="ui-settings-group-row-value">
+                {organizationRoleLabel(selected.role)}
                 {selected.isSelf ? " (you)" : ""}
               </span>
             )}
@@ -570,7 +558,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
           {isManagerRole(selected.role) ? (
             <div className="flex items-center gap-2 p-3.5 ui-settings-group-row-value">
               <ShieldCheck size={14} className="text-ink-tertiary" />
-              Full access to all projects and the Quality Module (manager role).
+              Full module and project access (organization role).
             </div>
           ) : (
             <>
@@ -597,7 +585,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
             </>
           )}
 
-          {!selected.isSelf && (callerIsOwner || !selectedIsOwner) ? (
+          {!selected.isSelf && (callerIsOwner || !selectedIsManager) ? (
             <div className="flex items-center justify-between gap-2 p-3.5">
               {confirmRemoveUserId === selected.userId ? (
                 <>
@@ -641,49 +629,15 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
 
       <Block
         title="Invite a user"
-        description="Anacorp work emails only. Choose their Quality Module access; they'll receive an email to create a password and sign in."
+        description="Anacorp work emails only. Configure organization, resource, project, and SOP workflow access before sending."
       >
-        <div className="space-y-2 p-3.5">
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_170px_140px_auto]">
-            <input
-              className="ui-field-standalone h-9 px-3"
-              type="email"
-              aria-label="Invite email"
-              placeholder="name@anacorp.com"
-              value={inviteEmail}
-              onChange={(event) => setInviteEmail(event.target.value)}
-              disabled={isSubmitting}
-            />
-            <input
-              className="ui-field-standalone h-9 px-3 text-ink-secondary"
-              aria-label="Module"
-              value="Quality Module"
-              readOnly
-              disabled={isSubmitting}
-            />
-            <ThemedSelect
-              triggerClassName="h-9 px-3"
-              ariaLabel="Quality Module access type"
-              value={inviteRole}
-              options={qualityInviteRoleOptions}
-              selectedLabel={qualityModuleAccessLabel(qualityModuleAccessForRole(inviteRole))}
-              onChange={(value) => setInviteRole(value as WorkspaceRole)}
-              disabled={isSubmitting}
-            />
-            <button
-              type="button"
-              className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-50"
-              onClick={() => void invite()}
-              disabled={isSubmitting}
-            >
-              <Plus size={13} />
-              Invite
-            </button>
-          </div>
-          <p className="ui-settings-group-row-desc">
-            {QUALITY_INVITE_DESCRIPTIONS[inviteRole]}
-          </p>
-        </div>
+        <WorkspaceInviteComposer
+          callerIsOwner={callerIsOwner}
+          departments={departments}
+          isSubmitting={isSubmitting}
+          onSubmit={invite}
+          projects={projects}
+        />
       </Block>
     </>
   );

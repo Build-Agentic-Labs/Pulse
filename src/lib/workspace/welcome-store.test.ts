@@ -21,6 +21,8 @@ function makeAdmin(results: Record<string, Result>, capture?: { updates: { table
       },
       lt: () => builder,
       in: () => builder,
+      gte: () => builder,
+      order: () => builder,
       eq: (col: string, val: unknown) => {
         guards[col] = val;
         return builder;
@@ -37,6 +39,39 @@ function makeAdmin(results: Record<string, Result>, capture?: { updates: { table
 }
 
 const origin = "https://pulse.example.com";
+
+describe("createWorkspaceWelcomeDrainStore.collect", () => {
+  it("does not queue a second welcome when an invite redemption created the membership", async () => {
+    const recipientId = "5f9d2f6e-1c1a-4b7e-9d3e-2a6b8c0d4e1f";
+    const createdAt = "2026-08-11T12:00:00.000Z";
+    const admin = makeAdmin({
+      audit_log: {
+        data: [
+          {
+            id: 7,
+            action: "workspace_members.insert",
+            workspace_id: "ws-1",
+            target_id: recipientId,
+            actor_id: recipientId,
+            created_at: createdAt,
+          },
+        ],
+        error: null,
+      },
+      workspace_notifications: { data: [], error: null },
+      workspaces: { data: [{ id: "ws-1", name: "Anacorp" }], error: null },
+      workspace_members: { data: [{ workspace_id: "ws-1", user_id: recipientId }], error: null },
+      profiles: { data: [{ id: recipientId, full_name: "Invitee", email: "invitee@anacorp.com" }], error: null },
+      workspace_access_grants: {
+        data: [{ workspace_id: "ws-1", redeemed_by: recipientId, redeemed_at: createdAt }],
+        error: null,
+      },
+    });
+
+    const store = createWorkspaceWelcomeDrainStore(admin);
+    expect((await store.collect(new Date("2026-08-11T12:01:00.000Z"), origin)).items).toEqual([]);
+  });
+});
 
 describe("createWorkspaceWelcomeDrainStore.retryItems", () => {
   const now = new Date("2026-07-21T12:00:00Z");

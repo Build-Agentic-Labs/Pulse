@@ -43,3 +43,48 @@
 - None required for this selected treatment.
 
 final result: passed
+
+---
+
+# Invitation access implementation QA
+
+## Visual source
+
+- Approved access-model board: `/Users/rosendolopez/.codex/visualizations/2026/08/11/pulse-invite-audit/figjam-board.png`
+- Board flow implemented: Person → Organization role → Access package → Resources & scope → Review & send.
+
+## Implementation captures
+
+- Final review state at the reference desktop viewport: `.qa/invite-review-final.png`
+- Responsive resources-and-scope state: `.qa/invite-resources-responsive.png`
+
+## Visual comparison
+
+- Compared the approved board and the final review capture together at the same desktop viewport.
+- The implementation preserves the existing Pulse settings shell, typography, neutral palette, border treatment, spacing, and compact controls.
+- The five approved stages are visible in the same order and clearly distinguish completed, current, and future steps.
+- The final state uses the requested plain-language access summary and keeps the primary send action visually distinct.
+- The resources state remains readable without horizontal page overflow; long resource lists stay in normal document flow.
+
+## Interaction verification
+
+- Opened the composer from Organization settings.
+- Confirmed invalid work email validation blocks progress.
+- Selected Member organization access.
+- Applied the Industrial Engineer package.
+- Confirmed the preset grants Quality Edit, Planning, Process Engineering Create, and the Industrial Engineer job title.
+- Confirmed Admin review states show one unambiguous `Modules and projects: Full access` summary instead of contradictory per-module rows.
+- Reached Review & send and confirmed the send button is enabled.
+- Did not submit the QA invitation, so no email or pending member was created.
+- Confirmed zero new browser console errors during the final end-to-end pass.
+
+## Automated verification
+
+- TypeScript typecheck passed.
+- ESLint passed with zero warnings.
+- Production build passed.
+- Full Vitest suite passed: 102 files, 905 tests.
+- Migration applied transactionally with 56 table row counts unchanged; six policies, three functions, and two smoke calls verified.
+- Quality grants were re-keyed from global user access to `(workspace_id, user_id)` with four rows preserved, zero unscoped rows, and no synthetic audit events.
+
+final result: passed

@@ -48,6 +48,7 @@ describe("resolveWorkspaceWelcome", () => {
   it("resolves to a pending welcome for a current member", () => {
     const pending = resolveWorkspaceWelcome(event, {
       isStillMember: true,
+      wasInvited: false,
       workspaceName: "Anacorp",
       actorName: "Rosendo Lopez",
     });
@@ -61,10 +62,26 @@ describe("resolveWorkspaceWelcome", () => {
 
   it("self-cancels when the member was removed or the workspace is gone", () => {
     expect(
-      resolveWorkspaceWelcome(event, { isStillMember: false, workspaceName: "Anacorp", actorName: null }),
+      resolveWorkspaceWelcome(event, {
+        isStillMember: false,
+        wasInvited: false,
+        workspaceName: "Anacorp",
+        actorName: null,
+      }),
     ).toBeNull();
     expect(
-      resolveWorkspaceWelcome(event, { isStillMember: true, workspaceName: null, actorName: null }),
+      resolveWorkspaceWelcome(event, { isStillMember: true, wasInvited: false, workspaceName: null, actorName: null }),
+    ).toBeNull();
+  });
+
+  it("suppresses the generic welcome after the dedicated invitation email", () => {
+    expect(
+      resolveWorkspaceWelcome(event, {
+        isStillMember: true,
+        wasInvited: true,
+        workspaceName: "Anacorp",
+        actorName: "Rosendo Lopez",
+      }),
     ).toBeNull();
   });
 });

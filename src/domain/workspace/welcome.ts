@@ -51,6 +51,8 @@ export function parseMemberAddedEvent(row: {
 export interface WorkspaceWelcomeContext {
   /** Recipient is still in workspace_members for this workspace at drain time. */
   isStillMember: boolean;
+  /** A dedicated invitation email already covered this membership event. */
+  wasInvited: boolean;
   /** Null when the workspace no longer exists. */
   workspaceName: string | null;
   actorName: string | null;
@@ -63,12 +65,12 @@ export interface WorkspaceWelcomePending {
   eventId: number;
 }
 
-/** Skip-unless-now: a welcome to someone already removed (or to a deleted workspace) is noise. */
+/** Skip stale memberships and invite redemptions that already received the invitation email. */
 export function resolveWorkspaceWelcome(
   event: MemberAddedEvent,
   ctx: WorkspaceWelcomeContext,
 ): WorkspaceWelcomePending | null {
-  if (!ctx.isStillMember || !ctx.workspaceName) return null;
+  if (!ctx.isStillMember || ctx.wasInvited || !ctx.workspaceName) return null;
   return {
     recipientId: event.recipientId,
     kind: "workspace_welcome",

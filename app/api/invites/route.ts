@@ -1,20 +1,31 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { renderQualityModuleInviteEmail } from "@/domain/workspace/invite-email";
+import { renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
-import type { Database } from "@/lib/database.types";
+import type { Database, Json } from "@/lib/database.types";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import {
-  qualityModuleAccessForRole,
-  qualityModuleAccessLabel,
   qualityModuleInviteRedirect,
 } from "@/domain/workspace/invite";
+import {
+  describeInviteEntitlements,
+  normalizedInviteEntitlements,
+  workspaceRoleForOrganizationRole,
+  type InviteAccessPackage,
+  type InviteDepartmentAccess,
+  type InviteProjectAccess,
+  type OrganizationInviteRole,
+  type WorkspaceInviteEntitlements,
+} from "@/domain/workspace/invite-access";
 import { createResendSender } from "@/lib/sop/notifications-drain";
+import { normalizeJobTitle } from "@/domain/departments";
 
 export const dynamic = "force-dynamic";
 
-const WORKSPACE_ROLES = ["owner", "admin", "editor", "viewer"] as const;
-type InviteRole = (typeof WORKSPACE_ROLES)[number];
+const ORGANIZATION_ROLES = ["member", "admin"] as const;
+const ACCESS_PACKAGES = ["custom", "industrial_engineer", "quality_reviewer", "planner", "production_operator"] as const;
+const ACCESS_LEVELS = ["none", "view", "edit"] as const;
+const DEPARTMENT_ROLES = ["author", "reviewer", "approver"] as const;
 
 const checkRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 20 });
 
@@ -39,7 +50,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Too many invites — try again in a minute." }, { status: 429 });
   }
 
-  let body: { workspaceId?: string; email?: string; role?: string };
+  let body: {
+    workspaceId?: string;
+    email?: string;
+    organizationRole?: string;
+    accessPackage?: string;
+    qualityAccess?: string;
+    planningAccess?: boolean;
+    projectAccess?: unknown;
+    departmentAccess?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -48,10 +68,47 @@ export async function POST(request: Request) {
 
   const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const role = WORKSPACE_ROLES.includes(body.role as InviteRole) ? (body.role as InviteRole) : null;
+  const organizationRole = ORGANIZATION_ROLES.includes(body.organizationRole as OrganizationInviteRole)
+    ? (body.organizationRole as OrganizationInviteRole)
+    : null;
+  const accessPackage = ACCESS_PACKAGES.includes(body.accessPackage as InviteAccessPackage)
+    ? (body.accessPackage as InviteAccessPackage)
+    : "custom";
+  const qualityAccess = ACCESS_LEVELS.includes(body.qualityAccess as (typeof ACCESS_LEVELS)[number])
+    ? (body.qualityAccess as WorkspaceInviteEntitlements["qualityAccess"])
+    : null;
+  const planningAccess = body.planningAccess === true;
+  const rawProjectAccess = Array.isArray(body.projectAccess) ? body.projectAccess : [];
+  const rawDepartmentAccess = Array.isArray(body.departmentAccess) ? body.departmentAccess : [];
+  const projectAccess: InviteProjectAccess[] = rawProjectAccess.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const row = value as Record<string, unknown>;
+    const projectId = typeof row.projectId === "string" ? row.projectId.trim() : "";
+    const level = row.level === "view" || row.level === "edit" ? row.level : null;
+    return projectId && level ? [{ projectId, level }] : [];
+  });
+  const departmentAccess: InviteDepartmentAccess[] = rawDepartmentAccess.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const row = value as Record<string, unknown>;
+    const departmentId = typeof row.departmentId === "string" ? row.departmentId.trim() : "";
+    const role = DEPARTMENT_ROLES.includes(row.role as InviteDepartmentAccess["role"])
+      ? (row.role as InviteDepartmentAccess["role"])
+      : null;
+    const positionTitle = typeof row.positionTitle === "string" ? normalizeJobTitle(row.positionTitle) : null;
+    return departmentId && role && positionTitle ? [{ departmentId, role, positionTitle }] : [];
+  });
 
-  if (!workspaceId || !email || !role) {
-    return NextResponse.json({ error: "workspaceId, email, and role are required." }, { status: 400 });
+  if (!workspaceId || !email || !organizationRole || !qualityAccess) {
+    return NextResponse.json(
+      { error: "workspaceId, email, organizationRole, and qualityAccess are required." },
+      { status: 400 },
+    );
+  }
+  if (rawProjectAccess.length !== projectAccess.length || rawDepartmentAccess.length !== departmentAccess.length) {
+    return NextResponse.json({ error: "One or more access selections are invalid." }, { status: 400 });
+  }
+  if (projectAccess.length > 100 || departmentAccess.length > 100) {
+    return NextResponse.json({ error: "Too many access selections in one invitation." }, { status: 400 });
   }
 
   if (!isAllowedSignupEmail(email)) {
@@ -72,6 +129,51 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Only owners and admins can invite members." }, { status: 403 });
   }
 
+  if (organizationRole === "admin") {
+    const { data: isOwner, error: ownerError } = await supabase.rpc("has_workspace_role", {
+      target_workspace_id: workspaceId,
+      allowed_roles: ["owner"],
+    });
+    if (ownerError) {
+      return NextResponse.json({ error: ownerError.message }, { status: 500 });
+    }
+    if (isOwner !== true) {
+      return NextResponse.json({ error: "Only an owner can invite another admin." }, { status: 403 });
+    }
+  }
+
+  const uniqueProjectIds = [...new Set(projectAccess.map((grant) => grant.projectId))];
+  const uniqueDepartmentIds = [...new Set(departmentAccess.map((grant) => grant.departmentId))];
+  if (uniqueProjectIds.length !== projectAccess.length || uniqueDepartmentIds.length !== departmentAccess.length) {
+    return NextResponse.json({ error: "Each resource can only be selected once." }, { status: 400 });
+  }
+
+  const [workspaceResult, projectsResult, departmentsResult] = await Promise.all([
+    supabase.from("workspaces").select("name").eq("id", workspaceId).maybeSingle(),
+    uniqueProjectIds.length
+      ? supabase.from("projects").select("id,name").eq("workspace_id", workspaceId).in("id", uniqueProjectIds)
+      : Promise.resolve({ data: [], error: null }),
+    uniqueDepartmentIds.length
+      ? supabase.from("departments").select("id,name").eq("workspace_id", workspaceId).in("id", uniqueDepartmentIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  const lookupError = workspaceResult.error ?? projectsResult.error ?? departmentsResult.error;
+  if (lookupError) {
+    return NextResponse.json({ error: lookupError.message }, { status: 500 });
+  }
+  if ((projectsResult.data?.length ?? 0) !== uniqueProjectIds.length || (departmentsResult.data?.length ?? 0) !== uniqueDepartmentIds.length) {
+    return NextResponse.json({ error: "A selected resource does not belong to this organization." }, { status: 400 });
+  }
+
+  const entitlements = normalizedInviteEntitlements({
+    organizationRole,
+    accessPackage,
+    qualityAccess,
+    planningAccess,
+    projectAccess,
+    departmentAccess,
+  });
+
   // Lift any prior revocation so the grant can mint a membership again (managers may
   // delete revocations under RLS; ignore "table missing" pre-migration).
   const { error: revocationError } = await supabase
@@ -83,13 +185,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: revocationError.message }, { status: 500 });
   }
 
-  const qualityAccess = qualityModuleAccessForRole(role);
   const { error: grantError } = await supabase.from("workspace_access_grants").upsert(
     {
       workspace_id: workspaceId,
       email,
-      role,
-      quality_access: qualityAccess,
+      role: workspaceRoleForOrganizationRole(entitlements.organizationRole),
+      quality_access: entitlements.qualityAccess,
+      access_package: entitlements.accessPackage,
+      planning_access: entitlements.planningAccess,
+      project_access: entitlements.projectAccess.map((grant) => ({
+        project_id: grant.projectId,
+        level: grant.level,
+      })) as Json,
+      department_access: entitlements.departmentAccess.map((grant) => ({
+        department_id: grant.departmentId,
+        role: grant.role,
+        position_title: grant.positionTitle,
+      })) as Json,
       granted_by: auth.userId,
       expires_at: new Date(Date.now() + GRANT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString(),
       redeemed_by: null,
@@ -139,12 +251,15 @@ export async function POST(request: Request) {
     if (!linkError && linkData.properties?.action_link) {
       try {
         const send = createResendSender(resendApiKey, resendFrom);
+        const projectNames = new Map((projectsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
+        const departmentNames = new Map((departmentsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
         const result = await send(
           email,
-          renderQualityModuleInviteEmail({
+          renderWorkspaceInviteEmail({
             actionLink: linkData.properties.action_link,
-            accessLabel: qualityModuleAccessLabel(qualityAccess),
+            accessSummary: describeInviteEntitlements(entitlements, projectNames, departmentNames),
             email,
+            organizationName: workspaceResult.data?.name ?? "your organization",
             origin: new URL(redirectTo).origin,
           }),
         );

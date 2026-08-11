@@ -453,6 +453,7 @@ export type Database = {
           level: Database["public"]["Enums"]["access_level"]
           updated_at: string
           user_id: string
+          workspace_id: string
         }
         Insert: {
           created_at?: string
@@ -460,6 +461,7 @@ export type Database = {
           level?: Database["public"]["Enums"]["access_level"]
           updated_at?: string
           user_id: string
+          workspace_id: string
         }
         Update: {
           created_at?: string
@@ -467,8 +469,17 @@ export type Database = {
           level?: Database["public"]["Enums"]["access_level"]
           updated_at?: string
           user_id?: string
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "org_tool_access_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       part_references: {
         Row: {
@@ -2793,11 +2804,15 @@ export type Database = {
       }
       workspace_access_grants: {
         Row: {
+          access_package: string
           created_at: string
+          department_access: Json
           email: string
           expires_at: string
           granted_by: string | null
           modules: string[] | null
+          planning_access: boolean
+          project_access: Json
           quality_access: Database["public"]["Enums"]["access_level"]
           redeemed_at: string | null
           redeemed_by: string | null
@@ -2806,11 +2821,15 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          access_package?: string
           created_at?: string
+          department_access?: Json
           email: string
           expires_at?: string
           granted_by?: string | null
           modules?: string[] | null
+          planning_access?: boolean
+          project_access?: Json
           quality_access?: Database["public"]["Enums"]["access_level"]
           redeemed_at?: string | null
           redeemed_by?: string | null
@@ -2819,11 +2838,15 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          access_package?: string
           created_at?: string
+          department_access?: Json
           email?: string
           expires_at?: string
           granted_by?: string | null
           modules?: string[] | null
+          planning_access?: boolean
+          project_access?: Json
           quality_access?: Database["public"]["Enums"]["access_level"]
           redeemed_at?: string | null
           redeemed_by?: string | null

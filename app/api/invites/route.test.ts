@@ -33,19 +33,27 @@ vi.mock("@/lib/sop/notifications-drain", () => ({
 
 import { POST } from "./route";
 
-function inviteRequest() {
+function inviteRequest(overrides: Record<string, unknown> = {}) {
   return new Request("http://localhost:3000/api/invites", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       workspaceId: "workspace-1",
       email: " First.User@anacorp.com ",
-      role: "editor",
+      organizationRole: "member",
+      accessPackage: "industrial_engineer",
+      qualityAccess: "edit",
+      planningAccess: true,
+      projectAccess: [{ projectId: "project-1", level: "edit" }],
+      departmentAccess: [
+        { departmentId: "department-1", role: "author", positionTitle: "Industrial Engineer" },
+      ],
+      ...overrides,
     }),
   });
 }
 
-describe("Quality Module invite route", () => {
+describe("workspace invite route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
@@ -66,15 +74,50 @@ describe("Quality Module invite route", () => {
         return Promise.resolve({ error: null }).then(resolve);
       },
     };
+    const workspaceQuery = {
+      select() {
+        return this;
+      },
+      eq() {
+        return this;
+      },
+      maybeSingle() {
+        return Promise.resolve({ data: { name: "ANA Corp" }, error: null });
+      },
+    };
+    const projectsQuery = {
+      select() {
+        return this;
+      },
+      eq() {
+        return this;
+      },
+      in() {
+        return Promise.resolve({ data: [{ id: "project-1", name: "FlexBoost" }], error: null });
+      },
+    };
+    const departmentsQuery = {
+      select() {
+        return this;
+      },
+      eq() {
+        return this;
+      },
+      in() {
+        return Promise.resolve({ data: [{ id: "department-1", name: "Process Engineering" }], error: null });
+      },
+    };
     mocks.grantUpsert.mockResolvedValue({ error: null });
-    mocks.from.mockImplementation((table: string) =>
-      table === "workspace_revocations"
-        ? revocationQuery
-        : { upsert: mocks.grantUpsert },
-    );
+    mocks.from.mockImplementation((table: string) => {
+      if (table === "workspace_revocations") return revocationQuery;
+      if (table === "workspaces") return workspaceQuery;
+      if (table === "projects") return projectsQuery;
+      if (table === "departments") return departmentsQuery;
+      return { upsert: mocks.grantUpsert };
+    });
   });
 
-  it("creates the first user, emails the secure action link, and assigns Editor access", async () => {
+  it("stores the reviewed entitlement snapshot and emails the secure action link", async () => {
     mocks.generateLink.mockResolvedValue({
       data: {
         properties: {
@@ -92,6 +135,12 @@ describe("Quality Module invite route", () => {
     expect(mocks.grantUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         email: "first.user@anacorp.com",
+        access_package: "industrial_engineer",
+        department_access: [
+          { department_id: "department-1", role: "author", position_title: "Industrial Engineer" },
+        ],
+        planning_access: true,
+        project_access: [{ project_id: "project-1", level: "edit" }],
         quality_access: "edit",
         role: "editor",
       }),
@@ -105,7 +154,30 @@ describe("Quality Module invite route", () => {
     expect(mocks.send).toHaveBeenCalledOnce();
     expect(mocks.send.mock.calls[0]?.[0]).toBe("first.user@anacorp.com");
     expect(mocks.send.mock.calls[0]?.[1].html).toContain("first.user@anacorp.com");
+    expect(mocks.send.mock.calls[0]?.[1].html).toContain("Process Engineering: Create · Industrial Engineer");
+    expect(mocks.send.mock.calls[0]?.[1].html).toContain("FlexBoost: Edit");
     expect(mocks.send.mock.calls[0]?.[1].html).toContain("secure-invite");
     expect(mocks.inviteUserByEmail).not.toHaveBeenCalled();
+  });
+
+  it("requires an owner before elevating an invitee to Admin", async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: true, error: null }).mockResolvedValueOnce({ data: false, error: null });
+
+    const response = await POST(inviteRequest({ organizationRole: "admin" }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "Only an owner can invite another admin." });
+    expect(mocks.grantUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects a workflow duty without a valid job title", async () => {
+    const response = await POST(
+      inviteRequest({
+        departmentAccess: [{ departmentId: "department-1", role: "author", positionTitle: "" }],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.grantUpsert).not.toHaveBeenCalled();
   });
 });

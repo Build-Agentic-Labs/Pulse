@@ -148,6 +148,14 @@ export interface WorkspaceAccessGrant {
   email: string;
   role: WorkspaceRole;
   qualityAccess: AccessLevel;
+  accessPackage: string;
+  planningAccess: boolean;
+  projectAccess: Array<{ projectId: string; level: Exclude<AccessLevel, "none"> }>;
+  departmentAccess: Array<{
+    departmentId: string;
+    role: "author" | "reviewer" | "approver";
+    positionTitle: string;
+  }>;
   grantedBy?: string;
   redeemedBy?: string;
   redeemedAt?: string;

@@ -39,7 +39,11 @@ import { formatDisplayTitle } from "@/lib/display-names";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import { displayNameValidationMessage, normalizeDisplayName } from "@/lib/profile-name";
 import { kickSopNotifications } from "@/lib/sop/notify-kick";
-import { qualityModuleAccessForRole } from "@/domain/workspace/invite";
+import {
+  normalizedInviteEntitlements,
+  workspaceRoleForOrganizationRole,
+  type WorkspaceInviteEntitlements,
+} from "@/domain/workspace/invite-access";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -425,6 +429,29 @@ function jsonObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+function mapInviteProjectAccess(value: unknown): WorkspaceAccessGrant["projectAccess"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const row = jsonObject(item);
+    const projectId = maybeText(row.projectId ?? row.project_id);
+    const level = normalizeAccessLevel(row.level);
+    return projectId && level !== "none" ? [{ projectId, level }] : [];
+  });
+}
+
+function mapInviteDepartmentAccess(value: unknown): WorkspaceAccessGrant["departmentAccess"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const row = jsonObject(item);
+    const departmentId = maybeText(row.departmentId ?? row.department_id);
+    const role = row.role;
+    const positionTitle = maybeText(row.positionTitle ?? row.position_title) ?? "";
+    return departmentId && (role === "author" || role === "reviewer" || role === "approver")
+      ? [{ departmentId, role, positionTitle }]
+      : [];
+  });
+}
+
 function mapProduct(row: Record<string, unknown>): Product {
   return {
     id: String(row.id),
@@ -495,6 +522,10 @@ function mapWorkspaceAccessGrant(row: Record<string, unknown>): WorkspaceAccessG
     email: String(row.email ?? ""),
     role: String(row.role ?? "editor") as WorkspaceRole,
     qualityAccess: normalizeAccessLevel(row.quality_access),
+    accessPackage: String(row.access_package ?? "custom"),
+    planningAccess: Boolean(row.planning_access),
+    projectAccess: mapInviteProjectAccess(row.project_access),
+    departmentAccess: mapInviteDepartmentAccess(row.department_access),
     grantedBy: maybeText(row.granted_by),
     redeemedBy: maybeText(row.redeemed_by),
     redeemedAt: maybeText(row.redeemed_at),
@@ -1679,6 +1710,7 @@ async function fetchUserProjectAccessMap(
 
 // The signed-in user's Quality Module access level ("edit" for superadmins).
 export async function fetchOrgToolAccess(
+  workspaceId: string,
   supabase: ReturnType<typeof plannerClient> = plannerClient(),
 ): Promise<AccessLevel> {
   const [isSuperAdmin, { data: userData }] = await Promise.all([
@@ -1694,6 +1726,7 @@ export async function fetchOrgToolAccess(
   const { data, error } = await supabase
     .from("org_tool_access")
     .select("level")
+    .eq("workspace_id", workspaceId)
     .eq("user_id", userData.user.id)
     .maybeSingle();
   if (error) {
@@ -2058,13 +2091,14 @@ const GRANT_EXPIRY_DAYS = 30;
 export async function upsertWorkspaceAccessGrantInSupabase(
   workspaceId: string,
   email: string,
-  role: WorkspaceRole,
+  entitlements: WorkspaceInviteEntitlements,
 ): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase();
 
   if (!isAllowedSignupEmail(normalizedEmail)) {
     throw new Error(SIGNUP_DOMAIN_MESSAGE);
   }
+  const normalizedEntitlements = normalizedInviteEntitlements(entitlements);
 
   const supabase = plannerClient();
   const { data: userData } = await getUserFromSession(supabase);
@@ -2085,8 +2119,19 @@ export async function upsertWorkspaceAccessGrantInSupabase(
       {
         workspace_id: workspaceId,
         email: normalizedEmail,
-        role,
-        quality_access: qualityModuleAccessForRole(role),
+        role: workspaceRoleForOrganizationRole(normalizedEntitlements.organizationRole),
+        quality_access: normalizedEntitlements.qualityAccess,
+        access_package: normalizedEntitlements.accessPackage,
+        planning_access: normalizedEntitlements.planningAccess,
+        project_access: normalizedEntitlements.projectAccess.map((grant) => ({
+          project_id: grant.projectId,
+          level: grant.level,
+        })) as Json,
+        department_access: normalizedEntitlements.departmentAccess.map((grant) => ({
+          department_id: grant.departmentId,
+          role: grant.role,
+          position_title: grant.positionTitle,
+        })) as Json,
         granted_by: userData.user?.id ?? null,
         expires_at: new Date(Date.now() + GRANT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString(),
         redeemed_by: null,
@@ -2195,13 +2240,19 @@ export async function loadMembersAccessForWorkspace(
   const projectIds = (projectRows ?? []).map((row) => String(row.id));
   const userIds = members.map((member) => member.userId);
 
-  // project_access and org_tool_access are likewise independent of each other.
+  // Project and Quality grants are independent, but both are scoped to this organization.
   const [accessRows, orgRows] = await Promise.all([
     projectIds.length
       ? throwIfError(supabase.from("project_access").select("project_id, user_id, level").in("project_id", projectIds))
       : Promise.resolve([]),
     userIds.length
-      ? throwIfError(supabase.from("org_tool_access").select("user_id, level").in("user_id", userIds))
+      ? throwIfError(
+          supabase
+            .from("org_tool_access")
+            .select("user_id, level")
+            .eq("workspace_id", workspaceId)
+            .in("user_id", userIds),
+        )
       : Promise.resolve([]),
   ]);
 
@@ -2248,7 +2299,7 @@ export interface AuditLogEntry {
 /**
  * Workspace activity, newest first. Managers/superadmins see rows via the
  * "audit_log manager read" policy; other callers just get zero rows back.
- * Org-wide entries (workspace_id null: org_tool_access, platform_admins) are included.
+ * Organization-scoped entries plus global platform-admin entries are included.
  */
 export async function loadAuditLogFromSupabase(
   workspaceId: string,
@@ -2301,13 +2352,17 @@ export async function setProjectAccessInSupabase(
   );
 }
 
-export async function setOrgToolAccessInSupabase(userId: string, level: AccessLevel): Promise<void> {
+export async function setOrgToolAccessInSupabase(
+  workspaceId: string,
+  userId: string,
+  level: AccessLevel,
+): Promise<void> {
   const supabase = plannerClient();
   const { data: userData } = await getUserFromSession(supabase);
   await throwIfError(
     supabase.from("org_tool_access").upsert(
-      { user_id: userId, level, granted_by: userData.user?.id ?? null },
-      { onConflict: "user_id" },
+      { workspace_id: workspaceId, user_id: userId, level, granted_by: userData.user?.id ?? null },
+      { onConflict: "workspace_id,user_id" },
     ),
   );
 }

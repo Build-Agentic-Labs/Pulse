@@ -1,6 +1,5 @@
 "use client";
 
-import { WorkspaceActivitySettings } from "@/components/workspace-activity-settings";
 import { WorkspaceListSettings } from "@/components/workspace-list-settings";
 import { WorkspaceMembersSettings } from "@/components/workspace-members-settings";
 import type { PlannerProjectContext } from "@/domain/types";
@@ -11,7 +10,7 @@ export function OrganizationSettings({ project }: { project?: PlannerProjectCont
     <>
       <WorkspaceListSettings />
       <WorkspaceMembersSettings project={project} />
-      <WorkspaceActivitySettings project={project} />
+      {/* Keep the audit feed hidden until its activity descriptions are reliable. */}
     </>
   );
 }

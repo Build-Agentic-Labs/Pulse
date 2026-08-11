@@ -158,14 +158,15 @@ export async function fetchInitialSopWorkspaceData(): Promise<InitialSopWorkspac
       return undefined;
     }
 
-    const [groups, orgToolAccess] = await Promise.all([
-      loadWorkspaceProjectGroups(data.user.id, supabase),
-      fetchOrgToolAccess(supabase).catch(() => "none" as const),
-    ]);
+    const groups = await loadWorkspaceProjectGroups(data.user.id, supabase);
     const requestedWorkspaceId = cookieStore.get(SOP_WORKSPACE_COOKIE)?.value;
     const workspaceId =
       groups.find((group) => group.workspace.id === requestedWorkspaceId)?.workspace.id ??
       groups[0]?.workspace.id;
+
+    const orgToolAccess = workspaceId
+      ? await fetchOrgToolAccess(workspaceId, supabase).catch(() => "none" as const)
+      : "none";
 
     return { groups, orgToolAccess, workspaceId };
   } catch {

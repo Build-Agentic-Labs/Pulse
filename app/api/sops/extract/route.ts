@@ -139,16 +139,41 @@ export async function POST(request: Request) {
     return RATE_LIMITED_RESPONSE();
   }
 
-  // Converting a SOP only makes sense for users who can save one. sops writes are gated
+  let file: File | null = null;
+  let workspaceId = "";
+  try {
+    const form = await request.formData();
+    const value = form.get("file");
+    const workspaceValue = form.get("workspaceId");
+    file = value instanceof File ? value : null;
+    workspaceId = typeof workspaceValue === "string" ? workspaceValue.trim() : "";
+  } catch {
+    return Response.json(
+      { error: "Expected multipart/form-data with 'file' and 'workspaceId' fields." },
+      { status: 400 },
+    );
+  }
+
+  if (!workspaceId) {
+    return Response.json({ error: "Select an organization before converting a SOP." }, { status: 400 });
+  }
+
+  // Converting a SOP only makes sense for users who can save one. SOP writes are gated
   // on org-tools 'edit' at the database (has_org_tool_access, 20260701121000); mirror
-  // that gate here so users without it can't spend LLM tokens. All three lookups run as
+  // that exact organization gate here so users without it can't spend LLM tokens. All lookups run as
   // the caller (RLS-scoped) and a failed lookup denies — this fails closed.
   const callerSupabase = callerScopedSupabase(getBearerToken(request));
   const [orgAccess, managerMembership, superAdmin] = await Promise.all([
-    callerSupabase.from("org_tool_access").select("level").eq("user_id", auth.userId).maybeSingle(),
+    callerSupabase
+      .from("org_tool_access")
+      .select("level")
+      .eq("workspace_id", workspaceId)
+      .eq("user_id", auth.userId)
+      .maybeSingle(),
     callerSupabase
       .from("workspace_members")
       .select("workspace_id")
+      .eq("workspace_id", workspaceId)
       .eq("user_id", auth.userId)
       .in("role", ["owner", "admin"])
       .limit(1),
@@ -168,15 +193,6 @@ export async function POST(request: Request) {
       { error: "ANTHROPIC_API_KEY is not set. Add it to .env.local to enable conversion." },
       { status: 500 },
     );
-  }
-
-  let file: File | null = null;
-  try {
-    const form = await request.formData();
-    const value = form.get("file");
-    file = value instanceof File ? value : null;
-  } catch {
-    return Response.json({ error: "Expected multipart/form-data with a 'file' field." }, { status: 400 });
   }
 
   if (!file) {

@@ -30,16 +30,28 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 interface WelcomeBundle {
   workspaceNameById: Map<string, string>;
   memberKeySet: Set<string>; // `${workspaceId}:${userId}`
+  redeemedInviteAtByMemberKey: Map<string, number[]>; // `${workspaceId}:${userId}` -> redemption times
   profileById: Map<string, { fullName: string | null; email: string | null }>;
+}
+
+const INVITE_EVENT_MATCH_TOLERANCE_MS = 5_000;
+
+function wasRedeemedInvite(bundle: WelcomeBundle, event: MemberAddedEvent): boolean {
+  const eventTime = new Date(event.createdAt).getTime();
+  if (!Number.isFinite(eventTime)) return false;
+  return (bundle.redeemedInviteAtByMemberKey.get(`${event.workspaceId}:${event.recipientId}`) ?? []).some(
+    (redeemedAt) => Math.abs(redeemedAt - eventTime) <= INVITE_EVENT_MATCH_TOLERANCE_MS,
+  );
 }
 
 export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>): DrainStore<WorkspaceWelcomePending> {
   async function loadBundle(events: MemberAddedEvent[]): Promise<WelcomeBundle> {
     const workspaceIds = Array.from(new Set(events.map((event) => event.workspaceId)));
+    const recipientIds = Array.from(new Set(events.map((event) => event.recipientId)));
     const userIds = Array.from(
       new Set(events.flatMap((event) => (event.actorId ? [event.recipientId, event.actorId] : [event.recipientId]))),
     );
-    const [workspaces, members, profiles] = await Promise.all([
+    const [workspaces, members, profiles, redeemedInvites] = await Promise.all([
       workspaceIds.length
         ? admin.from("workspaces").select("id, name").in("id", workspaceIds)
         : Promise.resolve({ data: [], error: null }),
@@ -49,13 +61,29 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
       userIds.length
         ? admin.from("profiles").select("id, full_name, email").in("id", userIds)
         : Promise.resolve({ data: [], error: null }),
+      workspaceIds.length && recipientIds.length
+        ? admin
+            .from("workspace_access_grants")
+            .select("workspace_id, redeemed_by, redeemed_at")
+            .in("workspace_id", workspaceIds)
+            .in("redeemed_by", recipientIds)
+        : Promise.resolve({ data: [], error: null }),
     ]);
-    for (const result of [workspaces, members, profiles]) {
+    for (const result of [workspaces, members, profiles, redeemedInvites]) {
       if (result.error) throw new Error(result.error.message);
+    }
+    const redeemedInviteAtByMemberKey = new Map<string, number[]>();
+    for (const row of redeemedInvites.data ?? []) {
+      if (!row.redeemed_by || !row.redeemed_at) continue;
+      const redeemedAt = new Date(row.redeemed_at).getTime();
+      if (!Number.isFinite(redeemedAt)) continue;
+      const key = `${row.workspace_id}:${row.redeemed_by}`;
+      redeemedInviteAtByMemberKey.set(key, [...(redeemedInviteAtByMemberKey.get(key) ?? []), redeemedAt]);
     }
     return {
       workspaceNameById: new Map((workspaces.data ?? []).map((row) => [row.id, row.name])),
       memberKeySet: new Set((members.data ?? []).map((row) => `${row.workspace_id}:${row.user_id}`)),
+      redeemedInviteAtByMemberKey,
       profileById: new Map(
         (profiles.data ?? []).map((row) => [row.id, { fullName: row.full_name, email: row.email }]),
       ),
@@ -112,6 +140,7 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
       for (const event of fresh) {
         const pending = resolveWorkspaceWelcome(event, {
           isStillMember: bundle.memberKeySet.has(`${event.workspaceId}:${event.recipientId}`),
+          wasInvited: wasRedeemedInvite(bundle, event),
           workspaceName: bundle.workspaceNameById.get(event.workspaceId) ?? null,
           actorName: null,
         });

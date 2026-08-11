@@ -8,6 +8,22 @@
 
 export type DeptRole = "author" | "reviewer" | "approver";
 
+/** User-facing access names. Stored role values stay stable for database compatibility. */
+export const DEPT_ROLE_ACCESS: Record<DeptRole, { label: string; description: string }> = {
+  author: {
+    label: "Create",
+    description: "Write and edit SOPs",
+  },
+  reviewer: {
+    label: "Review",
+    description: "Includes Create access",
+  },
+  approver: {
+    label: "Approve",
+    description: "Includes Review access",
+  },
+};
+
 export interface Department {
   id: string;
   workspaceId: string;

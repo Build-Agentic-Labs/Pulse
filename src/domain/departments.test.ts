@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ADDED_JOB_TITLES_GROUP,
+  DEPT_ROLE_ACCESS,
   GENERAL_RASIC_ROLES,
   canAuthor,
   canDeptApprove,
@@ -37,6 +38,12 @@ describe("standardPositionTitlesForDepartment", () => {
 });
 
 describe("dept role capabilities (cumulative)", () => {
+  it("presents the cumulative roles as Create, Review, and Approve access", () => {
+    expect(DEPT_ROLE_ACCESS.author).toEqual({ label: "Create", description: "Write and edit SOPs" });
+    expect(DEPT_ROLE_ACCESS.reviewer).toEqual({ label: "Review", description: "Includes Create access" });
+    expect(DEPT_ROLE_ACCESS.approver).toEqual({ label: "Approve", description: "Includes Review access" });
+  });
+
   it("author can author but not sign", () => {
     expect(canAuthor("author")).toBe(true);
     expect(canSignReview("author")).toBe(false);

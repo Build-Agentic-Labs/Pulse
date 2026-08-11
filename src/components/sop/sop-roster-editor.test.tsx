@@ -178,7 +178,7 @@ describe("SopRosterEditor", () => {
       expect(
         screen.getByRole("button", { name: "Required approver for MFG" }),
       ).toHaveTextContent(
-        "Author Member — Author access only — choose a reviewer or approver",
+        "Author Member — Create access only — choose someone with Review or Approve access",
       ),
     );
   });

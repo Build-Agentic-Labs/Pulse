@@ -5,7 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import { QuietLoading } from "@/components/quiet-loading";
 import { ThemedSelect } from "@/components/themed-select";
-import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
+import {
+  DEPT_ROLE_ACCESS,
+  jobTitleOptions,
+  type Department,
+  type DepartmentMember,
+  type DeptRole,
+} from "@/domain/departments";
 import { isValidDepartmentSopTarget, MAX_DEPARTMENT_SOP_TARGET } from "@/domain/sop/dashboard";
 import { loadMembersAccessForWorkspace } from "@/domain/supabase-planner";
 import type { MemberAccess } from "@/domain/types";
@@ -20,13 +26,17 @@ import {
   setMemberPosition,
 } from "@/lib/departments/store";
 import { SOP_DEMAND_UPDATED_EVENT } from "@/lib/sop/dashboard-events";
-import { jobTitleOptions } from "@/domain/departments";
 import { addJobTitle, listJobTitles, type JobTitle } from "@/lib/sop/job-titles/store";
 import { JobTitlesAdmin } from "./job-titles-admin";
 import { RasicRolesAdmin } from "./rasic-roles-admin";
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
 
 const DEPT_ROLES: readonly DeptRole[] = ["author", "reviewer", "approver"];
+const DEPT_ROLE_OPTIONS = DEPT_ROLES.map((deptRole) => ({
+  value: deptRole,
+  label: DEPT_ROLE_ACCESS[deptRole].label,
+  description: DEPT_ROLE_ACCESS[deptRole].description,
+}));
 
 interface DepartmentDraft {
   code: string;
@@ -709,7 +719,13 @@ function MembersPanel({
 
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col gap-4">
-      <h3 className="ui-settings-section-title">Members and SOP access</h3>
+      <div>
+        <h3 className="ui-settings-section-title">Members and SOP access</h3>
+        <p className="mt-1 text-[11px] leading-4 text-ink-tertiary">
+          Access is cumulative: Review includes Create, and Approve includes Review and Create. A person&apos;s role on
+          each SOP is assigned separately.
+        </p>
+      </div>
 
       {members.length === 0 ? (
         <div className="flex min-h-40 items-center justify-center text-center text-ink-tertiary">
@@ -774,16 +790,17 @@ function MembersPanel({
                       triggerClassName="ui-themed-select-trigger-compact px-2.5 text-xs"
                       ariaLabel="SOP access"
                       value={member.deptRole}
+                      selectedLabel={DEPT_ROLE_ACCESS[member.deptRole].label}
                       disabled={busyUserId === member.userId}
                       onChange={(value) => void handleRoleChange(member.userId, value as DeptRole)}
-                      options={DEPT_ROLES.map((deptRole) => ({ value: deptRole, label: deptRole }))}
+                      options={DEPT_ROLE_OPTIONS}
                     />
                   </div>
                 </div>
               ) : (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <span className="text-xs text-ink-secondary">{member.positionTitle || "Position not assigned"}</span>
-                  <span className="ui-chip shrink-0">{member.deptRole}</span>
+                  <span className="ui-chip shrink-0">{DEPT_ROLE_ACCESS[member.deptRole].label}</span>
                 </div>
               )}
             </li>

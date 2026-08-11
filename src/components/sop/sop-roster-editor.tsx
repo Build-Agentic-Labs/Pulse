@@ -241,7 +241,7 @@ export function SopRosterEditor({
                   ? [{
                       value: ineligibleCurrentSigner.userId,
                       label: ineligibleCurrentSigner.name,
-                      description: "Author access only — choose a reviewer or approver",
+                      description: "Create access only — choose someone with Review or Approve access",
                       disabled: true,
                     }]
                   : []),

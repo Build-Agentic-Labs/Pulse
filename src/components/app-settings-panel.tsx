@@ -9,8 +9,6 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { useTheme, type AppearanceColorKey, type AppearancePalette } from "@/components/theme-provider";
 
-import { projectContextLabel } from "@/lib/display-names";
-
 import { AccountSettings } from "@/components/account-settings";
 
 import { SettingsSectionLoadingContent } from "@/components/space-loading-states";
@@ -562,21 +560,6 @@ export function AppSettingsPanel({
           <div hidden={activeSection !== "organization"} aria-hidden={activeSection !== "organization"}>
 
           <SettingsPage title="Organization" description="Rename the organization, manage members, and control who can access each project.">
-
-            <SettingsSectionBlock title="Current organization">
-
-              <SettingsRow label="Active project">
-
-                <span className="ui-settings-group-row-value">
-
-                  {project ? projectContextLabel(project.projectName, project.workspaceName) : "No workspace selected"}
-
-                </span>
-
-              </SettingsRow>
-
-            </SettingsSectionBlock>
-
             <OrganizationSettings project={project} />
 
           </SettingsPage>

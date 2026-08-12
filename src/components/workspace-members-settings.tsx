@@ -390,7 +390,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
       {message ? <p className="ui-settings-section-desc px-1 text-ink-secondary">{message}</p> : null}
 
       <Block title="Members" description="Everyone in this organization, including invites that haven't been accepted yet.">
-        <div className="flex items-center gap-2 border-b border-line px-3.5 py-2">
+        <div className="flex items-center gap-2 border-b border-line px-3.5 py-1.5">
           <Search size={13} className="shrink-0 text-ink-tertiary" />
           <input
             className="w-full bg-transparent text-[13px] outline-none placeholder:text-ink-tertiary"
@@ -416,7 +416,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                     setConfirmRemoveUserId(undefined);
                   }}
                   aria-expanded={active}
-                  className="ui-settings-group-row ui-settings-member-row"
+                  className="ui-settings-group-row ui-settings-member-list-row ui-settings-member-row"
                 >
                   <div className="ui-settings-group-row-copy">
                     <div className="ui-settings-group-row-label">
@@ -447,7 +447,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
               const expired = grant.expiresAt ? new Date(grant.expiresAt).getTime() < Date.now() : false;
               const confirming = confirmCancelEmail === grant.email;
               return (
-                <div key={grant.email} className="ui-settings-group-row">
+                <div key={grant.email} className="ui-settings-group-row ui-settings-member-list-row">
                   <div className="ui-settings-group-row-copy">
                     <div className="flex items-center gap-2">
                       <MailPlus size={13} className="shrink-0 text-ink-tertiary" />

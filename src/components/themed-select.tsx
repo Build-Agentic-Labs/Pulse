@@ -93,7 +93,11 @@ export function ThemedSelect({
   const selectedOptionLabel = selected?.description
     ? `${selected.label} — ${selected.description}`
     : selected?.label;
-  const visibleLabel = selectedLabel ?? selectedOptionLabel ?? placeholder ?? options[0]?.label ?? "Select";
+  // A committed custom value is intentionally absent from `options`; keep showing it in the
+  // trigger so the control does not look as though the user's new entry was discarded.
+  const customValueLabel = allowCustomValue && value.trim() ? value : undefined;
+  const visibleLabel =
+    selectedLabel ?? selectedOptionLabel ?? customValueLabel ?? placeholder ?? options[0]?.label ?? "Select";
   const isSop = variant === "sop";
 
   useEffect(() => {

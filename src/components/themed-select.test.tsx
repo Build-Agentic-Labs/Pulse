@@ -110,6 +110,29 @@ describe("ThemedSelect with allowCustomValue", () => {
     expect(onChange).toHaveBeenCalledWith("Line Auditor");
   });
 
+  it("keeps a committed custom value visible in the trigger", () => {
+    const { rerender } = render(
+      <ThemedSelect value="" options={OPTIONS} onChange={vi.fn()} ariaLabel="Role" allowCustomValue />,
+    );
+    fireEvent.click(trigger());
+    fireEvent.change(search(), { target: { value: "Line Auditor" } });
+    fireEvent.keyDown(search(), { key: "Enter" });
+
+    rerender(
+      <ThemedSelect
+        value="Line Auditor"
+        options={OPTIONS}
+        onChange={vi.fn()}
+        ariaLabel="Role"
+        allowCustomValue
+        placeholder="Select or add job title"
+      />,
+    );
+
+    expect(trigger().textContent).toContain("Line Auditor");
+    expect(trigger().textContent).not.toContain("Select or add job title");
+  });
+
   // The affordance itself: opening the menu must reveal that new values are accepted, without
   // requiring the author to guess that the box is typeable.
   it("advertises that a new value can be added before anything is typed", () => {

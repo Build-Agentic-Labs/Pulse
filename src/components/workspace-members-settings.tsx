@@ -273,7 +273,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
 
     if (payload.emailSent) {
       return {
-        text: `Invitation email sent to ${email}. They'll create a password to finish setup; the invite expires in 30 days.`,
+        text: `Invitation email sent to ${email}. They'll create a password to finish setup; the secure setup link expires in 24 hours.`,
         tone: "info",
       };
     }
@@ -486,7 +486,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                           className="ui-btn-ghost h-7 w-7 shrink-0 px-0 disabled:opacity-50"
                           onClick={() => void invite(grant.email, entitlementsFromWorkspaceAccessGrant(grant))}
                           disabled={isSubmitting}
-                          title="Resend invite (refreshes the 30-day expiry)"
+                          title="Resend invite (new 24-hour setup link; refreshes the 30-day access window)"
                         >
                           <RotateCw size={13} />
                         </button>

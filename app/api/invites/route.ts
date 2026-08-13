@@ -6,6 +6,7 @@ import type { Database, Json } from "@/lib/database.types";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import {
   qualityModuleInviteRedirect,
+  workspaceInviteAcceptanceUrl,
 } from "@/domain/workspace/invite";
 import {
   describeInviteEntitlements,
@@ -248,7 +249,7 @@ export async function POST(request: Request) {
       options: { redirectTo },
     });
 
-    if (!linkError && linkData.properties?.action_link) {
+    if (!linkError && linkData.properties?.hashed_token) {
       try {
         const send = createResendSender(resendApiKey, resendFrom);
         const projectNames = new Map((projectsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
@@ -256,7 +257,11 @@ export async function POST(request: Request) {
         const result = await send(
           email,
           renderWorkspaceInviteEmail({
-            actionLink: linkData.properties.action_link,
+            actionLink: workspaceInviteAcceptanceUrl(
+              redirectTo,
+              email,
+              linkData.properties.hashed_token,
+            ),
             accessSummary: describeInviteEntitlements(entitlements, projectNames, departmentNames),
             email,
             organizationName: workspaceResult.data?.name ?? "your organization",

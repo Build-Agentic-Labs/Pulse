@@ -122,6 +122,7 @@ describe("workspace invite route", () => {
       data: {
         properties: {
           action_link: "https://project.supabase.co/auth/v1/verify?token=secure-invite",
+          hashed_token: "secure-invite-hash",
         },
       },
       error: null,
@@ -156,7 +157,10 @@ describe("workspace invite route", () => {
     expect(mocks.send.mock.calls[0]?.[1].html).toContain("first.user@anacorp.com");
     expect(mocks.send.mock.calls[0]?.[1].html).toContain("Process Engineering: Create · Industrial Engineer");
     expect(mocks.send.mock.calls[0]?.[1].html).toContain("FlexBoost: Edit");
-    expect(mocks.send.mock.calls[0]?.[1].html).toContain("secure-invite");
+    expect(mocks.send.mock.calls[0]?.[1].html).toContain(
+      "https://pulse.anacorp.com/invite#email=first.user%40anacorp.com&token_hash=secure-invite-hash&type=invite",
+    );
+    expect(mocks.send.mock.calls[0]?.[1].html).not.toContain("project.supabase.co/auth/v1/verify");
     expect(mocks.inviteUserByEmail).not.toHaveBeenCalled();
   });
 

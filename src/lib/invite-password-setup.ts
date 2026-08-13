@@ -3,6 +3,16 @@ const INVITE_SETUP_STORAGE_KEY = "pulse:invite-password-setup";
 
 export const INVITE_PASSWORD_SETUP_COMPLETED_EVENT = "pulse:invite-password-setup-completed";
 
+export function beginInvitePasswordSetup(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    window.sessionStorage.setItem(INVITE_SETUP_STORAGE_KEY, "1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function isInvitePasswordSetupActive(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -22,7 +32,7 @@ export function activateInvitePasswordSetup(): boolean {
     const url = new URL(window.location.href);
     const requested = url.searchParams.get(INVITE_QUERY_PARAM) === "1";
     if (requested) {
-      window.sessionStorage.setItem(INVITE_SETUP_STORAGE_KEY, "1");
+      beginInvitePasswordSetup();
       url.searchParams.delete(INVITE_QUERY_PARAM);
       window.history.replaceState(null, "", url.toString());
     }

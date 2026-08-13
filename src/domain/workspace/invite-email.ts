@@ -20,8 +20,10 @@ export function renderWorkspaceInviteEmail(input: {
     `<ul style="margin:0 0 14px;padding-left:20px;font-size:14px;line-height:1.55;color:#3f3f46;">${accessRows}</ul>` +
     `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#3f3f46;">` +
     `Your account email is <strong>${email}</strong>. Open the secure link below to create your password and sign in.</p>` +
+    `<p style="margin:0 0 6px;font-size:13px;line-height:1.6;color:#71717a;">` +
+    `This one-time link is intended only for ${email}.</p>` +
     `<p style="margin:0;font-size:13px;line-height:1.6;color:#71717a;">` +
-    `This one-time link is intended only for ${email}.</p>`;
+    `For your security, the setup link expires in 24 hours. An organization administrator can resend it.</p>`;
 
   return {
     subject: "Create your Pulse password",
@@ -32,6 +34,7 @@ export function renderWorkspaceInviteEmail(input: {
       `Your account email is ${input.email}.`,
       `Create your password and sign in: ${input.actionLink}`,
       "This one-time link is intended only for the invited email address.",
+      "For your security, the setup link expires in 24 hours. An organization administrator can resend it.",
     ].join("\n\n"),
     html: renderEmailShell({
       accent: "#111111",

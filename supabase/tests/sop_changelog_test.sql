@@ -40,8 +40,8 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_cl', '70000000-0000-0000-0000-000000000003', 'editor'),
   ('ws_cl', '70000000-0000-0000-0000-000000000004', 'editor');
 
-insert into public.org_tool_access (user_id, level)
-select u.id, 'edit'::public.access_level from (values
+insert into public.org_tool_access (workspace_id, user_id, level)
+select 'ws_cl', u.id, 'edit'::public.access_level from (values
   ('70000000-0000-0000-0000-000000000001'::uuid),
   ('70000000-0000-0000-0000-000000000002'::uuid),
   ('70000000-0000-0000-0000-000000000003'::uuid),
@@ -117,9 +117,13 @@ select is(
 -- 3/4/5. Gate D: a revision needs a non-blank reason.
 -- ---------------------------------------------------------------------------
 select test_as('70000000-0000-0000-0000-000000000002');
-select throws_ok(
-  $$ update public.sops set status = 'draft', revision_reason = 'Unauthorized edit', change_significance = 'MINOR' where id = 'sop_cl_1' $$,
-  null,
+-- The reviewer sits outside the owning department, so the sops UPDATE policy filters the row:
+-- the statement touches zero rows rather than raising (same pattern as sop_rls_test.sql).
+-- Assert the document did not reopen -- a raise would equally satisfy a naive throws_ok.
+update public.sops set status = 'draft', revision_reason = 'Unauthorized edit', change_significance = 'MINOR' where id = 'sop_cl_1';
+select is(
+  (select status from public.sops where id = 'sop_cl_1'),
+  'effective',
   'a department reviewer cannot reopen the author''s effective SOP'
 );
 select test_as('70000000-0000-0000-0000-000000000001');

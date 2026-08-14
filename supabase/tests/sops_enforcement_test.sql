@@ -44,11 +44,11 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_test', '33333333-3333-3333-3333-333333333333', 'editor'),
   ('ws_test', '44444444-4444-4444-4444-444444444444', 'editor');
 
-insert into public.org_tool_access (user_id, level) values
-  ('11111111-1111-1111-1111-111111111111', 'edit'),
-  ('22222222-2222-2222-2222-222222222222', 'edit'),
-  ('33333333-3333-3333-3333-333333333333', 'edit'),
-  ('44444444-4444-4444-4444-444444444444', 'edit');
+insert into public.org_tool_access (workspace_id, user_id, level) values
+  ('ws_test', '11111111-1111-1111-1111-111111111111', 'edit'),
+  ('ws_test', '22222222-2222-2222-2222-222222222222', 'edit'),
+  ('ws_test', '33333333-3333-3333-3333-333333333333', 'edit'),
+  ('ws_test', '44444444-4444-4444-4444-444444444444', 'edit');
 
 insert into public.departments (id, workspace_id, code, name, is_quality_gate) values
   ('dept_prd', 'ws_test', 'PRD', 'Production', false),

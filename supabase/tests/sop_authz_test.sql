@@ -43,8 +43,8 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_authz', 'e0000000-0000-0000-0000-000000000006', 'admin'),
   ('ws_authz', 'e0000000-0000-0000-0000-000000000007', 'editor');
 
-insert into public.org_tool_access (user_id, level)
-select u.id, 'edit'::public.access_level from (values
+insert into public.org_tool_access (workspace_id, user_id, level)
+select 'ws_authz', u.id, 'edit'::public.access_level from (values
   ('e0000000-0000-0000-0000-000000000001'::uuid),
   ('e0000000-0000-0000-0000-000000000002'::uuid),
   ('e0000000-0000-0000-0000-000000000003'::uuid),

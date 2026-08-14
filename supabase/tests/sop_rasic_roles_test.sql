@@ -34,10 +34,10 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_rr', 'f0000000-0000-0000-0000-000000000003', 'admin');
 -- u4 belongs to no workspace at all.
 
-insert into public.org_tool_access (user_id, level) values
-  ('f0000000-0000-0000-0000-000000000001', 'edit'),
-  ('f0000000-0000-0000-0000-000000000002', 'view'),
-  ('f0000000-0000-0000-0000-000000000003', 'edit');
+insert into public.org_tool_access (workspace_id, user_id, level) values
+  ('ws_rr', 'f0000000-0000-0000-0000-000000000001', 'edit'),
+  ('ws_rr', 'f0000000-0000-0000-0000-000000000002', 'view'),
+  ('ws_rr', 'f0000000-0000-0000-0000-000000000003', 'edit');
 
 insert into public.sop_rasic_roles (id, workspace_id, name) values
   ('rr_seed', 'ws_rr', 'Line Auditor');

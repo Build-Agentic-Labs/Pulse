@@ -2,10 +2,15 @@
 --
 -- The replay attack this kills: release v1.0 at hash H, start a revision, edit, then revert
 -- so the document is byte-identical to H. Content-only binding would make every v1.0
--- signature "valid" again and quorum satisfied before anyone reviews. Pins:
+-- signature "valid" again and quorum satisfied before anyone reviews. Since 20260805200000
+-- the system-managed changeHistory is part of the hashed document and every effective -> draft
+-- edge appends a history row a draft save cannot rewrite, so the byte-identical document is
+-- no longer even constructible. Pins:
 --   * effective -> draft increments review_cycle (and only that edge — the within-cycle
 --     behavior is pinned by the reject/resubmit case below)
---   * a revert to a prior version's exact hash does NOT resurrect that version's approvals
+--   * a revert to a prior version's body cannot reproduce that version's exact hash (the
+--     appended history row blocks the replay precondition), and the prior cycle's approvals
+--     still count for nothing at resubmit
 --   * within one cycle, reject -> resubmit with NO edit preserves the other seats'
 --     signatures: only the objector must act
 --
@@ -39,8 +44,8 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_cycle', '60000000-0000-0000-0000-000000000004', 'editor'),
   ('ws_cycle', '60000000-0000-0000-0000-000000000005', 'admin');
 
-insert into public.org_tool_access (user_id, level)
-select u.id, 'edit'::public.access_level from (values
+insert into public.org_tool_access (workspace_id, user_id, level)
+select 'ws_cycle', u.id, 'edit'::public.access_level from (values
   ('60000000-0000-0000-0000-000000000001'::uuid),
   ('60000000-0000-0000-0000-000000000002'::uuid),
   ('60000000-0000-0000-0000-000000000003'::uuid),
@@ -113,16 +118,20 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
--- 4. Edit, then revert: the document is byte-identical to the released v1.0.
+-- 4. Edit, then revert the body to the released v1.0 content. The draft still carries the
+--    system-managed V1.1 history row appended at effective -> draft (20260805200000), the
+--    trigger reinstates stored history on every save, and changeHistory is hashed — so the
+--    reverted draft can never reproduce the released v1.0 hash. The replay precondition
+--    itself is now unconstructible.
 -- ---------------------------------------------------------------------------
 update public.sops set document = '{"body":"cycle v2"}'::jsonb where id = 'sop_cy_1';
 update public.sops set document = '{"body":"cycle v1"}'::jsonb where id = 'sop_cy_1';
-select is(
+select isnt(
   (select content_hash from public.sops where id = 'sop_cy_1'),
   (select r.content_hash from public.sop_revisions r
      join public.sops s on s.effective_revision_id = r.id
     where s.id = 'sop_cy_1'),
-  'the revert reproduced the exact v1.0 content hash (the replay precondition holds)'
+  'a reverted body cannot reproduce the v1.0 hash (system-managed history blocks the replay precondition)'
 );
 
 -- ---------------------------------------------------------------------------
@@ -136,7 +145,7 @@ select public.test_ready_for_approval('sop_cy_1');
 select is(
   (select status from public.sops where id = 'sop_cy_1'),
   'in_review',
-  'fixture: the revision is in review at the v1.0 hash'
+  'fixture: the revision is back in review'
 );
 select test_as('60000000-0000-0000-0000-000000000005');
 select throws_ok(

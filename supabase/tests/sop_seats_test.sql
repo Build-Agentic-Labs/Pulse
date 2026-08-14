@@ -39,8 +39,8 @@ select 'ws_seats', u.id, 'editor' from (values
   ('c0000000-0000-0000-0000-000000000004'::uuid),
   ('c0000000-0000-0000-0000-000000000005'::uuid)) as u(id);
 
-insert into public.org_tool_access (user_id, level)
-select u.id, 'edit'::public.access_level from (values
+insert into public.org_tool_access (workspace_id, user_id, level)
+select 'ws_seats', u.id, 'edit'::public.access_level from (values
   ('c0000000-0000-0000-0000-000000000001'::uuid),
   ('c0000000-0000-0000-0000-000000000002'::uuid),
   ('c0000000-0000-0000-0000-000000000003'::uuid),

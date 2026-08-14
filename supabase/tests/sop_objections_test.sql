@@ -47,8 +47,8 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_obj', 'f0000000-0000-0000-0000-000000000006', 'editor'),
   ('ws_obj', 'f0000000-0000-0000-0000-000000000007', 'editor');
 
-insert into public.org_tool_access (user_id, level)
-select u.id, 'edit'::public.access_level from (values
+insert into public.org_tool_access (workspace_id, user_id, level)
+select 'ws_obj', u.id, 'edit'::public.access_level from (values
   ('f0000000-0000-0000-0000-000000000001'::uuid),
   ('f0000000-0000-0000-0000-000000000002'::uuid),
   ('f0000000-0000-0000-0000-000000000003'::uuid),

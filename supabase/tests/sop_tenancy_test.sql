@@ -30,11 +30,11 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_ta', 'e0000000-0000-0000-0000-000000000003', 'editor'),
   ('ws_tb', 'e0000000-0000-0000-0000-000000000009', 'editor');
 
-insert into public.org_tool_access (user_id, level) values
-  ('e0000000-0000-0000-0000-000000000001', 'edit'),
-  ('e0000000-0000-0000-0000-000000000002', 'edit'),
-  ('e0000000-0000-0000-0000-000000000003', 'edit'),
-  ('e0000000-0000-0000-0000-000000000009', 'edit');
+insert into public.org_tool_access (workspace_id, user_id, level) values
+  ('ws_ta', 'e0000000-0000-0000-0000-000000000001', 'edit'),
+  ('ws_ta', 'e0000000-0000-0000-0000-000000000002', 'edit'),
+  ('ws_ta', 'e0000000-0000-0000-0000-000000000003', 'edit'),
+  ('ws_tb', 'e0000000-0000-0000-0000-000000000009', 'edit');
 
 insert into public.departments (id, workspace_id, code, name, is_quality_gate) values
   ('d_ta_prd', 'ws_ta', 'PRD', 'Production',  false),

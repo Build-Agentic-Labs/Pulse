@@ -42,8 +42,8 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_reassign', '80000000-0000-0000-0000-000000000005', 'editor'),
   ('ws_reassign', '80000000-0000-0000-0000-000000000006', 'editor');
 
-insert into public.org_tool_access (user_id, level)
-select u.id, 'edit'::public.access_level from (values
+insert into public.org_tool_access (workspace_id, user_id, level)
+select 'ws_reassign', u.id, 'edit'::public.access_level from (values
   ('80000000-0000-0000-0000-000000000002'::uuid),
   ('80000000-0000-0000-0000-000000000003'::uuid),
   ('80000000-0000-0000-0000-000000000004'::uuid),

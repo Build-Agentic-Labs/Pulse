@@ -35,10 +35,10 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_rls', 'b0000000-0000-0000-0000-000000000002', 'viewer'),
   ('ws_rls', 'b0000000-0000-0000-0000-000000000003', 'editor');
 
-insert into public.org_tool_access (user_id, level) values
-  ('b0000000-0000-0000-0000-000000000001', 'edit'),
-  ('b0000000-0000-0000-0000-000000000002', 'view'),
-  ('b0000000-0000-0000-0000-000000000003', 'view');
+insert into public.org_tool_access (workspace_id, user_id, level) values
+  ('ws_rls', 'b0000000-0000-0000-0000-000000000001', 'edit'),
+  ('ws_rls', 'b0000000-0000-0000-0000-000000000002', 'view'),
+  ('ws_rls', 'b0000000-0000-0000-0000-000000000003', 'view');
 
 insert into public.departments (id, workspace_id, code, name, is_quality_gate) values
   ('dept_rls_prd', 'ws_rls', 'PRD', 'Production', false),

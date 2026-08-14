@@ -73,12 +73,12 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_e2e', 'a4444444-4444-4444-4444-444444444444', 'editor'),
   ('ws_e2e', 'a5555555-5555-5555-5555-555555555555', 'admin');
 
-insert into public.org_tool_access (user_id, level) values
-  ('a1111111-1111-1111-1111-111111111111', 'edit'),
-  ('a2222222-2222-2222-2222-222222222222', 'edit'),
-  ('a3333333-3333-3333-3333-333333333333', 'edit'),
-  ('a4444444-4444-4444-4444-444444444444', 'edit'),
-  ('a5555555-5555-5555-5555-555555555555', 'edit');
+insert into public.org_tool_access (workspace_id, user_id, level) values
+  ('ws_e2e', 'a1111111-1111-1111-1111-111111111111', 'edit'),
+  ('ws_e2e', 'a2222222-2222-2222-2222-222222222222', 'edit'),
+  ('ws_e2e', 'a3333333-3333-3333-3333-333333333333', 'edit'),
+  ('ws_e2e', 'a4444444-4444-4444-4444-444444444444', 'edit'),
+  ('ws_e2e', 'a5555555-5555-5555-5555-555555555555', 'edit');
 
 insert into public.departments (id, workspace_id, code, name, is_quality_gate) values
   ('d_prd', 'ws_e2e', 'PRD', 'Production',  false),
@@ -110,9 +110,11 @@ select must_fail($$ update public.sops set status='in_review' where id='sop_e2e'
                  'submit with no responsible/accountable seats');
 
 reset role;
+-- Since 20260723133000 every approval seat is a required departmental approver
+-- (rasic = 'responsible'); 'accountable' is refused by sop_review_seats_required_approver.
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
   ('sop_e2e', 'd_eng', 'responsible',  'a2222222-2222-2222-2222-222222222222'),
-  ('sop_e2e', 'd_mnt', 'accountable',  'a3333333-3333-3333-3333-333333333333');
+  ('sop_e2e', 'd_mnt', 'responsible',  'a3333333-3333-3333-3333-333333333333');
 select test_as('a1111111-1111-1111-1111-111111111111');
 
 -- Still refused: the author has not signed authorship.
@@ -122,6 +124,9 @@ select must_fail($$ update public.sops set status='in_review' where id='sop_e2e'
 select public.sign_sop('sop_e2e', 'authorship');
 update public.sops set status='in_review' where id='sop_e2e';
 select must_be((select status from public.sops where id='sop_e2e'), 'in_review', 'status after submit');
+-- Preconditions added after this walkthrough was written; see
+-- test_ready_for_approval in supabase/seed.sql.
+select public.test_ready_for_approval('sop_e2e');
 
 \echo ''
 \echo '════════ 3. Gate B — only seat holders sign, and quorum is one per blocking seat ════════'
@@ -196,19 +201,27 @@ select must_be((select version      from public.sops where id='sop_e2e'), '1.1',
 
 \echo ''
 \echo '════════ 7. Prior-cycle signatures cannot be replayed ════════'
--- Revert the document to the EXACT bytes that were signed in cycle 0.
+-- Revert the body to the EXACT bytes that were signed in cycle 0. Since 20260805200000 the
+-- system-managed changeHistory is part of the hashed document, and opening the revision
+-- appended a V1.1 history row that no draft save can rewrite — so the reverted document can
+-- no longer reproduce the cycle-0 hash: the replay precondition itself is unconstructible.
 update public.sops set document='{"body":"Torque to 90 Nm."}'::jsonb where id='sop_e2e';
 select public.sign_sop('sop_e2e', 'authorship');
 update public.sops set status='in_review' where id='sop_e2e';
+-- Preconditions added after this walkthrough was written; see
+-- test_ready_for_approval in supabase/seed.sql.
+select public.test_ready_for_approval('sop_e2e');
 
--- The document is byte-identical to v1.0, so every cycle-0 signature still matches the content
--- hash. Only the review_cycle stops them counting. Attempt the replay as the ADMIN — not the
--- submitter — so the refusal cannot come from the segregation-of-duties check, and assert on the
--- message: it must be the quorum that refuses.
-select must_be((select content_hash from public.sops where id='sop_e2e'),
-               (select signed_content_hash from public.sop_signatures
-                 where sop_id='sop_e2e' and meaning='dept_approval' and review_cycle=0 limit 1),
-               'the reverted document hashes identically to the one cycle-0 signed');
+-- Both dimensions now refuse the cycle-0 signatures: the appended history row moved the hash,
+-- and the review_cycle moved as well. Attempt the replay as the ADMIN — not the submitter — so
+-- the refusal cannot come from the segregation-of-duties check, and assert on the message: it
+-- must be the quorum that refuses.
+select must_be((select case when s.content_hash = (
+                 select signed_content_hash from public.sop_signatures
+                  where sop_id='sop_e2e' and meaning='dept_approval' and review_cycle=0 limit 1)
+               then 'replayable' else 'moved' end from public.sops s where s.id='sop_e2e'),
+               'moved',
+               'the appended history row moved the hash: cycle-0 bytes cannot be reproduced');
 
 select test_as('a5555555-5555-5555-5555-555555555555');
 select must_fail_with($$ update public.sops set status='approved' where id='sop_e2e' $$,
@@ -240,6 +253,7 @@ select public.sign_sop('sop_e2e', 'objection_withdrawn',
 select test_as('a1111111-1111-1111-1111-111111111111');
 update public.sops set status='in_review' where id='sop_e2e';
 select must_be((select status from public.sops where id='sop_e2e'), 'in_review', 'status after withdrawal');
+select public.test_ready_for_approval('sop_e2e');
 
 \echo ''
 \echo '════════ 9. Re-approve, release, and issue the change log ════════'

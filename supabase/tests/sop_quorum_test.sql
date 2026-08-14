@@ -44,8 +44,8 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_quorum', 'd0000000-0000-0000-0000-000000000007', 'editor'),
   ('ws_quorum', 'd0000000-0000-0000-0000-000000000008', 'admin');
 
-insert into public.org_tool_access (user_id, level)
-select u.id, 'edit'::public.access_level from (values
+insert into public.org_tool_access (workspace_id, user_id, level)
+select 'ws_quorum', u.id, 'edit'::public.access_level from (values
   ('d0000000-0000-0000-0000-000000000001'::uuid),
   ('d0000000-0000-0000-0000-000000000002'::uuid),
   ('d0000000-0000-0000-0000-000000000003'::uuid),

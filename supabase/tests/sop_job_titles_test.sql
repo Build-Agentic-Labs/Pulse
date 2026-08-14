@@ -34,10 +34,10 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_jt', 'e1000000-0000-0000-0000-000000000003', 'admin');
 -- u4 belongs to no workspace at all.
 
-insert into public.org_tool_access (user_id, level) values
-  ('e1000000-0000-0000-0000-000000000001', 'edit'),
-  ('e1000000-0000-0000-0000-000000000002', 'view'),
-  ('e1000000-0000-0000-0000-000000000003', 'edit');
+insert into public.org_tool_access (workspace_id, user_id, level) values
+  ('ws_jt', 'e1000000-0000-0000-0000-000000000001', 'edit'),
+  ('ws_jt', 'e1000000-0000-0000-0000-000000000002', 'view'),
+  ('ws_jt', 'e1000000-0000-0000-0000-000000000003', 'edit');
 
 insert into public.sop_job_titles (id, workspace_id, name) values
   ('jt_seed', 'ws_jt', 'Calibration Technician');

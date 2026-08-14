@@ -16,11 +16,16 @@ import {
   completeInvitePasswordSetup,
 } from "@/lib/invite-password-setup";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { getUserFromSession } from "@/domain/supabase-planner";
 
 function inviteErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   if (/expired|invalid|already.*used|otp/i.test(message)) {
-    return "This invitation link has expired or was already used. Ask an organization administrator to resend it.";
+    return (
+      "This invitation link has expired or was already used. " +
+      "If you already set a password, sign in — or use Forgot password on the sign-in page. " +
+      "Otherwise ask an organization administrator to resend the invite."
+    );
   }
   return message || "Unable to finish setting up your account. Try again.";
 }
@@ -48,12 +53,23 @@ export function WorkspaceInviteAcceptancePanel() {
     setMessage("");
     try {
       if (!verifiedRef.current) {
-        const { error } = await supabase.auth.verifyOtp({
-          token_hash: acceptance.tokenHash,
-          type: acceptance.type,
-        });
-        if (error) throw error;
-        verifiedRef.current = true;
+        // A reload after a verified-but-unfinished attempt leaves the one-time
+        // token consumed while its session is still live — finish with the
+        // session instead. Any other signed-in user (an admin opening the
+        // link) must go through the token so their own password is never
+        // replaced.
+        const { data: sessionData } = await getUserFromSession(supabase);
+        const sessionEmail = sessionData?.user?.email?.trim().toLowerCase() ?? "";
+        if (sessionEmail === acceptance.email) {
+          verifiedRef.current = true;
+        } else {
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash: acceptance.tokenHash,
+            type: acceptance.type,
+          });
+          if (error) throw error;
+          verifiedRef.current = true;
+        }
       }
 
       const { error } = await supabase.auth.updateUser({ password });

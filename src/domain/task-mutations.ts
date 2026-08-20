@@ -1,4 +1,5 @@
 import { defaultDocumentTypeCodes, generateTaskCode } from "./nomenclature";
+import { STEP_PART_MENTIONS_FIELD } from "./step-part-mentions";
 import { STEP_PHOTO_ATTACHMENTS_FIELD } from "./step-photos";
 import { STEP_TOOL_LISTS_FIELD } from "./step-tools";
 import type { ManufacturingComponent, PlannerState, Task, Zone } from "./types";
@@ -15,7 +16,7 @@ export function isCustomFieldRecord(value: unknown): value is Record<string, unk
 export function removeStepScopedCustomFields(task: Task, stepId: string): Task {
   const nextCustomFields = { ...task.customFields };
 
-  [STEP_PHOTO_ATTACHMENTS_FIELD, STEP_TOOL_LISTS_FIELD].forEach((field) => {
+  [STEP_PHOTO_ATTACHMENTS_FIELD, STEP_TOOL_LISTS_FIELD, STEP_PART_MENTIONS_FIELD].forEach((field) => {
     const fieldValue = nextCustomFields[field];
 
     if (!isCustomFieldRecord(fieldValue)) {

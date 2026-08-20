@@ -28,10 +28,17 @@ import { createAnnotationId } from "@/domain/photo-annotations";
 import { getTaskExplodedViews, type ExplodedView } from "@/domain/step-exploded-views";
 import {
   addStepPartReference,
+  attachPartMentionToStep,
   attachPartToStep,
   removePartReferenceFromSteps,
   removeStepPartReference,
+  setStepPartReferenceQuantity,
 } from "@/domain/step-part-references";
+import {
+  getStepPartMentions,
+  reconcileStepPartMentionsAfterInstructionChange,
+  removeStepPartMention,
+} from "@/domain/step-part-mentions";
 import { getStepPhotoAttachments, updateStepPhotoAttachment, type StepPhotoAttachment } from "@/domain/step-photos";
 import { addStepTool, buildStepToolLibrary, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import { removeStepScopedCustomFields } from "@/domain/task-mutations";
@@ -46,7 +53,15 @@ import { TaskVideoGallery } from "../task-video-gallery";
 import { type FeedbackConfirm } from "../themed-feedback";
 import { ThemedSelect } from "../themed-select";
 import { StatCard, handleInstructionBulletKeyDown, type ProcedureDraftFieldName } from "./shared";
-import { ProcedureStepChecksEditor, StepPartReferenceEditor, StepPhotoAttachmentEditor } from "./step-editors";
+import {
+  instructionTextSelectionFromTextarea,
+  LinkedInstructionTextarea,
+  ProcedureStepChecksEditor,
+  StepPartMentionEditor,
+  StepPartReferenceEditor,
+  StepPhotoAttachmentEditor,
+  type InstructionTextSelection,
+} from "./step-editors";
 
 function ScrollDownHint({ className = "" }: { className?: string }) {
   const hintRef = useRef<HTMLDivElement | null>(null);
@@ -161,6 +176,7 @@ export function ProcedureWorkspace({
   tasks,
   zones,
   selectedTask,
+  isTaskHydrating = false,
   focusedStepId,
   onSelectTask,
   onConfirmAction,
@@ -172,6 +188,7 @@ export function ProcedureWorkspace({
   onProcedureFieldChange,
   onMoveStepToTask,
   onUploadStepPhotos,
+  onCopyStepPhoto,
   onRemoveStepPhoto,
   onDeleteExplodedView,
   onDeleteTaskVideo,
@@ -183,6 +200,7 @@ export function ProcedureWorkspace({
   tasks: Task[];
   zones: Zone[];
   selectedTask?: Task;
+  isTaskHydrating?: boolean;
   focusedStepId?: string;
   onSelectTask: (taskId: string) => void;
   onConfirmAction: (message: FeedbackConfirm) => void;
@@ -209,6 +227,7 @@ export function ProcedureWorkspace({
   ) => void;
   onMoveStepToTask: (sourceTaskId: string, targetTaskId: string, stepId: string) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
+  onCopyStepPhoto: (taskId: string, targetStepId: string, photo: StepPhotoAttachment) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onDeleteExplodedView: (taskId: string, view: ExplodedView) => void;
   onDeleteTaskVideo: (taskId: string, video: TaskVideo) => void;
@@ -217,7 +236,7 @@ export function ProcedureWorkspace({
   projectToolRegistry: Map<string, ProjectToolDefinition>;
 }) {
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
-  const [newStepPartNumbers, setNewStepPartNumbers] = useState<Record<string, string>>({});
+  const [instructionSelections, setInstructionSelections] = useState<Record<string, InstructionTextSelection>>({});
   const [stepPhotoUploadCounts, setStepPhotoUploadCounts] = useState<Record<string, number>>({});
   const [navigatorWidth, setNavigatorWidth] = useState(320);
   const [isResizingNavigator, setIsResizingNavigator] = useState(false);
@@ -518,6 +537,7 @@ export function ProcedureWorkspace({
     const nextTask = removePartReferenceFromSteps(taskWithoutPart, partId);
 
     onUpdateTask(task.id, {
+      customFields: nextTask.customFields,
       manufacturingSteps: nextTask.manufacturingSteps,
       partReferences: nextTask.partReferences,
     });
@@ -531,25 +551,6 @@ export function ProcedureWorkspace({
       confirmLabel: "Delete Part",
       onConfirm: () => removePartReference(part.id),
     });
-  }
-
-  function addManufacturingStepPartReference(stepId: string) {
-    if (!task) {
-      return;
-    }
-
-    const nextTask = attachPartToStep(task, stepId, { partNumber: newStepPartNumbers[stepId] ?? "" }, () =>
-      createAnnotationId("part"),
-    );
-    if (!nextTask) {
-      return;
-    }
-
-    onUpdateTask(task.id, {
-      manufacturingSteps: nextTask.manufacturingSteps,
-      partReferences: nextTask.partReferences,
-    });
-    setNewStepPartNumbers((current) => ({ ...current, [stepId]: "" }));
   }
 
   function addStepPartFromBom(stepId: string, entry: BomPartSelection) {
@@ -573,8 +574,8 @@ export function ProcedureWorkspace({
       return;
     }
 
-	    const nextTask = addStepPartReference(task, stepId, partReferenceId);
-	    onUpdateTask(task.id, { manufacturingSteps: nextTask.manufacturingSteps });
+    const nextTask = addStepPartReference(task, stepId, partReferenceId);
+    onUpdateTask(task.id, { manufacturingSteps: nextTask.manufacturingSteps });
   }
 
   function removeManufacturingStepPartReference(stepId: string, partReferenceId: string) {
@@ -582,8 +583,117 @@ export function ProcedureWorkspace({
       return;
     }
 
-	    const nextTask = removeStepPartReference(task, stepId, partReferenceId);
-	    onUpdateTask(task.id, { manufacturingSteps: nextTask.manufacturingSteps });
+    const nextTask = removeStepPartReference(task, stepId, partReferenceId);
+    onUpdateTask(task.id, {
+      customFields: nextTask.customFields,
+      manufacturingSteps: nextTask.manufacturingSteps,
+    });
+  }
+
+  function updateManufacturingStepPartQuantity(stepId: string, partReferenceId: string, quantity: number) {
+    if (!task) {
+      return;
+    }
+
+    const nextTask = setStepPartReferenceQuantity(task, stepId, partReferenceId, quantity);
+    onUpdateTask(task.id, { manufacturingSteps: nextTask.manufacturingSteps });
+  }
+
+  function updateManufacturingStepInstruction(stepId: string, instruction: string) {
+    if (!task) {
+      return;
+    }
+
+    const step = manufacturingSteps.find((candidate) => candidate.id === stepId);
+    if (!step) {
+      return;
+    }
+
+    const previousInstruction = getProcedureFieldValue(task.id, stepId, "instruction", step.instruction);
+    const reconciledTask = reconcileStepPartMentionsAfterInstructionChange(
+      task,
+      stepId,
+      previousInstruction,
+      instruction,
+    );
+    if (reconciledTask.customFields !== task.customFields) {
+      onUpdateTask(task.id, {
+        customFields: reconciledTask.customFields,
+        manufacturingSteps: task.manufacturingSteps,
+      });
+    }
+    setInstructionSelections((current) => {
+      if (!current[stepId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[stepId];
+      return next;
+    });
+    onProcedureFieldChange(task.id, stepId, "instruction", instruction);
+  }
+
+  function captureInstructionSelection(stepId: string, textarea: HTMLTextAreaElement) {
+    const selection = instructionTextSelectionFromTextarea(textarea, task ? getStepPartMentions(task, stepId) : []);
+    if (!selection) {
+      clearInstructionSelection(stepId);
+      return;
+    }
+    setInstructionSelections((current) => ({ ...current, [stepId]: selection }));
+  }
+
+  function clearInstructionSelection(stepId: string) {
+    setInstructionSelections((current) => {
+      if (!current[stepId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[stepId];
+      return next;
+    });
+  }
+
+  function linkInstructionSelectionToPart(stepId: string, entry: BomPartSelection) {
+    if (!task) {
+      return;
+    }
+    const step = manufacturingSteps.find((candidate) => candidate.id === stepId);
+    const selection = instructionSelections[stepId];
+    if (!step || !selection) {
+      return;
+    }
+    const instruction = getProcedureFieldValue(task.id, stepId, "instruction", step.instruction);
+    const nextTask = attachPartMentionToStep(
+      task,
+      stepId,
+      instruction,
+      selection,
+      entry,
+      () => createAnnotationId("part"),
+      () => createAnnotationId("part-mention"),
+    );
+    if (!nextTask) {
+      clearInstructionSelection(stepId);
+      return;
+    }
+
+    onUpdateTask(task.id, {
+      customFields: nextTask.customFields,
+      manufacturingSteps: nextTask.manufacturingSteps,
+      partReferences: nextTask.partReferences,
+    });
+    clearInstructionSelection(stepId);
+  }
+
+  function removeInstructionPartMention(stepId: string, mentionId: string) {
+    if (!task) {
+      return;
+    }
+    const nextTask = removeStepPartMention(task, stepId, mentionId);
+    onUpdateTask(task.id, {
+      customFields: nextTask.customFields,
+      manufacturingSteps: task.manufacturingSteps,
+    });
   }
 
   function addManufacturingStepTool(stepId: string) {
@@ -750,55 +860,63 @@ export function ProcedureWorkspace({
 
       <main
         className="ui-procedure-main min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 md:px-6"
+        aria-busy={isTaskHydrating || undefined}
       >
         <div className="mx-auto max-w-[1500px] space-y-5">
           <section>
             <div className="flex items-start justify-between gap-3">
               <h1 className="ui-section-title ui-procedure-title">{task.name || "Untitled task"}</h1>
-              <div className="relative shrink-0" ref={sectionFilterRef}>
-                <button
-                  type="button"
-                  onClick={() => setIsSectionFilterOpen((open) => !open)}
-                  aria-haspopup="true"
-                  aria-expanded={isSectionFilterOpen}
-                  title="Show or hide step sections"
-                  className="ui-btn-ghost h-9 gap-2 px-3"
-                >
-                  <SlidersHorizontal size={14} strokeWidth={1.75} />
-                  Filter
-                  {hiddenStepSections.size > 0 ? (
-                    <span className="ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
-                      {hiddenStepSections.size}
-                    </span>
-                  ) : null}
-                </button>
-                {isSectionFilterOpen ? (
-                  <div className="absolute right-0 z-30 mt-2 w-56 rounded-lg border border-line bg-surface-raised p-3 shadow-lg">
-                    <div className="ui-field-label mb-2">Show on every step</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {PROCEDURE_STEP_SECTIONS.map(({ key, label, Icon }) => {
-                        const shown = !hiddenStepSections.has(key);
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => toggleStepSection(key)}
-                            aria-pressed={shown}
-                            title={shown ? `Hide ${label} on every step` : `Show ${label} on every step`}
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
-                              shown
-                                ? "border-accent/40 bg-accent/10 text-ink"
-                                : "border-line bg-surface-raised text-ink-secondary opacity-70"
-                            }`}
-                          >
-                            <Icon size={12} strokeWidth={1.75} />
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+              <div className="flex shrink-0 items-center gap-3">
+                {isTaskHydrating ? (
+                  <span className="ui-transition-status" role="status" aria-live="polite">
+                    Loading media
+                  </span>
                 ) : null}
+                <div className="relative" ref={sectionFilterRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsSectionFilterOpen((open) => !open)}
+                    aria-haspopup="true"
+                    aria-expanded={isSectionFilterOpen}
+                    title="Show or hide step sections"
+                    className="ui-btn-ghost h-9 gap-2 px-3"
+                  >
+                    <SlidersHorizontal size={14} strokeWidth={1.75} />
+                    Filter
+                    {hiddenStepSections.size > 0 ? (
+                      <span className="ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
+                        {hiddenStepSections.size}
+                      </span>
+                    ) : null}
+                  </button>
+                  {isSectionFilterOpen ? (
+                    <div className="absolute right-0 z-30 mt-2 w-56 rounded-lg border border-line bg-surface-raised p-3 shadow-lg">
+                      <div className="ui-field-label mb-2">Show on every step</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {PROCEDURE_STEP_SECTIONS.map(({ key, label, Icon }) => {
+                          const shown = !hiddenStepSections.has(key);
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => toggleStepSection(key)}
+                              aria-pressed={shown}
+                              title={shown ? `Hide ${label} on every step` : `Show ${label} on every step`}
+                              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
+                                shown
+                                  ? "border-accent/40 bg-accent/10 text-ink"
+                                  : "border-line bg-surface-raised text-ink-secondary opacity-70"
+                              }`}
+                            >
+                              <Icon size={12} strokeWidth={1.75} />
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
             <div className="ui-metric-strip mt-4">
@@ -946,10 +1064,8 @@ export function ProcedureWorkspace({
                             <button
                               type="button"
                               onClick={() =>
-                                onProcedureFieldChange(
-                                  task.id,
+                                updateManufacturingStepInstruction(
                                   step.id,
-                                  "instruction",
                                   applyInstructionBullets(
                                     getProcedureFieldValue(task.id, step.id, "instruction", step.instruction),
                                   ),
@@ -974,25 +1090,48 @@ export function ProcedureWorkspace({
                             </button>
                           </div>
                         </div>
-                        <label className="ui-procedure-step-instruction-field block">
+                        <div className="ui-procedure-step-instruction-field block">
                           <span className="ui-field-label mb-0 block">Instruction</span>
-                          <textarea
+                          <LinkedInstructionTextarea
+                            task={task}
+                            step={step}
                             aria-label={`Step ${step.sequence} instruction`}
                             className="ui-field-standalone ui-procedure-step-instruction h-auto w-full resize-y"
                             value={getProcedureFieldValue(task.id, step.id, "instruction", step.instruction)}
                             onFocus={() => onProcedureFieldFocus(task.id, step.id, "instruction", step.instruction)}
                             onBlur={() => onProcedureFieldBlur(task.id, step.id, "instruction")}
-                            onChange={(event) =>
-                              onProcedureFieldChange(task.id, step.id, "instruction", event.target.value)
-                            }
+                            onSelect={(event) => captureInstructionSelection(step.id, event.currentTarget)}
+                            onChange={(event) => updateManufacturingStepInstruction(step.id, event.target.value)}
                             onKeyDown={(event) =>
                               handleInstructionBulletKeyDown(event, (instruction) =>
-                                onProcedureFieldChange(task.id, step.id, "instruction", instruction),
+                                updateManufacturingStepInstruction(step.id, instruction),
                               )
+                            }
+                            onMentionClick={(mention, anchor) =>
+                              setInstructionSelections((current) => ({
+                                ...current,
+                                [step.id]: {
+                                  start: mention.start,
+                                  end: mention.end,
+                                  text: mention.text,
+                                  anchor,
+                                  mentionId: mention.id,
+                                  partReferenceId: mention.partReferenceId,
+                                },
+                              }))
                             }
                             placeholder="Write the manufacturing instruction for this operation."
                           />
-                        </label>
+                        </div>
+                        <StepPartMentionEditor
+                          task={task}
+                          step={step}
+                          selection={instructionSelections[step.id]}
+                          masterBom={masterBom}
+                          onLink={(entry) => linkInstructionSelectionToPart(step.id, entry)}
+                          onCancelSelection={() => clearInstructionSelection(step.id)}
+                          onRemoveMention={(mentionId) => removeInstructionPartMention(step.id, mentionId)}
+                        />
                       </div>
 
                       {showPhotos ? (
@@ -1000,8 +1139,10 @@ export function ProcedureWorkspace({
                           <StepPhotoAttachmentEditor
                             step={step}
                             photos={stepPhotos}
+                            copyTargets={task.manufacturingSteps ?? []}
                             isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
+                            onCopyToStep={(photo, targetStepId) => onCopyStepPhoto(task.id, targetStepId, photo)}
                             onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
                             onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                           />
@@ -1089,14 +1230,12 @@ export function ProcedureWorkspace({
                           task={task}
                           step={step}
                           partReferences={partReferences}
-                          draftValue={newStepPartNumbers[step.id] ?? ""}
                           masterBom={masterBom}
-                          onDraftChange={(value) =>
-                            setNewStepPartNumbers((current) => ({ ...current, [step.id]: value }))
-                          }
-                          onAddDraft={() => addManufacturingStepPartReference(step.id)}
                           onAddFromBom={(entry) => addStepPartFromBom(step.id, entry)}
                           onLinkExisting={(partReferenceId) => linkExistingPartToManufacturingStep(step.id, partReferenceId)}
+                          onQuantityChange={(partReferenceId, quantity) =>
+                            updateManufacturingStepPartQuantity(step.id, partReferenceId, quantity)
+                          }
                           onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
                         />
                         ) : null}
@@ -1107,6 +1246,19 @@ export function ProcedureWorkspace({
                 })
               )}
             </div>
+            {manufacturingSteps.length > 0 ? (
+              <div className="mt-4 flex justify-end border-t border-line pt-3">
+                <button
+                  type="button"
+                  onClick={addManufacturingStep}
+                  className="ui-btn-ghost h-9 gap-2"
+                  aria-label="Add step after final step"
+                >
+                  <Plus size={14} strokeWidth={1.75} />
+                  Add Step
+                </button>
+              </div>
+            ) : null}
           </section>
 
           {showParts ? (

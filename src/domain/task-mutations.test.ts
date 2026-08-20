@@ -10,6 +10,7 @@ import {
   taskPatchChangesSchedule,
 } from "./task-mutations";
 import { STEP_PHOTO_ATTACHMENTS_FIELD } from "./step-photos";
+import { STEP_PART_MENTIONS_FIELD } from "./step-part-mentions";
 import type { PlannerState, Task } from "./types";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -63,6 +64,21 @@ describe("removeStepScopedCustomFields", () => {
     const task = makeTask({ customFields: { [STEP_PHOTO_ATTACHMENTS_FIELD]: { step1: ["a"] } } });
     const next = removeStepScopedCustomFields(task, "step1");
     expect(STEP_PHOTO_ATTACHMENTS_FIELD in next.customFields).toBe(false);
+  });
+  it("removes part-text mappings owned by the deleted step", () => {
+    const task = makeTask({
+      customFields: {
+        [STEP_PART_MENTIONS_FIELD]: {
+          step1: [{ id: "mention-1", partReferenceId: "part-1", text: "bolt", start: 0, end: 4 }],
+          step2: [{ id: "mention-2", partReferenceId: "part-2", text: "hose", start: 0, end: 4 }],
+        },
+      },
+    });
+    const next = removeStepScopedCustomFields(task, "step1");
+
+    expect(next.customFields[STEP_PART_MENTIONS_FIELD]).toEqual({
+      step2: [{ id: "mention-2", partReferenceId: "part-2", text: "hose", start: 0, end: 4 }],
+    });
   });
 });
 

@@ -1406,6 +1406,58 @@
     color: var(--color-ink-secondary);
   }
 
+.ui-linked-instruction-editor {
+    position: relative;
+  }
+
+.ui-linked-instruction-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    height: auto !important;
+    overflow: hidden;
+    pointer-events: none;
+    resize: none;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    border-color: transparent !important;
+    background: transparent !important;
+    color: var(--color-ink-secondary) !important;
+    box-shadow: none !important;
+  }
+
+.ui-linked-instruction-input {
+    position: relative;
+    z-index: 1;
+    background: transparent !important;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent;
+    caret-color: var(--color-ink);
+  }
+
+.ui-linked-instruction-input::placeholder {
+    color: color-mix(in srgb, var(--color-ink-tertiary) 65%, transparent) !important;
+    -webkit-text-fill-color: color-mix(in srgb, var(--color-ink-tertiary) 65%, transparent);
+  }
+
+.ui-linked-instruction-input::selection {
+    background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+
+.ui-linked-instruction-mention {
+    position: relative;
+    pointer-events: auto;
+    cursor: pointer;
+    color: var(--color-link);
+    font-weight: 600;
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+
 .ui-setup-page > .ui-kpi-strip,
   .ui-workspace-content > .ui-kpi-strip,
   .ui-setup-page > .ui-metric-strip,

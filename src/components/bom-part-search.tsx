@@ -20,8 +20,6 @@ type DropdownPosition = {
   maxHeight: number;
 };
 
-const MAX_RESULTS = 50;
-
 export function BomPartSearch({
   masterBom,
   onSelect,
@@ -58,12 +56,11 @@ export function BomPartSearch({
 
   const results = useMemo<BomPartSelection[]>(() => {
     const q = query.trim().toLowerCase();
-    const matched = q
+    return q
       ? entries.filter(
           (entry) => entry.partNumber.toLowerCase().includes(q) || entry.description.toLowerCase().includes(q),
         )
       : entries;
-    return matched.slice(0, MAX_RESULTS);
   }, [entries, query]);
 
   function updatePosition() {
@@ -153,6 +150,7 @@ export function BomPartSearch({
       ? createPortal(
           <div
             ref={listRef}
+            data-bom-part-search-dropdown="true"
             style={{
               position: "fixed",
               left: position.left,
@@ -211,6 +209,7 @@ export function BomPartSearch({
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder="Search master BOM…"
+          aria-label="Search master BOM"
           role="combobox"
           aria-expanded={open}
           aria-controls={listId}

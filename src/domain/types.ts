@@ -77,6 +77,8 @@ export interface ManufacturingStep {
   qualityCheck?: string;
   dependencyIds?: string[];
   partReferenceIds?: string[];
+  /** Quantity consumed by this step, keyed by task-level part reference id. */
+  partReferenceQuantities?: Record<string, number>;
   version?: number;
 }
 

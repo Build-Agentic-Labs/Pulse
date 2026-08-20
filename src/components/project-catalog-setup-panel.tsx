@@ -1,15 +1,13 @@
 "use client";
 
-import { ChevronDown, ChevronRight, FileSpreadsheet, Sparkles, Trash2, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight, FileSpreadsheet, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
-import type { MasterBom } from "@/domain/master-bom";
+import { detectBomFieldColumns, type MasterBom } from "@/domain/master-bom";
 import {
-  buildProjectPartCatalog,
   buildProjectToolCatalog,
   groupToolCatalogByType,
   planToolNameTidy,
-  type ProjectPartCatalogEntry,
   type ProjectToolCatalogEntry,
 } from "@/domain/project-catalog";
 import type { ToolLibraryItem } from "@/domain/supabase-planner";
@@ -18,7 +16,6 @@ import type { ProjectToolDefinition } from "@/domain/tool-registry";
 import { TOOL_TYPE_OPTIONS, type ToolTypeValue } from "@/domain/tool-types";
 import type { Task } from "@/domain/types";
 import { parseBomFile } from "@/lib/parse-bom";
-import { ClearableNumberInput } from "./clearable-number-input";
 import type { FeedbackConfirm } from "./themed-feedback";
 import { ThemedSelect } from "./themed-select";
 
@@ -27,44 +24,166 @@ type ToolDraft = {
   category: ToolTypeValue;
 };
 
-type PartDraft = {
-  partNumber: string;
-  description: string;
-  quantity: number;
-  disposition: string;
-};
+const EMPTY_TOOL_LIBRARY_ITEMS: ToolLibraryItem[] = [];
 
-function partDraftKey(entry: ProjectPartCatalogEntry) {
-  return `${entry.taskId}:${entry.part.id}`;
+type MasterBomSavePhase = "idle" | "reading" | "saving" | "saved" | "error";
+
+type MasterBomTableColumn =
+  | { key: string; kind: "source"; name: string }
+  | { key: "allocation"; kind: "allocation" };
+
+function normalizePartNumber(partNumber: string) {
+  return partNumber.trim().toLocaleLowerCase();
 }
 
-function MasterBomPanel({
+export function MasterBomPanel({
   masterBom,
+  tasks = [],
   onChange,
   onConfirmAction,
 }: {
   masterBom?: MasterBom;
-  onChange: (bom: MasterBom | undefined) => void;
+  tasks?: Task[];
+  onChange: (bom: MasterBom | undefined) => Promise<void>;
   onConfirmAction: (message: FeedbackConfirm) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const savedStatusTimerRef = useRef<number | null>(null);
+  const [savePhase, setSavePhase] = useState<MasterBomSavePhase>("idle");
   const [error, setError] = useState<string>();
+  const [retryRequest, setRetryRequest] = useState<{ bom: MasterBom | undefined }>();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
+  const hasSearchQuery = normalizedSearchQuery.length > 0;
+  const visibleBomColumns = useMemo(
+    () => masterBom?.columns.filter((column) => column.trim().toLocaleLowerCase() !== "warning") ?? [],
+    [masterBom],
+  );
+  const bomFieldColumns = useMemo(() => detectBomFieldColumns(masterBom?.columns ?? []), [masterBom]);
+  const allocationByPartNumber = useMemo(() => {
+    const labelsByPartNumber = new Map<string, Map<string, string>>();
+
+    tasks.forEach((task) => {
+      const partById = new Map((task.partReferences ?? []).map((part) => [part.id, part]));
+      (task.manufacturingSteps ?? []).forEach((step) => {
+        (step.partReferenceIds ?? []).forEach((partReferenceId) => {
+          const part = partById.get(partReferenceId);
+          const partNumberKey = part ? normalizePartNumber(part.partNumber) : "";
+          if (!partNumberKey) {
+            return;
+          }
+
+          const labels = labelsByPartNumber.get(partNumberKey) ?? new Map<string, string>();
+          const stepKey = `${task.id}:${step.id}`;
+          const stepName = step.name?.trim();
+          labels.set(
+            stepKey,
+            `${task.wbs} · ${task.name} · Step ${step.sequence}${stepName ? ` · ${stepName}` : ""}`,
+          );
+          labelsByPartNumber.set(partNumberKey, labels);
+        });
+      });
+    });
+
+    return new Map(
+      [...labelsByPartNumber.entries()].map(([partNumber, labels]) => [partNumber, [...labels.values()]] as const),
+    );
+  }, [tasks]);
+  const tableColumns = useMemo<MasterBomTableColumn[]>(() => {
+    const columns: MasterBomTableColumn[] = [];
+    let allocationInserted = false;
+
+    visibleBomColumns.forEach((column, index) => {
+      columns.push({ key: `source-${index}`, kind: "source", name: column });
+      if (column === bomFieldColumns.description) {
+        columns.push({ key: "allocation", kind: "allocation" });
+        allocationInserted = true;
+      }
+    });
+
+    if (!allocationInserted) {
+      columns.push({ key: "allocation", kind: "allocation" });
+    }
+    return columns;
+  }, [bomFieldColumns.description, visibleBomColumns]);
+  const filteredBomRows = useMemo(() => {
+    if (!masterBom) {
+      return [];
+    }
+
+    const searchTerms = normalizedSearchQuery ? normalizedSearchQuery.split(/\s+/) : [];
+    return masterBom.rows
+      .map((row, rowIndex) => {
+        const partNumber = bomFieldColumns.partNumber ? row[bomFieldColumns.partNumber] ?? "" : "";
+        const allocationLabels = allocationByPartNumber.get(normalizePartNumber(partNumber)) ?? [];
+        return { row, rowIndex, allocationLabels };
+      })
+      .filter(({ row, allocationLabels }) => {
+        if (searchTerms.length === 0) {
+          return true;
+        }
+        const searchableText = visibleBomColumns
+          .map((column) => row[column] ?? "")
+          .concat(allocationLabels.length > 0 ? ["allocated", ...allocationLabels] : ["unassigned"])
+          .join("\u0000")
+          .toLocaleLowerCase();
+        return searchTerms.every((term) => searchableText.includes(term));
+      });
+  }, [allocationByPartNumber, bomFieldColumns.partNumber, masterBom, normalizedSearchQuery, visibleBomColumns]);
+
+  useEffect(
+    () => () => {
+      if (savedStatusTimerRef.current) {
+        window.clearTimeout(savedStatusTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  function clearSavedStatusTimer() {
+    if (savedStatusTimerRef.current) {
+      window.clearTimeout(savedStatusTimerRef.current);
+      savedStatusTimerRef.current = null;
+    }
+  }
+
+  async function persistBom(bom: MasterBom | undefined) {
+    clearSavedStatusTimer();
+    setError(undefined);
+    setRetryRequest(undefined);
+    setSavePhase("saving");
+    try {
+      await onChange(bom);
+      setSearchQuery("");
+      setSavePhase("saved");
+      savedStatusTimerRef.current = window.setTimeout(() => {
+        setSavePhase("idle");
+        savedStatusTimerRef.current = null;
+      }, 3200);
+    } catch (saveError) {
+      setRetryRequest({ bom });
+      setError(saveError instanceof Error ? saveError.message : "The master BOM could not be saved.");
+      setSavePhase("error");
+    }
+  }
 
   async function ingest(file: File) {
+    clearSavedStatusTimer();
     setError(undefined);
-    setUploading(true);
+    setRetryRequest(undefined);
+    setSavePhase("reading");
     try {
       const parsed = await parseBomFile(file);
       if (parsed.columns.length === 0) {
         setError("No columns found in that file.");
+        setSavePhase("error");
         return;
       }
-      onChange(parsed);
+      await persistBom(parsed);
     } catch (parseError) {
       setError(parseError instanceof Error ? parseError.message : "Could not read that file.");
-    } finally {
-      setUploading(false);
+      setSavePhase("error");
     }
   }
 
@@ -93,11 +212,14 @@ function MasterBomPanel({
       body: "This clears the uploaded BOM from this product.",
       tone: "danger",
       confirmLabel: "Remove",
-      onConfirm: () => onChange(undefined),
+      onConfirm: () => void persistBom(undefined),
     });
   }
 
   const uploadedLabel = masterBom?.uploadedAt ? new Date(masterBom.uploadedAt).toLocaleDateString() : undefined;
+  const isBusy = savePhase === "reading" || savePhase === "saving";
+  const statusLabel =
+    savePhase === "reading" ? "Reading file…" : savePhase === "saving" ? "Saving…" : savePhase === "saved" ? "Saved" : undefined;
 
   return (
     <section className="mb-5">
@@ -113,8 +235,13 @@ function MasterBomPanel({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {statusLabel ? (
+            <span className="px-2 text-xs font-semibold text-ink-secondary" role="status" aria-live="polite">
+              {statusLabel}
+            </span>
+          ) : null}
           {masterBom ? (
-            <button type="button" onClick={requestClear} className="ui-btn-ghost h-9 gap-2 px-2 text-xs">
+            <button type="button" onClick={requestClear} disabled={isBusy} className="ui-btn-ghost h-9 gap-2 px-2 text-xs">
               <Trash2 size={14} />
               Clear
             </button>
@@ -122,49 +249,151 @@ function MasterBomPanel({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={isBusy}
             className="ui-btn-ghost h-9 gap-2"
           >
             <Upload size={15} />
-            {uploading ? "Reading…" : masterBom ? "Replace" : "Upload BOM"}
+            {savePhase === "reading" ? "Reading…" : savePhase === "saving" ? "Saving…" : masterBom ? "Replace" : "Upload BOM"}
           </button>
         </div>
       </div>
 
-      <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileSelected} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.csv"
+        aria-label="Master BOM file"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
 
       {error ? (
-        <div className="mb-3 rounded border border-danger/40 bg-danger-muted px-3 py-2 text-xs font-semibold text-ink">{error}</div>
+        <div
+          className="mb-3 flex items-center justify-between gap-3 rounded border border-danger/40 bg-danger-muted px-3 py-2 text-xs font-semibold text-ink"
+          role="alert"
+        >
+          <span>{error}</span>
+          {retryRequest ? (
+            <button
+              type="button"
+              className="ui-btn-ghost h-7 shrink-0 px-2 text-xs"
+              onClick={() => void persistBom(retryRequest.bom)}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {masterBom ? (
-        <div className="overflow-auto rounded-lg border border-line" style={{ maxHeight: "28rem" }}>
-          <table className="w-full border-collapse text-xs">
-            <thead className="sticky top-0 z-10 bg-surface-raised">
-              <tr>
-                {masterBom.columns.map((column) => (
-                  <th
-                    key={column}
-                    className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2 text-left text-ink-secondary"
-                  >
-                    {column}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {masterBom.rows.map((row, index) => (
-                <tr key={index} className="border-b border-line/60 last:border-b-0 hover:bg-surface-raised/50">
-                  {masterBom.columns.map((column) => (
-                    <td key={column} className="max-w-[22rem] truncate px-3 py-1.5 text-ink" title={row[column]}>
-                      {row[column]}
-                    </td>
+        <>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="relative min-w-[16rem] flex-1 sm:max-w-md">
+              <Search
+                size={14}
+                strokeWidth={1.75}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
+                aria-hidden="true"
+              />
+              <input
+                type="text"
+                role="searchbox"
+                className="ui-field-standalone h-9 w-full pl-9 pr-9 text-xs font-normal"
+                placeholder="Search BOM or allocations…"
+                aria-label="Search master BOM"
+                aria-describedby="master-bom-search-results"
+                autoComplete="off"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setSearchQuery("");
+                  }
+                }}
+              />
+              {searchQuery ? (
+                <button
+                  type="button"
+                  className="ui-btn-ghost absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 justify-center px-0 text-ink-tertiary"
+                  aria-label="Clear BOM search"
+                  onClick={() => setSearchQuery("")}
+                >
+                  <X size={13} strokeWidth={1.75} />
+                </button>
+              ) : null}
+            </div>
+            <span
+              id="master-bom-search-results"
+              className="text-xs font-medium tabular-nums text-ink-tertiary"
+              aria-live="polite"
+            >
+              {hasSearchQuery
+                ? `${filteredBomRows.length} of ${masterBom.rows.length} rows`
+                : `${masterBom.rows.length} row${masterBom.rows.length === 1 ? "" : "s"}`}
+            </span>
+          </div>
+          <div
+            className="overflow-auto rounded-lg border border-line"
+            style={{ maxHeight: "calc(100dvh - 13.5rem)" }}
+          >
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 z-10 bg-surface-raised">
+                <tr>
+                  {tableColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2 text-left text-ink-secondary"
+                    >
+                      {column.kind === "allocation" ? "Allocated" : column.name}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredBomRows.length > 0 ? (
+                  filteredBomRows.map(({ row, rowIndex, allocationLabels }) => (
+                    <tr key={rowIndex} className="border-b border-line/60 last:border-b-0 hover:bg-surface-raised/50">
+                      {tableColumns.map((column) =>
+                        column.kind === "allocation" ? (
+                          <td key={column.key} className="whitespace-nowrap px-3 py-1.5">
+                            {allocationLabels.length > 0 ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 font-semibold text-success"
+                                title={allocationLabels.join("\n")}
+                                aria-label={`${allocationLabels.length} allocated step${allocationLabels.length === 1 ? "" : "s"}`}
+                              >
+                                <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />
+                                {allocationLabels.length} step{allocationLabels.length === 1 ? "" : "s"}
+                              </span>
+                            ) : (
+                              <span className="text-ink-tertiary" title="Not allocated to a procedure step">
+                                —
+                              </span>
+                            )}
+                          </td>
+                        ) : (
+                          <td
+                            key={column.key}
+                            className="max-w-[22rem] truncate px-3 py-1.5 text-ink"
+                            title={row[column.name]}
+                          >
+                            {row[column.name]}
+                          </td>
+                        ),
+                      )}
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={Math.max(tableColumns.length, 1)} className="px-3 py-8 text-center text-sm text-ink-tertiary">
+                      No BOM rows match “{searchQuery.trim()}”.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       ) : (
         <div className="ui-procedure-empty flex items-center gap-2">
           <FileSpreadsheet size={15} className="shrink-0 text-ink-tertiary" />
@@ -178,15 +407,13 @@ function MasterBomPanel({
 export function ProjectCatalogSetupPanel({
   tasks,
   projectToolRegistry,
-  toolLibraryItems = [],
+  toolLibraryItems = EMPTY_TOOL_LIBRARY_ITEMS,
   section = "all",
   masterBom,
   onMasterBomChange,
   onSaveTool,
   onDeleteTool,
   onTidyToolNames,
-  onSavePart,
-  onDeletePart,
   onConfirmAction,
 }: {
   tasks: Task[];
@@ -194,12 +421,10 @@ export function ProjectCatalogSetupPanel({
   toolLibraryItems?: ToolLibraryItem[];
   section?: "tools" | "parts" | "all";
   masterBom?: MasterBom;
-  onMasterBomChange?: (bom: MasterBom | undefined) => void;
+  onMasterBomChange?: (bom: MasterBom | undefined) => Promise<void>;
   onSaveTool: (entry: ProjectToolCatalogEntry, draft: ToolDraft) => Promise<void>;
   onDeleteTool: (entry: ProjectToolCatalogEntry) => Promise<void>;
   onTidyToolNames?: (plan: Array<{ from: string; to: string }>) => Promise<void>;
-  onSavePart: (entry: ProjectPartCatalogEntry, draft: PartDraft) => Promise<void>;
-  onDeletePart: (entry: ProjectPartCatalogEntry) => Promise<void>;
   onConfirmAction: (message: FeedbackConfirm) => void;
 }) {
   const showTools = section !== "parts";
@@ -210,14 +435,10 @@ export function ProjectCatalogSetupPanel({
   );
   const toolGroups = useMemo(() => groupToolCatalogByType(toolCatalog), [toolCatalog]);
   const tidyPlan = useMemo(() => planToolNameTidy(toolCatalog), [toolCatalog]);
-  const partCatalog = useMemo(() => buildProjectPartCatalog(tasks), [tasks]);
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>({});
-  const [partDrafts, setPartDrafts] = useState<Record<string, PartDraft>>({});
   const [savingToolKey, setSavingToolKey] = useState<string>();
-  const [savingPartKey, setSavingPartKey] = useState<string>();
   const [tidying, setTidying] = useState(false);
   const [toolsCollapsed, setToolsCollapsed] = useState(false);
-  const [partsCollapsed, setPartsCollapsed] = useState(false);
 
   async function handleTidyToolNames() {
     if (!onTidyToolNames || tidyPlan.length === 0 || tidying) {
@@ -246,24 +467,6 @@ export function ProjectCatalogSetupPanel({
     });
   }, [toolCatalog]);
 
-  useEffect(() => {
-    setPartDrafts((current) => {
-      const next: Record<string, PartDraft> = {};
-
-      partCatalog.forEach((entry) => {
-        const key = partDraftKey(entry);
-        next[key] = current[key] ?? {
-          partNumber: entry.part.partNumber,
-          description: entry.part.description ?? "",
-          quantity: entry.part.quantity ?? 0,
-          disposition: entry.part.disposition ?? "",
-        };
-      });
-
-      return next;
-    });
-  }, [partCatalog]);
-
   function updateToolDraft(key: string, patch: Partial<ToolDraft>) {
     setToolDrafts((current) => ({
       ...current,
@@ -274,27 +477,8 @@ export function ProjectCatalogSetupPanel({
     }));
   }
 
-  function updatePartDraft(key: string, patch: Partial<PartDraft>) {
-    setPartDrafts((current) => ({
-      ...current,
-      [key]: {
-        ...current[key],
-        ...patch,
-      },
-    }));
-  }
-
   function toolDraftChanged(entry: ProjectToolCatalogEntry, draft: ToolDraft) {
     return formatToolName(draft.name) !== entry.name || draft.category !== entry.category;
-  }
-
-  function partDraftChanged(entry: ProjectPartCatalogEntry, draft: PartDraft) {
-    return (
-      draft.partNumber.trim() !== entry.part.partNumber ||
-      draft.description.trim() !== (entry.part.description ?? "") ||
-      draft.quantity !== (entry.part.quantity ?? 0) ||
-      draft.disposition.trim() !== (entry.part.disposition ?? "")
-    );
   }
 
   async function commitToolDraft(entry: ProjectToolCatalogEntry, draft?: ToolDraft) {
@@ -331,26 +515,6 @@ export function ProjectCatalogSetupPanel({
     }
   }
 
-  async function commitPartDraft(entry: ProjectPartCatalogEntry, draft?: PartDraft) {
-    const key = partDraftKey(entry);
-    const nextDraft = draft ?? partDrafts[key];
-    if (!nextDraft || !partDraftChanged(entry, nextDraft) || savingPartKey === key) {
-      return;
-    }
-
-    setSavingPartKey(key);
-    try {
-      await onSavePart(entry, {
-        partNumber: nextDraft.partNumber.trim(),
-        description: nextDraft.description.trim(),
-        quantity: nextDraft.quantity,
-        disposition: nextDraft.disposition.trim(),
-      });
-    } finally {
-      setSavingPartKey(undefined);
-    }
-  }
-
   function requestDeleteTool(entry: ProjectToolCatalogEntry) {
     onConfirmAction({
       title: `Remove ${entry.name}?`,
@@ -358,18 +522,6 @@ export function ProjectCatalogSetupPanel({
       tone: "danger",
       confirmLabel: "Remove Tool",
       onConfirm: () => onDeleteTool(entry),
-    });
-  }
-
-  function requestDeletePart(entry: ProjectPartCatalogEntry) {
-    onConfirmAction({
-      title: `Remove ${entry.part.partNumber || "this part"}?`,
-      body: entry.linkedStepCount
-        ? `This unlinks the part from ${entry.linkedStepCount} manufacturing step(s) on ${entry.taskLabel}.`
-        : `This removes the part from ${entry.taskLabel}.`,
-      tone: "danger",
-      confirmLabel: "Remove Part",
-      onConfirm: () => onDeletePart(entry),
     });
   }
 
@@ -506,114 +658,13 @@ export function ProjectCatalogSetupPanel({
       </section>
       ) : null}
 
-      {showParts ? (
-      <>
-      {onMasterBomChange ? (
-        <MasterBomPanel masterBom={masterBom} onChange={onMasterBomChange} onConfirmAction={onConfirmAction} />
-      ) : null}
-      <section>
-        <button
-          type="button"
-          className="ui-catalog-collapse-trigger mb-3"
-          onClick={() => setPartsCollapsed((collapsed) => !collapsed)}
-          aria-expanded={!partsCollapsed}
-        >
-          <span className="min-w-0">
-            <span className="ui-setup-section-title block">Parts in use</span>
-            <span className="ui-setup-section-desc block">
-              {partCatalog.length} part{partCatalog.length === 1 ? "" : "s"} referenced on tasks.
-            </span>
-          </span>
-          <span className="ui-catalog-collapse-meta">
-            {partCatalog.length}
-            {partsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-          </span>
-        </button>
-
-        {partsCollapsed ? null : partCatalog.length === 0 ? (
-          <div className="ui-procedure-empty">Parts added in procedure steps will appear here for cleanup.</div>
-        ) : (
-          <div className="ui-procedure-part-editor">
-            {partCatalog.map((entry) => {
-              const key = partDraftKey(entry);
-              const draft = partDrafts[key] ?? {
-                partNumber: entry.part.partNumber,
-                description: entry.part.description ?? "",
-                quantity: entry.part.quantity ?? 0,
-                disposition: entry.part.disposition ?? "",
-              };
-
-              return (
-                <div key={key} className="ui-procedure-part-row group">
-                  <div className="ui-procedure-catalog-part-meta">
-                    <span className="ui-section-subtitle">{entry.taskLabel}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="ui-metric-card-meta tabular-nums">
-                        {entry.linkedStepCount} step{entry.linkedStepCount === 1 ? "" : "s"}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => requestDeletePart(entry)}
-                        className="ui-procedure-tool-table-remove opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                        aria-label={`Remove ${entry.part.partNumber || "part"}`}
-                        title={`Remove ${entry.part.partNumber || "part"}`}
-                      >
-                        <Trash2 size={10} />
-                      </button>
-                    </div>
-                  </div>
-                  <label className="block min-w-0">
-                    <span className="ui-field-label">Part Number</span>
-                    <input
-                      className="ui-procedure-step-inline-text w-full min-w-0"
-                      value={draft.partNumber}
-                      onChange={(event) => updatePartDraft(key, { partNumber: event.target.value })}
-                      onBlur={() => void commitPartDraft(entry)}
-                      placeholder="Part number"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="ui-field-label">Qty</span>
-                    <ClearableNumberInput
-                      className="number-input ui-procedure-step-inline-value"
-                      value={draft.quantity}
-                      min={0}
-                      fallbackValue={draft.quantity}
-                      precision={0}
-                      normalize={Math.round}
-                      onValueChange={(value) => {
-                        updatePartDraft(key, { quantity: value });
-                      }}
-                      onBlur={() => void commitPartDraft(entry)}
-                    />
-                  </label>
-                  <label className="block min-w-0">
-                    <span className="ui-field-label">Description</span>
-                    <input
-                      className="ui-procedure-step-inline-text w-full min-w-0"
-                      value={draft.description}
-                      onChange={(event) => updatePartDraft(key, { description: event.target.value })}
-                      onBlur={() => void commitPartDraft(entry)}
-                      placeholder="Description"
-                    />
-                  </label>
-                  <label className="block min-w-0">
-                    <span className="ui-field-label">Disposition / Note</span>
-                    <input
-                      className="ui-procedure-step-inline-text w-full min-w-0"
-                      value={draft.disposition}
-                      onChange={(event) => updatePartDraft(key, { disposition: event.target.value })}
-                      onBlur={() => void commitPartDraft(entry)}
-                      placeholder="Note"
-                    />
-                  </label>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-      </>
+      {showParts && onMasterBomChange ? (
+        <MasterBomPanel
+          masterBom={masterBom}
+          tasks={tasks}
+          onChange={onMasterBomChange}
+          onConfirmAction={onConfirmAction}
+        />
       ) : null}
     </div>
   );

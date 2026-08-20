@@ -314,6 +314,37 @@ describe("WorkInstructionDocument", () => {
     expect(screen.getByText("45 Nm")).toBeInTheDocument();
   });
 
+  it("renders unobtrusive superscript part references with the full description and step quantity", () => {
+    const card = makeCard(1, {
+      instruction: "Mount M8 bolts[1]",
+      partReferences: [
+        {
+          marker: 1,
+          text: "M8 bolts",
+          partNumber: "1000000373",
+          description: "BOLT SEMS M8-1.25 X 25MM LONG HHCS W/SPRING&FLAT WASHER STAINLESS STEEL",
+          quantity: 4,
+        },
+      ],
+    });
+    render(<WorkInstructionDocument instruction={makeInstruction([card])} />);
+
+    const instruction = document.querySelector(".wi-card-instruction");
+    expect(instruction).toHaveTextContent("Mount M8 bolts1");
+    expect(instruction).not.toHaveTextContent("[1]");
+    const instructionMarker = instruction?.querySelector("sup.wi-card-part-citation");
+    expect(instructionMarker).toHaveTextContent("1");
+    expect(instructionMarker).toHaveAttribute("aria-label", "Part reference 1");
+
+    const keyMarker = document.querySelector(".wi-card-part-marker");
+    expect(keyMarker).toHaveTextContent("1");
+    expect(keyMarker).not.toHaveTextContent("[1]");
+    expect(keyMarker?.querySelector("sup")).toHaveAttribute("aria-label", "Part reference 1");
+    expect(screen.getByText("1000000373")).toBeInTheDocument();
+    expect(screen.getByText(/BOLT SEMS M8-1.25/)).toBeInTheDocument();
+    expect(screen.getByText("×4")).toBeInTheDocument();
+  });
+
   it("marks an unbreakable card loudly instead of clipping its text", () => {
     const long = "x".repeat(2000);
     render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1, { overflowing: true, instruction: long })])} />);

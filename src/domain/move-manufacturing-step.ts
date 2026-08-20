@@ -1,5 +1,11 @@
 import { getStepPartReferenceIds, getStepPartReferences } from "./step-part-references";
 import {
+  STEP_PART_MENTIONS_FIELD,
+  getStepPartMentions,
+  setStepPartMentions,
+  type StepPartMention,
+} from "./step-part-mentions";
+import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
   getTaskStepPhotoAttachmentMap,
   upsertStepPhotoAttachments,
@@ -22,7 +28,7 @@ function normalizeStepSequences(steps: ManufacturingStep[]) {
 function removeStepScopedCustomFields(task: Task, stepId: string): Task {
   const nextCustomFields = { ...task.customFields };
 
-  [STEP_PHOTO_ATTACHMENTS_FIELD, STEP_TOOL_LISTS_FIELD].forEach((field) => {
+  [STEP_PHOTO_ATTACHMENTS_FIELD, STEP_TOOL_LISTS_FIELD, STEP_PART_MENTIONS_FIELD].forEach((field) => {
     const fieldValue = nextCustomFields[field];
 
     if (!isRecord(fieldValue)) {
@@ -50,6 +56,7 @@ function appendStepAssets(
   stepId: string,
   tools: string[],
   partsToCopy: PartReference[],
+  partMentions: StepPartMention[],
 ): Task {
   let nextTask = task;
   const existingPartIds = new Set((nextTask.partReferences ?? []).map((part) => part.id));
@@ -72,6 +79,10 @@ function appendStepAssets(
   tools.forEach((toolName) => {
     nextTask = addStepTool(nextTask, stepId, toolName);
   });
+
+  if (partMentions.length > 0) {
+    nextTask = setStepPartMentions(nextTask, stepId, partMentions);
+  }
 
   return nextTask;
 }
@@ -97,6 +108,7 @@ export function moveManufacturingStepBetweenTasks(
   const tools = getStepToolList(sourceTask, stepId);
   const photos = getTaskStepPhotoAttachmentMap(sourceTask)[stepId] ?? [];
   const partsToCopy = getStepPartReferences(sourceTask, stepId);
+  const partMentions = getStepPartMentions(sourceTask, stepId);
 
   const sourceSteps = normalizeStepSequences((sourceTask.manufacturingSteps ?? []).filter((candidate) => candidate.id !== stepId));
   const targetSteps = normalizeStepSequences([...(targetTask.manufacturingSteps ?? []), step]);
@@ -119,6 +131,7 @@ export function moveManufacturingStepBetweenTasks(
     stepId,
     tools,
     partsToCopy,
+    partMentions,
   );
 
   if (photos.length > 0) {

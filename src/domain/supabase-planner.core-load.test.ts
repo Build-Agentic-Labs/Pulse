@@ -63,6 +63,7 @@ function createPlannerClientFixture() {
       name: "Install",
       instruction: "Install the assembly.",
       duration_minutes: 20,
+      dependency_ids: ["part:part-1|qty:4"],
       version: 2,
     }],
     part_references: [{ id: "part-1", task_id: "task-1", part_number: "ABC", quantity: 1 }],
@@ -126,7 +127,13 @@ describe("loadPlannerCoreStateFromSupabase", () => {
 
     expect(state?.tasks[0]).toMatchObject({
       id: "task-1",
-      manufacturingSteps: [{ id: "step-1", instruction: "Install the assembly.", version: 2 }],
+      manufacturingSteps: [{
+        id: "step-1",
+        instruction: "Install the assembly.",
+        partReferenceIds: ["part-1"],
+        partReferenceQuantities: { "part-1": 4 },
+        version: 2,
+      }],
       partReferences: [{ id: "part-1", partNumber: "ABC", quantity: 1 }],
       customFields: {
         operatorIds: ["A"],

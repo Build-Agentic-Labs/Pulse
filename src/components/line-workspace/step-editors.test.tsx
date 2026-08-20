@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { StepPhotoAttachment } from "@/domain/step-photos";
-import type { ManufacturingStep } from "@/domain/types";
-import { StepPhotoAttachmentEditor } from "./step-editors";
+import type { ManufacturingStep, Task } from "@/domain/types";
+import {
+  instructionTextSelectionFromTextarea,
+  LinkedInstructionTextarea,
+  StepPartMentionEditor,
+  StepPartReferenceEditor,
+  StepPhotoAttachmentEditor,
+} from "./step-editors";
 
 const step: ManufacturingStep = {
   id: "step-1",
@@ -16,6 +22,8 @@ const step: ManufacturingStep = {
 function renderEditor(overrides: {
   isUploading?: boolean;
   onFilesSelected?: (files: File[]) => void;
+  onCopyToStep?: (photo: StepPhotoAttachment, targetStepId: string) => Promise<void> | void;
+  copyTargets?: ManufacturingStep[];
   photos?: StepPhotoAttachment[];
 } = {}) {
   const onFilesSelected = overrides.onFilesSelected ?? vi.fn();
@@ -23,8 +31,10 @@ function renderEditor(overrides: {
     <StepPhotoAttachmentEditor
       step={step}
       photos={overrides.photos ?? []}
+      copyTargets={overrides.copyTargets}
       isUploading={overrides.isUploading}
       onFilesSelected={onFilesSelected}
+      onCopyToStep={overrides.onCopyToStep}
       onRequestRemove={vi.fn()}
     />,
   );
@@ -118,5 +128,322 @@ describe("StepPhotoAttachmentEditor clipboard paste", () => {
     expect(preview).toHaveAttribute("preserveAspectRatio", "xMidYMid meet");
     expect(preview.querySelector("image")).toHaveAttribute("preserveAspectRatio", "none");
     expect(preview.querySelector('[data-annotation-type="rectangle"]')).not.toBeNull();
+  });
+
+  it("copies a selected photo to another manufacturing step", async () => {
+    const photo: StepPhotoAttachment = {
+      id: "photo-1",
+      name: "Air chamber.jpg",
+      dataUrl: "https://example.test/air-chamber.jpg",
+      capturedAt: "2026-08-06T00:00:00.000Z",
+    };
+    const destination: ManufacturingStep = {
+      id: "step-2",
+      sequence: 2,
+      name: "Install cooling duct",
+      instruction: "Install the duct.",
+    };
+    const onCopyToStep = vi.fn().mockResolvedValue(undefined);
+    renderEditor({
+      photos: [photo],
+      copyTargets: [step, destination],
+      onCopyToStep,
+    });
+
+    const copyButton = screen.getByRole("button", { name: "Copy photo from step 1" });
+    expect(copyButton).toHaveClass("text-white", "opacity-0", "group-hover:opacity-100");
+    expect(screen.getByRole("button", { name: "Remove photo from step 1" })).toHaveClass(
+      "text-white",
+      "opacity-0",
+      "group-hover:opacity-100",
+    );
+    fireEvent.click(copyButton);
+    expect(screen.getByRole("dialog", { name: "Copy photo to another step" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Destination step" }), {
+      target: { value: "step-2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Copy photo" }));
+
+    await waitFor(() => expect(onCopyToStep).toHaveBeenCalledWith(photo, "step-2"));
+    expect(screen.queryByRole("dialog", { name: "Copy photo to another step" })).not.toBeInTheDocument();
+  });
+});
+
+describe("StepPartReferenceEditor", () => {
+  it("uses the master BOM search without exposing free-text part entry", () => {
+    const task = {
+      id: "task-1",
+      partReferences: [],
+      manufacturingSteps: [step],
+    } as unknown as Task;
+
+    render(
+      <StepPartReferenceEditor
+        task={task}
+        step={step}
+        partReferences={[]}
+        masterBom={{
+          fileName: "bom.xlsx",
+          columns: ["No.", "Description", "Qty. per Parent"],
+          rows: [{ "No.": "P-100", Description: "Cooling hose", "Qty. per Parent": "2" }],
+        }}
+        onAddFromBom={vi.fn()}
+        onLinkExisting={vi.fn()}
+        onQuantityChange={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Search master BOM" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Part number")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
+  });
+
+  it("shows the part number, full description, and editable step-specific quantity", () => {
+    const onQuantityChange = vi.fn();
+    const task = {
+      id: "task-1",
+      partReferences: [
+        {
+          id: "part-1",
+          partNumber: "2000001475",
+          description: "LINING FOAM 125KVA V2 GENERATOR - RAD END ROOF, END",
+          quantity: 99,
+        },
+      ],
+      manufacturingSteps: [
+        {
+          ...step,
+          partReferenceIds: ["part-1"],
+          partReferenceQuantities: { "part-1": 3 },
+        },
+      ],
+    } as unknown as Task;
+
+    render(
+      <StepPartReferenceEditor
+        task={task}
+        step={task.manufacturingSteps![0]}
+        partReferences={task.partReferences!}
+        onAddFromBom={vi.fn()}
+        onLinkExisting={vi.fn()}
+        onQuantityChange={onQuantityChange}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    const partsTable = screen.getByRole("table", { name: "Parts allocated to step 1" });
+    expect(partsTable).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader", { name: "Part number" })).toHaveLength(1);
+    expect(screen.getAllByRole("columnheader", { name: "Description" })).toHaveLength(1);
+    expect(screen.getAllByRole("columnheader", { name: "Qty" })).toHaveLength(1);
+    expect(screen.getByText("2000001475")).toBeInTheDocument();
+    const description = screen.getByText("LINING FOAM 125KVA V2 GENERATOR - RAD END ROOF, END");
+    expect(description).toBeInTheDocument();
+    expect(description).not.toHaveClass("truncate");
+
+    const quantity = screen.getByRole("textbox", { name: "Quantity for 2000001475 on step 1" });
+    expect(quantity).toHaveValue("3");
+    fireEvent.change(quantity, { target: { value: "8" } });
+    expect(onQuantityChange).toHaveBeenCalledWith("part-1", 8);
+  });
+});
+
+describe("StepPartMentionEditor", () => {
+  it("treats a click inside linked text as selecting that hyperlink for editing", () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = "Install cooling hose";
+    textarea.setSelectionRange(10, 10);
+
+    expect(
+      instructionTextSelectionFromTextarea(textarea, [
+        { id: "mention-1", partReferenceId: "part-1", text: "cooling hose", start: 8, end: 20 },
+      ]),
+    ).toMatchObject({
+      start: 8,
+      end: 20,
+      text: "cooling hose",
+      mentionId: "mention-1",
+      partReferenceId: "part-1",
+    });
+
+    textarea.setSelectionRange(20, 20);
+    expect(
+      instructionTextSelectionFromTextarea(textarea, [
+        { id: "mention-1", partReferenceId: "part-1", text: "cooling hose", start: 8, end: 20 },
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("floats over the selection and waits for an explicit quantity and Link action", () => {
+    const onLink = vi.fn();
+    const onCancelSelection = vi.fn();
+    const task = {
+      id: "task-1",
+      partReferences: [],
+      manufacturingSteps: [{ ...step, instruction: "Install the cooling hose." }],
+      customFields: {},
+    } as unknown as Task;
+
+    render(
+      <StepPartMentionEditor
+        task={task}
+        step={task.manufacturingSteps![0]}
+        selection={{
+          start: 12,
+          end: 24,
+          text: "cooling hose",
+          anchor: { left: 200, top: 100, bottom: 118 },
+        }}
+        masterBom={{
+          fileName: "bom.xlsx",
+          columns: ["No.", "Description", "Qty. per Parent"],
+          rows: [{ "No.": "P-100", Description: "Cooling hose, reinforced", "Qty. per Parent": "2" }],
+        }}
+        onLink={onLink}
+        onCancelSelection={onCancelSelection}
+        onRemoveMention={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Link selected text on step 1" })).toBeInTheDocument();
+    expect(screen.getByText("“cooling hose”")).toBeInTheDocument();
+    const search = screen.getByRole("combobox", { name: "Search master BOM" });
+    fireEvent.focus(search);
+    fireEvent.mouseDown(screen.getByRole("button", { name: /P-100/ }));
+    expect(onLink).not.toHaveBeenCalled();
+    expect(onCancelSelection).not.toHaveBeenCalled();
+
+    const quantity = screen.getByRole("textbox", { name: "Quantity for linked part on step 1" });
+    expect(quantity).toHaveValue("2");
+    fireEvent.change(quantity, { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    expect(onLink).toHaveBeenCalledWith({
+      partNumber: "P-100",
+      description: "Cooling hose, reinforced",
+      quantity: 5,
+    });
+  });
+
+  it("renders linked instruction text like a hyperlink without changing the textarea value", () => {
+    const onMentionClick = vi.fn();
+    const task = {
+      id: "task-1",
+      partReferences: [{ id: "part-1", partNumber: "P-100", description: "Cooling hose" }],
+      manufacturingSteps: [{ ...step, instruction: "Install cooling hose" }],
+      customFields: {
+        stepPartMentions: {
+          "step-1": [
+            { id: "mention-1", partReferenceId: "part-1", text: "cooling hose", start: 8, end: 20 },
+          ],
+        },
+      },
+    } as unknown as Task;
+
+    const { container } = render(
+      <LinkedInstructionTextarea
+        task={task}
+        step={task.manufacturingSteps![0]}
+        value="Install cooling hose"
+        aria-label="Step 1 instruction"
+        onChange={vi.fn()}
+        onMentionClick={onMentionClick}
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Step 1 instruction" })).toHaveValue("Install cooling hose");
+    const link = container.querySelector('[data-part-mention-id="mention-1"]');
+    expect(link).toHaveTextContent("cooling hose");
+    expect(link).toHaveClass("ui-linked-instruction-mention");
+    vi.spyOn(link!, "getBoundingClientRect").mockReturnValue({
+      left: 120,
+      right: 220,
+      top: 100,
+      bottom: 118,
+      width: 100,
+      height: 18,
+      x: 120,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    fireEvent.mouseEnter(link!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("P-100");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Cooling hose");
+    fireEvent.click(link!);
+    expect(onMentionClick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "mention-1", partReferenceId: "part-1" }),
+      { left: 120, top: 100, bottom: 118 },
+    );
+  });
+
+  it("closes the popup when the user clicks outside it", () => {
+    const onCancelSelection = vi.fn();
+    const task = {
+      id: "task-1",
+      partReferences: [],
+      manufacturingSteps: [{ ...step, instruction: "Install cooling hose" }],
+      customFields: {},
+    } as unknown as Task;
+
+    render(
+      <>
+        <textarea aria-label="Step 1 instruction" defaultValue="Install cooling hose" />
+        <StepPartMentionEditor
+          task={task}
+          step={task.manufacturingSteps![0]}
+          selection={{ start: 8, end: 20, text: "cooling hose" }}
+          onLink={vi.fn()}
+          onCancelSelection={onCancelSelection}
+          onRemoveMention={vi.fn()}
+        />
+      </>,
+    );
+
+    const textarea = screen.getByRole("textbox", { name: "Step 1 instruction" }) as HTMLTextAreaElement;
+    textarea.setSelectionRange(8, 20);
+    fireEvent.pointerDown(document.body);
+    expect(onCancelSelection).toHaveBeenCalledTimes(1);
+    expect(textarea.selectionStart).toBe(20);
+    expect(textarea.selectionEnd).toBe(20);
+  });
+
+  it("opens an existing hyperlink for editing and can remove only that link", () => {
+    const onRemoveMention = vi.fn();
+    const onCancelSelection = vi.fn();
+    const task = {
+      id: "task-1",
+      partReferences: [{ id: "part-1", partNumber: "P-100", description: "Cooling hose" }],
+      manufacturingSteps: [{ ...step, instruction: "Install cooling hose" }],
+      customFields: {
+        stepPartMentions: {
+          "step-1": [
+            { id: "mention-1", partReferenceId: "part-1", text: "cooling hose", start: 8, end: 20 },
+          ],
+        },
+      },
+    } as unknown as Task;
+
+    render(
+      <StepPartMentionEditor
+        task={task}
+        step={task.manufacturingSteps![0]}
+        selection={{
+          start: 8,
+          end: 20,
+          text: "cooling hose",
+          mentionId: "mention-1",
+          partReferenceId: "part-1",
+        }}
+        onLink={vi.fn()}
+        onCancelSelection={onCancelSelection}
+        onRemoveMention={onRemoveMention}
+      />,
+    );
+
+    expect(screen.getByText("Edit BOM link")).toBeInTheDocument();
+    expect(screen.getByText("P-100")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove link" }));
+    expect(onRemoveMention).toHaveBeenCalledWith("mention-1");
+    expect(onCancelSelection).toHaveBeenCalledTimes(1);
   });
 });

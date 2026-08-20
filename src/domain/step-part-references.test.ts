@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { attachPartToStep, getStepPartReferenceIds } from "./step-part-references";
+import {
+  attachPartMentionToStep,
+  attachPartToStep,
+  getStepPartReferenceIds,
+  getStepPartReferenceQuantity,
+  mergeStepDependencyRefs,
+  removeStepPartReference,
+  setStepPartReferenceQuantity,
+  splitStepDependencyRefs,
+} from "./step-part-references";
 import type { ManufacturingStep, Task } from "./types";
 
 function makeStep(overrides: Partial<ManufacturingStep> = {}): ManufacturingStep {
@@ -44,6 +53,7 @@ describe("attachPartToStep", () => {
       { id: "id1", partNumber: "P1", description: "Widget", quantity: 4, disposition: "" },
     ]);
     expect(getStepPartReferenceIds(next!, "step1")).toEqual(["id1"]);
+    expect(getStepPartReferenceQuantity(next!, "step1", "id1")).toBe(4);
   });
 
   it("defaults description to empty and quantity to 1", () => {
@@ -63,9 +73,130 @@ describe("attachPartToStep", () => {
     expect(next?.partReferences).toHaveLength(1);
     expect(next?.partReferences?.[0].quantity).toBe(2); // existing part kept as-is
     expect(getStepPartReferenceIds(next!, "step1")).toEqual(["existing"]);
+    expect(getStepPartReferenceQuantity(next!, "step1", "existing")).toBe(9);
+  });
+
+  it("fills a missing description from the selected BOM part", () => {
+    const task = makeTask({
+      partReferences: [{ id: "existing", partNumber: "P1", description: "", quantity: 2 }],
+    });
+
+    const next = attachPartToStep(
+      task,
+      "step1",
+      { partNumber: "P1", description: "Full BOM part description", quantity: 3 },
+      () => "unused",
+    );
+
+    expect(next?.partReferences?.[0].description).toBe("Full BOM part description");
+    expect(getStepPartReferenceQuantity(next!, "step1", "existing")).toBe(3);
+  });
+
+  it("stores different quantities for the same shared part across multiple steps", () => {
+    const task = makeTask({
+      manufacturingSteps: [makeStep(), makeStep({ id: "step2", sequence: 2 })],
+    });
+    const first = attachPartToStep(task, "step1", { partNumber: "P1", quantity: 2 }, () => "shared");
+    const second = attachPartToStep(first!, "step2", { partNumber: "P1", quantity: 7 }, () => "unused");
+
+    expect(second?.partReferences).toHaveLength(1);
+    expect(getStepPartReferenceQuantity(second!, "step1", "shared")).toBe(2);
+    expect(getStepPartReferenceQuantity(second!, "step2", "shared")).toBe(7);
+  });
+
+  it("links selected instruction text while adding the BOM part to the step", () => {
+    const task = makeTask({ manufacturingSteps: [makeStep({ instruction: "Install cooling hose" })] });
+    const next = attachPartMentionToStep(
+      task,
+      "step1",
+      "Install cooling hose",
+      { start: 8, end: 20 },
+      { partNumber: "P-HOSE", description: "Full cooling hose description", quantity: 2 },
+      () => "part-hose",
+      () => "mention-hose",
+    );
+
+    expect(next?.partReferences?.[0]).toMatchObject({ id: "part-hose", partNumber: "P-HOSE" });
+    expect(next?.manufacturingSteps?.[0]).toMatchObject({
+      partReferenceIds: ["part-hose"],
+      partReferenceQuantities: { "part-hose": 2 },
+    });
+    expect(next?.customFields.stepPartMentions).toEqual({
+      step1: [{ id: "mention-hose", partReferenceId: "part-hose", text: "cooling hose", start: 8, end: 20 }],
+    });
+  });
+
+  it("uses the quantity entered in the link popup for an already allocated part", () => {
+    const task = makeTask({
+      manufacturingSteps: [
+        makeStep({
+          instruction: "Install cooling hose",
+          partReferenceIds: ["part-hose"],
+          partReferenceQuantities: { "part-hose": 2 },
+        }),
+      ],
+      partReferences: [{ id: "part-hose", partNumber: "P-HOSE", description: "Cooling hose", quantity: 10 }],
+    });
+
+    const next = attachPartMentionToStep(
+      task,
+      "step1",
+      "Install cooling hose",
+      { start: 8, end: 20 },
+      { partNumber: "P-HOSE", description: "Cooling hose", quantity: 7 },
+      () => "unused",
+      () => "mention-hose",
+    );
+
+    expect(getStepPartReferenceQuantity(next!, "step1", "part-hose")).toBe(7);
   });
 
   it("returns null when the part number is blank", () => {
     expect(attachPartToStep(makeTask(), "step1", { partNumber: "   " }, () => "x")).toBeNull();
+  });
+});
+
+describe("step part allocation persistence", () => {
+  it("round-trips per-step quantities through dependency_ids while reading legacy links", () => {
+    const stored = mergeStepDependencyRefs(
+      ["dependency-1"],
+      ["part-1", "part-2"],
+      { "part-1": 2.5, "part-2": 7 },
+    );
+
+    expect(stored).toEqual(["dependency-1", "part:part-1|qty:2.5", "part:part-2|qty:7"]);
+    expect(splitStepDependencyRefs(stored)).toEqual({
+      dependencyIds: ["dependency-1"],
+      partReferenceIds: ["part-1", "part-2"],
+      partReferenceQuantities: { "part-1": 2.5, "part-2": 7 },
+    });
+    expect(splitStepDependencyRefs(["part:legacy-part"])).toEqual({
+      dependencyIds: [],
+      partReferenceIds: ["legacy-part"],
+      partReferenceQuantities: {},
+    });
+  });
+
+  it("updates and removes quantity together with the step allocation", () => {
+    const linkedPart = attachPartToStep(makeTask(), "step1", { partNumber: "P1", quantity: 2 }, () => "part-1")!;
+    const linked = attachPartMentionToStep(
+      {
+        ...linkedPart,
+        manufacturingSteps: [{ ...linkedPart.manufacturingSteps![0], instruction: "Install widget" }],
+      },
+      "step1",
+      "Install widget",
+      { start: 8, end: 14 },
+      { partNumber: "P1", quantity: 2 },
+      () => "unused",
+      () => "mention-1",
+    )!;
+    const updated = setStepPartReferenceQuantity(linked, "step1", "part-1", 6);
+    const removed = removeStepPartReference(updated, "step1", "part-1");
+
+    expect(getStepPartReferenceQuantity(updated, "step1", "part-1")).toBe(6);
+    expect(removed.manufacturingSteps?.[0].partReferenceIds).toEqual([]);
+    expect(removed.manufacturingSteps?.[0].partReferenceQuantities).toEqual({});
+    expect(removed.customFields.stepPartMentions).toBeUndefined();
   });
 });

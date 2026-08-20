@@ -1,7 +1,17 @@
 "use client";
 
-import { ImageIcon, Trash2 } from "lucide-react";
-import { useId, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
+import { Copy, ImageIcon, Link2, Trash2, X } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type ReactNode,
+  type TextareaHTMLAttributes,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   getManufacturingStepCheckState,
   serializeManufacturingStepCheckState,
@@ -9,7 +19,16 @@ import {
   type ManufacturingStepCheckState,
 } from "@/domain/manufacturing-step-checks";
 import { type MasterBom } from "@/domain/master-bom";
-import { getStepPartReferenceIds, getStepPartReferences } from "@/domain/step-part-references";
+import {
+  getStepPartMentions,
+  numberedStepPartMentions,
+  type StepPartMention,
+} from "@/domain/step-part-mentions";
+import {
+  getStepPartReferenceIds,
+  getStepPartReferenceQuantity,
+  getStepPartReferences,
+} from "@/domain/step-part-references";
 import { normalizePhotoAnnotationDocument } from "@/domain/photo-annotations";
 import { type StepPhotoAttachment } from "@/domain/step-photos";
 import type { ManufacturingStep, PartReference, Task } from "@/domain/types";
@@ -23,22 +42,155 @@ type StepPartReferenceEditorProps = {
   task: Task;
   step: ManufacturingStep;
   partReferences: PartReference[];
-  draftValue: string;
   compact?: boolean;
   masterBom?: MasterBom;
-  onDraftChange: (value: string) => void;
-  onAddDraft: () => void;
   onAddFromBom: (entry: BomPartSelection) => void;
   onLinkExisting: (partReferenceId: string) => void;
+  onQuantityChange: (partReferenceId: string, quantity: number) => void;
   onRemove: (partReferenceId: string) => void;
+};
+
+export type InstructionSelectionAnchor = {
+  left: number;
+  top: number;
+  bottom: number;
+};
+
+export type InstructionTextSelection = {
+  start: number;
+  end: number;
+  text: string;
+  anchor?: InstructionSelectionAnchor;
+  mentionId?: string;
+  partReferenceId?: string;
+};
+
+function instructionSelectionAnchor(textarea: HTMLTextAreaElement, start: number) {
+  const textareaRect = textarea.getBoundingClientRect();
+  const fallback = {
+    left: textareaRect.left + 12,
+    top: textareaRect.top + 12,
+    bottom: textareaRect.top + 30,
+  };
+
+  if (typeof document === "undefined") {
+    return fallback;
+  }
+
+  const computed = window.getComputedStyle(textarea);
+  const mirror = document.createElement("div");
+  const marker = document.createElement("span");
+  const copiedProperties = [
+    "boxSizing",
+    "fontFamily",
+    "fontSize",
+    "fontStyle",
+    "fontWeight",
+    "letterSpacing",
+    "lineHeight",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+    "borderTopWidth",
+    "borderRightWidth",
+    "borderBottomWidth",
+    "borderLeftWidth",
+    "textAlign",
+    "textIndent",
+    "textTransform",
+    "wordSpacing",
+  ] as const;
+
+  copiedProperties.forEach((property) => {
+    mirror.style[property] = computed[property];
+  });
+  Object.assign(mirror.style, {
+    position: "fixed",
+    visibility: "hidden",
+    pointerEvents: "none",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "break-word",
+    wordBreak: "break-word",
+    left: `${textareaRect.left}px`,
+    top: `${textareaRect.top - textarea.scrollTop}px`,
+    width: `${textareaRect.width}px`,
+    minHeight: `${textareaRect.height}px`,
+  });
+  mirror.textContent = textarea.value.slice(0, start);
+  marker.textContent = "\u200b";
+  mirror.append(marker);
+  document.body.append(mirror);
+  const markerRect = marker.getBoundingClientRect();
+  mirror.remove();
+
+  if (!markerRect.width && !markerRect.height) {
+    return fallback;
+  }
+  return {
+    left: markerRect.left - textarea.scrollLeft,
+    top: markerRect.top,
+    bottom: markerRect.bottom,
+  };
+}
+
+export function instructionTextSelectionFromTextarea(
+  textarea: HTMLTextAreaElement,
+  mentions: StepPartMention[] = [],
+): InstructionTextSelection | undefined {
+  const rawStart = textarea.selectionStart;
+  const rawEnd = textarea.selectionEnd;
+  const selectedMention = rawStart === rawEnd
+    ? mentions.find((mention) => rawStart >= mention.start && rawStart < mention.end)
+    : undefined;
+  if (selectedMention) {
+    return {
+      start: selectedMention.start,
+      end: selectedMention.end,
+      text: selectedMention.text,
+      anchor: instructionSelectionAnchor(textarea, selectedMention.start),
+      mentionId: selectedMention.id,
+      partReferenceId: selectedMention.partReferenceId,
+    };
+  }
+  const rawText = textarea.value.slice(rawStart, rawEnd);
+  const leadingWhitespace = rawText.length - rawText.trimStart().length;
+  const trailingWhitespace = rawText.length - rawText.trimEnd().length;
+  const start = rawStart + leadingWhitespace;
+  const end = rawEnd - trailingWhitespace;
+  const text = textarea.value.slice(start, end);
+
+  return text
+    ? { start, end, text, anchor: instructionSelectionAnchor(textarea, start) }
+    : undefined;
+}
+
+type StepPartMentionEditorProps = {
+  task: Task;
+  step: ManufacturingStep;
+  selection?: InstructionTextSelection;
+  masterBom?: MasterBom;
+  compact?: boolean;
+  onLink: (entry: BomPartSelection) => void;
+  onCancelSelection: () => void;
+  onRemoveMention: (mentionId: string) => void;
+};
+
+type LinkedInstructionTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value"> & {
+  task: Task;
+  step: ManufacturingStep;
+  value: string;
+  onMentionClick?: (mention: StepPartMention, anchor: InstructionSelectionAnchor) => void;
 };
 
 type StepPhotoAttachmentEditorProps = {
   step: ManufacturingStep;
   photos: StepPhotoAttachment[];
+  copyTargets?: ManufacturingStep[];
   compact?: boolean;
   isUploading?: boolean;
   onFilesSelected: (files: File[]) => void;
+  onCopyToStep?: (photo: StepPhotoAttachment, targetStepId: string) => Promise<void> | void;
   onRequestRemove: (photo: StepPhotoAttachment) => void;
   onUpdatePhoto?: (photoId: string, patch: Partial<StepPhotoAttachment>) => void;
 };
@@ -117,13 +269,48 @@ function StepPhotoThumbnail({
 export function StepPhotoAttachmentEditor({
   step,
   photos,
+  copyTargets = [],
   compact = false,
   isUploading = false,
   onFilesSelected,
+  onCopyToStep,
   onRequestRemove,
   onUpdatePhoto,
 }: StepPhotoAttachmentEditorProps) {
   const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
+  const [copyPhoto, setCopyPhoto] = useState<StepPhotoAttachment | null>(null);
+  const [copyTargetStepId, setCopyTargetStepId] = useState("");
+  const [copyError, setCopyError] = useState<string>();
+  const [isCopying, setIsCopying] = useState(false);
+  const copyDialogTitleId = useId();
+  const availableCopyTargets = copyTargets.filter((candidate) => candidate.id !== step.id);
+
+  function closeCopyDialog() {
+    if (isCopying) {
+      return;
+    }
+    setCopyPhoto(null);
+    setCopyTargetStepId("");
+    setCopyError(undefined);
+  }
+
+  async function copyPhotoToSelectedStep() {
+    if (!copyPhoto || !copyTargetStepId || !onCopyToStep) {
+      return;
+    }
+
+    setIsCopying(true);
+    setCopyError(undefined);
+    try {
+      await onCopyToStep(copyPhoto, copyTargetStepId);
+      setCopyPhoto(null);
+      setCopyTargetStepId("");
+    } catch (error) {
+      setCopyError(error instanceof Error ? error.message : "Unable to copy this photo.");
+    } finally {
+      setIsCopying(false);
+    }
+  }
 
   function handlePaste(event: ReactClipboardEvent<HTMLDivElement>) {
     if (isUploading) {
@@ -193,13 +380,29 @@ export function StepPhotoAttachmentEditor({
                 >
                   <StepPhotoThumbnail photo={photo} stepSequence={step.sequence} compact={compact} />
                 </button>
+                {onCopyToStep && availableCopyTargets.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setCopyPhoto(photo);
+                      setCopyTargetStepId("");
+                      setCopyError(undefined);
+                    }}
+                    className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-black/55 text-white opacity-0 transition hover:bg-black/75 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100 group-focus-within:opacity-100"
+                    aria-label={`Copy photo from step ${step.sequence}`}
+                    title="Copy to another step"
+                  >
+                    <Copy size={11} />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
                     onRequestRemove(photo);
                   }}
-                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-surface/90 text-ink-secondary opacity-0 transition hover:text-danger focus:opacity-100 focus-visible:ring-2 focus-visible:ring-accent group-hover:opacity-100 group-focus-within:opacity-100"
+                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-black/55 text-white opacity-0 transition hover:bg-black/75 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100 group-focus-within:opacity-100"
                   aria-label={`Remove photo from step ${step.sequence}`}
                   title="Remove photo"
                 >
@@ -224,6 +427,84 @@ export function StepPhotoAttachmentEditor({
           onUpdatePhoto={onUpdatePhoto}
         />
       ) : null}
+      {copyPhoto && onCopyToStep && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  closeCopyDialog();
+                }
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={copyDialogTitleId}
+                className="w-full max-w-sm rounded-lg border border-line bg-surface p-4 text-ink shadow-xl"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 id={copyDialogTitleId} className="text-sm font-semibold">
+                      Copy photo to another step
+                    </h3>
+                    <p className="mt-1 truncate text-xs text-ink-secondary" title={copyPhoto.name}>
+                      {copyPhoto.name}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="ui-btn-ghost h-7 w-7 shrink-0 justify-center px-0"
+                    onClick={closeCopyDialog}
+                    disabled={isCopying}
+                    aria-label="Close copy photo dialog"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+
+                <label className="mt-4 block">
+                  <span className="ui-field-label block">Destination step</span>
+                  <select
+                    className="ui-field-standalone h-10 w-full px-2 text-xs"
+                    aria-label="Destination step"
+                    value={copyTargetStepId}
+                    disabled={isCopying}
+                    onChange={(event) => setCopyTargetStepId(event.target.value)}
+                  >
+                    <option value="">Select a step</option>
+                    {availableCopyTargets.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {`Step ${candidate.sequence}${candidate.name?.trim() ? ` — ${candidate.name.trim()}` : ""}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {copyError ? (
+                  <p className="mt-2 text-xs font-semibold text-danger" role="alert">
+                    {copyError}
+                  </p>
+                ) : null}
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <button type="button" className="ui-btn-ghost h-8 px-3 text-xs" onClick={closeCopyDialog} disabled={isCopying}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="ui-btn-primary h-8 px-3 text-xs"
+                    disabled={!copyTargetStepId || isCopying}
+                    onClick={() => void copyPhotoToSelectedStep()}
+                  >
+                    {isCopying ? "Copying…" : "Copy photo"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -232,51 +513,29 @@ export function StepPartReferenceEditor({
   task,
   step,
   partReferences,
-  draftValue,
   compact = false,
   masterBom,
-  onDraftChange,
-  onAddDraft,
   onAddFromBom,
   onLinkExisting,
+  onQuantityChange,
   onRemove,
 }: StepPartReferenceEditorProps) {
   const hasMasterBom = Boolean(masterBom && masterBom.rows.length > 0);
   const linkedPartIds = new Set(getStepPartReferenceIds(task, step.id));
   const linkedParts = getStepPartReferences(task, step.id);
   const availableParts = partReferences.filter((part) => part.partNumber.trim() && !linkedPartIds.has(part.id));
-  const gridClass = "grid grid-cols-[42px_minmax(0,1fr)_42px] items-center gap-1";
-  const compactInputClass =
-    "h-7 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-accent";
-  const compactAddClass = "h-7 text-[10px] ui-mono-label text-ink-secondary hover:text-accent";
 
   if (compact) {
     return (
       <div className="space-y-1.5">
-        <div className={gridClass}>
+        <div className="grid grid-cols-[42px_minmax(0,1fr)] items-center gap-1">
           <span className="ui-field-label mb-0">Parts</span>
-          <input
-            className={compactInputClass}
-            value={draftValue}
-            onChange={(event) => onDraftChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                onAddDraft();
-              }
-            }}
-            placeholder="Part number"
-          />
-          <button type="button" onClick={onAddDraft} className={compactAddClass}>
-            Add
-          </button>
-        </div>
-
-        {hasMasterBom && masterBom ? (
-          <div className="pl-[42px]">
+          {hasMasterBom && masterBom ? (
             <BomPartSearch masterBom={masterBom} onSelect={onAddFromBom} compact />
-          </div>
-        ) : null}
+          ) : (
+            <span className="text-[10px] font-semibold text-ink-tertiary">Upload a master BOM in Setup to add parts.</span>
+          )}
+        </div>
 
         {availableParts.length > 0 ? (
           <div className="pl-[42px]">
@@ -302,24 +561,44 @@ export function StepPartReferenceEditor({
         ) : null}
 
         {linkedParts.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5 pl-[42px]">
-            {linkedParts.map((part) => (
-              <span key={part.id} className="ui-chip inline-flex min-w-0 items-center gap-1 normal-case tracking-normal">
-                <span className="max-w-[220px] truncate" title={part.description || part.partNumber}>
-                  {part.partNumber}
-                  {part.quantity ? ` x${part.quantity}` : ""}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onRemove(part.id)}
-                  className="text-ink-secondary/70 hover:text-danger"
-                  aria-label={`Remove ${part.partNumber} from step ${step.sequence}`}
-                  title={`Remove ${part.partNumber}`}
+          <div className="space-y-1.5 pl-[42px]">
+            {linkedParts.map((part) => {
+              const quantity = getStepPartReferenceQuantity(task, step.id, part.id);
+              return (
+                <div
+                  key={part.id}
+                  className="grid grid-cols-[minmax(0,1fr)_4.5rem_1.5rem] items-start gap-2 rounded border border-line px-2 py-1.5"
                 >
-                  <Trash2 size={10} />
-                </button>
-              </span>
-            ))}
+                  <div className="min-w-0">
+                    <div className="font-mono text-[10px] font-bold text-ink">{part.partNumber}</div>
+                    <div className="whitespace-normal break-words text-[10px] leading-4 text-ink-secondary">
+                      {part.description || "No description"}
+                    </div>
+                  </div>
+                  <label className="min-w-0">
+                    <span className="ui-field-label mb-0 block text-[9px]">Qty</span>
+                    <ClearableNumberInput
+                      aria-label={`Quantity for ${part.partNumber} on step ${step.sequence}`}
+                      className="h-6 w-full border-b border-line bg-transparent text-right text-xs font-semibold tabular-nums text-ink outline-none focus:border-accent"
+                      value={quantity}
+                      fallbackValue={quantity}
+                      min={0.000001}
+                      precision={6}
+                      onValueChange={(value) => onQuantityChange(part.id, value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(part.id)}
+                    className="mt-1 flex h-5 w-5 items-center justify-center text-ink-secondary/70 hover:text-danger"
+                    aria-label={`Remove ${part.partNumber} from step ${step.sequence}`}
+                    title={`Remove ${part.partNumber}`}
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         ) : null}
       </div>
@@ -333,24 +612,11 @@ export function StepPartReferenceEditor({
         <div className="mb-2">
           <BomPartSearch masterBom={masterBom} onSelect={onAddFromBom} />
         </div>
-      ) : null}
-      <div className="ui-procedure-step-add-row">
-        <input
-          className="ui-procedure-step-inline-text"
-          value={draftValue}
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              onAddDraft();
-            }
-          }}
-          placeholder="Part number"
-        />
-        <button type="button" onClick={onAddDraft} className="ui-btn-ghost h-8 shrink-0 px-2 text-[10px]">
-          Add
-        </button>
-        {availableParts.length > 0 ? (
+      ) : (
+        <div className="mb-2 text-xs font-semibold text-ink-tertiary">Upload a master BOM in Setup to add parts.</div>
+      )}
+      {availableParts.length > 0 ? (
+        <div className="flex justify-end">
           <ThemedSelect
             aria-label={`Link existing part to step ${step.sequence}`}
             value=""
@@ -369,31 +635,378 @@ export function StepPartReferenceEditor({
               }
             }}
           />
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {linkedParts.length > 0 ? (
-        <div className="ui-procedure-step-chip-list">
-          {linkedParts.map((part) => (
-            <span key={part.id} className="ui-procedure-tag group">
-              <span className="min-w-0 truncate" title={part.description || part.partNumber}>
-                {part.partNumber}
-                {part.quantity ? ` x${part.quantity}` : ""}
-              </span>
-              <button
-                type="button"
-                onClick={() => onRemove(part.id)}
-                className="ui-procedure-tag-remove"
-                aria-label={`Remove ${part.partNumber} from step ${step.sequence}`}
-                title={`Remove ${part.partNumber}`}
-              >
-                <Trash2 size={10} />
-              </button>
-            </span>
-          ))}
+        <div className="mt-2 overflow-x-auto rounded border border-line">
+          <table
+            className="w-full min-w-[34rem] border-collapse text-xs"
+            aria-label={`Parts allocated to step ${step.sequence}`}
+          >
+            <thead className="bg-surface-raised">
+              <tr>
+                <th
+                  scope="col"
+                  className="ui-mono-label w-[12rem] whitespace-nowrap border-b border-line px-3 py-2 text-left text-ink-secondary"
+                >
+                  Part number
+                </th>
+                <th
+                  scope="col"
+                  className="ui-mono-label border-b border-line px-3 py-2 text-left text-ink-secondary"
+                >
+                  Description
+                </th>
+                <th
+                  scope="col"
+                  className="ui-mono-label w-20 whitespace-nowrap border-b border-line px-3 py-2 text-right text-ink-secondary"
+                >
+                  Qty
+                </th>
+                <th scope="col" className="w-8 border-b border-line px-1 py-2">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {linkedParts.map((part) => {
+                const quantity = getStepPartReferenceQuantity(task, step.id, part.id);
+                return (
+                  <tr key={part.id} className="border-b border-line/60 last:border-b-0 hover:bg-surface-raised/50">
+                    <td className="whitespace-nowrap px-3 py-1.5 align-middle font-mono font-semibold text-ink">
+                      {part.partNumber}
+                    </td>
+                    <td className="whitespace-normal break-words px-3 py-1.5 align-middle leading-4 text-ink-secondary">
+                      {part.description || "No description"}
+                    </td>
+                    <td className="px-3 py-1 align-middle">
+                      <ClearableNumberInput
+                        aria-label={`Quantity for ${part.partNumber} on step ${step.sequence}`}
+                        className="h-6 w-full border-b border-line bg-transparent text-right text-xs font-semibold tabular-nums text-ink outline-none focus:border-accent"
+                        value={quantity}
+                        fallbackValue={quantity}
+                        min={0.000001}
+                        precision={6}
+                        onValueChange={(value) => onQuantityChange(part.id, value)}
+                      />
+                    </td>
+                    <td className="px-1 py-1 align-middle">
+                      <button
+                        type="button"
+                        onClick={() => onRemove(part.id)}
+                        className="flex h-6 w-6 items-center justify-center text-ink-tertiary hover:text-danger"
+                        aria-label={`Remove ${part.partNumber} from step ${step.sequence}`}
+                        title={`Remove ${part.partNumber}`}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       ) : null}
     </div>
+  );
+}
+
+export function LinkedInstructionTextarea({
+  task,
+  step,
+  value,
+  className = "",
+  onScroll,
+  onMentionClick,
+  ...textareaProps
+}: LinkedInstructionTextareaProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const [hoveredPart, setHoveredPart] = useState<{
+    partNumber: string;
+    description: string;
+    rect: DOMRect;
+  }>();
+  const mentions = numberedStepPartMentions(task, step.id).filter(
+    (mention) => value.slice(mention.start, mention.end) === mention.text,
+  );
+  if (mentions.length === 0) {
+    return <textarea {...textareaProps} className={className} value={value} onScroll={onScroll} />;
+  }
+
+  const partById = new Map((task.partReferences ?? []).map((part) => [part.id, part]));
+  const content: ReactNode[] = [];
+  let cursor = 0;
+  mentions.forEach((mention) => {
+    content.push(value.slice(cursor, mention.start));
+    const part = partById.get(mention.partReferenceId);
+    content.push(
+      <span
+        key={mention.id}
+        className="ui-linked-instruction-mention"
+        data-part-mention-id={mention.id}
+        onMouseEnter={(event) => {
+          if (!part) {
+            return;
+          }
+          setHoveredPart({
+            partNumber: part.partNumber,
+            description: part.description ?? "",
+            rect: event.currentTarget.getBoundingClientRect(),
+          });
+        }}
+        onMouseLeave={() => setHoveredPart(undefined)}
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setHoveredPart(undefined);
+          onMentionClick?.(mention, { left: rect.left, top: rect.top, bottom: rect.bottom });
+        }}
+      >
+        {mention.text}
+      </span>,
+    );
+    cursor = mention.end;
+  });
+  content.push(value.slice(cursor));
+
+  const hoverTooltip = hoveredPart && typeof document !== "undefined"
+    ? createPortal(
+        <div
+          role="tooltip"
+          className="pointer-events-none fixed z-[70] w-64 rounded border border-line bg-surface px-2 py-1.5 shadow-lg"
+          style={{
+            left: Math.max(8, Math.min(hoveredPart.rect.left, window.innerWidth - 264)),
+            ...(hoveredPart.rect.top > 72
+              ? { bottom: window.innerHeight - hoveredPart.rect.top + 6 }
+              : { top: hoveredPart.rect.bottom + 6 }),
+          }}
+        >
+          <div className="font-mono text-[10px] font-bold text-ink">{hoveredPart.partNumber}</div>
+          <div className="mt-0.5 whitespace-normal break-words text-[10px] leading-4 text-ink-secondary">
+            {hoveredPart.description || "No description"}
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <>
+      <div className="ui-linked-instruction-editor">
+        <div ref={backdropRef} aria-hidden="true" className={`${className} ui-linked-instruction-backdrop`}>
+          {content}
+        </div>
+        <textarea
+          {...textareaProps}
+          className={`${className} ui-linked-instruction-input`}
+          value={value}
+          onScroll={(event) => {
+            if (backdropRef.current) {
+              backdropRef.current.scrollTop = event.currentTarget.scrollTop;
+              backdropRef.current.scrollLeft = event.currentTarget.scrollLeft;
+            }
+            onScroll?.(event);
+          }}
+        />
+      </div>
+      {hoverTooltip}
+    </>
+  );
+}
+
+export function StepPartMentionEditor({
+  task,
+  step,
+  selection,
+  masterBom,
+  compact = false,
+  onLink,
+  onCancelSelection,
+  onRemoveMention,
+}: StepPartMentionEditorProps) {
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [selectedPart, setSelectedPart] = useState<BomPartSelection>();
+  const [quantity, setQuantity] = useState(1);
+  const selectedMention = selection?.mentionId
+    ? getStepPartMentions(task, step.id).find((mention) => mention.id === selection.mentionId)
+    : undefined;
+
+  const dismissSelection = useCallback(() => {
+    if (selection) {
+      document.querySelectorAll<HTMLTextAreaElement>(`textarea[aria-label="Step ${step.sequence} instruction"]`)
+        .forEach((textarea) => {
+          if (textarea.value.slice(selection.start, selection.end) === selection.text) {
+            textarea.setSelectionRange(selection.end, selection.end);
+          }
+        });
+    }
+    onCancelSelection();
+  }, [onCancelSelection, selection, step.sequence]);
+
+  useEffect(() => {
+    const existingPart = selection?.partReferenceId
+      ? (task.partReferences ?? []).find((part) => part.id === selection.partReferenceId)
+      : undefined;
+    if (existingPart) {
+      const existingQuantity = getStepPartReferenceQuantity(task, step.id, existingPart.id);
+      setSelectedPart({
+        partNumber: existingPart.partNumber,
+        description: existingPart.description ?? "",
+        quantity: existingQuantity,
+      });
+      setQuantity(existingQuantity);
+    } else {
+      setSelectedPart(undefined);
+      setQuantity(1);
+    }
+  }, [selection?.end, selection?.partReferenceId, selection?.start, step.id, task]);
+
+  useEffect(() => {
+    if (!selection) {
+      return;
+    }
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        dismissSelection();
+        return;
+      }
+      if (
+        popupRef.current?.contains(target) ||
+        target.closest('[data-bom-part-search-dropdown="true"]')
+      ) {
+        return;
+      }
+      dismissSelection();
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        dismissSelection();
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [dismissSelection, selection]);
+
+  if (!selection || typeof document === "undefined") {
+    return null;
+  }
+
+  const desiredPopupWidth = compact ? 286 : 320;
+  const viewportWidth = typeof window === "undefined" ? desiredPopupWidth + 16 : window.innerWidth;
+  const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
+  const popupWidth = Math.min(desiredPopupWidth, Math.max(240, viewportWidth - 16));
+  const anchor = selection.anchor ?? { left: 16, top: 16, bottom: 34 };
+  const left = Math.max(8, Math.min(anchor.left, viewportWidth - popupWidth - 8));
+  const openAbove = viewportHeight - anchor.bottom < 300 && anchor.top > 300;
+
+  return createPortal(
+    <div
+      ref={popupRef}
+      role="dialog"
+      aria-label={`Link selected text on step ${step.sequence}`}
+      className="fixed z-50 rounded-md border border-line bg-surface p-2 shadow-xl"
+      style={{
+        left,
+        width: popupWidth,
+        ...(openAbove
+          ? { bottom: Math.max(8, viewportHeight - anchor.top + 8) }
+          : { top: Math.max(8, anchor.bottom + 8) }),
+      }}
+    >
+      <div className="mb-1.5 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-accent">
+            <Link2 size={11} strokeWidth={2} />
+            {selectedMention ? "Edit BOM link" : "Link text to BOM part"}
+          </div>
+          <div className="mt-0.5 truncate text-[11px] font-semibold text-ink" title={selection.text}>
+            “{selection.text}”
+          </div>
+        </div>
+        <button
+          type="button"
+          className="flex h-5 w-5 shrink-0 items-center justify-center text-ink-secondary hover:text-ink"
+          onClick={dismissSelection}
+          aria-label={`Close part link popup for step ${step.sequence}`}
+          title="Close"
+        >
+          <X size={12} />
+        </button>
+      </div>
+
+      {masterBom && masterBom.rows.length > 0 ? (
+        <BomPartSearch
+          masterBom={masterBom}
+          compact
+          onSelect={(entry) => {
+            setSelectedPart(entry);
+            setQuantity(entry.quantity);
+          }}
+        />
+      ) : (
+        <div className="text-[10px] font-semibold text-ink-tertiary">
+          Upload a master BOM in Setup before linking text.
+        </div>
+      )}
+
+      {selectedPart ? (
+        <div className="mt-1.5 rounded border border-line bg-surface-raised/60 p-1.5">
+          <div className="font-mono text-[10px] font-bold text-ink">{selectedPart.partNumber}</div>
+          <div className="mt-0.5 line-clamp-2 whitespace-normal break-words text-[9px] leading-3.5 text-ink-secondary">
+            {selectedPart.description || "No description"}
+          </div>
+          <label className="mt-1.5 grid grid-cols-[1fr_4.5rem] items-center gap-2">
+            <span className="text-[9px] font-semibold text-ink-secondary">Step quantity</span>
+            <ClearableNumberInput
+              aria-label={`Quantity for linked part on step ${step.sequence}`}
+              className="h-6 w-full border-b border-line bg-transparent text-right text-[11px] font-semibold tabular-nums text-ink outline-none focus:border-accent"
+              value={quantity}
+              fallbackValue={quantity}
+              min={0.000001}
+              precision={6}
+              onValueChange={setQuantity}
+            />
+          </label>
+        </div>
+      ) : null}
+
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div>
+          {selectedMention ? (
+            <button
+              type="button"
+              className="ui-btn-ghost h-6 px-1.5 text-[9px] text-danger hover:text-danger"
+              onClick={() => {
+                onRemoveMention(selectedMention.id);
+                dismissSelection();
+              }}
+            >
+              Remove link
+            </button>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button type="button" className="ui-btn-ghost h-6 px-1.5 text-[9px]" onClick={dismissSelection}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="ui-btn-primary h-6 px-2 text-[9px]"
+            disabled={!selectedPart}
+            onClick={() => selectedPart && onLink({ ...selectedPart, quantity })}
+          >
+            {selectedMention ? "Update link" : "Link"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

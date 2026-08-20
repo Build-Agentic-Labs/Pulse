@@ -17,6 +17,11 @@ import {
   type ManufacturingStepCheckDefinition,
 } from "../manufacturing-step-checks";
 import { documentDisplayCode, stepDisplayCode } from "../nomenclature";
+import { getStepPartReferenceQuantity } from "../step-part-references";
+import {
+  instructionWithPartMentionMarkers,
+  numberedStepPartMentions,
+} from "../step-part-mentions";
 import { getTaskStepPhotoAttachmentMap, type StepPhotoAttachmentMap } from "../step-photos";
 import { getTaskStepToolListMap } from "../step-tools";
 import type { ManufacturingStep, Product, Task, Zone } from "../types";
@@ -28,6 +33,7 @@ import {
   type WorkInstructionLayout,
   type WorkInstructionPart,
   type WorkInstructionPhoto,
+  type WorkInstructionStepPartReference,
 } from "./schema";
 import { estimateLines } from "./estimate-lines";
 import { splitInstruction } from "./split-instruction";
@@ -98,13 +104,56 @@ function buildPhoto(attachments: StepPhotoAttachmentMap, stepId: string): WorkIn
  */
 function buildParts(task: Task): WorkInstructionPart[] {
   const kit = task.materialKit?.trim();
+  const allocatedQuantityByPartId = new Map<string, number>();
+  (task.manufacturingSteps ?? []).forEach((step) => {
+    (step.partReferenceIds ?? []).forEach((partReferenceId) => {
+      allocatedQuantityByPartId.set(
+        partReferenceId,
+        (allocatedQuantityByPartId.get(partReferenceId) ?? 0) +
+          getStepPartReferenceQuantity(task, step.id, partReferenceId),
+      );
+    });
+  });
   const references = (task.partReferences ?? []).map((part) => ({
     partNumber: part.partNumber,
     description: part.description ?? "",
-    quantity: part.quantity,
+    quantity: allocatedQuantityByPartId.get(part.id) ?? part.quantity,
   }));
 
   return kit ? [{ partNumber: kit, description: "Material kit", quantity: 1 }, ...references] : references;
+}
+
+function buildStepPartReferences(task: Task, stepId: string): WorkInstructionStepPartReference[] {
+  const partById = new Map((task.partReferences ?? []).map((part) => [part.id, part]));
+  return numberedStepPartMentions(task, stepId).flatMap((mention) => {
+    const part = partById.get(mention.partReferenceId);
+    if (!part) {
+      return [];
+    }
+
+    return [{
+      marker: mention.marker,
+      text: mention.text,
+      partNumber: part.partNumber,
+      description: part.description ?? "",
+      quantity: getStepPartReferenceQuantity(task, stepId, part.id),
+    }];
+  });
+}
+
+function instructionBudgetWithPartReferences(
+  budget: WorkInstructionLayout["instruction"],
+  partReferences: WorkInstructionStepPartReference[],
+) {
+  if (partReferences.length === 0) {
+    return budget;
+  }
+
+  const referenceLines = partReferences.reduce(
+    (total, part) => total + 1 + Math.ceil(part.description.length / Math.max(budget.charsPerLine, 1)),
+    1,
+  );
+  return { ...budget, lines: Math.max(4, budget.lines - referenceLines) };
 }
 
 export function buildWorkInstruction({
@@ -124,7 +173,10 @@ export function buildWorkInstruction({
     const sequence = index + 1;
     const code = stepDisplayCode(task, step);
     const checks = buildChecks(step, definitions);
-    const chunks = splitInstruction(step.instruction, layout.instruction, layout.continuation);
+    const stepPartReferences = buildStepPartReferences(task, step.id);
+    const markedInstruction = instructionWithPartMentionMarkers(task, step.id, step.instruction);
+    const firstCardInstructionBudget = instructionBudgetWithPartReferences(layout.instruction, stepPartReferences);
+    const chunks = splitInstruction(markedInstruction, firstCardInstructionBudget, layout.continuation);
     // A step with no text still gets one card — the operator needs the slot.
     const parts = chunks.length > 0 ? chunks : [""];
 
@@ -143,12 +195,15 @@ export function buildWorkInstruction({
         instruction,
         // The splitter already broke what it could; anything still over budget
         // is a single token too wide to break, which only a human can fix.
-        overflowing: estimateLines(instruction, budget.charsPerLine) > budget.lines,
+        overflowing:
+          estimateLines(instruction, budget.charsPerLine) >
+          (first ? firstCardInstructionBudget.lines : budget.lines),
         // Photo, tools and duration lead the step; checks close it.
         durationMinutes: first ? step.durationMinutes : undefined,
         tools: first ? (toolsByStep[step.id] ?? []) : [],
         checks: last ? checks : [],
         photo: first ? buildPhoto(photosByStep, step.id) : undefined,
+        partReferences: first ? stepPartReferences : [],
       };
     });
   });

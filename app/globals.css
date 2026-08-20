@@ -20,6 +20,7 @@
   --nd-success: #4a9e5c;
   --nd-warning: #d4a843;
   --nd-interactive: #007aff;
+  --color-link: #0066cc;
 
   --color-canvas: var(--nd-black);
   --color-surface: var(--nd-surface);
@@ -142,6 +143,7 @@
   --nd-text-primary: #e8e8e8;
   --nd-text-display: #ffffff;
   --nd-interactive: #5b9bf6;
+  --color-link: #6aa7ff;
 
   --color-canvas: var(--nd-black);
   --color-surface: var(--nd-surface);

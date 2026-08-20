@@ -25,10 +25,17 @@ import { createAnnotationId } from "@/domain/photo-annotations";
 import { getTaskExplodedViews, type ExplodedView } from "@/domain/step-exploded-views";
 import {
   addStepPartReference,
+  attachPartMentionToStep,
   attachPartToStep,
   removePartReferenceFromSteps,
   removeStepPartReference,
+  setStepPartReferenceQuantity,
 } from "@/domain/step-part-references";
+import {
+  getStepPartMentions,
+  reconcileStepPartMentionsAfterInstructionChange,
+  removeStepPartMention,
+} from "@/domain/step-part-mentions";
 import { getStepPhotoAttachments, updateStepPhotoAttachment, type StepPhotoAttachment } from "@/domain/step-photos";
 import { addStepTool, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import { listSopSummariesFromSupabase, type SopSummary } from "@/domain/supabase-planner";
@@ -50,7 +57,15 @@ import { TaskVideoGallery } from "../task-video-gallery";
 import { type FeedbackConfirm } from "../themed-feedback";
 import { ThemedSelect } from "../themed-select";
 import { NumericField, handleInstructionBulletKeyDown, type ProcedureDraftFieldName } from "./shared";
-import { ProcedureStepChecksEditor, StepPartReferenceEditor, StepPhotoAttachmentEditor } from "./step-editors";
+import {
+  instructionTextSelectionFromTextarea,
+  LinkedInstructionTextarea,
+  ProcedureStepChecksEditor,
+  StepPartMentionEditor,
+  StepPartReferenceEditor,
+  StepPhotoAttachmentEditor,
+  type InstructionTextSelection,
+} from "./step-editors";
 
 function StatusPill({ status }: { status: string }) {
   const tone =
@@ -125,6 +140,7 @@ export function DetailDrawer({
   onProcedureFieldBlur,
   onProcedureFieldChange,
   onUploadStepPhotos,
+  onCopyStepPhoto,
   onRemoveStepPhoto,
   onDeleteExplodedView,
   onDeleteTaskVideo,
@@ -166,6 +182,7 @@ export function DetailDrawer({
     value: string,
   ) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
+  onCopyStepPhoto: (taskId: string, targetStepId: string, photo: StepPhotoAttachment) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onDeleteExplodedView: (taskId: string, view: ExplodedView) => void;
   onDeleteTaskVideo: (taskId: string, video: TaskVideo) => void;
@@ -183,7 +200,7 @@ export function DetailDrawer({
     collapsed ? "pointer-events-none translate-x-3 opacity-0" : "translate-x-0 opacity-100 delay-75"
   }`;
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
-  const [newStepPartNumbers, setNewStepPartNumbers] = useState<Record<string, string>>({});
+  const [instructionSelections, setInstructionSelections] = useState<Record<string, InstructionTextSelection>>({});
   const [stepPhotoUploadCounts, setStepPhotoUploadCounts] = useState<Record<string, number>>({});
   const sopSummaries = useSopSummaries(Boolean(task && station));
   const stepCheckDefinitions = getManufacturingStepCheckDefinitions();
@@ -357,25 +374,11 @@ export function DetailDrawer({
     };
     const nextTask = removePartReferenceFromSteps(taskWithoutPart, partId);
 
-	    onUpdateTask(taskId, {
-	      manufacturingSteps: nextTask.manufacturingSteps,
-	      partReferences: nextTask.partReferences,
-	    });
-  }
-
-  function addManufacturingStepPartReference(stepId: string) {
-    const nextTask = attachPartToStep(currentTask, stepId, { partNumber: newStepPartNumbers[stepId] ?? "" }, () =>
-      createAnnotationId("part"),
-    );
-    if (!nextTask) {
-      return;
-    }
-
     onUpdateTask(taskId, {
+      customFields: nextTask.customFields,
       manufacturingSteps: nextTask.manufacturingSteps,
       partReferences: nextTask.partReferences,
     });
-    setNewStepPartNumbers((current) => ({ ...current, [stepId]: "" }));
   }
 
   function addStepPartFromBom(stepId: string, entry: BomPartSelection) {
@@ -385,20 +388,114 @@ export function DetailDrawer({
     }
 
     onUpdateTask(taskId, {
+      customFields: nextTask.customFields,
       manufacturingSteps: nextTask.manufacturingSteps,
       partReferences: nextTask.partReferences,
     });
   }
 
-	  function linkExistingPartToManufacturingStep(stepId: string, partReferenceId: string) {
-	    const nextTask = addStepPartReference(currentTask, stepId, partReferenceId);
-	    onUpdateTask(taskId, { manufacturingSteps: nextTask.manufacturingSteps });
-	  }
+  function linkExistingPartToManufacturingStep(stepId: string, partReferenceId: string) {
+    const nextTask = addStepPartReference(currentTask, stepId, partReferenceId);
+    onUpdateTask(taskId, { manufacturingSteps: nextTask.manufacturingSteps });
+  }
 
-	  function removeManufacturingStepPartReference(stepId: string, partReferenceId: string) {
-	    const nextTask = removeStepPartReference(currentTask, stepId, partReferenceId);
-	    onUpdateTask(taskId, { manufacturingSteps: nextTask.manufacturingSteps });
-	  }
+  function removeManufacturingStepPartReference(stepId: string, partReferenceId: string) {
+    const nextTask = removeStepPartReference(currentTask, stepId, partReferenceId);
+    onUpdateTask(taskId, {
+      customFields: nextTask.customFields,
+      manufacturingSteps: nextTask.manufacturingSteps,
+    });
+  }
+
+  function updateManufacturingStepPartQuantity(stepId: string, partReferenceId: string, quantity: number) {
+    const nextTask = setStepPartReferenceQuantity(currentTask, stepId, partReferenceId, quantity);
+    onUpdateTask(taskId, { manufacturingSteps: nextTask.manufacturingSteps });
+  }
+
+  function updateManufacturingStepInstruction(stepId: string, instruction: string) {
+    const step = manufacturingSteps.find((candidate) => candidate.id === stepId);
+    if (!step) {
+      return;
+    }
+    const previousInstruction = getProcedureFieldValue(taskId, stepId, "instruction", step.instruction);
+    const reconciledTask = reconcileStepPartMentionsAfterInstructionChange(
+      currentTask,
+      stepId,
+      previousInstruction,
+      instruction,
+    );
+    if (reconciledTask.customFields !== currentTask.customFields) {
+      onUpdateTask(taskId, {
+        customFields: reconciledTask.customFields,
+        manufacturingSteps: currentTask.manufacturingSteps,
+      });
+    }
+    setInstructionSelections((current) => {
+      if (!current[stepId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[stepId];
+      return next;
+    });
+    onProcedureFieldChange(taskId, stepId, "instruction", instruction);
+  }
+
+  function captureInstructionSelection(stepId: string, textarea: HTMLTextAreaElement) {
+    const selection = instructionTextSelectionFromTextarea(textarea, getStepPartMentions(currentTask, stepId));
+    if (!selection) {
+      clearInstructionSelection(stepId);
+      return;
+    }
+    setInstructionSelections((current) => ({ ...current, [stepId]: selection }));
+  }
+
+  function clearInstructionSelection(stepId: string) {
+    setInstructionSelections((current) => {
+      if (!current[stepId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[stepId];
+      return next;
+    });
+  }
+
+  function linkInstructionSelectionToPart(stepId: string, entry: BomPartSelection) {
+    const step = manufacturingSteps.find((candidate) => candidate.id === stepId);
+    const selection = instructionSelections[stepId];
+    if (!step || !selection) {
+      return;
+    }
+    const instruction = getProcedureFieldValue(taskId, stepId, "instruction", step.instruction);
+    const nextTask = attachPartMentionToStep(
+      currentTask,
+      stepId,
+      instruction,
+      selection,
+      entry,
+      () => createAnnotationId("part"),
+      () => createAnnotationId("part-mention"),
+    );
+    if (!nextTask) {
+      clearInstructionSelection(stepId);
+      return;
+    }
+    onUpdateTask(taskId, {
+      customFields: nextTask.customFields,
+      manufacturingSteps: nextTask.manufacturingSteps,
+      partReferences: nextTask.partReferences,
+    });
+    clearInstructionSelection(stepId);
+  }
+
+  function removeInstructionPartMention(stepId: string, mentionId: string) {
+    const nextTask = removeStepPartMention(currentTask, stepId, mentionId);
+    onUpdateTask(taskId, {
+      customFields: nextTask.customFields,
+      manufacturingSteps: currentTask.manufacturingSteps,
+    });
+  }
 
   function addManufacturingStepTool(stepId: string) {
     const nextTool = (newStepToolNames[stepId] ?? "").trim();
@@ -661,29 +758,51 @@ export function DetailDrawer({
                             onValueChange={(value) => updateManufacturingStep(step.id, { durationMinutes: value })}
                           />
                         </div>
-                        <textarea
+                        <LinkedInstructionTextarea
+                          task={currentTask}
+                          step={step}
                           aria-label={`Step ${step.sequence} instruction`}
                           className="ui-field-standalone min-h-[86px] resize-none py-2 text-sm leading-snug"
                           value={getProcedureFieldValue(taskId, step.id, "instruction", step.instruction)}
                           onFocus={() => onProcedureFieldFocus(taskId, step.id, "instruction", step.instruction)}
                           onBlur={() => onProcedureFieldBlur(taskId, step.id, "instruction")}
-                          onChange={(event) =>
-                            onProcedureFieldChange(taskId, step.id, "instruction", event.target.value)
-                          }
+                          onSelect={(event) => captureInstructionSelection(step.id, event.currentTarget)}
+                          onChange={(event) => updateManufacturingStepInstruction(step.id, event.target.value)}
                           onKeyDown={(event) =>
                             handleInstructionBulletKeyDown(event, (instruction) =>
-                              onProcedureFieldChange(taskId, step.id, "instruction", instruction),
+                              updateManufacturingStepInstruction(step.id, instruction),
                             )
                           }
+                          onMentionClick={(mention, anchor) =>
+                            setInstructionSelections((current) => ({
+                              ...current,
+                              [step.id]: {
+                                start: mention.start,
+                                end: mention.end,
+                                text: mention.text,
+                                anchor,
+                                mentionId: mention.id,
+                                partReferenceId: mention.partReferenceId,
+                              },
+                            }))
+                          }
                           placeholder="Describe the manufacturing step"
+                        />
+                        <StepPartMentionEditor
+                          task={currentTask}
+                          step={step}
+                          selection={instructionSelections[step.id]}
+                          masterBom={masterBom}
+                          compact
+                          onLink={(entry) => linkInstructionSelectionToPart(step.id, entry)}
+                          onCancelSelection={() => clearInstructionSelection(step.id)}
+                          onRemoveMention={(mentionId) => removeInstructionPartMention(step.id, mentionId)}
                         />
                         <button
                           type="button"
                           onClick={() =>
-                            onProcedureFieldChange(
-                              taskId,
+                            updateManufacturingStepInstruction(
                               step.id,
-                              "instruction",
                               applyInstructionBullets(
                                 getProcedureFieldValue(taskId, step.id, "instruction", step.instruction),
                               ),
@@ -769,24 +888,24 @@ export function DetailDrawer({
 	                          task={currentTask}
 	                          step={step}
 	                          partReferences={partReferences}
-	                          draftValue={newStepPartNumbers[step.id] ?? ""}
 	                          compact
 	                          masterBom={masterBom}
-	                          onDraftChange={(value) =>
-	                            setNewStepPartNumbers((current) => ({ ...current, [step.id]: value }))
-	                          }
-	                          onAddDraft={() => addManufacturingStepPartReference(step.id)}
 	                          onAddFromBom={(entry) => addStepPartFromBom(step.id, entry)}
 	                          onLinkExisting={(partReferenceId) => linkExistingPartToManufacturingStep(step.id, partReferenceId)}
+	                          onQuantityChange={(partReferenceId, quantity) =>
+	                            updateManufacturingStepPartQuantity(step.id, partReferenceId, quantity)
+	                          }
 	                          onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
 	                        />
                         <div className="border-t border-line pt-2">
                           <StepPhotoAttachmentEditor
                             step={step}
                             photos={stepPhotos}
+                            copyTargets={currentTask.manufacturingSteps ?? []}
                             compact
                             isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
+                            onCopyToStep={(photo, targetStepId) => onCopyStepPhoto(taskId, targetStepId, photo)}
                             onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
                             onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                           />

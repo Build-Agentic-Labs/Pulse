@@ -159,9 +159,22 @@ const PRINT_STYLES = `
   font-size: 7pt; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .wi-card-text { display: flex; flex-direction: column; gap: 0.05in; min-width: 0; overflow: hidden; }
-.wi-card-instruction { flex: 1; min-height: 0; font-size: 9pt; line-height: 1.3; white-space: pre-wrap; overflow: hidden; }
+.wi-card-instruction {
+  flex: 1; min-height: 0; padding-top: 0.16em;
+  font-size: 9pt; line-height: 1.3; white-space: pre-wrap; overflow: hidden;
+}
+.wi-card-part-citation {
+  position: relative; top: -0.32em; margin-left: 0.03em;
+  font-size: 0.78em; line-height: 1; vertical-align: baseline; font-weight: 700;
+}
 .wi-card-overflow-note { flex: none; color: #a52a2a; font-size: 7pt; font-weight: 700; }
 .wi-card-tools, .wi-card-checks { flex: none; font-size: 7.5pt; }
+.wi-card-parts { flex: none; display: flex; flex-direction: column; gap: 1px; border-top: 1px solid #bbb; padding-top: 2px; font-size: 6.7pt; line-height: 1.2; }
+.wi-card-part-ref { display: grid; grid-template-columns: 0.2in 0.78in minmax(0, 1fr) 0.34in; gap: 3px; align-items: start; }
+.wi-card-part-marker, .wi-card-part-number, .wi-card-part-qty { font-family: var(--type-mono, monospace); font-weight: 700; }
+.wi-card-part-marker sup { font-size: 0.86em; line-height: 1; vertical-align: super; }
+.wi-card-part-description { overflow-wrap: anywhere; }
+.wi-card-part-qty { text-align: right; white-space: nowrap; }
 .wi-card-label { color: #666; font-size: 7pt; letter-spacing: 0.05em; text-transform: uppercase; }
 .wi-check { display: inline-flex; align-items: center; gap: 3px; margin: 0 4px 2px 0; padding: 1px 4px; border: 1px solid #999; }
 .wi-check-spec { font-family: var(--type-mono, monospace); font-weight: 700; }
@@ -480,6 +493,31 @@ function WorkInstructionPhotoMedia({
   );
 }
 
+function PartReferencedInstruction({ card }: { card: WorkInstructionCard }) {
+  const markers = new Set((card.partReferences ?? []).map((part) => String(part.marker)));
+  if (markers.size === 0) {
+    return card.instruction;
+  }
+
+  return card.instruction.split(/(\[\d+\])/g).map((segment, index) => {
+    const marker = segment.match(/^\[(\d+)\]$/)?.[1];
+    if (!marker || !markers.has(marker)) {
+      return segment;
+    }
+
+    return (
+      <sup
+        className="wi-card-part-citation"
+        aria-label={`Part reference ${marker}`}
+        title={`Part reference ${marker}`}
+        key={`${marker}-${index}`}
+      >
+        {marker}
+      </sup>
+    );
+  });
+}
+
 function StepCardCell({ card }: { card: WorkInstructionCard }) {
   const continued = card.part > 1;
   return (
@@ -504,7 +542,9 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
           <div className="wi-card-photo wi-card-photo-missing">No photo</div>
         )}
         <div className="wi-card-text">
-          <div className="wi-card-instruction">{card.instruction}</div>
+          <div className="wi-card-instruction">
+            <PartReferencedInstruction card={card} />
+          </div>
           {card.overflowing ? (
             <div className="wi-card-overflow-note">Unbreakable text wider than the card — shorten this step</div>
           ) : null}
@@ -512,6 +552,21 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
             <div className="wi-card-tools">
               <span className="wi-card-label">Tools </span>
               <span>{card.tools.join(", ")}</span>
+            </div>
+          ) : null}
+          {card.partReferences && card.partReferences.length > 0 ? (
+            <div className="wi-card-parts" aria-label={`Parts referenced in step ${card.sequence}`}>
+              <span className="wi-card-label">Parts</span>
+              {card.partReferences.map((part) => (
+                <div className="wi-card-part-ref" key={`${part.marker}-${part.partNumber}-${part.text}`}>
+                  <span className="wi-card-part-marker">
+                    <sup aria-label={`Part reference ${part.marker}`}>{part.marker}</sup>
+                  </span>
+                  <span className="wi-card-part-number">{part.partNumber}</span>
+                  <span className="wi-card-part-description">{part.description}</span>
+                  <span className="wi-card-part-qty">×{part.quantity ?? "—"}</span>
+                </div>
+              ))}
             </div>
           ) : null}
           {card.checks.length > 0 ? (

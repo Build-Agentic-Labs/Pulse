@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { STEP_PHOTO_ATTACHMENTS_FIELD } from "../step-photos";
+import { STEP_PART_MENTIONS_FIELD } from "../step-part-mentions";
 import { STEP_TOOL_LISTS_FIELD } from "../step-tools";
 import type { Product, Task, Zone } from "../types";
 import { buildWorkInstruction } from "./build";
@@ -340,6 +341,50 @@ describe("buildWorkInstruction", () => {
     expect(wi.setup.qualityGate).toBe(true);
     expect(wi.setup.plannedDurationMinutes).toBe(60);
     expect(wi.setup.plannedOperators).toBe(2);
+  });
+
+  it("adds numbered part markers and full step allocation details without changing the authored instruction", () => {
+    const task = makeTask({
+      manufacturingSteps: [
+        {
+          id: "step-a",
+          sequence: 1,
+          instruction: "Mount M8 bolts",
+          partReferenceIds: ["part-1"],
+          partReferenceQuantities: { "part-1": 4 },
+        },
+      ],
+      partReferences: [
+        {
+          id: "part-1",
+          partNumber: "1000000373",
+          description: "BOLT SEMS M8-1.25 X 25MM LONG HHCS W/SPRING&FLAT WASHER STAINLESS STEEL",
+          quantity: 99,
+        },
+      ],
+      customFields: {
+        [STEP_PART_MENTIONS_FIELD]: {
+          "step-a": [
+            { id: "mention-1", partReferenceId: "part-1", text: "M8 bolts", start: 6, end: 14 },
+          ],
+        },
+      },
+    });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
+
+    expect(task.manufacturingSteps?.[0].instruction).toBe("Mount M8 bolts");
+    expect(wi.cards[0].instruction).toBe("Mount M8 bolts[1]");
+    expect(wi.cards[0].partReferences).toEqual([
+      {
+        marker: 1,
+        text: "M8 bolts",
+        partNumber: "1000000373",
+        description: "BOLT SEMS M8-1.25 X 25MM LONG HHCS W/SPRING&FLAT WASHER STAINLESS STEEL",
+        quantity: 4,
+      },
+    ]);
+    expect(wi.setup.parts[0].quantity).toBe(4);
   });
 
   it("folds the material kit into the parts list as its first row", () => {

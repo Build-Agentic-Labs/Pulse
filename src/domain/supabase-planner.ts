@@ -44,6 +44,12 @@ import {
   workspaceRoleForOrganizationRole,
   type WorkspaceInviteEntitlements,
 } from "@/domain/workspace/invite-access";
+import {
+  PRODUCT_MASTER_BOM_FIELD,
+  getMasterBom,
+  serializeMasterBom,
+  type MasterBom,
+} from "./master-bom";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -633,6 +639,17 @@ function mapDocumentTypeCode(row: Record<string, unknown>): DocumentTypeCode {
 
 function mapManufacturingStepRecord(row: Record<string, unknown>): ManufacturingStep {
   const stepRefs = splitStepDependencyRefs(textArray(row.dependencyIds ?? row.dependency_ids));
+  // Some focused loaders normalize step rows before passing them through mapTask,
+  // so this mapper must also accept an already-mapped ManufacturingStep. Without
+  // this merge, the second mapping pass discarded partReferenceIds from a
+  // successful save response and made a newly linked part disappear in the UI.
+  const mappedPartReferenceIds = textArray(row.partReferenceIds ?? row.part_reference_ids);
+  const mappedQuantityValues = jsonObject(row.partReferenceQuantities ?? row.part_reference_quantities);
+  const mappedPartReferenceQuantities = Object.fromEntries(
+    Object.entries(mappedQuantityValues)
+      .map(([partReferenceId, quantity]) => [partReferenceId, maybeNum(quantity)] as const)
+      .filter((entry): entry is [string, number] => entry[1] !== undefined && entry[1] > 0),
+  );
 
   return {
     id: String(row.id),
@@ -642,7 +659,11 @@ function mapManufacturingStepRecord(row: Record<string, unknown>): Manufacturing
     durationMinutes: num(row.durationMinutes ?? row.duration_minutes),
     qualityCheck: maybeText(row.qualityCheck ?? row.quality_check),
     dependencyIds: stepRefs.dependencyIds,
-    partReferenceIds: stepRefs.partReferenceIds,
+    partReferenceIds: [...new Set([...stepRefs.partReferenceIds, ...mappedPartReferenceIds])],
+    partReferenceQuantities: {
+      ...stepRefs.partReferenceQuantities,
+      ...mappedPartReferenceQuantities,
+    },
     version: maybeNum(row.version),
   };
 }
@@ -976,6 +997,13 @@ function customFieldsRow(customFields: Task["customFields"]) {
   return nextCustomFields as Json;
 }
 
+export function procedureTaskUpdateRow(task: Task) {
+  // Procedure-owned metadata such as step part markers must travel with the
+  // debounced task save. customFieldsRow keeps normalized assets out because
+  // their rows have independent persistence and lifecycle handling.
+  return taskRow(task);
+}
+
 function dependencyRow(dependency: Dependency) {
   return {
     id: dependency.id,
@@ -1002,7 +1030,11 @@ function manufacturingStepRow(taskId: string, step: ManufacturingStep) {
     instruction: step.instruction,
     duration_minutes: step.durationMinutes ?? 0,
     quality_check: step.qualityCheck ?? null,
-    dependency_ids: mergeStepDependencyRefs(step.dependencyIds, step.partReferenceIds),
+    dependency_ids: mergeStepDependencyRefs(
+      step.dependencyIds,
+      step.partReferenceIds,
+      step.partReferenceQuantities,
+    ),
   };
 }
 
@@ -3059,6 +3091,58 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
   }
 }
 
+/**
+ * Persist only the product-level master BOM and verify the exact value returned
+ * by the database before the UI reports success. This intentionally bypasses
+ * the broader planner-shell autosave so an upload cannot be lost to debounce or
+ * page-unload timing.
+ */
+export async function saveMasterBomToSupabase(
+  product: Product,
+  bom: MasterBom | undefined,
+  projectId: string,
+  client?: ReturnType<typeof plannerClient>,
+): Promise<Product> {
+  if (!product.projectId || String(product.projectId) !== String(projectId)) {
+    throw new Error("The master BOM does not belong to the active project.");
+  }
+
+  const expectedBom = bom ? serializeMasterBom(bom) : undefined;
+  const customFields = { ...(product.customFields ?? {}) };
+  if (expectedBom) {
+    customFields[PRODUCT_MASTER_BOM_FIELD] = expectedBom;
+  } else {
+    delete customFields[PRODUCT_MASTER_BOM_FIELD];
+  }
+
+  const supabase = client ?? plannerClient();
+  const savedRow = await throwIfError(
+    supabase
+      .from("products")
+      .update({ custom_fields: customFields as Json })
+      .eq("id", product.id)
+      .eq("project_id", projectId)
+      .select("*")
+      .maybeSingle(),
+  );
+
+  if (!savedRow) {
+    throw new Error("The master BOM could not be saved. Check your project edit access and retry.");
+  }
+
+  const savedProduct = mapProduct(savedRow);
+  const verifiedBom = getMasterBom(savedProduct.customFields);
+  const didVerify = expectedBom
+    ? JSON.stringify(verifiedBom) === JSON.stringify(expectedBom)
+    : !Object.prototype.hasOwnProperty.call(savedProduct.customFields ?? {}, PRODUCT_MASTER_BOM_FIELD);
+
+  if (!didVerify) {
+    throw new Error("The master BOM save could not be verified. Retry before leaving this page.");
+  }
+
+  return savedProduct;
+}
+
 export async function saveTasksToSupabase(tasks: Task[], projectId?: string) {
   if (tasks.length === 0) {
     return;
@@ -3603,7 +3687,7 @@ export async function saveProcedureTaskUpdateToSupabase(
   await assertTaskInProject(supabase, task.id, projectId);
   const normalizedSteps = normalizeManufacturingStepSequences(task.manufacturingSteps ?? []);
   const taskToSave = { ...task, manufacturingSteps: normalizedSteps };
-  const { custom_fields: _customFields, ...taskProcedurePatch } = taskRow(taskToSave);
+  const taskProcedurePatch = procedureTaskUpdateRow(taskToSave);
   let taskUpdate = supabase.from("tasks").update(taskProcedurePatch).eq("id", task.id);
 
   if (taskToSave.version !== undefined) {

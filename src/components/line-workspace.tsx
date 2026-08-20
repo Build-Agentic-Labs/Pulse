@@ -71,17 +71,18 @@ import {
   issueReviewLabel,
 } from "@/domain/smart-allocation-report";
 import {
-  STEP_PHOTO_ATTACHMENTS_FIELD,
+  duplicateStepPhotoAttachment,
   getStepPhotoAttachments,
   getTaskStepPhotoAnnotationMap,
   removeStepPhotoAttachment,
   upsertStepPhotoAttachments,
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
-import { EXPLODED_VIEWS_FIELD, removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
-import { TASK_VIDEOS_FIELD, removeTaskVideo, type TaskVideo } from "@/domain/task-videos";
+import { removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
+import { removeTaskVideo, type TaskVideo } from "@/domain/task-videos";
+import { mergeTaskPrivateMedia } from "@/domain/task-private-media";
 import { buildStepToolLibrary, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
-import { removeTaskPartReference, updateTaskPartReference, type ProjectPartCatalogEntry, type ProjectToolCatalogEntry } from "@/domain/project-catalog";
+import type { ProjectToolCatalogEntry } from "@/domain/project-catalog";
 import { buildProjectToolRegistry } from "@/domain/tool-registry";
 import { canonicalToolKey, formatToolName } from "@/domain/tool-name-format";
 import type { ToolTypeValue } from "@/domain/tool-types";
@@ -133,6 +134,7 @@ import {
   loadToolLibraryFromSupabase,
   moveManufacturingStepToTaskInSupabase,
   removeStepToolFromSupabase,
+  saveMasterBomToSupabase,
   upsertToolLibraryMetadata,
   savePlannerShellToSupabase,
   savePlannerStateToSupabase,
@@ -156,6 +158,7 @@ import type {
   ManufacturingComponent,
   PlannerProjectContext,
   PlannerState,
+  Product,
   Project,
   ScenarioSummary,
   Station,
@@ -620,6 +623,7 @@ export function LineWorkspace({
   const [smartAllocationPending, setSmartAllocationPending] = useState(false);
   const [dismissedPlanningRecommendationKey, setDismissedPlanningRecommendationKey] = useState("");
   const saveInFlightRef = useRef(false);
+  const masterBomSaveInFlightRef = useRef(false);
   const queuedSaveStateRef = useRef<PlannerState | null>(null);
   const plannerDirtyRef = useRef(false);
   const plannerSaveTimerRef = useRef<number | null>(null);
@@ -771,9 +775,35 @@ export function LineWorkspace({
       flushPendingPlannerSaveRef.current();
     }
 
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (!masterBomSaveInFlightRef.current) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    function handleLinkNavigation(event: MouseEvent) {
+      if (!masterBomSaveInFlightRef.current) {
+        return;
+      }
+      const eventTarget = event.target;
+      const anchor = eventTarget instanceof Element ? eventTarget.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setChromeStatus({ message: "BOM is still saving. Wait for Saved before leaving this page.", error: true });
+    }
+
     window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleLinkNavigation, true);
     return () => {
       window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleLinkNavigation, true);
       flushPendingPlannerSaveRef.current();
     };
   }, []);
@@ -1077,7 +1107,8 @@ export function LineWorkspace({
   // actively editing); otherwise the server value is authoritative.
   function preserveLocalEditedTaskText(localTask: Task, mergedTask: Task, sourceMeta?: { source?: string }): Task {
     const isSaveCompletion = sourceMeta?.source === "saveCompletion";
-    if (!isSaveCompletion && !hasPendingProcedureSaveWork(localTask.id)) {
+    const hasNewerLocalSave = hasPendingProcedureSaveWork(localTask.id);
+    if (!isSaveCompletion && !hasNewerLocalSave) {
       return mergedTask;
     }
 
@@ -1100,6 +1131,28 @@ export function LineWorkspace({
       preserved.customFields = localTask.customFields;
     }
 
+    // A part can be attached while an older procedure save is still in flight. Keep the newer
+    // allocation visible until its queued save completes; otherwise the older server echo briefly
+    // removes the part and can make a successful Add look like it failed. Rebase step versions from
+    // the response so the queued save can still use the freshest optimistic-lock values.
+    if (
+      hasNewerLocalSave &&
+      JSON.stringify(localTask.manufacturingSteps ?? []) !== JSON.stringify(mergedTask.manufacturingSteps ?? [])
+    ) {
+      const mergedStepById = new Map((mergedTask.manufacturingSteps ?? []).map((step) => [step.id, step]));
+      preserved.manufacturingSteps = (localTask.manufacturingSteps ?? []).map((step) => ({
+        ...step,
+        version: mergedStepById.get(step.id)?.version ?? step.version,
+      }));
+    }
+
+    if (
+      hasNewerLocalSave &&
+      JSON.stringify(localTask.partReferences ?? []) !== JSON.stringify(mergedTask.partReferences ?? [])
+    ) {
+      preserved.partReferences = localTask.partReferences;
+    }
+
     if (Object.keys(preserved).length === 0) {
       return mergedTask;
     }
@@ -1116,7 +1169,7 @@ export function LineWorkspace({
   }
 
   function hasLocalSaveWork() {
-    return hasPlannerShellSaveWork() || hasProcedureSaveWork();
+    return masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork();
   }
 
   function generateProcedureSaveId() {
@@ -2760,8 +2813,8 @@ export function LineWorkspace({
   // The confirmed Product shell includes procedure steps, parts and tools, but
   // intentionally excludes private media. Hydrate one task at a time only when
   // Procedure needs it, avoiding three all-task media reads and URL signing on
-  // every Product entry. The procedure skeleton prevents edits from racing the
-  // selected task's authoritative media snapshot.
+  // every Product entry. Keep the confirmed procedure mounted during this read
+  // and merge only private media so a late response cannot replace active edits.
   useEffect(() => {
     if (
       activeModule !== "procedure" ||
@@ -2797,18 +2850,7 @@ export function LineWorkspace({
           if (!localTask) {
             return current;
           }
-          const mergedTask = mergeServerTaskIntoLocalTaskRef.current(localTask, serverTask, procedureDraftsRef.current, {
-            source: "lazyProcedureHydration",
-          });
-          const hydratedCustomFields = { ...mergedTask.customFields };
-          for (const field of [STEP_PHOTO_ATTACHMENTS_FIELD, EXPLODED_VIEWS_FIELD, TASK_VIDEOS_FIELD]) {
-            if (field in serverTask.customFields) {
-              hydratedCustomFields[field] = serverTask.customFields[field];
-            } else {
-              delete hydratedCustomFields[field];
-            }
-          }
-          const hydratedTask = { ...mergedTask, customFields: hydratedCustomFields };
+          const hydratedTask = mergeTaskPrivateMedia(localTask, serverTask);
           const nextState = {
             ...current,
             tasks: current.tasks.map((task) => (task.id === taskId ? hydratedTask : task)),
@@ -3256,9 +3298,13 @@ export function LineWorkspace({
 
     const taskModuleIds = new Set(["gantt", "procedure", "work-instructions"]);
     const ensureTaskModule = () => {
+      if (blockMasterBomNavigation()) {
+        return false;
+      }
       if (!taskModuleIds.has(activeModule)) {
         setActiveModule("gantt");
       }
+      return true;
     };
 
     return [
@@ -3277,14 +3323,22 @@ export function LineWorkspace({
             label: "Settings",
             hint: "Account",
             keywords: "account profile password theme",
-            action: () => router.push("/settings"),
+            action: () => {
+              if (!blockMasterBomNavigation()) {
+                router.push("/settings");
+              }
+            },
           },
           {
             id: "settings:organization",
             label: "Members & access",
             hint: "Settings",
             keywords: "invite user role organization access members",
-            action: () => router.push("/settings?section=organization"),
+            action: () => {
+              if (!blockMasterBomNavigation()) {
+                router.push("/settings?section=organization");
+              }
+            },
           },
         ],
       },
@@ -3307,8 +3361,9 @@ export function LineWorkspace({
           hint: task.wbs,
           keywords: "task",
           action: () => {
-            ensureTaskModule();
-            openTaskDetail(task.id);
+            if (ensureTaskModule()) {
+              openTaskDetail(task.id);
+            }
           },
         })),
       },
@@ -3319,8 +3374,9 @@ export function LineWorkspace({
           label: station.name,
           hint: "Station",
           action: () => {
-            ensureTaskModule();
-            selectStation(station.id);
+            if (ensureTaskModule()) {
+              selectStation(station.id);
+            }
           },
         })),
       },
@@ -3347,8 +3403,9 @@ export function LineWorkspace({
             hint: task.name,
             keywords: `part ${part.description ?? ""}`,
             action: () => {
-              ensureTaskModule();
-              openTaskDetail(task.id);
+              if (ensureTaskModule()) {
+                openTaskDetail(task.id);
+              }
             },
           })),
         ),
@@ -3363,6 +3420,9 @@ export function LineWorkspace({
             hint: entry.workspaceName,
             keywords: "project workspace open switch",
             action: () => {
+              if (blockMasterBomNavigation()) {
+                return;
+              }
               announceProjectSwitch(entry.project);
               router.push(projectPlannerHref(entry.project.id));
             },
@@ -3375,7 +3435,11 @@ export function LineWorkspace({
           label: sop.title || sop.sopNumber || sop.id,
           hint: sop.sopNumber && sop.title ? sop.sopNumber : "SOP",
           keywords: "sop standard operating procedure document",
-          action: () => router.push(`/sops/${sop.id}`),
+          action: () => {
+            if (!blockMasterBomNavigation()) {
+              router.push(`/sops/${sop.id}`);
+            }
+          },
         })),
       },
       {
@@ -3569,7 +3633,7 @@ export function LineWorkspace({
       return;
     }
 
-    if (saveInFlightRef.current) {
+    if (masterBomSaveInFlightRef.current || saveInFlightRef.current) {
       queuedSaveStateRef.current = stateToSave;
       setSaveState("saving");
       return;
@@ -4039,20 +4103,82 @@ export function LineWorkspace({
     }));
   }
 
-  function updateMasterBom(bom: MasterBom | undefined) {
-    markDirty();
-    setPlannerState((current) => {
-      const customFields = { ...(current.product.customFields ?? {}) };
-      if (bom) {
-        customFields[PRODUCT_MASTER_BOM_FIELD] = serializeMasterBom(bom);
-      } else {
-        delete customFields[PRODUCT_MASTER_BOM_FIELD];
-      }
-      return {
-        ...current,
-        product: { ...current.product, customFields },
+  async function updateMasterBom(bom: MasterBom | undefined): Promise<void> {
+    if (blockViewOnlyWrite()) {
+      throw new Error("You have view-only access to this project.");
+    }
+    if (!remoteStateConfirmedRef.current) {
+      throw new Error("The latest database state is still loading. Wait a moment, then retry the BOM upload.");
+    }
+    if (!projectId) {
+      throw new Error("Select a project before updating the master BOM.");
+    }
+
+    flushPendingPlannerSave();
+    if (hasLocalSaveWork() && !(await waitForLocalSavesToSettle())) {
+      throw new Error("Other changes could not be saved. Resolve the save error before updating the BOM.");
+    }
+
+    masterBomSaveInFlightRef.current = true;
+    setSaveError(undefined);
+    saveStateRef.current = "saving";
+    setSaveState("saving");
+
+    let verifiedProduct: Product | undefined;
+    try {
+      verifiedProduct = await saveMasterBomToSupabase(latestDerivedStateRef.current.product, bom, projectId);
+      const verifiedBom = getMasterBom(verifiedProduct.customFields);
+      const mergeVerifiedBom = (localProduct: Product): Product => {
+        const customFields = { ...(localProduct.customFields ?? {}) };
+        if (verifiedBom) {
+          customFields[PRODUCT_MASTER_BOM_FIELD] = serializeMasterBom(verifiedBom);
+        } else {
+          delete customFields[PRODUCT_MASTER_BOM_FIELD];
+        }
+        return { ...localProduct, customFields, updatedAt: verifiedProduct?.updatedAt ?? localProduct.updatedAt };
       };
-    });
+
+      const confirmedState = {
+        ...latestDerivedStateRef.current,
+        product: mergeVerifiedBom(latestDerivedStateRef.current.product),
+      };
+      latestDerivedStateRef.current = confirmedState;
+      setPlannerState((current) => ({ ...current, product: mergeVerifiedBom(current.product) }));
+      scenarioCacheRef.current.set(confirmedState.scenario.id, confirmedState);
+      void writeCachedPlannerState(projectId, confirmedState, mainScenarioIdRef.current).catch(() => undefined);
+      saveStateRef.current = "saved";
+      setSaveState("saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The master BOM could not be saved.";
+      setSaveError(message);
+      saveStateRef.current = "error";
+      setSaveState("error");
+      notifyFeedback({ title: "BOM save failed", body: message, tone: "danger" });
+      throw error;
+    } finally {
+      masterBomSaveInFlightRef.current = false;
+      const queuedState = queuedSaveStateRef.current;
+      queuedSaveStateRef.current = null;
+      if (queuedState) {
+        let nextQueuedState = queuedState;
+        if (verifiedProduct) {
+          const confirmedBom = getMasterBom(verifiedProduct.customFields);
+          const customFields = { ...(queuedState.product.customFields ?? {}) };
+          if (confirmedBom) {
+            customFields[PRODUCT_MASTER_BOM_FIELD] = serializeMasterBom(confirmedBom);
+          } else {
+            delete customFields[PRODUCT_MASTER_BOM_FIELD];
+          }
+          nextQueuedState = {
+            ...queuedState,
+            product: { ...queuedState.product, customFields, updatedAt: verifiedProduct.updatedAt },
+          };
+        }
+        void persistPlannerState(nextQueuedState);
+      } else {
+        flushDeferredRemoteRefresh();
+      }
+    }
   }
 
   function updateTask(taskId: string, patch: Partial<Task>) {
@@ -4394,35 +4520,6 @@ export function LineWorkspace({
     }
   }
 
-  async function saveCatalogPart(
-    entry: ProjectPartCatalogEntry,
-    draft: { partNumber: string; description: string; quantity: number; disposition: string },
-  ) {
-    const nextTasks = updateTaskPartReference(derivedState.tasks, entry.taskId, entry.part.id, {
-      partNumber: draft.partNumber,
-      description: draft.description,
-      quantity: draft.quantity,
-      disposition: draft.disposition,
-    });
-    const task = nextTasks.find((candidate) => candidate.id === entry.taskId);
-
-    if (task) {
-      updateProcedureTask(entry.taskId, { partReferences: task.partReferences });
-    }
-  }
-
-  async function deleteCatalogPart(entry: ProjectPartCatalogEntry) {
-    const nextTasks = removeTaskPartReference(derivedState.tasks, entry.taskId, entry.part.id);
-    const task = nextTasks.find((candidate) => candidate.id === entry.taskId);
-
-    if (task) {
-      updateProcedureTask(entry.taskId, {
-        partReferences: task.partReferences,
-        manufacturingSteps: task.manufacturingSteps,
-      });
-    }
-  }
-
   async function uploadStepPhotos(taskId: string, stepId: string, files: File[]) {
     if (files.length === 0) {
       return;
@@ -4472,6 +4569,69 @@ export function LineWorkspace({
 
       setSaveError(error instanceof Error ? error.message : "Unable to attach the selected photo.");
       setSaveState("error");
+    } finally {
+      saveInFlightRef.current = false;
+      flushDeferredRemoteRefresh();
+    }
+  }
+
+  async function copyStepPhoto(taskId: string, targetStepId: string, sourcePhoto: StepPhotoAttachment) {
+    const currentTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
+    const targetStep = currentTask?.manufacturingSteps?.find((step) => step.id === targetStepId);
+    if (!currentTask || !targetStep) {
+      throw new Error("The destination step is no longer available.");
+    }
+
+    const copiedPhoto = duplicateStepPhotoAttachment(sourcePhoto);
+    const taskWithCopy = upsertStepPhotoAttachments(currentTask, targetStepId, [copiedPhoto]);
+    let metadataSaved = false;
+    saveInFlightRef.current = true;
+    setSaveError(undefined);
+    setSaveState("saving");
+    setPlannerState((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) => (task.id === taskId ? taskWithCopy : task)),
+    }));
+
+    try {
+      const uploadedPhoto = await uploadStepPhotoAttachment(
+        taskId,
+        targetStepId,
+        copiedPhoto,
+        activeProjectContext,
+      );
+      metadataSaved = true;
+      const persistedTask = upsertStepPhotoAttachments(currentTask, targetStepId, [uploadedPhoto]);
+      await saveTaskCustomFieldsToSupabase(taskId, persistedTask.customFields, projectId);
+
+      setPlannerState((current) => ({
+        ...current,
+        tasks: current.tasks.map((task) =>
+          task.id === taskId ? upsertStepPhotoAttachments(task, targetStepId, [uploadedPhoto]) : task,
+        ),
+      }));
+      setSaveState("saved");
+      notifyFeedback({
+        title: "Photo copied",
+        body: `Added to Step ${targetStep.sequence}${targetStep.name?.trim() ? ` — ${targetStep.name.trim()}` : ""}.`,
+        tone: "success",
+      });
+    } catch (error) {
+      setPlannerState((current) => ({
+        ...current,
+        tasks: current.tasks.map((task) =>
+          task.id === taskId ? removeStepPhotoAttachment(task, targetStepId, copiedPhoto.id) : task,
+        ),
+      }));
+      if (metadataSaved) {
+        await softDeleteStepPhotoAttachmentFromSupabase(copiedPhoto.id, taskId, projectId).catch(() => undefined);
+      }
+
+      const message = error instanceof Error ? error.message : "Unable to copy this photo.";
+      setSaveError(message);
+      setSaveState("error");
+      notifyFeedback({ title: "Photo copy failed", body: message, tone: "danger" });
+      throw error;
     } finally {
       saveInFlightRef.current = false;
       flushDeferredRemoteRefresh();
@@ -5731,6 +5891,9 @@ export function LineWorkspace({
   }
 
   function openProcedureStepName(taskId: string, stepId: string) {
+    if (blockMasterBomNavigation()) {
+      return;
+    }
     selectTask(taskId);
     setFocusedProcedureStepId(stepId);
     setActiveModule("procedure");
@@ -5744,11 +5907,36 @@ export function LineWorkspace({
     }
   }
 
+  function blockMasterBomNavigation(): boolean {
+    if (!masterBomSaveInFlightRef.current) {
+      return false;
+    }
+    notifyFeedback({
+      title: "BOM is still saving",
+      body: "Wait for Saved before leaving this page.",
+      tone: "warning",
+    });
+    return true;
+  }
+
   function navigateModule(moduleId: string) {
+    if (blockMasterBomNavigation()) {
+      return;
+    }
     setActiveModule(moduleId);
   }
 
+  function navigateSetupSection(section: SetupSection) {
+    if (section !== setupSection && blockMasterBomNavigation()) {
+      return;
+    }
+    setSetupSection(section);
+  }
+
   function openSettings(section: SettingsSection = "account") {
+    if (blockMasterBomNavigation()) {
+      return;
+    }
     setSettingsSection(section);
     setActiveModule("settings");
   }
@@ -5851,7 +6039,7 @@ export function LineWorkspace({
             settingsSection={settingsSection}
             setupSection={setupSection}
             onChange={navigateModule}
-            onSetupSectionChange={setSetupSection}
+            onSetupSectionChange={navigateSetupSection}
             onOpenSettings={openSettings}
             onCollapse={() => setSidebarCollapsed(true)}
             project={activeProjectContext}
@@ -5859,8 +6047,7 @@ export function LineWorkspace({
         </div>
 
         {isProjectSwitching ||
-        (requiresCompletePlannerState && !hasConfirmedRemoteState) ||
-        isSelectedProcedureTaskHydrating ? (
+        (requiresCompletePlannerState && !hasConfirmedRemoteState) ? (
           <PlannerWorkspaceSkeleton />
         ) : isProcedureModule ? (
           <ProcedureWorkspace
@@ -5868,6 +6055,7 @@ export function LineWorkspace({
             tasks={derivedState.tasks}
             zones={derivedState.zones}
             selectedTask={selectedTask}
+            isTaskHydrating={isSelectedProcedureTaskHydrating}
             focusedStepId={focusedProcedureStepId}
             onSelectTask={selectTask}
             onConfirmAction={requestFeedbackConfirm}
@@ -5879,6 +6067,7 @@ export function LineWorkspace({
             onProcedureFieldChange={updateProcedureStepField}
             onMoveStepToTask={moveProcedureStepToTask}
             onUploadStepPhotos={uploadStepPhotos}
+            onCopyStepPhoto={copyStepPhoto}
             onRemoveStepPhoto={removeStepPhoto}
             onDeleteExplodedView={deleteExplodedView}
             onDeleteTaskVideo={deleteTaskVideo}
@@ -5957,8 +6146,6 @@ export function LineWorkspace({
                         onSaveTool={saveCatalogTool}
                         onDeleteTool={deleteCatalogTool}
                         onTidyToolNames={tidyCatalogToolNames}
-                        onSavePart={saveCatalogPart}
-                        onDeletePart={deleteCatalogPart}
                         onConfirmAction={requestFeedbackConfirm}
                       />
                     ) : null}
@@ -6110,6 +6297,7 @@ export function LineWorkspace({
             onProcedureFieldBlur={markProcedureFieldInactive}
             onProcedureFieldChange={updateProcedureStepField}
             onUploadStepPhotos={uploadStepPhotos}
+            onCopyStepPhoto={copyStepPhoto}
             onRemoveStepPhoto={removeStepPhoto}
             onDeleteExplodedView={deleteExplodedView}
             onDeleteTaskVideo={deleteTaskVideo}

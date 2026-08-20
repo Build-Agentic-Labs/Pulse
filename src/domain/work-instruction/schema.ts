@@ -62,6 +62,8 @@ export interface WorkInstructionCard {
   tools: string[];
   checks: WorkInstructionCheck[];
   photo?: WorkInstructionPhoto;
+  /** Numbered text-to-part references rendered on the first card for this step. */
+  partReferences?: WorkInstructionStepPartReference[];
 }
 
 /** A part or material consumed by the instruction. */
@@ -69,6 +71,11 @@ export interface WorkInstructionPart {
   partNumber: string;
   description: string;
   quantity?: number;
+}
+
+export interface WorkInstructionStepPartReference extends WorkInstructionPart {
+  marker: number;
+  text: string;
 }
 
 /**

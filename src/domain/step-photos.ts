@@ -114,6 +114,14 @@ export function countTaskStepPhotoAttachments(task: Pick<Task, "customFields">) 
   return Object.values(getTaskStepPhotoAttachmentMap(task)).reduce((total, photos) => total + photos.length, 0);
 }
 
+export function duplicateStepPhotoAttachment(photo: StepPhotoAttachment): StepPhotoAttachment {
+  return {
+    ...photo,
+    id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    annotations: photo.annotations ? normalizePhotoAnnotationDocument(photo.annotations) : undefined,
+  };
+}
+
 function writePhotoAttachmentMap(task: Task, map: StepPhotoAttachmentMap): Task {
   const cleanedMap = Object.entries(map).reduce<StepPhotoAttachmentMap>((accumulator, [stepId, photos]) => {
     if (photos.length > 0) {

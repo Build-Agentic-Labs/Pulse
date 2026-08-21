@@ -52,6 +52,7 @@ import type {
 } from "@/domain/types";
 import { type BomPartSelection } from "../bom-part-search";
 import { ClearableNumberInput } from "../clearable-number-input";
+import { ProcedureToolPicker } from "../procedure-tool-picker";
 import { StepExplodedViewGallery } from "../step-exploded-view-gallery";
 import { TaskVideoGallery } from "../task-video-gallery";
 import { type FeedbackConfirm } from "../themed-feedback";
@@ -497,8 +498,8 @@ export function DetailDrawer({
     });
   }
 
-  function addManufacturingStepTool(stepId: string) {
-    const nextTool = (newStepToolNames[stepId] ?? "").trim();
+  function addManufacturingStepTool(stepId: string, toolName?: string) {
+    const nextTool = (toolName ?? newStepToolNames[stepId] ?? "").trim();
     if (!nextTool) {
       return;
     }
@@ -507,16 +508,6 @@ export function DetailDrawer({
     onUpdateTask(taskId, { customFields: nextTask.customFields });
     void onAddStepTool(taskId, stepId, nextTool, getStepToolList(nextTask, stepId).length);
     setNewStepToolNames((current) => ({ ...current, [stepId]: "" }));
-  }
-
-  function addManufacturingStepToolFromLibrary(stepId: string, toolName: string) {
-    if (!toolName) {
-      return;
-    }
-
-    const nextTask = addStepTool(currentTask, stepId, toolName);
-    onUpdateTask(taskId, { customFields: nextTask.customFields });
-    void onAddStepTool(taskId, stepId, toolName, getStepToolList(nextTask, stepId).length);
   }
 
   function removeManufacturingStepTool(stepId: string, toolToRemove: string) {
@@ -816,51 +807,19 @@ export function DetailDrawer({
                           Bullets
                         </button>
                         <div className="space-y-1">
-                          <div className="flex items-center justify-between gap-2">
+                          <div className="grid grid-cols-[42px_minmax(0,1fr)] items-center gap-1">
                             <span className="ui-mono-label">Tools</span>
-                            {toolLibrary.length > 0 ? (
-                              <ThemedSelect
-                                aria-label={`Add saved tool to step ${step.sequence}`}
-                                value=""
-                                className="max-w-[150px]"
-                                triggerClassName="h-7 px-1.5 text-[10px]"
-                                options={[
-                                  { value: "", label: "Library" },
-                                  ...toolLibrary
-                                    .filter((tool) => !stepTools.some((stepTool) => stepTool.toLocaleLowerCase() === tool.toLocaleLowerCase()))
-                                    .map((tool) => ({ value: tool, label: tool })),
-                                ]}
-                                onChange={(value) => {
-                                  if (value) {
-                                    addManufacturingStepToolFromLibrary(step.id, value);
-                                  }
-                                }}
-                              />
-                            ) : null}
-                          </div>
-                          <div className="grid grid-cols-[42px_minmax(0,1fr)_42px] items-center gap-1">
-                            <span className="ui-mono-label">New</span>
-                            <input
-                              className="h-7 min-w-0 border-b border-line bg-transparent px-1 text-xs font-semibold text-ink outline-none focus:border-accent"
+                            <ProcedureToolPicker
                               value={newStepToolNames[step.id] ?? ""}
-                              onChange={(event) =>
-                                setNewStepToolNames((current) => ({ ...current, [step.id]: event.target.value }))
+                              toolLibrary={toolLibrary}
+                              assignedTools={stepTools}
+                              stepSequence={step.sequence}
+                              compact
+                              onValueChange={(value) =>
+                                setNewStepToolNames((current) => ({ ...current, [step.id]: value }))
                               }
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  addManufacturingStepTool(step.id);
-                                }
-                              }}
-                              placeholder="Add tool"
+                              onAdd={(toolName) => addManufacturingStepTool(step.id, toolName)}
                             />
-                            <button
-                              type="button"
-                              onClick={() => addManufacturingStepTool(step.id)}
-                              className="h-7 text-[10px] ui-mono-label text-ink-secondary hover:text-accent"
-                            >
-                              Add
-                            </button>
                           </div>
                           {stepTools.length > 0 ? (
                             <div className="flex flex-wrap gap-x-2 gap-y-1 pl-[42px] text-[10px] font-bold text-ink-secondary">

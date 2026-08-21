@@ -56,6 +56,11 @@ export type WorkspaceSnapshot = {
   savedAt: string;
 };
 
+export type WorkspaceUrlSnapshot = Pick<
+  WorkspaceSnapshot,
+  "activeModule" | "selectedTaskId" | "selectedStationId" | "activeZoneId"
+>;
+
 export type LegacyProcedureDraftSnapshot = {
   taskId: string;
   task: Task;
@@ -176,6 +181,39 @@ export function procedureDraftStorageKey(projectId?: string) {
 
 export function isKnownModule(moduleId: unknown): moduleId is string {
   return typeof moduleId === "string" && [...plannerModules, { id: "settings" }].some((module) => module.id === moduleId);
+}
+
+export function readWorkspaceUrlSnapshot(search: string): Partial<WorkspaceUrlSnapshot> {
+  const params = new URLSearchParams(search.replace(/^\?/, ""));
+  const requestedModule = params.get("view");
+  return {
+    activeModule: isKnownModule(requestedModule) ? requestedModule : undefined,
+    selectedTaskId: params.get("task") ?? undefined,
+    selectedStationId: params.get("station") ?? undefined,
+    activeZoneId: params.get("zone") ?? undefined,
+  };
+}
+
+export function buildWorkspaceUrl(
+  pathname: string,
+  currentSearch: string,
+  snapshot: WorkspaceUrlSnapshot,
+): string {
+  const params = new URLSearchParams(currentSearch.replace(/^\?/, ""));
+  params.set("view", snapshot.activeModule);
+
+  const optionalValues = [
+    ["task", snapshot.selectedTaskId],
+    ["station", snapshot.selectedStationId],
+    ["zone", snapshot.activeZoneId],
+  ] as const;
+  optionalValues.forEach(([key, value]) => {
+    if (value) params.set(key, value);
+    else params.delete(key);
+  });
+
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 export function readWorkspaceSnapshot(projectId?: string): WorkspaceSnapshot | undefined {

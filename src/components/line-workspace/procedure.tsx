@@ -30,7 +30,7 @@ import {
   addStepPartReference,
   attachPartMentionToStep,
   attachPartToStep,
-  removePartReferenceFromSteps,
+  getTaskPartAllocationSummaries,
   removeStepPartReference,
   setStepPartReferenceQuantity,
 } from "@/domain/step-part-references";
@@ -40,14 +40,15 @@ import {
   removeStepPartMention,
 } from "@/domain/step-part-mentions";
 import { getStepPhotoAttachments, updateStepPhotoAttachment, type StepPhotoAttachment } from "@/domain/step-photos";
-import { addStepTool, buildStepToolLibrary, getStepToolList, removeStepTool } from "@/domain/step-tools";
+import { addStepTool, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import { removeStepScopedCustomFields } from "@/domain/task-mutations";
 import { getTaskVideos, type TaskVideo } from "@/domain/task-videos";
 import { type ProjectToolDefinition } from "@/domain/tool-registry";
-import type { ManufacturingStep, PartReference, Product, Task, Zone } from "@/domain/types";
+import type { ManufacturingStep, Product, Task, Zone } from "@/domain/types";
 import { type BomPartSelection } from "../bom-part-search";
 import { ClearableNumberInput } from "../clearable-number-input";
 import { ProcedureStepToolTable } from "../procedure-step-tool-table";
+import { ProcedureToolPicker } from "../procedure-tool-picker";
 import { StepExplodedViewGallery } from "../step-exploded-view-gallery";
 import { TaskVideoGallery } from "../task-video-gallery";
 import { type FeedbackConfirm } from "../themed-feedback";
@@ -194,6 +195,7 @@ export function ProcedureWorkspace({
   onDeleteTaskVideo,
   onAddStepTool,
   onRemoveStepTool,
+  toolLibrary,
   projectToolRegistry,
 }: {
   product: Product;
@@ -233,6 +235,7 @@ export function ProcedureWorkspace({
   onDeleteTaskVideo: (taskId: string, video: TaskVideo) => void;
   onAddStepTool: (taskId: string, stepId: string, toolName: string, sequence?: number) => Promise<void>;
   onRemoveStepTool: (stepId: string, toolName: string) => Promise<void>;
+  toolLibrary: string[];
   projectToolRegistry: Map<string, ProjectToolDefinition>;
 }) {
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
@@ -319,12 +322,15 @@ export function ProcedureWorkspace({
     () => [...(task?.manufacturingSteps ?? [])].sort((left, right) => left.sequence - right.sequence),
     [task?.manufacturingSteps],
   );
-  const toolLibrary = useMemo(() => buildStepToolLibrary(tasks), [tasks]);
   const moveTargetTasks = useMemo(
     () => tasks.filter((candidate) => candidate.rowType === "task" && candidate.id !== task?.id),
     [task?.id, tasks],
   );
   const partReferences = task?.partReferences ?? [];
+  const allocatedPartSummaries = useMemo(
+    () => (task ? getTaskPartAllocationSummaries(task) : []),
+    [task],
+  );
   const masterBom = useMemo(() => getMasterBom(product.customFields), [product.customFields]);
   const manufacturingStepDurationMinutes = manufacturingSteps.reduce(
     (total, step) => total + Math.max(step.durationMinutes ?? 0, 0),
@@ -496,63 +502,6 @@ export function ProcedureWorkspace({
     });
   }
 
-  function updatePartReference(partId: string, patch: Partial<PartReference>) {
-    if (!task) {
-      return;
-    }
-
-    onUpdateTask(task.id, {
-      partReferences: partReferences.map((part) => (part.id === partId ? { ...part, ...patch } : part)),
-    });
-  }
-
-  function addPartReference() {
-    if (!task) {
-      return;
-    }
-
-    onUpdateTask(task.id, {
-      partReferences: [
-        ...partReferences,
-        {
-          id: `part-${task.id}-${Date.now()}`,
-          partNumber: "",
-          description: "",
-          quantity: 1,
-          disposition: "",
-        },
-      ],
-    });
-  }
-
-  function removePartReference(partId: string) {
-    if (!task) {
-      return;
-    }
-
-    const taskWithoutPart = {
-      ...task,
-      partReferences: partReferences.filter((part) => part.id !== partId),
-    };
-    const nextTask = removePartReferenceFromSteps(taskWithoutPart, partId);
-
-    onUpdateTask(task.id, {
-      customFields: nextTask.customFields,
-      manufacturingSteps: nextTask.manufacturingSteps,
-      partReferences: nextTask.partReferences,
-    });
-  }
-
-  function requestRemovePartReference(part: PartReference) {
-    onConfirmAction({
-      title: "Delete part reference?",
-      body: "This removes the part reference from this task and unlinks it from any manufacturing steps.",
-      tone: "danger",
-      confirmLabel: "Delete Part",
-      onConfirm: () => removePartReference(part.id),
-    });
-  }
-
   function addStepPartFromBom(stepId: string, entry: BomPartSelection) {
     if (!task) {
       return;
@@ -696,12 +645,12 @@ export function ProcedureWorkspace({
     });
   }
 
-  function addManufacturingStepTool(stepId: string) {
+  function addManufacturingStepTool(stepId: string, toolName?: string) {
     if (!task) {
       return;
     }
 
-    const nextTool = (newStepToolNames[stepId] ?? "").trim();
+    const nextTool = (toolName ?? newStepToolNames[stepId] ?? "").trim();
     if (!nextTool) {
       return;
     }
@@ -710,16 +659,6 @@ export function ProcedureWorkspace({
     onUpdateTask(task.id, { customFields: nextTask.customFields });
     void onAddStepTool(task.id, stepId, nextTool, getStepToolList(nextTask, stepId).length);
     setNewStepToolNames((current) => ({ ...current, [stepId]: "" }));
-  }
-
-  function addManufacturingStepToolFromLibrary(stepId: string, toolName: string) {
-    if (!task || !toolName) {
-      return;
-    }
-
-    const nextTask = addStepTool(task, stepId, toolName);
-    onUpdateTask(task.id, { customFields: nextTask.customFields });
-    void onAddStepTool(task.id, stepId, toolName, getStepToolList(nextTask, stepId).length);
   }
 
   function removeManufacturingStepTool(stepId: string, toolToRemove: string) {
@@ -1167,46 +1106,16 @@ export function ProcedureWorkspace({
                         <div className="ui-procedure-step-detail">
                           <span className="ui-field-label mb-0 block">Tools</span>
                           <div className="ui-procedure-step-add-row">
-                            <input
-                              className="ui-procedure-step-inline-text"
+                            <ProcedureToolPicker
                               value={newStepToolNames[step.id] ?? ""}
-                              onChange={(event) =>
-                                setNewStepToolNames((current) => ({ ...current, [step.id]: event.target.value }))
+                              toolLibrary={toolLibrary}
+                              assignedTools={stepTools}
+                              stepSequence={step.sequence}
+                              onValueChange={(value) =>
+                                setNewStepToolNames((current) => ({ ...current, [step.id]: value }))
                               }
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  addManufacturingStepTool(step.id);
-                                }
-                              }}
-                              placeholder="Add tool"
+                              onAdd={(toolName) => addManufacturingStepTool(step.id, toolName)}
                             />
-                            <button
-                              type="button"
-                              onClick={() => addManufacturingStepTool(step.id)}
-                              className="ui-btn-ghost h-8 shrink-0 px-2 text-[10px]"
-                            >
-                              Add
-                            </button>
-                            {toolLibrary.length > 0 ? (
-                              <ThemedSelect
-                                aria-label={`Add saved tool to step ${step.sequence}`}
-                                value=""
-                                className="min-w-36"
-                                triggerClassName="h-8 rounded-none border-0 border-b bg-transparent px-0 text-xs"
-                                options={[
-                                  { value: "", label: "Tool library" },
-                                  ...toolLibrary
-                                    .filter((tool) => !stepTools.some((stepTool) => stepTool.toLocaleLowerCase() === tool.toLocaleLowerCase()))
-                                    .map((tool) => ({ value: tool, label: tool })),
-                                ]}
-                                onChange={(value) => {
-                                  if (value) {
-                                    addManufacturingStepToolFromLibrary(step.id, value);
-                                  }
-                                }}
-                              />
-                            ) : null}
                           </div>
                           <ProcedureStepToolTable
                             tools={stepTools}
@@ -1263,74 +1172,66 @@ export function ProcedureWorkspace({
 
           {showParts ? (
           <section>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="ui-setup-section-title">Part References</h2>
-                <p className="ui-setup-section-desc">{partReferences.length} part reference(s)</p>
-              </div>
-              <button type="button" onClick={addPartReference} className="ui-btn-ghost h-9 gap-2">
-                <Plus size={14} strokeWidth={1.75} />
-                Part
-              </button>
+            <div className="mb-3">
+              <h2 className="ui-setup-section-title">Parts Summary</h2>
+              <p className="ui-setup-section-desc">
+                {allocatedPartSummaries.length} allocated part{allocatedPartSummaries.length === 1 ? "" : "s"} on this task
+              </p>
             </div>
-            {partReferences.length === 0 ? (
+            {allocatedPartSummaries.length === 0 ? (
               <div className="ui-procedure-empty">
-                No part references on this task yet.
+                Parts added to manufacturing steps will appear here.
               </div>
             ) : (
-              <div className="ui-procedure-part-editor">
-                {partReferences.map((part) => (
-                  <div key={part.id} className="ui-procedure-part-row group">
-                    <label className="block min-w-0">
-                      <span className="ui-field-label">Part Number</span>
-                      <input
-                        className="ui-procedure-step-inline-text w-full min-w-0"
-                        value={part.partNumber}
-                        onChange={(event) => updatePartReference(part.id, { partNumber: event.target.value })}
-                        placeholder="Part number"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="ui-field-label">Qty</span>
-                      <ClearableNumberInput
-                        className="number-input ui-procedure-step-inline-value"
-                        value={part.quantity ?? 0}
-                        min={0}
-                        fallbackValue={part.quantity ?? 0}
-                        precision={0}
-                        normalize={Math.round}
-                        onValueChange={(value) => updatePartReference(part.id, { quantity: value })}
-                      />
-                    </label>
-                    <label className="block min-w-0">
-                      <span className="ui-field-label">Description</span>
-                      <input
-                        className="ui-procedure-step-inline-text w-full min-w-0"
-                        value={part.description ?? ""}
-                        onChange={(event) => updatePartReference(part.id, { description: event.target.value })}
-                        placeholder="Description"
-                      />
-                    </label>
-                    <label className="block min-w-0">
-                      <span className="ui-field-label">Disposition / Note</span>
-                      <input
-                        className="ui-procedure-step-inline-text w-full min-w-0"
-                        value={part.disposition ?? ""}
-                        onChange={(event) => updatePartReference(part.id, { disposition: event.target.value })}
-                        placeholder="Note"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="ui-procedure-tool-table-remove mt-5 justify-self-end"
-                      onClick={() => requestRemovePartReference(part)}
-                      aria-label={`Delete part reference ${part.partNumber || "unnamed part"}`}
-                      title="Delete part"
-                    >
-                      <Trash2 size={14} strokeWidth={1.75} />
-                    </button>
-                  </div>
-                ))}
+              <div className="overflow-x-auto rounded border border-line">
+                <table className="w-full min-w-[42rem] border-collapse text-xs" aria-label="Parts allocated across this task">
+                  <thead className="bg-surface-raised">
+                    <tr>
+                      <th
+                        scope="col"
+                        className="ui-mono-label w-[12rem] whitespace-nowrap border-b border-line px-3 py-2 text-left text-ink-secondary"
+                      >
+                        Part number
+                      </th>
+                      <th
+                        scope="col"
+                        className="ui-mono-label border-b border-line px-3 py-2 text-left text-ink-secondary"
+                      >
+                        Description
+                      </th>
+                      <th
+                        scope="col"
+                        className="ui-mono-label w-28 whitespace-nowrap border-b border-line px-3 py-2 text-right text-ink-secondary"
+                      >
+                        BOM qty
+                      </th>
+                      <th
+                        scope="col"
+                        className="ui-mono-label w-32 whitespace-nowrap border-b border-line px-3 py-2 text-right text-ink-secondary"
+                      >
+                        Allocated qty
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allocatedPartSummaries.map(({ part, allocatedQuantity }) => (
+                      <tr key={part.id} className="border-b border-line/60 last:border-b-0 hover:bg-surface-raised/50">
+                        <td className="whitespace-nowrap px-3 py-1.5 align-middle font-mono font-semibold text-ink">
+                          {part.partNumber}
+                        </td>
+                        <td className="whitespace-normal break-words px-3 py-1.5 align-middle leading-4 text-ink-secondary">
+                          {part.description || "No description"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right align-middle font-semibold tabular-nums text-ink-secondary">
+                          {part.quantity ?? 1}
+                        </td>
+                        <td className="px-3 py-1.5 text-right align-middle font-semibold tabular-nums text-ink">
+                          {allocatedQuantity}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>

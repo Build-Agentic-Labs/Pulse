@@ -5,6 +5,7 @@ import {
   attachPartToStep,
   getStepPartReferenceIds,
   getStepPartReferenceQuantity,
+  getTaskPartAllocationSummaries,
   mergeStepDependencyRefs,
   removeStepPartReference,
   setStepPartReferenceQuantity,
@@ -157,6 +158,34 @@ describe("attachPartToStep", () => {
 });
 
 describe("step part allocation persistence", () => {
+  it("summarizes only allocated parts and totals quantities across steps", () => {
+    const task = makeTask({
+      manufacturingSteps: [
+        makeStep({
+          partReferenceIds: ["allocated", "allocated"],
+          partReferenceQuantities: { allocated: 4 },
+        }),
+        makeStep({
+          id: "step2",
+          sequence: 2,
+          partReferenceIds: ["allocated"],
+          partReferenceQuantities: { allocated: 3 },
+        }),
+      ],
+      partReferences: [
+        { id: "allocated", partNumber: "P-100", description: "Allocated part", quantity: 17 },
+        { id: "unlinked", partNumber: "P-200", description: "Unlinked part", quantity: 2 },
+      ],
+    });
+
+    expect(getTaskPartAllocationSummaries(task)).toEqual([
+      {
+        part: { id: "allocated", partNumber: "P-100", description: "Allocated part", quantity: 17 },
+        allocatedQuantity: 7,
+      },
+    ]);
+  });
+
   it("round-trips per-step quantities through dependency_ids while reading legacy links", () => {
     const stored = mergeStepDependencyRefs(
       ["dependency-1"],

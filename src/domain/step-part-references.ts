@@ -113,6 +113,42 @@ export function getStepPartReferences(task: Pick<Task, "manufacturingSteps" | "p
     .filter((part): part is PartReference => Boolean(part));
 }
 
+export type TaskPartAllocationSummary = {
+  part: PartReference;
+  allocatedQuantity: number;
+};
+
+/**
+ * Build a task-level summary from actual step allocations. Unlinked task part
+ * records are intentionally excluded, and quantities are totaled across every
+ * step that uses the part.
+ */
+export function getTaskPartAllocationSummaries(
+  task: Pick<Task, "manufacturingSteps" | "partReferences">,
+): TaskPartAllocationSummary[] {
+  const partById = new Map((task.partReferences ?? []).map((part) => [part.id, part]));
+  const allocatedQuantityByPartId = new Map<string, number>();
+
+  (task.manufacturingSteps ?? []).forEach((step) => {
+    uniqueIds(step.partReferenceIds ?? []).forEach((partReferenceId) => {
+      if (!partById.has(partReferenceId)) {
+        return;
+      }
+
+      const quantity = getStepPartReferenceQuantity(task, step.id, partReferenceId);
+      allocatedQuantityByPartId.set(
+        partReferenceId,
+        (allocatedQuantityByPartId.get(partReferenceId) ?? 0) + quantity,
+      );
+    });
+  });
+
+  return (task.partReferences ?? []).flatMap((part) => {
+    const allocatedQuantity = allocatedQuantityByPartId.get(part.id);
+    return allocatedQuantity === undefined ? [] : [{ part, allocatedQuantity }];
+  });
+}
+
 export function getStepPartReferenceQuantity(
   task: Pick<Task, "manufacturingSteps" | "partReferences">,
   stepId: string,

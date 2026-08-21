@@ -119,7 +119,7 @@ const PRINT_STYLES = `
    to be a circle to write the step number into. */
 .wi-card-blank .wi-card-seq { background: none; border: 1px solid #aaa; }
 .wi-card-overflowing { border: 2px solid #a52a2a; }
-.wi-card-head { flex: none; display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.wi-card-head { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wi-card-seq {
   flex: none; width: 0.24in; height: 0.24in; border-radius: 50%;
   background: #1a1a1a; color: #fff;
@@ -168,17 +168,66 @@ const PRINT_STYLES = `
   font-size: 0.78em; line-height: 1; vertical-align: baseline; font-weight: 700;
 }
 .wi-card-overflow-note { flex: none; color: #a52a2a; font-size: 7pt; font-weight: 700; }
-.wi-card-tools, .wi-card-checks { flex: none; font-size: 7.5pt; }
-.wi-card-parts { flex: none; display: flex; flex-direction: column; gap: 1px; border-top: 1px solid #bbb; padding-top: 2px; font-size: 6.7pt; line-height: 1.2; }
-.wi-card-part-ref { display: grid; grid-template-columns: 0.2in 0.78in minmax(0, 1fr) 0.34in; gap: 3px; align-items: start; }
+.wi-card-tools {
+  flex: none; min-width: 0;
+  font-size: 7pt; line-height: 1.2;
+}
+.wi-card-tools > .wi-card-label {
+  display: block; padding: 0 0 2px;
+  border-bottom: 0.5px solid #999;
+}
+.wi-card-tool-list {
+  min-width: 0; margin: 0; padding: 2px 0 0;
+  display: flex; flex-direction: column; gap: 0.03in;
+  list-style: none; font-weight: 500;
+}
+.wi-card-tool-item {
+  min-height: 1.4em; padding: 0;
+  display: flex; align-items: center;
+  line-height: 1.25; overflow-wrap: anywhere;
+}
+.wi-card-checks { flex: none; font-size: 7.5pt; }
+.wi-card-tools + .wi-card-parts { margin-top: 0.03in; }
+.wi-card-parts {
+  flex: none; min-width: 0; overflow: hidden;
+  font-size: 7pt; line-height: 1.2;
+}
+.wi-card-parts-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.wi-card-parts-table th,
+.wi-card-parts-table td {
+  padding: 2px 3px; border-bottom: 0.5px solid #d8d8d8; text-align: left; vertical-align: top;
+}
+.wi-card-parts-table th {
+  border-bottom-color: #999;
+}
+.wi-card-parts-table th:last-child { text-align: center; }
+.wi-card-parts-table tbody tr:last-child td { border-bottom: 0; }
+.wi-card-parts-table .wi-card-part-ref-column { width: 0.22in; }
+.wi-card-parts-table .wi-card-part-qty-column { width: 0.32in; }
 .wi-card-part-marker, .wi-card-part-number, .wi-card-part-qty { font-family: var(--type-mono, monospace); font-weight: 700; }
-.wi-card-part-marker sup { font-size: 0.86em; line-height: 1; vertical-align: super; }
-.wi-card-part-description { overflow-wrap: anywhere; }
-.wi-card-part-qty { text-align: right; white-space: nowrap; }
+.wi-card-part-marker > span, .wi-card-part-number, .wi-card-part-qty > span { display: block; line-height: 1.2; }
+.wi-card-part-number, .wi-card-part-description { display: block; }
+.wi-card-part-description { margin-top: 1px; color: #333; font-family: var(--type-sans, var(--font-ui-family)); font-weight: 400; overflow-wrap: anywhere; }
+.wi-card-parts-table .wi-card-part-qty { text-align: center; white-space: nowrap; }
 .wi-card-label { color: #666; font-size: 7pt; letter-spacing: 0.05em; text-transform: uppercase; }
+.wi-card-tools > .wi-card-label,
+.wi-card-parts-table th {
+  color: #666; font-family: var(--type-sans, var(--font-ui-family));
+  font-size: 6.5pt; font-weight: 700; line-height: 1.2;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
 .wi-check { display: inline-flex; align-items: center; gap: 3px; margin: 0 4px 2px 0; padding: 1px 4px; border: 1px solid #999; }
 .wi-check-spec { font-family: var(--type-mono, monospace); font-weight: 700; }
-.wi-card-duration { flex: none; color: #666; font-size: 7pt; white-space: nowrap; }
+.wi-card-duration {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 5px; border: 1px solid #777; background: #f1f1f1;
+  color: #1a1a1a; line-height: 1; white-space: nowrap;
+}
+.wi-card-duration-label {
+  color: #555; font-size: 5.8pt; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.wi-card-duration-value { font-family: var(--type-mono, monospace); font-size: 8.4pt; font-weight: 800; }
 .wi-card-part { flex: none; color: #666; font-size: 7.5pt; font-style: italic; }
 /* A continuation card has no photo, so its text runs the full card width —
    which is why continuations get their own, larger character budget. */
@@ -530,7 +579,12 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
         {card.partCount > 1 ? (
           <span className="wi-card-part">{`(${card.part} of ${card.partCount})`}</span>
         ) : null}
-        {card.durationMinutes ? <span className="wi-card-duration">{formatMinutes(card.durationMinutes)}</span> : null}
+        {card.durationMinutes ? (
+          <span className="wi-card-duration" aria-label={`Target time ${formatMinutes(card.durationMinutes)}`}>
+            <span className="wi-card-duration-label">Target</span>
+            <span className="wi-card-duration-value">{formatMinutes(card.durationMinutes)}</span>
+          </span>
+        ) : null}
         {card.code ? <span className="wi-card-code">{card.code}</span> : null}
       </div>
       <div className="wi-card-main">
@@ -550,23 +604,48 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
           ) : null}
           {card.tools.length > 0 ? (
             <div className="wi-card-tools">
-              <span className="wi-card-label">Tools </span>
-              <span>{card.tools.join(", ")}</span>
+              <span className="wi-card-label">Tools</span>
+              <ul className="wi-card-tool-list">
+                {card.tools.map((tool, index) => (
+                  <li className="wi-card-tool-item" key={`${tool}-${index}`}>
+                    {tool}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
           {card.partReferences && card.partReferences.length > 0 ? (
-            <div className="wi-card-parts" aria-label={`Parts referenced in step ${card.sequence}`}>
-              <span className="wi-card-label">Parts</span>
-              {card.partReferences.map((part) => (
-                <div className="wi-card-part-ref" key={`${part.marker}-${part.partNumber}-${part.text}`}>
-                  <span className="wi-card-part-marker">
-                    <sup aria-label={`Part reference ${part.marker}`}>{part.marker}</sup>
-                  </span>
-                  <span className="wi-card-part-number">{part.partNumber}</span>
-                  <span className="wi-card-part-description">{part.description}</span>
-                  <span className="wi-card-part-qty">×{part.quantity ?? "—"}</span>
-                </div>
-              ))}
+            <div className="wi-card-parts">
+              <table className="wi-card-parts-table" aria-label={`Parts referenced in step ${card.sequence}`}>
+                <colgroup>
+                  <col className="wi-card-part-ref-column" />
+                  <col />
+                  <col className="wi-card-part-qty-column" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col">Ref</th>
+                    <th scope="col">Part / description</th>
+                    <th scope="col">Qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {card.partReferences.map((part) => (
+                    <tr className="wi-card-part-ref" key={`${part.marker}-${part.partNumber}-${part.text}`}>
+                      <td className="wi-card-part-marker">
+                        <span aria-label={`Part reference ${part.marker}`}>{part.marker}</span>
+                      </td>
+                      <td className="wi-card-part-detail">
+                        <span className="wi-card-part-number">{part.partNumber}</span>
+                        <span className="wi-card-part-description">{part.description}</span>
+                      </td>
+                      <td className="wi-card-part-qty">
+                        <span>×{part.quantity ?? "—"}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : null}
           {card.checks.length > 0 ? (

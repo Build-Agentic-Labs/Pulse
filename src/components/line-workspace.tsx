@@ -98,6 +98,11 @@ import {
   type MasterBom,
 } from "@/domain/master-bom";
 import {
+  PRODUCT_PFMEA_DOCUMENT_FIELD,
+  serializePfmeaDocument,
+  type PfmeaDocument,
+} from "@/domain/pfmea";
+import {
   defaultDocumentTypeCodes,
   nextTaskNumberForComponent,
   taskDisplayCode,
@@ -184,6 +189,7 @@ import { ThemedSelect } from "./themed-select";
 import { KpiStrip, LineReadinessPanel } from "./line-workspace/analytics";
 import { DetailDrawer } from "./line-workspace/drawer";
 import { ProcedureWorkspace } from "./line-workspace/procedure";
+import { ChecklistWorkspace, PfmeaWorkspace } from "./line-workspace/planner-foundation-pages";
 import {
   Sidebar,
   SidebarReopenButton,
@@ -195,12 +201,12 @@ import {
 import {
   PROJECT_SWITCH_EVENT,
   PROJECT_SWITCH_SKELETON_MIN_MS,
+  buildWorkspaceUrl,
   buildProjectSwitchTargetContext,
   clearProcedureDraftSnapshot,
   clearProjectSwitchSession,
   getProcedureStepFieldValue,
   hasRecentProjectSwitchSession,
-  isKnownModule,
   makeProcedureDraftKey,
   mergeProcedureDraftWithServer,
   procedureDraftLog,
@@ -208,6 +214,7 @@ import {
   readProcedureDraftSnapshot,
   readProjectSwitchTarget,
   readWorkspaceSnapshot,
+  readWorkspaceUrlSnapshot,
   recentProjectSwitchStartedAt,
   writeProcedureFieldDraftSnapshot,
   writeWorkspaceSnapshot,
@@ -545,16 +552,10 @@ export function LineWorkspace({
   const searchParams = useSearchParams();
   const plannerQueryString = searchParams.toString();
   const hasAutosaveHarnessParam = searchParams.get("autosaveHarness") === "1";
-  const urlWorkspaceSnapshot = useMemo<Partial<WorkspaceSnapshot>>(() => {
-    const params = new URLSearchParams(plannerQueryString);
-    const requestedModule = params.get("view");
-    return {
-      activeModule: isKnownModule(requestedModule) ? requestedModule : undefined,
-      selectedTaskId: params.get("task") ?? undefined,
-      selectedStationId: params.get("station") ?? undefined,
-      activeZoneId: params.get("zone") ?? undefined,
-    };
-  }, [plannerQueryString]);
+  const urlWorkspaceSnapshot = useMemo<Partial<WorkspaceSnapshot>>(
+    () => readWorkspaceUrlSnapshot(plannerQueryString),
+    [plannerQueryString],
+  );
   const initialPlannerStateMatchesProject = Boolean(
     initialPlannerState &&
       projectId &&
@@ -588,6 +589,7 @@ export function LineWorkspace({
   // cache always matches what's saved; switching to a cached scenario is a pure in-memory setState.
   const scenarioCacheRef = useRef<Map<string, PlannerState>>(new Map());
   const [activeModule, setActiveModule] = useState(() => urlWorkspaceSnapshot.activeModule ?? "dashboard");
+  const restoringWorkspaceHistoryRef = useRef(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("account");
   const [setupSection, setSetupSection] = useState<SetupSection>("product");
   const [selectedTaskId, setSelectedTaskId] = useState(emptyPlannerState.tasks[0]?.id);
@@ -843,7 +845,22 @@ export function LineWorkspace({
     () => calculateAvailabilityMinutesForDemandPeriod(derivedState.product),
     [derivedState.product],
   );
-  const toolLibrary = useMemo(() => buildStepToolLibrary(derivedState.tasks), [derivedState.tasks]);
+  const toolLibrary = useMemo(() => {
+    const toolsByKey = new Map<string, string>();
+    buildStepToolLibrary(derivedState.tasks).forEach((tool) => {
+      toolsByKey.set(canonicalToolKey(tool), tool);
+    });
+    toolLibraryItems.forEach((item) => {
+      const toolName = formatToolName(item.toolName);
+      const key = canonicalToolKey(toolName);
+      if (key && !toolsByKey.has(key)) {
+        toolsByKey.set(key, toolName);
+      }
+    });
+    return [...toolsByKey.values()].sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: "base" }),
+    );
+  }, [derivedState.tasks, toolLibraryItems]);
   const currentOperatorAllocation = useMemo(() => buildOperatorAssignmentsFromIePlan({
     assignments: derivedState.tasks.map((task) => ({
       taskId: task.id,
@@ -952,6 +969,10 @@ export function LineWorkspace({
     if (!hasLoadedRemoteState || isProjectSwitching) {
       return;
     }
+    if (restoringWorkspaceHistoryRef.current) {
+      restoringWorkspaceHistoryRef.current = false;
+      return;
+    }
 
     writeWorkspaceSnapshot(projectId, {
       activeModule,
@@ -982,27 +1003,13 @@ export function LineWorkspace({
     // Read the live address bar rather than the hook snapshot. Native history
     // updates are intentionally local and may not cause useSearchParams to
     // publish a new value in every supported Next/browser combination.
-    const currentQueryString = window.location.search.replace(/^\?/, "");
-    const params = new URLSearchParams(currentQueryString);
-    params.set("view", activeModule);
-    if (selectedTaskId) {
-      params.set("task", selectedTaskId);
-    } else {
-      params.delete("task");
-    }
-    if (selectedStationId) {
-      params.set("station", selectedStationId);
-    } else {
-      params.delete("station");
-    }
-    if (activeZoneId) {
-      params.set("zone", activeZoneId);
-    } else {
-      params.delete("zone");
-    }
-
-    const nextQueryString = params.toString();
-    if (nextQueryString === currentQueryString) {
+    const nextUrl = buildWorkspaceUrl(pathname, window.location.search, {
+      activeModule,
+      selectedTaskId,
+      selectedStationId,
+      activeZoneId,
+    });
+    if (nextUrl === `${window.location.pathname}${window.location.search}`) {
       return;
     }
 
@@ -1011,7 +1018,6 @@ export function LineWorkspace({
     // (and its summary queries) for every sidebar click or task selection. The
     // native History API keeps the shareable URL in sync without a server/RSC
     // round trip; Next patches it so useSearchParams still receives the update.
-    const nextUrl = nextQueryString ? `${pathname}?${nextQueryString}` : pathname;
     window.history.replaceState(window.history.state, "", nextUrl);
   }, [
     activeModule,
@@ -1024,6 +1030,20 @@ export function LineWorkspace({
     selectedStationId,
     selectedTaskId,
   ]);
+
+  useEffect(() => {
+    function restoreWorkspaceFromHistory() {
+      const snapshot = readWorkspaceUrlSnapshot(window.location.search);
+      restoringWorkspaceHistoryRef.current = true;
+      setActiveModule(snapshot.activeModule ?? "dashboard");
+      if (snapshot.selectedTaskId) setSelectedTaskId(snapshot.selectedTaskId);
+      if (snapshot.selectedStationId) setSelectedStationId(snapshot.selectedStationId);
+      setActiveZoneId(snapshot.activeZoneId);
+    }
+
+    window.addEventListener("popstate", restoreWorkspaceFromHistory);
+    return () => window.removeEventListener("popstate", restoreWorkspaceFromHistory);
+  }, []);
 
   function bumpProcedureDraftVersion() {
     setProcedureDraftVersion((version) => version + 1);
@@ -4103,6 +4123,23 @@ export function LineWorkspace({
     }));
   }
 
+  function updateProductPfmeaDocument(document: PfmeaDocument) {
+    if (blockViewOnlyWrite()) {
+      return;
+    }
+    markDirty();
+    setPlannerState((current) => ({
+      ...current,
+      product: {
+        ...current.product,
+        customFields: {
+          ...(current.product.customFields ?? {}),
+          [PRODUCT_PFMEA_DOCUMENT_FIELD]: serializePfmeaDocument(document),
+        },
+      },
+    }));
+  }
+
   async function updateMasterBom(bom: MasterBom | undefined): Promise<void> {
     if (blockViewOnlyWrite()) {
       throw new Error("You have view-only access to this project.");
@@ -5896,7 +5933,7 @@ export function LineWorkspace({
     }
     selectTask(taskId);
     setFocusedProcedureStepId(stepId);
-    setActiveModule("procedure");
+    pushWorkspaceModuleHistory("procedure");
   }
 
   function selectStation(stationId: string) {
@@ -5919,11 +5956,27 @@ export function LineWorkspace({
     return true;
   }
 
+  function pushWorkspaceModuleHistory(moduleId: string) {
+    if (moduleId === activeModule) {
+      return;
+    }
+    const nextUrl = buildWorkspaceUrl(pathname, window.location.search, {
+      activeModule: moduleId,
+      selectedTaskId,
+      selectedStationId,
+      activeZoneId,
+    });
+    if (nextUrl !== `${window.location.pathname}${window.location.search}`) {
+      window.history.pushState(null, "", nextUrl);
+    }
+    setActiveModule(moduleId);
+  }
+
   function navigateModule(moduleId: string) {
     if (blockMasterBomNavigation()) {
       return;
     }
-    setActiveModule(moduleId);
+    pushWorkspaceModuleHistory(moduleId);
   }
 
   function navigateSetupSection(section: SetupSection) {
@@ -5938,7 +5991,7 @@ export function LineWorkspace({
       return;
     }
     setSettingsSection(section);
-    setActiveModule("settings");
+    pushWorkspaceModuleHistory("settings");
   }
 
 
@@ -6073,6 +6126,7 @@ export function LineWorkspace({
             onDeleteTaskVideo={deleteTaskVideo}
             onAddStepTool={persistAddStepTool}
             onRemoveStepTool={persistRemoveStepTool}
+            toolLibrary={toolLibrary}
             projectToolRegistry={projectToolRegistry}
           />
         ) : isSettingsModule ? (
@@ -6157,6 +6211,23 @@ export function LineWorkspace({
                       />
                     ) : null}
                   </div>
+                ) : activeModule === "pfmea" ? (
+                  <PfmeaWorkspace
+                    product={derivedState.product}
+                    scenario={derivedState.scenario}
+                    tasks={derivedState.tasks}
+                    zones={derivedState.zones}
+                    readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
+                    saveState={saveState}
+                    saveError={saveError}
+                    onDocumentChange={updateProductPfmeaDocument}
+                    onOpenTask={(taskId) => {
+                      selectTask(taskId);
+                      pushWorkspaceModuleHistory("procedure");
+                    }}
+                  />
+                ) : activeModule === "checklist" ? (
+                  <ChecklistWorkspace />
                 ) : activeModule === "work-instructions" ? (
                   <WorkInstructionsPanel
                     tasks={derivedState.tasks}
@@ -6166,7 +6237,7 @@ export function LineWorkspace({
                     hydratedTaskIds={hydratedTaskIds}
                     onOpenTask={(taskId) => {
                       selectTask(taskId);
-                      setActiveModule("procedure");
+                      pushWorkspaceModuleHistory("procedure");
                     }}
                   />
                 ) : isComingSoonModule ? (

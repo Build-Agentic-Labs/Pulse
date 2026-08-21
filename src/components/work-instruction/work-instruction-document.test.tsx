@@ -304,12 +304,18 @@ describe("WorkInstructionDocument", () => {
 
   it("shows per-step tools and checks on the card", () => {
     const card = makeCard(1, {
+      durationMinutes: 20,
       tools: ["Torque wrench", "10mm socket"],
       checks: [{ key: "torque_required", label: "Torque Spec", spec: "45 Nm" }],
     });
     render(<WorkInstructionDocument instruction={makeInstruction([card])} />);
 
-    expect(screen.getByText("Torque wrench, 10mm socket")).toBeInTheDocument();
+    expect(screen.getByLabelText("Target time 20m")).toHaveTextContent("Target20m");
+    expect(document.querySelector(".wi-card-duration-value")).toHaveTextContent("20m");
+    const toolList = document.querySelector(".wi-card-tool-list");
+    expect(toolList).toHaveTextContent("Torque wrench");
+    expect(toolList).toHaveTextContent("10mm socket");
+    expect(toolList?.querySelectorAll(".wi-card-tool-item")).toHaveLength(2);
     expect(screen.getByText("Torque Spec")).toBeInTheDocument();
     expect(screen.getByText("45 Nm")).toBeInTheDocument();
   });
@@ -339,7 +345,11 @@ describe("WorkInstructionDocument", () => {
     const keyMarker = document.querySelector(".wi-card-part-marker");
     expect(keyMarker).toHaveTextContent("1");
     expect(keyMarker).not.toHaveTextContent("[1]");
-    expect(keyMarker?.querySelector("sup")).toHaveAttribute("aria-label", "Part reference 1");
+    expect(keyMarker?.querySelector("span")).toHaveAttribute("aria-label", "Part reference 1");
+    const partsTable = screen.getByRole("table", { name: "Parts referenced in step 1" });
+    expect(partsTable).toHaveClass("wi-card-parts-table");
+    expect(partsTable.querySelectorAll("th")).toHaveLength(3);
+    expect(partsTable).toHaveTextContent("RefPart / descriptionQty");
     expect(screen.getByText("1000000373")).toBeInTheDocument();
     expect(screen.getByText(/BOLT SEMS M8-1.25/)).toBeInTheDocument();
     expect(screen.getByText("×4")).toBeInTheDocument();

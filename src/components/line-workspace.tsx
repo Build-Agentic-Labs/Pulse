@@ -6140,369 +6140,369 @@ export function LineWorkspace({
 
   return (
     <StepPhotoClipboardProvider onPaste={pasteStepPhoto} onNotify={notifyFeedback}>
-    <div
-      className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink"
-      style={workspaceGridStyle}
-    >
-      <TopNav
-        context={displayedPlannerChromeContext}
-        chromeStatus={chromeStatus}
-        presence={presencePeers}
-      />
-
-      <CommandPalette
-        open={commandPaletteOpen}
-        onClose={() => setCommandPaletteOpen(false)}
-        groups={commandPaletteGroups}
-      />
-
-      <BulkTaskEditor
-        open={bulkEditorOpen}
-        onClose={() => setBulkEditorOpen(false)}
-        tasks={derivedState.tasks}
-        zones={derivedState.zones}
-        taskCode={taskDisplayCode}
-        onMoveToZone={moveTasksToZone}
-        onDelete={deleteTasks}
-      />
-
-      {isViewOnlyAccess ? (
-        <section className="ui-workspace-notice">
-          <div className="flex items-start gap-3">
-            <div className="min-w-0">
-              <NothingStatus>View-only access</NothingStatus>
-              <p className="ui-workspace-notice-body">
-                You can browse this project, but you can&apos;t make changes. Ask an organization owner or admin
-                for edit access.
-              </p>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      <div className={`relative ${workspaceGridClass}`}>
-        <SidebarReopenButton
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed((value) => !value)}
+      <div
+        className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink"
+        style={workspaceGridStyle}
+      >
+        <TopNav
+          context={displayedPlannerChromeContext}
+          chromeStatus={chromeStatus}
+          presence={presencePeers}
         />
-        <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
-          <Sidebar
-            activeModule={sidebarActiveModule}
-            settingsSection={settingsSection}
-            setupSection={setupSection}
-            onChange={navigateModule}
-            onSetupSectionChange={navigateSetupSection}
-            onOpenSettings={openSettings}
-            onCollapse={() => setSidebarCollapsed(true)}
-            project={activeProjectContext}
-          />
-        </div>
 
-        {isProjectSwitching ||
-        (requiresCompletePlannerState && !hasConfirmedRemoteState) ? (
-          <PlannerWorkspaceSkeleton />
-        ) : isProcedureModule ? (
-          <ProcedureWorkspace
-            product={derivedState.product}
-            tasks={derivedState.tasks}
-            zones={derivedState.zones}
-            selectedTask={selectedTask}
-            isTaskHydrating={isSelectedProcedureTaskHydrating}
-            focusedStepId={focusedProcedureStepId}
-            onSelectTask={selectTask}
-            onConfirmAction={requestFeedbackConfirm}
-            onStepDeleted={notifyDeletedStepRestore}
-            onUpdateTask={updateProcedureTask}
-            getProcedureFieldValue={getProcedureFieldValue}
-            onProcedureFieldFocus={markProcedureFieldActive}
-            onProcedureFieldBlur={markProcedureFieldInactive}
-            onProcedureFieldChange={updateProcedureStepField}
-            onMoveStepToTask={moveProcedureStepToTask}
-            onUploadStepPhotos={uploadStepPhotos}
-            onRemoveStepPhoto={removeStepPhoto}
-            onDeleteExplodedView={deleteExplodedView}
-            onDeleteTaskVideo={deleteTaskVideo}
-            onAddStepTool={persistAddStepTool}
-            onRemoveStepTool={persistRemoveStepTool}
-            toolLibrary={toolLibrary}
-            projectToolRegistry={projectToolRegistry}
+        <CommandPalette
+          open={commandPaletteOpen}
+          onClose={() => setCommandPaletteOpen(false)}
+          groups={commandPaletteGroups}
+        />
+
+        <BulkTaskEditor
+          open={bulkEditorOpen}
+          onClose={() => setBulkEditorOpen(false)}
+          tasks={derivedState.tasks}
+          zones={derivedState.zones}
+          taskCode={taskDisplayCode}
+          onMoveToZone={moveTasksToZone}
+          onDelete={deleteTasks}
+        />
+
+        {isViewOnlyAccess ? (
+          <section className="ui-workspace-notice">
+            <div className="flex items-start gap-3">
+              <div className="min-w-0">
+                <NothingStatus>View-only access</NothingStatus>
+                <p className="ui-workspace-notice-body">
+                  You can browse this project, but you can&apos;t make changes. Ask an organization owner or admin
+                  for edit access.
+                </p>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        <div className={`relative ${workspaceGridClass}`}>
+          <SidebarReopenButton
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed((value) => !value)}
           />
-        ) : isSettingsModule ? (
-          <main className="min-h-0 min-w-0 overflow-hidden">
-            <AppSettingsPanel
-              showSubnav={false}
-              section={settingsSection}
-              onSectionChange={setSettingsSection}
+          <div className={`ui-workspace-sidebar-slot ${sidebarCollapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
+            <Sidebar
+              activeModule={sidebarActiveModule}
+              settingsSection={settingsSection}
+              setupSection={setupSection}
+              onChange={navigateModule}
+              onSetupSectionChange={navigateSetupSection}
+              onOpenSettings={openSettings}
+              onCollapse={() => setSidebarCollapsed(true)}
               project={activeProjectContext}
-              sections={embeddedSettingsSections}
             />
-          </main>
-        ) : (
-          <main
-            className={`ui-workspace-content ${activeModule === "gantt" ? "ui-gantt-page" : ""} ${
-              isDashboardModule
-                ? "p-0 pb-6"
-                : `space-y-4 p-3 sm:p-4 ${SIMULATION_ENABLED ? (playbackCollapsed ? "pb-20" : "pb-44") : "pb-6"}`
-            }`}
-          >
-            {isDashboardModule ? (
-              <PlannerDashboardPanel
-                product={derivedState.product}
-                saveError={saveError}
-                kpis={kpis}
-                flowDurationMinutes={timelineBounds.durationMinutes}
-                zoneCount={derivedState.zones.length}
-                taskCount={derivedState.tasks.length}
-                stationCount={getTopLevelTasks(derivedState.tasks).length}
-                planningRecommendationCount={visibleAllocationRecommendations.length}
-              >
-                {dashboardLineReadinessPanel}
-              </PlannerDashboardPanel>
-            ) : (
-              <>
-                {activeModule === "setup" ? (
-                  <div className="ui-setup-page space-y-4">
-                    {setupSection === "product" ? (
-                      <ProductSetupPanel
-                        product={derivedState.product}
-                        onProductNumber={updateProductNumber}
-                        onProductText={updateProductText}
-                      />
-                    ) : null}
-                    {setupSection === "nomenclature" ? (
-                      <NomenclatureSetupPanel
-                        product={derivedState.product}
-                        zones={derivedState.zones}
-                        tasks={derivedState.tasks}
-                        components={derivedState.components}
-                        documentTypes={derivedState.documentTypes}
-                        onProductText={updateProductText}
-                        onUpdateZone={updateZone}
-                        onAddComponent={addComponentCode}
-                        onUpdateComponent={updateComponentCode}
-                        onDeleteComponent={deleteComponentCode}
-                        onAddDocumentType={() => addDocumentTypeCode()}
-                        onUpdateDocumentType={updateDocumentTypeCode}
-                        onDeleteDocumentType={deleteDocumentTypeCode}
-                        onAddMissingDefaultDocumentTypes={addMissingDefaultDocumentTypeCodes}
-                      />
-                    ) : null}
-                    {setupSection === "tools" || setupSection === "bom" ? (
-                      <ProjectCatalogSetupPanel
-                        tasks={derivedState.tasks}
-                        projectToolRegistry={projectToolRegistry}
-                        toolLibraryItems={toolLibraryItems}
-                        section={setupSection === "tools" ? "tools" : "parts"}
-                        masterBom={masterBom}
-                        onMasterBomChange={updateMasterBom}
-                        onSaveTool={saveCatalogTool}
-                        onDeleteTool={deleteCatalogTool}
-                        onTidyToolNames={tidyCatalogToolNames}
-                        onConfirmAction={requestFeedbackConfirm}
-                      />
-                    ) : null}
-                    {setupSection === "procedure-checks" ? (
-                      <ProcedureChecksSetupPanel
-                        product={derivedState.product}
-                        onProductStepChecks={updateProductStepChecks}
-                        onConfirmAction={requestFeedbackConfirm}
-                      />
-                    ) : null}
-                  </div>
-                ) : activeModule === "pfmea" ? (
-                  <PfmeaWorkspace
-                    product={derivedState.product}
-                    scenario={derivedState.scenario}
-                    tasks={derivedState.tasks}
-                    zones={derivedState.zones}
-                    readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
-                    saveState={saveState}
-                    saveError={saveError}
-                    onDocumentChange={updateProductPfmeaDocument}
-                    onOpenTask={(taskId) => {
-                      selectTask(taskId);
-                      pushWorkspaceModuleHistory("procedure");
-                    }}
-                  />
-                ) : activeModule === "checklist" ? (
-                  <ChecklistWorkspace />
-                ) : activeModule === "work-instructions" ? (
-                  <WorkInstructionsPanel
-                    tasks={derivedState.tasks}
-                    zones={derivedState.zones}
-                    product={derivedState.product}
-                    initialPlannerState={derivedState}
-                    hydratedTaskIds={hydratedTaskIds}
-                    onOpenTask={(taskId) => {
-                      selectTask(taskId);
-                      pushWorkspaceModuleHistory("procedure");
-                    }}
-                  />
-                ) : isComingSoonModule ? (
-                  <ComingSoonModuleView moduleLabel={comingSoonModuleLabel}>
-                    <KpiStrip kpis={kpis} product={derivedState.product} />
-                    {lineReadinessPanel}
-                  </ComingSoonModuleView>
-                ) : (
-                  <>
-                    <KpiStrip kpis={kpis} product={derivedState.product} />
-                    {lineReadinessPanel}
-                  </>
-                )}
+          </div>
 
-                {showsSchedulingWorkspace ? (
-              <>
-                <section className="ui-gantt-workspace">
-                  <div className="ui-gantt-workspace-head">
-                    <div>
-                      <h2 className="ui-section-title">Manufacturing Gantt</h2>
-                      <p className="ui-section-subtitle">
-                        {formatMinutes(timelineBounds.durationMinutes)} planned flow / {totalHeadcount} headcount
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
-                      <button type="button" onClick={exportGanttDocument} className="ui-btn-ghost h-9 gap-2">
-                        <Download size={16} />
-                        Export Setup
-                      </button>
-                      <button type="button" onClick={addZone} className="ui-btn-ghost h-9 gap-2">
-                        <Plus size={16} />
-                        Zone
-                      </button>
-                      <button type="button" onClick={addTaskAtBottom} className="ui-btn-ghost h-9 gap-2">
-                        <Plus size={16} />
-                        Task
-                      </button>
-                      {SIMULATION_ENABLED ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPlaybackCollapsed(false);
-                          setIsPlaying(true);
-                        }}
-                        className="ui-btn-ghost h-9 gap-2"
-                      >
-                        <Play size={16} />
-                        Playback
-                      </button>
+          {isProjectSwitching ||
+          (requiresCompletePlannerState && !hasConfirmedRemoteState) ? (
+            <PlannerWorkspaceSkeleton />
+          ) : isProcedureModule ? (
+            <ProcedureWorkspace
+              product={derivedState.product}
+              tasks={derivedState.tasks}
+              zones={derivedState.zones}
+              selectedTask={selectedTask}
+              isTaskHydrating={isSelectedProcedureTaskHydrating}
+              focusedStepId={focusedProcedureStepId}
+              onSelectTask={selectTask}
+              onConfirmAction={requestFeedbackConfirm}
+              onStepDeleted={notifyDeletedStepRestore}
+              onUpdateTask={updateProcedureTask}
+              getProcedureFieldValue={getProcedureFieldValue}
+              onProcedureFieldFocus={markProcedureFieldActive}
+              onProcedureFieldBlur={markProcedureFieldInactive}
+              onProcedureFieldChange={updateProcedureStepField}
+              onMoveStepToTask={moveProcedureStepToTask}
+              onUploadStepPhotos={uploadStepPhotos}
+              onRemoveStepPhoto={removeStepPhoto}
+              onDeleteExplodedView={deleteExplodedView}
+              onDeleteTaskVideo={deleteTaskVideo}
+              onAddStepTool={persistAddStepTool}
+              onRemoveStepTool={persistRemoveStepTool}
+              toolLibrary={toolLibrary}
+              projectToolRegistry={projectToolRegistry}
+            />
+          ) : isSettingsModule ? (
+            <main className="min-h-0 min-w-0 overflow-hidden">
+              <AppSettingsPanel
+                showSubnav={false}
+                section={settingsSection}
+                onSectionChange={setSettingsSection}
+                project={activeProjectContext}
+                sections={embeddedSettingsSections}
+              />
+            </main>
+          ) : (
+            <main
+              className={`ui-workspace-content ${activeModule === "gantt" ? "ui-gantt-page" : ""} ${
+                isDashboardModule
+                  ? "p-0 pb-6"
+                  : `space-y-4 p-3 sm:p-4 ${SIMULATION_ENABLED ? (playbackCollapsed ? "pb-20" : "pb-44") : "pb-6"}`
+              }`}
+            >
+              {isDashboardModule ? (
+                <PlannerDashboardPanel
+                  product={derivedState.product}
+                  saveError={saveError}
+                  kpis={kpis}
+                  flowDurationMinutes={timelineBounds.durationMinutes}
+                  zoneCount={derivedState.zones.length}
+                  taskCount={derivedState.tasks.length}
+                  stationCount={getTopLevelTasks(derivedState.tasks).length}
+                  planningRecommendationCount={visibleAllocationRecommendations.length}
+                >
+                  {dashboardLineReadinessPanel}
+                </PlannerDashboardPanel>
+              ) : (
+                <>
+                  {activeModule === "setup" ? (
+                    <div className="ui-setup-page space-y-4">
+                      {setupSection === "product" ? (
+                        <ProductSetupPanel
+                          product={derivedState.product}
+                          onProductNumber={updateProductNumber}
+                          onProductText={updateProductText}
+                        />
+                      ) : null}
+                      {setupSection === "nomenclature" ? (
+                        <NomenclatureSetupPanel
+                          product={derivedState.product}
+                          zones={derivedState.zones}
+                          tasks={derivedState.tasks}
+                          components={derivedState.components}
+                          documentTypes={derivedState.documentTypes}
+                          onProductText={updateProductText}
+                          onUpdateZone={updateZone}
+                          onAddComponent={addComponentCode}
+                          onUpdateComponent={updateComponentCode}
+                          onDeleteComponent={deleteComponentCode}
+                          onAddDocumentType={() => addDocumentTypeCode()}
+                          onUpdateDocumentType={updateDocumentTypeCode}
+                          onDeleteDocumentType={deleteDocumentTypeCode}
+                          onAddMissingDefaultDocumentTypes={addMissingDefaultDocumentTypeCodes}
+                        />
+                      ) : null}
+                      {setupSection === "tools" || setupSection === "bom" ? (
+                        <ProjectCatalogSetupPanel
+                          tasks={derivedState.tasks}
+                          projectToolRegistry={projectToolRegistry}
+                          toolLibraryItems={toolLibraryItems}
+                          section={setupSection === "tools" ? "tools" : "parts"}
+                          masterBom={masterBom}
+                          onMasterBomChange={updateMasterBom}
+                          onSaveTool={saveCatalogTool}
+                          onDeleteTool={deleteCatalogTool}
+                          onTidyToolNames={tidyCatalogToolNames}
+                          onConfirmAction={requestFeedbackConfirm}
+                        />
+                      ) : null}
+                      {setupSection === "procedure-checks" ? (
+                        <ProcedureChecksSetupPanel
+                          product={derivedState.product}
+                          onProductStepChecks={updateProductStepChecks}
+                          onConfirmAction={requestFeedbackConfirm}
+                        />
                       ) : null}
                     </div>
-                  </div>
-                  <ScenarioTabs
-                    scenarios={scenarios}
-                    activeScenarioId={derivedState.scenario.id}
-                    pendingScenarioId={switchTargetId}
-                    isSwitching={isSwitchingScenario}
-                    onSwitch={(scenarioId) => void switchScenario(scenarioId)}
-                    onDuplicate={() => void duplicateActiveScenario()}
-                    onRename={(scenarioId, name) => void renameScenarioById(scenarioId, name)}
-                    onDelete={(scenarioId) => requestDeleteScenario(scenarioId)}
-                    onEditTarget={(scenarioId, targetOutput, targetOutputPeriod) =>
-                      void editScenarioTarget(scenarioId, targetOutput, targetOutputPeriod)
-                    }
-                  />
-                  <GanttTimeline
-                    tasks={derivedState.tasks}
-                    stations={derivedState.stations}
-                    zones={derivedState.zones}
-                    components={derivedState.components}
-                    activeZoneId={activeZoneId}
-                    selectedTaskId={selectedTaskId}
-                    taktMinutes={activeTaktMinutes}
-                    availableOperatorLetters={availableOperatorLetters}
-                    operatorCapacityMinutes={operatorCapacityMinutes}
-                    demandQuantity={derivedState.product.demandQuantity}
-                    currentMinute={currentMinute}
-                    showPlaybackMarker={SIMULATION_ENABLED && (isPlaying || currentMinute > 0)}
-                    onSelectTask={selectTask}
-                    onOpenTaskDetail={openTaskDetail}
-                    onOpenProcedureStepName={openProcedureStepName}
-                    onUpdateTask={updateTask}
-                    onUpdateZone={updateZone}
-                    onCreateZoneFromTasks={createZoneFromTasks}
-                    onDeleteZone={deleteZone}
-                    onAddTaskToZone={addTaskToZone}
-                    onActivateZone={setActiveZoneId}
-                    onMoveTasksToZone={moveTasksToZone}
-                    onReorderTaskGroups={reorderTaskGroups}
-                    onNotify={notifyFeedback}
-                    onConfirmAction={requestFeedbackConfirm}
-                    smartAllocationPending={smartAllocationPending}
-                    onSmartAllocate={() => void optimizeLineIntoScenario()}
-                    onResetHeadcount={resetTaskHeadcount}
-                    onSetTaskDependencies={setTaskDependencies}
-                    onLinkTaskStartToFinish={linkTaskStartToFinish}
-                    onDeleteTasks={deleteTasks}
-                  />
-                  <OperatorUtilizationPanel
-                    tasks={derivedState.tasks}
-                    availableOperatorIds={availableOperatorLetters}
-                  />
-                </section>
+                  ) : activeModule === "pfmea" ? (
+                    <PfmeaWorkspace
+                      product={derivedState.product}
+                      scenario={derivedState.scenario}
+                      tasks={derivedState.tasks}
+                      zones={derivedState.zones}
+                      readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
+                      saveState={saveState}
+                      saveError={saveError}
+                      onDocumentChange={updateProductPfmeaDocument}
+                      onOpenTask={(taskId) => {
+                        selectTask(taskId);
+                        pushWorkspaceModuleHistory("procedure");
+                      }}
+                    />
+                  ) : activeModule === "checklist" ? (
+                    <ChecklistWorkspace />
+                  ) : activeModule === "work-instructions" ? (
+                    <WorkInstructionsPanel
+                      tasks={derivedState.tasks}
+                      zones={derivedState.zones}
+                      product={derivedState.product}
+                      initialPlannerState={derivedState}
+                      hydratedTaskIds={hydratedTaskIds}
+                      onOpenTask={(taskId) => {
+                        selectTask(taskId);
+                        pushWorkspaceModuleHistory("procedure");
+                      }}
+                    />
+                  ) : isComingSoonModule ? (
+                    <ComingSoonModuleView moduleLabel={comingSoonModuleLabel}>
+                      <KpiStrip kpis={kpis} product={derivedState.product} />
+                      {lineReadinessPanel}
+                    </ComingSoonModuleView>
+                  ) : (
+                    <>
+                      <KpiStrip kpis={kpis} product={derivedState.product} />
+                      {lineReadinessPanel}
+                    </>
+                  )}
 
-              </>
-            ) : null}
-              </>
-            )}
-          </main>
-        )}
+                  {showsSchedulingWorkspace ? (
+                <>
+                  <section className="ui-gantt-workspace">
+                    <div className="ui-gantt-workspace-head">
+                      <div>
+                        <h2 className="ui-section-title">Manufacturing Gantt</h2>
+                        <p className="ui-section-subtitle">
+                          {formatMinutes(timelineBounds.durationMinutes)} planned flow / {totalHeadcount} headcount
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
+                        <button type="button" onClick={exportGanttDocument} className="ui-btn-ghost h-9 gap-2">
+                          <Download size={16} />
+                          Export Setup
+                        </button>
+                        <button type="button" onClick={addZone} className="ui-btn-ghost h-9 gap-2">
+                          <Plus size={16} />
+                          Zone
+                        </button>
+                        <button type="button" onClick={addTaskAtBottom} className="ui-btn-ghost h-9 gap-2">
+                          <Plus size={16} />
+                          Task
+                        </button>
+                        {SIMULATION_ENABLED ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPlaybackCollapsed(false);
+                            setIsPlaying(true);
+                          }}
+                          className="ui-btn-ghost h-9 gap-2"
+                        >
+                          <Play size={16} />
+                          Playback
+                        </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <ScenarioTabs
+                      scenarios={scenarios}
+                      activeScenarioId={derivedState.scenario.id}
+                      pendingScenarioId={switchTargetId}
+                      isSwitching={isSwitchingScenario}
+                      onSwitch={(scenarioId) => void switchScenario(scenarioId)}
+                      onDuplicate={() => void duplicateActiveScenario()}
+                      onRename={(scenarioId, name) => void renameScenarioById(scenarioId, name)}
+                      onDelete={(scenarioId) => requestDeleteScenario(scenarioId)}
+                      onEditTarget={(scenarioId, targetOutput, targetOutputPeriod) =>
+                        void editScenarioTarget(scenarioId, targetOutput, targetOutputPeriod)
+                      }
+                    />
+                    <GanttTimeline
+                      tasks={derivedState.tasks}
+                      stations={derivedState.stations}
+                      zones={derivedState.zones}
+                      components={derivedState.components}
+                      activeZoneId={activeZoneId}
+                      selectedTaskId={selectedTaskId}
+                      taktMinutes={activeTaktMinutes}
+                      availableOperatorLetters={availableOperatorLetters}
+                      operatorCapacityMinutes={operatorCapacityMinutes}
+                      demandQuantity={derivedState.product.demandQuantity}
+                      currentMinute={currentMinute}
+                      showPlaybackMarker={SIMULATION_ENABLED && (isPlaying || currentMinute > 0)}
+                      onSelectTask={selectTask}
+                      onOpenTaskDetail={openTaskDetail}
+                      onOpenProcedureStepName={openProcedureStepName}
+                      onUpdateTask={updateTask}
+                      onUpdateZone={updateZone}
+                      onCreateZoneFromTasks={createZoneFromTasks}
+                      onDeleteZone={deleteZone}
+                      onAddTaskToZone={addTaskToZone}
+                      onActivateZone={setActiveZoneId}
+                      onMoveTasksToZone={moveTasksToZone}
+                      onReorderTaskGroups={reorderTaskGroups}
+                      onNotify={notifyFeedback}
+                      onConfirmAction={requestFeedbackConfirm}
+                      smartAllocationPending={smartAllocationPending}
+                      onSmartAllocate={() => void optimizeLineIntoScenario()}
+                      onResetHeadcount={resetTaskHeadcount}
+                      onSetTaskDependencies={setTaskDependencies}
+                      onLinkTaskStartToFinish={linkTaskStartToFinish}
+                      onDeleteTasks={deleteTasks}
+                    />
+                    <OperatorUtilizationPanel
+                      tasks={derivedState.tasks}
+                      availableOperatorIds={availableOperatorLetters}
+                    />
+                  </section>
 
-        {showDetailDrawer ? (
-          <DetailDrawer
-            task={selectedTask}
-            station={selectedStation}
-            zones={derivedState.zones}
-            components={derivedState.components}
+                </>
+              ) : null}
+                </>
+              )}
+            </main>
+          )}
+
+          {showDetailDrawer ? (
+            <DetailDrawer
+              task={selectedTask}
+              station={selectedStation}
+              zones={derivedState.zones}
+              components={derivedState.components}
+              tasks={derivedState.tasks}
+              collapsed={detailDrawerCollapsed}
+              isResizing={isResizingDetailDrawer}
+              onConfirmAction={requestFeedbackConfirm}
+              onStepDeleted={notifyDeletedStepRestore}
+              onToggleCollapsed={() => setDetailDrawerCollapsed((collapsed) => !collapsed)}
+              onResizeStart={startDetailDrawerResize}
+              onUpdateTask={updateTask}
+              getProcedureFieldValue={getProcedureFieldValue}
+              onProcedureFieldFocus={markProcedureFieldActive}
+              onProcedureFieldBlur={markProcedureFieldInactive}
+              onProcedureFieldChange={updateProcedureStepField}
+              onUploadStepPhotos={uploadStepPhotos}
+              onRemoveStepPhoto={removeStepPhoto}
+              onDeleteExplodedView={deleteExplodedView}
+              onDeleteTaskVideo={deleteTaskVideo}
+              onAddStepTool={persistAddStepTool}
+              onRemoveStepTool={persistRemoveStepTool}
+              toolLibrary={toolLibrary}
+              masterBom={masterBom}
+            />
+          ) : null}
+        </div>
+
+        {SIMULATION_ENABLED && !isProcedureModule && !isDashboardModule ? (
+          <PlaybackPanel
             tasks={derivedState.tasks}
-            collapsed={detailDrawerCollapsed}
-            isResizing={isResizingDetailDrawer}
-            onConfirmAction={requestFeedbackConfirm}
-            onStepDeleted={notifyDeletedStepRestore}
-            onToggleCollapsed={() => setDetailDrawerCollapsed((collapsed) => !collapsed)}
-            onResizeStart={startDetailDrawerResize}
-            onUpdateTask={updateTask}
-            getProcedureFieldValue={getProcedureFieldValue}
-            onProcedureFieldFocus={markProcedureFieldActive}
-            onProcedureFieldBlur={markProcedureFieldInactive}
-            onProcedureFieldChange={updateProcedureStepField}
-            onUploadStepPhotos={uploadStepPhotos}
-            onRemoveStepPhoto={removeStepPhoto}
-            onDeleteExplodedView={deleteExplodedView}
-            onDeleteTaskVideo={deleteTaskVideo}
-            onAddStepTool={persistAddStepTool}
-            onRemoveStepTool={persistRemoveStepTool}
-            toolLibrary={toolLibrary}
-            masterBom={masterBom}
+            stations={derivedState.stations}
+            currentMinute={currentMinute}
+            speed={speed}
+            isPlaying={isPlaying}
+            collapsed={playbackCollapsed}
+            onPlayPause={() => setIsPlaying((value) => !value)}
+            onReset={() => {
+              setCurrentMinute(0);
+              setIsPlaying(false);
+            }}
+            onStep={(delta) => setCurrentMinute((minute) => Math.min(Math.max(minute + delta, 0), timelineBounds.durationMinutes))}
+            onSpeed={setSpeed}
+            onToggleCollapsed={() => setPlaybackCollapsed((value) => !value)}
           />
         ) : null}
-      </div>
-
-      {SIMULATION_ENABLED && !isProcedureModule && !isDashboardModule ? (
-        <PlaybackPanel
-          tasks={derivedState.tasks}
-          stations={derivedState.stations}
-          currentMinute={currentMinute}
-          speed={speed}
-          isPlaying={isPlaying}
-          collapsed={playbackCollapsed}
-          onPlayPause={() => setIsPlaying((value) => !value)}
-          onReset={() => {
-            setCurrentMinute(0);
-            setIsPlaying(false);
-          }}
-          onStep={(delta) => setCurrentMinute((minute) => Math.min(Math.max(minute + delta, 0), timelineBounds.durationMinutes))}
-          onSpeed={setSpeed}
-          onToggleCollapsed={() => setPlaybackCollapsed((value) => !value)}
+        <ThemedFeedbackLayer
+          confirm={feedbackConfirm}
+          toasts={workspaceToasts}
+          onCancelConfirm={() => setFeedbackConfirm(undefined)}
+          onConfirm={confirmFeedbackAction}
+          onDismissToast={dismissWorkspaceNotice}
         />
-      ) : null}
-      <ThemedFeedbackLayer
-        confirm={feedbackConfirm}
-        toasts={workspaceToasts}
-        onCancelConfirm={() => setFeedbackConfirm(undefined)}
-        onConfirm={confirmFeedbackAction}
-        onDismissToast={dismissWorkspaceNotice}
-      />
-    </div>
+      </div>
     </StepPhotoClipboardProvider>
   );
 }

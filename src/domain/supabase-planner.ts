@@ -4344,6 +4344,19 @@ export async function copyStepPhotoAttachmentToStep(
     project,
     safeStorageSegment(extension),
   );
+  // Destination paths key on photo.id. If the caller passed the photo with its ORIGINAL id
+  // instead of a duplicated one (see the precondition in the doc comment above), the derived
+  // path collapses onto the source path, and the upsert in saveStepPhotoMetadataToSupabase
+  // below would silently overwrite the source row -- moving it to the target task/step and
+  // orphaning the original Storage object. Fail loudly, before any Storage write, instead of
+  // corrupting data silently.
+  if (storagePath === sourceStoragePath) {
+    throw new Error(
+      "copyStepPhotoAttachmentToStep: destination path matches the source path. The photo must be " +
+        "duplicated with a fresh id (see duplicateStepPhotoAttachment) before it is copied to another step.",
+    );
+  }
+
   // Verified present in the installed client: storage-js exposes
   // copy(fromPath, toPath, options?) — node_modules/@supabase/storage-js/dist/index.d.mts:1149
   await throwIfError(supabase.storage.from(stepPhotoBucket).copy(sourceStoragePath, storagePath));
@@ -4359,19 +4372,23 @@ export async function copyStepPhotoAttachmentToStep(
   }
 
   const signedUrl = await signedStorageUrl(supabase, storagePath, { cache: true });
-  if (!signedUrl) {
-    throw new Error("The photo was copied, but a signed URL could not be created for it. Reload to retry.");
-  }
 
   const copiedPhoto: StepPhotoAttachment = {
     ...photo,
-    dataUrl: signedUrl,
+    dataUrl: signedUrl ?? "",
     storagePath,
     thumbnailUrl,
     thumbnailStoragePath,
   };
 
   await saveStepPhotoMetadataToSupabase(targetTaskId, targetStepId, copiedPhoto, project);
+
+  // The bucket is private, so the fabricated public URL can never load -- returning it would hand
+  // the caller a permanently-broken image. The row is saved (a reload re-signs it), so fail loudly.
+  if (!signedUrl) {
+    throw new Error("The photo was copied, but a signed URL could not be created for it. Reload to retry.");
+  }
+
   return copiedPhoto;
 }
 

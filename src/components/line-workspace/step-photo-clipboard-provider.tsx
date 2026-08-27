@@ -113,7 +113,7 @@ export function StepPhotoClipboardProvider({
   // this feature keys off what the pointer is over. keydown is the only signal available.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) {
         return;
       }
 
@@ -165,7 +165,7 @@ export function StepPhotoClipboardProvider({
       event.preventDefault();
       void Promise.resolve(onPasteRef.current(currentEntry, target))
         .then(() => {
-          if (currentEntry.mode === "cut") {
+          if (currentEntry.mode === "cut" && entryRef.current === currentEntry) {
             setEntry(null);
           }
         })

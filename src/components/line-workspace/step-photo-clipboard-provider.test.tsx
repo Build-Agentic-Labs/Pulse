@@ -126,4 +126,34 @@ describe("StepPhotoClipboardProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("mode")).toHaveTextContent("empty"));
   });
+
+  it("ignores Ctrl+C while a text selection is active", () => {
+    renderProvider();
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "thumbnail" }));
+
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(screen.getByTestId("mode"));
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    try {
+      fireEvent.keyDown(document, { key: "c", ctrlKey: true });
+      expect(screen.getByTestId("mode")).toHaveTextContent("empty");
+    } finally {
+      selection?.removeAllRanges();
+    }
+  });
+
+  it("ignores a paste targeting a textarea", () => {
+    const onPaste = vi.fn().mockResolvedValue(undefined);
+    renderProvider(onPaste);
+
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "thumbnail" }));
+    fireEvent.keyDown(document, { key: "c", ctrlKey: true });
+    fireEvent.pointerEnter(screen.getByRole("region", { name: "destination" }));
+    fireEvent.paste(screen.getByLabelText("instruction"), { clipboardData: { items: [], files: [] } });
+
+    expect(onPaste).not.toHaveBeenCalled();
+  });
 });

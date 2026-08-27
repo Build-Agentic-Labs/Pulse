@@ -29,6 +29,7 @@ import {
   getStepPartReferenceQuantity,
   getStepPartReferences,
 } from "@/domain/step-part-references";
+import { clipboardImageFiles } from "@/domain/clipboard-images";
 import { normalizePhotoAnnotationDocument } from "@/domain/photo-annotations";
 import { type StepPhotoAttachment } from "@/domain/step-photos";
 import type { ManufacturingStep, PartReference, Task } from "@/domain/types";
@@ -195,16 +196,6 @@ type StepPhotoAttachmentEditorProps = {
   onUpdatePhoto?: (photoId: string, patch: Partial<StepPhotoAttachment>) => void;
 };
 
-function clipboardImageFiles(event: ReactClipboardEvent<HTMLDivElement>) {
-  const itemFiles = Array.from(event.clipboardData.items)
-    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-    .map((item) => item.getAsFile())
-    .filter((file): file is File => Boolean(file));
-
-  const candidates = itemFiles.length > 0 ? itemFiles : Array.from(event.clipboardData.files);
-  return candidates.filter((file) => file.type.startsWith("image/"));
-}
-
 function StepPhotoThumbnail({
   photo,
   stepSequence,
@@ -317,7 +308,7 @@ export function StepPhotoAttachmentEditor({
       return;
     }
 
-    const files = clipboardImageFiles(event);
+    const files = clipboardImageFiles(event.clipboardData);
     if (files.length === 0) {
       return;
     }

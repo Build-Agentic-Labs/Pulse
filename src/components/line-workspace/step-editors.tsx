@@ -38,6 +38,7 @@ import { ClearableNumberInput } from "../clearable-number-input";
 import { StaticPhotoAnnotation } from "../static-photo-annotation";
 import { StepPhotoViewer } from "../step-photo-viewer";
 import { ThemedSelect } from "../themed-select";
+import { useStepPhotoClipboard } from "./step-photo-clipboard-provider";
 
 type StepPartReferenceEditorProps = {
   task: Task;
@@ -185,13 +186,12 @@ type LinkedInstructionTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaEl
 };
 
 type StepPhotoAttachmentEditorProps = {
+  taskId: string;
   step: ManufacturingStep;
   photos: StepPhotoAttachment[];
-  copyTargets?: ManufacturingStep[];
   compact?: boolean;
   isUploading?: boolean;
   onFilesSelected: (files: File[]) => void;
-  onCopyToStep?: (photo: StepPhotoAttachment, targetStepId: string) => Promise<void> | void;
   onRequestRemove: (photo: StepPhotoAttachment) => void;
   onUpdatePhoto?: (photoId: string, patch: Partial<StepPhotoAttachment>) => void;
 };
@@ -258,50 +258,17 @@ function StepPhotoThumbnail({
 }
 
 export function StepPhotoAttachmentEditor({
+  taskId,
   step,
   photos,
-  copyTargets = [],
   compact = false,
   isUploading = false,
   onFilesSelected,
-  onCopyToStep,
   onRequestRemove,
   onUpdatePhoto,
 }: StepPhotoAttachmentEditorProps) {
   const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
-  const [copyPhoto, setCopyPhoto] = useState<StepPhotoAttachment | null>(null);
-  const [copyTargetStepId, setCopyTargetStepId] = useState("");
-  const [copyError, setCopyError] = useState<string>();
-  const [isCopying, setIsCopying] = useState(false);
-  const copyDialogTitleId = useId();
-  const availableCopyTargets = copyTargets.filter((candidate) => candidate.id !== step.id);
-
-  function closeCopyDialog() {
-    if (isCopying) {
-      return;
-    }
-    setCopyPhoto(null);
-    setCopyTargetStepId("");
-    setCopyError(undefined);
-  }
-
-  async function copyPhotoToSelectedStep() {
-    if (!copyPhoto || !copyTargetStepId || !onCopyToStep) {
-      return;
-    }
-
-    setIsCopying(true);
-    setCopyError(undefined);
-    try {
-      await onCopyToStep(copyPhoto, copyTargetStepId);
-      setCopyPhoto(null);
-      setCopyTargetStepId("");
-    } catch (error) {
-      setCopyError(error instanceof Error ? error.message : "Unable to copy this photo.");
-    } finally {
-      setIsCopying(false);
-    }
-  }
+  const { entry, putOnClipboard, setActivePhoto, setActiveStep } = useStepPhotoClipboard();
 
   function handlePaste(event: ReactClipboardEvent<HTMLDivElement>) {
     if (isUploading) {
@@ -321,9 +288,13 @@ export function StepPhotoAttachmentEditor({
     <div
       className="space-y-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
       role="region"
-      aria-label={`Step ${step.sequence} photos. Paste an image or use Upload.`}
+      aria-label={`Step ${step.sequence} photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.`}
       tabIndex={isUploading ? -1 : 0}
       onPaste={handlePaste}
+      onPointerEnter={() => setActiveStep({ taskId, stepId: step.id })}
+      onPointerLeave={() => setActiveStep(null)}
+      onFocus={() => setActiveStep({ taskId, stepId: step.id })}
+      onBlur={() => setActiveStep(null)}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="ui-field-label mb-0 flex items-center gap-1">
@@ -360,8 +331,19 @@ export function StepPhotoAttachmentEditor({
       {photos.length > 0 ? (
         <div className="step-photo-strip flex max-w-full gap-3 overflow-x-auto overscroll-x-contain pb-2">
           {photos.map((photo) => (
-            <div key={photo.id} className="shrink-0">
-              <div className="group relative">
+            <div
+              key={photo.id}
+              className="shrink-0"
+              onPointerEnter={() => setActivePhoto({ photo, taskId, stepId: step.id })}
+              onPointerLeave={() => setActivePhoto(null)}
+              onFocus={() => setActivePhoto({ photo, taskId, stepId: step.id })}
+              onBlur={() => setActivePhoto(null)}
+            >
+              <div
+                className={`group relative transition ${
+                  entry?.mode === "cut" && entry.photo.id === photo.id ? "opacity-40" : ""
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => setPreviewPhoto(photo)}
@@ -371,22 +353,18 @@ export function StepPhotoAttachmentEditor({
                 >
                   <StepPhotoThumbnail photo={photo} stepSequence={step.sequence} compact={compact} />
                 </button>
-                {onCopyToStep && availableCopyTargets.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setCopyPhoto(photo);
-                      setCopyTargetStepId("");
-                      setCopyError(undefined);
-                    }}
-                    className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-black/55 text-white opacity-0 transition hover:bg-black/75 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100 group-focus-within:opacity-100"
-                    aria-label={`Copy photo from step ${step.sequence}`}
-                    title="Copy to another step"
-                  >
-                    <Copy size={11} />
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    putOnClipboard(photo, taskId, step.id, "copy");
+                  }}
+                  className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-black/55 text-white opacity-0 transition hover:bg-black/75 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100 group-focus-within:opacity-100"
+                  aria-label={`Copy photo from step ${step.sequence}`}
+                  title="Copy photo (Ctrl+C) — then Ctrl+V on another step"
+                >
+                  <Copy size={11} />
+                </button>
                 <button
                   type="button"
                   onClick={(event) => {
@@ -418,84 +396,6 @@ export function StepPhotoAttachmentEditor({
           onUpdatePhoto={onUpdatePhoto}
         />
       ) : null}
-      {copyPhoto && onCopyToStep && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) {
-                  closeCopyDialog();
-                }
-              }}
-            >
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby={copyDialogTitleId}
-                className="w-full max-w-sm rounded-lg border border-line bg-surface p-4 text-ink shadow-xl"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 id={copyDialogTitleId} className="text-sm font-semibold">
-                      Copy photo to another step
-                    </h3>
-                    <p className="mt-1 truncate text-xs text-ink-secondary" title={copyPhoto.name}>
-                      {copyPhoto.name}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="ui-btn-ghost h-7 w-7 shrink-0 justify-center px-0"
-                    onClick={closeCopyDialog}
-                    disabled={isCopying}
-                    aria-label="Close copy photo dialog"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-
-                <label className="mt-4 block">
-                  <span className="ui-field-label block">Destination step</span>
-                  <select
-                    className="ui-field-standalone h-10 w-full px-2 text-xs"
-                    aria-label="Destination step"
-                    value={copyTargetStepId}
-                    disabled={isCopying}
-                    onChange={(event) => setCopyTargetStepId(event.target.value)}
-                  >
-                    <option value="">Select a step</option>
-                    {availableCopyTargets.map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {`Step ${candidate.sequence}${candidate.name?.trim() ? ` — ${candidate.name.trim()}` : ""}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                {copyError ? (
-                  <p className="mt-2 text-xs font-semibold text-danger" role="alert">
-                    {copyError}
-                  </p>
-                ) : null}
-
-                <div className="mt-4 flex justify-end gap-2">
-                  <button type="button" className="ui-btn-ghost h-8 px-3 text-xs" onClick={closeCopyDialog} disabled={isCopying}>
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="ui-btn-primary h-8 px-3 text-xs"
-                    disabled={!copyTargetStepId || isCopying}
-                    onClick={() => void copyPhotoToSelectedStep()}
-                  >
-                    {isCopying ? "Copying…" : "Copy photo"}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }

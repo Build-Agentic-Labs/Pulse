@@ -78,6 +78,11 @@ import {
   upsertStepPhotoAttachments,
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
+import {
+  StepPhotoClipboardProvider,
+  type StepPhotoTarget,
+} from "@/components/line-workspace/step-photo-clipboard-provider";
+import type { StepPhotoClipboardEntry } from "@/domain/step-photo-clipboard";
 import { removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
 import { removeTaskVideo, type TaskVideo } from "@/domain/task-videos";
 import { mergeTaskPrivateMedia } from "@/domain/task-private-media";
@@ -123,6 +128,7 @@ import { optimizeLine as runLineOptimization } from "@/domain/joint-scheduler";
 import {
   addStepToolToSupabase,
   canPatchTaskFromRealtimePayload,
+  copyStepPhotoAttachmentToStep,
   createPlannerSupabaseClient,
   deleteToolLibraryFromSupabase,
   deleteScenario,
@@ -4612,62 +4618,135 @@ export function LineWorkspace({
     }
   }
 
-  async function copyStepPhoto(taskId: string, targetStepId: string, sourcePhoto: StepPhotoAttachment) {
-    const currentTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
-    const targetStep = currentTask?.manufacturingSteps?.find((step) => step.id === targetStepId);
-    if (!currentTask || !targetStep) {
+  /**
+   * Place a clipboard photo onto a step, in this or any other task in the project.
+   *
+   * Order matters: the destination write must land before the source is touched, or a
+   * failed paste loses the photo. When source and destination are the SAME task, both
+   * edits must be folded into one task object and saved once — two sequential saves of
+   * the same task would clobber each other.
+   */
+  async function pasteStepPhoto(entry: StepPhotoClipboardEntry, target: StepPhotoTarget) {
+    const state = latestDerivedStateRef.current;
+    const targetTask = state.tasks.find((task) => task.id === target.taskId);
+    const targetStep = targetTask?.manufacturingSteps?.find((step) => step.id === target.stepId);
+    if (!targetTask || !targetStep) {
       throw new Error("The destination step is no longer available.");
     }
 
-    const copiedPhoto = duplicateStepPhotoAttachment(sourcePhoto);
-    const taskWithCopy = upsertStepPhotoAttachments(currentTask, targetStepId, [copiedPhoto]);
-    let metadataSaved = false;
+    const isCut = entry.mode === "cut";
+    const sameTask = entry.sourceTaskId === target.taskId;
+    const pastedPhoto = duplicateStepPhotoAttachment(entry.photo);
+
     saveInFlightRef.current = true;
     setSaveError(undefined);
     setSaveState("saving");
     setPlannerState((current) => ({
       ...current,
-      tasks: current.tasks.map((task) => (task.id === taskId ? taskWithCopy : task)),
+      tasks: current.tasks.map((task) => {
+        if (task.id === target.taskId) {
+          const withPhoto = upsertStepPhotoAttachments(task, target.stepId, [pastedPhoto]);
+          return isCut && sameTask
+            ? removeStepPhotoAttachment(withPhoto, entry.sourceStepId, entry.photo.id)
+            : withPhoto;
+        }
+
+        if (isCut && task.id === entry.sourceTaskId) {
+          return removeStepPhotoAttachment(task, entry.sourceStepId, entry.photo.id);
+        }
+
+        return task;
+      }),
     }));
 
+    let metadataSaved = false;
     try {
-      const uploadedPhoto = await uploadStepPhotoAttachment(
-        taskId,
-        targetStepId,
-        copiedPhoto,
-        activeProjectContext,
-      );
+      // A photo still held only as a data: URL has never been uploaded, so there is no
+      // object to copy — upload it the normal way instead.
+      const persistedPhoto = entry.photo.storagePath
+        ? await copyStepPhotoAttachmentToStep(
+            target.taskId,
+            target.stepId,
+            pastedPhoto,
+            entry.photo.storagePath,
+            entry.photo.thumbnailStoragePath,
+            activeProjectContext,
+          )
+        : await uploadStepPhotoAttachment(target.taskId, target.stepId, pastedPhoto, activeProjectContext);
       metadataSaved = true;
-      const persistedTask = upsertStepPhotoAttachments(currentTask, targetStepId, [uploadedPhoto]);
-      await saveTaskCustomFieldsToSupabase(taskId, persistedTask.customFields, projectId);
+
+      const freshTargetTask = latestDerivedStateRef.current.tasks.find((task) => task.id === target.taskId);
+      if (freshTargetTask) {
+        let nextTargetTask = upsertStepPhotoAttachments(freshTargetTask, target.stepId, [persistedPhoto]);
+        if (isCut && sameTask) {
+          nextTargetTask = removeStepPhotoAttachment(nextTargetTask, entry.sourceStepId, entry.photo.id);
+        }
+        await saveTaskCustomFieldsToSupabase(target.taskId, nextTargetTask.customFields, projectId);
+      }
+
+      if (isCut && !sameTask) {
+        const freshSourceTask = latestDerivedStateRef.current.tasks.find(
+          (task) => task.id === entry.sourceTaskId,
+        );
+        if (freshSourceTask) {
+          const nextSourceTask = removeStepPhotoAttachment(
+            freshSourceTask,
+            entry.sourceStepId,
+            entry.photo.id,
+          );
+          await saveTaskCustomFieldsToSupabase(entry.sourceTaskId, nextSourceTask.customFields, projectId);
+        }
+      }
+
+      if (isCut) {
+        await softDeleteStepPhotoAttachmentFromSupabase(entry.photo.id, entry.sourceTaskId, projectId);
+      }
 
       setPlannerState((current) => ({
         ...current,
         tasks: current.tasks.map((task) =>
-          task.id === taskId ? upsertStepPhotoAttachments(task, targetStepId, [uploadedPhoto]) : task,
+          task.id === target.taskId
+            ? upsertStepPhotoAttachments(task, target.stepId, [persistedPhoto])
+            : task,
         ),
       }));
       setSaveState("saved");
       notifyFeedback({
-        title: "Photo copied",
-        body: `Added to Step ${targetStep.sequence}${targetStep.name?.trim() ? ` — ${targetStep.name.trim()}` : ""}.`,
+        title: isCut ? "Photo moved" : "Photo copied",
+        body: `${isCut ? "Moved" : "Added"} to Step ${targetStep.sequence}${
+          targetStep.name?.trim() ? ` — ${targetStep.name.trim()}` : ""
+        }.`,
         tone: "success",
       });
     } catch (error) {
       setPlannerState((current) => ({
         ...current,
-        tasks: current.tasks.map((task) =>
-          task.id === taskId ? removeStepPhotoAttachment(task, targetStepId, copiedPhoto.id) : task,
-        ),
+        tasks: current.tasks.map((task) => {
+          if (task.id === target.taskId) {
+            const withoutPaste = removeStepPhotoAttachment(task, target.stepId, pastedPhoto.id);
+            return isCut && sameTask
+              ? upsertStepPhotoAttachments(withoutPaste, entry.sourceStepId, [entry.photo])
+              : withoutPaste;
+          }
+
+          if (isCut && task.id === entry.sourceTaskId) {
+            return upsertStepPhotoAttachments(task, entry.sourceStepId, [entry.photo]);
+          }
+
+          return task;
+        }),
       }));
+
       if (metadataSaved) {
-        await softDeleteStepPhotoAttachmentFromSupabase(copiedPhoto.id, taskId, projectId).catch(() => undefined);
+        await softDeleteStepPhotoAttachmentFromSupabase(pastedPhoto.id, target.taskId, projectId).catch(
+          () => undefined,
+        );
       }
 
-      const message = error instanceof Error ? error.message : "Unable to copy this photo.";
+      const message = error instanceof Error ? error.message : "Unable to paste this photo.";
       setSaveError(message);
       setSaveState("error");
-      notifyFeedback({ title: "Photo copy failed", body: message, tone: "danger" });
+      notifyFeedback({ title: "Photo paste failed", body: message, tone: "danger" });
       throw error;
     } finally {
       saveInFlightRef.current = false;
@@ -6041,6 +6120,7 @@ export function LineWorkspace({
   );
 
   return (
+    <StepPhotoClipboardProvider onPaste={pasteStepPhoto} onNotify={notifyFeedback}>
     <div
       className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink"
       style={workspaceGridStyle}
@@ -6120,7 +6200,6 @@ export function LineWorkspace({
             onProcedureFieldChange={updateProcedureStepField}
             onMoveStepToTask={moveProcedureStepToTask}
             onUploadStepPhotos={uploadStepPhotos}
-            onCopyStepPhoto={copyStepPhoto}
             onRemoveStepPhoto={removeStepPhoto}
             onDeleteExplodedView={deleteExplodedView}
             onDeleteTaskVideo={deleteTaskVideo}
@@ -6368,7 +6447,6 @@ export function LineWorkspace({
             onProcedureFieldBlur={markProcedureFieldInactive}
             onProcedureFieldChange={updateProcedureStepField}
             onUploadStepPhotos={uploadStepPhotos}
-            onCopyStepPhoto={copyStepPhoto}
             onRemoveStepPhoto={removeStepPhoto}
             onDeleteExplodedView={deleteExplodedView}
             onDeleteTaskVideo={deleteTaskVideo}
@@ -6406,5 +6484,6 @@ export function LineWorkspace({
         onDismissToast={dismissWorkspaceNotice}
       />
     </div>
+    </StepPhotoClipboardProvider>
   );
 }

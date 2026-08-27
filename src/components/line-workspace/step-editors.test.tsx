@@ -12,6 +12,7 @@ import {
   StepPartReferenceEditor,
   StepPhotoAttachmentEditor,
 } from "./step-editors";
+import { StepPhotoClipboardProvider } from "./step-photo-clipboard-provider";
 
 const step: ManufacturingStep = {
   id: "step-1",
@@ -22,26 +23,27 @@ const step: ManufacturingStep = {
 function renderEditor(overrides: {
   isUploading?: boolean;
   onFilesSelected?: (files: File[]) => void;
-  onCopyToStep?: (photo: StepPhotoAttachment, targetStepId: string) => Promise<void> | void;
-  copyTargets?: ManufacturingStep[];
   photos?: StepPhotoAttachment[];
 } = {}) {
   const onFilesSelected = overrides.onFilesSelected ?? vi.fn();
   render(
-    <StepPhotoAttachmentEditor
-      step={step}
-      photos={overrides.photos ?? []}
-      copyTargets={overrides.copyTargets}
-      isUploading={overrides.isUploading}
-      onFilesSelected={onFilesSelected}
-      onCopyToStep={overrides.onCopyToStep}
-      onRequestRemove={vi.fn()}
-    />,
+    <StepPhotoClipboardProvider onPaste={vi.fn()}>
+      <StepPhotoAttachmentEditor
+        taskId="task-1"
+        step={step}
+        photos={overrides.photos ?? []}
+        isUploading={overrides.isUploading}
+        onFilesSelected={onFilesSelected}
+        onRequestRemove={vi.fn()}
+      />
+    </StepPhotoClipboardProvider>,
   );
 
   return {
     onFilesSelected,
-    pasteTarget: screen.getByRole("region", { name: "Step 1 photos. Paste an image or use Upload." }),
+    pasteTarget: screen.getByRole("region", {
+      name: "Step 1 photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.",
+    }),
   };
 }
 
@@ -130,42 +132,49 @@ describe("StepPhotoAttachmentEditor clipboard paste", () => {
     expect(preview.querySelector('[data-annotation-type="rectangle"]')).not.toBeNull();
   });
 
-  it("copies a selected photo to another manufacturing step", async () => {
+  it("copies a photo onto another step through the clipboard", async () => {
     const photo: StepPhotoAttachment = {
       id: "photo-1",
-      name: "Air chamber.jpg",
-      dataUrl: "https://example.test/air-chamber.jpg",
-      capturedAt: "2026-08-06T00:00:00.000Z",
+      name: "Panel.png",
+      dataUrl: "https://example.test/panel.png",
+      capturedAt: "2026-08-27T00:00:00.000Z",
     };
-    const destination: ManufacturingStep = {
-      id: "step-2",
-      sequence: 2,
-      name: "Install cooling duct",
-      instruction: "Install the duct.",
-    };
-    const onCopyToStep = vi.fn().mockResolvedValue(undefined);
-    renderEditor({
-      photos: [photo],
-      copyTargets: [step, destination],
-      onCopyToStep,
-    });
+    const secondStep: ManufacturingStep = { id: "step-2", sequence: 2, instruction: "Fit the panel." };
+    const onPaste = vi.fn().mockResolvedValue(undefined);
 
-    const copyButton = screen.getByRole("button", { name: "Copy photo from step 1" });
-    expect(copyButton).toHaveClass("text-white", "opacity-0", "group-hover:opacity-100");
-    expect(screen.getByRole("button", { name: "Remove photo from step 1" })).toHaveClass(
-      "text-white",
-      "opacity-0",
-      "group-hover:opacity-100",
+    render(
+      <StepPhotoClipboardProvider onPaste={onPaste}>
+        <StepPhotoAttachmentEditor
+          taskId="task-1"
+          step={step}
+          photos={[photo]}
+          onFilesSelected={vi.fn()}
+          onRequestRemove={vi.fn()}
+        />
+        <StepPhotoAttachmentEditor
+          taskId="task-1"
+          step={secondStep}
+          photos={[]}
+          onFilesSelected={vi.fn()}
+          onRequestRemove={vi.fn()}
+        />
+      </StepPhotoClipboardProvider>,
     );
-    fireEvent.click(copyButton);
-    expect(screen.getByRole("dialog", { name: "Copy photo to another step" })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox", { name: "Destination step" }), {
-      target: { value: "step-2" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Copy photo" }));
 
-    await waitFor(() => expect(onCopyToStep).toHaveBeenCalledWith(photo, "step-2"));
-    expect(screen.queryByRole("dialog", { name: "Copy photo to another step" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy photo from step 1" }));
+    fireEvent.pointerEnter(
+      screen.getByRole("region", {
+        name: "Step 2 photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.",
+      }),
+    );
+    fireEvent.paste(document, { clipboardData: { items: [], files: [] } });
+
+    await waitFor(() =>
+      expect(onPaste).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "copy", sourceStepId: "step-1", sourceTaskId: "task-1" }),
+        { taskId: "task-1", stepId: "step-2" },
+      ),
+    );
   });
 });
 

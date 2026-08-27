@@ -83,6 +83,7 @@ import {
   type StepPhotoTarget,
 } from "@/components/line-workspace/step-photo-clipboard-provider";
 import type { StepPhotoClipboardEntry } from "@/domain/step-photo-clipboard";
+import { applyPastedPhoto, revertPastedPhoto } from "@/domain/step-photo-paste";
 import { removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
 import { removeTaskVideo, type TaskVideo } from "@/domain/task-videos";
 import { mergeTaskPrivateMedia } from "@/domain/task-private-media";
@@ -4643,23 +4644,11 @@ export function LineWorkspace({
     setSaveState("saving");
     setPlannerState((current) => ({
       ...current,
-      tasks: current.tasks.map((task) => {
-        if (task.id === target.taskId) {
-          const withPhoto = upsertStepPhotoAttachments(task, target.stepId, [pastedPhoto]);
-          return isCut && sameTask
-            ? removeStepPhotoAttachment(withPhoto, entry.sourceStepId, entry.photo.id)
-            : withPhoto;
-        }
-
-        if (isCut && task.id === entry.sourceTaskId) {
-          return removeStepPhotoAttachment(task, entry.sourceStepId, entry.photo.id);
-        }
-
-        return task;
-      }),
+      tasks: applyPastedPhoto(current.tasks, entry, target.taskId, target.stepId, pastedPhoto),
     }));
 
     let metadataSaved = false;
+    let destinationSaved = false;
     try {
       // A photo still held only as a data: URL has never been uploaded, so there is no
       // object to copy — upload it the normal way instead.
@@ -4676,26 +4665,29 @@ export function LineWorkspace({
       metadataSaved = true;
 
       const freshTargetTask = latestDerivedStateRef.current.tasks.find((task) => task.id === target.taskId);
-      if (freshTargetTask) {
-        let nextTargetTask = upsertStepPhotoAttachments(freshTargetTask, target.stepId, [persistedPhoto]);
-        if (isCut && sameTask) {
-          nextTargetTask = removeStepPhotoAttachment(nextTargetTask, entry.sourceStepId, entry.photo.id);
-        }
-        await saveTaskCustomFieldsToSupabase(target.taskId, nextTargetTask.customFields, projectId);
+      if (!freshTargetTask) {
+        throw new Error("The destination task is no longer available.");
       }
+      let nextTargetTask = upsertStepPhotoAttachments(freshTargetTask, target.stepId, [persistedPhoto]);
+      if (isCut && sameTask) {
+        nextTargetTask = removeStepPhotoAttachment(nextTargetTask, entry.sourceStepId, entry.photo.id);
+      }
+      await saveTaskCustomFieldsToSupabase(target.taskId, nextTargetTask.customFields, projectId);
+      destinationSaved = true;
 
       if (isCut && !sameTask) {
         const freshSourceTask = latestDerivedStateRef.current.tasks.find(
           (task) => task.id === entry.sourceTaskId,
         );
-        if (freshSourceTask) {
-          const nextSourceTask = removeStepPhotoAttachment(
-            freshSourceTask,
-            entry.sourceStepId,
-            entry.photo.id,
-          );
-          await saveTaskCustomFieldsToSupabase(entry.sourceTaskId, nextSourceTask.customFields, projectId);
+        if (!freshSourceTask) {
+          throw new Error("The source task is no longer available.");
         }
+        const nextSourceTask = removeStepPhotoAttachment(
+          freshSourceTask,
+          entry.sourceStepId,
+          entry.photo.id,
+        );
+        await saveTaskCustomFieldsToSupabase(entry.sourceTaskId, nextSourceTask.customFields, projectId);
       }
 
       if (isCut) {
@@ -4712,35 +4704,62 @@ export function LineWorkspace({
       }));
       setSaveState("saved");
       notifyFeedback({
-        title: isCut ? "Photo moved" : "Photo copied",
-        body: `${isCut ? "Moved" : "Added"} to Step ${targetStep.sequence}${
+        title: isCut ? "Photo moved" : "Photo placed",
+        body: `${isCut ? "Moved" : "Placed"} on Step ${targetStep.sequence}${
           targetStep.name?.trim() ? ` — ${targetStep.name.trim()}` : ""
         }.`,
         tone: "success",
       });
     } catch (error) {
+      // Base the revert AND any compensating saves on the same snapshot so the state we
+      // write back to Supabase is exactly the state the UI is about to show.
+      const revertedTasks = revertPastedPhoto(
+        latestDerivedStateRef.current.tasks,
+        entry,
+        target.taskId,
+        target.stepId,
+        pastedPhoto.id,
+      );
+
       setPlannerState((current) => ({
         ...current,
-        tasks: current.tasks.map((task) => {
-          if (task.id === target.taskId) {
-            const withoutPaste = removeStepPhotoAttachment(task, target.stepId, pastedPhoto.id);
-            return isCut && sameTask
-              ? upsertStepPhotoAttachments(withoutPaste, entry.sourceStepId, [entry.photo])
-              : withoutPaste;
-          }
-
-          if (isCut && task.id === entry.sourceTaskId) {
-            return upsertStepPhotoAttachments(task, entry.sourceStepId, [entry.photo]);
-          }
-
-          return task;
-        }),
+        tasks: revertPastedPhoto(current.tasks, entry, target.taskId, target.stepId, pastedPhoto.id),
       }));
 
       if (metadataSaved) {
         await softDeleteStepPhotoAttachmentFromSupabase(pastedPhoto.id, target.taskId, projectId).catch(
           () => undefined,
         );
+      }
+
+      // The destination write (and, for a cross-task cut, the source write) may have already
+      // committed before something later in the flow threw. Re-save the reverted customFields
+      // for whichever tasks were touched so Supabase matches what the user now sees — best
+      // effort, so a failure here cannot mask the error we're about to propagate.
+      if (destinationSaved) {
+        const compensatingSaves: Promise<unknown>[] = [];
+
+        const revertedTarget = revertedTasks.find((task) => task.id === target.taskId);
+        if (revertedTarget) {
+          compensatingSaves.push(
+            saveTaskCustomFieldsToSupabase(target.taskId, revertedTarget.customFields, projectId).catch(
+              () => undefined,
+            ),
+          );
+        }
+
+        if (isCut && !sameTask) {
+          const revertedSource = revertedTasks.find((task) => task.id === entry.sourceTaskId);
+          if (revertedSource) {
+            compensatingSaves.push(
+              saveTaskCustomFieldsToSupabase(entry.sourceTaskId, revertedSource.customFields, projectId).catch(
+                () => undefined,
+              ),
+            );
+          }
+        }
+
+        await Promise.all(compensatingSaves);
       }
 
       const message = error instanceof Error ? error.message : "Unable to paste this photo.";

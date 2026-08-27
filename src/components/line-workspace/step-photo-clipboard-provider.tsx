@@ -35,17 +35,12 @@ interface StepPhotoClipboardValue {
 
 const StepPhotoClipboardContext = createContext<StepPhotoClipboardValue | null>(null);
 
-/** A no-op clipboard so the editor renders outside a provider (tests, storybook-style use). */
-const inertClipboard: StepPhotoClipboardValue = {
-  entry: null,
-  putOnClipboard: () => undefined,
-  clear: () => undefined,
-  setActivePhoto: () => undefined,
-  setActiveStep: () => undefined,
-};
-
 export function useStepPhotoClipboard(): StepPhotoClipboardValue {
-  return useContext(StepPhotoClipboardContext) ?? inertClipboard;
+  const value = useContext(StepPhotoClipboardContext);
+  if (!value) {
+    throw new Error("useStepPhotoClipboard must be used within a StepPhotoClipboardProvider.");
+  }
+  return value;
 }
 
 /** Typing in a field must never be hijacked by the photo clipboard. */

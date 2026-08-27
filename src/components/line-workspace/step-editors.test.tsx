@@ -176,6 +176,84 @@ describe("StepPhotoAttachmentEditor clipboard paste", () => {
       ),
     );
   });
+
+  it("pastes across tasks and reports the destination task id, not the source's", async () => {
+    const photo: StepPhotoAttachment = {
+      id: "photo-1",
+      name: "Panel.png",
+      dataUrl: "https://example.test/panel.png",
+      capturedAt: "2026-08-27T00:00:00.000Z",
+    };
+    const secondStep: ManufacturingStep = { id: "step-2", sequence: 2, instruction: "Fit the panel." };
+    const onPaste = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <StepPhotoClipboardProvider onPaste={onPaste}>
+        <StepPhotoAttachmentEditor
+          taskId="task-1"
+          step={step}
+          photos={[photo]}
+          onFilesSelected={vi.fn()}
+          onRequestRemove={vi.fn()}
+        />
+        <StepPhotoAttachmentEditor
+          taskId="task-2"
+          step={secondStep}
+          photos={[]}
+          onFilesSelected={vi.fn()}
+          onRequestRemove={vi.fn()}
+        />
+      </StepPhotoClipboardProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy photo from step 1" }));
+    fireEvent.pointerEnter(
+      screen.getByRole("region", {
+        name: "Step 2 photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.",
+      }),
+    );
+    fireEvent.paste(document, { clipboardData: { items: [], files: [] } });
+
+    await waitFor(() =>
+      expect(onPaste).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "copy", sourceStepId: "step-1", sourceTaskId: "task-1" }),
+        { taskId: "task-2", stepId: "step-2" },
+      ),
+    );
+  });
+
+  it("dims the source thumbnail while its photo is on the clipboard as a cut", () => {
+    const photo: StepPhotoAttachment = {
+      id: "photo-1",
+      name: "Panel.png",
+      dataUrl: "https://example.test/panel.png",
+      capturedAt: "2026-08-27T00:00:00.000Z",
+    };
+
+    const { container } = render(
+      <StepPhotoClipboardProvider onPaste={vi.fn()}>
+        <StepPhotoAttachmentEditor
+          taskId="task-1"
+          step={step}
+          photos={[photo]}
+          onFilesSelected={vi.fn()}
+          onRequestRemove={vi.fn()}
+        />
+      </StepPhotoClipboardProvider>,
+    );
+
+    const thumbnailWrapper = screen
+      .getByRole("button", { name: "Open step 1 photo Panel.png" })
+      .closest(".shrink-0") as HTMLElement;
+    const dimmedWrapper = thumbnailWrapper.firstElementChild as HTMLElement;
+    expect(dimmedWrapper).not.toHaveClass("opacity-40");
+
+    fireEvent.pointerEnter(thumbnailWrapper);
+    fireEvent.keyDown(document, { key: "x", ctrlKey: true });
+
+    expect(dimmedWrapper).toHaveClass("opacity-40");
+    expect(container.querySelectorAll(".opacity-40")).toHaveLength(1);
+  });
 });
 
 describe("StepPartReferenceEditor", () => {

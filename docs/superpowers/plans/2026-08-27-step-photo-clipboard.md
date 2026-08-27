@@ -748,6 +748,10 @@ git commit -m "feat: copy step photo bytes server-side instead of sharing the so
 
 ### Task 5: Paste store function and provider mount
 
+> **Lands together with Task 6 in one commit.** Task 5 removes `onCopyStepPhoto` from the
+> parent while Task 6 removes the matching prop from the children; the tree does not
+> typecheck in between. Implement both, then commit once.
+
 **Files:**
 - Modify: `src/components/line-workspace.tsx:4615-4673` (replace `copyStepPhoto` with `pasteStepPhoto`)
 - Modify: `src/components/line-workspace.tsx:6043-6048` (wrap the root element in the provider)
@@ -974,6 +978,8 @@ Hold this commit until Task 6 completes; the tree does not typecheck between the
 
 ### Task 6: Wire the editor and delete the dialog
 
+> **Lands together with Task 5 in one commit** — see the note on Task 5.
+
 **Files:**
 - Modify: `src/components/line-workspace/step-editors.tsx` (props, hover registration, Copy button, remove dialog)
 - Modify: `src/components/line-workspace/procedure.tsx:1078-1088`
@@ -1140,23 +1146,54 @@ function renderEditor(overrides: {
 Add the import `import { StepPhotoClipboardProvider } from "./step-photo-clipboard-provider";`, delete the existing test at line 133, `"copies a selected photo to another manufacturing step"` (it drives the removed dialog and will fail once the dialog is gone), and add:
 
 ```tsx
-  it("puts a photo on the clipboard when the copy button is pressed", () => {
+  it("copies a photo onto another step through the clipboard", async () => {
     const photo: StepPhotoAttachment = {
       id: "photo-1",
       name: "Panel.png",
       dataUrl: "https://example.test/panel.png",
       capturedAt: "2026-08-27T00:00:00.000Z",
     };
-    renderEditor({ photos: [photo] });
+    const secondStep: ManufacturingStep = { id: "step-2", sequence: 2, instruction: "Fit the panel." };
+    const onPaste = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <StepPhotoClipboardProvider onPaste={onPaste}>
+        <StepPhotoAttachmentEditor
+          taskId="task-1"
+          step={step}
+          photos={[photo]}
+          onFilesSelected={vi.fn()}
+          onRequestRemove={vi.fn()}
+        />
+        <StepPhotoAttachmentEditor
+          taskId="task-1"
+          step={secondStep}
+          photos={[]}
+          onFilesSelected={vi.fn()}
+          onRequestRemove={vi.fn()}
+        />
+      </StepPhotoClipboardProvider>,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Copy photo from step 1" }));
+    fireEvent.pointerEnter(
+      screen.getByRole("region", {
+        name: "Step 2 photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.",
+      }),
+    );
+    fireEvent.paste(document, { clipboardData: { items: [], files: [] } });
 
-    expect(screen.getByRole("button", { name: "Copy photo from step 1" })).toHaveAttribute(
-      "title",
-      "Copy photo (Ctrl+C) — then Ctrl+V on another step",
+    await waitFor(() =>
+      expect(onPaste).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "copy", sourceStepId: "step-1", sourceTaskId: "task-1" }),
+        { taskId: "task-1", stepId: "step-2" },
+      ),
     );
   });
 ```
+
+This drives the whole mouse path end to end — button click, hover registration, paste
+dispatch — rather than re-asserting a static attribute.
 
 - [ ] **Step 9: Run the full gate**
 

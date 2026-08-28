@@ -231,7 +231,7 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 9999px;
+  border-radius: 0.25rem;
   border: 1px solid var(--color-line);
   background: var(--color-surface-raised);
   padding: 0 0.375rem;
@@ -290,7 +290,7 @@
 
 .mobile-photo-portal .ui-photo-mobile-field,
 .mobile-photo-portal select.ui-photo-mobile-field {
-  height: 2.5rem;
+  height: 2.75rem;
   width: 100%;
   min-width: 0;
   border-radius: 0.5rem;
@@ -399,18 +399,20 @@
 
 .mobile-photo-portal .ui-photo-mobile-check-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.25rem;
+  /* Two across, not three: at 375px a third column left ~105px per chip, which wrapped
+     "Work instruction" and "Torque Spec" onto two lines and made the rows ragged. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem;
 }
 
 .mobile-photo-portal .ui-photo-mobile-check {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.5rem;
   height: auto;
-  min-height: 1.625rem;
+  min-height: 2.75rem;
   min-width: 0;
-  border-radius: 0.3125rem;
+  border-radius: 0.375rem;
   border: 1px solid var(--color-line);
   background: var(--color-surface-raised);
   padding: 0 0.375rem;
@@ -432,8 +434,8 @@
 }
 
 .mobile-photo-portal .ui-photo-mobile-check input[type="checkbox"] {
-  height: 0.75rem;
-  width: 0.75rem;
+  height: 1.125rem;
+  width: 1.125rem;
   flex-shrink: 0;
   margin: 0;
   accent-color: var(--color-accent);
@@ -463,8 +465,8 @@
 .mobile-photo-portal .ui-photo-mobile-tool-manual-shell {
   position: relative;
   min-width: 0;
-  height: 2.5rem;
-  border-radius: 0.5rem;
+  height: 3.25rem;
+  border-radius: 0.375rem;
   border: 1px solid var(--color-line);
   background: var(--color-surface);
   box-shadow: inset 0 1px 2px color-mix(in srgb, var(--color-ink) 5%, transparent);
@@ -504,10 +506,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 1.875rem;
-  padding-inline: 0.5rem;
+  height: 2.75rem;
+  padding-inline: 0.625rem;
   border: 0;
-  border-radius: 0.3125rem;
+  border-radius: 0.375rem;
   background: var(--color-surface-raised);
   font-family: var(--type-mono);
   font-size: var(--type-label);
@@ -522,9 +524,17 @@
   background: var(--color-surface-sunken);
 }
 
+/* This is a div wrapping a ThemedSelect button, not a real <select>, so it never triggers iOS
+   focus-zoom and does not need the 16px the genuine inputs above require. At 16px it was the
+   largest text on the step panel -- a placeholder for an empty dropdown outranking the content. */
 .mobile-photo-portal .ui-photo-mobile-tool-library-select {
   min-width: 0;
-  font-size: 1rem;
+  font-size: var(--type-body);
+}
+
+.mobile-photo-portal .ui-photo-mobile-tool-library-select .ui-themed-select-trigger {
+  height: 2.75rem;
+  font-size: var(--type-body);
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-photo-grid {
@@ -599,7 +609,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   border: 1px solid var(--color-border-strong);
   background: var(--color-surface);
   padding-inline: 0.75rem;
@@ -615,14 +625,17 @@
     color 160ms var(--ease-ui);
 }
 
+/* The primary action uses the accent, not the danger token. It was painted with --color-danger,
+   so "Next Step" -- the most-pressed control in the capture loop -- was the same red as the
+   "Delete step?" confirmation, leaving red to mean both proceed and destroy on one screen. */
 .mobile-photo-portal .ui-photo-mobile-btn-primary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--color-danger);
-  background: var(--color-danger);
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
   padding-inline: 0.75rem;
   font-family: var(--type-mono);
   font-size: var(--type-label);
@@ -638,7 +651,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   border: 1px solid var(--color-line);
   background: var(--color-surface);
   padding-inline: 0.75rem;
@@ -699,6 +712,8 @@
 .mobile-photo-portal .ui-photo-mobile-back-link {
   display: inline-flex;
   align-items: center;
+  min-height: 2.75rem;
+  padding-right: 0.5rem;
   gap: 0.25rem;
   font-family: var(--type-mono);
   font-size: var(--type-label);
@@ -779,9 +794,16 @@
 
 .mobile-photo-portal .ui-photo-mobile-step-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.5rem 0.75rem;
+}
+
+/* Title block takes the full row so the name input is never squeezed by the action cluster. */
+.mobile-photo-portal .ui-photo-mobile-step-header > .min-w-0 {
+  flex: 1 0 100%;
+  order: -1;
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-header-title {
@@ -844,9 +866,9 @@
   align-items: center;
   justify-content: center;
   gap: 0.25rem;
-  height: 2rem;
+  height: 2.75rem;
   min-width: 4.75rem;
-  border-radius: 9999px;
+  border-radius: 0.375rem;
   border: 1px solid var(--color-line);
   background: var(--color-surface-raised);
   padding-inline: 0.625rem;
@@ -877,13 +899,13 @@
 
 .mobile-photo-portal .ui-photo-mobile-icon-btn {
   display: inline-flex;
-  height: 2rem;
-  width: 2rem;
+  height: 2.75rem;
+  width: 2.75rem;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 9999px;
+  border-radius: 0.375rem;
   background: transparent;
   color: var(--color-steel);
 }
@@ -1045,4 +1067,65 @@
     box-shadow: none;
     background-color: var(--color-surface);
   }
+}
+
+/* Collapsed step row. Steps render collapsed by default -- a fully expanded step runs ~750px on an
+   812px phone, so a nine-step task was ~8.7 screens of largely empty form. The summary carries the
+   identifiers a capture operator scans for (code, name, duration) plus counts for anything actually
+   attached, so a glance answers "does this step have its photos yet?" without expanding it. */
+.mobile-photo-portal .ui-photo-mobile-step-summary {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 3.5rem;
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  background: transparent;
+  text-align: left;
+  transition: background-color 160ms var(--ease-ui);
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-summary:active {
+  background: var(--color-surface-muted);
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-summary-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-summary-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--type-body);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--type-caption);
+  color: var(--color-steel);
+}
+
+/* Separator dots between the meta counts, so they read as one line rather than stacked chips. */
+.mobile-photo-portal .ui-photo-mobile-step-summary-meta > span + span::before {
+  content: "·";
+  margin-right: 0.5rem;
+  color: color-mix(in srgb, var(--color-steel) 55%, transparent);
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-summary-chevron {
+  flex-shrink: 0;
+  color: var(--color-steel);
 }

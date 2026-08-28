@@ -7,7 +7,9 @@ import "./mobile-photo-portal.css";
 
 import {
   Camera,
+  ChevronDown,
   ChevronLeft,
+  ChevronUp,
   ClipboardList,
   ImageIcon,
   Menu,
@@ -833,6 +835,10 @@ export function MobilePhotoPortal({
   const [revealedPhotoDeleteId, setRevealedPhotoDeleteId] = useState<string | null>(null);
   const [revealedToolDeleteKey, setRevealedToolDeleteKey] = useState<string | null>(null);
   const [showNewStepForm, setShowNewStepForm] = useState(false);
+  // Steps render collapsed by default: fully expanded, one step runs ~750px on a 812px phone, so a
+  // nine-step task was ~8.7 screens of mostly-empty form to scroll past. Expansion is per step and
+  // additive -- opening one never closes another, because comparing two steps is a real task here.
+  const [expandedStepIds, setExpandedStepIds] = useState<Set<string>>(() => new Set());
   const [newStepInstruction, setNewStepInstruction] = useState("");
   const [newStepDurationText, setNewStepDurationText] = useState("5");
   const [newStepToolName, setNewStepToolName] = useState("");
@@ -2928,6 +2934,36 @@ export function MobilePhotoPortal({
     return String(defaultDuration);
   }
 
+  // Set by openNewStepForm, consumed by the effect that runs after the draft panel commits.
+  // goToNextManufacturingStep does not use this -- it scrolls from inside a timer callback, by
+  // which point the panel is already mounted.
+  const pendingNewStepScrollRef = useRef(false);
+
+  useEffect(() => {
+    if (!showNewStepForm || !pendingNewStepScrollRef.current) {
+      return;
+    }
+
+    pendingNewStepScrollRef.current = false;
+    scrollToNewStepForm();
+    // newStepId is a dependency because opening a draft assigns a fresh id, which remounts the
+    // panel and reattaches the ref the scroll depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showNewStepForm, newStepId]);
+
+  function toggleStepExpanded(stepId: string) {
+    setExpandedStepIds((current) => {
+      const next = new Set(current);
+      if (next.has(stepId)) {
+        next.delete(stepId);
+      } else {
+        next.add(stepId);
+      }
+
+      return next;
+    });
+  }
+
   function openNewStepForm() {
     if (!selectedTask) {
       return;
@@ -2936,6 +2972,13 @@ export function MobilePhotoPortal({
     const stepId = buildNewStepId(selectedTask.id);
     resetNewStepDraft(getNewStepDefaultDurationText(), stepId);
     setShowNewStepForm(true);
+
+    // The draft panel renders `order-last`, i.e. below every existing step, so on a task with
+    // more than a couple of steps it opens off-screen and the tap reads as "nothing happened".
+    // Scrolling cannot be requested inline here: scrollToNewStepForm reads newStepFormRef, and
+    // the panel this call just asked for has not been committed yet, so the ref is still null and
+    // the scroll silently no-ops. Flag it and let the effect below fire once React has mounted it.
+    pendingNewStepScrollRef.current = true;
 
     if (captureTimerRef.current.running && captureTimerRef.current.taskId === selectedTask.id) {
       bindCaptureTimerToStep(selectedTask, stepId);
@@ -3249,7 +3292,7 @@ export function MobilePhotoPortal({
                   <div className="relative">
                     {renderToolVisual(tool)}
                     <span
-                      className={`absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-danger text-canvas transition md:opacity-0 md:group-hover:opacity-100 ${
+                      className={`absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded bg-danger text-canvas transition md:opacity-0 md:group-hover:opacity-100 ${
                         revealedToolDeleteKey === toolKey ? "opacity-100" : "opacity-0"
                       }`}
                       onClick={(event) => {
@@ -3949,7 +3992,7 @@ export function MobilePhotoPortal({
                           {stepDisplayCode(selectedTask, { sequence: draftStepSequence }) || `Step ${draftStepSequence}`}
                         </div>
                         <div className="ui-photo-mobile-body">
-                          {draftStepSequence === 1 ? "Add manufacturing step" : `Capture step ${draftStepSequence}`}
+                          {`New step ${draftStepSequence}`}
                         </div>
                       </div>
                       <button
@@ -4182,6 +4225,39 @@ export function MobilePhotoPortal({
                   const isUploading = uploadCount > 0;
                   const confirmingDelete = confirmDeleteStepId === step.id;
                   const stepCode = stepDisplayCode(selectedTask, step);
+                  // A step the timer is running on, or one mid-delete-confirm, stays open regardless
+                  // of the collapse state -- collapsing the thing you are actively working on reads
+                  // as the app losing your place.
+                  const isTimedStep = captureTimer.activeStepId === step.id;
+                  const isExpanded = expandedStepIds.has(step.id) || isTimedStep || confirmingDelete;
+
+                  if (!isExpanded) {
+                    return (
+                      <article key={step.id} className="overflow-hidden ui-panel">
+                        <button
+                          type="button"
+                          onClick={() => toggleStepExpanded(step.id)}
+                          className="ui-photo-mobile-step-summary"
+                          aria-expanded={false}
+                          aria-label={`Expand step ${step.sequence}`}
+                        >
+                          <span className="ui-photo-mobile-step-summary-main">
+                            <span className="ui-photo-mobile-step-code">{stepCode || `Step ${step.sequence}`}</span>
+                            <span className="ui-photo-mobile-step-summary-name">
+                              {manufacturingStepDisplayName(step)}
+                            </span>
+                            <span className="ui-photo-mobile-step-summary-meta">
+                              <span>{step.durationMinutes ?? 0} min</span>
+                              {photos.length > 0 ? <span>{photos.length} photo{photos.length === 1 ? "" : "s"}</span> : null}
+                              {stepTools.length > 0 ? <span>{stepTools.length} tool{stepTools.length === 1 ? "" : "s"}</span> : null}
+                              {selectedChecks.size > 0 ? <span>{selectedChecks.size} check{selectedChecks.size === 1 ? "" : "s"}</span> : null}
+                            </span>
+                          </span>
+                          <ChevronDown size={16} className="ui-photo-mobile-step-summary-chevron" />
+                        </button>
+                      </article>
+                    );
+                  }
 
                   return (
                     <article
@@ -4262,6 +4338,17 @@ export function MobilePhotoPortal({
                             title={`Delete step ${step.sequence}`}
                           >
                             <Trash2 size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleStepExpanded(step.id)}
+                            disabled={isTimedStep}
+                            className="ui-photo-mobile-icon-btn disabled:opacity-40"
+                            aria-expanded
+                            aria-label={`Collapse step ${step.sequence}`}
+                            title={isTimedStep ? "Timer is running on this step" : `Collapse step ${step.sequence}`}
+                          >
+                            <ChevronUp size={14} />
                           </button>
                         </div>
                       </div>

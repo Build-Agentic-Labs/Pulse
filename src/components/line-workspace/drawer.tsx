@@ -141,7 +141,6 @@ export function DetailDrawer({
   onProcedureFieldBlur,
   onProcedureFieldChange,
   onUploadStepPhotos,
-  onCopyStepPhoto,
   onRemoveStepPhoto,
   onDeleteExplodedView,
   onDeleteTaskVideo,
@@ -183,7 +182,6 @@ export function DetailDrawer({
     value: string,
   ) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
-  onCopyStepPhoto: (taskId: string, targetStepId: string, photo: StepPhotoAttachment) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onDeleteExplodedView: (taskId: string, view: ExplodedView) => void;
   onDeleteTaskVideo: (taskId: string, video: TaskVideo) => void;
@@ -858,13 +856,12 @@ export function DetailDrawer({
 	                        />
                         <div className="border-t border-line pt-2">
                           <StepPhotoAttachmentEditor
+                            taskId={taskId}
                             step={step}
                             photos={stepPhotos}
-                            copyTargets={currentTask.manufacturingSteps ?? []}
                             compact
                             isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
-                            onCopyToStep={(photo, targetStepId) => onCopyStepPhoto(taskId, targetStepId, photo)}
                             onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
                             onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                           />

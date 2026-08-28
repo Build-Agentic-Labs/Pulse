@@ -4313,6 +4313,85 @@ export async function removeStepPhotoAttachmentObject(photo: StepPhotoAttachment
   await throwIfError(supabase.storage.from(stepPhotoBucket).remove(paths));
 }
 
+/**
+ * Duplicate a stored photo object onto another step, server-side.
+ *
+ * `uploadStepPhotoAttachment` deliberately short-circuits for photos that already live in
+ * Storage — it only re-saves metadata — which is right for re-saving but wrong for a copy:
+ * the duplicate would inherit the source's `storage_path`, and deleting the source TASK
+ * hard-deletes every object belonging to its photos, breaking the copy. So a paste gets its
+ * own object. Storage `.copy()` does this on the server; no download/upload round trip.
+ *
+ * `photo` must already carry the NEW id (see `duplicateStepPhotoAttachment`) — destination
+ * paths key on it, which is what keeps the copy on a distinct path.
+ */
+export async function copyStepPhotoAttachmentToStep(
+  targetTaskId: string,
+  targetStepId: string,
+  photo: StepPhotoAttachment,
+  sourceStoragePath: string,
+  sourceThumbnailStoragePath: string | undefined,
+  project?: PlannerProjectContext,
+): Promise<StepPhotoAttachment> {
+  const supabase = plannerClient();
+  await assertTaskInProject(supabase, targetTaskId, project?.projectId);
+
+  const extension = photo.contentType?.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+  const storagePath = projectScopedStoragePath(
+    targetTaskId,
+    targetStepId,
+    photo,
+    project,
+    safeStorageSegment(extension),
+  );
+  // Destination paths key on photo.id. If the caller passed the photo with its ORIGINAL id
+  // instead of a duplicated one (see the precondition in the doc comment above), the derived
+  // path collapses onto the source path, and the upsert in saveStepPhotoMetadataToSupabase
+  // below would silently overwrite the source row -- moving it to the target task/step and
+  // orphaning the original Storage object. Fail loudly, before any Storage write, instead of
+  // corrupting data silently.
+  if (storagePath === sourceStoragePath) {
+    throw new Error(
+      "copyStepPhotoAttachmentToStep: destination path matches the source path. The photo must be " +
+        "duplicated with a fresh id (see duplicateStepPhotoAttachment) before it is copied to another step.",
+    );
+  }
+
+  // Verified present in the installed client: storage-js exposes
+  // copy(fromPath, toPath, options?) — node_modules/@supabase/storage-js/dist/index.d.mts:1149
+  await throwIfError(supabase.storage.from(stepPhotoBucket).copy(sourceStoragePath, storagePath));
+
+  let thumbnailStoragePath: string | undefined;
+  let thumbnailUrl: string | undefined;
+  if (sourceThumbnailStoragePath) {
+    thumbnailStoragePath = projectScopedThumbnailStoragePath(targetTaskId, targetStepId, photo, project);
+    await throwIfError(
+      supabase.storage.from(stepPhotoBucket).copy(sourceThumbnailStoragePath, thumbnailStoragePath),
+    );
+    thumbnailUrl = await signedStorageUrl(supabase, thumbnailStoragePath, { cache: true });
+  }
+
+  const signedUrl = await signedStorageUrl(supabase, storagePath, { cache: true });
+
+  const copiedPhoto: StepPhotoAttachment = {
+    ...photo,
+    dataUrl: signedUrl ?? "",
+    storagePath,
+    thumbnailUrl,
+    thumbnailStoragePath,
+  };
+
+  await saveStepPhotoMetadataToSupabase(targetTaskId, targetStepId, copiedPhoto, project);
+
+  // The bucket is private, so the fabricated public URL can never load -- returning it would hand
+  // the caller a permanently-broken image. The row is saved (a reload re-signs it), so fail loudly.
+  if (!signedUrl) {
+    throw new Error("The photo was copied, but a signed URL could not be created for it. Reload to retry.");
+  }
+
+  return copiedPhoto;
+}
+
 export type ExplodedViewUploadInput = {
   taskId: string;
   bytes: Blob | ArrayBuffer;

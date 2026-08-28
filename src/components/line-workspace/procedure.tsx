@@ -189,7 +189,6 @@ export function ProcedureWorkspace({
   onProcedureFieldChange,
   onMoveStepToTask,
   onUploadStepPhotos,
-  onCopyStepPhoto,
   onRemoveStepPhoto,
   onDeleteExplodedView,
   onDeleteTaskVideo,
@@ -229,7 +228,6 @@ export function ProcedureWorkspace({
   ) => void;
   onMoveStepToTask: (sourceTaskId: string, targetTaskId: string, stepId: string) => void;
   onUploadStepPhotos: (taskId: string, stepId: string, files: File[]) => Promise<void>;
-  onCopyStepPhoto: (taskId: string, targetStepId: string, photo: StepPhotoAttachment) => Promise<void>;
   onRemoveStepPhoto: (taskId: string, stepId: string, photoId: string) => Promise<void>;
   onDeleteExplodedView: (taskId: string, view: ExplodedView) => void;
   onDeleteTaskVideo: (taskId: string, video: TaskVideo) => void;
@@ -1076,12 +1074,11 @@ export function ProcedureWorkspace({
                       {showPhotos ? (
                         <div className="ui-procedure-step-divider">
                           <StepPhotoAttachmentEditor
+                            taskId={task.id}
                             step={step}
                             photos={stepPhotos}
-                            copyTargets={task.manufacturingSteps ?? []}
                             isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
                             onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
-                            onCopyToStep={(photo, targetStepId) => onCopyStepPhoto(task.id, targetStepId, photo)}
                             onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
                             onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
                           />

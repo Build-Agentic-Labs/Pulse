@@ -6208,6 +6208,7 @@ export function LineWorkspace({
             <PlannerWorkspaceSkeleton />
           ) : isProcedureModule ? (
             <ProcedureWorkspace
+              project={activeProjectContext}
               product={derivedState.product}
               tasks={derivedState.tasks}
               zones={derivedState.zones}

@@ -1,11 +1,27 @@
-/* Extracted from app/globals.css (mobile photo capture). Plain CSS by necessity: Tailwind v3
+/* NOTE: this sheet used to reference var(--color-steel), a token that is defined nowhere in the
+   codebase. An undefined var() in `color` is invalid at computed-value time, which for an
+   inherited property means `inherit` -- so every "secondary grey" label silently rendered as full
+   ink. Use --color-ink-secondary / --color-ink-tertiary. line-workspace.css still has 8 of these.
+
+   Extracted from app/globals.css (mobile photo capture). Plain CSS by necessity: Tailwind v3
    intercepts @layer components in any file it processes and requires a matching
    @tailwind directive. This sheet loads after globals.css, so its self-namespaced
    rules keep the same win-over-utilities behavior they had before extraction. */
 .mobile-photo-portal input,
 .mobile-photo-portal textarea,
 .mobile-photo-portal select {
+  /* 16px is mandatory on real form controls: below it, iOS Safari zooms the viewport on focus.
+     It is deliberately NOT applied to buttons or divs dressed as controls. */
   font-size: 16px;
+}
+
+/* One label tier, matching `.ui-procedure-step .ui-field-label` in line-workspace.css, so the
+   phone and desktop editors of the same procedure agree. */
+.mobile-photo-portal .ui-field-label,
+.mobile-photo-portal .ui-mono-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.025em;
+  color: var(--color-ink);
 }
 
 .mobile-photo-portal .ui-photo-mobile-site-header {
@@ -28,12 +44,12 @@
 
 .mobile-photo-portal .ui-photo-mobile-site-eyebrow {
   font-family: var(--type-mono);
-  font-size: 0.5625rem;
+  font-size: var(--type-label);
   font-weight: 500;
   letter-spacing: 0.1em;
   line-height: 1.2;
   text-transform: uppercase;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-header-actions {
@@ -95,7 +111,7 @@
   white-space: nowrap;
   font-size: var(--type-caption);
   font-weight: 500;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-header-timer-value {
@@ -257,7 +273,7 @@
   font-size: var(--type-caption);
   font-weight: 500;
   letter-spacing: 0.04em;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-body {
@@ -273,7 +289,7 @@
   font-size: var(--type-caption);
   font-weight: 400;
   line-height: 1.45;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-empty {
@@ -285,7 +301,7 @@
   font-size: var(--type-caption);
   font-weight: 500;
   letter-spacing: 0.03em;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-field,
@@ -420,7 +436,7 @@
   font-size: var(--type-caption);
   font-weight: 500;
   line-height: 1.2;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
   transition:
     border-color 160ms var(--ease-ui),
     background-color 160ms var(--ease-ui),
@@ -667,7 +683,7 @@
   font-family: var(--type-mono);
   font-size: var(--type-subtitle);
   font-weight: 500;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-task-name {
@@ -706,7 +722,7 @@
   font-size: var(--type-caption);
   font-weight: 400;
   line-height: 1.45;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-back-link {
@@ -719,7 +735,7 @@
   font-size: var(--type-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-task-header {
@@ -756,7 +772,7 @@
   font-size: var(--type-label);
   font-weight: 500;
   letter-spacing: 0.03em;
-  color: color-mix(in srgb, var(--color-steel) 58%, transparent);
+  color: color-mix(in srgb, var(--color-ink-secondary) 58%, transparent);
 }
 
 .mobile-photo-portal .ui-photo-mobile-task-name-inline {
@@ -789,7 +805,7 @@
   font-size: 0.625rem;
   font-weight: 500;
   letter-spacing: 0.03em;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-header {
@@ -822,7 +838,7 @@
   font-size: var(--type-label);
   font-weight: 500;
   letter-spacing: 0.03em;
-  color: color-mix(in srgb, var(--color-steel) 58%, transparent);
+  color: color-mix(in srgb, var(--color-ink-secondary) 58%, transparent);
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-title {
@@ -893,7 +909,7 @@
   font-size: var(--type-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
   line-height: 1;
 }
 
@@ -907,7 +923,7 @@
   border: 0;
   border-radius: 0.375rem;
   background: transparent;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-icon-btn:active {
@@ -983,7 +999,7 @@
   font-size: var(--type-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-wbs-chip {
@@ -998,7 +1014,7 @@
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-wbs-chip-accent {
@@ -1115,17 +1131,17 @@
   align-items: center;
   gap: 0.5rem;
   font-size: var(--type-caption);
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }
 
 /* Separator dots between the meta counts, so they read as one line rather than stacked chips. */
 .mobile-photo-portal .ui-photo-mobile-step-summary-meta > span + span::before {
   content: "·";
   margin-right: 0.5rem;
-  color: color-mix(in srgb, var(--color-steel) 55%, transparent);
+  color: color-mix(in srgb, var(--color-ink-secondary) 55%, transparent);
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-summary-chevron {
   flex-shrink: 0;
-  color: var(--color-steel);
+  color: var(--color-ink-secondary);
 }

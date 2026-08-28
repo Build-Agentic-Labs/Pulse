@@ -257,6 +257,40 @@ function StepPhotoThumbnail({
   );
 }
 
+/**
+ * Wraps one thumbnail's hover/focus registration and, critically, clears it on unmount --
+ * pointerleave/blur never fire when the thumbnail disappears out from under the pointer
+ * (photo removed, list re-rendered, drawer closed), which otherwise leaves a stale active
+ * photo that a later Ctrl+C would copy from the wrong (or a gone) photo.
+ */
+function StepPhotoThumbnailSlot({
+  photo,
+  taskId,
+  stepId,
+  children,
+}: {
+  photo: StepPhotoAttachment;
+  taskId: string;
+  stepId: string;
+  children: ReactNode;
+}) {
+  const { setActivePhoto, clearActivePhoto } = useStepPhotoClipboard();
+
+  useEffect(() => () => clearActivePhoto(photo.id), [photo.id, clearActivePhoto]);
+
+  return (
+    <div
+      className="shrink-0"
+      onPointerEnter={() => setActivePhoto({ photo, taskId, stepId })}
+      onPointerLeave={() => clearActivePhoto(photo.id)}
+      onFocus={() => setActivePhoto({ photo, taskId, stepId })}
+      onBlur={() => clearActivePhoto(photo.id)}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function StepPhotoAttachmentEditor({
   taskId,
   step,
@@ -268,7 +302,12 @@ export function StepPhotoAttachmentEditor({
   onUpdatePhoto,
 }: StepPhotoAttachmentEditorProps) {
   const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
-  const { entry, putOnClipboard, setActivePhoto, setActiveStep } = useStepPhotoClipboard();
+  const { entry, putOnClipboard, setActiveStep, clearActiveStep } = useStepPhotoClipboard();
+
+  // pointerleave/blur don't fire when this editor unmounts while it is the active paste
+  // target (closing the drawer with Esc, switching task, collapsing the section) -- without
+  // this, a later Ctrl+V with nothing hovered would land on a step no longer on screen.
+  useEffect(() => () => clearActiveStep(step.id), [step.id, clearActiveStep]);
 
   function handlePaste(event: ReactClipboardEvent<HTMLDivElement>) {
     if (isUploading) {
@@ -288,13 +327,13 @@ export function StepPhotoAttachmentEditor({
     <div
       className="space-y-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
       role="region"
-      aria-label={`Step ${step.sequence} photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.`}
+      aria-label={`Step ${step.sequence} photos. Paste an image, press Ctrl/Cmd+V to paste a copied photo, or use Upload.`}
       tabIndex={isUploading ? -1 : 0}
       onPaste={handlePaste}
       onPointerEnter={() => setActiveStep({ taskId, stepId: step.id })}
-      onPointerLeave={() => setActiveStep(null)}
+      onPointerLeave={() => clearActiveStep(step.id)}
       onFocus={() => setActiveStep({ taskId, stepId: step.id })}
-      onBlur={() => setActiveStep(null)}
+      onBlur={() => clearActiveStep(step.id)}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="ui-field-label mb-0 flex items-center gap-1">
@@ -331,14 +370,7 @@ export function StepPhotoAttachmentEditor({
       {photos.length > 0 ? (
         <div className="step-photo-strip flex max-w-full gap-3 overflow-x-auto overscroll-x-contain pb-2">
           {photos.map((photo) => (
-            <div
-              key={photo.id}
-              className="shrink-0"
-              onPointerEnter={() => setActivePhoto({ photo, taskId, stepId: step.id })}
-              onPointerLeave={() => setActivePhoto(null)}
-              onFocus={() => setActivePhoto({ photo, taskId, stepId: step.id })}
-              onBlur={() => setActivePhoto(null)}
-            >
+            <StepPhotoThumbnailSlot key={photo.id} photo={photo} taskId={taskId} stepId={step.id}>
               <div
                 className={`group relative transition ${
                   entry?.mode === "cut" && entry.photo.id === photo.id ? "opacity-40" : ""
@@ -361,7 +393,7 @@ export function StepPhotoAttachmentEditor({
                   }}
                   className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-black/55 text-white opacity-0 transition hover:bg-black/75 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100 group-focus-within:opacity-100"
                   aria-label={`Copy photo from step ${step.sequence}`}
-                  title="Copy photo (Ctrl+C) — then Ctrl+V on another step"
+                  title="Copy photo (Ctrl/Cmd+C) — then Ctrl/Cmd+V on another step"
                 >
                   <Copy size={11} />
                 </button>
@@ -378,7 +410,7 @@ export function StepPhotoAttachmentEditor({
                   <Trash2 size={11} />
                 </button>
               </div>
-            </div>
+            </StepPhotoThumbnailSlot>
           ))}
         </div>
       ) : (

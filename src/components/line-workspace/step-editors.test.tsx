@@ -42,7 +42,7 @@ function renderEditor(overrides: {
   return {
     onFilesSelected,
     pasteTarget: screen.getByRole("region", {
-      name: "Step 1 photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.",
+      name: "Step 1 photos. Paste an image, press Ctrl/Cmd+V to paste a copied photo, or use Upload.",
     }),
   };
 }
@@ -164,7 +164,7 @@ describe("StepPhotoAttachmentEditor clipboard paste", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy photo from step 1" }));
     fireEvent.pointerEnter(
       screen.getByRole("region", {
-        name: "Step 2 photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.",
+        name: "Step 2 photos. Paste an image, press Ctrl/Cmd+V to paste a copied photo, or use Upload.",
       }),
     );
     fireEvent.paste(document, { clipboardData: { items: [], files: [] } });
@@ -209,7 +209,7 @@ describe("StepPhotoAttachmentEditor clipboard paste", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy photo from step 1" }));
     fireEvent.pointerEnter(
       screen.getByRole("region", {
-        name: "Step 2 photos. Paste an image, press Ctrl+V to paste a copied photo, or use Upload.",
+        name: "Step 2 photos. Paste an image, press Ctrl/Cmd+V to paste a copied photo, or use Upload.",
       }),
     );
     fireEvent.paste(document, { clipboardData: { items: [], files: [] } });

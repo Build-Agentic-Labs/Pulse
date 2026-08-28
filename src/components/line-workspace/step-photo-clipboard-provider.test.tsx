@@ -68,19 +68,27 @@ describe("StepPhotoClipboardProvider", () => {
     expect(screen.getByTestId("mode")).toHaveTextContent("cut");
   });
 
-  it("ignores Ctrl+C when no photo is active", () => {
+  it("ignores Ctrl+C when no photo is active, and never calls preventDefault", () => {
     renderProvider();
-    fireEvent.keyDown(document, { key: "c", ctrlKey: true });
+    const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
 
     expect(screen.getByTestId("mode")).toHaveTextContent("empty");
+    // This is the property that keeps the global listener from breaking ordinary browser
+    // behavior when its own guards trip: it must never call preventDefault.
+    expect(event.defaultPrevented).toBe(false);
   });
 
-  it("ignores Ctrl+C raised from a textarea", () => {
+  it("ignores Ctrl+C raised from a textarea, and never calls preventDefault", () => {
     renderProvider();
     fireEvent.pointerEnter(screen.getByRole("button", { name: "thumbnail" }));
-    fireEvent.keyDown(screen.getByLabelText("instruction"), { key: "c", ctrlKey: true });
+    const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true });
+    screen.getByLabelText("instruction").dispatchEvent(event);
 
     expect(screen.getByTestId("mode")).toHaveTextContent("empty");
+    // Typing Ctrl+C inside a field must keep working like ordinary text copy -- this is the
+    // property that guarantees it.
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("pastes onto the active step", async () => {
@@ -155,5 +163,21 @@ describe("StepPhotoClipboardProvider", () => {
     fireEvent.paste(screen.getByLabelText("instruction"), { clipboardData: { items: [], files: [] } });
 
     expect(onPaste).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when nothing is hovered as the paste target", async () => {
+    const onPaste = vi.fn().mockResolvedValue(undefined);
+    renderProvider(onPaste);
+
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "thumbnail" }));
+    fireEvent.keyDown(document, { key: "c", ctrlKey: true });
+    expect(screen.getByTestId("mode")).toHaveTextContent("copy");
+
+    // No pointerEnter over the destination region -- there is no active step at all.
+    fireEvent.paste(document, { clipboardData: { items: [], files: [] } });
+
+    expect(onPaste).not.toHaveBeenCalled();
+    // The entry must survive the no-op paste; it was never handed to onPaste to be cleared.
+    expect(screen.getByTestId("mode")).toHaveTextContent("copy");
   });
 });

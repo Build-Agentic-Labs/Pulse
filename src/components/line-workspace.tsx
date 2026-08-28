@@ -4711,8 +4711,13 @@ export function LineWorkspace({
         tone: "success",
       });
     } catch (error) {
-      // Base the revert AND any compensating saves on the same snapshot so the state we
-      // write back to Supabase is exactly the state the UI is about to show.
+      // revertedTasks (below, from latestDerivedStateRef.current) and the UI revert in the
+      // setPlannerState call right after (from the updater's own `current`) are two separate
+      // reads, not one shared snapshot -- they merely agree in practice, since
+      // latestDerivedStateRef.current is kept in sync with the state the updater sees. The
+      // compensating saves below are what actually needs a snapshot: they run after
+      // setPlannerState resolves, so they read revertedTasks rather than re-deriving it, to
+      // stay consistent with what was just written back to Supabase.
       const revertedTasks = revertPastedPhoto(
         latestDerivedStateRef.current.tasks,
         entry,
@@ -6139,7 +6144,7 @@ export function LineWorkspace({
   );
 
   return (
-    <StepPhotoClipboardProvider onPaste={pasteStepPhoto} onNotify={notifyFeedback}>
+    <StepPhotoClipboardProvider onPaste={pasteStepPhoto} onNotify={notifyFeedback} resetKey={projectId}>
       <div
         className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink"
         style={workspaceGridStyle}

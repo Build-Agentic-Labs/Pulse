@@ -41,7 +41,6 @@ import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
   getStepPhotoAttachments,
   removeStepPhotoAttachment,
-  updateStepPhotoAttachment,
   upsertStepPhotoAttachments,
   type StepPhotoAttachment,
 } from "@/domain/step-photos";
@@ -67,7 +66,6 @@ import {
   softDeleteStepPhotoAttachmentFromSupabase,
   subscribePlannerStateChanges,
   taskIdFromRealtimePayload,
-  updateStepPhotoCaptionInSupabase,
   uploadStepPhotoAttachment,
   type ToolLibraryItem,
 } from "@/domain/supabase-planner";
@@ -2500,39 +2498,6 @@ export function MobilePhotoPortal({
     });
   }
 
-  async function updatePhotoCaption(stepId: string, photoId: string, caption: string) {
-    if (!plannerState || !selectedTask) {
-      return;
-    }
-
-    const taskId = selectedTask.id;
-    const normalizedCaption = caption.trim();
-    const currentTask = plannerState.tasks.find((task) => task.id === selectedTask.id) ?? selectedTask;
-    const previousPhoto = getStepPhotoAttachments(currentTask, stepId).find((photo) => photo.id === photoId);
-
-    if ((previousPhoto?.caption ?? "") === normalizedCaption) {
-      return;
-    }
-
-    updateLocalTask(taskId, (task) => updateStepPhotoAttachment(task, stepId, photoId, { caption: normalizedCaption }));
-    setErrorMessage(null);
-    beginLocalWrite();
-    setSaveState("saving");
-
-    try {
-      await updateStepPhotoCaptionInSupabase(photoId, normalizedCaption, selectedTask.id, projectId);
-      setSaveState("saved");
-    } catch (error) {
-      if (previousPhoto) {
-        updateLocalTask(taskId, (task) => upsertStepPhotoAttachments(task, stepId, [previousPhoto]));
-      }
-      setSaveState("error");
-      setErrorMessage(error instanceof Error ? error.message : "Unable to save the photo note.");
-    } finally {
-      endLocalWrite();
-    }
-  }
-
   async function addManufacturingStepTool(stepId: string) {
     if (!plannerState || !selectedTask) {
       return;
@@ -3366,16 +3331,6 @@ export function MobilePhotoPortal({
     persistNewStepDraft(getNewStepDraftSnapshot({ photos: nextPhotos }), { saveTask: true, showSaving: true });
   }
 
-  function updateNewStepDraftPhotoCaption(photoId: string, caption: string) {
-    const nextPhotos = newStepDraftPhotos.map((photo) =>
-      photo.id === photoId ? { ...photo, caption } : photo,
-    );
-
-    setNewStepDraftPhotos(nextPhotos);
-    newStepTouchedRef.current = true;
-    persistNewStepDraft(getNewStepDraftSnapshot({ photos: nextPhotos }), { saveTask: true, showSaving: true });
-  }
-
   function goToNextManufacturingStep() {
     if (newStepMotionPhase !== "idle") {
       return;
@@ -4161,17 +4116,6 @@ export function MobilePhotoPortal({
                                   <Trash2 size={14} />
                                 </button>
                               </div>
-                              <label className="ui-photo-mobile-step-photo-caption-wrap block">
-                                <span className="sr-only">Photo note</span>
-                                <textarea
-                                  className="ui-photo-mobile-step-photo-caption"
-                                  value={photo.caption ?? ""}
-                                  onFocus={handleMobileFieldFocus}
-                                  onChange={(event) => updateNewStepDraftPhotoCaption(photo.id, event.currentTarget.value)}
-                                  placeholder="Caption"
-                                  rows={1}
-                                />
-                              </label>
                             </div>
                           ))}
                         </div>
@@ -4530,19 +4474,6 @@ export function MobilePhotoPortal({
                                   </button>
                                 ) : null}
                               </div>
-                              <label className="ui-photo-mobile-step-photo-caption-wrap block">
-                                <span className="sr-only">Photo note</span>
-                                <textarea
-                                  className="ui-photo-mobile-step-photo-caption"
-                                  defaultValue={photo.caption ?? ""}
-                                  onFocus={handleMobileFieldFocus}
-                                  onBlur={(event) => {
-                                    void updatePhotoCaption(step.id, photo.id, event.currentTarget.value);
-                                  }}
-                                  placeholder="Caption"
-                                  rows={1}
-                                />
-                              </label>
                             </div>
                           ))}
                         </div>

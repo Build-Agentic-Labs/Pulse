@@ -1,5 +1,6 @@
 "use client";
 
+import { PhonePortalQrButton } from "@/components/line-workspace/phone-portal-qr-button";
 import {
   ChevronDown,
   ImageIcon,
@@ -44,7 +45,7 @@ import { addStepTool, getStepToolList, removeStepTool } from "@/domain/step-tool
 import { removeStepScopedCustomFields } from "@/domain/task-mutations";
 import { getTaskVideos, type TaskVideo } from "@/domain/task-videos";
 import { type ProjectToolDefinition } from "@/domain/tool-registry";
-import type { ManufacturingStep, Product, Task, Zone } from "@/domain/types";
+import type { ManufacturingStep, PlannerProjectContext, Product, Task, Zone } from "@/domain/types";
 import { type BomPartSelection } from "../bom-part-search";
 import { ClearableNumberInput } from "../clearable-number-input";
 import { ProcedureStepToolTable } from "../procedure-step-tool-table";
@@ -196,6 +197,7 @@ export function ProcedureWorkspace({
   onRemoveStepTool,
   toolLibrary,
   projectToolRegistry,
+  project,
 }: {
   product: Product;
   tasks: Task[];
@@ -235,6 +237,8 @@ export function ProcedureWorkspace({
   onRemoveStepTool: (stepId: string, toolName: string) => Promise<void>;
   toolLibrary: string[];
   projectToolRegistry: Map<string, ProjectToolDefinition>;
+  /** Needed only to resolve the phone capture portal's URL for the QR popover. */
+  project?: PlannerProjectContext;
 }) {
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [instructionSelections, setInstructionSelections] = useState<Record<string, InstructionTextSelection>>({});
@@ -809,6 +813,7 @@ export function ProcedureWorkspace({
                     Loading media
                   </span>
                 ) : null}
+                <PhonePortalQrButton project={project} />
                 <div className="relative" ref={sectionFilterRef}>
                   <button
                     type="button"

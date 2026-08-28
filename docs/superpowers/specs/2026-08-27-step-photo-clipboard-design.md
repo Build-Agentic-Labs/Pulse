@@ -223,7 +223,27 @@ Store (`line-workspace` paste function):
 no text selection, focus not in a field — and never calling `preventDefault` when a guard
 trips. The guard tests above are the regression net.
 
-**Storage `.copy()` and RLS.** The copy is issued with the browser client, so it is subject
-to the same storage policies as the original upload. Destination paths stay inside the
-same project prefix, so an existing policy that permits the upload permits the copy. To be
-confirmed live during implementation.
+**Storage `.copy()` and RLS — confirmed live 2026-08-27.** The copy is issued with the
+browser client and is subject to the same storage policies as the original upload;
+destination paths stay inside the same project prefix, so the policy that permits the
+upload permits the copy. Verified against the live database on the `project-flexboost`
+planner: a copy from Fluid Drain Step 1 to Step 3 produced
+`.../tasks/task-flexboost-1/steps/<step-3>/thumbnails/photo-1787931065511-b34d7s.webp`
+against a source of `.../steps/<step-1>/thumbnails/photo-1787326495132-sqm01y.webp` —
+distinct step folder AND distinct photo id, i.e. the copy owns its bytes (defect D1 fixed).
+A cross-task cut then produced `.../tasks/task-flexboost-2/steps/<step-2>/...` under the
+DESTINATION task, and removed the photo from the source. No console errors, no server-side
+write failures. Test artifacts were deleted afterwards; the project's photos are unchanged.
+
+**Automation note for anyone re-running this.** Synthetic Ctrl+V from browser automation
+does NOT reproduce this feature's paste: CDP key events deliver a `keydown` (verified:
+`ctrlKey: true`) but never invoke the browser's clipboard command, so no native `paste`
+event fires and nothing happens. The handler itself was exercised by dispatching a real
+`ClipboardEvent('paste')`, which is what a genuine keypress delivers. Ctrl+C and Ctrl+X
+ride `keydown` and DO work under automation — only paste has this gap.
+
+**Guards — confirmed live.** With a photo hovered and no text selected, Ctrl+C called
+`preventDefault` (the feature acted). With a text selection active and the same photo
+hovered, `preventDefault` was NOT called, so the browser's own text copy proceeded
+untouched. That is the property that keeps the global key listener from breaking ordinary
+copying in the procedure editor.

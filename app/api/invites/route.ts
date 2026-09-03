@@ -1,8 +1,9 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
+import { renderWorkspaceAccessGrantedEmail, renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
 import type { Database, Json } from "@/lib/database.types";
+import type { SopEmailContent } from "@/domain/sop/notifications";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import {
   inviteeHasCompletedSetup,
@@ -21,7 +22,7 @@ import {
   type OrganizationInviteRole,
   type WorkspaceInviteEntitlements,
 } from "@/domain/workspace/invite-access";
-import { createResendSender } from "@/lib/sop/notifications-drain";
+import { createResendSender, type EmailSender } from "@/lib/sop/notifications-drain";
 import { normalizeJobTitle } from "@/domain/departments";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +76,22 @@ async function generateSetupLink(
 }
 
 const ALREADY_REGISTERED_REASON = "They already have an account — access applies the next time they sign in.";
+const ALREADY_REGISTERED_EMAILED_REASON =
+  "They already have an account, so we emailed them a sign-in reminder instead of a setup link.";
+
+/** Send one email, logging (never throwing) on failure. */
+async function deliver(send: EmailSender, to: string, content: SopEmailContent): Promise<boolean> {
+  try {
+    const result = await send(to, content);
+    if (result.ok) return true;
+    console.error("Invitation email delivery failed", { status: result.status, failure: result.failure });
+  } catch (error) {
+    console.error("Invitation email delivery threw", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return false;
+}
 
 /**
  * Invite a user to a workspace. The grant row is written with the CALLER's token, so
@@ -286,39 +303,50 @@ export async function POST(request: Request) {
 
   if (resendApiKey && resendFrom) {
     const setupLink = await generateSetupLink(admin, email, redirectTo);
+    const send = createResendSender(resendApiKey, resendFrom);
+    const projectNames = new Map((projectsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
+    const departmentNames = new Map((departmentsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
+    const accessSummary = describeInviteEntitlements(entitlements, projectNames, departmentNames);
+    const organizationName = workspaceResult.data?.name ?? "your organization";
+    const origin = new URL(redirectTo).origin;
 
     if (setupLink.kind === "already_registered") {
+      // They finished setup before, so no credential goes out — but the admin
+      // clicked Resend because this person is waiting on SOMETHING, so at least
+      // tell them their access is live and where to sign in.
+      const delivered = await deliver(
+        send,
+        email,
+        renderWorkspaceAccessGrantedEmail({
+          accessSummary,
+          email,
+          organizationName,
+          origin,
+          signInLink: new URL("/", origin).toString(),
+        }),
+      );
       return NextResponse.json({
         granted: true,
-        emailSent: false,
+        emailSent: delivered,
         alreadyRegistered: true,
-        reason: ALREADY_REGISTERED_REASON,
+        reason: delivered ? ALREADY_REGISTERED_EMAILED_REASON : ALREADY_REGISTERED_REASON,
       });
     }
 
     if (setupLink.kind === "link") {
-      try {
-        const send = createResendSender(resendApiKey, resendFrom);
-        const projectNames = new Map((projectsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
-        const departmentNames = new Map((departmentsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
-        const result = await send(
+      const delivered = await deliver(
+        send,
+        email,
+        renderWorkspaceInviteEmail({
+          actionLink: workspaceInviteAcceptanceUrl(redirectTo, email, setupLink.tokenHash, setupLink.type),
+          accessSummary,
           email,
-          renderWorkspaceInviteEmail({
-            actionLink: workspaceInviteAcceptanceUrl(redirectTo, email, setupLink.tokenHash, setupLink.type),
-            accessSummary: describeInviteEntitlements(entitlements, projectNames, departmentNames),
-            email,
-            organizationName: workspaceResult.data?.name ?? "your organization",
-            origin: new URL(redirectTo).origin,
-          }),
-        );
-        if (result.ok) {
-          return NextResponse.json({ granted: true, emailSent: true });
-        }
-        console.error("Invitation email delivery failed", { status: result.status, failure: result.failure });
-      } catch (error) {
-        console.error("Invitation email delivery threw", {
-          message: error instanceof Error ? error.message : String(error),
-        });
+          organizationName,
+          origin,
+        }),
+      );
+      if (delivered) {
+        return NextResponse.json({ granted: true, emailSent: true });
       }
       return NextResponse.json({
         granted: true,

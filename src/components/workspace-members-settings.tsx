@@ -262,6 +262,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     }
 
     const payload = (await response.json().catch(() => ({}))) as {
+      alreadyRegistered?: boolean;
       error?: string;
       emailSent?: boolean;
       reason?: string;
@@ -269,6 +270,13 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
 
     if (!response.ok) {
       return { text: payload.error ?? "Unable to invite user.", tone: "error" };
+    }
+
+    if (payload.emailSent && payload.alreadyRegistered) {
+      return {
+        text: `${email} already has a Pulse account, so we emailed them a sign-in reminder instead of a setup link. Their access applies as soon as they sign in.`,
+        tone: "info",
+      };
     }
 
     if (payload.emailSent) {

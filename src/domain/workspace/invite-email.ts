@@ -49,3 +49,54 @@ export function renderWorkspaceInviteEmail(input: {
     }),
   };
 }
+
+/**
+ * Sent when an administrator (re)invites someone who already finished setting up
+ * their Pulse account. No credential goes out — they own a password — but they
+ * still get a nudge with the access they were granted and a link to sign in.
+ */
+export function renderWorkspaceAccessGrantedEmail(input: {
+  accessSummary: readonly string[];
+  email: string;
+  organizationName: string;
+  origin: string;
+  signInLink: string;
+}): SopEmailContent {
+  const origin = input.origin.replace(/\/$/, "");
+  const email = escapeHtml(input.email);
+  const organizationName = escapeHtml(input.organizationName);
+  const accessRows = input.accessSummary
+    .map((item) => `<li style="margin:0 0 6px;">${escapeHtml(item)}</li>`)
+    .join("");
+  const body =
+    `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#3f3f46;">` +
+    `An administrator granted <strong>${email}</strong> access to <strong>${organizationName}</strong> in Pulse.</p>` +
+    `<ul style="margin:0 0 14px;padding-left:20px;font-size:14px;line-height:1.55;color:#3f3f46;">${accessRows}</ul>` +
+    `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#3f3f46;">` +
+    `You already have a Pulse password, so sign in with it and this access applies right away.</p>` +
+    `<p style="margin:0;font-size:13px;line-height:1.6;color:#71717a;">` +
+    `Forgot your password? Choose <strong>Forgot password</strong> on the sign-in page to set a new one.</p>`;
+
+  return {
+    subject: `You now have access to ${input.organizationName} in Pulse`,
+    text: [
+      `You now have access to ${input.organizationName} in Pulse`,
+      `An administrator granted ${input.email} access to ${input.organizationName} in Pulse.`,
+      ...input.accessSummary,
+      "You already have a Pulse password, so sign in with it and this access applies right away.",
+      `Sign in: ${input.signInLink}`,
+      "Forgot your password? Choose Forgot password on the sign-in page to set a new one.",
+    ].join("\n\n"),
+    html: renderEmailShell({
+      accent: "#111111",
+      subtitle: input.organizationName,
+      eyebrow: "Access update",
+      heading: "Your Pulse access was updated",
+      bodyParagraphsHtml: body,
+      ctaLabel: "Sign in to Pulse",
+      ctaHref: input.signInLink,
+      reason: "You are receiving this because a Pulse administrator granted this email address access.",
+      origin,
+    }),
+  };
+}

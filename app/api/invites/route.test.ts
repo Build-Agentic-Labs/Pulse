@@ -222,7 +222,7 @@ describe("workspace invite route — resend to a pending invitee", () => {
     );
   });
 
-  it("does not email someone who already finished setup and signed in", async () => {
+  it("emails a sign-in reminder, not a credential, to someone who already finished setup", async () => {
     mocks.generateLink.mockImplementation(async ({ type }: { type: string }) => {
       if (type === "invite") return emailExists;
       return {
@@ -239,11 +239,16 @@ describe("workspace invite route — resend to a pending invitee", () => {
       };
     });
 
+    mocks.send.mockResolvedValue({ ok: true, id: "email-3" });
+
     const response = await POST(inviteRequest());
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toMatchObject({ granted: true, emailSent: false, alreadyRegistered: true });
-    expect(mocks.send).not.toHaveBeenCalled();
+    expect(payload).toMatchObject({ granted: true, emailSent: true, alreadyRegistered: true });
+    expect(mocks.send).toHaveBeenCalledOnce();
+    expect(mocks.send.mock.calls[0]?.[1].subject).toBe("You now have access to ANA Corp in Pulse");
+    expect(mocks.send.mock.calls[0]?.[1].html).toContain("https://pulse.anacorp.com/");
+    expect(mocks.send.mock.calls[0]?.[1].html).not.toContain("token_hash");
   });
 });

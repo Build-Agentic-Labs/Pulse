@@ -1,12 +1,15 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
 import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
 import type { Database, Json } from "@/lib/database.types";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import {
+  inviteeHasCompletedSetup,
+  isAlreadyRegisteredAuthError,
   qualityModuleInviteRedirect,
   workspaceInviteAcceptanceUrl,
+  type WorkspaceInviteVerificationType,
 } from "@/domain/workspace/invite";
 import {
   describeInviteEntitlements,
@@ -33,6 +36,45 @@ const checkRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 20 
 // Days until an unredeemed invite expires — mirrors the workspace_access_grants
 // column default (20260703120000 migration).
 const GRANT_EXPIRY_DAYS = 30;
+
+type SetupLink =
+  | { kind: "link"; tokenHash: string; type: WorkspaceInviteVerificationType }
+  | { kind: "already_registered" }
+  | { kind: "unavailable"; message: string };
+
+/**
+ * Mint the one-time token behind the "create your password" link.
+ *
+ * The first invite creates the auth user, so a second call to
+ * generateLink(type: "invite") — which is what every RESEND is — comes back
+ * "already registered" and, before this helper existed, silently sent nothing.
+ * For an existing user we mint a recovery token instead, which the /invite page
+ * already knows how to verify, unless they have actually signed in before.
+ */
+async function generateSetupLink(
+  admin: SupabaseClient<Database>,
+  email: string,
+  redirectTo: string,
+): Promise<SetupLink> {
+  const invite = await admin.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } });
+  if (!invite.error && invite.data.properties?.hashed_token) {
+    return { kind: "link", tokenHash: invite.data.properties.hashed_token, type: "invite" };
+  }
+  if (!invite.error || !isAlreadyRegisteredAuthError(invite.error)) {
+    return { kind: "unavailable", message: invite.error?.message ?? "Supabase returned no invitation token." };
+  }
+
+  const recovery = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo } });
+  if (recovery.error || !recovery.data.properties?.hashed_token) {
+    return { kind: "unavailable", message: recovery.error?.message ?? "Supabase returned no recovery token." };
+  }
+  if (inviteeHasCompletedSetup(recovery.data.user)) {
+    return { kind: "already_registered" };
+  }
+  return { kind: "link", tokenHash: recovery.data.properties.hashed_token, type: "recovery" };
+}
+
+const ALREADY_REGISTERED_REASON = "They already have an account — access applies the next time they sign in.";
 
 /**
  * Invite a user to a workspace. The grant row is written with the CALLER's token, so
@@ -215,9 +257,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: grantError.message }, { status });
   }
 
-  // First-time invitations use a Supabase-generated one-time action link delivered
-  // through Pulse's verified Resend sender. This keeps the subject, destination,
-  // and create-password wording under application control. Supabase mail remains a
+  // Invitations use a Supabase-generated one-time action link delivered through
+  // Pulse's verified Resend sender. This keeps the subject, destination, and
+  // create-password wording under application control. Supabase mail remains a
   // fallback when Resend is not configured.
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -243,13 +285,18 @@ export async function POST(request: Request) {
   const redirectTo = qualityModuleInviteRedirect(request.url, configuredSiteUrl);
 
   if (resendApiKey && resendFrom) {
-    const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
-      type: "invite",
-      email,
-      options: { redirectTo },
-    });
+    const setupLink = await generateSetupLink(admin, email, redirectTo);
 
-    if (!linkError && linkData.properties?.hashed_token) {
+    if (setupLink.kind === "already_registered") {
+      return NextResponse.json({
+        granted: true,
+        emailSent: false,
+        alreadyRegistered: true,
+        reason: ALREADY_REGISTERED_REASON,
+      });
+    }
+
+    if (setupLink.kind === "link") {
       try {
         const send = createResendSender(resendApiKey, resendFrom);
         const projectNames = new Map((projectsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
@@ -257,11 +304,7 @@ export async function POST(request: Request) {
         const result = await send(
           email,
           renderWorkspaceInviteEmail({
-            actionLink: workspaceInviteAcceptanceUrl(
-              redirectTo,
-              email,
-              linkData.properties.hashed_token,
-            ),
+            actionLink: workspaceInviteAcceptanceUrl(redirectTo, email, setupLink.tokenHash, setupLink.type),
             accessSummary: describeInviteEntitlements(entitlements, projectNames, departmentNames),
             email,
             organizationName: workspaceResult.data?.name ?? "your organization",
@@ -271,43 +314,52 @@ export async function POST(request: Request) {
         if (result.ok) {
           return NextResponse.json({ granted: true, emailSent: true });
         }
-        return NextResponse.json({
-          granted: true,
-          emailSent: false,
-          reason: "The invitation email could not be sent. Try Resend again.",
-        });
-      } catch {
-        return NextResponse.json({
-          granted: true,
-          emailSent: false,
-          reason: "The invitation email could not be sent. Try Resend again.",
+        console.error("Invitation email delivery failed", { status: result.status, failure: result.failure });
+      } catch (error) {
+        console.error("Invitation email delivery threw", {
+          message: error instanceof Error ? error.message : String(error),
         });
       }
-    }
-
-    if (linkError && /already.*(registered|exists|been invited)/i.test(linkError.message)) {
       return NextResponse.json({
         granted: true,
         emailSent: false,
-        alreadyRegistered: true,
-        reason: "They already have an account — access applies the next time they sign in.",
+        reason: "The invitation email could not be sent. Try Resend again.",
       });
     }
+
+    console.error("Invitation link generation failed", { message: setupLink.message });
   }
 
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
 
-  if (inviteError) {
-    const alreadyRegistered = /already.*(registered|exists|been invited)/i.test(inviteError.message);
-    return NextResponse.json({
-      granted: true,
-      emailSent: false,
-      alreadyRegistered,
-      reason: alreadyRegistered
-        ? "They already have an account — access applies the next time they sign in."
-        : inviteError.message,
-    });
+  if (!inviteError) {
+    return NextResponse.json({ granted: true, emailSent: true });
   }
 
-  return NextResponse.json({ granted: true, emailSent: true });
+  if (!isAlreadyRegisteredAuthError(inviteError)) {
+    return NextResponse.json({ granted: true, emailSent: false, reason: inviteError.message });
+  }
+
+  // Supabase-mail resend: the user row exists from the first invite. Send a
+  // recovery email (same redirect, same password-setup flow) unless they have
+  // signed in before.
+  const { data: existing } = await admin.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo },
+  });
+  if (existing?.user && !inviteeHasCompletedSetup(existing.user)) {
+    const { error: recoverError } = await admin.auth.resetPasswordForEmail(email, { redirectTo });
+    if (!recoverError) {
+      return NextResponse.json({ granted: true, emailSent: true });
+    }
+    return NextResponse.json({ granted: true, emailSent: false, reason: recoverError.message });
+  }
+
+  return NextResponse.json({
+    granted: true,
+    emailSent: false,
+    alreadyRegistered: true,
+    reason: ALREADY_REGISTERED_REASON,
+  });
 }

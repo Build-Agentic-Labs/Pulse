@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  inviteeHasCompletedSetup,
+  isAlreadyRegisteredAuthError,
   parseWorkspaceInviteAcceptanceHash,
   qualityModuleAccessForRole,
   qualityModuleAccessLabel,
@@ -61,5 +63,23 @@ describe("Quality Module invitations", () => {
       ),
     ).toEqual({ email: "first.user@anacorp.com", tokenHash: "recovery-token", type: "recovery" });
     expect(parseWorkspaceInviteAcceptanceHash("#type=invite")).toBeNull();
+  });
+});
+
+describe("resend detection", () => {
+  it("recognises GoTrue's already-registered rejection by code or message", () => {
+    expect(isAlreadyRegisteredAuthError({ code: "email_exists", message: "" })).toBe(true);
+    expect(
+      isAlreadyRegisteredAuthError({ message: "A user with this email address has already been registered" }),
+    ).toBe(true);
+    expect(isAlreadyRegisteredAuthError({ message: "User has already been invited" })).toBe(true);
+    expect(isAlreadyRegisteredAuthError({ message: "Database error" })).toBe(false);
+    expect(isAlreadyRegisteredAuthError(null)).toBe(false);
+  });
+
+  it("treats an invitee as set up only once they have signed in", () => {
+    expect(inviteeHasCompletedSetup({ last_sign_in_at: null })).toBe(false);
+    expect(inviteeHasCompletedSetup(undefined)).toBe(false);
+    expect(inviteeHasCompletedSetup({ last_sign_in_at: "2026-08-02T00:00:00Z" })).toBe(true);
   });
 });

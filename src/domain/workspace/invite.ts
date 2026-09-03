@@ -62,3 +62,27 @@ export function parseWorkspaceInviteAcceptanceHash(hash: string): WorkspaceInvit
 
   return { email, tokenHash, type };
 }
+
+/**
+ * Supabase (GoTrue) rejects invite generation for an email that already has an
+ * auth user. After the FIRST invite that is every invitee, so a resend must
+ * recognise this and fall back to a recovery-type setup link.
+ */
+export function isAlreadyRegisteredAuthError(
+  error: { message?: string; code?: string } | null | undefined,
+): boolean {
+  if (!error) return false;
+  if (error.code === "email_exists") return true;
+  return /already.*(registered|exists|been invited)/i.test(error.message ?? "");
+}
+
+/**
+ * An invitee who has never signed in has never set a password: re-sending them a
+ * setup link is the right move. Someone who HAS signed in owns a password and
+ * should use Forgot password instead of receiving a fresh credential by email.
+ */
+export function inviteeHasCompletedSetup(
+  user: { last_sign_in_at?: string | null } | null | undefined,
+): boolean {
+  return Boolean(user?.last_sign_in_at);
+}

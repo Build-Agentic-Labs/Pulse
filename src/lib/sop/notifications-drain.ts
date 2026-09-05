@@ -7,6 +7,7 @@
  * Spec: docs/superpowers/specs/2026-07-21-sop-notifications-design.md
  */
 
+import { timingSafeEqual } from "node:crypto";
 import type { PendingNotification, SopEmailContent } from "@/domain/sop/notifications";
 import { getBearerToken } from "@/lib/api-auth";
 
@@ -54,7 +55,11 @@ export function snapshotContent(value: unknown): SopEmailContent | null {
 export function isAuthorizedCronRequest(request: Request): boolean {
   const secret = process.env.CRON_SECRET ?? "";
   if (!secret) return false;
-  return getBearerToken(request) === secret;
+  const presented = getBearerToken(request);
+  const expected = Buffer.from(secret);
+  const actual = Buffer.from(presented);
+  // Constant-time compare; a length mismatch is rejected without leaking where.
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
 /**
@@ -177,6 +182,11 @@ export interface DrainStore<P = PendingNotification> {
    * needs no cross-invocation guard omit it.
    */
   claimRetry?(ledgerId: number, expectedAttempts: number): Promise<boolean>;
+  /**
+   * Rows that exhausted every attempt without sending, within the alert window.
+   * Optional: a store without a retry lane has no dead rows to report.
+   */
+  deadRows?(now: Date): Promise<number>;
   markSent(ledgerId: number, messageId: string): Promise<void>;
   markFailed(ledgerId: number, error: string, attemptsAfter: number): Promise<void>;
 }
@@ -190,6 +200,8 @@ export interface DrainReport {
   failed: number;
   /** Sends refused by OUR configuration — held, not spent. Non-zero = act now. */
   blocked: number;
+  /** Rows that burned every attempt and will never retry on their own. Non-zero = resend by hand. */
+  dead: number;
   oldestUnnotifiedEventAgeHours: number | null;
 }
 
@@ -225,6 +237,11 @@ export function assessDrainHealth(reports: { label: string; report: DrainReport 
         `${label}: ${report.blocked} send(s) blocked by configuration — check RESEND_FROM and RESEND_API_KEY`,
       );
     }
+    if (report.dead > 0) {
+      problems.push(
+        `${label}: ${report.dead} dead row(s) exhausted every attempt — resend from the notifications console`,
+      );
+    }
     const age = report.oldestUnnotifiedEventAgeHours;
     if (age !== null && age >= BACKLOG_ALERT_HOURS) {
       problems.push(`${label}: oldest unnotified event is ${age}h old (threshold ${BACKLOG_ALERT_HOURS}h)`);
@@ -249,8 +266,19 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
     skippedNoEmail: 0,
     failed: 0,
     blocked: 0,
+    dead: 0,
     oldestUnnotifiedEventAgeHours: batch.oldestUnnotifiedEventAgeHours,
   };
+  if (store.deadRows) {
+    try {
+      report.dead = await store.deadRows(deps.now());
+    } catch (error: unknown) {
+      // A failed count must not cost the batch its sends; say so and carry on.
+      console.error(`notification drain (${store.ledger}): dead-row count failed`, {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   // Unconfigured: report what WOULD send (and the age signal) but claim nothing,
   // so a later configured drain still owns every send.
   if (!send) return report;

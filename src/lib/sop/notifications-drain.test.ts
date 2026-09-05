@@ -85,6 +85,17 @@ describe("runSopNotificationDrain", () => {
   const now = () => new Date("2026-07-21T12:00:00Z");
   const origin = "https://pulse.example.com";
 
+  it("reports the store's dead rows so the health verdict can see them", async () => {
+    const { store } = fakeStore({ items: [], oldestUnnotifiedEventAgeHours: null });
+    store.deadRows = async () => 2;
+    const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
+    expect(report.dead).toBe(2);
+    expect(assessDrainHealth([{ label: "sop", report }])).toEqual({
+      healthy: false,
+      problems: ["sop: 2 dead row(s) exhausted every attempt — resend from the notifications console"],
+    });
+  });
+
   it("keys every send on the ledger name and row id, first-touch and retry alike", async () => {
     const keys: string[] = [];
     const recordingSender: EmailSender = async (_to, _content, options) => {
@@ -279,6 +290,7 @@ describe("assessDrainHealth", () => {
     skippedNoEmail: 0,
     failed: 0,
     blocked: 0,
+    dead: 0,
     oldestUnnotifiedEventAgeHours: 1,
   };
 

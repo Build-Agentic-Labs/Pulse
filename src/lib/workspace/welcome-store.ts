@@ -26,6 +26,7 @@ import {
 } from "@/lib/sop/notifications-drain";
 
 const EVENT_WINDOW_DAYS = 30;
+const DEAD_ROW_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface WelcomeBundle {
@@ -217,6 +218,19 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
         throw new Error(error.message);
       }
       return { claimed: true, ledgerId: Number(data.id) };
+    },
+
+    async deadRows(now) {
+      const since = new Date(now.getTime() - DEAD_ROW_WINDOW_DAYS * DAY_MS).toISOString();
+      const { count, error } = await admin
+        .from("workspace_notifications")
+        .select("id", { count: "exact", head: true })
+        .is("sent_at", null)
+        .is("skipped_reason", null)
+        .gte("attempts", MAX_SEND_ATTEMPTS)
+        .gte("created_at", since);
+      if (error) throw new Error(error.message);
+      return count ?? 0;
     },
 
     async claimRetry(ledgerId, expectedAttempts) {

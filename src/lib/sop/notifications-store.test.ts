@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { createSopNotificationDrainStore } from "./notifications-store";
 
-type Result = { data: unknown; error: { message: string } | null };
+type Result = { data: unknown; count?: number; error: { message: string } | null };
 
 interface Capture {
   inserts: { table: string; values: Record<string, unknown> }[];
@@ -206,6 +206,13 @@ describe("createSopNotificationDrainStore.retryItems", () => {
     const items = await createSopNotificationDrainStore(admin).retryItems(now, origin);
     expect(items[0].content.subject).toBe('Review requested: SOP-0042 "Line Clearance" (Rev C)');
     expect(items[0].content.text).toContain("Pulse sent");
+  });
+});
+
+describe("createSopNotificationDrainStore.deadRows", () => {
+  it("counts rows that exhausted every attempt without sending", async () => {
+    const admin = makeAdmin(fixtures({ sop_notifications: { data: [], count: 3, error: null } as Result }));
+    expect(await createSopNotificationDrainStore(admin).deadRows!(new Date("2026-09-04T12:00:00Z"))).toBe(3);
   });
 });
 

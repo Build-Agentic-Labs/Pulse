@@ -1,27 +1,26 @@
 /**
- * SOP notification drain. GET = Vercel Cron (CRON_SECRET bearer, attached
- * automatically by Vercel once the env var exists). POST = the browser kick
- * after an SOP mutation — any signed-in user, because the drain is idempotent:
- * over-kicking can only produce skips, never duplicate email.
- * Degrades like app/api/invites: missing secrets report, never crash.
+ * Notification drain. GET = Vercel Cron (CRON_SECRET bearer, attached
+ * automatically by Vercel once the env var exists) or an external heartbeat
+ * monitor using the same secret. POST = the browser kick after a mutation — any
+ * signed-in user, because the drain is idempotent: over-kicking can only produce
+ * skips, never duplicate email.
+ * The request core lives in src/lib/notifications/run-drain-request.ts (tested
+ * with fake stores); this file only wires env, clients, and HTTP.
  */
 
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
-import {
-  assessDrainHealth,
-  createResendSender,
-  isAuthorizedCronRequest,
-  runSopNotificationDrain,
-} from "@/lib/sop/notifications-drain";
+import { recordDrainRun, type DrainCaller } from "@/lib/notifications/drain-runs-store";
+import { runDrainRequest } from "@/lib/notifications/run-drain-request";
+import { createResendSender, isAuthorizedCronRequest } from "@/lib/sop/notifications-drain";
 import { createSopNotificationDrainStore } from "@/lib/sop/notifications-store";
 import { createWorkspaceWelcomeDrainStore } from "@/lib/workspace/welcome-store";
 import type { Database } from "@/lib/database.types";
 
 const kickRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 6 });
 
-async function drain(request: Request): Promise<NextResponse> {
+async function drain(request: Request, caller: DrainCaller): Promise<NextResponse> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   if (!supabaseUrl || !serviceRoleKey) {
@@ -45,41 +44,24 @@ async function drain(request: Request): Promise<NextResponse> {
 
   try {
     const send = resendApiKey && resendFrom ? createResendSender(resendApiKey, resendFrom) : null;
-    const now = () => new Date();
-    const sopReport = await runSopNotificationDrain({
-      store: createSopNotificationDrainStore(admin),
+    const result = await runDrainRequest({
+      caller,
+      stores: [
+        { label: "sop", store: createSopNotificationDrainStore(admin) },
+        { label: "workspace", store: createWorkspaceWelcomeDrainStore(admin) },
+      ],
       send,
-      now,
+      now: () => new Date(),
       origin,
-    });
-    const workspaceReport = await runSopNotificationDrain({
-      store: createWorkspaceWelcomeDrainStore(admin),
-      send,
-      now,
-      origin,
+      recordRun: (run) => recordDrainRun(admin, run),
     });
     // A drain that "succeeds" while sending nothing is exactly how the
-    // RESEND_FROM outage hid for two weeks. Answer 503 when the pipeline is
-    // unhealthy so the failure is visible to anything that watches this route —
-    // Vercel's cron status, an uptime check, or a plain curl. The drain's own
-    // writes are already durable, so a non-2xx costs no work.
-    const health = assessDrainHealth([
-      { label: "sop", report: sopReport },
-      { label: "workspace", report: workspaceReport },
-    ]);
-    if (!health.healthy) {
-      console.error(`SOP notification drain unhealthy — ${health.problems.join("; ")}`);
+    // RESEND_FROM outage hid for two weeks. 503 keeps the failure visible to
+    // Vercel's cron status, the heartbeat monitor, or a plain curl.
+    if (!result.body.healthy) {
+      console.error(`notification drain unhealthy — ${result.body.problems.join("; ")}`);
     }
-    return NextResponse.json(
-      {
-        configured: send !== null,
-        healthy: health.healthy,
-        problems: health.problems,
-        sop: sopReport,
-        workspace: workspaceReport,
-      },
-      { status: health.healthy ? 200 : 503 },
-    );
+    return NextResponse.json(result.body, { status: result.status });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Drain failed.";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -90,7 +72,7 @@ export async function GET(request: Request) {
   if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
-  return drain(request);
+  return drain(request, "cron");
 }
 
 export async function POST(request: Request) {
@@ -99,5 +81,5 @@ export async function POST(request: Request) {
   if (!kickRateLimit(userId)) {
     return NextResponse.json({ error: "Too many requests." }, { status: 429 });
   }
-  return drain(request);
+  return drain(request, "kick");
 }

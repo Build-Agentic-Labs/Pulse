@@ -36,6 +36,8 @@ import {
 } from "./notifications-drain";
 
 const EVENT_WINDOW_DAYS = 30;
+/** Dead rows older than this have been acted on (or accepted); they stop tripping health. */
+const DEAD_ROW_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Single string literal (not `+` concatenation): Supabase's generated `.select()`
@@ -501,6 +503,19 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         throw new Error(error.message);
       }
       return { claimed: true, ledgerId: Number(data.id) };
+    },
+
+    async deadRows(now) {
+      const since = new Date(now.getTime() - DEAD_ROW_WINDOW_DAYS * DAY_MS).toISOString();
+      const { count, error } = await admin
+        .from("sop_notifications")
+        .select("id", { count: "exact", head: true })
+        .is("sent_at", null)
+        .is("skipped_reason", null)
+        .gte("attempts", MAX_SEND_ATTEMPTS)
+        .gte("created_at", since);
+      if (error) throw new Error(error.message);
+      return count ?? 0;
     },
 
     async claimRetry(ledgerId, expectedAttempts) {

@@ -73,6 +73,48 @@ describe("createWorkspaceWelcomeDrainStore.collect", () => {
   });
 });
 
+describe("createWorkspaceWelcomeDrainStore.collect — membership kinds", () => {
+  const MEMBER = "5f9d2f6e-1c1a-4b7e-9d3e-2a6b8c0d4e1f";
+  const ADMIN = "5f9d2f6e-1c1a-4b7e-9d3e-2a6b8c0d4e2a";
+
+  it("turns a role change into a notification for the member, rendered with the actor's name", async () => {
+    const admin = makeAdmin({
+      audit_log: {
+        data: [
+          {
+            id: 9,
+            action: "workspace_members.update",
+            workspace_id: "ws-1",
+            target_id: MEMBER,
+            actor_id: ADMIN,
+            details: { old: { role: "viewer" }, new: { role: "admin" } },
+            created_at: "2026-09-04T12:00:00.000Z",
+          },
+        ],
+        error: null,
+      },
+      workspace_notifications: { data: [], error: null },
+      workspaces: { data: [{ id: "ws-1", name: "Anacorp" }], error: null },
+      workspace_members: { data: [{ workspace_id: "ws-1", user_id: MEMBER }], error: null },
+      profiles: {
+        data: [
+          { id: MEMBER, full_name: "Mia Member", email: "mia@anacorp.com" },
+          { id: ADMIN, full_name: "Ada Admin", email: "ada@anacorp.com" },
+        ],
+        error: null,
+      },
+      workspace_access_grants: { data: [], error: null },
+    });
+    const store = createWorkspaceWelcomeDrainStore(admin);
+    const batch = await store.collect(new Date("2026-09-04T12:01:00.000Z"), origin);
+    expect(batch.items).toHaveLength(1);
+    expect(batch.items[0].pending).toEqual({ recipientId: MEMBER, kind: "role_changed", workspaceId: "ws-1", eventId: 9 });
+    expect(batch.items[0].content.subject).toBe("Your role in Anacorp changed to Admin");
+    expect(batch.items[0].content.text).toContain("Ada Admin changed your role");
+    expect(batch.items[0].inbox).toEqual({ link: "/", entityType: "workspace", entityId: "ws-1", workspaceId: "ws-1" });
+  });
+});
+
 describe("createWorkspaceWelcomeDrainStore.retryItems", () => {
   const now = new Date("2026-07-21T12:00:00Z");
   const minsAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString();

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { renderPasswordRecoveryEmail } from "@/domain/auth/password-recovery";
 import { createApiRateLimiter } from "@/lib/api-auth";
 import type { Database } from "@/lib/database.types";
+import { recordTransactionalEmail } from "@/lib/notifications/transactional-log";
 import { createResendSender } from "@/lib/sop/notifications-drain";
 
 export const dynamic = "force-dynamic";
@@ -128,6 +129,8 @@ export async function POST(request: Request) {
       renderPasswordRecoveryEmail({ code: data.properties.email_otp, email, origin }),
       { idempotencyKey: `recovery:${randomUUID()}` },
     );
+    // The ledger records that a recovery email went out — never the code.
+    await recordTransactionalEmail(supabase, { kind: "password_recovery", recipientEmail: email, result });
     if (!result.ok) {
       console.error("Password recovery email delivery request failed", {
         status: result.status,

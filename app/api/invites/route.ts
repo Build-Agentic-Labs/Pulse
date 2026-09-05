@@ -23,6 +23,7 @@ import {
   type OrganizationInviteRole,
   type WorkspaceInviteEntitlements,
 } from "@/domain/workspace/invite-access";
+import { recordTransactionalEmail, type TransactionalEmailKind } from "@/lib/notifications/transactional-log";
 import { createResendSender, type EmailSender } from "@/lib/sop/notifications-drain";
 import { normalizeJobTitle } from "@/domain/departments";
 
@@ -80,12 +81,24 @@ const ALREADY_REGISTERED_REASON = "They already have an account — access appli
 const ALREADY_REGISTERED_EMAILED_REASON =
   "They already have an account, so we emailed them a sign-in reminder instead of a setup link.";
 
-/** Send one email, logging (never throwing) on failure. */
-async function deliver(send: EmailSender, to: string, content: SopEmailContent): Promise<boolean> {
+interface DeliveryRecord {
+  admin: SupabaseClient<Database>;
+  kind: TransactionalEmailKind;
+  workspaceId: string;
+}
+
+/** Send one email and record the outcome in the transactional ledger, logging (never throwing) on failure. */
+async function deliver(send: EmailSender, to: string, content: SopEmailContent, record: DeliveryRecord): Promise<boolean> {
   try {
     // Every admin click is a deliberate (re)send, so the key is per request: it
     // guards the provider retry inside this call, never a later resend.
     const result = await send(to, content, { idempotencyKey: `invite:${randomUUID()}` });
+    await recordTransactionalEmail(record.admin, {
+      kind: record.kind,
+      recipientEmail: to,
+      workspaceId: record.workspaceId,
+      result,
+    });
     if (result.ok) return true;
     console.error("Invitation email delivery failed", { status: result.status, failure: result.failure });
   } catch (error) {
@@ -327,6 +340,7 @@ export async function POST(request: Request) {
           origin,
           signInLink: new URL("/", origin).toString(),
         }),
+        { admin, kind: "access_granted", workspaceId },
       );
       return NextResponse.json({
         granted: true,
@@ -347,6 +361,7 @@ export async function POST(request: Request) {
           organizationName,
           origin,
         }),
+        { admin, kind: "invite", workspaceId },
       );
       if (delivered) {
         return NextResponse.json({ granted: true, emailSent: true });

@@ -23,7 +23,7 @@ export interface QueueSummaryItem {
 }
 
 export interface QueueSummarySection {
-  key: "awaitingMe" | "finalApprovals" | "awaitingQuality" | "sentBack";
+  key: "awaitingMe" | "finalApprovals" | "awaitingQuality" | "sentBack" | "readyForFinalApproval";
   label: string;
   items: QueueSummaryItem[];
 }
@@ -95,6 +95,16 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
           row.contentHash,
           row.rejectedReason,
         ]),
+        sopId: row.id,
+        sopNumber: listNumberLabel(row.sopNumber, row.departmentCode),
+        title: row.title,
+      })),
+    },
+    {
+      key: "readyForFinalApproval" as const,
+      label: "Ready for final approval",
+      items: queue.readyForFinalApproval.map((row) => ({
+        notificationId: notificationId("readyForFinalApproval", [row.id, row.reviewCycle, row.contentHash]),
         sopId: row.id,
         sopNumber: listNumberLabel(row.sopNumber, row.departmentCode),
         title: row.title,

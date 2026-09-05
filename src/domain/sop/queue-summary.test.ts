@@ -56,6 +56,7 @@ function queue(over: Partial<QueueData> = {}): QueueData {
     finalApprovals: [],
     sentBack: [],
     awaitingQuality: [],
+    readyForFinalApproval: [],
     allInFlight: [],
     isQualityApprover: false,
     ...over,
@@ -63,6 +64,20 @@ function queue(over: Partial<QueueData> = {}): QueueData {
 }
 
 describe("summarizeQueue", () => {
+  it("lists authored SOPs whose review is complete as their own section, after sent-back", () => {
+    const summary = summarizeQueue(
+      queue({
+        sentBack: [sopItem("s4", "SOP-4", "Four")],
+        readyForFinalApproval: [{ ...sopItem("s5", "", "Five"), status: "in_review", rejectedReason: null, reviewCycle: 2 }],
+      }),
+    );
+    expect(summary.total).toBe(2);
+    expect(summary.sections.map((section) => section.label)).toEqual(["Sent back", "Ready for final approval"]);
+    expect(summary.sections[1].items).toEqual([
+      { notificationId: "readyForFinalApproval:s5:2:h", sopId: "s5", sopNumber: "ENG", title: "Five" },
+    ]);
+  });
+
   it("totals the four actionable sections and never counts allInFlight", () => {
     const summary = summarizeQueue(
       queue({

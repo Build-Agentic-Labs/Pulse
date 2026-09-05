@@ -97,6 +97,26 @@ export async function listSopReviewSubmissions(
   return (data ?? []).map((row) => mapSubmission(row as Record<string, unknown>));
 }
 
+/**
+ * Unresolved remarks across many SOPs, reduced to what a queue decision needs.
+ * RLS scopes the read to SOPs the caller may see (an author sees their own).
+ */
+export async function listOpenSopReviewAnnotationsFor(
+  sopIds: readonly string[],
+  client?: SupabaseClient<Database>,
+): Promise<{ sopId: string; reviewCycle: number }[]> {
+  const unique = Array.from(new Set(sopIds));
+  if (unique.length === 0) return [];
+  const supabase = client ?? createPlannerSupabaseClient();
+  const { data, error } = await supabase
+    .from("sop_review_annotations")
+    .select("sop_id, review_cycle")
+    .in("sop_id", unique)
+    .is("resolved_at", null);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({ sopId: String(row.sop_id), reviewCycle: Number(row.review_cycle) }));
+}
+
 export async function submitSopReviewResult(sopId: string, noChanges: boolean): Promise<string> {
   const supabase = createPlannerSupabaseClient();
   const { data, error } = await supabase.rpc("submit_sop_review", {

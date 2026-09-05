@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Inbox, ShieldCheck } from "lucide-react";
+import { CheckCheck, FileText, Inbox, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QuietLoading } from "@/components/quiet-loading";
@@ -145,6 +145,7 @@ export function ReviewQueue({
     draftReviews.length === 0 &&
     data.finalApprovals.length === 0 &&
     data.sentBack.length === 0 &&
+    data.readyForFinalApproval.length === 0 &&
     data.awaitingQuality.length === 0 &&
     awaitingRelease.length === 0;
   const qualityGroups = useMemo(() => {
@@ -210,6 +211,41 @@ export function ReviewQueue({
                     </div>
                     <div className="ui-section-subtitle truncate text-ink-secondary">{sop.rejectedReason}</div>
                   </div>
+                  <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
+                </Link>
+              ))}
+            </section>
+          ) : null}
+
+          {data.readyForFinalApproval.length > 0 ? (
+            <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
+              <div className="flex items-center justify-between gap-2 px-4 py-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Ready for final approval</h2>
+                  <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
+                    Every reviewer has responded and no remarks are open. Send these for formal signatures.
+                  </p>
+                </div>
+                <CheckCheck size={14} className="text-emerald-700" />
+              </div>
+              {data.readyForFinalApproval.map((sop) => (
+                <Link
+                  key={sop.id}
+                  href={`/sops/${sop.id}?step=final-approval`}
+                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
+                >
+                  <CheckCheck size={15} className="shrink-0 text-emerald-700" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-ink">
+                      {sop.title || sop.sopNumber || "Untitled SOP"}
+                    </div>
+                    <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
+                      {[listNumberLabel(sop.sopNumber, sop.departmentCode), sop.version ? `v${sop.version}` : ""]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  </div>
+                  <span className="ui-chip shrink-0 border-emerald-600 text-emerald-700">Your move</span>
                   <span className="hidden ui-mono-label text-ink-tertiary sm:inline">{formatDate(sop.updatedAt)}</span>
                 </Link>
               ))}

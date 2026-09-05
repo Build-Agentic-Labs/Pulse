@@ -6,9 +6,14 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
+import { selectReadyForFinalApproval } from "@/domain/sop/queue-ready";
 import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
-import { hasSubmittedSopReview, listSopReviewSubmissions } from "@/lib/sop/review-annotations";
-import { isBlockingSeat, listMySeats, listMySignaturesFor, type MySeatItem } from "@/lib/sop/review";
+import {
+  hasSubmittedSopReview,
+  listOpenSopReviewAnnotationsFor,
+  listSopReviewSubmissions,
+} from "@/lib/sop/review-annotations";
+import { isBlockingSeat, listMySeats, listMySignaturesFor, listSeatsForSops, type MySeatItem } from "@/lib/sop/review";
 import { listSops, type SopListItem } from "@/lib/sop/store";
 
 /** A seat awaiting this user's signature, with the department it speaks for. */
@@ -36,6 +41,11 @@ export interface QueueData {
   sentBack: SopListItem[];
   /** Department-approved SOPs waiting on the Quality gate. Only shown to Quality approvers. */
   awaitingQuality: QualityQueueItem[];
+  /**
+   * SOPs I authored whose every required approver has returned and nothing is open:
+   * the "send for final approval" click is mine to make.
+   */
+  readyForFinalApproval: SopListItem[];
   /** The workspace-wide board this page used to be. Kept: nothing that was visible is removed. */
   allInFlight: SopListItem[];
   isQualityApprover: boolean;
@@ -46,6 +56,7 @@ export const EMPTY_QUEUE: QueueData = {
   finalApprovals: [],
   sentBack: [],
   awaitingQuality: [],
+  readyForFinalApproval: [],
   allInFlight: [],
   isQualityApprover: false,
 };
@@ -76,9 +87,13 @@ export async function fetchReviewQueueData(
   );
   const finalApprovalSopIds = new Set(finalApprovalSeats.map((seat) => seat.sopId));
   const draftReviewSeats = inReviewSeats.filter((seat) => !finalApprovalSopIds.has(seat.sopId));
-  const [mySubmissions, mySignatures] = await Promise.all([
-    listSopReviewSubmissions(draftReviewSeats.map((seat) => seat.sopId), client),
+  const authoredInReview = sops.filter((sop) => sop.createdBy === userId && sop.status === "in_review");
+  const authoredIds = authoredInReview.map((sop) => sop.id);
+  const [mySubmissions, mySignatures, authoredSeats, openAnnotations] = await Promise.all([
+    listSopReviewSubmissions([...draftReviewSeats.map((seat) => seat.sopId), ...authoredIds], client),
     listMySignaturesFor(finalApprovalSeats.map((seat) => seat.sopId), userId, client),
+    listSeatsForSops(authoredIds, client),
+    listOpenSopReviewAnnotationsFor(authoredIds, client),
   ]);
 
   const awaitingMe: PendingSeat[] = draftReviewSeats
@@ -129,6 +144,13 @@ export async function fetchReviewQueueData(
             };
           })
       : [],
+    readyForFinalApproval: selectReadyForFinalApproval({
+      userId,
+      sops: authoredInReview,
+      seats: authoredSeats,
+      submissions: mySubmissions,
+      openAnnotations,
+    }),
     allInFlight: sops.filter((sop) => sop.status === "in_review" || sop.status === "approved"),
     isQualityApprover,
   };

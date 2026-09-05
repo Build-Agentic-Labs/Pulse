@@ -320,9 +320,9 @@ describe("WorkInstructionDocument", () => {
     expect(screen.getByText("45 Nm")).toBeInTheDocument();
   });
 
-  it("renders unobtrusive superscript part references with the full description and step quantity", () => {
+  it("renders matching inline part labels with the full description and step quantity", () => {
     const card = makeCard(1, {
-      instruction: "Mount M8 bolts[1]",
+      instruction: "Stage M8 bolts. Mount M8 bolts[1]",
       partReferences: [
         {
           marker: 1,
@@ -336,14 +336,17 @@ describe("WorkInstructionDocument", () => {
     render(<WorkInstructionDocument instruction={makeInstruction([card])} />);
 
     const instruction = document.querySelector(".wi-card-instruction");
-    expect(instruction).toHaveTextContent("Mount M8 bolts1");
+    expect(instruction).toHaveTextContent("Stage M8 bolts. Mount M8 boltsP1");
+    expect(instruction?.querySelectorAll("strong")).toHaveLength(1);
+    expect(instruction?.querySelector("strong")).toHaveTextContent("M8 bolts");
     expect(instruction).not.toHaveTextContent("[1]");
-    const instructionMarker = instruction?.querySelector("sup.wi-card-part-citation");
-    expect(instructionMarker).toHaveTextContent("1");
+    const instructionMarker = instruction?.querySelector("span.wi-card-part-citation");
+    expect(instruction?.querySelector("sup")).toBeNull();
+    expect(instructionMarker).toHaveTextContent("P1");
     expect(instructionMarker).toHaveAttribute("aria-label", "Part reference 1");
 
     const keyMarker = document.querySelector(".wi-card-part-marker");
-    expect(keyMarker).toHaveTextContent("1");
+    expect(keyMarker).toHaveTextContent("P1");
     expect(keyMarker).not.toHaveTextContent("[1]");
     expect(keyMarker?.querySelector("span")).toHaveAttribute("aria-label", "Part reference 1");
     const partsTable = screen.getByRole("table", { name: "Parts referenced in step 1" });

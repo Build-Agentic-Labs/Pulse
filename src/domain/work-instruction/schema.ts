@@ -62,7 +62,7 @@ export interface WorkInstructionCard {
   tools: string[];
   checks: WorkInstructionCheck[];
   photo?: WorkInstructionPhoto;
-  /** Numbered text-to-part references rendered on the first card for this step. */
+  /** Part key on the first card, plus references used by each continuation. */
   partReferences?: WorkInstructionStepPartReference[];
 }
 
@@ -200,8 +200,8 @@ export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
   /**
    * 3x2. Six steps a sheet, 5.25in cards, 2.45in portrait photo.
    *
-   * Budgets measured 2026-08-04: a crowded first card holds 16 lines at 45
-   * chars, a continuation 19 lines at 91.
+   * Conservative text capacities for 11pt instructions at 1.35 line height.
+   * Keep one spare line for wrapping and inline part-reference badges.
    */
   v1: {
     id: "v1",
@@ -210,16 +210,15 @@ export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
     cardsPerSheet: 6,
     cardsOnFirstSheet: 3,
     photoWidth: "2.45in",
-    instruction: { lines: 16 - MARGIN_LINES, charsPerLine: 45 },
-    continuation: { lines: 19 - MARGIN_LINES, charsPerLine: 91 },
+    instruction: { lines: 12 - MARGIN_LINES, charsPerLine: 36 },
+    continuation: { lines: 15 - MARGIN_LINES, charsPerLine: 74 },
   },
   /**
    * 2x2. Four steps a sheet, 7.94in cards, 4.40in LANDSCAPE photo — 80% wider
    * than v1 and the right orientation for a shop photo, at the cost of roughly
    * half again as many sheets.
    *
-   * Budgets measured 2026-08-04: a crowded first card holds 16 lines at 58
-   * chars, a continuation 19 lines at 139.
+   * Same 11pt line height as v1, with more characters in the wider column.
    */
   v2: {
     id: "v2",
@@ -228,8 +227,8 @@ export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
     cardsPerSheet: 4,
     cardsOnFirstSheet: 2,
     photoWidth: "4.40in",
-    instruction: { lines: 16 - MARGIN_LINES, charsPerLine: 58 },
-    continuation: { lines: 19 - MARGIN_LINES, charsPerLine: 139 },
+    instruction: { lines: 12 - MARGIN_LINES, charsPerLine: 46 },
+    continuation: { lines: 15 - MARGIN_LINES, charsPerLine: 113 },
   },
 };
 

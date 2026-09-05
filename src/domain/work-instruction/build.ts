@@ -176,14 +176,17 @@ export function buildWorkInstruction({
     const stepPartReferences = buildStepPartReferences(task, step.id);
     const markedInstruction = instructionWithPartMentionMarkers(task, step.id, step.instruction);
     const firstCardInstructionBudget = instructionBudgetWithPartReferences(layout.instruction, stepPartReferences);
-    const chunks = splitInstruction(markedInstruction, firstCardInstructionBudget, layout.continuation);
+    // A reference may move onto a continuation when larger text wraps. Reserve
+    // room for its key there too, so the marker remains usable on that card.
+    const continuationInstructionBudget = instructionBudgetWithPartReferences(layout.continuation, stepPartReferences);
+    const chunks = splitInstruction(markedInstruction, firstCardInstructionBudget, continuationInstructionBudget);
     // A step with no text still gets one card — the operator needs the slot.
     const parts = chunks.length > 0 ? chunks : [""];
 
     return parts.map((instruction, partIndex) => {
       const first = partIndex === 0;
       const last = partIndex === parts.length - 1;
-      const budget = first ? layout.instruction : layout.continuation;
+      const budget = first ? firstCardInstructionBudget : continuationInstructionBudget;
 
       return {
         stepId: step.id,
@@ -196,14 +199,15 @@ export function buildWorkInstruction({
         // The splitter already broke what it could; anything still over budget
         // is a single token too wide to break, which only a human can fix.
         overflowing:
-          estimateLines(instruction, budget.charsPerLine) >
-          (first ? firstCardInstructionBudget.lines : budget.lines),
+          estimateLines(instruction, budget.charsPerLine) > budget.lines,
         // Photo, tools and duration lead the step; checks close it.
         durationMinutes: first ? step.durationMinutes : undefined,
         tools: first ? (toolsByStep[step.id] ?? []) : [],
         checks: last ? checks : [],
         photo: first ? buildPhoto(photosByStep, step.id) : undefined,
-        partReferences: first ? stepPartReferences : [],
+        partReferences: first
+          ? stepPartReferences
+          : stepPartReferences.filter((reference) => instruction.includes(`[${reference.marker}]`)),
       };
     });
   });

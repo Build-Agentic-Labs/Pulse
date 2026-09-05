@@ -29,7 +29,7 @@ import {
   type WorkInstructionPhoto,
   type WorkInstructionSheet,
 } from "@/domain/work-instruction/schema";
-import { useId } from "react";
+import { Fragment, useId } from "react";
 import { StaticPhotoAnnotation } from "../static-photo-annotation";
 
 const CONFIDENTIAL_LINE =
@@ -161,12 +161,15 @@ const PRINT_STYLES = `
 .wi-card-text { display: flex; flex-direction: column; gap: 0.05in; min-width: 0; overflow: hidden; }
 .wi-card-instruction {
   flex: 1; min-height: 0; padding-top: 0.16em;
-  font-size: 9pt; line-height: 1.3; white-space: pre-wrap; overflow: hidden;
+  font-size: 11pt; line-height: 1.35; white-space: pre-wrap; overflow: hidden;
 }
-.wi-card-part-citation {
-  position: relative; top: -0.32em; margin-left: 0.03em;
-  font-size: 0.78em; line-height: 1; vertical-align: baseline; font-weight: 700;
+.wi-card-part-citation, .wi-card-part-marker > span {
+  display: inline-block; min-width: 1.6em; padding: 0.05em 0.18em;
+  border: 0.6pt solid #666; border-radius: 2px; background: #f1f1f1; color: #1a1a1a;
+  font-family: var(--type-mono, monospace); font-size: 9pt; line-height: 1.1;
+  vertical-align: baseline; font-weight: 700; text-align: center; white-space: nowrap;
 }
+.wi-card-part-citation { margin: 0 0.15em; }
 .wi-card-overflow-note { flex: none; color: #a52a2a; font-size: 7pt; font-weight: 700; }
 .wi-card-tools {
   flex: none; min-width: 0;
@@ -202,10 +205,10 @@ const PRINT_STYLES = `
 }
 .wi-card-parts-table th:last-child { text-align: center; }
 .wi-card-parts-table tbody tr:last-child td { border-bottom: 0; }
-.wi-card-parts-table .wi-card-part-ref-column { width: 0.22in; }
-.wi-card-parts-table .wi-card-part-qty-column { width: 0.32in; }
+.wi-card-parts-table .wi-card-part-ref-column { width: 0.40in; }
+.wi-card-parts-table .wi-card-part-qty-column { width: 0.48in; }
 .wi-card-part-marker, .wi-card-part-number, .wi-card-part-qty { font-family: var(--type-mono, monospace); font-weight: 700; }
-.wi-card-part-marker > span, .wi-card-part-number, .wi-card-part-qty > span { display: block; line-height: 1.2; }
+.wi-card-part-number, .wi-card-part-qty > span { display: block; line-height: 1.2; }
 .wi-card-part-number, .wi-card-part-description { display: block; }
 .wi-card-part-description { margin-top: 1px; color: #333; font-family: var(--type-sans, var(--font-ui-family)); font-weight: 400; overflow-wrap: anywhere; }
 .wi-card-parts-table .wi-card-part-qty { text-align: center; white-space: nowrap; }
@@ -543,26 +546,39 @@ function WorkInstructionPhotoMedia({
 }
 
 function PartReferencedInstruction({ card }: { card: WorkInstructionCard }) {
-  const markers = new Set((card.partReferences ?? []).map((part) => String(part.marker)));
-  if (markers.size === 0) {
+  const references = new Map((card.partReferences ?? []).map((part) => [String(part.marker), part]));
+  if (references.size === 0) {
     return card.instruction;
   }
 
-  return card.instruction.split(/(\[\d+\])/g).map((segment, index) => {
+  const segments = card.instruction.split(/(\[\d+\])/g);
+  return segments.map((segment, index) => {
     const marker = segment.match(/^\[(\d+)\]$/)?.[1];
-    if (!marker || !markers.has(marker)) {
+    if (!marker || !references.has(marker)) {
+      const nextMarker = segments[index + 1]?.match(/^\[(\d+)\]$/)?.[1];
+      const linkedText = nextMarker ? references.get(nextMarker)?.text : undefined;
+      // Only emphasize the selected occurrence immediately before its marker;
+      // the same words elsewhere in the instruction remain ordinary text.
+      if (linkedText && segment.endsWith(linkedText)) {
+        return (
+          <Fragment key={`linked-text-${index}`}>
+            {segment.slice(0, -linkedText.length)}
+            <strong>{linkedText}</strong>
+          </Fragment>
+        );
+      }
       return segment;
     }
 
     return (
-      <sup
+      <span
         className="wi-card-part-citation"
         aria-label={`Part reference ${marker}`}
         title={`Part reference ${marker}`}
         key={`${marker}-${index}`}
       >
-        {marker}
-      </sup>
+        P{marker}
+      </span>
     );
   });
 }
@@ -633,7 +649,7 @@ function StepCardCell({ card }: { card: WorkInstructionCard }) {
                   {card.partReferences.map((part) => (
                     <tr className="wi-card-part-ref" key={`${part.marker}-${part.partNumber}-${part.text}`}>
                       <td className="wi-card-part-marker">
-                        <span aria-label={`Part reference ${part.marker}`}>{part.marker}</span>
+                        <span aria-label={`Part reference ${part.marker}`}>P{part.marker}</span>
                       </td>
                       <td className="wi-card-part-detail">
                         <span className="wi-card-part-number">{part.partNumber}</span>

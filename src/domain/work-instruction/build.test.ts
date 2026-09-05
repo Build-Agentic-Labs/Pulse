@@ -4,7 +4,7 @@ import { STEP_PART_MENTIONS_FIELD } from "../step-part-mentions";
 import { STEP_TOOL_LISTS_FIELD } from "../step-tools";
 import type { Product, Task, Zone } from "../types";
 import { buildWorkInstruction } from "./build";
-import { INSTRUCTION_BUDGET } from "./schema";
+import { INSTRUCTION_BUDGET, WORK_INSTRUCTION_LAYOUTS } from "./schema";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -385,6 +385,36 @@ describe("buildWorkInstruction", () => {
       },
     ]);
     expect(wi.setup.parts[0].quantity).toBe(4);
+  });
+
+  it.each(Object.values(WORK_INSTRUCTION_LAYOUTS))("keeps a part key with a citation that moves to a continuation in $label", (layout) => {
+    const instruction = `${"Prepare the next connection.\n".repeat(20)}Install M8 bolts`;
+    const start = instruction.indexOf("M8 bolts");
+    const task = makeTask({
+      manufacturingSteps: [{
+        id: "step-a", sequence: 1, instruction,
+        partReferenceIds: ["part-1"], partReferenceQuantities: { "part-1": 4 },
+      }],
+      partReferences: [{ id: "part-1", partNumber: "BOLT-M8", description: "M8 flange bolt", quantity: 4 }],
+      customFields: {
+        [STEP_PART_MENTIONS_FIELD]: {
+          "step-a": [{ id: "mention-1", partReferenceId: "part-1", text: "M8 bolts", start, end: start + 8 }],
+        },
+      },
+    });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone, layout });
+    const citedCard = wi.cards.find((card) => card.instruction.includes("[1]"));
+    expect(citedCard?.part).toBeGreaterThan(1);
+    expect(citedCard?.partReferences).toEqual([{
+      marker: 1, text: "M8 bolts", partNumber: "BOLT-M8", description: "M8 flange bolt", quantity: 4,
+    }]);
+    expect(wi.cards.filter((card) => card.part > 1 && !card.instruction.includes("[1]"))
+      .every((card) => card.partReferences?.length === 0)).toBe(true);
+    expect(wi.cards.map((card) => card.instruction).join(" ").replace("[1]", "").split(/\s+/))
+      .toEqual(instruction.split(/\s+/));
+    expect(wi.cards.every((card) => !card.overflowing)).toBe(true);
+    expect(task.manufacturingSteps?.[0].instruction).toBe(instruction);
   });
 
   it("folds the material kit into the parts list as its first row", () => {

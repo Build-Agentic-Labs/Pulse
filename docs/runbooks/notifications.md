@@ -11,10 +11,10 @@ invocation is recorded in `notification_drain_runs`.
 
 1. **Apply migrations** (additive; never `supabase db push`):
    ```bash
-   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260904120000_notification_core.sql
-   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260904121000_notifications_inbox.sql
-   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260904122000_email_deliveries.sql
-   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260904123000_workspace_integrations.sql
+   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260905100000_notification_core.sql
+   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260905101000_notifications_inbox.sql
+   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260905102000_email_deliveries.sql
+   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260905103000_workspace_integrations.sql
    node scripts/repair-migration-ledger.mjs
    npm run gen:types
    ```

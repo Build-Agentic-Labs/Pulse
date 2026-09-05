@@ -1,5 +1,5 @@
 -- pgTAP: notification ledgers, run log, digests, and the two event triggers the
--- notification drain consumes (migration 20260904120000_notification_core).
+-- notification drain consumes (migration 20260905100000_notification_core).
 --
 -- Pins:
 --   * ledgers/runs/digests are service-role only: an authenticated user sees zero

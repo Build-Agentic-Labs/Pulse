@@ -8,7 +8,7 @@
 --      endpoints the push service reports gone.
 --
 -- Additive + idempotent. Apply with:
---   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260904123000_workspace_integrations.sql
+--   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260905103000_workspace_integrations.sql
 
 create table if not exists public.workspace_integrations (
   workspace_id text not null references public.workspaces(id) on delete cascade,

@@ -25,10 +25,10 @@
 ## File map
 
 **Migrations (`supabase/migrations/`)**
-- `20260904120000_notification_core.sql` — SOP ledger: kind CHECK extended, `review_cycle`, `content`, `skipped_reason`; reminder unique index includes `review_cycle`; workspace ledger: kind CHECK extended, `content`, `skipped_reason`; `notification_drain_runs`; `notification_digests`; triggers `log_sop_signature_event` (→ `signature_added`) and `log_sop_seat_reassignment_event` (→ `seat_reassigned`).
-- `20260904121000_notifications_inbox.sql` — `notifications` (user inbox, RLS: own rows; update limited to `read_at`), `notification_preferences` (own rows).
-- `20260904122000_email_deliveries.sql` — `email_deliveries`, `email_suppressions`, `transactional_emails` (service-role only).
-- `20260904123000_workspace_integrations.sql` — `workspace_integrations` (managers CRUD via `has_workspace_role`), `push_subscriptions` (own rows).
+- `20260905100000_notification_core.sql` — SOP ledger: kind CHECK extended, `review_cycle`, `content`, `skipped_reason`; reminder unique index includes `review_cycle`; workspace ledger: kind CHECK extended, `content`, `skipped_reason`; `notification_drain_runs`; `notification_digests`; triggers `log_sop_signature_event` (→ `signature_added`) and `log_sop_seat_reassignment_event` (→ `seat_reassigned`).
+- `20260905101000_notifications_inbox.sql` — `notifications` (user inbox, RLS: own rows; update limited to `read_at`), `notification_preferences` (own rows).
+- `20260905102000_email_deliveries.sql` — `email_deliveries`, `email_suppressions`, `transactional_emails` (service-role only).
+- `20260905103000_workspace_integrations.sql` — `workspace_integrations` (managers CRUD via `has_workspace_role`), `push_subscriptions` (own rows).
 - `supabase/tests/notifications_test.sql` — pgTAP for every posture above + the two new triggers.
 
 **Domain (`src/domain/`)**
@@ -66,7 +66,7 @@
 
 ### Task 1: Core migration + pgTAP + types
 
-**Files:** create `supabase/migrations/20260904120000_notification_core.sql`, `supabase/tests/notifications_test.sql`; modify `src/lib/database.types.ts`.
+**Files:** create `supabase/migrations/20260905100000_notification_core.sql`, `supabase/tests/notifications_test.sql`; modify `src/lib/database.types.ts`.
 
 **Produces:** columns `sop_notifications.review_cycle int not null default 0`, `.content jsonb`, `.skipped_reason text`; `workspace_notifications.content jsonb`, `.skipped_reason text`; tables `notification_drain_runs(id, caller check in ('cron','kick'), started_at, finished_at, healthy bool, problems text[], report jsonb)`, `notification_digests(id, workspace_id, recipient_id, kind check ('stalled_weekly'), period_key, content, sent_at, attempts, last_error, last_attempt_at, resend_message_id, skipped_reason, created_at, unique(workspace_id, recipient_id, kind, period_key))`; events `signature_added {meaning, signer_id, seat_department_id, review_cycle, rejected_reason, resolves_signature_id}` and `seat_reassigned {department_id, from_signer_id, to_signer_id}`.
 

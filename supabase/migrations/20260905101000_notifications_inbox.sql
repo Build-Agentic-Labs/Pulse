@@ -8,7 +8,7 @@
 --      immediate or off; workspace_id '' means "every workspace". Own rows only.
 --
 -- Additive + idempotent. Apply with:
---   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260904121000_notifications_inbox.sql
+--   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260905101000_notifications_inbox.sql
 
 create table if not exists public.notifications (
   id                 bigint generated always as identity primary key,

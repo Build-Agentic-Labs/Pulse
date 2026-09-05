@@ -16,7 +16,7 @@
 --      rewritten from a file here).
 --
 -- Additive + idempotent. Apply with:
---   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260904120000_notification_core.sql
+--   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260905100000_notification_core.sql
 
 -- ---------------------------------------------------------------------------
 -- 1. sop_notifications

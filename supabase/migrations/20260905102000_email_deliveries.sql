@@ -11,7 +11,7 @@
 --      the provider accepted it.
 --
 -- All three are service-role only. Additive + idempotent. Apply with:
---   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260904122000_email_deliveries.sql
+--   node --env-file=.env.local scripts/apply-migration-safely.mjs 20260905102000_email_deliveries.sql
 
 create table if not exists public.email_deliveries (
   id                 bigint generated always as identity primary key,

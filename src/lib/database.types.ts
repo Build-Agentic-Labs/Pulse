@@ -335,6 +335,60 @@ export type Database = {
           },
         ]
       }
+      email_deliveries: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: number
+          occurred_at: string
+          payload: Json
+          recipient_email: string | null
+          resend_message_id: string | null
+          webhook_event_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: never
+          occurred_at: string
+          payload?: Json
+          recipient_email?: string | null
+          resend_message_id?: string | null
+          webhook_event_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: never
+          occurred_at?: string
+          payload?: Json
+          recipient_email?: string | null
+          resend_message_id?: string | null
+          webhook_event_id?: string
+        }
+        Relationships: []
+      }
+      email_suppressions: {
+        Row: {
+          created_at: string
+          email: string
+          reason: string
+          source_message_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          reason: string
+          source_message_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          reason?: string
+          source_message_id?: string | null
+        }
+        Relationships: []
+      }
       manufacturing_components: {
         Row: {
           active: boolean
@@ -531,6 +585,92 @@ export type Database = {
           started_at?: string
         }
         Relationships: []
+      }
+      notification_preferences: {
+        Row: {
+          channel: string
+          kind: string
+          mode: string
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          channel: string
+          kind: string
+          mode: string
+          updated_at?: string
+          user_id: string
+          workspace_id?: string
+        }
+        Update: {
+          channel?: string
+          kind?: string
+          mode?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          body: string
+          created_at: string
+          delivered_channels: Json
+          entity_id: string | null
+          entity_type: string | null
+          id: number
+          kind: string
+          link: string | null
+          read_at: string | null
+          recipient_id: string
+          source: string
+          source_ledger_id: number | null
+          title: string
+          workspace_id: string | null
+        }
+        Insert: {
+          body?: string
+          created_at?: string
+          delivered_channels?: Json
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: never
+          kind: string
+          link?: string | null
+          read_at?: string | null
+          recipient_id: string
+          source: string
+          source_ledger_id?: number | null
+          title: string
+          workspace_id?: string | null
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          delivered_channels?: Json
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: never
+          kind?: string
+          link?: string | null
+          read_at?: string | null
+          recipient_id?: string
+          source?: string
+          source_ledger_id?: number | null
+          title?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       org_tool_access: {
         Row: {
@@ -874,6 +1014,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          endpoint: string
+          p256dh: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          endpoint: string
+          p256dh: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          endpoint?: string
+          p256dh?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
       }
       sales_order_lines: {
         Row: {
@@ -2544,6 +2711,42 @@ export type Database = {
           },
         ]
       }
+      transactional_emails: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: number
+          kind: string
+          recipient_email: string
+          recipient_id: string | null
+          resend_message_id: string | null
+          status: string
+          workspace_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: never
+          kind: string
+          recipient_email: string
+          recipient_id?: string | null
+          resend_message_id?: string | null
+          status: string
+          workspace_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: never
+          kind?: string
+          recipient_email?: string
+          recipient_id?: string | null
+          resend_message_id?: string | null
+          status?: string
+          workspace_id?: string | null
+        }
+        Relationships: []
+      }
       trailer_configs: {
         Row: {
           created_at: string
@@ -2988,6 +3191,41 @@ export type Database = {
           },
         ]
       }
+      workspace_integrations: {
+        Row: {
+          config: Json
+          enabled: boolean
+          kind: string
+          updated_at: string
+          updated_by: string | null
+          workspace_id: string
+        }
+        Insert: {
+          config?: Json
+          enabled?: boolean
+          kind: string
+          updated_at?: string
+          updated_by?: string | null
+          workspace_id: string
+        }
+        Update: {
+          config?: Json
+          enabled?: boolean
+          kind?: string
+          updated_at?: string
+          updated_by?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_integrations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_members: {
         Row: {
           created_at: string
@@ -3355,6 +3593,14 @@ export type Database = {
         Returns: boolean
       }
       is_super_admin: { Args: never; Returns: boolean }
+      mark_all_notifications_read: {
+        Args: { p_workspace?: string }
+        Returns: number
+      }
+      mark_notifications_read: {
+        Args: { p_ids: number[] }
+        Returns: number
+      }
       mint_sop_number_internal: {
         Args: { p_department: string; p_doc_type: string; p_workspace: string }
         Returns: string

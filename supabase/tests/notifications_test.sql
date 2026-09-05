@@ -13,7 +13,7 @@
 --   * notification_digests dedupes on (workspace, recipient, kind, period)
 
 begin;
-select plan(15);
+select plan(29);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -200,6 +200,111 @@ select lives_ok(
              (select max(id) from public.audit_log where action = 'workspace_members.update')) $$,
   'role_changed is an accepted workspace notification kind'
 );
+
+-- ---------------------------------------------------------------------------
+-- 16-19. Inbox: recipients read only their own rows, cannot edit content, and
+--        mark read only through the RPC (which touches only their own rows).
+-- ---------------------------------------------------------------------------
+insert into public.notifications (recipient_id, workspace_id, source, kind, title, body, link)
+values
+  ('a1000000-0000-0000-0000-000000000002', 'ws_notif', 'sop', 'review_complete', 'Ready for final approval', 'body', '/sops/sop_n_1'),
+  ('a1000000-0000-0000-0000-000000000003', 'ws_notif', 'sop', 'review_requested', 'Review requested', 'body', '/sops/sop_n_1');
+
+select test_as('a1000000-0000-0000-0000-000000000002');
+select is(
+  (select count(*) from public.notifications),
+  1::bigint,
+  'a recipient sees only their own inbox rows'
+);
+update public.notifications set title = 'hacked';
+select is(
+  (select count(*) from public.notifications where title = 'hacked'),
+  0::bigint,
+  'a recipient cannot edit inbox content (no update policy)'
+);
+select is(
+  public.mark_notifications_read(array(select id from public.notifications)),
+  1,
+  'mark_notifications_read marks the caller''s own rows'
+);
+reset role;
+select is(
+  (select count(*) from public.notifications where read_at is not null),
+  1::bigint,
+  'the RPC left the other recipient''s row unread'
+);
+
+-- ---------------------------------------------------------------------------
+-- 20/21. Preferences: own rows only, enforced on write.
+-- ---------------------------------------------------------------------------
+select test_as('a1000000-0000-0000-0000-000000000002');
+select lives_ok(
+  $$ insert into public.notification_preferences (user_id, workspace_id, kind, channel, mode)
+     values ('a1000000-0000-0000-0000-000000000002', '', 'remark_added', 'email', 'immediate') $$,
+  'a user can write their own preference'
+);
+select throws_ok(
+  $$ insert into public.notification_preferences (user_id, workspace_id, kind, channel, mode)
+     values ('a1000000-0000-0000-0000-000000000003', '', 'remark_added', 'email', 'off') $$,
+  '42501',
+  null,
+  'a user cannot write another user''s preference'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 22-24. Delivery tracking tables are service-role only.
+-- ---------------------------------------------------------------------------
+insert into public.email_deliveries (webhook_event_id, resend_message_id, event_type, recipient_email, occurred_at)
+values ('msg_1', 're_1', 'email.delivered', 'n-reviewer@test.dev', now());
+insert into public.email_suppressions (email, reason) values ('bounced@test.dev', 'hard_bounce');
+insert into public.transactional_emails (kind, recipient_email, status) values ('invite', 'n-reviewer@test.dev', 'sent');
+
+select test_as('a1000000-0000-0000-0000-000000000001');
+select is((select count(*) from public.email_deliveries), 0::bigint, 'deliveries are invisible to authenticated users');
+select is((select count(*) from public.email_suppressions), 0::bigint, 'suppressions are invisible to authenticated users');
+select is((select count(*) from public.transactional_emails), 0::bigint, 'the transactional ledger is invisible to authenticated users');
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 25-27. Integrations: owners/admins manage, editors cannot even see them.
+-- ---------------------------------------------------------------------------
+select test_as('a1000000-0000-0000-0000-000000000001');
+select lives_ok(
+  $$ insert into public.workspace_integrations (workspace_id, kind, config, enabled, updated_by)
+     values ('ws_notif', 'teams_webhook', '{"webhookUrl":"https://example.webhook.office.com/x"}'::jsonb, true,
+             'a1000000-0000-0000-0000-000000000001') $$,
+  'an admin can configure a Teams webhook'
+);
+reset role;
+select test_as('a1000000-0000-0000-0000-000000000002');
+select is((select count(*) from public.workspace_integrations), 0::bigint, 'an editor cannot read the webhook config');
+-- RLS makes a disallowed UPDATE match zero rows rather than raise.
+update public.workspace_integrations set enabled = false where workspace_id = 'ws_notif';
+reset role;
+select is(
+  (select enabled from public.workspace_integrations where workspace_id = 'ws_notif' and kind = 'teams_webhook'),
+  true,
+  'an editor cannot change it'
+);
+
+-- ---------------------------------------------------------------------------
+-- 28/29. Push subscriptions: own rows only.
+-- ---------------------------------------------------------------------------
+select test_as('a1000000-0000-0000-0000-000000000002');
+select lives_ok(
+  $$ insert into public.push_subscriptions (endpoint, user_id, p256dh, auth)
+     values ('https://push.example/abc', 'a1000000-0000-0000-0000-000000000002', 'p', 'a') $$,
+  'a user can register their own push subscription'
+);
+select throws_ok(
+  $$ insert into public.push_subscriptions (endpoint, user_id, p256dh, auth)
+     values ('https://push.example/def', 'a1000000-0000-0000-0000-000000000003', 'p', 'a') $$,
+  '42501',
+  null,
+  'a user cannot register a subscription for someone else'
+);
+reset role;
 
 select * from finish();
 rollback;

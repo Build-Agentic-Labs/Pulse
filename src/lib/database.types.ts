@@ -446,6 +446,92 @@ export type Database = {
           },
         ]
       }
+      notification_digests: {
+        Row: {
+          attempts: number
+          content: Json | null
+          created_at: string
+          id: number
+          kind: string
+          last_attempt_at: string | null
+          last_error: string | null
+          period_key: string
+          recipient_id: string
+          resend_message_id: string | null
+          sent_at: string | null
+          skipped_reason: string | null
+          workspace_id: string
+        }
+        Insert: {
+          attempts?: number
+          content?: Json | null
+          created_at?: string
+          id?: never
+          kind: string
+          last_attempt_at?: string | null
+          last_error?: string | null
+          period_key: string
+          recipient_id: string
+          resend_message_id?: string | null
+          sent_at?: string | null
+          skipped_reason?: string | null
+          workspace_id: string
+        }
+        Update: {
+          attempts?: number
+          content?: Json | null
+          created_at?: string
+          id?: never
+          kind?: string
+          last_attempt_at?: string | null
+          last_error?: string | null
+          period_key?: string
+          recipient_id?: string
+          resend_message_id?: string | null
+          sent_at?: string | null
+          skipped_reason?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_digests_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_drain_runs: {
+        Row: {
+          caller: string
+          finished_at: string
+          healthy: boolean
+          id: number
+          problems: string[]
+          report: Json
+          started_at: string
+        }
+        Insert: {
+          caller: string
+          finished_at?: string
+          healthy: boolean
+          id?: never
+          problems?: string[]
+          report?: Json
+          started_at: string
+        }
+        Update: {
+          caller?: string
+          finished_at?: string
+          healthy?: boolean
+          id?: never
+          problems?: string[]
+          report?: Json
+          started_at?: string
+        }
+        Relationships: []
+      }
       org_tool_access: {
         Row: {
           created_at: string
@@ -1212,6 +1298,7 @@ export type Database = {
       sop_notifications: {
         Row: {
           attempts: number
+          content: Json | null
           created_at: string
           event_id: number | null
           id: number
@@ -1221,11 +1308,14 @@ export type Database = {
           recipient_id: string
           reminder_index: number
           resend_message_id: string | null
+          review_cycle: number
           sent_at: string | null
+          skipped_reason: string | null
           sop_id: string
         }
         Insert: {
           attempts?: number
+          content?: Json | null
           created_at?: string
           event_id?: number | null
           id?: never
@@ -1235,11 +1325,14 @@ export type Database = {
           recipient_id: string
           reminder_index?: number
           resend_message_id?: string | null
+          review_cycle?: number
           sent_at?: string | null
+          skipped_reason?: string | null
           sop_id: string
         }
         Update: {
           attempts?: number
+          content?: Json | null
           created_at?: string
           event_id?: number | null
           id?: never
@@ -1249,7 +1342,9 @@ export type Database = {
           recipient_id?: string
           reminder_index?: number
           resend_message_id?: string | null
+          review_cycle?: number
           sent_at?: string | null
+          skipped_reason?: string | null
           sop_id?: string
         }
         Relationships: [
@@ -2928,6 +3023,7 @@ export type Database = {
       workspace_notifications: {
         Row: {
           attempts: number
+          content: Json | null
           created_at: string
           event_id: number
           id: number
@@ -2937,10 +3033,12 @@ export type Database = {
           recipient_id: string
           resend_message_id: string | null
           sent_at: string | null
+          skipped_reason: string | null
           workspace_id: string
         }
         Insert: {
           attempts?: number
+          content?: Json | null
           created_at?: string
           event_id: number
           id?: never
@@ -2950,10 +3048,12 @@ export type Database = {
           recipient_id: string
           resend_message_id?: string | null
           sent_at?: string | null
+          skipped_reason?: string | null
           workspace_id: string
         }
         Update: {
           attempts?: number
+          content?: Json | null
           created_at?: string
           event_id?: number
           id?: never
@@ -2963,6 +3063,7 @@ export type Database = {
           recipient_id?: string
           resend_message_id?: string | null
           sent_at?: string | null
+          skipped_reason?: string | null
           workspace_id?: string
         }
         Relationships: [

@@ -135,6 +135,8 @@ const AUDIT_EVENT_LABELS: Record<string, string> = {
   remark_deleted: "Remark deleted",
   final_approval_requested: "Sent for final approval",
   status_changed: "Status changed",
+  signature_added: "Signature recorded",
+  seat_reassigned: "Review seat reassigned",
 };
 
 /** Whether a step has any content yet — drives the ✓ marker in the step nav. */

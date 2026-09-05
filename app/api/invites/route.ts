@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { renderWorkspaceAccessGrantedEmail, renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
-import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
+import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import type { Database, Json } from "@/lib/database.types";
 import type { SopEmailContent } from "@/domain/sop/notifications";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
@@ -175,7 +175,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: SIGNUP_DOMAIN_MESSAGE }, { status: 400 });
   }
 
-  const supabase = callerScopedSupabase(getBearerToken(request));
+  const supabase = auth.supabase;
 
   // Manager check up front for a friendly error (RLS below would reject anyway).
   const { data: isManager, error: roleError } = await supabase.rpc("has_workspace_role", {

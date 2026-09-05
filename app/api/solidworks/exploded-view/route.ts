@@ -1,4 +1,4 @@
-import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
+import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import { saveExplodedViewToSupabase } from "@/domain/supabase-planner";
 import { normalizeComponents } from "@/domain/step-exploded-views";
 
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
   // Act as the caller so the authenticated, project-scoped Storage + table RLS is satisfied (the anon
   // server client is denied). Resolve the project's workspace via an RLS-gated read — a null result
   // means the caller can't access the project, so reject before touching Storage.
-  const supabase = callerScopedSupabase(getBearerToken(request));
+  const supabase = auth.supabase;
   const { data: project, error: projectError } = await supabase
     .from("projects")
     .select("id, name, workspace_id")

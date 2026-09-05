@@ -31,7 +31,7 @@ const browseSidebar = (
 
 type DetailState =
   | { status: "pending" }
-  | { status: "loaded"; record: SopRecord; department?: Department; canEdit: boolean }
+  | { status: "loaded"; record: SopRecord; department?: Department; myDepartmentIds: string[] }
   | { status: "missing" }
   | { status: "error"; message: string };
 
@@ -43,15 +43,13 @@ export function SopDetailClient({
   initialView?: SopEditorInitialView;
 }) {
   const params = useParams<{ sopId: string }>();
-  const { canEditSops } = useSopWorkspace();
+  const { canEditSops, workspaceId } = useSopWorkspace();
   const [state, setState] = useState<DetailState>(() => initial
     ? {
         status: "loaded",
         record: initial.record,
         department: initial.department,
-        canEdit:
-          canEditSops &&
-          (!initial.record.departmentId || initial.myDepartmentIds.includes(initial.record.departmentId)),
+        myDepartmentIds: initial.myDepartmentIds,
       }
     : { status: "pending" });
 
@@ -74,9 +72,7 @@ export function SopDetailClient({
           status: "loaded",
           record,
           department: departments.find((item) => item.id === record.departmentId),
-          canEdit:
-            canEditSops &&
-            (!record.departmentId || myDepartments.some((item) => item.id === record.departmentId)),
+          myDepartmentIds: myDepartments.map((item) => item.id),
         });
       })
       .catch((error) => {
@@ -86,7 +82,7 @@ export function SopDetailClient({
     return () => {
       active = false;
     };
-  }, [params.sopId, canEditSops, initial]);
+  }, [params.sopId, initial]);
 
   if (state.status === "loaded") {
     return (
@@ -95,7 +91,11 @@ export function SopDetailClient({
         initial={state.record.sop}
         workspaceId={state.record.workspaceId}
         owningDepartment={state.department}
-        canEdit={state.canEdit}
+        canEdit={
+          workspaceId === state.record.workspaceId &&
+          canEditSops &&
+          (!state.record.departmentId || state.myDepartmentIds.includes(state.record.departmentId))
+        }
         initialApprovalRouting={initial?.approval}
         initialView={initialView}
       />

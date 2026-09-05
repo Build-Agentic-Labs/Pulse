@@ -7,7 +7,7 @@ import {
   repairPlanDeterministically,
   validationMessages,
 } from "@/domain/ie-smart-allocation-solver";
-import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
+import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import { calculateTaskManHours, formatMinutes, getTimelineBounds, round } from "@/domain/calculations";
 import type { IeSmartAllocationPlan, IeSmartAllocationRequest } from "@/domain/ie-smart-allocation";
 import { getTaskOperatorIds } from "@/domain/operator-assignments";
@@ -116,7 +116,7 @@ async function authorizeSmartAllocationRequest(request: Request, body: IeSmartAl
   // Shared auth gate (env check -> bearer token -> Supabase verification). This route
   // previously re-implemented the same flow inline; api-auth.ts was extracted FROM it,
   // so any future auth change (e.g. cookie sessions) lands in exactly one place.
-  const { userId, failure } = await requireApiUser(request);
+  const { userId, failure, supabase } = await requireApiUser(request);
   if (failure) {
     return failure;
   }
@@ -131,7 +131,6 @@ async function authorizeSmartAllocationRequest(request: Request, body: IeSmartAl
   }
 
   // RLS-scoped access check: acting AS the caller, can they see this project?
-  const supabase = callerScopedSupabase(getBearerToken(request));
   const { data: project, error: projectError } = await supabase
     .from("projects")
     .select("id")

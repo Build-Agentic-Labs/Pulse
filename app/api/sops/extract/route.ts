@@ -7,7 +7,7 @@ import {
 } from "@/domain/sop/extraction";
 import { validateExtractedSop } from "@/domain/sop/extraction-validate";
 import { prepareSopUpload, type PreparedSopUpload } from "@/lib/sop/parse-document";
-import { callerScopedSupabase, createApiRateLimiter, getBearerToken, requireApiUser } from "@/lib/api-auth";
+import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import type { Database } from "@/lib/database.types";
 
 export const runtime = "nodejs";
@@ -162,25 +162,12 @@ export async function POST(request: Request) {
   // on org-tools 'edit' at the database (has_org_tool_access, 20260701121000); mirror
   // that exact organization gate here so users without it can't spend LLM tokens. All lookups run as
   // the caller (RLS-scoped) and a failed lookup denies — this fails closed.
-  const callerSupabase = callerScopedSupabase(getBearerToken(request));
-  const [orgAccess, managerMembership, superAdmin] = await Promise.all([
-    callerSupabase
-      .from("org_tool_access")
-      .select("level")
-      .eq("workspace_id", workspaceId)
-      .eq("user_id", auth.userId)
-      .maybeSingle(),
-    callerSupabase
-      .from("workspace_members")
-      .select("workspace_id")
-      .eq("workspace_id", workspaceId)
-      .eq("user_id", auth.userId)
-      .in("role", ["owner", "admin"])
-      .limit(1),
-    callerSupabase.rpc("is_super_admin"),
-  ]);
-  const isManager = (managerMembership.data?.length ?? 0) > 0 || superAdmin.data === true;
-  if (!isManager && orgAccess.data?.level !== "edit") {
+  const callerSupabase = auth.supabase;
+  const { data: canConvert, error: accessError } = await callerSupabase.rpc("has_org_tool_access", {
+    target_workspace_id: workspaceId,
+    min_level: "edit",
+  });
+  if (accessError || canConvert !== true) {
     return Response.json(
       { error: "You need Quality Module Editor access to convert SOPs." },
       { status: 403 },

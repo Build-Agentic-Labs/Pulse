@@ -21,10 +21,8 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 vi.mock("@/lib/api-auth", () => ({
-  callerScopedSupabase: () => ({ from: mocks.from, rpc: mocks.rpc }),
   createApiRateLimiter: () => () => true,
-  getBearerToken: () => "caller-token",
-  requireApiUser: () => Promise.resolve({ userId: "manager-1" }),
+  requireApiUser: () => Promise.resolve({ userId: "manager-1", supabase: { from: mocks.from, rpc: mocks.rpc } }),
 }));
 
 vi.mock("@/lib/sop/notifications-drain", () => ({

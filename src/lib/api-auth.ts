@@ -18,8 +18,7 @@ import type { Database } from "./database.types";
 
 export function getBearerToken(request: Request) {
   const header = request.headers.get("authorization") ?? "";
-  const [scheme, token] = header.split(" ");
-  return scheme?.toLowerCase() === "bearer" && token ? token : "";
+  return /^Bearer\s+(\S+)$/i.exec(header.trim())?.[1] ?? "";
 }
 
 /**
@@ -36,7 +35,9 @@ export function callerScopedSupabase(token: string): SupabaseClient<Database> {
   });
 }
 
-export type ApiUserResult = { userId: string; failure: null } | { userId: null; failure: NextResponse };
+export type ApiUserResult =
+  | { userId: string; supabase: SupabaseClient<Database>; failure: null }
+  | { userId: null; supabase: null; failure: NextResponse };
 
 export async function requireApiUser(request: Request): Promise<ApiUserResult> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -45,52 +46,44 @@ export async function requireApiUser(request: Request): Promise<ApiUserResult> {
   if (!supabaseUrl || !supabaseAnonKey) {
     return {
       userId: null,
+      supabase: null,
       failure: NextResponse.json({ error: "Supabase auth is not configured." }, { status: 503 }),
     };
   }
 
   const token = getBearerToken(request);
-  if (!token) {
-    // No bearer header: fall back to the @supabase/ssr auth cookies. An
-    // explicitly-presented bearer token is never silently substituted — if one
-    // was sent and is invalid, the caller gets a 401, not a cookie session.
-    const cookieUserId = await userIdFromRequestCookies(request, supabaseUrl, supabaseAnonKey);
-    if (cookieUserId) {
-      return { userId: cookieUserId, failure: null };
-    }
+  // An explicit malformed header must never fall back to a different identity.
+  if (request.headers.has("authorization") && !token) {
     return {
       userId: null,
-      failure: NextResponse.json({ error: "Sign in to use this endpoint." }, { status: 401 }),
+      supabase: null,
+      failure: NextResponse.json({ error: "Invalid authorization header." }, { status: 401 }),
     };
   }
 
-  const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-  const { data, error } = await supabase.auth.getUser(token);
+  const supabase = token
+    ? callerScopedSupabase(token)
+    : cookieScopedSupabase(request, supabaseUrl, supabaseAnonKey);
+  const { data, error } = token
+    ? await supabase.auth.getUser(token)
+    : await supabase.auth.getUser();
 
   if (error || !data.user) {
     return {
       userId: null,
+      supabase: null,
       failure: NextResponse.json({ error: "Invalid or expired session." }, { status: 401 }),
     };
   }
 
-  return { userId: data.user.id, failure: null };
+  // Reuse this verified client for all data access. Reconstructing it from only
+  // the Authorization header drops cookie sessions and makes RLS see anon.
+  return { userId: data.user.id, supabase, failure: null };
 }
 
-/** Verify a cookie-borne session. Read-only: token rotation belongs to middleware, not API routes. */
-async function userIdFromRequestCookies(
-  request: Request,
-  supabaseUrl: string,
-  supabaseAnonKey: string,
-): Promise<string | null> {
-  const cookieHeader = request.headers.get("cookie");
-  if (!cookieHeader || !cookieHeader.includes("-auth-token")) {
-    return null;
-  }
-
-  const parsed = cookieHeader
+/** Read-only cookies: token rotation belongs to the proxy, not API routes. */
+function cookieScopedSupabase(request: Request, supabaseUrl: string, supabaseAnonKey: string) {
+  const parsed = (request.headers.get("cookie") ?? "")
     .split(";")
     .map((part) => {
       const separator = part.indexOf("=");
@@ -99,14 +92,12 @@ async function userIdFromRequestCookies(
     })
     .filter((cookie): cookie is { name: string; value: string } => cookie !== null);
 
-  const supabase = createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+  return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll: () => parsed,
       setAll: () => {},
     },
   });
-  const { data, error } = await supabase.auth.getUser();
-  return error || !data.user ? null : data.user.id;
 }
 
 /**

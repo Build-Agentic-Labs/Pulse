@@ -29,6 +29,9 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
   createClientMock.mockReset();
   createServerClientMock.mockReset();
+  createServerClientMock.mockReturnValue({
+    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }) },
+  });
 });
 
 afterEach(() => {
@@ -133,6 +136,7 @@ describe("requireApiUser", () => {
 
     expect(getUser).toHaveBeenCalledWith("good-token");
     expect(result.userId).toBe("user-42");
+    expect(result.supabase).toBe(createClientMock.mock.results[0].value);
     expect(result.failure).toBeNull();
   });
 
@@ -147,12 +151,26 @@ describe("requireApiUser", () => {
 
     expect(result.userId).toBe("cookie-user");
     expect(result.failure).toBeNull();
+    expect(result.supabase).toBe(createServerClientMock.mock.results[0].value);
     // The cookie client received the parsed request cookies.
     const options = createServerClientMock.mock.calls[0][2] as {
       cookies: { getAll: () => Array<{ name: string; value: string }> };
     };
     expect(options.cookies.getAll()).toContainEqual({ name: "sb-ref-auth-token.0", value: "abc" });
   });
+
+  it.each(["Bearer", "Bearer a b", "Basic abc", ""])(
+    "rejects malformed authorization %j even with valid cookies",
+    async (authorization) => {
+      const request = new Request("http://localhost/api/test", {
+        headers: { authorization, cookie: "sb-ref-auth-token=valid" },
+      });
+      const result = await requireApiUser(request);
+      expect(result.failure?.status).toBe(401);
+      expect(result.supabase).toBeNull();
+      expect(createServerClientMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("does NOT substitute a cookie session for an explicitly-presented invalid bearer token", async () => {
     const bearerGetUser = vi.fn().mockResolvedValue({ data: { user: null }, error: { message: "bad" } });

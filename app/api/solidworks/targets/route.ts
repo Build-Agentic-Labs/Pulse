@@ -1,4 +1,4 @@
-import { callerScopedSupabase, getBearerToken, requireApiUser } from "@/lib/api-auth";
+import { requireApiUser } from "@/lib/api-auth";
 import { loadProjectTaskTargetsFromSupabase } from "@/domain/supabase-planner";
 
 export const runtime = "nodejs";
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     return auth.failure;
   }
 
-  const supabase = callerScopedSupabase(getBearerToken(request));
+  const supabase = auth.supabase;
   const projectId = new URL(request.url).searchParams.get("projectId");
 
   if (!projectId) {

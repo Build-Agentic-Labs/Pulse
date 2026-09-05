@@ -220,6 +220,42 @@ describe("createSopNotificationDrainStore.deadRows", () => {
   });
 });
 
+describe("createSopNotificationDrainStore.collect — escalation", () => {
+  const now = new Date("2026-08-15T12:00:00Z");
+  const MANAGER = "1a000000-0000-0000-0000-000000000009";
+
+  it("escalates an ignored stall to the workspace owner, naming the stalled reviewer", async () => {
+    const store = createSopNotificationDrainStore(
+      makeAdmin(
+        fixtures({
+          sop_event_log: {
+            data: [
+              { id: 45, sop_id: "sop-1", review_cycle: 0, event_type: "review_sent", actor_id: AUTHOR, actor_name: "Ana", details: {}, created_at: "2026-07-29T18:20:45Z" },
+            ],
+            error: null,
+          },
+          sop_review_submissions: { data: [], error: null },
+          sop_notifications: {
+            data: [
+              { sop_id: "sop-1", recipient_id: REVIEWER, kind: "review_requested", reminder_index: 1, review_cycle: 0, sent_at: "2026-08-02T13:00:00Z", event_id: null },
+              { sop_id: "sop-1", recipient_id: REVIEWER, kind: "review_requested", reminder_index: 2, review_cycle: 0, sent_at: "2026-08-05T13:00:00Z", event_id: null },
+              { event_id: 45, recipient_id: REVIEWER },
+            ],
+            error: null,
+          },
+          workspace_members: { data: [{ workspace_id: "ws-1", user_id: MANAGER, role: "owner" }], error: null },
+          profiles: { data: [{ id: MANAGER, email: "owner@anacorp.com", full_name: "Olivia Owner" }, { id: REVIEWER, email: "r@anacorp.com", full_name: "Tomas Bach" }], error: null },
+        }),
+      ),
+    );
+    const batch = await store.collect(now, origin);
+    const escalation = batch.items.find((item) => item.pending.kind === "stall_escalated");
+    expect(escalation?.pending).toEqual({ recipientId: MANAGER, kind: "stall_escalated", sopId: "sop-1", eventId: null, reminderIndex: 1, reviewCycle: 0 });
+    expect(escalation?.email).toBe("owner@anacorp.com");
+    expect(escalation?.content.text).toContain("Tomas Bach (Engineering seat)");
+  });
+});
+
 describe("createSopNotificationDrainStore.collect — channels", () => {
   const now = new Date("2026-09-04T12:00:00Z");
 

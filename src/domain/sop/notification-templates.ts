@@ -25,11 +25,22 @@ export interface SopEmailInput {
   sopId: string;
   reminderIndex: number;
   waitingDays: number | null;
+  /** Escalations only: who the SOP is waiting on. */
+  stalled?: { name: string; departmentName: string | null; waitingDays: number }[];
 }
 
 const SEAT_REASON = "You are receiving this because you hold a review seat on this SOP.";
 const AUTHOR_REASON = "You are receiving this because you are the author of this SOP.";
 const QUALITY_REASON = "You are receiving this because you are a Quality approver in this workspace.";
+const MANAGER_REASON = "You are receiving this because you are an owner or admin of this workspace.";
+
+function stalledSentence(entries: SopEmailInput["stalled"]): string {
+  if (!entries || entries.length === 0) return "It is waiting on someone who has not responded to two reminders.";
+  const parts = entries.map((entry) =>
+    `${entry.name}${entry.departmentName ? ` (${entry.departmentName} seat)` : ""} — ${entry.waitingDays} days`,
+  );
+  return `It is waiting on ${parts.join("; ")}, after two reminders went unanswered.`;
+}
 
 interface TemplateCopy {
   subject: string;
@@ -91,6 +102,15 @@ function copyFor(input: SopEmailInput, label: string): TemplateCopy {
         reason: AUTHOR_REASON,
         happened: `Every reviewer has responded to ${label}, and no remarks remain open.`,
         needed: `Open it and send it for final approval to collect the formal department signatures.`,
+      };
+    case "stall_escalated":
+      return {
+        subject: `Stalled: ${label} needs a nudge`,
+        eyebrow: "Escalation",
+        accent: "#b45309",
+        reason: MANAGER_REASON,
+        happened: `${label} has stalled. ${stalledSentence(input.stalled)}`,
+        needed: `Please follow up with them, or reassign the seat so the document can move.`,
       };
   }
 }

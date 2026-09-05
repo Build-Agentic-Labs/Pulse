@@ -4,16 +4,20 @@
  * only — this module must ONLY ever be constructed inside the drain route.
  * All queries are batched by id set; the working set is bounded by the 30-day
  * event window plus currently stalled (in_review / approved / rejected-draft) SOPs.
+ *
+ * `loadSopStallStates` is exported for the digest store, which reads the same
+ * live picture of every in-flight SOP without owning any of these queries.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/database.types";
 import { resolveEmailEnabled, type PreferenceRow } from "@/domain/notifications/channels";
 import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
-import { renderSopNotificationEmail } from "@/domain/sop/notification-templates";
+import { renderSopNotificationEmail, type SopEmailInput } from "@/domain/sop/notification-templates";
 import {
   REMINDER_AFTER_DAYS,
   SOP_NOTIFIABLE_EVENT_TYPES,
+  resolveEscalations,
   resolveEventRecipients,
   resolveReminders,
   type NotifiableEvent,
@@ -26,6 +30,7 @@ import {
   type SopNotificationKind,
   type SopReminderState,
   type SopSnapshot,
+  type StalledEntry,
 } from "@/domain/sop/notifications";
 import {
   MAX_SEND_ATTEMPTS,
@@ -48,14 +53,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // which made the two `.select(SOP_COLUMNS)` calls below fall back to a
 // `GenericStringError` return type instead of `SopRow[]`.
 const SOP_COLUMNS =
-  "id, workspace_id, title, sop_number, version, status, deleted_at, created_by, submitted_by, content_hash, final_approval_requested_at, final_approval_content_hash, rejected_reason, review_cycle, approved_at";
+  "id, workspace_id, department_id, title, sop_number, version, status, deleted_at, created_by, submitted_by, content_hash, final_approval_requested_at, final_approval_content_hash, rejected_reason, review_cycle, approved_at, updated_at";
 
 /** SOPs the reminder scan owns: signer stalls AND author stalls (a rejected draft awaiting rework). */
 const STALL_SCAN_FILTER = "status.in.(in_review,approved),and(status.eq.draft,rejected_reason.not.is.null)";
 
-type SopRow = {
+export type SopRow = {
   id: string;
   workspace_id: string;
+  department_id: string | null;
   title: string | null;
   sop_number: string | null;
   version: string | null;
@@ -69,6 +75,7 @@ type SopRow = {
   rejected_reason: string | null;
   review_cycle: number;
   approved_at: string | null;
+  updated_at: string | null;
 };
 
 function toSnapshot(row: SopRow): SopSnapshot {
@@ -90,7 +97,7 @@ function toSnapshot(row: SopRow): SopSnapshot {
 }
 
 /** Everything the resolvers and templates need about a set of SOPs, batched. */
-interface SopContextBundle {
+export interface SopContextBundle {
   sops: Map<string, SopRow>;
   seatsBySop: Map<string, SeatSnapshot[]>;
   qualityApproversBySop: Map<string, QualityApproverSnapshot[]>;
@@ -98,14 +105,26 @@ interface SopContextBundle {
   returnsBySop: Map<string, ReviewReturnSnapshot[]>;
   /** Current-cycle unresolved remarks per SOP. */
   openAnnotationsBySop: Map<string, number>;
+  /** Owners/admins per workspace — escalation and digest recipients. */
+  managersByWorkspace: Map<string, string[]>;
+  departmentNameById: Map<string, string>;
+  departmentCodeById: Map<string, string>;
   emailByUser: Map<string, string | null>;
+  nameByUser: Map<string, string>;
   /** Email-channel preference rows per recipient (any workspace scope). */
   prefsByUser: Map<string, PreferenceRow[]>;
   /** Lower-cased addresses the drain must never mail. */
   suppressed: Set<string>;
 }
 
-export function createSopNotificationDrainStore(admin: SupabaseClient<Database>): DrainStore {
+export interface SopStallStates {
+  rows: SopRow[];
+  states: SopReminderState[];
+  bundle: SopContextBundle;
+}
+
+/** The query side, shared by the SOP drain store and the digest store. */
+export function createSopContextLoader(admin: SupabaseClient<Database>) {
   async function loadContext(sopIds: string[]): Promise<SopContextBundle> {
     const bundle: SopContextBundle = {
       sops: new Map(),
@@ -113,7 +132,11 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       qualityApproversBySop: new Map(),
       returnsBySop: new Map(),
       openAnnotationsBySop: new Map(),
+      managersByWorkspace: new Map(),
+      departmentNameById: new Map(),
+      departmentCodeById: new Map(),
       emailByUser: new Map(),
+      nameByUser: new Map(),
       prefsByUser: new Map(),
       suppressed: new Set(),
     };
@@ -130,9 +153,9 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     if (foundIds.length === 0) return bundle;
     const workspaceIds = Array.from(new Set(Array.from(bundle.sops.values()).map((sop) => sop.workspace_id)));
 
-    const [seatsResult, departmentsResult, submissionsResult, annotationsResult] = await Promise.all([
+    const [seatsResult, departmentsResult, submissionsResult, annotationsResult, managersResult] = await Promise.all([
       admin.from("sop_review_seats").select("sop_id, department_id, rasic, signer_id").in("sop_id", foundIds),
-      admin.from("departments").select("id, workspace_id, name, is_quality_gate").in("workspace_id", workspaceIds),
+      admin.from("departments").select("id, workspace_id, name, code, is_quality_gate").in("workspace_id", workspaceIds),
       admin
         .from("sop_review_submissions")
         .select("sop_id, reviewer_id, review_cycle, no_changes, submitted_at")
@@ -142,21 +165,27 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         .select("sop_id, review_cycle")
         .in("sop_id", foundIds)
         .is("resolved_at", null),
+      admin
+        .from("workspace_members")
+        .select("workspace_id, user_id, role")
+        .in("workspace_id", workspaceIds)
+        .in("role", ["owner", "admin"]),
     ]);
-    for (const result of [seatsResult, departmentsResult, submissionsResult, annotationsResult]) {
+    for (const result of [seatsResult, departmentsResult, submissionsResult, annotationsResult, managersResult]) {
       if (result.error) throw new Error(result.error.message);
     }
 
-    const departmentNameById = new Map(
-      (departmentsResult.data ?? []).map((department) => [department.id, department.name]),
-    );
+    for (const department of departmentsResult.data ?? []) {
+      bundle.departmentNameById.set(department.id, department.name);
+      bundle.departmentCodeById.set(department.id, String(department.code ?? ""));
+    }
     for (const seat of seatsResult.data ?? []) {
       const list = bundle.seatsBySop.get(seat.sop_id) ?? [];
       bundle.seatsBySop.set(seat.sop_id, [
         ...list,
         {
           departmentId: seat.department_id,
-          departmentName: departmentNameById.get(seat.department_id) ?? "Unknown department",
+          departmentName: bundle.departmentNameById.get(seat.department_id) ?? "Unknown department",
           rasic: seat.rasic as SeatSnapshot["rasic"],
           signerId: seat.signer_id,
         },
@@ -177,6 +206,14 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       const sop = bundle.sops.get(annotation.sop_id);
       if (!sop || annotation.review_cycle !== sop.review_cycle) continue;
       bundle.openAnnotationsBySop.set(annotation.sop_id, (bundle.openAnnotationsBySop.get(annotation.sop_id) ?? 0) + 1);
+    }
+
+    for (const member of managersResult.data ?? []) {
+      if (member.role !== "owner" && member.role !== "admin") continue;
+      bundle.managersByWorkspace.set(member.workspace_id, [
+        ...(bundle.managersByWorkspace.get(member.workspace_id) ?? []),
+        member.user_id,
+      ]);
     }
 
     const qualityDeptByWorkspace = new Map(
@@ -230,10 +267,14 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
   async function loadEmails(bundle: SopContextBundle, userIds: string[]): Promise<void> {
     const missing = Array.from(new Set(userIds)).filter((id) => !bundle.emailByUser.has(id));
     if (missing.length === 0) return;
-    const { data, error } = await admin.from("profiles").select("id, email").in("id", missing);
+    const { data, error } = await admin.from("profiles").select("id, email, full_name").in("id", missing);
     if (error) throw new Error(error.message);
-    const found = new Map((data ?? []).map((row) => [row.id, row.email]));
-    for (const id of missing) bundle.emailByUser.set(id, found.get(id) ?? null);
+    const found = new Map((data ?? []).map((row) => [row.id, row]));
+    for (const id of missing) {
+      const row = found.get(id);
+      bundle.emailByUser.set(id, row?.email ?? null);
+      if (row?.full_name) bundle.nameByUser.set(id, row.full_name);
+    }
   }
 
   /** Preferences + suppressions for a set of recipients. Call after loadEmails (suppression is keyed by address). */
@@ -272,18 +313,134 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     };
   }
 
+  /**
+   * The live picture of every stalled SOP (signer stalls, author stalls, Quality
+   * stalls): rows plus the reminder-state the domain scans. Extra SOP ids can be
+   * folded into the same context load (the drain adds the event window's SOPs).
+   */
+  async function loadStallStates(now: Date, extraSopIds: string[] = []): Promise<SopStallStates> {
+    const { data: stalledRows, error: stalledError } = await admin
+      .from("sops")
+      .select(SOP_COLUMNS)
+      .or(STALL_SCAN_FILTER)
+      .is("deleted_at", null);
+    if (stalledError) throw new Error(stalledError.message);
+    const stalled = (stalledRows ?? []) as SopRow[];
+    const stalledIds = stalled.map((sop) => sop.id);
+
+    const bundle = await loadContext(Array.from(new Set([...extraSopIds, ...stalledIds])));
+
+    const [deptApprovals, phaseEvents, reminderRows] = await Promise.all([
+      stalledIds.length
+        ? admin
+            .from("sop_signatures")
+            .select("sop_id, signer_id, seat_department_id, review_cycle, signed_content_hash")
+            .in("sop_id", stalledIds)
+            .eq("meaning", "dept_approval")
+        : Promise.resolve({ data: [], error: null }),
+      stalledIds.length
+        ? admin
+            .from("sop_event_log")
+            .select("sop_id, review_cycle, event_type, created_at")
+            .in("sop_id", stalledIds)
+            .in("event_type", ["review_sent", "review_recalled"])
+            .order("created_at", { ascending: true })
+        : Promise.resolve({ data: [], error: null }),
+      stalledIds.length
+        ? admin
+            .from("sop_notifications")
+            .select("sop_id, recipient_id, kind, reminder_index, review_cycle, sent_at")
+            .in("sop_id", stalledIds)
+            .is("event_id", null)
+            .not("sent_at", "is", null)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    for (const result of [deptApprovals, phaseEvents, reminderRows]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+
+    const reviewSentAtBySop = new Map<string, string>();
+    const recalledAtBySop = new Map<string, string>();
+    for (const row of phaseEvents.data ?? []) {
+      const sop = bundle.sops.get(row.sop_id);
+      // Ascending order: the last write per (sop, current cycle) wins = latest.
+      if (!sop || row.review_cycle !== sop.review_cycle) continue;
+      if (row.event_type === "review_sent") reviewSentAtBySop.set(row.sop_id, row.created_at);
+      else recalledAtBySop.set(row.sop_id, row.created_at);
+    }
+
+    const states: SopReminderState[] = stalled.flatMap((sop) => {
+      const ctx = contextFor(bundle, sop.id);
+      if (!ctx) return [];
+      return [
+        {
+          sop: ctx.sop,
+          seats: ctx.seats,
+          qualityApprovers: ctx.qualityApprovers,
+          reviewReturns: ctx.reviewReturns,
+          openAnnotationCount: ctx.openAnnotationCount,
+          recalledAt: recalledAtBySop.get(sop.id) ?? null,
+          currentDeptApprovals: (deptApprovals.data ?? [])
+            .filter(
+              (row) =>
+                row.sop_id === sop.id &&
+                row.review_cycle === sop.review_cycle &&
+                row.signed_content_hash === (sop.final_approval_content_hash ?? "") &&
+                row.seat_department_id !== null,
+            )
+            .map((row) => ({ signerId: row.signer_id, departmentId: row.seat_department_id as string })),
+          approvedAt: sop.approved_at,
+          reviewSentAt: reviewSentAtBySop.get(sop.id) ?? null,
+          reminders: ((reminderRows.data ?? []) as {
+            sop_id: string;
+            recipient_id: string;
+            kind: string;
+            reminder_index: number;
+            review_cycle: number;
+            sent_at: string;
+          }[])
+            .filter((row) => row.sop_id === sop.id)
+            .map(
+              (row): ReminderLedgerRow => ({
+                recipientId: row.recipient_id,
+                kind: row.kind as SopNotificationKind,
+                reminderIndex: row.reminder_index,
+                reviewCycle: row.review_cycle,
+                sentAt: row.sent_at,
+              }),
+            ),
+          workspaceManagers: bundle.managersByWorkspace.get(sop.workspace_id) ?? [],
+        },
+      ];
+    });
+
+    return { rows: stalled, states, bundle };
+  }
+
+  return { loadContext, loadEmails, loadChannels, contextFor, loadStallStates };
+}
+
+export function createSopNotificationDrainStore(admin: SupabaseClient<Database>): DrainStore {
+  const loader = createSopContextLoader(admin);
+
   function toItem(
     bundle: SopContextBundle,
     pending: PendingNotification,
     origin: string,
     actorName: string,
     waitingDays: number | null,
+    stalled?: StalledEntry[],
   ): DrainItem | null {
     const row = bundle.sops.get(pending.sopId);
     if (!row) return null;
     const seats = bundle.seatsBySop.get(pending.sopId) ?? [];
     const recipientSeat = seats.find((seat) => seat.signerId === pending.recipientId);
     const email = bundle.emailByUser.get(pending.recipientId) ?? null;
+    const stalledForTemplate: SopEmailInput["stalled"] = stalled?.map((entry) => ({
+      name: bundle.nameByUser.get(entry.userId) ?? "A participant",
+      departmentName: entry.departmentId ? (bundle.departmentNameById.get(entry.departmentId) ?? null) : null,
+      waitingDays: entry.waitingDays,
+    }));
     return {
       pending,
       email,
@@ -303,6 +460,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         sopId: pending.sopId,
         reminderIndex: pending.reminderIndex,
         waitingDays,
+        stalled: stalledForTemplate,
       }),
     };
   }
@@ -339,22 +497,13 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       if (ledgerError) throw new Error(ledgerError.message);
       const covered = new Set((ledgerRows ?? []).map((row) => `${row.event_id}:${row.recipient_id}`));
 
-      // 3) Stalled SOPs for the reminder scan: signer stalls and author stalls.
-      const { data: stalledRows, error: stalledError } = await admin
-        .from("sops")
-        .select(SOP_COLUMNS)
-        .or(STALL_SCAN_FILTER)
-        .is("deleted_at", null);
-      if (stalledError) throw new Error(stalledError.message);
-      const stalled = (stalledRows ?? []) as SopRow[];
-
-      const sopIds = Array.from(new Set([...events.map((event) => event.sopId), ...stalled.map((sop) => sop.id)]));
-      const bundle = await loadContext(sopIds);
+      // 3) Stalled SOPs (reminders, escalations) + the event window's SOPs, one context load.
+      const { states, bundle } = await loader.loadStallStates(now, events.map((event) => event.sopId));
 
       // 4) First-touch pendings, minus already-covered (event, recipient) pairs.
       const eventItems: { pending: PendingNotification; event: NotifiableEvent }[] = [];
       for (const event of events) {
-        const ctx = contextFor(bundle, event.sopId);
+        const ctx = loader.contextFor(bundle, event.sopId);
         if (!ctx) continue;
         for (const pending of resolveEventRecipients(event, ctx)) {
           if (covered.has(`${event.id}:${pending.recipientId}`)) continue;
@@ -362,99 +511,19 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         }
       }
 
-      // 5) Reminder pendings from current state.
-      const stalledIds = stalled.map((sop) => sop.id);
-      const [deptApprovals, phaseEvents, reminderRows] = await Promise.all([
-        stalledIds.length
-          ? admin
-              .from("sop_signatures")
-              .select("sop_id, signer_id, seat_department_id, review_cycle, signed_content_hash")
-              .in("sop_id", stalledIds)
-              .eq("meaning", "dept_approval")
-          : Promise.resolve({ data: [], error: null }),
-        stalledIds.length
-          ? admin
-              .from("sop_event_log")
-              .select("sop_id, review_cycle, event_type, created_at")
-              .in("sop_id", stalledIds)
-              .in("event_type", ["review_sent", "review_recalled"])
-              .order("created_at", { ascending: true })
-          : Promise.resolve({ data: [], error: null }),
-        stalledIds.length
-          ? admin
-              .from("sop_notifications")
-              .select("sop_id, recipient_id, kind, reminder_index, review_cycle, sent_at")
-              .in("sop_id", stalledIds)
-              .is("event_id", null)
-              .not("sent_at", "is", null)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-      for (const result of [deptApprovals, phaseEvents, reminderRows]) {
-        if (result.error) throw new Error(result.error.message);
-      }
-
-      const reviewSentAtBySop = new Map<string, string>();
-      const recalledAtBySop = new Map<string, string>();
-      for (const row of phaseEvents.data ?? []) {
-        const sop = bundle.sops.get(row.sop_id);
-        // Ascending order: the last write per (sop, current cycle) wins = latest.
-        if (!sop || row.review_cycle !== sop.review_cycle) continue;
-        if (row.event_type === "review_sent") reviewSentAtBySop.set(row.sop_id, row.created_at);
-        else recalledAtBySop.set(row.sop_id, row.created_at);
-      }
-
-      const states: SopReminderState[] = stalled.flatMap((sop) => {
-        const ctx = contextFor(bundle, sop.id);
-        if (!ctx) return [];
-        return [
-          {
-            sop: ctx.sop,
-            seats: ctx.seats,
-            qualityApprovers: ctx.qualityApprovers,
-            reviewReturns: ctx.reviewReturns,
-            openAnnotationCount: ctx.openAnnotationCount,
-            recalledAt: recalledAtBySop.get(sop.id) ?? null,
-            currentDeptApprovals: (deptApprovals.data ?? [])
-              .filter(
-                (row) =>
-                  row.sop_id === sop.id &&
-                  row.review_cycle === sop.review_cycle &&
-                  row.signed_content_hash === (sop.final_approval_content_hash ?? "") &&
-                  row.seat_department_id !== null,
-              )
-              .map((row) => ({ signerId: row.signer_id, departmentId: row.seat_department_id as string })),
-            approvedAt: sop.approved_at,
-            reviewSentAt: reviewSentAtBySop.get(sop.id) ?? null,
-            reminders: ((reminderRows.data ?? []) as {
-              sop_id: string;
-              recipient_id: string;
-              kind: string;
-              reminder_index: number;
-              review_cycle: number;
-              sent_at: string;
-            }[])
-              .filter((row) => row.sop_id === sop.id)
-              .map(
-                (row): ReminderLedgerRow => ({
-                  recipientId: row.recipient_id,
-                  kind: row.kind as SopNotificationKind,
-                  reminderIndex: row.reminder_index,
-                  reviewCycle: row.review_cycle,
-                  sentAt: row.sent_at,
-                }),
-              ),
-          },
-        ];
-      });
+      // 5) Reminders and escalations from current state.
       const reminderPendings = resolveReminders(now, states);
+      const escalationPendings = resolveEscalations(now, states);
 
-      // 6) Emails + rendered content for everything.
+      // 6) Emails, names, channels, rendered content for everything.
       const recipientIds = [
         ...eventItems.map((entry) => entry.pending.recipientId),
         ...reminderPendings.map((pending) => pending.recipientId),
+        ...escalationPendings.map((pending) => pending.recipientId),
       ];
-      await loadEmails(bundle, recipientIds);
-      await loadChannels(bundle, recipientIds);
+      const stalledIds = escalationPendings.flatMap((pending) => pending.stalled.map((entry) => entry.userId));
+      await loader.loadEmails(bundle, [...recipientIds, ...stalledIds]);
+      await loader.loadChannels(bundle, recipientIds);
 
       const items: DrainItem[] = [];
       for (const { pending, event } of eventItems) {
@@ -464,6 +533,11 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       for (const pending of reminderPendings) {
         const waitingDays = pending.reminderIndex * REMINDER_AFTER_DAYS;
         const item = toItem(bundle, pending, origin, "Pulse", waitingDays);
+        if (item) items.push(item);
+      }
+      for (const pending of escalationPendings) {
+        const { stalled, ...plain } = pending;
+        const item = toItem(bundle, plain, origin, "Pulse", null, stalled);
         if (item) items.push(item);
       }
 
@@ -499,8 +573,8 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       );
       if (rows.length === 0) return [];
 
-      const bundle = await loadContext(Array.from(new Set(rows.map((row) => row.sop_id))));
-      await loadEmails(bundle, rows.map((row) => row.recipient_id));
+      const bundle = await loader.loadContext(Array.from(new Set(rows.map((row) => row.sop_id))));
+      await loader.loadEmails(bundle, rows.map((row) => row.recipient_id));
 
       return rows.flatMap((row) => {
         const item = toItem(

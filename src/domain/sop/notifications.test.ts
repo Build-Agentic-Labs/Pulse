@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ESCALATE_AFTER_REMINDER_DAYS,
+  describeStall,
+  resolveEscalations,
   resolveEventRecipients,
   resolveReminders,
   type NotifiableEvent,
@@ -233,6 +236,7 @@ describe("resolveReminders", () => {
     approvedAt: null,
     reviewSentAt: "2026-07-21T12:00:00Z",
     reminders: [],
+    workspaceManagers: [],
     ...over,
   });
 
@@ -396,6 +400,7 @@ describe("resolveReminders: author stalls", () => {
     approvedAt: null,
     reviewSentAt: "2026-07-20T12:00:00Z",
     reminders: [],
+    workspaceManagers: [],
     ...over,
   });
   const authorNudge = (kind: "review_complete" | "sent_back", reminderIndex = 1) => ({
@@ -447,6 +452,135 @@ describe("resolveReminders: author stalls", () => {
   it("does not nudge an SOP without an author", () => {
     const s = state({ sop: sop({ authorId: null }), reviewReturns: [returned("resp", true, "2026-07-21T12:00:00Z")] });
     expect(resolveReminders(NOW, [s])).toEqual([]);
+  });
+});
+
+describe("resolveEscalations", () => {
+  const NOW = new Date("2026-08-01T12:00:00Z");
+  const nudges = (recipientId: string, kind: "review_requested" | "review_complete" = "review_requested") => [
+    { recipientId, kind, reminderIndex: 1, reviewCycle: 1, sentAt: "2026-07-24T12:00:00Z" },
+    { recipientId, kind, reminderIndex: 2, reviewCycle: 1, sentAt: "2026-07-27T12:00:00Z" },
+  ];
+  const state = (over: Partial<SopReminderState> = {}): SopReminderState => ({
+    sop: sop(),
+    seats: [{ departmentId: "d-r", departmentName: "Engineering", rasic: "responsible", signerId: "resp" }],
+    qualityApprovers: [],
+    reviewReturns: [],
+    openAnnotationCount: 0,
+    recalledAt: null,
+    currentDeptApprovals: [],
+    approvedAt: null,
+    reviewSentAt: "2026-07-21T12:00:00Z",
+    reminders: nudges("resp"),
+    workspaceManagers: ["mgr-1", "mgr-2", "resp"],
+    ...over,
+  });
+
+  it("escalates an ignored signer stall to every workspace manager except the stalled person", () => {
+    const out = resolveEscalations(NOW, [state()]);
+    expect(out).toEqual([
+      {
+        recipientId: "mgr-1",
+        kind: "stall_escalated",
+        sopId: "sop-1",
+        eventId: null,
+        reminderIndex: 1,
+        reviewCycle: 1,
+        stalled: [{ userId: "resp", departmentId: "d-r", kind: "review_requested", waitingDays: 11 }],
+      },
+      {
+        recipientId: "mgr-2",
+        kind: "stall_escalated",
+        sopId: "sop-1",
+        eventId: null,
+        reminderIndex: 1,
+        reviewCycle: 1,
+        stalled: [{ userId: "resp", departmentId: "d-r", kind: "review_requested", waitingDays: 11 }],
+      },
+    ]);
+  });
+
+  it(`waits ${ESCALATE_AFTER_REMINDER_DAYS} days after the last nudge`, () => {
+    expect(resolveEscalations(new Date("2026-07-30T12:00:00Z"), [state()])).toEqual([]);
+  });
+
+  it("does not escalate while nudges remain", () => {
+    expect(resolveEscalations(NOW, [state({ reminders: nudges("resp").slice(0, 1) })])).toEqual([]);
+  });
+
+  it("escalates once per manager per cycle", () => {
+    const already = state({
+      reminders: [
+        ...nudges("resp"),
+        { recipientId: "mgr-1", kind: "stall_escalated", reminderIndex: 1, reviewCycle: 1, sentAt: "2026-07-31T12:00:00Z" },
+      ],
+    });
+    expect(resolveEscalations(NOW, [already]).map((n) => n.recipientId)).toEqual(["mgr-2"]);
+  });
+
+  it("self-cancels once the stalled person acts", () => {
+    expect(resolveEscalations(NOW, [state({ reviewReturns: [returned("resp", true, "2026-07-31T12:00:00Z")] })])).toEqual([]);
+  });
+
+  it("escalates an author stall the same way", () => {
+    const authorStall = state({
+      reviewReturns: [returned("resp", true, "2026-07-21T12:00:00Z")],
+      reminders: nudges("author", "review_complete"),
+      workspaceManagers: ["mgr-1", "author"],
+    });
+    const out = resolveEscalations(NOW, [authorStall]);
+    expect(out.map((n) => n.recipientId)).toEqual(["mgr-1"]);
+    expect(out[0].stalled).toEqual([{ userId: "author", departmentId: null, kind: "review_complete", waitingDays: 11 }]);
+  });
+
+  it("is silent for a workspace with no managers", () => {
+    expect(resolveEscalations(NOW, [state({ workspaceManagers: [] })])).toEqual([]);
+  });
+});
+
+describe("describeStall", () => {
+  const base = (over: Partial<SopReminderState> = {}): SopReminderState => ({
+    sop: sop(),
+    seats: [
+      { departmentId: "d-r", departmentName: "Engineering", rasic: "responsible", signerId: "resp" },
+      { departmentId: "d-a", departmentName: "Ops", rasic: "accountable", signerId: "acct" },
+    ],
+    qualityApprovers: [{ userId: "q1", holdsSeat: false, overruledThisCycle: false }],
+    reviewReturns: [],
+    openAnnotationCount: 0,
+    recalledAt: null,
+    currentDeptApprovals: [],
+    approvedAt: null,
+    reviewSentAt: "2026-07-21T12:00:00Z",
+    reminders: [],
+    workspaceManagers: [],
+    ...over,
+  });
+
+  it("names how many reviews are still out", () => {
+    expect(describeStall(base())).toBe("2 reviews outstanding (Engineering, Ops)");
+    expect(describeStall(base({ reviewReturns: [returned("resp")] }))).toBe("1 review outstanding (Ops)");
+  });
+
+  it("names the author's move once every review is back", () => {
+    const all = [returned("resp"), returned("acct")];
+    expect(describeStall(base({ reviewReturns: all }))).toBe("author to send for final approval");
+    expect(describeStall(base({ reviewReturns: all, openAnnotationCount: 2 }))).toBe("author to address 2 open remarks");
+  });
+
+  it("names outstanding signatures in the final-approval phase", () => {
+    const fa = base({
+      sop: sop({ finalApprovalRequestedAt: "2026-07-22T00:00:00Z", finalApprovalContentHash: "hash-1" }),
+      currentDeptApprovals: [{ signerId: "resp", departmentId: "d-r" }],
+    });
+    expect(describeStall(fa)).toBe("1 signature outstanding (Ops)");
+  });
+
+  it("names the Quality gate and a rejected draft", () => {
+    expect(describeStall(base({ sop: sop({ status: "approved" }), approvedAt: "2026-07-25T00:00:00Z" }))).toBe("Quality release");
+    expect(describeStall(base({ sop: sop({ status: "draft", rejectedReason: "x" }), recalledAt: "2026-07-25T00:00:00Z" }))).toBe(
+      "author to rework a rejected draft",
+    );
   });
 });
 

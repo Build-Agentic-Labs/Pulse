@@ -14,6 +14,8 @@ export { renderSopNotificationEmail } from "./notification-templates";
 
 export const REMINDER_AFTER_DAYS = 3;
 export const MAX_REMINDERS = 2;
+/** Days after the LAST nudge before an ignored stall is escalated to workspace managers. */
+export const ESCALATE_AFTER_REMINDER_DAYS = 4;
 
 /** Event types the drain scans for. Everything else in sop_event_log is ignored. */
 export const SOP_NOTIFIABLE_EVENT_TYPES = [
@@ -29,7 +31,8 @@ export type SopNotificationKind =
   | "final_approval_requested"
   | "quality_release_requested"
   | "sent_back"
-  | "review_complete";
+  | "review_complete"
+  | "stall_escalated";
 
 /** Local copy of the RASIC union — domain must not import from src/lib. */
 export type SopSeatRasic = "responsible" | "accountable" | "support" | "consulted" | "informed";
@@ -287,12 +290,16 @@ export interface SopReminderState {
   reviewSentAt: string | null;
   /** Prior SENT reminder rows for this SOP, any cycle (event_id null, sent_at not null). */
   reminders: ReminderLedgerRow[];
+  /** Workspace owners/admins — where an ignored stall escalates. */
+  workspaceManagers: string[];
 }
 
 interface ReminderCandidate {
   recipientId: string;
   kind: SopNotificationKind;
   anchorAt: string;
+  /** The seat the stall belongs to; null for author and Quality stalls. */
+  departmentId: string | null;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -318,7 +325,12 @@ function signerCandidates(state: SopReminderState): ReminderCandidate[] {
     const returned = new Set(state.reviewReturns.map((entry) => entry.reviewerId));
     for (const seat of state.seats) {
       if (!isBlocking(seat.rasic) || !seat.signerId || returned.has(seat.signerId)) continue;
-      candidates.push({ recipientId: seat.signerId, kind: "review_requested", anchorAt: state.reviewSentAt });
+      candidates.push({
+        recipientId: seat.signerId,
+        kind: "review_requested",
+        anchorAt: state.reviewSentAt,
+        departmentId: seat.departmentId,
+      });
     }
   }
 
@@ -333,6 +345,7 @@ function signerCandidates(state: SopReminderState): ReminderCandidate[] {
         recipientId: seat.signerId,
         kind: "final_approval_requested",
         anchorAt: sop.finalApprovalRequestedAt,
+        departmentId: seat.departmentId,
       });
     }
   }
@@ -345,11 +358,133 @@ function signerCandidates(state: SopReminderState): ReminderCandidate[] {
         recipientId: approver.userId,
         kind: "quality_release_requested",
         anchorAt: state.approvedAt,
+        departmentId: null,
       });
     }
   }
 
   return candidates;
+}
+
+/** Blocking seats whose signer has not returned a draft review this cycle. */
+function unreturnedSeats(state: SopReminderState): SeatSnapshot[] {
+  const returned = new Set(state.reviewReturns.map((entry) => entry.reviewerId));
+  return state.seats.filter((seat) => isBlocking(seat.rasic) && seat.signerId && !returned.has(seat.signerId));
+}
+
+/** Blocking seats without a current-cycle department signature. */
+function unsignedSeats(state: SopReminderState): SeatSnapshot[] {
+  return state.seats.filter(
+    (seat) =>
+      isBlocking(seat.rasic) &&
+      seat.signerId &&
+      !state.currentDeptApprovals.some(
+        (approval) => approval.signerId === seat.signerId && approval.departmentId === seat.departmentId,
+      ),
+  );
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * One line naming what an in-flight SOP is waiting on right now — for digests
+ * and escalations, where the reader is not the person who owes the action.
+ */
+export function describeStall(state: SopReminderState): string {
+  const { sop } = state;
+  if (sop.status === "draft") return sop.rejectedReason ? "author to rework a rejected draft" : "";
+  if (sop.status === "approved") return "Quality release";
+  if (sop.status !== "in_review") return "";
+
+  if (finalApprovalPhaseActive(sop)) {
+    const seats = unsignedSeats(state);
+    if (seats.length === 0) return "";
+    return `${plural(seats.length, "signature")} outstanding (${seats.map((seat) => seat.departmentName).join(", ")})`;
+  }
+
+  const outstanding = unreturnedSeats(state);
+  if (outstanding.length > 0) {
+    return `${plural(outstanding.length, "review")} outstanding (${outstanding.map((seat) => seat.departmentName).join(", ")})`;
+  }
+  if (blockingSignerIds(state.seats).length === 0) return "";
+  return state.openAnnotationCount > 0
+    ? `author to address ${plural(state.openAnnotationCount, "open remark")}`
+    : "author to send for final approval";
+}
+
+export interface StalledEntry {
+  userId: string;
+  departmentId: string | null;
+  kind: SopNotificationKind;
+  waitingDays: number;
+}
+
+export interface EscalationPending extends PendingNotification {
+  kind: "stall_escalated";
+  stalled: StalledEntry[];
+}
+
+/**
+ * Escalations: a stall whose every nudge went unanswered for
+ * ESCALATE_AFTER_REMINDER_DAYS is raised once per workspace manager per cycle,
+ * naming who it waits on and for how long. Recomputed from live state, so it
+ * self-cancels the moment the stalled person acts. The stalled person is never
+ * a recipient of their own escalation.
+ */
+export function resolveEscalations(now: Date, states: SopReminderState[]): EscalationPending[] {
+  return states.flatMap((state) => escalationsForSop(now, state));
+}
+
+function escalationsForSop(now: Date, state: SopReminderState): EscalationPending[] {
+  const { sop } = state;
+  if (sop.deletedAt || state.workspaceManagers.length === 0) return [];
+
+  const stalled: StalledEntry[] = [];
+  const seen = new Set<string>();
+  for (const candidate of [...signerCandidates(state), ...authorCandidates(state)]) {
+    const key = `${candidate.recipientId}:${candidate.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const nudges = state.reminders
+      .filter(
+        (row) =>
+          row.recipientId === candidate.recipientId &&
+          row.kind === candidate.kind &&
+          row.reviewCycle === sop.reviewCycle,
+      )
+      .sort((a, b) => a.reminderIndex - b.reminderIndex);
+    if (nudges.length < MAX_REMINDERS) continue;
+    const last = nudges[nudges.length - 1];
+    const sinceLastNudgeDays = (now.getTime() - new Date(last.sentAt).getTime()) / DAY_MS;
+    if (sinceLastNudgeDays < ESCALATE_AFTER_REMINDER_DAYS) continue;
+    stalled.push({
+      userId: candidate.recipientId,
+      departmentId: candidate.departmentId,
+      kind: candidate.kind,
+      waitingDays: Math.floor((now.getTime() - new Date(candidate.anchorAt).getTime()) / DAY_MS),
+    });
+  }
+  if (stalled.length === 0) return [];
+
+  const stalledIds = new Set(stalled.map((entry) => entry.userId));
+  const alreadyEscalated = new Set(
+    state.reminders
+      .filter((row) => row.kind === "stall_escalated" && row.reviewCycle === sop.reviewCycle)
+      .map((row) => row.recipientId),
+  );
+  return Array.from(new Set(state.workspaceManagers))
+    .filter((manager) => !stalledIds.has(manager) && !alreadyEscalated.has(manager))
+    .map((manager) => ({
+      recipientId: manager,
+      kind: "stall_escalated" as const,
+      sopId: sop.id,
+      eventId: null,
+      reminderIndex: 1,
+      reviewCycle: sop.reviewCycle,
+      stalled,
+    }));
 }
 
 function authorCandidates(state: SopReminderState): ReminderCandidate[] {
@@ -363,11 +498,11 @@ function authorCandidates(state: SopReminderState): ReminderCandidate[] {
     // Remarks still open: the author owes rework. None open: the author owes the
     // "send for final approval" click — the stall the pipeline used to be blind to.
     const kind: SopNotificationKind = state.openAnnotationCount > 0 ? "sent_back" : "review_complete";
-    return [{ recipientId: sop.authorId, kind, anchorAt }];
+    return [{ recipientId: sop.authorId, kind, anchorAt, departmentId: null }];
   }
 
   if (sop.status === "draft" && sop.rejectedReason && state.recalledAt) {
-    return [{ recipientId: sop.authorId, kind: "sent_back", anchorAt: state.recalledAt }];
+    return [{ recipientId: sop.authorId, kind: "sent_back", anchorAt: state.recalledAt, departmentId: null }];
   }
 
   return [];

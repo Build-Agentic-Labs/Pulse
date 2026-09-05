@@ -40,6 +40,25 @@ describe("renderSopNotificationEmail", () => {
     expect(out.html).toContain("author of this SOP");
   });
 
+  it("stall_escalated names who the SOP waits on and speaks to a workspace manager", () => {
+    const out = renderSopNotificationEmail(
+      input({
+        kind: "stall_escalated",
+        stalled: [
+          { name: "Tomas Bach", departmentName: "Engineering", waitingDays: 11 },
+          { name: "Ana Author", departmentName: null, waitingDays: 9 },
+        ],
+      }),
+    );
+    expect(out.subject).toBe('Stalled: SOP-0042 "Line Clearance" needs a nudge');
+    expect(out.text).toContain("Tomas Bach (Engineering seat) — 11 days; Ana Author — 9 days");
+    expect(out.html).toContain("owner or admin of this workspace");
+  });
+
+  it("stall_escalated degrades gracefully without names", () => {
+    expect(renderSopNotificationEmail(input({ kind: "stall_escalated" })).text).toContain("has not responded to two reminders");
+  });
+
   it("body links to the SOP in both text and html", () => {
     const { text, html } = renderSopNotificationEmail(input());
     expect(text).toContain("https://pulse.example.com/sops/sop-1");

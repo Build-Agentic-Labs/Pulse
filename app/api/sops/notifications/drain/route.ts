@@ -11,6 +11,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
+import { createStalledDigestDrainStore } from "@/lib/notifications/digest-store";
 import { recordDrainRun, type DrainCaller } from "@/lib/notifications/drain-runs-store";
 import { runDrainRequest } from "@/lib/notifications/run-drain-request";
 import { createResendSender, isAuthorizedCronRequest } from "@/lib/sop/notifications-drain";
@@ -49,6 +50,9 @@ async function drain(request: Request, caller: DrainCaller): Promise<NextRespons
       stores: [
         { label: "sop", store: createSopNotificationDrainStore(admin) },
         { label: "workspace", store: createWorkspaceWelcomeDrainStore(admin) },
+        // Digests are periodic by nature: only the scheduled run owns them, so a
+        // burst of browser kicks can never mail a week's summary early.
+        ...(caller === "cron" ? [{ label: "digest", store: createStalledDigestDrainStore(admin) }] : []),
       ],
       send,
       now: () => new Date(),

@@ -1,7 +1,12 @@
 # SOP Email Notifications — Design
 
 **Date:** 2026-07-21
-**Status:** Approved (brainstorm complete, pending implementation plan)
+**Status:** Shipped 2026-07-21; extended 2026-09-04 (author stalls, escalation, inbox,
+preferences, delivery tracking, Teams, push, console) — see
+`docs/audits/2026-09-04-notification-systems-audit.md`, the plan
+`docs/superpowers/plans/2026-09-04-notification-system.md`, and the runbook
+`docs/runbooks/notifications.md`. Where this spec and those documents differ, the
+later documents win (e.g. reminders are now keyed by review cycle and cover authors).
 **Problem:** SOPs stall waiting on a signer. The pull-based queue at `/sops/review`
 already answers "what's waiting on me," but signers who don't visit the app never
 see it. Email is the only delivery channel (explicit decision — no in-app bell, no

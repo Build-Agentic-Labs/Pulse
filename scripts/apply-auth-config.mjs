@@ -7,7 +7,25 @@
  * in DESIRED below. Requires SUPABASE_ACCESS_TOKEN in the environment.
  *
  *   SUPABASE_ACCESS_TOKEN=sbp_... node scripts/apply-auth-config.mjs [--dry-run]
+ *   SUPABASE_ACCESS_TOKEN=sbp_... node scripts/apply-auth-config.mjs --report
+ *     --report prints the hosted mailer configuration (SMTP host, confirmations,
+ *     rate limit) and changes nothing — the check the 2026-09-04 notifications
+ *     audit could not run: an empty smtp_host means signup/email-change mail is
+ *     still on Supabase's built-in mailer.
  */
+
+const MAILER_REPORT_KEYS = [
+  "smtp_host",
+  "smtp_port",
+  "smtp_sender_name",
+  "smtp_admin_email",
+  "mailer_autoconfirm",
+  "external_email_enabled",
+  "rate_limit_email_sent",
+  "mailer_secure_email_change_enabled",
+  "mailer_otp_exp",
+  "site_url",
+];
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -22,6 +40,17 @@ async function main() {
     process.exit(1);
   }
   const dryRun = process.argv.includes("--dry-run");
+
+  if (process.argv.includes("--report")) {
+    const current = await fetchJson(API_BASE, { headers: { Authorization: `Bearer ${token}` } });
+    console.log("Hosted auth mailer configuration:");
+    for (const key of MAILER_REPORT_KEYS) console.log(`  ${key} = ${preview(current[key])}`);
+    if (!current.smtp_host) {
+      console.log("\nsmtp_host is empty: signup confirmation and email-change mail use Supabase's built-in mailer.");
+      console.log("See docs/runbooks/notifications.md §1 step 5 to route it through Resend SMTP.");
+    }
+    return;
+  }
 
   const templatePath = path.join(process.cwd(), "supabase", "templates", "invite.html");
   const inviteTemplate = await readFile(templatePath, "utf8");

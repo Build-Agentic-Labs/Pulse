@@ -2,12 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   resolveEventRecipients,
   resolveReminders,
-  renderSopNotificationEmail,
   type NotifiableEvent,
+  type ReviewReturnSnapshot,
   type SopNotificationContext,
   type SopSnapshot,
   type SopReminderState,
-  type SopEmailInput,
 } from "./notifications";
 
 const sop = (over: Partial<SopSnapshot> = {}): SopSnapshot => ({
@@ -36,7 +35,15 @@ const ctx = (over: Partial<SopNotificationContext> = {}): SopNotificationContext
     { departmentId: "d-i", departmentName: "HR", rasic: "informed", signerId: "info" },
   ],
   qualityApprovers: [],
+  reviewReturns: [],
+  openAnnotationCount: 0,
   ...over,
+});
+
+const returned = (reviewerId: string, noChanges = true, returnedAt = "2026-07-22T12:00:00Z"): ReviewReturnSnapshot => ({
+  reviewerId,
+  noChanges,
+  returnedAt,
 });
 
 const event = (over: Partial<NotifiableEvent> = {}): NotifiableEvent => ({
@@ -219,12 +226,27 @@ describe("resolveReminders", () => {
       { departmentId: "d-s", departmentName: "Safety", rasic: "support", signerId: "supp" },
     ],
     qualityApprovers: [],
-    currentReviewReturns: [],
+    reviewReturns: [],
+    openAnnotationCount: 0,
+    recalledAt: null,
     currentDeptApprovals: [],
     approvedAt: null,
     reviewSentAt: "2026-07-21T12:00:00Z",
     reminders: [],
     ...over,
+  });
+
+  it("a later review cycle earns its own nudges even after the previous cycle was exhausted", () => {
+    const cycleTwo = state({
+      sop: sop({ reviewCycle: 2 }),
+      reminders: [
+        { recipientId: "resp", kind: "review_requested", reminderIndex: 1, reviewCycle: 1, sentAt: "2026-07-01T12:00:00Z" },
+        { recipientId: "resp", kind: "review_requested", reminderIndex: 2, reviewCycle: 1, sentAt: "2026-07-05T12:00:00Z" },
+      ],
+    });
+    expect(resolveReminders(NOW, [cycleTwo])).toEqual([
+      { recipientId: "resp", kind: "review_requested", sopId: "sop-1", eventId: null, reminderIndex: 1, reviewCycle: 2 },
+    ]);
   });
 
   it("nudges every stalled required approver after 3 days", () => {
@@ -244,14 +266,15 @@ describe("resolveReminders", () => {
   });
 
   it("skips reviewers who already returned their review", () => {
-    expect(resolveReminders(NOW, [state({ currentReviewReturns: ["resp"] })])).toEqual([]);
+    const out = resolveReminders(NOW, [state({ reviewReturns: [returned("resp")] })]);
+    expect(out.filter((n) => n.kind === "review_requested")).toEqual([]);
   });
 
   it("caps at MAX_REMINDERS", () => {
     const capped = state({
       reminders: [
-        { recipientId: "resp", kind: "review_requested", reminderIndex: 1, sentAt: "2026-07-24T12:00:00Z" },
-        { recipientId: "resp", kind: "review_requested", reminderIndex: 2, sentAt: "2026-07-28T12:00:00Z" },
+        { recipientId: "resp", kind: "review_requested", reminderIndex: 1, reviewCycle: 1, sentAt: "2026-07-24T12:00:00Z" },
+        { recipientId: "resp", kind: "review_requested", reminderIndex: 2, reviewCycle: 1, sentAt: "2026-07-28T12:00:00Z" },
       ],
     });
     const late = new Date("2026-08-15T12:00:00Z");
@@ -260,7 +283,7 @@ describe("resolveReminders", () => {
 
   it("anchors nudge 2 on nudge 1's sent_at, not the original event", () => {
     const one = state({
-      reminders: [{ recipientId: "resp", kind: "review_requested", reminderIndex: 1, sentAt: "2026-07-24T00:00:00Z" }],
+      reminders: [{ recipientId: "resp", kind: "review_requested", reminderIndex: 1, reviewCycle: 1, sentAt: "2026-07-24T00:00:00Z" }],
     });
     // 07-25 is only 1.5 days after nudge 1: the required approver is not due.
     expect(resolveReminders(NOW, [one])).toEqual([]);
@@ -308,7 +331,7 @@ describe("resolveReminders", () => {
   it("a reassigned seat's new signer gets nudge 1 (their first contact)", () => {
     const reassigned = state({
       seats: [{ departmentId: "d-r", departmentName: "Engineering", rasic: "responsible", signerId: "new-signer" }],
-      reminders: [{ recipientId: "old-signer", kind: "review_requested", reminderIndex: 1, sentAt: "2026-07-22T12:00:00Z" }],
+      reminders: [{ recipientId: "old-signer", kind: "review_requested", reminderIndex: 1, reviewCycle: 1, sentAt: "2026-07-22T12:00:00Z" }],
     });
     const out = resolveReminders(NOW, [reassigned]);
     expect(ids(out)).toEqual(["new-signer"]);
@@ -316,90 +339,114 @@ describe("resolveReminders", () => {
   });
 });
 
-describe("renderSopNotificationEmail", () => {
-  const input = (over: Partial<SopEmailInput> = {}): SopEmailInput => ({
-    kind: "review_requested",
-    sopNumber: "SOP-0042",
-    title: "Line Clearance",
-    version: "C",
-    actorName: "Sam Submitter",
-    departmentName: "Engineering",
-    origin: "https://pulse.example.com",
-    sopId: "sop-1",
-    reminderIndex: 0,
-    waitingDays: null,
-    ...over,
+describe("resolveEventRecipients: review_complete", () => {
+  const completeCtx = (over: Partial<SopNotificationContext> = {}): SopNotificationContext =>
+    ctx({ reviewReturns: [returned("resp"), returned("acct")], openAnnotationCount: 0, ...over });
+  const returnedEvent = (over: Partial<NotifiableEvent> = {}): NotifiableEvent =>
+    event({
+      id: 20,
+      eventType: "review_returned",
+      actorId: "acct",
+      actorName: "Ann Acct",
+      details: { no_changes: true, reviewer_id: "acct" },
+      ...over,
+    });
+
+  it("emails the author when every required approver has returned no changes", () => {
+    expect(resolveEventRecipients(returnedEvent(), completeCtx())).toEqual([
+      { recipientId: "author", kind: "review_complete", sopId: "sop-1", eventId: 20, reminderIndex: 0, reviewCycle: 1 },
+    ]);
   });
 
-  it("review subject carries number, title, and revision", () => {
-    expect(renderSopNotificationEmail(input()).subject).toBe('Review requested: SOP-0042 "Line Clearance" (Rev C)');
+  it("stays silent while a required approver is still waiting", () => {
+    expect(resolveEventRecipients(returnedEvent(), completeCtx({ reviewReturns: [returned("acct")] }))).toEqual([]);
   });
 
-  it("subjects match the spec shapes for the other kinds", () => {
-    expect(renderSopNotificationEmail(input({ kind: "final_approval_requested" })).subject).toBe(
-      'Signature needed: SOP-0042 "Line Clearance"',
-    );
-    expect(renderSopNotificationEmail(input({ kind: "quality_release_requested" })).subject).toBe(
-      'Ready for release: SOP-0042 "Line Clearance"',
-    );
-    expect(renderSopNotificationEmail(input({ kind: "sent_back" })).subject).toBe(
-      'Sent back with remarks: SOP-0042 "Line Clearance"',
-    );
+  it("stays silent while remarks are unresolved", () => {
+    expect(resolveEventRecipients(returnedEvent(), completeCtx({ openAnnotationCount: 2 }))).toEqual([]);
   });
 
-  it("body links to the SOP in both text and html", () => {
-    const { text, html } = renderSopNotificationEmail(input());
-    expect(text).toContain("https://pulse.example.com/sops/sop-1");
-    expect(html).toContain('href="https://pulse.example.com/sops/sop-1"');
+  it("stays silent when a return requested changes — that is the sent_back path", () => {
+    const changes = completeCtx({ reviewReturns: [returned("resp"), returned("acct", false)] });
+    expect(resolveEventRecipients(returnedEvent(), changes)).toEqual([]);
   });
 
-  it("reminders get the prefix and the waiting line", () => {
-    const out = renderSopNotificationEmail(input({ reminderIndex: 1, waitingDays: 4 }));
-    expect(out.subject).toBe('Reminder: Review requested: SOP-0042 "Line Clearance" (Rev C)');
-    expect(out.text).toContain("waiting 4 days");
+  it("never emails the author about their own return", () => {
+    expect(resolveEventRecipients(returnedEvent({ actorId: "author" }), completeCtx())).toEqual([]);
   });
 
-  it("html-escapes user-controlled fields", () => {
-    const out = renderSopNotificationEmail(input({ title: '<img src=x onerror=1>' }));
-    expect(out.html).not.toContain("<img");
-    expect(out.html).toContain("&lt;img");
-  });
-
-  it("falls back gracefully when number/title/version are missing", () => {
-    const out = renderSopNotificationEmail(input({ sopNumber: null, title: null, version: null }));
-    expect(out.subject).toBe('Review requested: SOP "Untitled SOP"');
-  });
-
-  it("brands the html with the Pulse wordmark and an uppercase kind eyebrow", () => {
-    const { html } = renderSopNotificationEmail(input());
-    expect(html).toContain(">Pulse</span>");
-    expect(html).toContain("Review requested</p>");
-  });
-
-  it("footer explains why the recipient got the email, per kind", () => {
-    expect(renderSopNotificationEmail(input()).html).toContain("you hold a review seat");
-    expect(renderSopNotificationEmail(input({ kind: "final_approval_requested" })).html).toContain(
-      "you hold a review seat",
-    );
-    expect(renderSopNotificationEmail(input({ kind: "quality_release_requested" })).html).toContain(
-      "Quality approver",
-    );
-    expect(renderSopNotificationEmail(input({ kind: "sent_back" })).html).toContain("author of this SOP");
-  });
-
-  it("text version carries the reason footer too", () => {
-    expect(renderSopNotificationEmail(input()).text).toContain("you hold a review seat");
-  });
-
-  it("reminder emails mark the eyebrow and render the waiting line as a note", () => {
-    const { html } = renderSopNotificationEmail(input({ reminderIndex: 1, waitingDays: 4 }));
-    expect(html).toContain("Reminder — Review requested</p>");
-    expect(html).toContain("waiting 4 days");
-  });
-
-  it("escapes the title inside the card heading", () => {
-    const { html } = renderSopNotificationEmail(input({ title: '<b>"sneaky"</b>' }));
-    expect(html).not.toContain("<b>");
-    expect(html).toContain("&lt;b&gt;");
+  it("drops the email once final approval is already underway", () => {
+    const moved = completeCtx({
+      sop: sop({ finalApprovalRequestedAt: "2026-07-23T00:00:00Z", finalApprovalContentHash: "hash-1" }),
+    });
+    expect(resolveEventRecipients(returnedEvent(), moved)).toEqual([]);
   });
 });
+
+describe("resolveReminders: author stalls", () => {
+  const NOW = new Date("2026-07-25T12:00:00Z");
+  const state = (over: Partial<SopReminderState> = {}): SopReminderState => ({
+    sop: sop(),
+    seats: [{ departmentId: "d-r", departmentName: "Engineering", rasic: "responsible", signerId: "resp" }],
+    qualityApprovers: [],
+    reviewReturns: [],
+    openAnnotationCount: 0,
+    recalledAt: null,
+    currentDeptApprovals: [],
+    approvedAt: null,
+    reviewSentAt: "2026-07-20T12:00:00Z",
+    reminders: [],
+    ...over,
+  });
+  const authorNudge = (kind: "review_complete" | "sent_back", reminderIndex = 1) => ({
+    recipientId: "author",
+    kind,
+    sopId: "sop-1",
+    eventId: null,
+    reminderIndex,
+    reviewCycle: 1,
+  });
+
+  it("nudges the author when every review is back and remarks are addressed", () => {
+    const s = state({ reviewReturns: [returned("resp", true, "2026-07-21T12:00:00Z")] });
+    expect(resolveReminders(NOW, [s])).toEqual([authorNudge("review_complete")]);
+  });
+
+  it("nudges the author to address remarks when changes were requested", () => {
+    const s = state({ reviewReturns: [returned("resp", false, "2026-07-21T12:00:00Z")], openAnnotationCount: 3 });
+    expect(resolveReminders(NOW, [s])).toEqual([authorNudge("sent_back")]);
+  });
+
+  it("nudges the author of a rejected draft, anchored on the recall", () => {
+    const s = state({ sop: sop({ status: "draft", rejectedReason: "unclear" }), recalledAt: "2026-07-21T12:00:00Z" });
+    expect(resolveReminders(NOW, [s])).toEqual([authorNudge("sent_back")]);
+  });
+
+  it("does not nudge the author before the threshold", () => {
+    const s = state({ reviewReturns: [returned("resp", true, "2026-07-24T12:00:00Z")] });
+    expect(resolveReminders(NOW, [s])).toEqual([]);
+  });
+
+  it("anchors the second author nudge on the first and caps at MAX_REMINDERS", () => {
+    const s = state({
+      reviewReturns: [returned("resp", true, "2026-07-10T12:00:00Z")],
+      reminders: [{ recipientId: "author", kind: "review_complete", reminderIndex: 1, reviewCycle: 1, sentAt: "2026-07-23T12:00:00Z" }],
+    });
+    expect(resolveReminders(NOW, [s])).toEqual([]);
+    expect(resolveReminders(new Date("2026-07-27T12:00:00Z"), [s])).toEqual([authorNudge("review_complete", 2)]);
+    const exhausted = state({
+      reviewReturns: [returned("resp", true, "2026-07-10T12:00:00Z")],
+      reminders: [
+        { recipientId: "author", kind: "review_complete", reminderIndex: 1, reviewCycle: 1, sentAt: "2026-07-13T12:00:00Z" },
+        { recipientId: "author", kind: "review_complete", reminderIndex: 2, reviewCycle: 1, sentAt: "2026-07-16T12:00:00Z" },
+      ],
+    });
+    expect(resolveReminders(new Date("2026-08-15T12:00:00Z"), [exhausted])).toEqual([]);
+  });
+
+  it("does not nudge an SOP without an author", () => {
+    const s = state({ sop: sop({ authorId: null }), reviewReturns: [returned("resp", true, "2026-07-21T12:00:00Z")] });
+    expect(resolveReminders(NOW, [s])).toEqual([]);
+  });
+});
+

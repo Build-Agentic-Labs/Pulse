@@ -4,10 +4,13 @@
  * assembles plain-value contexts from the database; these functions only decide.
  * Recipients resolve against CURRENT state (drain time), and each rule carries a
  * skip-unless-now guard so an email whose moment has passed is dropped, not sent.
+ * Templates live in ./notification-templates.
  * Spec: docs/superpowers/specs/2026-07-21-sop-notifications-design.md
+ * Phase 0 additions: docs/audits/2026-09-04-notification-systems-audit.md §4
  */
 
-import { escapeHtml, renderEmailShell } from "@/domain/notification-email-shell";
+export type { SopEmailContent, SopEmailInput } from "./notification-templates";
+export { renderSopNotificationEmail } from "./notification-templates";
 
 export const REMINDER_AFTER_DAYS = 3;
 export const MAX_REMINDERS = 2;
@@ -25,7 +28,8 @@ export type SopNotificationKind =
   | "review_requested"
   | "final_approval_requested"
   | "quality_release_requested"
-  | "sent_back";
+  | "sent_back"
+  | "review_complete";
 
 /** Local copy of the RASIC union — domain must not import from src/lib. */
 export type SopSeatRasic = "responsible" | "accountable" | "support" | "consulted" | "informed";
@@ -72,20 +76,33 @@ export interface QualityApproverSnapshot {
   overruledThisCycle: boolean;
 }
 
+/** One reviewer's returned draft review for the CURRENT cycle. */
+export interface ReviewReturnSnapshot {
+  reviewerId: string;
+  noChanges: boolean;
+  returnedAt: string;
+}
+
 export interface SopNotificationContext {
   sop: SopSnapshot;
   seats: SeatSnapshot[];
   qualityApprovers: QualityApproverSnapshot[];
+  /** Current-cycle draft-review returns (sop_review_submissions). */
+  reviewReturns: ReviewReturnSnapshot[];
+  /** Current-cycle remarks still unresolved — they block "send for final approval". */
+  openAnnotationCount: number;
 }
 
 export interface PendingNotification {
   recipientId: string;
   kind: SopNotificationKind;
   sopId: string;
-  /** Null for reminders; reminders key on (sopId, recipientId, kind, reminderIndex). */
+  /** Null for reminders; reminders key on (sopId, recipientId, kind, reminderIndex, reviewCycle). */
   eventId: number | null;
   /** 0 for first-touch mail, 1..MAX_REMINDERS for nudges. */
   reminderIndex: number;
+  /** The SOP's review cycle at decision time — part of the reminder claim key. */
+  reviewCycle: number;
 }
 
 /** The final-approval phase is live only while the content still matches the request. */
@@ -95,6 +112,32 @@ export function finalApprovalPhaseActive(sop: SopSnapshot): boolean {
 
 function isBlocking(rasic: SopSeatRasic): boolean {
   return rasic === "responsible" || rasic === "accountable";
+}
+
+function blockingSignerIds(seats: SeatSnapshot[]): string[] {
+  return Array.from(
+    new Set(seats.filter((seat) => isBlocking(seat.rasic) && seat.signerId).map((seat) => seat.signerId as string)),
+  );
+}
+
+/** Every required approver with a seat has returned their draft review this cycle. */
+function everyBlockingSignerReturned(seats: SeatSnapshot[], returns: ReviewReturnSnapshot[]): boolean {
+  const signers = blockingSignerIds(seats);
+  if (signers.length === 0) return false;
+  const returned = new Set(returns.map((entry) => entry.reviewerId));
+  return signers.every((signer) => returned.has(signer));
+}
+
+function anyChangesRequested(seats: SeatSnapshot[], returns: ReviewReturnSnapshot[]): boolean {
+  const signers = new Set(blockingSignerIds(seats));
+  return returns.some((entry) => signers.has(entry.reviewerId) && !entry.noChanges);
+}
+
+function latestReturnAt(returns: ReviewReturnSnapshot[]): string | null {
+  return returns.reduce<string | null>(
+    (latest, entry) => (latest === null || entry.returnedAt > latest ? entry.returnedAt : latest),
+    null,
+  );
 }
 
 function parseEventDetails(details: unknown): { toStatus?: string; noChanges?: boolean } {
@@ -115,6 +158,15 @@ function dedupeByRecipient(list: PendingNotification[]): PendingNotification[] {
   });
 }
 
+function firstTouch(
+  ctx: SopNotificationContext,
+  event: NotifiableEvent,
+  recipientId: string,
+  kind: SopNotificationKind,
+): PendingNotification {
+  return { recipientId, kind, sopId: ctx.sop.id, eventId: event.id, reminderIndex: 0, reviewCycle: ctx.sop.reviewCycle };
+}
+
 function seatRecipients(
   event: NotifiableEvent,
   ctx: SopNotificationContext,
@@ -124,14 +176,18 @@ function seatRecipients(
   return dedupeByRecipient(
     ctx.seats
       .filter((seat) => includeSeat(seat.rasic) && seat.signerId && seat.signerId !== event.actorId)
-      .map((seat) => ({
-        recipientId: seat.signerId as string,
-        kind,
-        sopId: ctx.sop.id,
-        eventId: event.id,
-        reminderIndex: 0,
-      })),
+      .map((seat) => firstTouch(ctx, event, seat.signerId as string, kind)),
   );
+}
+
+function authorRecipient(
+  event: NotifiableEvent,
+  ctx: SopNotificationContext,
+  kind: SopNotificationKind,
+): PendingNotification[] {
+  const { sop } = ctx;
+  if (!sop.authorId || sop.authorId === event.actorId) return [];
+  return [firstTouch(ctx, event, sop.authorId, kind)];
 }
 
 /**
@@ -171,21 +227,25 @@ export function resolveEventRecipients(
             approver.userId !== sop.submittedBy &&
             approver.userId !== event.actorId,
         )
-        .map((approver) => ({
-          recipientId: approver.userId,
-          kind: "quality_release_requested" as const,
-          sopId: sop.id,
-          eventId: event.id,
-          reminderIndex: 0,
-        }));
+        .map((approver) => firstTouch(ctx, event, approver.userId, "quality_release_requested"));
     }
 
     case "review_returned": {
-      // no_changes=true is an acceptance, not a send-back. Malformed details -> no mail.
-      if (parseEventDetails(event.details).noChanges !== false) return [];
-      if (sop.status === "obsolete") return [];
-      if (!sop.authorId || sop.authorId === event.actorId) return [];
-      return [{ recipientId: sop.authorId, kind: "sent_back", sopId: sop.id, eventId: event.id, reminderIndex: 0 }];
+      const { noChanges } = parseEventDetails(event.details);
+      // Malformed details -> no mail.
+      if (noChanges === undefined) return [];
+      if (noChanges === false) {
+        if (sop.status === "obsolete") return [];
+        return authorRecipient(event, ctx, "sent_back");
+      }
+      // An acceptance: the author's next move exists only once EVERY required
+      // approver has accepted and nothing remains open. Until then, silence —
+      // and a change request already reached the author as sent_back.
+      if (sop.status !== "in_review" || finalApprovalPhaseActive(sop)) return [];
+      if (!everyBlockingSignerReturned(ctx.seats, ctx.reviewReturns)) return [];
+      if (anyChangesRequested(ctx.seats, ctx.reviewReturns)) return [];
+      if (ctx.openAnnotationCount > 0) return [];
+      return authorRecipient(event, ctx, "review_complete");
     }
 
     case "review_recalled": {
@@ -194,8 +254,7 @@ export function resolveEventRecipients(
       // clears it — so its presence is what separates "rejected" from "recalled".
       if (!sop.rejectedReason) return [];
       if (sop.status !== "draft") return [];
-      if (!sop.authorId || sop.authorId === event.actorId) return [];
-      return [{ recipientId: sop.authorId, kind: "sent_back", sopId: sop.id, eventId: event.id, reminderIndex: 0 }];
+      return authorRecipient(event, ctx, "sent_back");
     }
 
     default:
@@ -207,6 +266,7 @@ export interface ReminderLedgerRow {
   recipientId: string;
   kind: SopNotificationKind;
   reminderIndex: number;
+  reviewCycle: number;
   sentAt: string;
 }
 
@@ -214,14 +274,18 @@ export interface SopReminderState {
   sop: SopSnapshot;
   seats: SeatSnapshot[];
   qualityApprovers: QualityApproverSnapshot[];
-  /** Reviewer ids with a sop_review_submissions row for the current cycle. */
-  currentReviewReturns: string[];
+  /** Current-cycle draft-review returns (sop_review_submissions). */
+  reviewReturns: ReviewReturnSnapshot[];
+  /** Current-cycle remarks still unresolved. */
+  openAnnotationCount: number;
+  /** Latest review_recalled event time for the current cycle — the send-back anchor for a rejected draft. */
+  recalledAt: string | null;
   /** dept_approval signatures for the current cycle + final-approval hash, per seat. */
   currentDeptApprovals: { signerId: string; departmentId: string }[];
   approvedAt: string | null;
   /** Latest review_sent event time for the current cycle (any age, no window). */
   reviewSentAt: string | null;
-  /** Prior SENT reminder rows for this SOP (event_id null, sent_at not null). */
+  /** Prior SENT reminder rows for this SOP, any cycle (event_id null, sent_at not null). */
   reminders: ReminderLedgerRow[];
 }
 
@@ -234,23 +298,24 @@ interface ReminderCandidate {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Nudges for signer stalls, recomputed from CURRENT state every drain — which is
- * what makes reminders self-cancelling on recall/rejection/retirement, and what
- * hands a reassigned seat's new signer their first nudge with no special case.
- * Nudge 1 anchors on the stall's start; nudge N anchors on nudge N-1's sent_at.
+ * Nudges for stalls, recomputed from CURRENT state every drain — which is what
+ * makes reminders self-cancelling on recall/rejection/retirement, and what hands
+ * a reassigned seat's new signer their first nudge with no special case.
+ * Signer stalls (review, signature, release) AND author stalls (every review is
+ * back, or a send-back awaits rework) are covered. Nudge 1 anchors on the stall's
+ * start; nudge N anchors on nudge N-1's sent_at. Claims key on the review cycle,
+ * so a later cycle earns its own nudges.
  */
 export function resolveReminders(now: Date, states: SopReminderState[]): PendingNotification[] {
   return states.flatMap((state) => remindersForSop(now, state));
 }
 
-function remindersForSop(now: Date, state: SopReminderState): PendingNotification[] {
+function signerCandidates(state: SopReminderState): ReminderCandidate[] {
   const { sop } = state;
-  if (sop.deletedAt) return [];
-
   const candidates: ReminderCandidate[] = [];
 
   if (sop.status === "in_review" && !finalApprovalPhaseActive(sop) && state.reviewSentAt) {
-    const returned = new Set(state.currentReviewReturns);
+    const returned = new Set(state.reviewReturns.map((entry) => entry.reviewerId));
     for (const seat of state.seats) {
       if (!isBlocking(seat.rasic) || !seat.signerId || returned.has(seat.signerId)) continue;
       candidates.push({ recipientId: seat.signerId, kind: "review_requested", anchorAt: state.reviewSentAt });
@@ -284,6 +349,36 @@ function remindersForSop(now: Date, state: SopReminderState): PendingNotificatio
     }
   }
 
+  return candidates;
+}
+
+function authorCandidates(state: SopReminderState): ReminderCandidate[] {
+  const { sop } = state;
+  if (!sop.authorId) return [];
+
+  if (sop.status === "in_review" && !finalApprovalPhaseActive(sop)) {
+    if (!everyBlockingSignerReturned(state.seats, state.reviewReturns)) return [];
+    const anchorAt = latestReturnAt(state.reviewReturns);
+    if (!anchorAt) return [];
+    // Remarks still open: the author owes rework. None open: the author owes the
+    // "send for final approval" click — the stall the pipeline used to be blind to.
+    const kind: SopNotificationKind = state.openAnnotationCount > 0 ? "sent_back" : "review_complete";
+    return [{ recipientId: sop.authorId, kind, anchorAt }];
+  }
+
+  if (sop.status === "draft" && sop.rejectedReason && state.recalledAt) {
+    return [{ recipientId: sop.authorId, kind: "sent_back", anchorAt: state.recalledAt }];
+  }
+
+  return [];
+}
+
+function remindersForSop(now: Date, state: SopReminderState): PendingNotification[] {
+  const { sop } = state;
+  if (sop.deletedAt) return [];
+
+  const candidates = [...signerCandidates(state), ...authorCandidates(state)];
+
   const out: PendingNotification[] = [];
   const seen = new Set<string>();
   for (const candidate of candidates) {
@@ -292,7 +387,12 @@ function remindersForSop(now: Date, state: SopReminderState): PendingNotificatio
     seen.add(key);
 
     const prior = state.reminders
-      .filter((row) => row.recipientId === candidate.recipientId && row.kind === candidate.kind)
+      .filter(
+        (row) =>
+          row.recipientId === candidate.recipientId &&
+          row.kind === candidate.kind &&
+          row.reviewCycle === sop.reviewCycle,
+      )
       .sort((a, b) => a.reminderIndex - b.reminderIndex);
     const last = prior[prior.length - 1];
     const nextIndex = last ? last.reminderIndex + 1 : 1;
@@ -308,116 +408,8 @@ function remindersForSop(now: Date, state: SopReminderState): PendingNotificatio
       sopId: sop.id,
       eventId: null,
       reminderIndex: nextIndex,
+      reviewCycle: sop.reviewCycle,
     });
   }
   return out;
-}
-
-export interface SopEmailInput {
-  kind: SopNotificationKind;
-  sopNumber: string | null;
-  title: string | null;
-  version: string | null;
-  actorName: string;
-  departmentName: string | null;
-  origin: string;
-  sopId: string;
-  reminderIndex: number;
-  waitingDays: number | null;
-}
-
-export interface SopEmailContent {
-  subject: string;
-  text: string;
-  html: string;
-}
-
-const SEAT_REASON = "You are receiving this because you hold a review seat on this SOP.";
-
-/**
- * Four literal templates, one per kind — deliberately no engine, no registry
- * (spec's YAGNI cuts). The html is a branded, email-client-safe card: inline
- * styles only, table layout (Outlook), squared 4px geometry to match the app's
- * design language, and a per-kind accent + "why you got this" footer.
- */
-export function renderSopNotificationEmail(input: SopEmailInput): SopEmailContent {
-  const label = `${input.sopNumber ?? "SOP"} "${input.title ?? "Untitled SOP"}"`;
-  const link = `${input.origin}/sops/${input.sopId}`;
-
-  let subject: string;
-  let eyebrow: string;
-  let accent: string;
-  let reason: string;
-  let happened: string;
-  let needed: string;
-  switch (input.kind) {
-    case "review_requested":
-      subject = `Review requested: ${label}${input.version ? ` (Rev ${input.version})` : ""}`;
-      eyebrow = "Review requested";
-      accent = "#2563eb";
-      reason = SEAT_REASON;
-      happened = `${input.actorName} sent ${label} for review.`;
-      needed = input.departmentName
-        ? `You are the reviewer for the ${input.departmentName} seat — please review it and return your result.`
-        : `Please review it and return your result.`;
-      break;
-    case "final_approval_requested":
-      subject = `Signature needed: ${label}`;
-      eyebrow = "Signature needed";
-      accent = "#7c3aed";
-      reason = SEAT_REASON;
-      happened = `Every reviewer accepted ${label}.`;
-      needed = input.departmentName
-        ? `Your formal ${input.departmentName} department signature is needed to approve it.`
-        : `Your formal department signature is needed to approve it.`;
-      break;
-    case "quality_release_requested":
-      subject = `Ready for release: ${label}`;
-      eyebrow = "Ready for release";
-      accent = "#059669";
-      reason = "You are receiving this because you are a Quality approver in this workspace.";
-      happened = `${label} has every department signature.`;
-      needed = `As a Quality approver, you can review it and make it effective.`;
-      break;
-    case "sent_back":
-      subject = `Sent back with remarks: ${label}`;
-      eyebrow = "Sent back";
-      accent = "#dc2626";
-      reason = "You are receiving this because you are the author of this SOP.";
-      happened = `${input.actorName} sent ${label} back.`;
-      needed = `Please address the remarks and resubmit it for review.`;
-      break;
-  }
-
-  const isReminder = input.reminderIndex > 0;
-  if (isReminder) subject = `Reminder: ${subject}`;
-  const eyebrowText = isReminder ? `Reminder — ${eyebrow}` : eyebrow;
-  const waiting =
-    isReminder && input.waitingDays !== null ? `This has been waiting ${input.waitingDays} days.` : null;
-
-  const heading = `${input.sopNumber ?? "SOP"} — ${input.title ?? "Untitled SOP"}${
-    input.version ? ` (Rev ${input.version})` : ""
-  }`;
-
-  const textLines = [happened, needed, waiting, `Open it: ${link}`, "—", reason, input.origin].filter(Boolean);
-
-  const bodyParagraph = (line: string): string =>
-    `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#3f3f46;">${escapeHtml(line)}</p>`;
-  const waitingNote = waiting
-    ? `<p style="margin:0 0 12px;padding:10px 14px;background:#fef3c7;border-radius:4px;font-size:13px;line-height:1.5;color:#92400e;">${escapeHtml(waiting)}</p>`
-    : "";
-
-  const html = renderEmailShell({
-    accent,
-    subtitle: "SOP document control",
-    eyebrow: eyebrowText,
-    heading,
-    bodyParagraphsHtml: bodyParagraph(happened) + bodyParagraph(needed) + waitingNote,
-    ctaLabel: "Open in Pulse",
-    ctaHref: link,
-    reason,
-    origin: input.origin,
-  });
-
-  return { subject, text: textLines.join("\n\n"), html };
 }

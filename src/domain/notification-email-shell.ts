@@ -6,6 +6,13 @@
  * markup only (email-client compatibility). Pure module — no imports.
  */
 
+/** A rendered email: what every sender in the app accepts. */
+export interface EmailContent {
+  subject: string;
+  text: string;
+  html: string;
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")

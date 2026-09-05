@@ -18,7 +18,7 @@ import {
 
 const content: SopEmailContent = { subject: "s", text: "t", html: "<p>t</p>" };
 const item = (over: Partial<DrainItem> = {}): DrainItem => ({
-  pending: { recipientId: "u1", kind: "review_requested", sopId: "sop-1", eventId: 10, reminderIndex: 0 },
+  pending: { recipientId: "u1", kind: "review_requested", sopId: "sop-1", eventId: 10, reminderIndex: 0, reviewCycle: 1 },
   email: "u1@example.com",
   content,
   ...over,
@@ -93,9 +93,9 @@ describe("runSopNotificationDrain", () => {
     const { store, calls } = fakeStore({ items: [item({ email: null })], oldestUnnotifiedEventAgeHours: null });
     let claims = 0;
     const baseClaim = store.claim;
-    store.claim = async (pending) => {
+    store.claim = async (pending, rendered) => {
       claims += 1;
-      return baseClaim(pending);
+      return baseClaim(pending, rendered);
     };
     const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
     expect(report.skippedNoEmail).toBe(1);
@@ -204,12 +204,12 @@ describe("runSopNotificationDrain", () => {
     const { store, calls } = fakeStore({ items, oldestUnnotifiedEventAgeHours: null });
     let first = true;
     const baseClaim = store.claim;
-    store.claim = async (pending) => {
+    store.claim = async (pending, rendered) => {
       if (first) {
         first = false;
         throw new Error("db timeout");
       }
-      return baseClaim(pending);
+      return baseClaim(pending, rendered);
     };
     const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
     expect(report.failed).toBe(1);

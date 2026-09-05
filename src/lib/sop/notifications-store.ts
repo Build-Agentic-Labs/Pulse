@@ -3,21 +3,22 @@
  * resolvers and owns every read/write against sop_notifications. Service-role
  * only — this module must ONLY ever be constructed inside the drain route.
  * All queries are batched by id set; the working set is bounded by the 30-day
- * event window plus currently in-flight (in_review/approved) SOPs.
+ * event window plus currently stalled (in_review / approved / rejected-draft) SOPs.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/database.types";
+import type { Database, Json } from "@/lib/database.types";
+import { renderSopNotificationEmail, type SopEmailContent } from "@/domain/sop/notification-templates";
 import {
   REMINDER_AFTER_DAYS,
   SOP_NOTIFIABLE_EVENT_TYPES,
-  renderSopNotificationEmail,
   resolveEventRecipients,
   resolveReminders,
   type NotifiableEvent,
   type PendingNotification,
   type QualityApproverSnapshot,
   type ReminderLedgerRow,
+  type ReviewReturnSnapshot,
   type SeatSnapshot,
   type SopNotificationContext,
   type SopNotificationKind,
@@ -43,6 +44,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // `GenericStringError` return type instead of `SopRow[]`.
 const SOP_COLUMNS =
   "id, workspace_id, title, sop_number, version, status, deleted_at, created_by, submitted_by, content_hash, final_approval_requested_at, final_approval_content_hash, rejected_reason, review_cycle, approved_at";
+
+/** SOPs the reminder scan owns: signer stalls AND author stalls (a rejected draft awaiting rework). */
+const STALL_SCAN_FILTER = "status.in.(in_review,approved),and(status.eq.draft,rejected_reason.not.is.null)";
 
 type SopRow = {
   id: string;
@@ -85,6 +89,10 @@ interface SopContextBundle {
   sops: Map<string, SopRow>;
   seatsBySop: Map<string, SeatSnapshot[]>;
   qualityApproversBySop: Map<string, QualityApproverSnapshot[]>;
+  /** Current-cycle draft-review returns per SOP. */
+  returnsBySop: Map<string, ReviewReturnSnapshot[]>;
+  /** Current-cycle unresolved remarks per SOP. */
+  openAnnotationsBySop: Map<string, number>;
   emailByUser: Map<string, string | null>;
 }
 
@@ -94,6 +102,8 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       sops: new Map(),
       seatsBySop: new Map(),
       qualityApproversBySop: new Map(),
+      returnsBySop: new Map(),
+      openAnnotationsBySop: new Map(),
       emailByUser: new Map(),
     };
     if (sopIds.length === 0) return bundle;
@@ -109,12 +119,22 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     if (foundIds.length === 0) return bundle;
     const workspaceIds = Array.from(new Set(Array.from(bundle.sops.values()).map((sop) => sop.workspace_id)));
 
-    const [seatsResult, departmentsResult] = await Promise.all([
+    const [seatsResult, departmentsResult, submissionsResult, annotationsResult] = await Promise.all([
       admin.from("sop_review_seats").select("sop_id, department_id, rasic, signer_id").in("sop_id", foundIds),
       admin.from("departments").select("id, workspace_id, name, is_quality_gate").in("workspace_id", workspaceIds),
+      admin
+        .from("sop_review_submissions")
+        .select("sop_id, reviewer_id, review_cycle, no_changes, submitted_at")
+        .in("sop_id", foundIds),
+      admin
+        .from("sop_review_annotations")
+        .select("sop_id, review_cycle")
+        .in("sop_id", foundIds)
+        .is("resolved_at", null),
     ]);
-    if (seatsResult.error) throw new Error(seatsResult.error.message);
-    if (departmentsResult.error) throw new Error(departmentsResult.error.message);
+    for (const result of [seatsResult, departmentsResult, submissionsResult, annotationsResult]) {
+      if (result.error) throw new Error(result.error.message);
+    }
 
     const departmentNameById = new Map(
       (departmentsResult.data ?? []).map((department) => [department.id, department.name]),
@@ -130,6 +150,22 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
           signerId: seat.signer_id,
         },
       ]);
+    }
+
+    for (const submission of submissionsResult.data ?? []) {
+      const sop = bundle.sops.get(submission.sop_id);
+      if (!sop || submission.review_cycle !== sop.review_cycle) continue;
+      const list = bundle.returnsBySop.get(submission.sop_id) ?? [];
+      bundle.returnsBySop.set(submission.sop_id, [
+        ...list,
+        { reviewerId: submission.reviewer_id, noChanges: submission.no_changes, returnedAt: submission.submitted_at },
+      ]);
+    }
+
+    for (const annotation of annotationsResult.data ?? []) {
+      const sop = bundle.sops.get(annotation.sop_id);
+      if (!sop || annotation.review_cycle !== sop.review_cycle) continue;
+      bundle.openAnnotationsBySop.set(annotation.sop_id, (bundle.openAnnotationsBySop.get(annotation.sop_id) ?? 0) + 1);
     }
 
     const qualityDeptByWorkspace = new Map(
@@ -196,6 +232,8 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       sop: toSnapshot(row),
       seats: bundle.seatsBySop.get(sopId) ?? [],
       qualityApprovers: bundle.qualityApproversBySop.get(sopId) ?? [],
+      reviewReturns: bundle.returnsBySop.get(sopId) ?? [],
+      openAnnotationCount: bundle.openAnnotationsBySop.get(sopId) ?? 0,
     };
   }
 
@@ -258,16 +296,16 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       if (ledgerError) throw new Error(ledgerError.message);
       const covered = new Set((ledgerRows ?? []).map((row) => `${row.event_id}:${row.recipient_id}`));
 
-      // 3) In-flight SOPs for the reminder scan.
-      const { data: inFlightRows, error: inFlightError } = await admin
+      // 3) Stalled SOPs for the reminder scan: signer stalls and author stalls.
+      const { data: stalledRows, error: stalledError } = await admin
         .from("sops")
         .select(SOP_COLUMNS)
-        .in("status", ["in_review", "approved"])
+        .or(STALL_SCAN_FILTER)
         .is("deleted_at", null);
-      if (inFlightError) throw new Error(inFlightError.message);
-      const inFlight = (inFlightRows ?? []) as SopRow[];
+      if (stalledError) throw new Error(stalledError.message);
+      const stalled = (stalledRows ?? []) as SopRow[];
 
-      const sopIds = Array.from(new Set([...events.map((event) => event.sopId), ...inFlight.map((sop) => sop.id)]));
+      const sopIds = Array.from(new Set([...events.map((event) => event.sopId), ...stalled.map((sop) => sop.id)]));
       const bundle = await loadContext(sopIds);
 
       // 4) First-touch pendings, minus already-covered (event, recipient) pairs.
@@ -282,47 +320,47 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       }
 
       // 5) Reminder pendings from current state.
-      const inFlightIds = inFlight.map((sop) => sop.id);
-      const [submissions, deptApprovals, reviewSentEvents, reminderRows] = await Promise.all([
-        inFlightIds.length
-          ? admin.from("sop_review_submissions").select("sop_id, reviewer_id, review_cycle").in("sop_id", inFlightIds)
-          : Promise.resolve({ data: [], error: null }),
-        inFlightIds.length
+      const stalledIds = stalled.map((sop) => sop.id);
+      const [deptApprovals, phaseEvents, reminderRows] = await Promise.all([
+        stalledIds.length
           ? admin
               .from("sop_signatures")
               .select("sop_id, signer_id, seat_department_id, review_cycle, signed_content_hash")
-              .in("sop_id", inFlightIds)
+              .in("sop_id", stalledIds)
               .eq("meaning", "dept_approval")
           : Promise.resolve({ data: [], error: null }),
-        inFlightIds.length
+        stalledIds.length
           ? admin
               .from("sop_event_log")
-              .select("sop_id, review_cycle, created_at")
-              .in("sop_id", inFlightIds)
-              .eq("event_type", "review_sent")
+              .select("sop_id, review_cycle, event_type, created_at")
+              .in("sop_id", stalledIds)
+              .in("event_type", ["review_sent", "review_recalled"])
               .order("created_at", { ascending: true })
           : Promise.resolve({ data: [], error: null }),
-        inFlightIds.length
+        stalledIds.length
           ? admin
               .from("sop_notifications")
-              .select("sop_id, recipient_id, kind, reminder_index, sent_at")
-              .in("sop_id", inFlightIds)
+              .select("sop_id, recipient_id, kind, reminder_index, review_cycle, sent_at")
+              .in("sop_id", stalledIds)
               .is("event_id", null)
               .not("sent_at", "is", null)
           : Promise.resolve({ data: [], error: null }),
       ]);
-      for (const result of [submissions, deptApprovals, reviewSentEvents, reminderRows]) {
+      for (const result of [deptApprovals, phaseEvents, reminderRows]) {
         if (result.error) throw new Error(result.error.message);
       }
 
       const reviewSentAtBySop = new Map<string, string>();
-      for (const row of reviewSentEvents.data ?? []) {
+      const recalledAtBySop = new Map<string, string>();
+      for (const row of phaseEvents.data ?? []) {
         const sop = bundle.sops.get(row.sop_id);
         // Ascending order: the last write per (sop, current cycle) wins = latest.
-        if (sop && row.review_cycle === sop.review_cycle) reviewSentAtBySop.set(row.sop_id, row.created_at);
+        if (!sop || row.review_cycle !== sop.review_cycle) continue;
+        if (row.event_type === "review_sent") reviewSentAtBySop.set(row.sop_id, row.created_at);
+        else recalledAtBySop.set(row.sop_id, row.created_at);
       }
 
-      const states: SopReminderState[] = inFlight.flatMap((sop) => {
+      const states: SopReminderState[] = stalled.flatMap((sop) => {
         const ctx = contextFor(bundle, sop.id);
         if (!ctx) return [];
         return [
@@ -330,9 +368,9 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
             sop: ctx.sop,
             seats: ctx.seats,
             qualityApprovers: ctx.qualityApprovers,
-            currentReviewReturns: (submissions.data ?? [])
-              .filter((row) => row.sop_id === sop.id && row.review_cycle === sop.review_cycle)
-              .map((row) => row.reviewer_id),
+            reviewReturns: ctx.reviewReturns,
+            openAnnotationCount: ctx.openAnnotationCount,
+            recalledAt: recalledAtBySop.get(sop.id) ?? null,
             currentDeptApprovals: (deptApprovals.data ?? [])
               .filter(
                 (row) =>
@@ -349,6 +387,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
               recipient_id: string;
               kind: string;
               reminder_index: number;
+              review_cycle: number;
               sent_at: string;
             }[])
               .filter((row) => row.sop_id === sop.id)
@@ -357,6 +396,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
                   recipientId: row.recipient_id,
                   kind: row.kind as SopNotificationKind,
                   reminderIndex: row.reminder_index,
+                  reviewCycle: row.review_cycle,
                   sentAt: row.sent_at,
                 }),
               ),
@@ -395,7 +435,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     async retryItems(now, origin): Promise<RetryItem[]> {
       const { data, error } = await admin
         .from("sop_notifications")
-        .select("id, sop_id, recipient_id, kind, reminder_index, attempts, last_attempt_at, created_at")
+        .select("id, sop_id, recipient_id, kind, reminder_index, review_cycle, attempts, last_attempt_at, created_at")
         .is("sent_at", null)
         .lt("attempts", MAX_SEND_ATTEMPTS);
       if (error) throw new Error(error.message);
@@ -423,6 +463,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
             sopId: row.sop_id,
             eventId: null,
             reminderIndex: row.reminder_index,
+            reviewCycle: row.review_cycle,
           },
           origin,
           "Pulse",
@@ -433,7 +474,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       });
     },
 
-    async claim(pending) {
+    async claim(pending, content: SopEmailContent) {
       const { data, error } = await admin
         .from("sop_notifications")
         .insert({
@@ -442,6 +483,8 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
           kind: pending.kind,
           event_id: pending.eventId,
           reminder_index: pending.reminderIndex,
+          review_cycle: pending.reviewCycle,
+          content: content as unknown as Json,
         })
         .select("id")
         .single();

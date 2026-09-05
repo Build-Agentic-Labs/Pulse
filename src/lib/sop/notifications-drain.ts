@@ -129,8 +129,11 @@ export interface DrainStore<P = PendingNotification> {
   collect(now: Date, origin: string): Promise<DrainBatch<P>>;
   /** Claimed-but-unsent rows past the lease, below the attempt cap. */
   retryItems(now: Date, origin: string): Promise<RetryItem[]>;
-  /** Insert the ledger row; a unique-index conflict returns claimed:false. */
-  claim(pending: P): Promise<{ claimed: boolean; ledgerId: number | null }>;
+  /**
+   * Insert the ledger row with the rendered content snapshotted onto it (retries
+   * resend that exact content); a unique-index conflict returns claimed:false.
+   */
+  claim(pending: P, content: SopEmailContent): Promise<{ claimed: boolean; ledgerId: number | null }>;
   /**
    * Atomically claim a retry row for THIS attempt before sending: a conditional
    * bump (attempts+1, last_attempt_at=now) that only matches while the row is
@@ -226,7 +229,7 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
       continue;
     }
     try {
-      const { claimed, ledgerId } = await store.claim(item.pending);
+      const { claimed, ledgerId } = await store.claim(item.pending, item.content);
       if (!claimed || ledgerId === null) {
         report.skippedDuplicate += 1;
         continue;

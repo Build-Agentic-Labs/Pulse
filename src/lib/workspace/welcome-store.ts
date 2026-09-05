@@ -7,7 +7,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/database.types";
+import type { Database, Json } from "@/lib/database.types";
 import {
   parseMemberAddedEvent,
   renderWorkspaceWelcomeEmail,
@@ -195,7 +195,7 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
       }));
     },
 
-    async claim(pending) {
+    async claim(pending, content) {
       const { data, error } = await admin
         .from("workspace_notifications")
         .insert({
@@ -203,6 +203,7 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
           recipient_id: pending.recipientId,
           kind: pending.kind,
           event_id: pending.eventId,
+          content: content as unknown as Json,
         })
         .select("id")
         .single();

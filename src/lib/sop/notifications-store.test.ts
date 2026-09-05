@@ -7,6 +7,7 @@ type Result = { data: unknown; count?: number; error: { message: string } | null
 
 interface Capture {
   inserts: { table: string; values: Record<string, unknown> }[];
+  updates?: { table: string; values: Record<string, unknown> }[];
 }
 
 // Table-dispatching fake: each `from(table)` yields a thenable builder whose chain
@@ -30,7 +31,10 @@ function makeAdmin(results: Record<string, Result>, capture?: Capture) {
         capture?.inserts.push({ table, values });
         return builder;
       },
-      update: () => builder,
+      update: (values: Record<string, unknown>) => {
+        capture?.updates?.push({ table, values });
+        return builder;
+      },
       then: (resolve: (r: Result) => void) => resolve(results[table] ?? { data: [], error: null }),
     });
     return builder;
@@ -216,19 +220,50 @@ describe("createSopNotificationDrainStore.deadRows", () => {
   });
 });
 
+describe("createSopNotificationDrainStore.collect — channels", () => {
+  const now = new Date("2026-09-04T12:00:00Z");
+
+  it("turns the email channel off for a recipient whose preference says so, keeping the decision", async () => {
+    const store = createSopNotificationDrainStore(
+      makeAdmin(
+        fixtures({
+          notification_preferences: {
+            data: [{ user_id: AUTHOR, workspace_id: "", kind: "review_complete", channel: "email", mode: "off" }],
+            error: null,
+          },
+        }),
+      ),
+    );
+    const batch = await store.collect(now, origin);
+    const first = batch.items.find((item) => item.pending.eventId === 50);
+    expect(first?.channels).toEqual({ email: false, suppressed: false });
+    expect(first?.inbox).toEqual({ link: "/sops/sop-1", entityType: "sop", entityId: "sop-1", workspaceId: "ws-1" });
+  });
+
+  it("flags a suppressed address so the drain never mails it again", async () => {
+    const store = createSopNotificationDrainStore(
+      makeAdmin(fixtures({ email_suppressions: { data: [{ email: "author@anacorp.com" }], error: null } })),
+    );
+    const batch = await store.collect(now, origin);
+    expect(batch.items.find((item) => item.pending.eventId === 50)?.channels).toEqual({ email: true, suppressed: true });
+  });
+});
+
 describe("createSopNotificationDrainStore.claim", () => {
-  it("writes the review cycle and the rendered content onto the ledger row", async () => {
+  const content = { subject: 'Ready for final approval: SOP-0042 "Line Clearance"', text: "Every reviewer has responded.\n\nOpen it.", html: "<p>h</p>" };
+  const claimItem = {
+    pending: { recipientId: AUTHOR, kind: "review_complete" as const, sopId: "sop-1", eventId: 50, reminderIndex: 0, reviewCycle: 2 },
+    email: "author@anacorp.com",
+    content,
+    channels: { email: true, suppressed: false },
+    inbox: { link: "/sops/sop-1", entityType: "sop", entityId: "sop-1", workspaceId: "ws-1" },
+  };
+
+  it("writes the review cycle and the rendered content onto the ledger row, then an inbox row pointing back at it", async () => {
     const capture: Capture = { inserts: [] };
-    const admin = makeAdmin(
-      fixtures({ sop_notifications: { data: { id: 7 }, error: null } }),
-      capture,
-    );
+    const admin = makeAdmin(fixtures({ sop_notifications: { data: { id: 7 }, error: null } }), capture);
     const store = createSopNotificationDrainStore(admin);
-    const content = { subject: "s", text: "t", html: "<p>h</p>" };
-    const claimed = await store.claim(
-      { recipientId: AUTHOR, kind: "review_complete", sopId: "sop-1", eventId: 50, reminderIndex: 0, reviewCycle: 2 },
-      content,
-    );
+    const claimed = await store.claim(claimItem);
     expect(claimed).toEqual({ claimed: true, ledgerId: 7 });
     expect(capture.inserts).toEqual([
       {
@@ -243,6 +278,41 @@ describe("createSopNotificationDrainStore.claim", () => {
           content,
         },
       },
+      {
+        table: "notifications",
+        values: {
+          recipient_id: AUTHOR,
+          workspace_id: "ws-1",
+          source: "sop",
+          source_ledger_id: 7,
+          kind: "review_complete",
+          entity_type: "sop",
+          entity_id: "sop-1",
+          title: 'Ready for final approval: SOP-0042 "Line Clearance"',
+          body: "Every reviewer has responded.",
+          link: "/sops/sop-1",
+        },
+      },
     ]);
+  });
+
+  it("a lost claim race writes no inbox row either", async () => {
+    const capture: Capture = { inserts: [] };
+    const admin = makeAdmin(
+      fixtures({ sop_notifications: { data: null, error: { message: "duplicate", code: "23505" } as never } }),
+      capture,
+    );
+    const store = createSopNotificationDrainStore(admin);
+    expect(await store.claim(claimItem)).toEqual({ claimed: false, ledgerId: null });
+    expect(capture.inserts.map((insert) => insert.table)).toEqual(["sop_notifications"]);
+  });
+});
+
+describe("createSopNotificationDrainStore.markSkipped", () => {
+  it("stamps the reason so the row is terminal without a send", async () => {
+    const capture: Capture = { inserts: [], updates: [] };
+    const store = createSopNotificationDrainStore(makeAdmin(fixtures(), capture));
+    await store.markSkipped!(9, "preference");
+    expect(capture.updates).toEqual([{ table: "sop_notifications", values: { skipped_reason: "preference" } }]);
   });
 });

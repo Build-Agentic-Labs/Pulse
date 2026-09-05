@@ -8,7 +8,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/database.types";
-import { renderSopNotificationEmail, type SopEmailContent } from "@/domain/sop/notification-templates";
+import { resolveEmailEnabled, type PreferenceRow } from "@/domain/notifications/channels";
+import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
+import { renderSopNotificationEmail } from "@/domain/sop/notification-templates";
 import {
   REMINDER_AFTER_DAYS,
   SOP_NOTIFIABLE_EVENT_TYPES,
@@ -97,6 +99,10 @@ interface SopContextBundle {
   /** Current-cycle unresolved remarks per SOP. */
   openAnnotationsBySop: Map<string, number>;
   emailByUser: Map<string, string | null>;
+  /** Email-channel preference rows per recipient (any workspace scope). */
+  prefsByUser: Map<string, PreferenceRow[]>;
+  /** Lower-cased addresses the drain must never mail. */
+  suppressed: Set<string>;
 }
 
 export function createSopNotificationDrainStore(admin: SupabaseClient<Database>): DrainStore {
@@ -108,6 +114,8 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       returnsBySop: new Map(),
       openAnnotationsBySop: new Map(),
       emailByUser: new Map(),
+      prefsByUser: new Map(),
+      suppressed: new Set(),
     };
     if (sopIds.length === 0) return bundle;
 
@@ -228,6 +236,30 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     for (const id of missing) bundle.emailByUser.set(id, found.get(id) ?? null);
   }
 
+  /** Preferences + suppressions for a set of recipients. Call after loadEmails (suppression is keyed by address). */
+  async function loadChannels(bundle: SopContextBundle, userIds: string[]): Promise<void> {
+    const ids = Array.from(new Set(userIds));
+    if (ids.length === 0) return;
+    const emails = ids
+      .map((id) => bundle.emailByUser.get(id)?.toLowerCase())
+      .filter((email): email is string => Boolean(email));
+    const [prefs, suppressions] = await Promise.all([
+      admin.from("notification_preferences").select("user_id, workspace_id, kind, channel, mode").in("user_id", ids).eq("channel", "email"),
+      emails.length
+        ? admin.from("email_suppressions").select("email").in("email", emails)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (prefs.error) throw new Error(prefs.error.message);
+    if (suppressions.error) throw new Error(suppressions.error.message);
+    for (const row of prefs.data ?? []) {
+      bundle.prefsByUser.set(row.user_id, [
+        ...(bundle.prefsByUser.get(row.user_id) ?? []),
+        { workspaceId: row.workspace_id, kind: row.kind, channel: row.channel, mode: row.mode },
+      ]);
+    }
+    for (const row of suppressions.data ?? []) bundle.suppressed.add(String(row.email).toLowerCase());
+  }
+
   function contextFor(bundle: SopContextBundle, sopId: string): SopNotificationContext | null {
     const row = bundle.sops.get(sopId);
     if (!row) return null;
@@ -251,9 +283,15 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     if (!row) return null;
     const seats = bundle.seatsBySop.get(pending.sopId) ?? [];
     const recipientSeat = seats.find((seat) => seat.signerId === pending.recipientId);
+    const email = bundle.emailByUser.get(pending.recipientId) ?? null;
     return {
       pending,
-      email: bundle.emailByUser.get(pending.recipientId) ?? null,
+      email,
+      channels: {
+        email: resolveEmailEnabled(pending.kind, row.workspace_id, bundle.prefsByUser.get(pending.recipientId) ?? []),
+        suppressed: email !== null && bundle.suppressed.has(email.toLowerCase()),
+      },
+      inbox: { link: `/sops/${pending.sopId}`, entityType: "sop", entityId: pending.sopId, workspaceId: row.workspace_id },
       content: renderSopNotificationEmail({
         kind: pending.kind,
         sopNumber: row.sop_number,
@@ -411,10 +449,12 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       const reminderPendings = resolveReminders(now, states);
 
       // 6) Emails + rendered content for everything.
-      await loadEmails(bundle, [
+      const recipientIds = [
         ...eventItems.map((entry) => entry.pending.recipientId),
         ...reminderPendings.map((pending) => pending.recipientId),
-      ]);
+      ];
+      await loadEmails(bundle, recipientIds);
+      await loadChannels(bundle, recipientIds);
 
       const items: DrainItem[] = [];
       for (const { pending, event } of eventItems) {
@@ -444,6 +484,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
           "id, sop_id, recipient_id, kind, reminder_index, review_cycle, attempts, last_attempt_at, created_at, content",
         )
         .is("sent_at", null)
+        .is("skipped_reason", null)
         .lt("attempts", MAX_SEND_ATTEMPTS);
       if (error) throw new Error(error.message);
       // Attempt-scaled lease off last_attempt_at (created_at for a never-tried
@@ -484,7 +525,8 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       });
     },
 
-    async claim(pending, content: SopEmailContent) {
+    async claim(item) {
+      const { pending, content } = item;
       const { data, error } = await admin
         .from("sop_notifications")
         .insert({
@@ -502,7 +544,31 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         if (error.code === "23505") return { claimed: false, ledgerId: null };
         throw new Error(error.message);
       }
-      return { claimed: true, ledgerId: Number(data.id) };
+      const ledgerId = Number(data.id);
+      // The inbox row is the user-visible record of this decision. Its failure
+      // must not undo the claim (the email still owes delivery), so it is logged.
+      const entry = inboxEntryFromEmail(content, item.inbox);
+      const { error: inboxError } = await admin.from("notifications").insert({
+        recipient_id: pending.recipientId,
+        workspace_id: item.inbox.workspaceId,
+        source: "sop",
+        source_ledger_id: ledgerId,
+        kind: pending.kind,
+        entity_type: entry.entityType,
+        entity_id: entry.entityId,
+        title: entry.title,
+        body: entry.body,
+        link: entry.link,
+      });
+      if (inboxError) {
+        console.error("sop_notifications: inbox row write failed", { ledgerId, message: inboxError.message });
+      }
+      return { claimed: true, ledgerId };
+    },
+
+    async markSkipped(ledgerId, reason) {
+      const { error } = await admin.from("sop_notifications").update({ skipped_reason: reason }).eq("id", ledgerId);
+      if (error) throw new Error(error.message);
     },
 
     async deadRows(now) {

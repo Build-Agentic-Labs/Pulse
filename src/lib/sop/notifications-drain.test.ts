@@ -23,6 +23,8 @@ const item = (over: Partial<DrainItem> = {}): DrainItem => ({
   pending: { recipientId: "u1", kind: "review_requested", sopId: "sop-1", eventId: 10, reminderIndex: 0, reviewCycle: 1 },
   email: "u1@example.com",
   content,
+  channels: { email: true, suppressed: false },
+  inbox: { link: "/sops/sop-1", entityType: "sop", entityId: "sop-1", workspaceId: "ws-1" },
   ...over,
 });
 
@@ -30,6 +32,7 @@ function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
   const calls = {
     sent: [] as number[],
     failed: [] as { id: number; attempts: number }[],
+    skipped: [] as { id: number; reason: string }[],
     retryClaims: [] as { id: number; expected: number }[],
   };
   let nextLedgerId = 100;
@@ -44,6 +47,7 @@ function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
     },
     markSent: async (id) => void calls.sent.push(id),
     markFailed: async (id, _error, attempts) => void calls.failed.push({ id, attempts }),
+    markSkipped: async (id, reason) => void calls.skipped.push({ id, reason }),
   };
   return { store, calls };
 }
@@ -84,6 +88,25 @@ describe("createResendSender", () => {
 describe("runSopNotificationDrain", () => {
   const now = () => new Date("2026-07-21T12:00:00Z");
   const origin = "https://pulse.example.com";
+
+  it("records the decision but sends nothing when the recipient turned this kind's email off", async () => {
+    const muted = item({ channels: { email: false, suppressed: false } });
+    const { store, calls } = fakeStore({ items: [muted], oldestUnnotifiedEventAgeHours: null });
+    const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
+    expect(report.skippedByPreference).toBe(1);
+    expect(report.sent).toBe(0);
+    expect(calls.skipped).toEqual([{ id: 100, reason: "preference" }]);
+    expect(calls.sent).toEqual([]);
+  });
+
+  it("never mails a suppressed address, and says so", async () => {
+    const bounced = item({ channels: { email: true, suppressed: true } });
+    const { store, calls } = fakeStore({ items: [bounced], oldestUnnotifiedEventAgeHours: null });
+    const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
+    expect(report.skippedSuppressed).toBe(1);
+    expect(report.sent).toBe(0);
+    expect(calls.skipped).toEqual([{ id: 100, reason: "suppressed" }]);
+  });
 
   it("reports the store's dead rows so the health verdict can see them", async () => {
     const { store } = fakeStore({ items: [], oldestUnnotifiedEventAgeHours: null });
@@ -137,9 +160,9 @@ describe("runSopNotificationDrain", () => {
     const { store, calls } = fakeStore({ items: [item({ email: null })], oldestUnnotifiedEventAgeHours: null });
     let claims = 0;
     const baseClaim = store.claim;
-    store.claim = async (pending, rendered) => {
+    store.claim = async (claimItem) => {
       claims += 1;
-      return baseClaim(pending, rendered);
+      return baseClaim(claimItem);
     };
     const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
     expect(report.skippedNoEmail).toBe(1);
@@ -248,12 +271,12 @@ describe("runSopNotificationDrain", () => {
     const { store, calls } = fakeStore({ items, oldestUnnotifiedEventAgeHours: null });
     let first = true;
     const baseClaim = store.claim;
-    store.claim = async (pending, rendered) => {
+    store.claim = async (claimItem) => {
       if (first) {
         first = false;
         throw new Error("db timeout");
       }
-      return baseClaim(pending, rendered);
+      return baseClaim(claimItem);
     };
     const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
     expect(report.failed).toBe(1);
@@ -291,6 +314,8 @@ describe("assessDrainHealth", () => {
     failed: 0,
     blocked: 0,
     dead: 0,
+    skippedByPreference: 0,
+    skippedSuppressed: 0,
     oldestUnnotifiedEventAgeHours: 1,
   };
 

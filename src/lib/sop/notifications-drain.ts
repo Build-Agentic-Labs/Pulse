@@ -142,11 +142,31 @@ export function createResendSender(apiKey: string, from: string, fetchImpl: type
   };
 }
 
+/** Which deliveries a decision is entitled to, resolved by the store from preferences + suppressions. */
+export interface DrainChannels {
+  /** The recipient has email on for this kind (catalog default unless they said otherwise). */
+  email: boolean;
+  /** The address hard-bounced or complained — never mail it, whatever the preference. */
+  suppressed: boolean;
+}
+
+/** Where the inbox row points; title/body derive from the rendered email. */
+export interface DrainInboxMeta {
+  link: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  workspaceId: string | null;
+}
+
 export interface DrainItem<P = PendingNotification> {
   pending: P;
   email: string | null;
   content: SopEmailContent;
+  channels: DrainChannels;
+  inbox: DrainInboxMeta;
 }
+
+export type SkipReason = "preference" | "suppressed";
 
 export interface RetryItem {
   ledgerId: number;
@@ -170,9 +190,16 @@ export interface DrainStore<P = PendingNotification> {
   retryItems(now: Date, origin: string): Promise<RetryItem[]>;
   /**
    * Insert the ledger row with the rendered content snapshotted onto it (retries
-   * resend that exact content); a unique-index conflict returns claimed:false.
+   * resend that exact content) and the recipient's inbox row pointing back at it;
+   * a unique-index conflict returns claimed:false and writes nothing else.
    */
-  claim(pending: P, content: SopEmailContent): Promise<{ claimed: boolean; ledgerId: number | null }>;
+  claim(item: DrainItem<P>): Promise<{ claimed: boolean; ledgerId: number | null }>;
+  /**
+   * Make a claimed row terminal without a send: the decision stands in the inbox,
+   * but the email channel was off or the address is suppressed. Optional for
+   * stores that never skip.
+   */
+  markSkipped?(ledgerId: number, reason: SkipReason): Promise<void>;
   /**
    * Atomically claim a retry row for THIS attempt before sending: a conditional
    * bump (attempts+1, last_attempt_at=now) that only matches while the row is
@@ -202,6 +229,10 @@ export interface DrainReport {
   blocked: number;
   /** Rows that burned every attempt and will never retry on their own. Non-zero = resend by hand. */
   dead: number;
+  /** Decisions recorded in the inbox whose email the recipient turned off. */
+  skippedByPreference: number;
+  /** Decisions recorded in the inbox whose address is suppressed (bounce/complaint). */
+  skippedSuppressed: number;
   oldestUnnotifiedEventAgeHours: number | null;
 }
 
@@ -267,6 +298,8 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
     failed: 0,
     blocked: 0,
     dead: 0,
+    skippedByPreference: 0,
+    skippedSuppressed: 0,
     oldestUnnotifiedEventAgeHours: batch.oldestUnnotifiedEventAgeHours,
   };
   if (store.deadRows) {
@@ -291,9 +324,21 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
       continue;
     }
     try {
-      const { claimed, ledgerId } = await store.claim(item.pending, item.content);
+      const { claimed, ledgerId } = await store.claim(item);
       if (!claimed || ledgerId === null) {
         report.skippedDuplicate += 1;
+        continue;
+      }
+      // The decision is now on record (ledger + inbox). Whether email follows is
+      // the recipient's call — or the bounce list's.
+      if (item.channels.suppressed) {
+        await store.markSkipped?.(ledgerId, "suppressed");
+        report.skippedSuppressed += 1;
+        continue;
+      }
+      if (!item.channels.email) {
+        await store.markSkipped?.(ledgerId, "preference");
+        report.skippedByPreference += 1;
         continue;
       }
       const outcome = await attemptSend(store, send, ledgerId, item.email, item.content, 0);

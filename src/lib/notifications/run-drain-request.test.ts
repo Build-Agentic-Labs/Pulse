@@ -22,7 +22,15 @@ function sendingStore(ledger: string): DrainStore<unknown> {
   return {
     ...emptyStore(ledger),
     collect: async () => ({
-      items: [{ pending: { recipientId: "u1" }, email: "u1@example.com", content }],
+      items: [
+        {
+          pending: { recipientId: "u1" },
+          email: "u1@example.com",
+          content,
+          channels: { email: true, suppressed: false },
+          inbox: { link: null, entityType: null, entityId: null, workspaceId: null },
+        },
+      ],
       oldestUnnotifiedEventAgeHours: 1,
     }),
   };

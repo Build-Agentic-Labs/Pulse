@@ -8,6 +8,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/database.types";
+import { resolveEmailEnabled, type PreferenceRow } from "@/domain/notifications/channels";
+import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
 import {
   parseMemberAddedEvent,
   renderWorkspaceWelcomeEmail,
@@ -30,6 +32,8 @@ const DEAD_ROW_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface WelcomeBundle {
+  prefsByUser: Map<string, PreferenceRow[]>;
+  suppressed: Set<string>;
   workspaceNameById: Map<string, string>;
   memberKeySet: Set<string>; // `${workspaceId}:${userId}`
   redeemedInviteAtByMemberKey: Map<string, number[]>; // `${workspaceId}:${userId}` -> redemption times
@@ -82,13 +86,40 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
       const key = `${row.workspace_id}:${row.redeemed_by}`;
       redeemedInviteAtByMemberKey.set(key, [...(redeemedInviteAtByMemberKey.get(key) ?? []), redeemedAt]);
     }
+    const profileById = new Map(
+      (profiles.data ?? []).map((row) => [row.id, { fullName: row.full_name, email: row.email }]),
+    );
+    const recipientEmails = recipientIds
+      .map((id) => profileById.get(id)?.email?.toLowerCase())
+      .filter((email): email is string => Boolean(email));
+    const [prefs, suppressions] = await Promise.all([
+      recipientIds.length
+        ? admin
+            .from("notification_preferences")
+            .select("user_id, workspace_id, kind, channel, mode")
+            .in("user_id", recipientIds)
+            .eq("channel", "email")
+        : Promise.resolve({ data: [], error: null }),
+      recipientEmails.length
+        ? admin.from("email_suppressions").select("email").in("email", recipientEmails)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (prefs.error) throw new Error(prefs.error.message);
+    if (suppressions.error) throw new Error(suppressions.error.message);
+    const prefsByUser = new Map<string, PreferenceRow[]>();
+    for (const row of prefs.data ?? []) {
+      prefsByUser.set(row.user_id, [
+        ...(prefsByUser.get(row.user_id) ?? []),
+        { workspaceId: row.workspace_id, kind: row.kind, channel: row.channel, mode: row.mode },
+      ]);
+    }
     return {
+      prefsByUser,
+      suppressed: new Set((suppressions.data ?? []).map((row) => String(row.email).toLowerCase())),
       workspaceNameById: new Map((workspaces.data ?? []).map((row) => [row.id, row.name])),
       memberKeySet: new Set((members.data ?? []).map((row) => `${row.workspace_id}:${row.user_id}`)),
       redeemedInviteAtByMemberKey,
-      profileById: new Map(
-        (profiles.data ?? []).map((row) => [row.id, { fullName: row.full_name, email: row.email }]),
-      ),
+      profileById,
     };
   }
 
@@ -100,9 +131,15 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
   ): DrainItem<WorkspaceWelcomePending> {
     const selfCaused = event.actorId === null || event.actorId === event.recipientId;
     const actorName = event.actorId ? (bundle.profileById.get(event.actorId)?.fullName ?? null) : null;
+    const email = bundle.profileById.get(pending.recipientId)?.email ?? null;
     return {
       pending,
-      email: bundle.profileById.get(pending.recipientId)?.email ?? null,
+      email,
+      channels: {
+        email: resolveEmailEnabled(pending.kind, pending.workspaceId, bundle.prefsByUser.get(pending.recipientId) ?? []),
+        suppressed: email !== null && bundle.suppressed.has(email.toLowerCase()),
+      },
+      inbox: { link: "/", entityType: "workspace", entityId: pending.workspaceId, workspaceId: pending.workspaceId },
       content: renderWorkspaceWelcomeEmail({
         workspaceName: bundle.workspaceNameById.get(pending.workspaceId) ?? "your workspace",
         actorName,
@@ -164,6 +201,7 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
         .from("workspace_notifications")
         .select("id, workspace_id, recipient_id, event_id, attempts, last_attempt_at, created_at, content")
         .is("sent_at", null)
+        .is("skipped_reason", null)
         .lt("attempts", MAX_SEND_ATTEMPTS);
       if (error) throw new Error(error.message);
       // Attempt-scaled lease off last_attempt_at (created_at for a never-tried
@@ -201,7 +239,8 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
       }));
     },
 
-    async claim(pending, content) {
+    async claim(item) {
+      const { pending, content } = item;
       const { data, error } = await admin
         .from("workspace_notifications")
         .insert({
@@ -217,7 +256,29 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
         if (error.code === "23505") return { claimed: false, ledgerId: null };
         throw new Error(error.message);
       }
-      return { claimed: true, ledgerId: Number(data.id) };
+      const ledgerId = Number(data.id);
+      const entry = inboxEntryFromEmail(content, item.inbox);
+      const { error: inboxError } = await admin.from("notifications").insert({
+        recipient_id: pending.recipientId,
+        workspace_id: item.inbox.workspaceId,
+        source: "workspace",
+        source_ledger_id: ledgerId,
+        kind: pending.kind,
+        entity_type: entry.entityType,
+        entity_id: entry.entityId,
+        title: entry.title,
+        body: entry.body,
+        link: entry.link,
+      });
+      if (inboxError) {
+        console.error("workspace_notifications: inbox row write failed", { ledgerId, message: inboxError.message });
+      }
+      return { claimed: true, ledgerId };
+    },
+
+    async markSkipped(ledgerId, reason) {
+      const { error } = await admin.from("workspace_notifications").update({ skipped_reason: reason }).eq("id", ledgerId);
+      if (error) throw new Error(error.message);
     },
 
     async deadRows(now) {

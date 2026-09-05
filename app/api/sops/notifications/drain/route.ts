@@ -14,6 +14,7 @@ import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import { createStalledDigestDrainStore } from "@/lib/notifications/digest-store";
 import { recordDrainRun, type DrainCaller } from "@/lib/notifications/drain-runs-store";
 import { runDrainRequest } from "@/lib/notifications/run-drain-request";
+import { createTeamsSender } from "@/lib/notifications/teams-sender";
 import { createResendSender, isAuthorizedCronRequest } from "@/lib/sop/notifications-drain";
 import { createSopNotificationDrainStore } from "@/lib/sop/notifications-store";
 import { createWorkspaceWelcomeDrainStore } from "@/lib/workspace/welcome-store";
@@ -55,6 +56,7 @@ async function drain(request: Request, caller: DrainCaller): Promise<NextRespons
         ...(caller === "cron" ? [{ label: "digest", store: createStalledDigestDrainStore(admin) }] : []),
       ],
       send,
+      teams: createTeamsSender(),
       now: () => new Date(),
       origin,
       recordRun: (run) => recordDrainRun(admin, run),

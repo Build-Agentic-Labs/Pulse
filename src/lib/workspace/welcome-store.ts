@@ -35,6 +35,7 @@ import {
   type DrainStore,
   type RetryItem,
 } from "@/lib/sop/notifications-drain";
+import { stampDeliveredChannel } from "@/lib/sop/notifications-store";
 
 const EVENT_WINDOW_DAYS = 30;
 const DEAD_ROW_WINDOW_DAYS = 7;
@@ -346,6 +347,10 @@ export function createWorkspaceWelcomeDrainStore(
     async markSkipped(ledgerId, reason) {
       const { error } = await admin.from("workspace_notifications").update({ skipped_reason: reason }).eq("id", ledgerId);
       if (error) throw new Error(error.message);
+    },
+
+    async recordChannel(ledgerId, channel, status) {
+      await stampDeliveredChannel(admin, "workspace", ledgerId, channel, status);
     },
 
     async deadRows(now) {

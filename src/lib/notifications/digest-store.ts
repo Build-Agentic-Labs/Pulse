@@ -19,7 +19,7 @@ import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
 import { listNumberLabel } from "@/domain/sop/authoring";
 import { describeStall } from "@/domain/sop/notifications";
 import type { Database, Json } from "@/lib/database.types";
-import { createSopContextLoader } from "@/lib/sop/notifications-store";
+import { createSopContextLoader, stampDeliveredChannel } from "@/lib/sop/notifications-store";
 import {
   MAX_SEND_ATTEMPTS,
   isRetryDue,
@@ -176,6 +176,10 @@ export function createStalledDigestDrainStore(admin: SupabaseClient<Database>): 
     async markSkipped(ledgerId, reason) {
       const { error } = await admin.from("notification_digests").update({ skipped_reason: reason }).eq("id", ledgerId);
       if (error) throw new Error(error.message);
+    },
+
+    async recordChannel(ledgerId, channel, status) {
+      await stampDeliveredChannel(admin, "digest", ledgerId, channel, status);
     },
 
     async deadRows(now) {

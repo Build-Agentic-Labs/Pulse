@@ -11,6 +11,7 @@ import {
   type DrainReport,
   type DrainStore,
   type EmailSender,
+  type TeamsPoster,
 } from "@/lib/sop/notifications-drain";
 import type { DrainCaller, DrainRunInput } from "./drain-runs-store";
 
@@ -20,6 +21,8 @@ export interface DrainRequestDeps {
   caller: DrainCaller;
   stores: { label: string; store: DrainStore<unknown> }[];
   send: EmailSender | null;
+  /** Optional Teams channel poster; absent = channel off. */
+  teams?: TeamsPoster | null;
   now: () => Date;
   origin: string;
   recordRun: (run: DrainRunInput) => Promise<void>;
@@ -51,7 +54,13 @@ export async function runDrainRequest(deps: DrainRequestDeps): Promise<DrainRequ
 
   for (const { label, store } of deps.stores) {
     try {
-      const report = await runSopNotificationDrain({ store, send: deps.send, now: deps.now, origin: deps.origin });
+      const report = await runSopNotificationDrain({
+        store,
+        send: deps.send,
+        teams: deps.teams ?? null,
+        now: deps.now,
+        origin: deps.origin,
+      });
       stores[label] = report;
       reports.push({ label, report });
     } catch (error: unknown) {

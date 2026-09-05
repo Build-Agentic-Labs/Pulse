@@ -8,6 +8,8 @@
  */
 
 import { timingSafeEqual } from "node:crypto";
+import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
+import { buildTeamsMessage, type TeamsMessage } from "@/domain/notifications/teams-card";
 import type { PendingNotification, SopEmailContent } from "@/domain/sop/notifications";
 import { getBearerToken } from "@/lib/api-auth";
 
@@ -148,7 +150,15 @@ export interface DrainChannels {
   email: boolean;
   /** The address hard-bounced or complained — never mail it, whatever the preference. */
   suppressed: boolean;
+  /**
+   * A workspace-level Teams channel post. Set on ONE item per decision (the store
+   * dedupes), because a channel wants one card per event, not one per recipient.
+   */
+  teams?: { webhookUrl: string } | null;
 }
+
+export type DeliveryChannel = "email" | "teams" | "push";
+export type ChannelStatus = "sent" | "failed";
 
 /** Where the inbox row points; title/body derive from the rendered email. */
 export interface DrainInboxMeta {
@@ -200,6 +210,8 @@ export interface DrainStore<P = PendingNotification> {
    * stores that never skip.
    */
   markSkipped?(ledgerId: number, reason: SkipReason): Promise<void>;
+  /** Stamp a channel outcome on the inbox row so "was it delivered, and how" is answerable. Optional. */
+  recordChannel?(ledgerId: number, channel: DeliveryChannel, status: ChannelStatus): Promise<void>;
   /**
    * Atomically claim a retry row for THIS attempt before sending: a conditional
    * bump (attempts+1, last_attempt_at=now) that only matches while the row is
@@ -233,6 +245,9 @@ export interface DrainReport {
   skippedByPreference: number;
   /** Decisions recorded in the inbox whose address is suppressed (bounce/complaint). */
   skippedSuppressed: number;
+  /** Teams channel cards posted / refused this run. */
+  teamsPosted: number;
+  teamsFailed: number;
   oldestUnnotifiedEventAgeHours: number | null;
 }
 
@@ -281,9 +296,54 @@ export function assessDrainHealth(reports: { label: string; report: DrainReport 
   return { healthy: problems.length === 0, problems };
 }
 
+/** A Teams channel post; the concrete sender lives in src/lib/notifications/teams-sender.ts. */
+export type TeamsPoster = (
+  webhookUrl: string,
+  message: TeamsMessage,
+) => Promise<{ ok: true } | { ok: false; status: number; error: string }>;
+
+function kindLabelFor(entityType: string | null): string {
+  if (entityType === "sop") return "SOP document control";
+  if (entityType === "workspace") return "Company workspace";
+  return "Notification";
+}
+
+async function postTeams<P>(
+  store: DrainStore<P>,
+  teams: TeamsPoster,
+  ledgerId: number,
+  item: DrainItem<P>,
+  origin: string,
+  report: DrainReport,
+): Promise<void> {
+  const hook = item.channels.teams;
+  if (!hook) return;
+  const entry = inboxEntryFromEmail(item.content, item.inbox);
+  const message = buildTeamsMessage({
+    title: entry.title,
+    body: entry.body,
+    kindLabel: kindLabelFor(item.inbox.entityType),
+    link: entry.link,
+    origin,
+  });
+  const result = await teams(hook.webhookUrl, message);
+  if (result.ok) report.teamsPosted += 1;
+  else report.teamsFailed += 1;
+  try {
+    await store.recordChannel?.(ledgerId, "teams", result.ok ? "sent" : "failed");
+  } catch (error: unknown) {
+    console.error(`notification drain (${store.ledger}): channel record failed`, {
+      ledgerId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export async function runSopNotificationDrain<P = PendingNotification>(deps: {
   store: DrainStore<P>;
   send: EmailSender | null;
+  /** Optional Teams channel poster; absent = channel off. */
+  teams?: TeamsPoster | null;
   now: () => Date;
   origin: string;
 }): Promise<DrainReport> {
@@ -300,6 +360,8 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
     dead: 0,
     skippedByPreference: 0,
     skippedSuppressed: 0,
+    teamsPosted: 0,
+    teamsFailed: 0,
     oldestUnnotifiedEventAgeHours: batch.oldestUnnotifiedEventAgeHours,
   };
   if (store.deadRows) {
@@ -334,17 +396,18 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
       if (item.channels.suppressed) {
         await store.markSkipped?.(ledgerId, "suppressed");
         report.skippedSuppressed += 1;
-        continue;
-      }
-      if (!item.channels.email) {
+      } else if (!item.channels.email) {
         await store.markSkipped?.(ledgerId, "preference");
         report.skippedByPreference += 1;
-        continue;
+      } else {
+        const outcome = await attemptSend(store, send, ledgerId, item.email, item.content, 0);
+        if (outcome === "sent") report.sent += 1;
+        else if (outcome === "blocked") report.blocked += 1;
+        else report.failed += 1;
       }
-      const outcome = await attemptSend(store, send, ledgerId, item.email, item.content, 0);
-      if (outcome === "sent") report.sent += 1;
-      else if (outcome === "blocked") report.blocked += 1;
-      else report.failed += 1;
+      // A channel post is workspace-level: it happens whatever the recipient's
+      // own email preference says.
+      if (deps.teams) await postTeams(store, deps.teams, ledgerId, item, deps.origin, report);
     } catch {
       // A store-layer rejection (claim, or the failure bookkeeping itself) must
       // cost only this item. A claimed-but-unstamped row re-enters via the retry lane.
@@ -380,6 +443,23 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
   return report;
 }
 
+/** Channel bookkeeping is diagnostic; it must never change a send's outcome. */
+async function recordChannelQuietly<P>(
+  store: DrainStore<P>,
+  ledgerId: number,
+  channel: DeliveryChannel,
+  status: ChannelStatus,
+): Promise<void> {
+  try {
+    await store.recordChannel?.(ledgerId, channel, status);
+  } catch (error: unknown) {
+    console.error(`notification drain (${store.ledger}): channel record failed`, {
+      ledgerId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function attemptSend<P = PendingNotification>(
   store: DrainStore<P>,
   send: EmailSender,
@@ -392,8 +472,10 @@ async function attemptSend<P = PendingNotification>(
     const result = await send(email, content, { idempotencyKey: `${store.ledger}:${ledgerId}` });
     if (result.ok) {
       await store.markSent(ledgerId, result.id);
+      await recordChannelQuietly(store, ledgerId, "email", "sent");
       return "sent";
     }
+    await recordChannelQuietly(store, ledgerId, "email", "failed");
     // A configuration fault HOLDS the attempt count: the row stays eligible so
     // it delivers itself once someone fixes the credentials. Recipient
     // rejections jump straight to the cap (dead row); transient ones step once.

@@ -27,6 +27,7 @@ function makeAdmin(results: Record<string, Result>, capture?: Capture) {
       gte: () => builder,
       order: () => builder,
       single: () => builder,
+      maybeSingle: () => builder,
       insert: (values: Record<string, unknown>) => {
         capture?.inserts.push({ table, values });
         return builder;
@@ -272,7 +273,7 @@ describe("createSopNotificationDrainStore.collect — channels", () => {
     );
     const batch = await store.collect(now, origin);
     const first = batch.items.find((item) => item.pending.eventId === 50);
-    expect(first?.channels).toEqual({ email: false, suppressed: false });
+    expect(first?.channels).toEqual({ email: false, suppressed: false, teams: null });
     expect(first?.inbox).toEqual({ link: "/sops/sop-1", entityType: "sop", entityId: "sop-1", workspaceId: "ws-1" });
   });
 
@@ -281,7 +282,53 @@ describe("createSopNotificationDrainStore.collect — channels", () => {
       makeAdmin(fixtures({ email_suppressions: { data: [{ email: "author@anacorp.com" }], error: null } })),
     );
     const batch = await store.collect(now, origin);
-    expect(batch.items.find((item) => item.pending.eventId === 50)?.channels).toEqual({ email: true, suppressed: true });
+    expect(batch.items.find((item) => item.pending.eventId === 50)?.channels).toEqual({ email: true, suppressed: true, teams: null });
+  });
+});
+
+describe("createSopNotificationDrainStore.collect — Teams", () => {
+  const now = new Date("2026-09-04T12:00:00Z");
+
+  it("attaches the workspace's enabled webhook to ONE item per decision, so a channel gets one post per event", async () => {
+    const SECOND = "1a000000-0000-0000-0000-000000000003";
+    const store = createSopNotificationDrainStore(
+      makeAdmin(
+        fixtures({
+          sop_event_log: {
+            data: [
+              { id: 45, sop_id: "sop-1", review_cycle: 0, event_type: "review_sent", actor_id: AUTHOR, actor_name: "Ana", details: {}, created_at: "2026-09-04T11:00:00Z" },
+            ],
+            error: null,
+          },
+          sop_review_seats: {
+            data: [
+              { sop_id: "sop-1", department_id: "dept-eng", rasic: "responsible", signer_id: REVIEWER },
+              { sop_id: "sop-1", department_id: "dept-ops", rasic: "accountable", signer_id: SECOND },
+            ],
+            error: null,
+          },
+          sop_review_submissions: { data: [], error: null },
+          workspace_integrations: {
+            data: [{ workspace_id: "ws-1", kind: "teams_webhook", enabled: true, config: { webhookUrl: "https://a.webhook.office.com/x" } }],
+            error: null,
+          },
+          profiles: { data: [{ id: REVIEWER, email: "r@anacorp.com" }, { id: SECOND, email: "s@anacorp.com" }], error: null },
+        }),
+      ),
+    );
+    const batch = await store.collect(now, origin);
+    const firstTouch = batch.items.filter((item) => item.pending.eventId === 45);
+    expect(firstTouch).toHaveLength(2);
+    expect(firstTouch.map((item) => item.channels.teams)).toEqual([{ webhookUrl: "https://a.webhook.office.com/x" }, null]);
+  });
+});
+
+describe("createSopNotificationDrainStore.recordChannel", () => {
+  it("stamps the channel outcome onto the inbox row that points at the ledger row", async () => {
+    const capture: Capture = { inserts: [], updates: [] };
+    const store = createSopNotificationDrainStore(makeAdmin(fixtures(), capture));
+    await store.recordChannel!(9, "teams", "sent");
+    expect(capture.updates).toEqual([{ table: "notifications", values: { delivered_channels: { teams: "sent" } } }]);
   });
 });
 

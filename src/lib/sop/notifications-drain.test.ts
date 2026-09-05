@@ -33,6 +33,7 @@ function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
     sent: [] as number[],
     failed: [] as { id: number; attempts: number }[],
     skipped: [] as { id: number; reason: string }[],
+    channels: [] as { id: number; channel: string; status: string }[],
     retryClaims: [] as { id: number; expected: number }[],
   };
   let nextLedgerId = 100;
@@ -48,6 +49,7 @@ function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
     markSent: async (id) => void calls.sent.push(id),
     markFailed: async (id, _error, attempts) => void calls.failed.push({ id, attempts }),
     markSkipped: async (id, reason) => void calls.skipped.push({ id, reason }),
+    recordChannel: async (id, channel, status) => void calls.channels.push({ id, channel, status }),
   };
   return { store, calls };
 }
@@ -106,6 +108,53 @@ describe("runSopNotificationDrain", () => {
     expect(report.skippedSuppressed).toBe(1);
     expect(report.sent).toBe(0);
     expect(calls.skipped).toEqual([{ id: 100, reason: "suppressed" }]);
+  });
+
+  it("posts a Teams card for an item carrying a webhook and records both channel outcomes", async () => {
+    const posted: { url: string; title: string }[] = [];
+    const teams = async (url: string, message: { attachments: { content: { body: { text: string }[] } }[] }) => {
+      posted.push({ url, title: message.attachments[0].content.body[1].text });
+      return { ok: true as const };
+    };
+    const withTeams = item({
+      channels: { email: true, suppressed: false, teams: { webhookUrl: "https://contoso.webhook.office.com/x" } },
+    });
+    const { store, calls } = fakeStore({ items: [withTeams], oldestUnnotifiedEventAgeHours: null });
+    const report = await runSopNotificationDrain({ store, send: okSender, teams, now, origin });
+    expect(report.sent).toBe(1);
+    expect(report.teamsPosted).toBe(1);
+    expect(posted).toEqual([{ url: "https://contoso.webhook.office.com/x", title: "s" }]);
+    expect(calls.channels).toEqual([
+      { id: 100, channel: "email", status: "sent" },
+      { id: 100, channel: "teams", status: "sent" },
+    ]);
+  });
+
+  it("a Teams failure is recorded and counted, and never touches the email outcome", async () => {
+    const teams = async () => ({ ok: false as const, status: 500, error: "boom" });
+    const withTeams = item({
+      channels: { email: true, suppressed: false, teams: { webhookUrl: "https://contoso.webhook.office.com/x" } },
+    });
+    const { store, calls } = fakeStore({ items: [withTeams], oldestUnnotifiedEventAgeHours: null });
+    const report = await runSopNotificationDrain({ store, send: okSender, teams, now, origin });
+    expect(report.sent).toBe(1);
+    expect(report.teamsFailed).toBe(1);
+    expect(calls.channels).toContainEqual({ id: 100, channel: "teams", status: "failed" });
+  });
+
+  it("still posts to Teams when the recipient's email is off — the channel post is workspace-level", async () => {
+    let posts = 0;
+    const teams = async () => {
+      posts += 1;
+      return { ok: true as const };
+    };
+    const muted = item({
+      channels: { email: false, suppressed: false, teams: { webhookUrl: "https://contoso.webhook.office.com/x" } },
+    });
+    const { store } = fakeStore({ items: [muted], oldestUnnotifiedEventAgeHours: null });
+    const report = await runSopNotificationDrain({ store, send: okSender, teams, now, origin });
+    expect(report.skippedByPreference).toBe(1);
+    expect(posts).toBe(1);
   });
 
   it("reports the store's dead rows so the health verdict can see them", async () => {
@@ -316,6 +365,8 @@ describe("assessDrainHealth", () => {
     dead: 0,
     skippedByPreference: 0,
     skippedSuppressed: 0,
+    teamsPosted: 0,
+    teamsFailed: 0,
     oldestUnnotifiedEventAgeHours: 1,
   };
 

@@ -12,6 +12,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/database.types";
 import { resolveEmailEnabled, type PreferenceRow } from "@/domain/notifications/channels";
+import { loadTeamsIntegrations, type TeamsIntegration } from "@/lib/notifications/integrations-store";
 import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
 import { renderSopNotificationEmail, type SopEmailInput } from "@/domain/sop/notification-templates";
 import {
@@ -107,6 +108,8 @@ export interface SopContextBundle {
   openAnnotationsBySop: Map<string, number>;
   /** Owners/admins per workspace — escalation and digest recipients. */
   managersByWorkspace: Map<string, string[]>;
+  /** Enabled Teams webhooks per workspace. */
+  teamsByWorkspace: Map<string, TeamsIntegration>;
   departmentNameById: Map<string, string>;
   departmentCodeById: Map<string, string>;
   /** signature id → signer id, across the loaded SOPs. */
@@ -125,6 +128,35 @@ export interface SopStallStates {
   bundle: SopContextBundle;
 }
 
+/**
+ * Merge one channel outcome into the inbox row that points at a ledger row.
+ * Read-merge-write: PostgREST replaces jsonb columns, so a blind update would
+ * drop the other channels' stamps. Shared by every ledger store.
+ */
+export async function stampDeliveredChannel(
+  admin: SupabaseClient<Database>,
+  source: "sop" | "workspace" | "digest",
+  ledgerId: number,
+  channel: string,
+  status: string,
+): Promise<void> {
+  const { data, error } = await admin
+    .from("notifications")
+    .select("id, delivered_channels")
+    .eq("source", source)
+    .eq("source_ledger_id", ledgerId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const current =
+    data && typeof data.delivered_channels === "object" && data.delivered_channels !== null && !Array.isArray(data.delivered_channels)
+      ? (data.delivered_channels as Record<string, unknown>)
+      : {};
+  const merged = { ...current, [channel]: status } as Json;
+  const update = admin.from("notifications").update({ delivered_channels: merged });
+  const { error: updateError } = await (data ? update.eq("id", data.id) : update.eq("source", source).eq("source_ledger_id", ledgerId));
+  if (updateError) throw new Error(updateError.message);
+}
+
 /** The query side, shared by the SOP drain store and the digest store. */
 export function createSopContextLoader(admin: SupabaseClient<Database>) {
   async function loadContext(sopIds: string[]): Promise<SopContextBundle> {
@@ -135,6 +167,7 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
       returnsBySop: new Map(),
       openAnnotationsBySop: new Map(),
       managersByWorkspace: new Map(),
+      teamsByWorkspace: new Map(),
       departmentNameById: new Map(),
       departmentCodeById: new Map(),
       signatureSignerById: new Map(),
@@ -218,6 +251,8 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
         member.user_id,
       ]);
     }
+
+    bundle.teamsByWorkspace = await loadTeamsIntegrations(admin, workspaceIds);
 
     const qualityDeptByWorkspace = new Map(
       (departmentsResult.data ?? [])
@@ -546,12 +581,27 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         if (item) items.push(item);
       }
 
-      // 7) Health signal: the oldest event still owed a first-touch send.
+      // 7) Teams: one channel card per decision, not per recipient. The first
+      // item of each decision key carries the workspace's webhook; the rest none.
+      const postedKeys = new Set<string>();
+      const withTeams = items.map((item) => {
+        const { pending } = item;
+        const key =
+          pending.eventId !== null
+            ? `event:${pending.eventId}`
+            : `${pending.sopId}:${pending.kind}:${pending.reminderIndex}:${pending.reviewCycle}`;
+        const hook = bundle.teamsByWorkspace.get(item.inbox.workspaceId ?? "") ?? null;
+        const teams = hook && !postedKeys.has(key) ? { webhookUrl: hook.webhookUrl } : null;
+        postedKeys.add(key);
+        return { ...item, channels: { ...item.channels, teams } };
+      });
+
+      // 8) Health signal: the oldest event still owed a first-touch send.
       const oldest = eventItems.length
         ? Math.max(...eventItems.map((entry) => now.getTime() - new Date(entry.event.createdAt).getTime()))
         : null;
       return {
-        items,
+        items: withTeams,
         oldestUnnotifiedEventAgeHours: oldest === null ? null : Math.round(oldest / (60 * 60 * 1000)),
       };
     },
@@ -648,6 +698,10 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     async markSkipped(ledgerId, reason) {
       const { error } = await admin.from("sop_notifications").update({ skipped_reason: reason }).eq("id", ledgerId);
       if (error) throw new Error(error.message);
+    },
+
+    async recordChannel(ledgerId, channel, status) {
+      await stampDeliveredChannel(admin, "sop", ledgerId, channel, status);
     },
 
     async deadRows(now) {

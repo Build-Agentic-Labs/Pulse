@@ -12,6 +12,7 @@ import {
   type QueueSummaryItem,
 } from "@/domain/sop/queue-summary";
 import { createPlannerSupabaseClient, loadWorkspaceProjectGroups } from "@/domain/supabase-planner";
+import { listInbox, markAllInboxRead, markInboxRead, type InboxItem } from "@/lib/notifications/inbox-store";
 import { fetchReviewQueueData } from "@/lib/sop/review-queue-data";
 import { SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
@@ -20,6 +21,7 @@ import "./notification-bell.css";
 const REFRESH_INTERVAL_MS = 60_000;
 const ACKNOWLEDGED_STORAGE_PREFIX = "pulse:sop-notification-acknowledged:v1";
 const MAX_ACKNOWLEDGED_ITEMS = 200;
+const INBOX_LIMIT = 8;
 
 function readAcknowledged(storageKey: string): Set<string> {
   try {
@@ -38,20 +40,36 @@ function writeAcknowledged(storageKey: string, ids: ReadonlySet<string>) {
   }
 }
 
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const minutes = Math.round((Date.now() - then) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
 /**
- * Self-clearing count of SOPs currently waiting on the viewer, recomputed from
- * the same derivation as /sops/review. Null summary = signed out, no
- * workspace, or nothing fetched yet. The button itself is permanent chrome;
- * only its badge and menu contents depend on this asynchronous summary.
- * Failures keep the last good summary.
+ * Two feeds behind one bell: the self-clearing count of SOPs currently waiting
+ * on the viewer (derived from the same data as /sops/review), and the recent
+ * inbox — the durable, cross-device record of what the viewer was notified
+ * about. Null summary = signed out, no workspace, or nothing fetched yet. The
+ * button itself is permanent chrome; only its badge and menu contents depend on
+ * this asynchronous state. Failures keep the last good state.
  */
-function useActionableQueue(): {
+function useNotificationState(): {
   summary: QueueSummary | null;
+  inbox: InboxItem[];
   loading: boolean;
   acknowledge: (item: QueueSummaryItem) => void;
+  markRead: (id: number) => void;
+  markAllRead: () => void;
 } {
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [summary, setSummary] = useState<QueueSummary | null>(null);
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const storageKeyRef = useRef<string | null>(null);
 
@@ -65,6 +83,7 @@ function useActionableQueue(): {
         if (!user) {
           if (mounted) {
             setSummary(null);
+            setInbox([]);
             setLoaded(true);
           }
           return;
@@ -80,24 +99,24 @@ function useActionableQueue(): {
           const groups = await loadWorkspaceProjectGroups(user.id, supabase);
           workspaceId = groups[0]?.workspace.id ?? null;
         }
-        if (!workspaceId) {
-          if (mounted) {
-            setSummary(null);
-            setLoaded(true);
-          }
-          return;
-        }
 
-        const queue = await fetchReviewQueueData(workspaceId, user.id);
-        const storageKey = `${ACKNOWLEDGED_STORAGE_PREFIX}:${workspaceId}:${user.id}`;
-        storageKeyRef.current = storageKey;
-        const visibleSummary = excludeAcknowledged(summarizeQueue(queue), readAcknowledged(storageKey));
-        if (mounted) {
-          setSummary(visibleSummary);
-          setLoaded(true);
+        // The inbox is user-level and needs no workspace; the actionable count does.
+        const [items, queue] = await Promise.all([
+          listInbox(INBOX_LIMIT, supabase),
+          workspaceId ? fetchReviewQueueData(workspaceId, user.id) : Promise.resolve(null),
+        ]);
+        if (!mounted) return;
+        setInbox(items);
+        if (workspaceId && queue) {
+          const storageKey = `${ACKNOWLEDGED_STORAGE_PREFIX}:${workspaceId}:${user.id}`;
+          storageKeyRef.current = storageKey;
+          setSummary(excludeAcknowledged(summarizeQueue(queue), readAcknowledged(storageKey)));
+        } else {
+          setSummary(null);
         }
+        setLoaded(true);
       } catch {
-        // Keep the last good summary; retry on the next trigger.
+        // Keep the last good state; retry on the next trigger.
         if (mounted) setLoaded(true);
       }
     }
@@ -125,12 +144,31 @@ function useActionableQueue(): {
     );
   }, []);
 
-  return { summary, loading: !loaded, acknowledge };
+  const markRead = useCallback(
+    (id: number) => {
+      const stamp = new Date().toISOString();
+      setInbox((current) => current.map((item) => (item.id === id && !item.readAt ? { ...item, readAt: stamp } : item)));
+      void markInboxRead([id], supabase).catch(() => {
+        // The optimistic state stands; the next refresh reconciles.
+      });
+    },
+    [supabase],
+  );
+
+  const markAllRead = useCallback(() => {
+    const stamp = new Date().toISOString();
+    setInbox((current) => current.map((item) => (item.readAt ? item : { ...item, readAt: stamp })));
+    void markAllInboxRead(supabase).catch(() => {
+      // As above.
+    });
+  }, [supabase]);
+
+  return { summary, inbox, loading: !loaded, acknowledge, markRead, markAllRead };
 }
 
 export function NotificationBell() {
   const router = useRouter();
-  const { summary, loading, acknowledge } = useActionableQueue();
+  const { summary, inbox, loading, acknowledge, markRead, markAllRead } = useNotificationState();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -159,6 +197,7 @@ export function NotificationBell() {
 
   const total = summary?.total ?? 0;
   const sections = summary?.sections ?? [];
+  const unread = inbox.filter((item) => !item.readAt).length;
 
   return (
     <div ref={containerRef} className="relative flex shrink-0 items-center">
@@ -174,39 +213,78 @@ export function NotificationBell() {
       >
         <Bell size={15} strokeWidth={1.75} />
         {total > 0 ? <span className="bell-badge">{badgeLabel(total)}</span> : null}
+        {total === 0 && unread > 0 ? <span className="bell-dot" aria-hidden="true" /> : null}
       </button>
 
       {open ? (
-        <div role="menu" className="bell-panel absolute right-0 top-full z-50 mt-2 w-72 ui-panel p-1.5 shadow-modal">
+        <div role="menu" className="bell-panel absolute right-0 top-full z-50 mt-2 w-80 ui-panel p-1.5 shadow-modal">
           {loading ? (
             <div className="px-2.5 py-3 text-[12px] text-ink-tertiary">Checking notifications…</div>
-          ) : sections.length === 0 ? (
+          ) : sections.length === 0 && inbox.length === 0 ? (
             <div className="px-2.5 py-3 text-[12px] text-ink-tertiary">Nothing waiting on you.</div>
           ) : (
-            sections.map((section) => (
-              <div key={section.key}>
-                <div className="px-2.5 pb-1 pt-2 ui-mono-label text-ink-tertiary">{section.label}</div>
-                {section.items.map((item) => (
-                  <button
-                    key={item.notificationId}
-                    type="button"
-                    role="menuitem"
-                    className="ui-btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2.5 text-[12px]"
-                    onClick={() => {
-                      acknowledge(item);
-                      setOpen(false);
-                      router.push(`/sops/${item.sopId}`);
-                    }}
-                  >
-                    <span className="truncate">
-                      {item.sopNumber} · {item.title || "Untitled SOP"}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ))
+            <>
+              {sections.map((section) => (
+                <div key={section.key}>
+                  <div className="px-2.5 pb-1 pt-2 ui-mono-label text-ink-tertiary">{section.label}</div>
+                  {section.items.map((item) => (
+                    <button
+                      key={item.notificationId}
+                      type="button"
+                      role="menuitem"
+                      className="ui-btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2.5 text-[12px]"
+                      onClick={() => {
+                        acknowledge(item);
+                        setOpen(false);
+                        router.push(`/sops/${item.sopId}`);
+                      }}
+                    >
+                      <span className="truncate">
+                        {item.sopNumber} · {item.title || "Untitled SOP"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+              {inbox.length > 0 ? (
+                <div>
+                  <div className="px-2.5 pb-1 pt-2 ui-mono-label text-ink-tertiary">Recent</div>
+                  {inbox.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      data-unread={item.readAt ? "false" : "true"}
+                      className="bell-inbox-item ui-btn-ghost flex w-full items-start justify-start gap-2 px-2.5 py-1.5 text-left text-[12px]"
+                      onClick={() => {
+                        markRead(item.id);
+                        setOpen(false);
+                        router.push(item.link ?? "/sops/review");
+                      }}
+                    >
+                      <span className="bell-inbox-marker" aria-hidden="true" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{item.title}</span>
+                        {item.body ? <span className="block truncate text-ink-tertiary">{item.body}</span> : null}
+                      </span>
+                      <span className="shrink-0 ui-mono-label text-ink-tertiary">{timeAgo(item.createdAt)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
           )}
           <div className="my-1 h-px bg-line" />
+          {inbox.length > 0 ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="ui-btn-ghost flex h-8 w-full items-center justify-start px-2.5 text-[12px]"
+              onClick={() => markAllRead()}
+            >
+              Mark all read
+            </button>
+          ) : null}
           <Link
             href="/sops/review"
             role="menuitem"

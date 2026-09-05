@@ -10,6 +10,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTheme, type AppearanceColorKey, type AppearancePalette } from "@/components/theme-provider";
 
 import { AccountSettings } from "@/components/account-settings";
+import { NotificationPreferencesSettings } from "@/components/notification-preferences-settings";
 
 import { SettingsSectionLoadingContent } from "@/components/space-loading-states";
 
@@ -387,9 +388,11 @@ export function AppSettingsPanel({
 
           <div hidden={activeSection !== "account"} aria-hidden={activeSection !== "account"}>
 
-          <SettingsPage title="Account" description="Your profile and sign-in credentials.">
+          <SettingsPage title="Account" description="Your profile, sign-in credentials, and notifications.">
 
             <AccountSettings embedded />
+
+            <NotificationPreferencesSettings />
 
           </SettingsPage>
 

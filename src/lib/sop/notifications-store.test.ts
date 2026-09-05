@@ -273,7 +273,7 @@ describe("createSopNotificationDrainStore.collect — channels", () => {
     );
     const batch = await store.collect(now, origin);
     const first = batch.items.find((item) => item.pending.eventId === 50);
-    expect(first?.channels).toEqual({ email: false, suppressed: false, teams: null });
+    expect(first?.channels).toEqual({ email: false, suppressed: false, teams: null, push: null });
     expect(first?.inbox).toEqual({ link: "/sops/sop-1", entityType: "sop", entityId: "sop-1", workspaceId: "ws-1" });
   });
 
@@ -282,7 +282,7 @@ describe("createSopNotificationDrainStore.collect — channels", () => {
       makeAdmin(fixtures({ email_suppressions: { data: [{ email: "author@anacorp.com" }], error: null } })),
     );
     const batch = await store.collect(now, origin);
-    expect(batch.items.find((item) => item.pending.eventId === 50)?.channels).toEqual({ email: true, suppressed: true, teams: null });
+    expect(batch.items.find((item) => item.pending.eventId === 50)?.channels).toEqual({ email: true, suppressed: true, teams: null, push: null });
   });
 });
 

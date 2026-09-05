@@ -34,6 +34,7 @@ function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
     failed: [] as { id: number; attempts: number }[],
     skipped: [] as { id: number; reason: string }[],
     channels: [] as { id: number; channel: string; status: string }[],
+    pruned: [] as string[],
     retryClaims: [] as { id: number; expected: number }[],
   };
   let nextLedgerId = 100;
@@ -50,6 +51,7 @@ function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
     markFailed: async (id, _error, attempts) => void calls.failed.push({ id, attempts }),
     markSkipped: async (id, reason) => void calls.skipped.push({ id, reason }),
     recordChannel: async (id, channel, status) => void calls.channels.push({ id, channel, status }),
+    prunePushSubscription: async (endpoint) => void calls.pruned.push(endpoint),
   };
   return { store, calls };
 }
@@ -155,6 +157,35 @@ describe("runSopNotificationDrain", () => {
     const report = await runSopNotificationDrain({ store, send: okSender, teams, now, origin });
     expect(report.skippedByPreference).toBe(1);
     expect(posts).toBe(1);
+  });
+
+  it("pushes to every subscription of a recipient, prunes gone endpoints, and records the channel", async () => {
+    const pushed: string[] = [];
+    const push = async (subscription: { endpoint: string }) => {
+      pushed.push(subscription.endpoint);
+      return subscription.endpoint.endsWith("/gone")
+        ? { ok: false as const, gone: true, status: 410, error: "" }
+        : { ok: true as const };
+    };
+    const withPush = item({
+      channels: {
+        email: true,
+        suppressed: false,
+        push: {
+          subscriptions: [
+            { endpoint: "https://p/live", p256dh: "a", auth: "b" },
+            { endpoint: "https://p/gone", p256dh: "c", auth: "d" },
+          ],
+        },
+      },
+    });
+    const { store, calls } = fakeStore({ items: [withPush], oldestUnnotifiedEventAgeHours: null });
+    const report = await runSopNotificationDrain({ store, send: okSender, push, now, origin });
+    expect(pushed).toEqual(["https://p/live", "https://p/gone"]);
+    expect(report.pushSent).toBe(1);
+    expect(report.pushFailed).toBe(0);
+    expect(calls.pruned).toEqual(["https://p/gone"]);
+    expect(calls.channels).toContainEqual({ id: 100, channel: "push", status: "sent" });
   });
 
   it("reports the store's dead rows so the health verdict can see them", async () => {
@@ -367,6 +398,8 @@ describe("assessDrainHealth", () => {
     skippedSuppressed: 0,
     teamsPosted: 0,
     teamsFailed: 0,
+    pushSent: 0,
+    pushFailed: 0,
     oldestUnnotifiedEventAgeHours: 1,
   };
 

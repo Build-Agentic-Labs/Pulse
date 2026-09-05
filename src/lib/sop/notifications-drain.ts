@@ -12,6 +12,7 @@ import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
 import { buildTeamsMessage, type TeamsMessage } from "@/domain/notifications/teams-card";
 import type { PendingNotification, SopEmailContent } from "@/domain/sop/notifications";
 import { getBearerToken } from "@/lib/api-auth";
+import type { PushSubscriptionKeys } from "@/lib/notifications/push-sender";
 
 /** After this many attempts an unsent row is dead — visible, never retried. */
 export const MAX_SEND_ATTEMPTS = 3;
@@ -155,6 +156,8 @@ export interface DrainChannels {
    * dedupes), because a channel wants one card per event, not one per recipient.
    */
   teams?: { webhookUrl: string } | null;
+  /** The recipient's browser push subscriptions, when push is on for this kind. */
+  push?: { subscriptions: PushSubscriptionKeys[] } | null;
 }
 
 export type DeliveryChannel = "email" | "teams" | "push";
@@ -212,6 +215,8 @@ export interface DrainStore<P = PendingNotification> {
   markSkipped?(ledgerId: number, reason: SkipReason): Promise<void>;
   /** Stamp a channel outcome on the inbox row so "was it delivered, and how" is answerable. Optional. */
   recordChannel?(ledgerId: number, channel: DeliveryChannel, status: ChannelStatus): Promise<void>;
+  /** Drop a push subscription the push service reported gone (404/410). Optional. */
+  prunePushSubscription?(endpoint: string): Promise<void>;
   /**
    * Atomically claim a retry row for THIS attempt before sending: a conditional
    * bump (attempts+1, last_attempt_at=now) that only matches while the row is
@@ -248,6 +253,9 @@ export interface DrainReport {
   /** Teams channel cards posted / refused this run. */
   teamsPosted: number;
   teamsFailed: number;
+  /** Browser push messages accepted / refused this run (per subscription). */
+  pushSent: number;
+  pushFailed: number;
   oldestUnnotifiedEventAgeHours: number | null;
 }
 
@@ -339,11 +347,54 @@ async function postTeams<P>(
   }
 }
 
+/** A browser push delivery; the concrete sender lives in src/lib/notifications/push-sender.ts. */
+export type PushPoster = (
+  subscription: PushSubscriptionKeys,
+  payload: { title: string; body: string; link: string },
+) => Promise<{ ok: true } | { ok: false; gone: boolean; status: number; error: string }>;
+
+async function pushToSubscriptions<P>(
+  store: DrainStore<P>,
+  push: PushPoster,
+  ledgerId: number,
+  item: DrainItem<P>,
+  report: DrainReport,
+): Promise<void> {
+  const subscriptions = item.channels.push?.subscriptions ?? [];
+  if (subscriptions.length === 0) return;
+  const entry = inboxEntryFromEmail(item.content, item.inbox);
+  let delivered = 0;
+  for (const subscription of subscriptions) {
+    const result = await push(subscription, { title: entry.title, body: entry.body, link: entry.link ?? "/" });
+    if (result.ok) {
+      delivered += 1;
+      report.pushSent += 1;
+      continue;
+    }
+    if (result.gone) {
+      // A dead endpoint is housekeeping, not a failure: prune it, say nothing.
+      try {
+        await store.prunePushSubscription?.(subscription.endpoint);
+      } catch (error: unknown) {
+        console.error(`notification drain (${store.ledger}): push prune failed`, {
+          endpoint: subscription.endpoint,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
+    report.pushFailed += 1;
+  }
+  await recordChannelQuietly(store, ledgerId, "push", delivered > 0 ? "sent" : "failed");
+}
+
 export async function runSopNotificationDrain<P = PendingNotification>(deps: {
   store: DrainStore<P>;
   send: EmailSender | null;
   /** Optional Teams channel poster; absent = channel off. */
   teams?: TeamsPoster | null;
+  /** Optional browser push sender; absent = channel off. */
+  push?: PushPoster | null;
   now: () => Date;
   origin: string;
 }): Promise<DrainReport> {
@@ -362,6 +413,8 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
     skippedSuppressed: 0,
     teamsPosted: 0,
     teamsFailed: 0,
+    pushSent: 0,
+    pushFailed: 0,
     oldestUnnotifiedEventAgeHours: batch.oldestUnnotifiedEventAgeHours,
   };
   if (store.deadRows) {
@@ -406,8 +459,9 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
         else report.failed += 1;
       }
       // A channel post is workspace-level: it happens whatever the recipient's
-      // own email preference says.
+      // own email preference says. Push is per device and gated by the store.
       if (deps.teams) await postTeams(store, deps.teams, ledgerId, item, deps.origin, report);
+      if (deps.push) await pushToSubscriptions(store, deps.push, ledgerId, item, report);
     } catch {
       // A store-layer rejection (claim, or the failure bookkeeping itself) must
       // cost only this item. A claimed-but-unstamped row re-enters via the retry lane.

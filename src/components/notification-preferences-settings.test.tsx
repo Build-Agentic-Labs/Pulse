@@ -23,6 +23,42 @@ vi.mock("@/lib/supabase-auth", () => ({
   resolveSupabaseSession: vi.fn(async () => ({ session: { user: { id: "u1" } } })),
 }));
 
+const pushClient = {
+  isPushSupported: vi.fn(() => true),
+  currentPushEndpoint: vi.fn(async () => null as string | null),
+  subscribeToPush: vi.fn(async () => ({ endpoint: "https://p/1", p256dh: "a", auth: "b" })),
+  unsubscribeFromPush: vi.fn(async () => "https://p/1"),
+};
+vi.mock("@/lib/notifications/push-client", () => ({
+  isPushSupported: () => pushClient.isPushSupported(),
+  currentPushEndpoint: () => pushClient.currentPushEndpoint(),
+  subscribeToPush: () => pushClient.subscribeToPush(),
+  unsubscribeFromPush: () => pushClient.unsubscribeFromPush(),
+}));
+
+const pushStore = { savePushSubscription: vi.fn(async () => undefined), deletePushSubscription: vi.fn(async () => undefined) };
+vi.mock("@/lib/notifications/push-store", () => ({
+  savePushSubscription: (...args: unknown[]) => pushStore.savePushSubscription(...(args as [])),
+  deletePushSubscription: (...args: unknown[]) => pushStore.deletePushSubscription(...(args as [])),
+}));
+
+describe("NotificationPreferencesSettings — browser push", () => {
+  it("offers a device push switch when the browser supports it, and subscribes on toggle", async () => {
+    render(<NotificationPreferencesSettings />);
+    const push = await screen.findByRole("switch", { name: "Browser push on this device" });
+    expect(push.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(push);
+    await screen.findByRole("switch", { name: "Browser push on this device", checked: true });
+    expect(pushClient.subscribeToPush).toHaveBeenCalledTimes(1);
+    expect(pushStore.savePushSubscription).toHaveBeenCalledWith(
+      expect.anything(),
+      "u1",
+      { endpoint: "https://p/1", p256dh: "a", auth: "b" },
+      expect.any(String),
+    );
+  });
+});
+
 describe("NotificationPreferencesSettings", () => {
   it("renders one email switch per kind, reflecting catalog defaults and saved overrides", async () => {
     render(<NotificationPreferencesSettings />);

@@ -14,6 +14,7 @@ import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import { createStalledDigestDrainStore } from "@/lib/notifications/digest-store";
 import { recordDrainRun, type DrainCaller } from "@/lib/notifications/drain-runs-store";
 import { runDrainRequest } from "@/lib/notifications/run-drain-request";
+import { createPushSender } from "@/lib/notifications/push-sender";
 import { createTeamsSender } from "@/lib/notifications/teams-sender";
 import { createResendSender, isAuthorizedCronRequest } from "@/lib/sop/notifications-drain";
 import { createSopNotificationDrainStore } from "@/lib/sop/notifications-store";
@@ -21,6 +22,14 @@ import { createWorkspaceWelcomeDrainStore } from "@/lib/workspace/welcome-store"
 import type { Database } from "@/lib/database.types";
 
 const kickRateLimit = createApiRateLimiter({ windowMs: 60_000, maxRequests: 6 });
+
+/** Browser push is on only when a VAPID pair is configured (scripts/generate-vapid-keys.mjs). */
+function createPushSenderFromEnv(origin: string) {
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "";
+  const privateKey = process.env.VAPID_PRIVATE_KEY ?? "";
+  if (!publicKey || !privateKey) return null;
+  return createPushSender({ publicKey, privateKey, subject: process.env.VAPID_SUBJECT ?? origin });
+}
 
 async function drain(request: Request, caller: DrainCaller): Promise<NextResponse> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -57,6 +66,7 @@ async function drain(request: Request, caller: DrainCaller): Promise<NextRespons
       ],
       send,
       teams: createTeamsSender(),
+      push: createPushSenderFromEnv(origin),
       now: () => new Date(),
       origin,
       recordRun: (run) => recordDrainRun(admin, run),

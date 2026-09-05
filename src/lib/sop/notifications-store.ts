@@ -11,8 +11,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/database.types";
-import { resolveEmailEnabled, type PreferenceRow } from "@/domain/notifications/channels";
+import { resolveChannelEnabled, resolveEmailEnabled, type PreferenceRow } from "@/domain/notifications/channels";
 import { loadTeamsIntegrations, type TeamsIntegration } from "@/lib/notifications/integrations-store";
+import { deletePushSubscription, listPushSubscriptions, type PushSubscriptionRow } from "@/lib/notifications/push-store";
 import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
 import { renderSopNotificationEmail, type SopEmailInput } from "@/domain/sop/notification-templates";
 import {
@@ -120,6 +121,8 @@ export interface SopContextBundle {
   prefsByUser: Map<string, PreferenceRow[]>;
   /** Lower-cased addresses the drain must never mail. */
   suppressed: Set<string>;
+  /** Browser push subscriptions per recipient. */
+  pushByUser: Map<string, PushSubscriptionRow[]>;
 }
 
 export interface SopStallStates {
@@ -175,6 +178,7 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
       nameByUser: new Map(),
       prefsByUser: new Map(),
       suppressed: new Set(),
+      pushByUser: new Map(),
     };
     if (sopIds.length === 0) return bundle;
 
@@ -323,14 +327,16 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
     const emails = ids
       .map((id) => bundle.emailByUser.get(id)?.toLowerCase())
       .filter((email): email is string => Boolean(email));
-    const [prefs, suppressions] = await Promise.all([
-      admin.from("notification_preferences").select("user_id, workspace_id, kind, channel, mode").in("user_id", ids).eq("channel", "email"),
+    const [prefs, suppressions, pushByUser] = await Promise.all([
+      admin.from("notification_preferences").select("user_id, workspace_id, kind, channel, mode").in("user_id", ids),
       emails.length
         ? admin.from("email_suppressions").select("email").in("email", emails)
         : Promise.resolve({ data: [], error: null }),
+      listPushSubscriptions(admin, ids),
     ]);
     if (prefs.error) throw new Error(prefs.error.message);
     if (suppressions.error) throw new Error(suppressions.error.message);
+    for (const [userId, subscriptions] of pushByUser) bundle.pushByUser.set(userId, subscriptions);
     for (const row of prefs.data ?? []) {
       bundle.prefsByUser.set(row.user_id, [
         ...(bundle.prefsByUser.get(row.user_id) ?? []),
@@ -476,6 +482,9 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     const seats = bundle.seatsBySop.get(pending.sopId) ?? [];
     const recipientSeat = seats.find((seat) => seat.signerId === pending.recipientId);
     const email = bundle.emailByUser.get(pending.recipientId) ?? null;
+    const prefs = bundle.prefsByUser.get(pending.recipientId) ?? [];
+    const subscriptions = bundle.pushByUser.get(pending.recipientId) ?? [];
+    const pushOn = subscriptions.length > 0 && resolveChannelEnabled(pending.kind, "push", row.workspace_id, prefs, true);
     const stalledForTemplate: SopEmailInput["stalled"] = stalled?.map((entry) => ({
       name: bundle.nameByUser.get(entry.userId) ?? "A participant",
       departmentName: entry.departmentId ? (bundle.departmentNameById.get(entry.departmentId) ?? null) : null,
@@ -485,8 +494,9 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       pending,
       email,
       channels: {
-        email: resolveEmailEnabled(pending.kind, row.workspace_id, bundle.prefsByUser.get(pending.recipientId) ?? []),
+        email: resolveEmailEnabled(pending.kind, row.workspace_id, prefs),
         suppressed: email !== null && bundle.suppressed.has(email.toLowerCase()),
+        push: pushOn ? { subscriptions } : null,
       },
       inbox: { link: `/sops/${pending.sopId}`, entityType: "sop", entityId: pending.sopId, workspaceId: row.workspace_id },
       content: renderSopNotificationEmail({
@@ -702,6 +712,10 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
 
     async recordChannel(ledgerId, channel, status) {
       await stampDeliveredChannel(admin, "sop", ledgerId, channel, status);
+    },
+
+    async prunePushSubscription(endpoint) {
+      await deletePushSubscription(admin, endpoint);
     },
 
     async deadRows(now) {

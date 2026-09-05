@@ -11,6 +11,7 @@ import {
   type DrainReport,
   type DrainStore,
   type EmailSender,
+  type PushPoster,
   type TeamsPoster,
 } from "@/lib/sop/notifications-drain";
 import type { DrainCaller, DrainRunInput } from "./drain-runs-store";
@@ -23,6 +24,8 @@ export interface DrainRequestDeps {
   send: EmailSender | null;
   /** Optional Teams channel poster; absent = channel off. */
   teams?: TeamsPoster | null;
+  /** Optional browser push sender; absent = channel off. */
+  push?: PushPoster | null;
   now: () => Date;
   origin: string;
   recordRun: (run: DrainRunInput) => Promise<void>;
@@ -58,6 +61,7 @@ export async function runDrainRequest(deps: DrainRequestDeps): Promise<DrainRequ
         store,
         send: deps.send,
         teams: deps.teams ?? null,
+        push: deps.push ?? null,
         now: deps.now,
         origin: deps.origin,
       });

@@ -9,6 +9,8 @@ import {
 } from "@/domain/notifications/channels";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { loadPreferences, savePreference } from "@/lib/notifications/preferences-store";
+import { currentPushEndpoint, isPushSupported, subscribeToPush, unsubscribeFromPush } from "@/lib/notifications/push-client";
+import { deletePushSubscription, savePushSubscription } from "@/lib/notifications/push-store";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import "./notification-preferences-settings.css";
 
@@ -55,6 +57,9 @@ export function NotificationPreferencesSettings() {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushEndpoint, setPushEndpoint] = useState<string | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -68,8 +73,16 @@ export function NotificationPreferencesSettings() {
           setLoaded(true);
           return;
         }
-        const rows = await loadPreferences(id, supabase);
-        if (mounted) setPreferences(rows);
+        const supported = isPushSupported();
+        setPushSupported(supported);
+        const [rows, endpoint] = await Promise.all([
+          loadPreferences(id, supabase),
+          supported ? currentPushEndpoint().catch(() => null) : Promise.resolve(null),
+        ]);
+        if (mounted) {
+          setPreferences(rows);
+          setPushEndpoint(endpoint);
+        }
       } catch (error: unknown) {
         if (mounted) setMessage(error instanceof Error ? error.message : "Could not load notification settings.");
       } finally {
@@ -102,8 +115,47 @@ export function NotificationPreferencesSettings() {
     }
   }
 
+  async function togglePush() {
+    if (!userId || pushBusy) return;
+    setPushBusy(true);
+    setMessage("");
+    try {
+      if (pushEndpoint) {
+        const endpoint = (await unsubscribeFromPush()) ?? pushEndpoint;
+        await deletePushSubscription(supabase, endpoint);
+        setPushEndpoint(null);
+      } else {
+        const subscription = await subscribeToPush();
+        await savePushSubscription(supabase, userId, subscription, navigator.userAgent);
+        setPushEndpoint(subscription.endpoint);
+      }
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : "Could not change push notifications.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   return (
     <>
+      {pushSupported ? (
+        <Block
+          title="Notifications · This device"
+          description="Browser push shows a system notification on this device for anything that lands in your inbox."
+        >
+          <Row label="Browser push on this device">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={pushEndpoint !== null}
+              aria-label="Browser push on this device"
+              className="notif-switch"
+              disabled={!loaded || !userId || pushBusy}
+              onClick={() => void togglePush()}
+            />
+          </Row>
+        </Block>
+      ) : null}
       {GROUPS.map((group) => {
         const kinds = Object.entries(NOTIFICATION_KINDS).filter(([, meta]) => meta.group === group.key);
         return (

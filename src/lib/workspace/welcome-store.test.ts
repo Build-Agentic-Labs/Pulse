@@ -109,6 +109,23 @@ describe("createWorkspaceWelcomeDrainStore.retryItems", () => {
     expect(items.find((item) => item.ledgerId === 2)?.email).toBe("b@x.com");
   });
 
+  it("names its ledger and resends the snapshotted content when a row has one", async () => {
+    const stored = { subject: "Welcome to Anacorp on Pulse", text: "as first sent", html: "<p>as first sent</p>" };
+    const admin = makeAdmin({
+      workspace_notifications: {
+        data: [
+          { id: 4, workspace_id: "ws-1", recipient_id: "u-a", event_id: 10, attempts: 0, last_attempt_at: null, created_at: minsAgo(RETRY_BASE_MINUTES + 5), content: stored },
+        ],
+        error: null,
+      },
+      workspaces: { data: [{ id: "ws-1", name: "Anacorp" }], error: null },
+      profiles: { data: [{ id: "u-a", full_name: "A", email: "a@x.com" }], error: null },
+    });
+    const store = createWorkspaceWelcomeDrainStore(admin);
+    expect(store.ledger).toBe("workspace_notifications");
+    expect(await store.retryItems(now, origin)).toEqual([{ ledgerId: 4, email: "a@x.com", content: stored, attempts: 0 }]);
+  });
+
   it("returns nothing when every unsent row is still inside its lease", async () => {
     const admin = makeAdmin({
       workspace_notifications: {

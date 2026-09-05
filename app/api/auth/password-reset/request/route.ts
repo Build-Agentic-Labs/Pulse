@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { renderPasswordRecoveryEmail } from "@/domain/auth/password-recovery";
@@ -126,6 +126,7 @@ export async function POST(request: Request) {
     const result = await send(
       email,
       renderPasswordRecoveryEmail({ code: data.properties.email_otp, email, origin }),
+      { idempotencyKey: `recovery:${randomUUID()}` },
     );
     if (!result.ok) {
       console.error("Password recovery email delivery request failed", {

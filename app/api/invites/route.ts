@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { renderWorkspaceAccessGrantedEmail, renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
@@ -82,7 +83,9 @@ const ALREADY_REGISTERED_EMAILED_REASON =
 /** Send one email, logging (never throwing) on failure. */
 async function deliver(send: EmailSender, to: string, content: SopEmailContent): Promise<boolean> {
   try {
-    const result = await send(to, content);
+    // Every admin click is a deliberate (re)send, so the key is per request: it
+    // guards the provider retry inside this call, never a later resend.
+    const result = await send(to, content, { idempotencyKey: `invite:${randomUUID()}` });
     if (result.ok) return true;
     console.error("Invitation email delivery failed", { status: result.status, failure: result.failure });
   } catch (error) {

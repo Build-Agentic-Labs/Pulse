@@ -144,6 +144,71 @@ describe("createSopNotificationDrainStore.collect — author stall context", () 
   });
 });
 
+describe("createSopNotificationDrainStore.retryItems", () => {
+  const now = new Date("2026-09-04T12:00:00Z");
+  const hoursAgo = (h: number) => new Date(now.getTime() - h * 60 * 60 * 1000).toISOString();
+  const stored = { subject: "Review requested: SOP-0042 \"Line Clearance\" (Rev C)", text: "as first sent", html: "<p>as first sent</p>" };
+
+  it("names its ledger so the drain can key idempotent sends", () => {
+    expect(createSopNotificationDrainStore(makeAdmin(fixtures())).ledger).toBe("sop_notifications");
+  });
+
+  it("resends the snapshotted content byte-for-byte instead of re-rendering with a generic actor", async () => {
+    const admin = makeAdmin(
+      fixtures({
+        sop_notifications: {
+          data: [
+            {
+              id: 9,
+              sop_id: "sop-1",
+              recipient_id: REVIEWER,
+              kind: "review_requested",
+              reminder_index: 0,
+              review_cycle: 0,
+              attempts: 0,
+              last_attempt_at: null,
+              created_at: hoursAgo(2),
+              content: stored,
+            },
+          ],
+          error: null,
+        },
+        profiles: { data: [{ id: REVIEWER, email: "reviewer@anacorp.com" }], error: null },
+      }),
+    );
+    const items = await createSopNotificationDrainStore(admin).retryItems(now, origin);
+    expect(items).toEqual([{ ledgerId: 9, email: "reviewer@anacorp.com", content: stored, attempts: 0 }]);
+  });
+
+  it("re-renders only rows claimed before content snapshots existed", async () => {
+    const admin = makeAdmin(
+      fixtures({
+        sop_notifications: {
+          data: [
+            {
+              id: 3,
+              sop_id: "sop-1",
+              recipient_id: REVIEWER,
+              kind: "review_requested",
+              reminder_index: 0,
+              review_cycle: 0,
+              attempts: 0,
+              last_attempt_at: null,
+              created_at: hoursAgo(2),
+              content: null,
+            },
+          ],
+          error: null,
+        },
+        profiles: { data: [{ id: REVIEWER, email: "reviewer@anacorp.com" }], error: null },
+      }),
+    );
+    const items = await createSopNotificationDrainStore(admin).retryItems(now, origin);
+    expect(items[0].content.subject).toBe('Review requested: SOP-0042 "Line Clearance" (Rev C)');
+    expect(items[0].content.text).toContain("Pulse sent");
+  });
+});
+
 describe("createSopNotificationDrainStore.claim", () => {
   it("writes the review cycle and the rendered content onto the ledger row", async () => {
     const capture: Capture = { inserts: [] };

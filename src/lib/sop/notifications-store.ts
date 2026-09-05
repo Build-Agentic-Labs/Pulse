@@ -28,6 +28,7 @@ import {
 import {
   MAX_SEND_ATTEMPTS,
   isRetryDue,
+  snapshotContent,
   type DrainBatch,
   type DrainItem,
   type DrainStore,
@@ -267,6 +268,8 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
   }
 
   return {
+    ledger: "sop_notifications",
+
     async collect(now, origin): Promise<DrainBatch> {
       const windowStart = new Date(now.getTime() - EVENT_WINDOW_DAYS * DAY_MS).toISOString();
 
@@ -435,7 +438,9 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     async retryItems(now, origin): Promise<RetryItem[]> {
       const { data, error } = await admin
         .from("sop_notifications")
-        .select("id, sop_id, recipient_id, kind, reminder_index, review_cycle, attempts, last_attempt_at, created_at")
+        .select(
+          "id, sop_id, recipient_id, kind, reminder_index, review_cycle, attempts, last_attempt_at, created_at, content",
+        )
         .is("sent_at", null)
         .lt("attempts", MAX_SEND_ATTEMPTS);
       if (error) throw new Error(error.message);
@@ -470,7 +475,10 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
           row.reminder_index > 0 ? row.reminder_index * REMINDER_AFTER_DAYS : null,
         );
         if (!item) return [];
-        return [{ ledgerId: Number(row.id), email: item.email, content: item.content, attempts: row.attempts }];
+        // The snapshot taken at claim time is what the idempotency key was issued
+        // for; only rows claimed before snapshots existed fall back to a re-render.
+        const content = snapshotContent(row.content) ?? item.content;
+        return [{ ledgerId: Number(row.id), email: item.email, content, attempts: row.attempts }];
       });
     },
 

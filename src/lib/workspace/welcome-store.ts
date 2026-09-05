@@ -18,6 +18,7 @@ import {
 import {
   MAX_SEND_ATTEMPTS,
   isRetryDue,
+  snapshotContent,
   type DrainBatch,
   type DrainItem,
   type DrainStore,
@@ -111,6 +112,8 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
   }
 
   return {
+    ledger: "workspace_notifications",
+
     async collect(now, origin): Promise<DrainBatch<WorkspaceWelcomePending>> {
       const windowStart = new Date(now.getTime() - EVENT_WINDOW_DAYS * DAY_MS).toISOString();
       const { data: rows, error } = await admin
@@ -158,7 +161,7 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
     async retryItems(now, origin): Promise<RetryItem[]> {
       const { data, error } = await admin
         .from("workspace_notifications")
-        .select("id, workspace_id, recipient_id, event_id, attempts, last_attempt_at, created_at")
+        .select("id, workspace_id, recipient_id, event_id, attempts, last_attempt_at, created_at, content")
         .is("sent_at", null)
         .lt("attempts", MAX_SEND_ATTEMPTS);
       if (error) throw new Error(error.message);
@@ -185,12 +188,14 @@ export function createWorkspaceWelcomeDrainStore(admin: SupabaseClient<Database>
       return rows.map((row) => ({
         ledgerId: Number(row.id),
         email: bundle.profileById.get(row.recipient_id)?.email ?? null,
-        content: renderWorkspaceWelcomeEmail({
-          workspaceName: bundle.workspaceNameById.get(row.workspace_id) ?? "your workspace",
-          actorName: null,
-          selfCaused: true,
-          origin,
-        }),
+        content:
+          snapshotContent(row.content) ??
+          renderWorkspaceWelcomeEmail({
+            workspaceName: bundle.workspaceNameById.get(row.workspace_id) ?? "your workspace",
+            actorName: null,
+            selfCaused: true,
+            origin,
+          }),
         attempts: row.attempts,
       }));
     },

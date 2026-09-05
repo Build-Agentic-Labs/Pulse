@@ -36,6 +36,20 @@ export function isRetryDue(
   return dueAt <= now.getTime();
 }
 
+/**
+ * Read a ledger row's content snapshot back as email content. Null when the row
+ * predates snapshots (or the column holds something unexpected), so callers fall
+ * back to re-rendering rather than sending a malformed email.
+ */
+export function snapshotContent(value: unknown): SopEmailContent | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.subject !== "string" || typeof record.text !== "string" || typeof record.html !== "string") {
+    return null;
+  }
+  return { subject: record.subject, text: record.text, html: record.html };
+}
+
 /** Cron caller auth: constant bearer, set by Vercel Cron when CRON_SECRET exists. */
 export function isAuthorizedCronRequest(request: Request): boolean {
   const secret = process.env.CRON_SECRET ?? "";
@@ -57,7 +71,21 @@ export type EmailSendResult =
   | { ok: true; id: string }
   | { ok: false; status: number; error: string; failure: EmailFailureKind };
 
-export type EmailSender = (to: string, content: SopEmailContent) => Promise<EmailSendResult>;
+export interface EmailSendOptions {
+  /**
+   * Provider-side dedupe key. The drain keys it on `${ledger}:${row id}`, so if a
+   * send succeeds but the ledger stamp is lost, the retry lane's resend returns the
+   * original message instead of a second email. Resend honours the key for 24h and
+   * answers 409 if the body differs — which is why ledger rows snapshot their content.
+   */
+  idempotencyKey: string;
+}
+
+export type EmailSender = (
+  to: string,
+  content: SopEmailContent,
+  options: EmailSendOptions,
+) => Promise<EmailSendResult>;
 
 /** Fields whose rejection indicts the ADDRESS rather than our configuration. */
 const RECIPIENT_FIELDS = new Set(["to", "cc", "bcc"]);
@@ -84,11 +112,15 @@ export function classifyResendFailure(status: number, body: string): EmailFailur
 }
 
 /** Plain fetch to Resend — deliberately no SDK (zero new dependencies). */
-export function createResendSender(apiKey: string, from: string): EmailSender {
-  return async (to, content) => {
-    const response = await fetch("https://api.resend.com/emails", {
+export function createResendSender(apiKey: string, from: string, fetchImpl: typeof fetch = fetch): EmailSender {
+  return async (to, content, options) => {
+    const response = await fetchImpl("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": options.idempotencyKey,
+      },
       body: JSON.stringify({ from, to: [to], subject: content.subject, text: content.text, html: content.html }),
     });
     if (response.ok) {
@@ -125,6 +157,8 @@ export interface DrainBatch<P = PendingNotification> {
 }
 
 export interface DrainStore<P = PendingNotification> {
+  /** The ledger table this store owns — the namespace of every idempotency key it sends under. */
+  readonly ledger: string;
   /** Scan events + reminders, resolve recipients, render emails. Read-only. */
   collect(now: Date, origin: string): Promise<DrainBatch<P>>;
   /** Claimed-but-unsent rows past the lease, below the attempt cap. */
@@ -282,7 +316,7 @@ async function attemptSend<P = PendingNotification>(
   priorAttempts: number,
 ): Promise<"sent" | "failed" | "blocked"> {
   try {
-    const result = await send(email, content);
+    const result = await send(email, content, { idempotencyKey: `${store.ledger}:${ledgerId}` });
     if (result.ok) {
       await store.markSent(ledgerId, result.id);
       return "sent";

@@ -5,6 +5,7 @@ import {
   RETRY_BASE_MINUTES,
   assessDrainHealth,
   classifyResendFailure,
+  createResendSender,
   isAuthorizedCronRequest,
   isRetryDue,
   retryBackoffMinutes,
@@ -13,6 +14,7 @@ import {
   type DrainItem,
   type DrainReport,
   type DrainStore,
+  type EmailSender,
   type RetryItem,
 } from "./notifications-drain";
 
@@ -32,6 +34,7 @@ function fakeStore(batch: DrainBatch, retries: RetryItem[] = []) {
   };
   let nextLedgerId = 100;
   const store: DrainStore = {
+    ledger: "sop_notifications",
     collect: async () => batch,
     retryItems: async () => retries,
     claim: async () => ({ claimed: true, ledgerId: nextLedgerId++ }),
@@ -60,9 +63,39 @@ describe("isAuthorizedCronRequest", () => {
   });
 });
 
+describe("createResendSender", () => {
+  it("sends an Idempotency-Key so a resend of the same ledger row cannot double-deliver", async () => {
+    const seen: { url: string; init: RequestInit }[] = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ id: "re_abc" }), { status: 200 });
+    };
+    const send = createResendSender("re_key", "Pulse <n@pulse.test>", fetchImpl as typeof fetch);
+    const result = await send("to@example.com", content, { idempotencyKey: "sop_notifications:7" });
+    expect(result).toEqual({ ok: true, id: "re_abc" });
+    expect(seen).toHaveLength(1);
+    const headers = seen[0].init.headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBe("sop_notifications:7");
+    expect(headers.Authorization).toBe("Bearer re_key");
+    expect(JSON.parse(String(seen[0].init.body))).toMatchObject({ to: ["to@example.com"], subject: "s" });
+  });
+});
+
 describe("runSopNotificationDrain", () => {
   const now = () => new Date("2026-07-21T12:00:00Z");
   const origin = "https://pulse.example.com";
+
+  it("keys every send on the ledger name and row id, first-touch and retry alike", async () => {
+    const keys: string[] = [];
+    const recordingSender: EmailSender = async (_to, _content, options) => {
+      keys.push(options.idempotencyKey);
+      return { ok: true, id: "re_1" };
+    };
+    const retries: RetryItem[] = [{ ledgerId: 55, email: "u1@example.com", content, attempts: 1 }];
+    const { store } = fakeStore({ items: [item()], oldestUnnotifiedEventAgeHours: null }, retries);
+    await runSopNotificationDrain({ store, send: recordingSender, now, origin });
+    expect(keys).toEqual(["sop_notifications:100", "sop_notifications:55"]);
+  });
 
   it("unconfigured (no sender): reports without claiming anything", async () => {
     const { store, calls } = fakeStore({ items: [item()], oldestUnnotifiedEventAgeHours: 5 });

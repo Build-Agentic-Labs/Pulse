@@ -1,0 +1,103 @@
+/* Scoped styles for the notifications console (Settings → Organization).
+   Squared geometry, theme variables only — never a pill, never globals. */
+.notif-admin-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.notif-admin-health[data-healthy="false"] {
+  border-left-color: #dc2626;
+}
+
+.notif-admin-health ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.notif-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.notif-admin-table th,
+.notif-admin-table td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.notif-admin-table th {
+  font-weight: 600;
+  color: var(--color-ink-tertiary);
+  white-space: nowrap;
+}
+
+.notif-admin-scroll {
+  overflow-x: auto;
+}
+
+.notif-state {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.notif-state[data-state="sent"] {
+  border-color: #059669;
+  color: #059669;
+}
+
+.notif-state[data-state="dead"],
+.notif-state[data-state="blocked"] {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
+.notif-state[data-state="pending"] {
+  border-color: #b45309;
+  color: #b45309;
+}
+
+.notif-admin-error {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  color: var(--color-ink-tertiary);
+}
+
+.notif-admin-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.notif-admin-form input[type="url"] {
+  flex: 1 1 320px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 12px;
+}
+
+.notif-admin-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--color-ink-tertiary);
+}

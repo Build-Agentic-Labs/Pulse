@@ -112,6 +112,53 @@ function copyFor(input: SopEmailInput, label: string): TemplateCopy {
         happened: `${label} has stalled. ${stalledSentence(input.stalled)}`,
         needed: `Please follow up with them, or reassign the seat so the document can move.`,
       };
+    case "released":
+      return {
+        subject: `Now effective: ${label}`,
+        eyebrow: "Now effective",
+        accent: "#059669",
+        reason: "You are receiving this because you are the author or hold a seat on this SOP.",
+        happened: `${input.actorName} released ${label}${revision}. It is now the controlled, effective document.`,
+        needed: `Work to this revision from now on; earlier printouts are superseded.`,
+      };
+    case "seat_assigned":
+      return {
+        subject: `Review seat assigned to you: ${label}`,
+        eyebrow: "Seat assigned",
+        accent: "#2563eb",
+        reason: SEAT_REASON,
+        happened: `${input.actorName} assigned you a review seat on ${label}.`,
+        needed: input.departmentName
+          ? `You now hold the ${input.departmentName} seat — please review it and return your result.`
+          : `Please review it and return your result.`,
+      };
+    case "objection_raised":
+      return {
+        subject: `Objection raised: ${label}`,
+        eyebrow: "Objection raised",
+        accent: "#dc2626",
+        reason: "You are receiving this because you are the author of this SOP or a Quality approver who can dispose of objections.",
+        happened: `${input.actorName} raised a formal objection on ${label}.`,
+        needed: `Open it to read the objection and decide how it is resolved.`,
+      };
+    case "objection_resolved":
+      return {
+        subject: `Objection resolved: ${label}`,
+        eyebrow: "Objection resolved",
+        accent: "#7c3aed",
+        reason: "You are receiving this because you are the author of this SOP or raised the objection.",
+        happened: `${input.actorName} resolved an objection on ${label}.`,
+        needed: `Open it to see the disposition and what happens next.`,
+      };
+    case "remark_added":
+      return {
+        subject: `New remark: ${label}`,
+        eyebrow: "New remark",
+        accent: "#71717a",
+        reason: AUTHOR_REASON,
+        happened: `${input.actorName} left a remark on ${label}.`,
+        needed: `Open it to read and address the remark.`,
+      };
   }
 }
 

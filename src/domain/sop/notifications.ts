@@ -24,6 +24,9 @@ export const SOP_NOTIFIABLE_EVENT_TYPES = [
   "status_changed",
   "review_returned",
   "review_recalled",
+  "signature_added",
+  "seat_reassigned",
+  "remark_added",
 ] as const;
 
 export type SopNotificationKind =
@@ -32,7 +35,12 @@ export type SopNotificationKind =
   | "quality_release_requested"
   | "sent_back"
   | "review_complete"
-  | "stall_escalated";
+  | "stall_escalated"
+  | "released"
+  | "seat_assigned"
+  | "objection_raised"
+  | "objection_resolved"
+  | "remark_added";
 
 /** Local copy of the RASIC union — domain must not import from src/lib. */
 export type SopSeatRasic = "responsible" | "accountable" | "support" | "consulted" | "informed";
@@ -94,6 +102,8 @@ export interface SopNotificationContext {
   reviewReturns: ReviewReturnSnapshot[];
   /** Current-cycle remarks still unresolved — they block "send for final approval". */
   openAnnotationCount: number;
+  /** signature id → signer id, so a disposition can reach the objector it resolves. */
+  signatureSignerById?: Record<string, string>;
 }
 
 export interface PendingNotification {
@@ -143,14 +153,30 @@ function latestReturnAt(returns: ReviewReturnSnapshot[]): string | null {
   );
 }
 
-function parseEventDetails(details: unknown): { toStatus?: string; noChanges?: boolean } {
+interface EventDetails {
+  toStatus?: string;
+  noChanges?: boolean;
+  meaning?: string;
+  resolvesSignatureId?: string;
+  departmentId?: string;
+  toSignerId?: string;
+}
+
+function parseEventDetails(details: unknown): EventDetails {
   if (typeof details !== "object" || details === null) return {};
   const record = details as Record<string, unknown>;
+  const str = (key: string): string | undefined => (typeof record[key] === "string" ? (record[key] as string) : undefined);
   return {
-    toStatus: typeof record.to_status === "string" ? record.to_status : undefined,
+    toStatus: str("to_status"),
     noChanges: typeof record.no_changes === "boolean" ? record.no_changes : undefined,
+    meaning: str("meaning"),
+    resolvesSignatureId: str("resolves_signature_id"),
+    departmentId: str("department_id"),
+    toSignerId: str("to_signer_id"),
   };
 }
+
+const OBJECTION_DISPOSITIONS = new Set(["objection_withdrawn", "objection_sustained", "objection_overruled"]);
 
 function dedupeByRecipient(list: PendingNotification[]): PendingNotification[] {
   const seen = new Set<string>();
@@ -219,7 +245,18 @@ export function resolveEventRecipients(
     }
 
     case "status_changed": {
-      if (parseEventDetails(event.details).toStatus !== "approved") return [];
+      const { toStatus } = parseEventDetails(event.details);
+      if (toStatus === "effective") {
+        // Release: the author and every seat — Informed seats exist for exactly this.
+        if (sop.status !== "effective") return [];
+        const seatHolders = ctx.seats.map((seat) => seat.signerId).filter((id): id is string => Boolean(id));
+        return dedupeByRecipient(
+          [...(sop.authorId ? [sop.authorId] : []), ...seatHolders]
+            .filter((userId) => userId !== event.actorId)
+            .map((userId) => firstTouch(ctx, event, userId, "released")),
+        );
+      }
+      if (toStatus !== "approved") return [];
       if (sop.status !== "approved") return [];
       return ctx.qualityApprovers
         .filter(
@@ -231,6 +268,49 @@ export function resolveEventRecipients(
             approver.userId !== event.actorId,
         )
         .map((approver) => firstTouch(ctx, event, approver.userId, "quality_release_requested"));
+    }
+
+    case "seat_reassigned": {
+      // A first touch for the new signer — only while there is something to do.
+      const { departmentId, toSignerId } = parseEventDetails(event.details);
+      if (!toSignerId || sop.status !== "in_review" || toSignerId === event.actorId) return [];
+      const stillTheirs = ctx.seats.some((seat) => seat.departmentId === departmentId && seat.signerId === toSignerId);
+      if (!stillTheirs) return [];
+      const alreadyReturned =
+        !finalApprovalPhaseActive(sop) && ctx.reviewReturns.some((entry) => entry.reviewerId === toSignerId);
+      if (alreadyReturned) return [];
+      return [firstTouch(ctx, event, toSignerId, "seat_assigned")];
+    }
+
+    case "signature_added": {
+      const { meaning, resolvesSignatureId } = parseEventDetails(event.details);
+      if (meaning === "rejection") {
+        // A standing objection. If it recalled the draft, sent_back already covers it.
+        if (sop.status !== "in_review") return [];
+        const disposers = ctx.qualityApprovers
+          .filter((approver) => !approver.holdsSeat && !approver.overruledThisCycle)
+          .map((approver) => approver.userId);
+        return dedupeByRecipient(
+          [...(sop.authorId ? [sop.authorId] : []), ...disposers]
+            .filter((userId) => userId !== event.actorId)
+            .map((userId) => firstTouch(ctx, event, userId, "objection_raised")),
+        );
+      }
+      if (meaning && OBJECTION_DISPOSITIONS.has(meaning)) {
+        if (sop.status === "obsolete") return [];
+        const objector = resolvesSignatureId ? (ctx.signatureSignerById?.[resolvesSignatureId] ?? null) : null;
+        return dedupeByRecipient(
+          [...(sop.authorId ? [sop.authorId] : []), ...(objector ? [objector] : [])]
+            .filter((userId) => userId !== event.actorId)
+            .map((userId) => firstTouch(ctx, event, userId, "objection_resolved")),
+        );
+      }
+      return [];
+    }
+
+    case "remark_added": {
+      if (sop.status !== "in_review") return [];
+      return authorRecipient(event, ctx, "remark_added");
     }
 
     case "review_returned": {

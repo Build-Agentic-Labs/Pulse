@@ -55,6 +55,24 @@ describe("renderSopNotificationEmail", () => {
     expect(out.html).toContain("owner or admin of this workspace");
   });
 
+  it("the Phase 1 kinds each have a subject that says what happened", () => {
+    const subjects = (["released", "seat_assigned", "objection_raised", "objection_resolved", "remark_added"] as const).map(
+      (kind) => renderSopNotificationEmail(input({ kind, actorName: "Quinn Quality" })).subject,
+    );
+    expect(subjects).toEqual([
+      'Now effective: SOP-0042 "Line Clearance"',
+      'Review seat assigned to you: SOP-0042 "Line Clearance"',
+      'Objection raised: SOP-0042 "Line Clearance"',
+      'Objection resolved: SOP-0042 "Line Clearance"',
+      'New remark: SOP-0042 "Line Clearance"',
+    ]);
+  });
+
+  it("released tells Informed seats why they got it and seat_assigned names the department", () => {
+    expect(renderSopNotificationEmail(input({ kind: "released" })).html).toContain("author or hold a seat");
+    expect(renderSopNotificationEmail(input({ kind: "seat_assigned" })).text).toContain("Engineering seat");
+  });
+
   it("stall_escalated degrades gracefully without names", () => {
     expect(renderSopNotificationEmail(input({ kind: "stall_escalated" })).text).toContain("has not responded to two reminders");
   });

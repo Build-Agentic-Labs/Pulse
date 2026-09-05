@@ -216,7 +216,7 @@ describe("resolveEventRecipients: universal guards", () => {
   });
 
   it("unknown event types resolve to nothing", () => {
-    expect(resolveEventRecipients(event({ eventType: "remark_added" }), ctx())).toEqual([]);
+    expect(resolveEventRecipients(event({ eventType: "remark_deleted" }), ctx())).toEqual([]);
   });
 });
 
@@ -581,6 +581,118 @@ describe("describeStall", () => {
     expect(describeStall(base({ sop: sop({ status: "draft", rejectedReason: "x" }), recalledAt: "2026-07-25T00:00:00Z" }))).toBe(
       "author to rework a rejected draft",
     );
+  });
+});
+
+describe("resolveEventRecipients: released", () => {
+  const releasedEvent = (over: Partial<NotifiableEvent> = {}): NotifiableEvent =>
+    event({ id: 60, eventType: "status_changed", actorId: "q1", actorName: "Quinn Quality", details: { from_status: "approved", to_status: "effective" }, ...over });
+
+  it("tells the author and every seat holder — Informed seats included — that the SOP is effective", () => {
+    const out = resolveEventRecipients(releasedEvent(), ctx({ sop: sop({ status: "effective" }) }));
+    expect(ids(out)).toEqual(["acct", "author", "info", "resp", "supp"]);
+    expect(out.every((n) => n.kind === "released" && n.eventId === 60)).toBe(true);
+  });
+
+  it("never tells the releaser, and drops the email once the SOP is no longer effective", () => {
+    expect(ids(resolveEventRecipients(releasedEvent({ actorId: "resp" }), ctx({ sop: sop({ status: "effective" }) })))).not.toContain("resp");
+    expect(resolveEventRecipients(releasedEvent(), ctx({ sop: sop({ status: "obsolete" }) }))).toEqual([]);
+  });
+});
+
+describe("resolveEventRecipients: seat_assigned", () => {
+  const reassigned = (over: Partial<NotifiableEvent> = {}): NotifiableEvent =>
+    event({
+      id: 61,
+      eventType: "seat_reassigned",
+      actorId: "admin",
+      actorName: "Ada Admin",
+      details: { department_id: "d-r", from_signer_id: "resp", to_signer_id: "new-signer" },
+      ...over,
+    });
+  const withNewSigner = (over: Partial<SopNotificationContext> = {}) =>
+    ctx({
+      seats: [{ departmentId: "d-r", departmentName: "Engineering", rasic: "responsible", signerId: "new-signer" }],
+      ...over,
+    });
+
+  it("gives the new signer a first-touch email while the SOP is in review", () => {
+    expect(resolveEventRecipients(reassigned(), withNewSigner())).toEqual([
+      { recipientId: "new-signer", kind: "seat_assigned", sopId: "sop-1", eventId: 61, reminderIndex: 0, reviewCycle: 1 },
+    ]);
+  });
+
+  it("stays silent in draft (review_sent will reach them), when the seat moved on again, or once they responded", () => {
+    expect(resolveEventRecipients(reassigned(), withNewSigner({ sop: sop({ status: "draft" }) }))).toEqual([]);
+    expect(resolveEventRecipients(reassigned(), ctx())).toEqual([]);
+    expect(resolveEventRecipients(reassigned(), withNewSigner({ reviewReturns: [returned("new-signer")] }))).toEqual([]);
+  });
+});
+
+describe("resolveEventRecipients: objections", () => {
+  const signature = (meaning: string, over: Partial<NotifiableEvent> = {}): NotifiableEvent =>
+    event({
+      id: 62,
+      eventType: "signature_added",
+      actorId: "resp",
+      actorName: "Rae Responsible",
+      details: { signature_id: "sig-2", meaning, signer_id: "resp", seat_department_id: "d-r", resolves_signature_id: null },
+      ...over,
+    });
+  const qctx = (over: Partial<SopNotificationContext> = {}) =>
+    ctx({
+      qualityApprovers: [
+        { userId: "q1", holdsSeat: false, overruledThisCycle: false },
+        { userId: "q-seated", holdsSeat: true, overruledThisCycle: false },
+      ],
+      signatureSignerById: { "sig-1": "resp" },
+      ...over,
+    });
+
+  it("a standing objection reaches the author and the Quality approvers who can dispose of it", () => {
+    const out = resolveEventRecipients(signature("rejection"), qctx());
+    expect(ids(out)).toEqual(["author", "q1"]);
+    expect(out.every((n) => n.kind === "objection_raised")).toBe(true);
+  });
+
+  it("an objection that recalled the draft is already covered by sent_back", () => {
+    expect(resolveEventRecipients(signature("rejection"), qctx({ sop: sop({ status: "draft", rejectedReason: "x" }) }))).toEqual([]);
+  });
+
+  it("a disposition reaches the author and the objector, never the actor", () => {
+    const overruled = signature("objection_overruled", {
+      actorId: "q1",
+      details: { signature_id: "sig-3", meaning: "objection_overruled", signer_id: "q1", resolves_signature_id: "sig-1" },
+    });
+    const out = resolveEventRecipients(overruled, qctx());
+    expect(ids(out)).toEqual(["author", "resp"]);
+    expect(out.every((n) => n.kind === "objection_resolved")).toBe(true);
+
+    const withdrawn = signature("objection_withdrawn", {
+      details: { signature_id: "sig-4", meaning: "objection_withdrawn", signer_id: "resp", resolves_signature_id: "sig-1" },
+    });
+    expect(ids(resolveEventRecipients(withdrawn, qctx()))).toEqual(["author"]);
+  });
+
+  it("ignores signatures that are not objections", () => {
+    expect(resolveEventRecipients(signature("dept_approval"), qctx())).toEqual([]);
+    expect(resolveEventRecipients(signature("authorship", { actorId: "author" }), qctx())).toEqual([]);
+  });
+});
+
+describe("resolveEventRecipients: remark_added", () => {
+  const remark = (over: Partial<NotifiableEvent> = {}): NotifiableEvent =>
+    event({ id: 63, eventType: "remark_added", actorId: "resp", actorName: "Rae Responsible", details: { annotation_id: "a1", category: "procedure" }, ...over });
+
+  it("reaches the author while the SOP is in review", () => {
+    expect(resolveEventRecipients(remark(), ctx())).toEqual([
+      { recipientId: "author", kind: "remark_added", sopId: "sop-1", eventId: 63, reminderIndex: 0, reviewCycle: 1 },
+    ]);
+  });
+
+  it("is silent for the author's own remark or once review is over", () => {
+    expect(resolveEventRecipients(remark({ actorId: "author" }), ctx())).toEqual([]);
+    expect(resolveEventRecipients(remark(), ctx({ sop: sop({ status: "approved" }) }))).toEqual([]);
   });
 });
 

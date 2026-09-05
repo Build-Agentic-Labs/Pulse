@@ -109,6 +109,8 @@ export interface SopContextBundle {
   managersByWorkspace: Map<string, string[]>;
   departmentNameById: Map<string, string>;
   departmentCodeById: Map<string, string>;
+  /** signature id → signer id, across the loaded SOPs. */
+  signatureSignerById: Map<string, string>;
   emailByUser: Map<string, string | null>;
   nameByUser: Map<string, string>;
   /** Email-channel preference rows per recipient (any workspace scope). */
@@ -135,6 +137,7 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
       managersByWorkspace: new Map(),
       departmentNameById: new Map(),
       departmentCodeById: new Map(),
+      signatureSignerById: new Map(),
       emailByUser: new Map(),
       nameByUser: new Map(),
       prefsByUser: new Map(),
@@ -235,12 +238,13 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
       approversByDept.set(member.department_id, [...(approversByDept.get(member.department_id) ?? []), member.user_id]);
     }
 
-    const { data: overrules, error: overrulesError } = await admin
+    const { data: signatures, error: signaturesError } = await admin
       .from("sop_signatures")
-      .select("sop_id, signer_id, review_cycle")
-      .in("sop_id", foundIds)
-      .eq("meaning", "objection_overruled");
-    if (overrulesError) throw new Error(overrulesError.message);
+      .select("id, sop_id, signer_id, meaning, review_cycle")
+      .in("sop_id", foundIds);
+    if (signaturesError) throw new Error(signaturesError.message);
+    for (const signature of signatures ?? []) bundle.signatureSignerById.set(String(signature.id), signature.signer_id);
+    const overrules = (signatures ?? []).filter((signature) => signature.meaning === "objection_overruled");
 
     for (const sop of bundle.sops.values()) {
       const deptId = qualityDeptByWorkspace.get(sop.workspace_id);
@@ -252,7 +256,7 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
         approverIds.map((userId) => ({
           userId,
           holdsSeat: seatHolders.has(userId),
-          overruledThisCycle: (overrules ?? []).some(
+          overruledThisCycle: overrules.some(
             (signature) =>
               signature.sop_id === sop.id &&
               signature.signer_id === userId &&
@@ -310,6 +314,7 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
       qualityApprovers: bundle.qualityApproversBySop.get(sopId) ?? [],
       reviewReturns: bundle.returnsBySop.get(sopId) ?? [],
       openAnnotationCount: bundle.openAnnotationsBySop.get(sopId) ?? 0,
+      signatureSignerById: Object.fromEntries(bundle.signatureSignerById),
     };
   }
 

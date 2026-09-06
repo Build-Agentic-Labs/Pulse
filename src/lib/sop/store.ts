@@ -1,3 +1,4 @@
+import { readAllPages } from "@/lib/supabase/read-all-pages";
 /**
  * Supabase-backed persistence for SOPs.
  *
@@ -177,14 +178,14 @@ export async function listSops(
   client?: SupabaseClient<Database>,
 ): Promise<SopListItem[]> {
   const supabase = client ?? createPlannerSupabaseClient();
-  const rows = await throwIfError(
+  const rows = await readAllPages((from, to) => throwIfError(
     supabase
       .from("sops")
       .select(SOP_LIST_COLUMNS)
       .eq("workspace_id", workspaceId)
       .is("deleted_at", null)
-      .order("updated_at", { ascending: false }),
-  );
+      .order("updated_at", { ascending: false }).order("id").range(from, to),
+  ));
   return (rows ?? []).map(mapSopListItem);
 }
 

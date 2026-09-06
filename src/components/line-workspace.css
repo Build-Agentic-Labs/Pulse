@@ -2797,3 +2797,15 @@
     grid-column: auto;
   }
 }
+
+/* Brief local confirmation for both the copy button and Ctrl/Cmd+C. */
+.step-photo-copy-confirmed { background: #15803d; }
+.step-photo-copy-pop { animation: step-photo-copy-pop 220ms ease-out; }
+@keyframes step-photo-copy-pop {
+  0% { opacity: 0; transform: scale(0.8); }
+  65% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step-photo-copy-pop { animation: none; }
+}

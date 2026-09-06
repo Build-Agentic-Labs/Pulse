@@ -1,5 +1,7 @@
 "use client";
 
+import { acknowledgeAnnotationDrafts, readAnnotationDraft } from "@/lib/photo-annotation-drafts";
+
 // Route-scoped styles: ~37 kB of planner-only rules (procedure, gantt, scenarios,
 // setup, dashboard) that previously shipped to every route via globals.css.
 import "./line-workspace.css";
@@ -38,6 +40,8 @@ import {
   getTimelineBounds,
   round,
 } from "@/domain/calculations";
+import dynamic from "next/dynamic";
+import { createPlannerDerivation } from "@/domain/planner-derivation";
 import { buildOperatorAssignmentsFromIePlan } from "@/domain/operator-allocation";
 import type { IeSmartAllocationPlan, IeSmartAllocationRequest } from "@/domain/ie-smart-allocation";
 import { getTaskOperatorIds, getTaskOperatorResetPatch, syncTaskOperatorCount } from "@/domain/operator-assignments";
@@ -141,6 +145,7 @@ import {
   loadScenariosForProduct,
   loadWorkspaceProjectGroups,
   loadTaskFromSupabase,
+  loadTaskPrivateMediaFromSupabase,
   renameScenario,
   updateScenarioTarget,
   loadToolLibraryFromSupabase,
@@ -152,6 +157,7 @@ import {
   savePlannerStateToSupabase,
   saveProcedureTaskUpdateToSupabase,
   saveTaskCustomFieldsToSupabase,
+  saveTaskPhotoAnnotationsToSupabase,
   saveTasksToSupabase,
   softDeleteExplodedViewFromSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
@@ -179,8 +185,6 @@ import type {
 } from "@/domain/types";
 import { BulkTaskEditor } from "./bulk-task-editor";
 import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
-import { GanttTimeline } from "./gantt-timeline";
-import { OperatorUtilizationPanel } from "./operator-utilization-panel";
 import { ScenarioTabs } from "./scenario-tabs";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
 import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
@@ -190,13 +194,10 @@ import { TopNav } from "./planner-top-nav";
 import { announceProjectSwitch, projectPlannerHref } from "./sidebar-workspace-panel";
 import { PlannerWorkspaceSkeleton, ProductLoadingState, SettingsLoadingState } from "./space-loading-states";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
-import { ProjectCatalogSetupPanel } from "./project-catalog-setup-panel";
 import { AppSettingsPanel, embeddedSettingsSections, type SettingsSection } from "./app-settings-panel";
 import { ThemedSelect } from "./themed-select";
 import { KpiStrip, LineReadinessPanel } from "./line-workspace/analytics";
-import { DetailDrawer } from "./line-workspace/drawer";
-import { ProcedureWorkspace } from "./line-workspace/procedure";
-import { ChecklistWorkspace, PfmeaWorkspace } from "./line-workspace/planner-foundation-pages";
+import { ChecklistWorkspace } from "./line-workspace/planner-foundation-pages";
 import {
   Sidebar,
   SidebarReopenButton,
@@ -260,6 +261,8 @@ type ProcedureTaskSaveQueue = {
   inFlightSeq?: number;
   pending: boolean;
   pendingTaskSnapshot?: Task;
+  annotationOnly?: boolean;
+  annotationBase?: ReturnType<typeof getTaskStepPhotoAnnotationMap>;
   pendingTasksSnapshot?: Task[];
   pendingDraftSnapshot?: ProcedureDraftMap;
   latestSeq: number;
@@ -273,6 +276,13 @@ type DeferredProcedureServerUpdate = {
   receivedAt: number;
   source: "realtime" | "refreshTasks" | "refreshPlanner" | "saveCompletion";
 };
+
+const GanttTimeline = dynamic(() => import("./gantt-timeline").then((module) => module.GanttTimeline), { loading: () => <PlannerWorkspaceSkeleton /> });
+const OperatorUtilizationPanel = dynamic(() => import("./operator-utilization-panel").then((module) => module.OperatorUtilizationPanel), { loading: () => <PlannerWorkspaceSkeleton /> });
+const ProjectCatalogSetupPanel = dynamic(() => import("./project-catalog-setup-panel").then((module) => module.ProjectCatalogSetupPanel), { loading: () => <PlannerWorkspaceSkeleton /> });
+const DetailDrawer = dynamic(() => import("./line-workspace/drawer").then((module) => module.DetailDrawer));
+const ProcedureWorkspace = dynamic(() => import("./line-workspace/procedure").then((module) => module.ProcedureWorkspace), { loading: () => <PlannerWorkspaceSkeleton /> });
+const PfmeaWorkspace = dynamic(() => import("./line-workspace/pfmea-workspace").then((module) => module.PfmeaWorkspace), { loading: () => <PlannerWorkspaceSkeleton /> });
 
 // Cap on the planner undo history. Snapshots are structural-shared PlannerState objects,
 // so the memory cost is per-edit deltas, not full copies.
@@ -642,7 +652,6 @@ export function LineWorkspace({
   const procedureSaveQueuesRef = useRef<Record<string, ProcedureTaskSaveQueue>>({});
   const procedureSaveTimersRef = useRef<Record<string, number>>({});
   const procedureRetryTimersRef = useRef<Record<string, number>>({});
-  const photoAnnotationSaveQueuesRef = useRef<Record<string, Promise<void>>>({});
   const deferredProcedureServerUpdatesRef = useRef<Record<string, DeferredProcedureServerUpdate>>({});
   const autosaveHarnessRanRef = useRef(false);
   const [, setProcedureDraftVersion] = useState(0);
@@ -653,6 +662,8 @@ export function LineWorkspace({
   const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
   const taskDetailHydrationRequestsRef = useRef<Set<string>>(new Set());
   const fullyHydratedScenarioIdsRef = useRef<Set<string>>(new Set());
+  const hasLocalSaveWorkRef = useRef(hasLocalSaveWork);
+  hasLocalSaveWorkRef.current = hasLocalSaveWork;
   const flushPendingPlannerSaveRef = useRef(flushPendingPlannerSave);
   const applyProcedureDraftsToTaskRef = useRef(applyProcedureDraftsToTask);
   const mergeServerTaskIntoLocalTaskRef = useRef(mergeServerTaskIntoLocalTask);
@@ -698,22 +709,11 @@ export function LineWorkspace({
     [workspaceNotice],
   );
 
-  const derivedState = useMemo<PlannerState>(() => {
-    const planningContext = normalizeTaskPlanningContext(
-      plannerState.tasks,
-      plannerState.zones,
-      plannerState.stations,
-      plannerState.scenario.id,
-    );
-    const normalizedTasks = planningContext.tasks.map(syncTaskOperatorCount);
-    const calculated = applyCalculatedFields(plannerState.product, planningContext.stations, normalizedTasks);
-    return {
-      ...plannerState,
-      product: calculated.product,
-      stations: calculated.stations,
-      tasks: calculated.tasks,
-    };
-  }, [plannerState]);
+  const [derivePlanner] = useState(createPlannerDerivation);
+  const { state: derivedState, planningTasks } = useMemo(
+    () => derivePlanner(plannerState),
+    [derivePlanner, plannerState],
+  );
 
   const masterBom = useMemo(
     () => getMasterBom(derivedState.product.customFields),
@@ -785,7 +785,7 @@ export function LineWorkspace({
     }
 
     function handleBeforeUnload(event: BeforeUnloadEvent) {
-      if (!masterBomSaveInFlightRef.current) {
+      if (!hasLocalSaveWorkRef.current()) {
         return;
       }
       event.preventDefault();
@@ -818,8 +818,8 @@ export function LineWorkspace({
   }, []);
 
   const kpis = useMemo(
-    () => calculateProductKpis(derivedState.product, derivedState.stations, derivedState.tasks),
-    [derivedState.product, derivedState.stations, derivedState.tasks],
+    () => calculateProductKpis(derivedState.product, derivedState.stations, planningTasks),
+    [derivedState.product, derivedState.stations, planningTasks],
   );
 
   // Main Plan = the earliest-created scenario; it always uses the canonical product-level takt so its
@@ -842,7 +842,7 @@ export function LineWorkspace({
     [isMainScenario, kpis.taktMinutes, derivedState.product, derivedState.scenario],
   );
 
-  const timelineBounds = useMemo(() => getTimelineBounds(derivedState.tasks), [derivedState.tasks]);
+  const timelineBounds = useMemo(() => getTimelineBounds(planningTasks), [planningTasks]);
   const totalHeadcount = kpis.peakManpower;
   const availableOperatorLetters = useMemo(
     () => WORKER_ICON_LETTERS.slice(0, Math.min(Math.max(kpis.wholePersonStaffingRequirement, 0), WORKER_ICON_LETTERS.length)),
@@ -869,7 +869,7 @@ export function LineWorkspace({
     );
   }, [derivedState.tasks, toolLibraryItems]);
   const currentOperatorAllocation = useMemo(() => buildOperatorAssignmentsFromIePlan({
-    assignments: derivedState.tasks.map((task) => ({
+    assignments: planningTasks.map((task) => ({
       taskId: task.id,
       operatorIds: getTaskOperatorIds(task, availableOperatorLetters),
       rationale: "Current Gantt assignment",
@@ -880,11 +880,11 @@ export function LineWorkspace({
     operatorCapacityMinutes,
     strategyNotes: ["Current Gantt assignments were audited for planning recommendations."],
     taktMinutes: kpis.taktMinutes,
-    tasks: derivedState.tasks,
+    tasks: planningTasks,
   }), [
     availableOperatorLetters,
     derivedState.product.demandQuantity,
-    derivedState.tasks,
+    planningTasks,
     kpis.requiredAverageAllocationPercent,
     kpis.taktMinutes,
     operatorCapacityMinutes,
@@ -2837,6 +2837,23 @@ export function LineWorkspace({
     };
   }, [projectId]);
 
+  useEffect(() => {
+    const retryFailedMedia = () => {
+      if (document.visibilityState === "hidden") return;
+      setTaskDetailHydrationStatus(current => Object.fromEntries(
+        Object.entries(current).filter(([, status]) => status !== "error"),
+      ));
+    };
+    window.addEventListener("online", retryFailedMedia);
+    window.addEventListener("focus", retryFailedMedia);
+    document.addEventListener("visibilitychange", retryFailedMedia);
+    return () => {
+      window.removeEventListener("online", retryFailedMedia);
+      window.removeEventListener("focus", retryFailedMedia);
+      document.removeEventListener("visibilitychange", retryFailedMedia);
+    };
+  }, []);
+
   // The confirmed Product shell includes procedure steps, parts and tools, but
   // intentionally excludes private media. Hydrate one task at a time only when
   // Procedure needs it, avoiding three all-task media reads and URL signing on
@@ -2860,7 +2877,7 @@ export function LineWorkspace({
     taskDetailHydrationRequestsRef.current.add(taskId);
     setTaskDetailHydrationStatus((current) => ({ ...current, [taskId]: "loading" }));
 
-    void loadTaskFromSupabase(taskId, projectId)
+    void loadTaskPrivateMediaFromSupabase(taskId, projectId)
       .then((serverTask) => {
         if (!serverTask) {
           throw new Error("This procedure task is no longer available.");
@@ -3804,6 +3821,10 @@ export function LineWorkspace({
     const taskSnapshot = applyProcedureDraftsToTask(queue.pendingTaskSnapshot, draftSnapshot);
     const tasksSnapshot = queue.pendingTasksSnapshot.map((task) => (task.id === taskId ? taskSnapshot : task));
 
+    const annotationOnly = queue.annotationOnly;
+    const annotationBase = queue.annotationBase;
+    queue.annotationOnly = undefined;
+    queue.annotationBase = undefined;
     queue.inFlight = true;
     queue.pending = false;
     queue.inFlightSaveId = saveId;
@@ -3820,11 +3841,21 @@ export function LineWorkspace({
     let savedTask: Task | null = null;
 
     try {
-      savedTask = await saveProcedureTaskUpdateToSupabase(taskSnapshot, tasksSnapshot, projectId);
+      savedTask = annotationOnly
+        ? await saveTaskPhotoAnnotationsToSupabase(taskSnapshot, annotationBase ?? {}, projectId)
+        : await saveProcedureTaskUpdateToSupabase(taskSnapshot, tasksSnapshot, projectId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to save procedure task.";
       const isConflict = message.toLowerCase().includes("conflict");
       queue.inFlight = false;
+      if (!queue.pending) {
+        queue.pending = true;
+        queue.pendingTaskSnapshot = taskSnapshot;
+        queue.pendingTasksSnapshot = tasksSnapshot;
+        queue.pendingDraftSnapshot = draftSnapshot;
+        queue.annotationOnly = annotationOnly;
+        queue.annotationBase = annotationBase;
+      }
       queue.state = isConflict ? "conflict" : "retrying";
       queue.lastError = error;
       markProcedureDraftsForTask(taskId, {
@@ -3853,7 +3884,7 @@ export function LineWorkspace({
           const latestTasksSnapshot = latestDerivedStateRef.current.tasks.map((task) =>
             task.id === taskId ? latestTaskSnapshot : task,
           );
-          scheduleProcedureTaskSave(latestTaskSnapshot, latestTasksSnapshot);
+          scheduleProcedureTaskSave(latestTaskSnapshot, latestTasksSnapshot, annotationOnly ? annotationBase : undefined);
         }, 2500);
       }
       return;
@@ -3865,6 +3896,7 @@ export function LineWorkspace({
 
     let confirmedCurrent = true;
     if (savedTask) {
+      acknowledgeAnnotationDrafts(taskId, getTaskStepPhotoAnnotationMap(savedTask));
       confirmedCurrent = confirmProcedureDraftsFromSave(taskId, saveId, saveSeq, draftSnapshot, savedTask);
       remoteRefreshAppliedRef.current = true;
       setPlannerState((current) => {
@@ -3929,10 +3961,13 @@ export function LineWorkspace({
     await startProcedureTaskSave(taskId);
   }
 
-  function scheduleProcedureTaskSave(taskToSave: Task, tasksToSave: Task[]) {
+  function scheduleProcedureTaskSave(taskToSave: Task, tasksToSave: Task[], annotationBase?: ReturnType<typeof getTaskStepPhotoAnnotationMap>) {
     const taskId = taskToSave.id;
     const queue = getProcedureTaskSaveQueue(taskId);
     const taskSnapshot = applyProcedureDraftsToTask(taskToSave);
+    const onlyAnnotations = annotationBase !== undefined;
+    queue.annotationOnly = queue.pending ? Boolean(queue.annotationOnly && onlyAnnotations) : onlyAnnotations;
+    if (onlyAnnotations) queue.annotationBase = queue.annotationBase ?? annotationBase;
 
     queue.pending = true;
     queue.pendingTaskSnapshot = taskSnapshot;
@@ -4274,27 +4309,6 @@ export function LineWorkspace({
           JSON.stringify(getTaskStepPhotoAnnotationMap({ customFields: annotationCustomFields })),
     );
 
-    if (photoAnnotationsChanged && annotationCustomFields) {
-      const previousSave = photoAnnotationSaveQueuesRef.current[taskId] ?? Promise.resolve();
-      const nextSave = previousSave
-        .catch(() => undefined)
-        .then(() => saveTaskCustomFieldsToSupabase(taskId, annotationCustomFields, projectId));
-      photoAnnotationSaveQueuesRef.current[taskId] = nextSave;
-      void nextSave
-        .catch((error: unknown) => {
-          notifyFeedback({
-            title: "Photo annotations could not be saved",
-            body: error instanceof Error ? error.message : "Try editing the photo again.",
-            tone: "danger",
-          });
-        })
-        .finally(() => {
-          if (photoAnnotationSaveQueuesRef.current[taskId] === nextSave) {
-            delete photoAnnotationSaveQueuesRef.current[taskId];
-          }
-        });
-    }
-
     setPlannerState((current) => {
       const currentTask = current.tasks.find((task) => task.id === taskId);
       const safePatch = currentTask ? enforceStepDerivedDuration(currentTask, patch) : patch;
@@ -4306,8 +4320,17 @@ export function LineWorkspace({
         : patchedTasks;
       const taskToSave = scheduledTasks.find((task) => task.id === taskId);
 
-      if (taskToSave && !isNormalizedAssetPatch) {
-        scheduleProcedureTaskSave(taskToSave, scheduledTasks);
+      if (taskToSave && (!isNormalizedAssetPatch || photoAnnotationsChanged)) {
+        const base = photoAnnotationsChanged && isNormalizedAssetPatch && currentTask
+          ? getTaskStepPhotoAnnotationMap(currentTask) : undefined;
+        if (base) {
+          const nextMap = getTaskStepPhotoAnnotationMap(taskToSave);
+          for (const photoId of new Set([...Object.keys(base), ...Object.keys(nextMap)])) {
+            const draft = readAnnotationDraft(taskId, photoId);
+            if (draft) base[photoId] = draft.base;
+          }
+        }
+        scheduleProcedureTaskSave(taskToSave, scheduledTasks, base);
       }
 
       return {

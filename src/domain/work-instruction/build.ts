@@ -89,6 +89,7 @@ function buildPhoto(attachments: StepPhotoAttachmentMap, stepId: string): WorkIn
   return {
     id: first.id,
     url: first.dataUrl,
+    ...(first.storagePath ? { storagePath: first.storagePath } : {}),
     caption: first.caption ?? "",
     ...(first.width ? { width: first.width } : {}),
     ...(first.height ? { height: first.height } : {}),

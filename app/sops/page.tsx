@@ -17,7 +17,7 @@ import { fetchSopListReviewData } from "@/lib/sop/list-review-data";
 import { fetchReviewQueueData } from "@/lib/sop/review-queue-data";
 import { listSops } from "@/lib/sop/store";
 import { SOP_WORKSPACE_COOKIE } from "@/lib/sop/workspace-cookie";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getServerAuthContext } from "@/lib/supabase/request-context";
 
 export const metadata = {
   title: "SOPs | Pulse",
@@ -58,11 +58,8 @@ export default async function SopsPage({
     const cookieStore = await cookies();
     const workspaceId = cookieStore.get(SOP_WORKSPACE_COOKIE)?.value;
     if (workspaceId) {
-      const supabase = await createSupabaseServerClient();
-      // getUser(), not getSession(): on the server the cookie payload is
-      // unverified input, and this page is the request's verification point.
-      const { data } = await supabase.auth.getUser();
-      if (data.user) {
+      const { supabase, user } = await getServerAuthContext();
+      if (user) {
         switch (tab) {
           case "dashboard": {
             const [sops, departments] = await Promise.all([
@@ -76,9 +73,9 @@ export default async function SopsPage({
             const [sops, departments, departmentRoles] = await Promise.all([
               listSops(workspaceId, supabase),
               listDepartments(workspaceId, supabase),
-              fetchDepartmentRolesForUser(data.user.id, supabase),
+              fetchDepartmentRolesForUser(user.id, supabase),
             ]);
-            const review = await fetchSopListReviewData(sops, data.user.id, supabase);
+            const review = await fetchSopListReviewData(sops, user.id, supabase);
             const memberDepartments = pickMemberDepartments(
               departments,
               new Set(departmentRoles.keys()),
@@ -103,7 +100,7 @@ export default async function SopsPage({
             break;
           }
           case "review": {
-            const queue = await fetchReviewQueueData(workspaceId, data.user.id, supabase);
+            const queue = await fetchReviewQueueData(workspaceId, user.id, supabase);
             initial = { tab, workspaceId, queue };
             break;
           }

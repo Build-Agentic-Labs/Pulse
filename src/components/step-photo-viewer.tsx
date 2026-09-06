@@ -60,7 +60,8 @@ import {
   type PhotoTextAnnotation,
 } from "@/domain/photo-annotations";
 import type { StepPhotoAttachment } from "@/domain/step-photos";
-import { refreshSignedMediaUrl } from "@/domain/supabase-planner";
+import { useRecoveringPhoto } from "@/lib/use-recovering-photo";
+import { mergeAnnotationDocuments, readAnnotationDraft, writeAnnotationDraft } from "@/lib/photo-annotation-drafts";
 import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "./themed-select";
 
@@ -468,6 +469,7 @@ function wrapCanvasText(
 }
 
 export function StepPhotoViewer({
+  taskId = "",
   stepSequence,
   photo,
   photos,
@@ -480,6 +482,7 @@ export function StepPhotoViewer({
   photos: StepPhotoAttachment[];
   onClose: () => void;
   onPhotoChange: (photo: StepPhotoAttachment) => void;
+  taskId?: string;
   onUpdatePhoto?: (photoId: string, patch: Partial<StepPhotoAttachment>) => void;
 }) {
   const markerId = useId().replace(/:/g, "");
@@ -509,37 +512,11 @@ export function StepPhotoViewer({
   const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("minimized");
   const [exportAction, setExportAction] = useState<PhotoExportAction>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  // Signed URLs expire after an hour, so an idle tab's <img> starts 4xx-ing. On the first load
-  // error per object we re-sign once and swap in the fresh URL; a second failure (or a failed
-  // re-sign, tracked as null) falls back to a placeholder instead of a broken image.
-  const [signedUrlOverrides, setSignedUrlOverrides] = useState<Record<string, string | null>>({});
-  const refreshedPathsRef = useRef(new Set<string>());
+  const media = useRecoveringPhoto(photo.dataUrl, photo.storagePath);
   const confirm = useConfirm();
-
-  async function handlePhotoError(storagePath?: string) {
-    if (!storagePath) {
-      return;
-    }
-    if (refreshedPathsRef.current.has(storagePath)) {
-      setSignedUrlOverrides((current) =>
-        current[storagePath] === null ? current : { ...current, [storagePath]: null },
-      );
-      return;
-    }
-    refreshedPathsRef.current.add(storagePath);
-    const freshUrl = await refreshSignedMediaUrl(storagePath, "photo");
-    setSignedUrlOverrides((current) => ({ ...current, [storagePath]: freshUrl ?? null }));
-  }
-
-  function resolvePhotoSource(storagePath: string | undefined, fallbackUrl: string) {
-    if (storagePath) {
-      const override = signedUrlOverrides[storagePath];
-      if (override !== undefined) {
-        return override ?? "";
-      }
-    }
-    return fallbackUrl;
-  }
+  const incomingRef = useRef({ id: photo.id, document: annotationDocumentFromPhoto(photo) });
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
 
   const selectedAnnotation = useMemo(
     () => annotations.find((item) => item.id === selectedId) ?? null,
@@ -579,6 +556,9 @@ export function StepPhotoViewer({
         return;
       }
 
+      writeAnnotationDraft(taskId, photo.id, incomingRef.current.document, {
+        version: PHOTO_ANNOTATION_VERSION, items: nextItems,
+      });
       pendingSaveRef.current = { photoId: photo.id, items: nextItems };
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
@@ -588,7 +568,7 @@ export function StepPhotoViewer({
         flushPendingAnnotations();
       }, 350);
     },
-    [flushPendingAnnotations, photo.id],
+    [flushPendingAnnotations, photo.id, taskId],
   );
 
   const updateAnnotations = useCallback(
@@ -728,7 +708,16 @@ export function StepPhotoViewer({
 
   useEffect(() => {
     flushPendingAnnotations();
-    setAnnotations(annotationDocumentFromPhoto(selectedPhotoRef.current).items);
+    const incoming = annotationDocumentFromPhoto(selectedPhotoRef.current);
+    const draft = readAnnotationDraft(taskId, photo.id);
+    const restored = draft ? mergeAnnotationDocuments(draft.base, draft.local, incoming) : incoming;
+    incomingRef.current = {id: photo.id, document: incoming};
+    annotationsRef.current = restored.items;
+    setAnnotations(restored.items);
+    if (draft && JSON.stringify(restored.items) !== JSON.stringify(incoming.items)) {
+      pendingSaveRef.current = {photoId: photo.id, items: restored.items};
+      flushPendingAnnotations();
+    }
     setExportError(null);
     setSelectedId(null);
     setDraftArrow(null);
@@ -738,7 +727,37 @@ export function StepPhotoViewer({
     setDragState(null);
     setTextBoxDragPending(null);
     setContextMenu(null);
-  }, [flushPendingAnnotations, photo.id]);
+  }, [flushPendingAnnotations, photo.id, taskId]);
+
+  const incomingAnnotations = JSON.stringify(annotationDocumentFromPhoto(photo));
+  useEffect(() => {
+    const incoming = JSON.parse(incomingAnnotations) as PhotoAnnotationDocument;
+    if (incomingRef.current.id !== photo.id) return;
+    const draft = readAnnotationDraft(taskId, photo.id);
+    const merged = mergeAnnotationDocuments(draft?.base ?? incomingRef.current.document,
+      {version: PHOTO_ANNOTATION_VERSION, items: annotationsRef.current}, incoming);
+    incomingRef.current = {id: photo.id, document: incoming};
+    if (JSON.stringify(merged.items) !== JSON.stringify(annotationsRef.current)) {
+      setAnnotations(merged.items);
+      if (pendingSaveRef.current?.photoId === photo.id) {
+        pendingSaveRef.current.items = merged.items;
+        writeAnnotationDraft(taskId, photo.id, incoming, merged);
+      }
+    }
+  }, [incomingAnnotations, photo.id, taskId]);
+
+  useEffect(() => {
+    const flush = () => flushPendingAnnotations();
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!pendingSaveRef.current) return;
+      flush();
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => { window.removeEventListener("pagehide", flush); window.removeEventListener("beforeunload", beforeUnload); };
+  }, [flushPendingAnnotations]);
 
   useEffect(() => {
     if (photos.length <= 1) {
@@ -1401,14 +1420,18 @@ export function StepPhotoViewer({
       } satisfies PhotoAnnotationDocument;
       const extension = photo.contentType?.includes("png") ? "png" : "jpg";
       const baseName = photo.name.replace(/\.[^.]+$/, "") || `step-${stepSequence}-photo`;
-      const source = resolvePhotoSource(photo.storagePath, photo.dataUrl);
+      let source = await media.recover();
 
       if (!source) {
         throw new Error("Photo is unavailable for download.");
       }
 
       if (annotations.length === 0) {
-        const response = await fetch(source);
+        let response = await fetch(source);
+        if (!response.ok && photo.storagePath) {
+          source = await media.retry();
+          if (source) response = await fetch(source);
+        }
         if (!response.ok) {
           throw new Error("Photo could not be downloaded.");
         }
@@ -1417,7 +1440,11 @@ export function StepPhotoViewer({
         return;
       }
 
-      const blob = await renderAnnotatedPhotoBlob(photo, document, source);
+      const blob = await renderAnnotatedPhotoBlob(photo, document, source).catch(async (error) => {
+        const fresh = photo.storagePath ? await media.retry() : undefined;
+        if (!fresh) throw error;
+        return renderAnnotatedPhotoBlob(photo, document, fresh);
+      });
       downloadBlob(blob, `${baseName}-annotated.${extension}`);
     } catch (error) {
       setExportError(error instanceof Error ? error.message : "Photo could not be downloaded.");
@@ -1432,7 +1459,7 @@ export function StepPhotoViewer({
 
     let annotatedUrl: string | null = null;
     try {
-      const source = resolvePhotoSource(photo.storagePath, photo.dataUrl);
+      const source = await media.recover();
       if (!source) {
         throw new Error("Photo is unavailable for printing.");
       }
@@ -1442,7 +1469,11 @@ export function StepPhotoViewer({
           photo,
           { version: PHOTO_ANNOTATION_VERSION, items: annotations },
           source,
-        );
+        ).catch(async (error) => {
+          const fresh = photo.storagePath ? await media.retry() : undefined;
+          if (!fresh) throw error;
+          return renderAnnotatedPhotoBlob(photo, {version: PHOTO_ANNOTATION_VERSION, items: annotations}, fresh);
+        });
         annotatedUrl = URL.createObjectURL(blob);
       }
 
@@ -1964,24 +1995,26 @@ export function StepPhotoViewer({
       onClick={onClose}
     >
       <div className="ui-photo-viewer-frame" onClick={(event) => event.stopPropagation()}>
-        {resolvePhotoSource(photo.storagePath, photo.dataUrl) ? (
+        {!media.failed && media.source ? (
           <NextImage
-            src={resolvePhotoSource(photo.storagePath, photo.dataUrl)}
+            src={media.source}
             alt={`Step ${stepSequence} photo ${photo.name}`}
             width={photo.width ?? 1280}
             height={photo.height ?? 960}
             unoptimized
             fetchPriority="high"
             className="ui-photo-viewer-image"
-            onError={() => void handlePhotoError(photo.storagePath)}
+            onError={media.onError}
           />
         ) : (
           <div className="ui-photo-viewer-image flex min-h-64 items-center justify-center text-sm text-ink-tertiary">
-            Photo unavailable
+            <span>Photo unavailable</span>
+            <button type="button" className="ml-3 underline" disabled={media.loading} onClick={() => void media.retry()}>Retry photo</button>
           </div>
         )}
         <div
           ref={overlayRef}
+          style={{pointerEvents: media.failed ? "none" : undefined}}
           className={`ui-photo-viewer-annotation-layer ${activeTool === "select" ? "ui-photo-viewer-annotation-layer-select" : "ui-photo-viewer-annotation-layer-draw"}${dragState?.active ? " ui-photo-viewer-annotation-dragging" : ""}`}
           onPointerDown={handleOverlayPointerDown}
           onPointerMove={handleOverlayPointerMove}

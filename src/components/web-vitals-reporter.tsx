@@ -1,23 +1,25 @@
 "use client";
 
 import { useReportWebVitals } from "next/web-vitals";
+import { performanceRoute } from "@/lib/web-vitals";
 
-const webVitalsEndpoint = process.env.NEXT_PUBLIC_WEB_VITALS_ENDPOINT;
+const webVitalsEndpoint = process.env.NEXT_PUBLIC_WEB_VITALS_ENDPOINT || "/api/performance";
 
 export function WebVitalsReporter() {
   useReportWebVitals((metric) => {
-    if (!webVitalsEndpoint) {
+    if (process.env.NODE_ENV !== "production") {
       return;
     }
 
     const body = JSON.stringify({
-      ...metric,
-      path: window.location.pathname,
+      name: metric.name,
+      value: metric.value,
+      rating: metric.rating,
+      path: performanceRoute(window.location.pathname),
       recordedAt: new Date().toISOString(),
     });
 
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(webVitalsEndpoint, new Blob([body], { type: "application/json" }));
+    if (navigator.sendBeacon?.(webVitalsEndpoint, new Blob([body], { type: "application/json" }))) {
       return;
     }
 
@@ -27,7 +29,7 @@ export function WebVitalsReporter() {
       headers: { "Content-Type": "application/json" },
       keepalive: true,
       cache: "no-store",
-    });
+    }).catch(() => undefined);
   });
 
   return null;

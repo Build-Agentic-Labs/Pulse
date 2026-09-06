@@ -36,6 +36,16 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Production build
+        run: npm run build
+        env:
+          # Compile-time public configuration only; CI never needs production credentials.
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-build-only
+
+      - name: Client bundle budget
+        run: npm run check:bundles
+
   # The database is the enforcement layer for SOP document control, so the rules that matter most
   # live in triggers and RLS policies that `npm test` cannot reach. This job is why it is caught:
   # on 2026-07-25 the pgTAP suite found a number stamp that moved a document's content hash --

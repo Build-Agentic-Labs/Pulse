@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadPlannerCoreStateFromSupabase } from "./supabase-planner";
+import { loadPlannerCoreStateFromSupabase, loadTaskPrivateMediaFromSupabase } from "./supabase-planner";
 
 const NOW = "2026-08-05T12:00:00.000Z";
 
@@ -78,6 +78,7 @@ function createPlannerClientFixture() {
     eq() { return this; }
     order() { return this; }
     limit() { return this; }
+    range() { return this; }
     or() { return this; }
     in() { return this; }
     is() { return this; }
@@ -110,7 +111,7 @@ function createPlannerClientFixture() {
         error: null,
       }),
     },
-    rpc: () => Promise.resolve({ data: false, error: null }),
+    rpc: (name: string) => Promise.resolve({ data: name === "task_project_id" ? "project-1" : false, error: null }),
     storage: {
       from: () => ({ createSignedUrls }),
     },
@@ -147,5 +148,15 @@ describe("loadPlannerCoreStateFromSupabase", () => {
     expect(requestedTables).not.toContain("step_exploded_views");
     expect(requestedTables).not.toContain("task_videos");
     expect(createSignedUrls).not.toHaveBeenCalled();
+  });
+});
+
+describe("private media refresh", () => {
+  it("does not re-read steps, dependencies, parts, or tools", async () => {
+    const { client, requestedTables } = createPlannerClientFixture();
+    const task = await loadTaskPrivateMediaFromSupabase("task-1", "project-1", client as never);
+    expect(task?.id).toBe("task-1");
+    expect(requestedTables).toEqual(["tasks", "step_photos", "step_exploded_views", "task_videos"]);
+    expect(task?.customFields).not.toHaveProperty("stepPhotoAttachments");
   });
 });

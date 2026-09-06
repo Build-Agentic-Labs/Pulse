@@ -6,8 +6,8 @@
  * variant (`WORK_INSTRUCTION_LAYOUTS`) — v1 is 3x2, v2 is 2x2 with a far larger
  * photo — driven by CSS custom properties rather than a forked renderer.
  *
- * `WorkInstructionDocument` is a pure render — no data fetching, no planner
- * state — so the print route can load its data however it likes and hand the
+ * `WorkInstructionDocument` owns no planner state. Photo sources renew their
+ * signed links as needed; the print route loads document data and hands the
  * same markup to the browser's print pipeline. Same contract as
  * `src/components/planning/work-order-print.tsx`.
  *
@@ -30,6 +30,7 @@ import {
   type WorkInstructionSheet,
 } from "@/domain/work-instruction/schema";
 import { Fragment, useId } from "react";
+import { RecoveringPhoto } from "../recovering-photo";
 import { StaticPhotoAnnotation } from "../static-photo-annotation";
 
 const CONFIDENTIAL_LINE =
@@ -505,8 +506,7 @@ function WorkInstructionPhotoMedia({
 
   if (annotations.length === 0) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- self-contained print document; src is a data: or signed URL
-      <img src={photo.url} alt={alt} />
+      <RecoveringPhoto url={photo.url} storagePath={photo.storagePath} alt={alt} />
     );
   }
 
@@ -531,7 +531,7 @@ function WorkInstructionPhotoMedia({
           <path d="M0,0 L8,4 L0,8 Z" fill="context-stroke" />
         </marker>
       </defs>
-      <image href={photo.url} width={width} height={height} preserveAspectRatio="none" />
+      <RecoveringPhoto svg url={photo.url} storagePath={photo.storagePath} alt={alt} width={width} height={height} />
       {annotations.map((annotation) => (
         <StaticPhotoAnnotation
           key={annotation.id}

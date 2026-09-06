@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, ImageIcon, Link2, Trash2, X } from "lucide-react";
+import { Check, ClipboardPaste, Copy, ImageIcon, Link2, Trash2, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -29,6 +29,7 @@ import {
   getStepPartReferenceQuantity,
   getStepPartReferences,
 } from "@/domain/step-part-references";
+import { canPasteInto } from "@/domain/step-photo-clipboard";
 import { clipboardImageFiles } from "@/domain/clipboard-images";
 import { normalizePhotoAnnotationDocument } from "@/domain/photo-annotations";
 import { type StepPhotoAttachment } from "@/domain/step-photos";
@@ -36,6 +37,7 @@ import type { ManufacturingStep, PartReference, Task } from "@/domain/types";
 import { BomPartSearch, type BomPartSelection } from "../bom-part-search";
 import { ClearableNumberInput } from "../clearable-number-input";
 import { StaticPhotoAnnotation } from "../static-photo-annotation";
+import { RecoveringPhoto } from "../recovering-photo";
 import { StepPhotoViewer } from "../step-photo-viewer";
 import { ThemedSelect } from "../themed-select";
 import { useStepPhotoClipboard } from "./step-photo-clipboard-provider";
@@ -236,11 +238,11 @@ function StepPhotoThumbnail({
           <path d="M0,0 L8,4 L0,8 Z" fill="context-stroke" />
         </marker>
       </defs>
-      <image
-        href={photo.thumbnailUrl ?? photo.dataUrl}
-        width={width}
-        height={height}
-        preserveAspectRatio="none"
+      <RecoveringPhoto svg
+        url={photo.thumbnailUrl ?? photo.dataUrl}
+        storagePath={photo.thumbnailUrl ? (photo.thumbnailStoragePath ?? photo.storagePath) : photo.storagePath}
+        alt={`Step ${stepSequence} photo`}
+        width={width} height={height}
       />
       {annotations.map((annotation) => (
         <StaticPhotoAnnotation
@@ -302,7 +304,65 @@ export function StepPhotoAttachmentEditor({
   onUpdatePhoto,
 }: StepPhotoAttachmentEditorProps) {
   const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
-  const { entry, putOnClipboard, setActiveStep, clearActiveStep } = useStepPhotoClipboard();
+  const { entry, putOnClipboard, pasteInto, isPasting, setActiveStep, clearActiveStep } = useStepPhotoClipboard();
+  const photoAreaRef = useRef<HTMLDivElement>(null);
+  const [pasteHint, setPasteHint] = useState("");
+  const [readingClipboard, setReadingClipboard] = useState(false);
+  const clipboardReadRef = useRef(0);
+  useEffect(() => () => { clipboardReadRef.current++; }, [taskId, step.id]);
+  const canPasteCopied = Boolean(entry && canPasteInto(entry, taskId, step.id));
+  const pasteBusy = isUploading || isPasting || readingClipboard;
+
+  async function pasteCopiedPhoto() {
+    if (pasteBusy) return;
+    setPasteHint("");
+    try {
+      if (await pasteInto({taskId, stepId:step.id})) setPasteHint(`Photo pasted into Step ${step.sequence}.`);
+    } catch {
+      setPasteHint("Photo could not be pasted. Try again.");
+    }
+  }
+
+  async function pasteSystemImage() {
+    if (pasteBusy) return;
+    setPasteHint("");
+    const request = ++clipboardReadRef.current;
+    setReadingClipboard(true);
+    photoAreaRef.current?.focus();
+    try {
+      if (!navigator.clipboard?.read) throw new Error("Clipboard read unavailable");
+      const items = await navigator.clipboard.read();
+      const files: File[] = [];
+      for (const item of items) {
+        const type = item.types.find(type => type.startsWith("image/"));
+        if (type) files.push(new File([await item.getType(type)], `Pasted image.${type.split("/")[1]}`, {type}));
+      }
+      if (request !== clipboardReadRef.current) return;
+      if (!files.length) {
+        setPasteHint("No image found. Copy an image or screenshot first, or use Upload.");
+        return;
+      }
+      onFilesSelected(files);
+    } catch {
+      if (request !== clipboardReadRef.current) return;
+      setPasteHint("Press Cmd/Ctrl+V in this photo area to paste, or use Upload.");
+    } finally {
+      if (request === clipboardReadRef.current) setReadingClipboard(false);
+    }
+  }
+  const [copyFeedback, setCopyFeedback] = useState<{ photoId: string; sequence: number } | null>(null);
+  const copySequence = useRef(0);
+
+  useEffect(() => {
+    if (entry?.mode !== "copy" || entry.sourceTaskId !== taskId || entry.sourceStepId !== step.id) {
+      setCopyFeedback(null);
+      return;
+    }
+    setCopyFeedback({ photoId: entry.photo.id, sequence: ++copySequence.current });
+    const timer = window.setTimeout(() => setCopyFeedback(null), 1600);
+    return () => window.clearTimeout(timer);
+  }, [entry, taskId, step.id]);
+
 
   // pointerleave/blur don't fire when this editor unmounts while it is the active paste
   // target (closing the drawer with Esc, switching task, collapsing the section) -- without
@@ -310,21 +370,25 @@ export function StepPhotoAttachmentEditor({
   useEffect(() => () => clearActiveStep(step.id), [step.id, clearActiveStep]);
 
   function handlePaste(event: ReactClipboardEvent<HTMLDivElement>) {
-    if (isUploading) {
-      return;
-    }
-
-    const files = clipboardImageFiles(event.clipboardData);
-    if (files.length === 0) {
-      return;
-    }
-
+    const target = event.target as HTMLElement;
+    if (target.closest("textarea, input, [contenteditable='true']")) return;
+    // Claim this event even while busy so it cannot paste into a different hovered step.
     event.preventDefault();
-    onFilesSelected(files);
+    if (pasteBusy) return;
+    const files = clipboardImageFiles(event.clipboardData);
+    if (files.length) {
+      setPasteHint("");
+      onFilesSelected(files);
+    } else if (canPasteCopied) {
+      void pasteCopiedPhoto();
+    } else {
+      setPasteHint("Copy an image or a photo from another step first, then paste here.");
+    }
   }
 
   return (
     <div
+      ref={photoAreaRef}
       className="space-y-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
       role="region"
       aria-label={`Step ${step.sequence} photos. Paste an image, press Ctrl/Cmd+V to paste a copied photo, or use Upload.`}
@@ -341,7 +405,11 @@ export function StepPhotoAttachmentEditor({
           {photos.length > 0 ? <span className="text-ink-secondary/70">({photos.length})</span> : null}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold text-ink-tertiary">Paste image</span>
+          <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-2" disabled={pasteBusy}
+            aria-label={`Paste photo into step ${step.sequence}`}
+            onClick={() => void (canPasteCopied ? pasteCopiedPhoto() : pasteSystemImage())}>
+            <ClipboardPaste size={14} />{isPasting || readingClipboard ? "Pasting…" : "Paste photo"}
+          </button>
           <label
             className={`ui-btn-ghost cursor-pointer ${compact ? "h-8 gap-1.5 px-2" : "h-10 gap-2"} ${
               isUploading ? "pointer-events-none opacity-60" : ""
@@ -391,11 +459,20 @@ export function StepPhotoAttachmentEditor({
                     event.stopPropagation();
                     putOnClipboard(photo, taskId, step.id, "copy");
                   }}
-                  className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-black/55 text-white opacity-0 transition hover:bg-black/75 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100 group-focus-within:opacity-100"
+                  className={`absolute left-1.5 top-1.5 flex h-6 items-center justify-center rounded text-white transition focus:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100 group-focus-within:opacity-100 ${
+                    copyFeedback?.photoId === photo.id
+                      ? "step-photo-copy-confirmed px-2 opacity-100"
+                      : "w-6 bg-black/55 opacity-0 hover:bg-black/75"
+                  }` }
                   aria-label={`Copy photo from step ${step.sequence}`}
                   title="Copy photo (Ctrl/Cmd+C) — then Ctrl/Cmd+V on another step"
                 >
-                  <Copy size={11} />
+                  {copyFeedback?.photoId === photo.id ? (
+                    <span key={copyFeedback.sequence} className="step-photo-copy-pop flex items-center gap-1" role="status">
+                      <Check size={13} strokeWidth={2.5} aria-hidden="true" />
+                      <span className="text-[10px] font-semibold">Copied</span>
+                    </span>
+                  ) : <Copy size={11} />}
                 </button>
                 <button
                   type="button"
@@ -414,12 +491,19 @@ export function StepPhotoAttachmentEditor({
           ))}
         </div>
       ) : (
-        <div className="border-t border-dashed border-line pt-2 text-xs font-semibold text-ink-secondary">
-          No photos attached yet. Click here and paste an image.
-        </div>
+        <button type="button" disabled={pasteBusy}
+          className="w-full rounded border border-dashed border-line px-3 py-4 text-left text-xs text-ink-secondary transition hover:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+          onClick={() => {
+            photoAreaRef.current?.focus();
+            setPasteHint(`Ready to paste into Step ${step.sequence}. Press Cmd/Ctrl+V, or click Paste photo above.`);
+          }}>
+          No photos yet. Click here, then press Cmd/Ctrl+V to paste an image.
+        </button>
       )}
+      <p className={pasteHint ? "text-[11px] text-ink-secondary" : "sr-only"} role="status" aria-live="polite">{pasteHint}</p>
       {previewPhoto ? (
         <StepPhotoViewer
+          taskId={taskId}
           stepSequence={step.sequence}
           photo={photos.find((candidate) => candidate.id === previewPhoto.id) ?? previewPhoto}
           photos={photos}

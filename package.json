@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "gen:types": "supabase gen types typescript --project-id neaadefipcpxxcqszpud --schema public"
+    "gen:types": "supabase gen types typescript --project-id neaadefipcpxxcqszpud --schema public",
+    "check:bundles": "node scripts/check-client-bundles.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

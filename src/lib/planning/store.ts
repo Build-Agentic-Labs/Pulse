@@ -1,3 +1,4 @@
+import { readAllPages, readRowsByIds } from "@/lib/supabase/read-all-pages";
 /**
  * Supabase-backed persistence for the Planning space: work orders, trailer configs, the item
  * master, and space_access grants. (Legacy MTS Excel "work order templates" are only purged —
@@ -267,15 +268,18 @@ export async function listWorkOrders(
   client?: PlannerSupabaseClient,
 ): Promise<WorkOrderSummary[]> {
   const supabase = client ?? createPlannerSupabaseClient();
-  const { data, error } = await supabase
-    .from("work_orders")
-    .select(WORK_ORDER_LIST_COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .order("order_date", { ascending: false })
-    .order("order_no", { ascending: false });
-  if (error) {
-    throw new Error(`Could not load work orders: ${error.message}`);
-  }
+  const data = await readAllPages(async (from, to) => {
+    const { data, error } = await supabase
+      .from("work_orders")
+      .select(WORK_ORDER_LIST_COLUMNS)
+      .eq("workspace_id", workspaceId)
+      .order("order_date", { ascending: false })
+      .order("order_no", { ascending: false }).order("id").range(from, to);
+    if (error) {
+      throw new Error(`Could not load work orders: ${error.message}`);
+    }
+    return data;
+  });
   const summaries = (data ?? []).map(mapWorkOrderSummary);
   if (summaries.length === 0) {
     return summaries;
@@ -285,15 +289,19 @@ export async function listWorkOrders(
   // actually missing their assembly order number (assembly fulfillment, blank assembly_order_no)
   // and tally them per order, client-side. Keeps the primary list query a flat header projection
   // rather than a join/aggregate, and keeps this one narrow instead of fetching every line.
-  const { data: lineRows, error: linesError } = await supabase
-    .from("work_order_lines")
-    .select("work_order_id")
-    .eq("workspace_id", workspaceId)
-    .eq("fulfillment", "assembly")
-    .eq("assembly_order_no", "");
-  if (linesError) {
-    throw new Error(`Could not load work-order completeness: ${linesError.message}`);
-  }
+  const lineRows = await readRowsByIds(summaries.map((order) => order.id), async (ids, from, to) => {
+    const { data: lineRows, error: linesError } = await supabase
+      .from("work_order_lines")
+      .select("work_order_id")
+      .eq("workspace_id", workspaceId)
+      .eq("fulfillment", "assembly")
+      .eq("assembly_order_no", "").in("work_order_id", ids).order("id").range(from, to);
+    if (linesError) {
+      throw new Error(`Could not load work-order completeness: ${linesError.message}`);
+    }
+
+    return lineRows;
+  });
 
   const missingByOrderId = new Map<string, number>();
   for (const row of lineRows ?? []) {

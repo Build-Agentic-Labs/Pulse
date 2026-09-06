@@ -21,6 +21,7 @@ import {
   type WorkOrderSummary,
 } from "@/lib/planning/store";
 import { SOP_WORKSPACE_COOKIE } from "@/lib/sop/workspace-cookie";
+import { getServerAuthContext } from "@/lib/supabase/request-context";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type InitialSopWorkspaceData = {
@@ -46,14 +47,11 @@ export type InitialSopWorkspaceData = {
  */
 export const fetchInitialWorkspaceGroups = cache(async (): Promise<WorkspaceProjectGroup[] | undefined> => {
   try {
-    const supabase = await createSupabaseServerClient();
-    // getUser(), not getSession(): the cookie payload is unverified input on the
-    // server, and this fetch is the request's verification point.
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) {
+    const { supabase, user } = await getServerAuthContext();
+    if (!user) {
       return undefined;
     }
-    return await loadWorkspaceProjectGroups(data.user.id, supabase);
+    return await loadWorkspaceProjectGroups(user.id, supabase);
   } catch {
     return undefined;
   }
@@ -152,13 +150,13 @@ export async function fetchInitialPlanningConfigurations(): Promise<
  */
 export async function fetchInitialSopWorkspaceData(): Promise<InitialSopWorkspaceData | undefined> {
   try {
-    const [supabase, cookieStore] = await Promise.all([createSupabaseServerClient(), cookies()]);
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) {
+    const [{ supabase, user }, cookieStore] = await Promise.all([getServerAuthContext(), cookies()]);
+    if (!user) {
       return undefined;
     }
 
-    const groups = await loadWorkspaceProjectGroups(data.user.id, supabase);
+    const groups = await fetchInitialWorkspaceGroups();
+    if (!groups) return undefined;
     const requestedWorkspaceId = cookieStore.get(SOP_WORKSPACE_COOKIE)?.value;
     const workspaceId =
       groups.find((group) => group.workspace.id === requestedWorkspaceId)?.workspace.id ??
@@ -186,13 +184,12 @@ export async function fetchInitialPlannerData(projectId: string): Promise<{
   plannerState?: PlannerState;
 }> {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) {
+    const { supabase, user } = await getServerAuthContext();
+    if (!user) {
       return {};
     }
     const [groups, plannerState] = await Promise.all([
-      loadWorkspaceProjectGroups(data.user.id, supabase).catch(() => undefined),
+      loadWorkspaceProjectGroups(user.id, supabase).catch(() => undefined),
       loadPlannerStateFromSupabase(projectId, undefined, supabase).catch(() => undefined),
     ]);
     return { groups, plannerState: plannerState ?? undefined };
@@ -213,13 +210,12 @@ export async function fetchInitialPlannerSummaryData(projectId: string): Promise
   plannerState?: PlannerState;
 }> {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) {
+    const { supabase, user } = await getServerAuthContext();
+    if (!user) {
       return {};
     }
     const [groups, plannerState] = await Promise.all([
-      loadWorkspaceProjectGroups(data.user.id, supabase).catch(() => undefined),
+      loadWorkspaceProjectGroups(user.id, supabase).catch(() => undefined),
       loadPlannerSummaryStateFromSupabase(projectId, supabase).catch(() => undefined),
     ]);
     return { groups, plannerState: plannerState ?? undefined };

@@ -80,3 +80,10 @@ describe("mergeTaskPrivateMedia", () => {
     expect(merged.customFields).not.toHaveProperty(EXPLODED_VIEWS_FIELD);
   });
 });
+
+it("retains local markup when a stale photo hydration finishes", () => {
+  const mark={version:2,items:[{id:"a",type:"arrow",color:"red",strokeWidth:3,x1:0,y1:0,x2:1,y2:1}]};
+  const local=task({customFields:{stepPhotoAnnotations:{p:mark}}});
+  const remote=task({customFields:{stepPhotoAttachments:{s:[{id:"p",dataUrl:"https://example.test/new",annotations:{version:2,items:[]}}]}}});
+  expect(mergeTaskPrivateMedia(local,remote).customFields.stepPhotoAttachments).toMatchObject({s:[{annotations:mark}]});
+});

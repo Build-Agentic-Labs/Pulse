@@ -1,3 +1,7 @@
+import { mergeTaskPrivateMedia } from "./task-private-media";
+import { mergeAnnotationDocuments } from "@/lib/photo-annotation-drafts";
+import { normalizePhotoAnnotationDocument } from "./photo-annotations";
+import { readAllPages, readRowsByIds } from "@/lib/supabase/read-all-pages";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Database, Json, TablesUpdate } from "@/lib/database.types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -2410,7 +2414,6 @@ export async function loadPlannerStateWithProjectFromSupabase(
 } | null> {
   const supabase = client ?? plannerClient();
   const includeTaskMedia = options.includeTaskMedia !== false;
-  let project: PlannerProjectContext | undefined;
   const product = projectId
     ? await throwIfError(
         supabase
@@ -2429,15 +2432,15 @@ export async function loadPlannerStateWithProjectFromSupabase(
     return null;
   }
 
-  if (projectId || product.project_id) {
-    project = await loadProjectContext(supabase, String(projectId ?? product.project_id));
-  }
-
   // When a scenarioId is given, load that specific scenario (scoped to this product so a caller can
   // never pull another product's scenario). Otherwise fall back to the earliest = "Main" scenario,
   // which preserves the original single-scenario behavior.
-  const scenario = await throwIfError(
-    scenarioId
+  const [project, scenario] = await Promise.all([
+    projectId || product.project_id
+      ? loadProjectContext(supabase, String(projectId ?? product.project_id))
+      : Promise.resolve(undefined),
+    throwIfError(
+      scenarioId
       ? supabase
           .from("scenarios")
           .select("*")
@@ -2451,7 +2454,8 @@ export async function loadPlannerStateWithProjectFromSupabase(
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle(),
-  );
+    ),
+  ]);
 
   if (!scenario) {
     return null;
@@ -2459,42 +2463,42 @@ export async function loadPlannerStateWithProjectFromSupabase(
 
   const documentTypeFilter = documentTypeScopeFilter({ id: String(product.id), projectId: maybeText(product.project_id) });
   const [stations, zones, components, documentTypes, taskRows, customColumns] = await Promise.all([
-    throwIfError(supabase.from("stations").select("*").eq("scenario_id", scenario.id).order("sequence")),
-    throwIfError(supabase.from("zones").select("*").eq("scenario_id", scenario.id).order("sequence")),
-    throwIfError(supabase.from("manufacturing_components").select("*").eq("scenario_id", scenario.id).order("sequence")),
-    throwIfError(
+    readAllPages((from, to) => throwIfError(supabase.from("stations").select("*").eq("scenario_id", scenario.id).order("sequence").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("zones").select("*").eq("scenario_id", scenario.id).order("sequence").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("manufacturing_components").select("*").eq("scenario_id", scenario.id).order("sequence").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(
       supabase
         .from("document_type_codes")
         .select("*")
         .or(documentTypeFilter)
-        .order("created_at"),
-    ),
-    throwIfError(supabase.from("tasks").select("*").eq("scenario_id", scenario.id).order("wbs")),
-    throwIfError(
+        .order("created_at").order("id").range(from, to),
+    )),
+    readAllPages((from, to) => throwIfError(supabase.from("tasks").select("*").eq("scenario_id", scenario.id).order("wbs").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(
       supabase
         .from("custom_columns")
         .select("*")
         .or(customColumnScopeFilter(String(product.id), String(scenario.id)))
-        .order("created_at"),
-    ),
+        .order("created_at").order("id").range(from, to),
+    )),
   ]);
 
   const taskIds = (taskRows ?? []).map((task) => String(task.id));
   const [dependencies, manufacturingSteps, partReferences, actualEvents, stepPhotos, stepTools, explodedViews, taskVideos] = taskIds.length
     ? await Promise.all([
-        throwIfError(supabase.from("task_dependencies").select("*").in("successor_task_id", taskIds)),
-        throwIfError(supabase.from("manufacturing_steps").select("*").in("task_id", taskIds).order("sequence")),
-        throwIfError(supabase.from("part_references").select("*").in("task_id", taskIds).order("created_at")),
-        throwIfError(supabase.from("actual_events").select("*").in("task_id", taskIds).order("timestamp")),
+        readRowsByIds(taskIds, (ids, from, to) => throwIfError(supabase.from("task_dependencies").select("*").in("successor_task_id", ids).order("id").range(from, to))),
+        readRowsByIds(taskIds, (ids, from, to) => throwIfError(supabase.from("manufacturing_steps").select("*").in("task_id", ids).order("sequence").order("id").range(from, to))),
+        readRowsByIds(taskIds, (ids, from, to) => throwIfError(supabase.from("part_references").select("*").in("task_id", ids).order("created_at").order("id").range(from, to))),
+        readRowsByIds(taskIds, (ids, from, to) => throwIfError(supabase.from("actual_events").select("*").in("task_id", ids).order("timestamp").order("id").range(from, to))),
         includeTaskMedia
-          ? throwIfError(supabase.from("step_photos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at"))
+          ? readRowsByIds(taskIds, (ids, from, to) => throwIfError(supabase.from("step_photos").select("*").in("task_id", ids).is("deleted_at", null).order("captured_at").order("id").range(from, to)))
           : Promise.resolve([]),
-        throwIfError(supabase.from("step_tools").select("*").in("task_id", taskIds).order("sequence")),
+        readRowsByIds(taskIds, (ids, from, to) => throwIfError(supabase.from("step_tools").select("*").in("task_id", ids).order("sequence").order("id").range(from, to))),
         includeTaskMedia
-          ? throwIfError(supabase.from("step_exploded_views").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at"))
+          ? readRowsByIds(taskIds, (ids, from, to) => throwIfError(supabase.from("step_exploded_views").select("*").in("task_id", ids).is("deleted_at", null).order("captured_at").order("id").range(from, to)))
           : Promise.resolve([]),
         includeTaskMedia
-          ? throwIfError(supabase.from("task_videos").select("*").in("task_id", taskIds).is("deleted_at", null).order("captured_at"))
+          ? readRowsByIds(taskIds, (ids, from, to) => throwIfError(supabase.from("task_videos").select("*").in("task_id", ids).is("deleted_at", null).order("captured_at").order("id").range(from, to)))
           : Promise.resolve([]),
       ])
     : [[], [], [], [], [], [], [], []];
@@ -2573,7 +2577,10 @@ export async function loadPlannerStateWithProjectFromSupabase(
           scenarioTaskIds.has(String(dependency.successor_task_id)),
       )
       .map(mapDependency),
-    actualEvents: (actualEvents ?? []).filter((event) => scenarioTaskIds.has(String(event.task_id))).map(mapActualEvent),
+    actualEvents: (actualEvents ?? [])
+      .filter((event) => scenarioTaskIds.has(String(event.task_id)))
+      .sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)) || String(left.id).localeCompare(String(right.id)))
+      .map(mapActualEvent),
     customColumns: (customColumns ?? []).map(mapCustomColumn),
   };
 
@@ -2673,9 +2680,9 @@ export async function loadPlannerSummaryStateFromSupabase(
   }
 
   const [stations, zones, tasks] = await Promise.all([
-    throwIfError(supabase.from("stations").select("*").eq("scenario_id", scenario.id).order("sequence")),
-    throwIfError(supabase.from("zones").select("*").eq("scenario_id", scenario.id).order("sequence")),
-    throwIfError(supabase.from("tasks").select("*").eq("scenario_id", scenario.id).order("wbs")),
+    readAllPages((from, to) => throwIfError(supabase.from("stations").select("*").eq("scenario_id", scenario.id).order("sequence").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("zones").select("*").eq("scenario_id", scenario.id).order("sequence").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("tasks").select("*").eq("scenario_id", scenario.id).order("wbs").order("id").range(from, to))),
   ]);
 
   return buildPlannerSummaryState({
@@ -3162,6 +3169,38 @@ export async function saveTaskRowToSupabase(task: Task, projectId?: string) {
 
 export async function saveTaskToSupabase(task: Task, projectId?: string) {
   await saveTasksToSupabase([task], projectId);
+}
+
+/** Save markup without rewriting steps, parts, or unrelated task metadata. */
+export async function saveTaskPhotoAnnotationsToSupabase(task: Task, base: ReturnType<typeof getTaskStepPhotoAnnotationMap>, projectId?: string, providedClient?: SupabaseClient) {
+  const supabase = providedClient ?? plannerClient();
+  await assertTaskInProject(supabase, task.id, projectId);
+  const local = getTaskStepPhotoAnnotationMap(task);
+  const empty = normalizePhotoAnnotationDocument(undefined);
+  const changedIds = [...new Set([...Object.keys(base), ...Object.keys(local)])].filter(
+    id => JSON.stringify(base[id]?.items ?? []) !== JSON.stringify(local[id]?.items ?? []),
+  );
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await throwIfError(supabase.from("tasks").select("custom_fields,version").eq("id", task.id).single());
+    if (!row) throw new Error("Photo annotation task is no longer available.");
+    const fields = row.custom_fields && typeof row.custom_fields === "object" && !Array.isArray(row.custom_fields)
+      ? {...row.custom_fields} : {};
+    const remote = getTaskStepPhotoAnnotationMap({customFields:fields});
+    for (const id of changedIds) {
+      const merged = mergeAnnotationDocuments(base[id] ?? empty, local[id] ?? empty, remote[id] ?? empty);
+      if (merged.items.length) remote[id] = merged;
+      else delete remote[id];
+    }
+    if (Object.keys(remote).length) fields.stepPhotoAnnotations = remote as unknown as Json;
+    else delete fields.stepPhotoAnnotations;
+    const saved = await throwIfError(supabase.from("tasks").update({custom_fields:fields})
+      .eq("id",task.id).eq("version",row.version).select("version").maybeSingle());
+    if (saved) return mergeTaskPrivateMedia({
+      ...task, version: Number(saved.version),
+      customFields: {...task.customFields, ...fields, stepPhotoAnnotations: remote},
+    }, task);
+  }
+  throw new Error("Photo annotations changed during saving. Please try again.");
 }
 
 export async function saveTaskCustomFieldsToSupabase(taskId: string, customFields: Task["customFields"], projectId?: string) {
@@ -3922,6 +3961,40 @@ export async function loadProjectTaskTargetsFromSupabase(
     // Group by zone (stable sort keeps the within-zone wbs order from the query above).
     .sort((left, right) => left.zoneSequence - right.zoneSequence)
     .map(({ zoneSequence: _zoneSequence, ...target }) => target);
+}
+
+/** Refresh private media without re-reading the editable steps, parts, or tools. */
+export async function loadTaskPrivateMediaFromSupabase(
+  taskId: string, projectId?: string, client?: ReturnType<typeof plannerClient>,
+): Promise<Task | null> {
+  const supabase = client ?? plannerClient();
+  await assertTaskInProject(supabase, taskId, projectId);
+  const task = await throwIfError(supabase.from("tasks").select("*").eq("id", taskId).maybeSingle());
+
+  if (!task) {
+    return null;
+  }
+
+  const [stepPhotos, explodedViews, taskVideos] = await Promise.all([
+    readAllPages((from, to) => throwIfError(supabase.from("step_photos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("task_videos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
+  ]);
+  const mappedTask = mapTask({ ...task, custom_fields: customFieldsRow(jsonObject(task.custom_fields)) });
+
+  const [signedStepPhotos, signedExplodedViews, signedTaskVideos] = await Promise.all([
+    withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[]),
+    withSignedExplodedViewRows(supabase, (explodedViews ?? []) as StepExplodedViewRow[]),
+    withSignedTaskVideoRows(supabase, (taskVideos ?? []) as TaskVideoRow[]),
+  ]);
+
+  return withNormalizedStepAssets(
+    mappedTask,
+    indexStepPhotos(signedStepPhotos),
+    new Map(),
+    indexExplodedViews(signedExplodedViews),
+    indexTaskVideos(signedTaskVideos),
+  );
 }
 
 export async function loadTaskFromSupabase(taskId: string, projectId?: string): Promise<Task | null> {

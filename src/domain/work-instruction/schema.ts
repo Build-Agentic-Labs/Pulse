@@ -16,6 +16,7 @@ export type { CardTextBudget };
 
 /** A photo bound to a step, already resolved to something an <img> can use. */
 export interface WorkInstructionPhoto {
+  storagePath?: string;
   id: string;
   url: string;
   caption: string;

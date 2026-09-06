@@ -22,6 +22,8 @@ export interface ActiveStepPhoto extends StepPhotoTarget {
 
 interface StepPhotoClipboardValue {
   entry: StepPhotoClipboardEntry | null;
+  pasteInto: (target: StepPhotoTarget) => Promise<boolean>;
+  isPasting: boolean;
   putOnClipboard: (
     photo: StepPhotoAttachment,
     taskId: string,
@@ -79,6 +81,8 @@ export function StepPhotoClipboardProvider({
   resetKey?: string;
 }) {
   const [entry, setEntry] = useState<StepPhotoClipboardEntry | null>(null);
+  const [isPasting, setIsPasting] = useState(false);
+  const pasteInFlightRef = useRef(false);
   const entryRef = useRef<StepPhotoClipboardEntry | null>(null);
   const activePhotoRef = useRef<ActiveStepPhoto | null>(null);
   const activeStepRef = useRef<StepPhotoTarget | null>(null);
@@ -116,7 +120,9 @@ export function StepPhotoClipboardProvider({
 
   const putOnClipboard = useCallback(
     (photo: StepPhotoAttachment, taskId: string, stepId: string, mode: StepPhotoClipboardMode) => {
-      setEntry(createStepPhotoClipboardEntry(photo, taskId, stepId, mode));
+      const nextEntry = createStepPhotoClipboardEntry(photo, taskId, stepId, mode);
+      entryRef.current = nextEntry;
+      setEntry(nextEntry);
       onNotifyRef.current?.({
         title: mode === "cut" ? "Photo cut" : "Photo copied",
         body: "Hover another step's photos and press Ctrl/Cmd+V.",
@@ -126,7 +132,22 @@ export function StepPhotoClipboardProvider({
     [],
   );
 
-  const clear = useCallback(() => setEntry(null), []);
+  const clear = useCallback(() => { entryRef.current = null; setEntry(null); }, []);
+
+  const pasteInto = useCallback(async (target: StepPhotoTarget) => {
+    const currentEntry = entryRef.current;
+    if (!currentEntry || pasteInFlightRef.current || !canPasteInto(currentEntry, target.taskId, target.stepId)) return false;
+    pasteInFlightRef.current = true;
+    setIsPasting(true);
+    try {
+      await onPasteRef.current(currentEntry, target);
+      if (currentEntry.mode === "cut" && entryRef.current === currentEntry) clear();
+      return true;
+    } finally {
+      pasteInFlightRef.current = false;
+      setIsPasting(false);
+    }
+  }, [clear]);
 
   // A held clipboard entry (and, for a cut, the source bytes it will move) must never
   // survive a switch to a different project -- a cross-project paste would copy the
@@ -172,6 +193,7 @@ export function StepPhotoClipboardProvider({
   // screenshot taken seconds ago always beats a photo copied minutes ago.
   useEffect(() => {
     function handlePaste(event: ClipboardEvent) {
+      if (event.defaultPrevented) return;
       const currentEntry = entryRef.current;
       if (!currentEntry) {
         return;
@@ -191,22 +213,18 @@ export function StepPhotoClipboardProvider({
       }
 
       event.preventDefault();
-      void Promise.resolve(onPasteRef.current(currentEntry, target))
-        .then(() => {
-          if (currentEntry.mode === "cut" && entryRef.current === currentEntry) {
-            setEntry(null);
-          }
-        })
-        .catch(() => undefined);
+      void pasteInto(target).catch(() => undefined);
     }
 
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
-  }, []);
+  }, [pasteInto]);
 
   const value = useMemo<StepPhotoClipboardValue>(
     () => ({
       entry,
+      pasteInto,
+      isPasting,
       putOnClipboard,
       clear,
       setActivePhoto,
@@ -214,7 +232,7 @@ export function StepPhotoClipboardProvider({
       clearActiveStep,
       clearActivePhoto,
     }),
-    [entry, putOnClipboard, clear, setActivePhoto, setActiveStep, clearActiveStep, clearActivePhoto],
+    [entry, pasteInto, isPasting, putOnClipboard, clear, setActivePhoto, setActiveStep, clearActiveStep, clearActivePhoto],
   );
 
   return <StepPhotoClipboardContext.Provider value={value}>{children}</StepPhotoClipboardContext.Provider>;

@@ -469,6 +469,13 @@ export async function runSopNotificationDrain<P = PendingNotification>(deps: {
     }
   }
 
+  // The age signal describes what is STILL owed after this run. A catch-up drain
+  // that delivered (or deliberately skipped) every collected item leaves nothing
+  // unnotified, so it must not read as an outage.
+  if (report.skippedNoEmail + report.failed + report.blocked === 0) {
+    report.oldestUnnotifiedEventAgeHours = null;
+  }
+
   for (const retry of await store.retryItems(deps.now(), deps.origin)) {
     if (retry.attempts >= MAX_SEND_ATTEMPTS) continue;
     if (!retry.email) {

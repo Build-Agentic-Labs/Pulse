@@ -188,6 +188,21 @@ describe("runSopNotificationDrain", () => {
     expect(calls.channels).toContainEqual({ id: 100, channel: "push", status: "sent" });
   });
 
+  it("a backlog that this run fully delivered no longer counts as unnotified", async () => {
+    const { store } = fakeStore({ items: [item()], oldestUnnotifiedEventAgeHours: 553 });
+    const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
+    expect(report.sent).toBe(1);
+    expect(report.oldestUnnotifiedEventAgeHours).toBeNull();
+    expect(assessDrainHealth([{ label: "workspace", report }]).healthy).toBe(true);
+  });
+
+  it("a backlog item that could NOT be delivered keeps its age on the report", async () => {
+    const { store } = fakeStore({ items: [item({ email: null })], oldestUnnotifiedEventAgeHours: 553 });
+    const report = await runSopNotificationDrain({ store, send: okSender, now, origin });
+    expect(report.skippedNoEmail).toBe(1);
+    expect(report.oldestUnnotifiedEventAgeHours).toBe(553);
+  });
+
   it("reports the store's dead rows so the health verdict can see them", async () => {
     const { store } = fakeStore({ items: [], oldestUnnotifiedEventAgeHours: null });
     store.deadRows = async () => 2;

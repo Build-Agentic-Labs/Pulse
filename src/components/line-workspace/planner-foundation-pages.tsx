@@ -1,69 +1,31 @@
-import { ClipboardCheck, type LucideIcon } from "lucide-react";
+"use client";
+
+import { useState } from "react";
+import dynamic from "next/dynamic";
+import { Download, FileText } from "lucide-react";
 
 export { PfmeaWorkspace } from "./pfmea-workspace";
-
-type PlannerFoundationPageProps = {
-  title: string;
-  subtitle: string;
-  detail: string;
-  workspaceLabel: string;
-  emptyTitle: string;
-  emptyCopy: string;
-  icon: LucideIcon;
-};
-
-function PlannerFoundationPage({
-  title,
-  subtitle,
-  detail,
-  workspaceLabel,
-  emptyTitle,
-  emptyCopy,
-  icon: Icon,
-}: PlannerFoundationPageProps) {
-  const titleId = `planner-${title.toLowerCase()}-title`;
-
-  return (
-    <section className="mx-auto max-w-[1100px] space-y-6" aria-labelledby={titleId}>
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h2 id={titleId} className="ui-section-title">
-            {title}
-          </h2>
-          <p className="ui-section-subtitle">{subtitle}</p>
-          <p className="text-xs text-ink-tertiary">{detail}</p>
-        </div>
-      </header>
-
-      <section className="overflow-hidden rounded-lg border border-line" aria-label={workspaceLabel}>
-        <div className="flex items-baseline justify-between gap-3 border-b border-line px-3 py-2.5">
-          <h3 className="ui-setup-section-title">{workspaceLabel}</h3>
-          <span className="ui-section-subtitle">0 items</span>
-        </div>
-        <div className="grid min-h-[24rem] place-items-center p-6">
-          <div className="max-w-md text-center">
-            <span className="mx-auto flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-tertiary">
-              <Icon size={16} strokeWidth={1.75} aria-hidden="true" />
-            </span>
-            <h3 className="mt-3 text-sm font-medium text-ink">{emptyTitle}</h3>
-            <p className="mt-1 text-xs leading-5 text-ink-secondary">{emptyCopy}</p>
-          </div>
-        </div>
-      </section>
-    </section>
-  );
-}
+const ChecklistPdfViewer = dynamic(() => import("./checklist-pdf-viewer").then(module => module.ChecklistPdfViewer), { ssr: false });
 
 export function ChecklistWorkspace() {
+  const [kind, setKind] = useState<"build" | "pdi">("build");
+  const [preview, setPreview] = useState(false);
+  const title = kind === "build" ? "Build Traveler" : "Pre-Delivery Inspection";
+  const pdf = `/templates/${kind}-checklist.pdf`;
   return (
-    <PlannerFoundationPage
-      title="Checklist"
-      subtitle="Build the operator and quality checks used while the product is assembled."
-      detail="This will become the in-process traveler used to verify the product as work progresses."
-      workspaceLabel="Checklist builder"
-      emptyTitle="No checklist content yet"
-      emptyCopy="The builder shell is ready. We will define operator checks, quality checks, and traveler behavior next."
-      icon={ClipboardCheck}
-    />
+    <section className="mx-auto max-w-[1100px] space-y-5" aria-labelledby="planner-checklist-title">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 id="planner-checklist-title" className="ui-section-title">Checklist templates</h2><p className="ui-section-subtitle mt-1">ANA · Blank controlled-document templates</p></div>
+        <div className="flex gap-1" role="group" aria-label="Checklist template">
+          {(["build", "pdi"] as const).map(value => <button key={value} type="button" aria-pressed={kind === value} className={`ui-btn-ghost h-8 px-3 text-xs ${kind === value ? "bg-surface-active text-ink" : "text-ink-secondary"}`} onClick={() => setKind(value)}>{value === "build" ? "Build Traveler" : "PDI"}</button>)}
+        </div>
+      </header>
+      <div className="flex flex-wrap items-center justify-between gap-5 border-y border-line py-6">
+        <div><h3 className="text-sm font-semibold">{title}</h3><p className="mt-2 text-xs text-ink-secondary">Portrait US Letter · 1 page · Operator and QC signature fields</p><p className="mt-1 text-xs text-ink-tertiary">Blank check rows, document control, traceability and final authorization.</p></div>
+        <div className="flex gap-2"><button type="button" className="ui-btn-primary h-9 gap-2 px-4 text-xs" onClick={() => setPreview(true)}><FileText size={14} />View template</button><a href={pdf} download className="ui-btn-ghost h-9 gap-2 px-3 text-xs"><Download size={14} />Download</a></div>
+      </div>
+      <p className="text-[11px] text-ink-tertiary">Draft master template. Complete document approvals and define product-specific checks before use.</p>
+      {preview ? <ChecklistPdfViewer key={kind} url={pdf} title={title} onClose={() => setPreview(false)} /> : null}
+    </section>
   );
 }

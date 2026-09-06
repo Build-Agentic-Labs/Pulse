@@ -1621,7 +1621,7 @@ export function GanttTimeline({
                           ? "bg-accent-muted opacity-70"
                         : selected
                           ? "bg-accent-muted"
-                          : "bg-accent-muted hover:bg-accent-muted"
+                          : "bg-canvas hover:bg-surface-hover"
                     } ${
                       dragOverGroup?.id === row.group.id
                         ? dragOverGroup.placement === "before"
@@ -1854,7 +1854,7 @@ export function GanttTimeline({
                     onClick={() => activateRow(row)}
                     onDoubleClick={() => openRowDetail(row)}
                     className={`grid h-[54px] w-full items-center gap-2 border-b border-line pl-3 pr-4 text-left text-xs transition ${
-                      highlighted ? "bg-accent-muted shadow-inset-accent-start" : "bg-surface-raised hover:bg-surface-hover"
+                      highlighted ? "bg-accent-muted shadow-inset-accent-start" : "bg-canvas hover:bg-surface-hover"
                     }`}
                     style={tableGridStyle}
                   >
@@ -2165,7 +2165,7 @@ export function GanttTimeline({
             <div className={canvasMaximized ? "flex w-max min-w-full" : undefined}>
             {canvasMaximized ? (
               <div
-                className="sticky left-0 z-20 shrink-0 border-r border-line bg-surface-raised"
+                className="sticky left-0 z-20 shrink-0 border-r border-line bg-canvas"
                 style={{ width: maximizedLabelWidth, height: chartHeight }}
               >
                 <div className="flex h-11 items-center bg-surface-sunken px-4 ui-mono-label">
@@ -2181,7 +2181,7 @@ export function GanttTimeline({
                       onClick={() => activateRow(visibleRow)}
                       onDoubleClick={() => openRowDetail(visibleRow)}
                       className={`flex w-full items-center gap-3 border-b border-line px-4 text-left text-[12px] font-extrabold text-ink ${
-                        isZone ? "bg-surface-sunken" : "bg-surface-raised"
+                        isZone ? "bg-surface-sunken" : "bg-canvas"
                       }`}
                       style={{ height: ROW_HEIGHT }}
                       title={getTimelineRowLabel(visibleRow)}

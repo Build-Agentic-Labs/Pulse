@@ -1,14 +1,13 @@
 "use client";
 
 import {
-  BarChart3,
   BookOpen,
   Boxes,
   ChevronLeft,
+  ChevronDown,
   ClipboardCheck,
   ClipboardList,
   Factory,
-  FileText,
   GitBranch,
   ListChecks,
   Package,
@@ -20,6 +19,7 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import type { PlannerProjectContext } from "@/domain/types";
 import { embeddedSettingsSections, type SettingsSection } from "../app-settings-panel";
 import { NavSelectionTrack } from "../nav-selection-track";
@@ -27,14 +27,12 @@ import { SidebarWorkspacePanel } from "../sidebar-workspace-panel";
 
 export const plannerModules = [
   { id: "dashboard", label: "Dashboard", icon: Factory },
-  { id: "setup", label: "Setup", icon: ClipboardList },
   { id: "gantt", label: "Gantt", icon: GitBranch },
   { id: "procedure", label: "Procedure", icon: ListChecks },
   { id: "pfmea", label: "PFMEA", icon: ShieldAlert },
   { id: "checklist", label: "Checklist", icon: ClipboardCheck },
   { id: "work-instructions", label: "Work Instructions", icon: BookOpen },
-  { id: "balance", label: "Balance", icon: BarChart3 },
-  { id: "reports", label: "Reports", icon: FileText },
+  { id: "setup", label: "Setup", icon: ClipboardList },
 ];
 
 export const setupSections = [
@@ -47,10 +45,8 @@ export const setupSections = [
 
 export type SetupSection = (typeof setupSections)[number]["id"];
 
-export const comingSoonModuleIds = new Set(["balance", "reports"]);
-
-// Modules reachable via Alt+1..N and the command palette (coming-soon ones excluded).
-export const quickSwitchModules = plannerModules.filter((module) => !comingSoonModuleIds.has(module.id));
+const mainModules = plannerModules.filter(module => module.id !== "setup");
+export const quickSwitchModules = plannerModules;
 
 /** Floating control that reappears when the sidebar is collapsed, so it can be reopened. */
 export function SidebarReopenButton({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
@@ -91,6 +87,8 @@ export function Sidebar({
 }) {
   const isSettingsModule = activeModule === "settings";
   const isSetupModule = activeModule === "setup";
+  const [setupExpanded, setSetupExpanded] = useState(isSetupModule);
+  useEffect(() => { if (isSetupModule) setSetupExpanded(true); }, [isSetupModule]);
 
   return (
     <aside className="ui-nav-sidebar">
@@ -141,48 +139,14 @@ export function Sidebar({
               })}
             </NavSelectionTrack>
           </>
-        ) : isSetupModule ? (
-          <>
-            <button
-              type="button"
-              onClick={() => onChange("dashboard")}
-              className="ui-settings-back"
-              title="Back to Product"
-            >
-              <ChevronLeft size={14} strokeWidth={1.75} />
-              Back to Product
-            </button>
-            <div className="ui-nav-section">Setup</div>
-            <NavSelectionTrack
-              activeIndex={setupSections.findIndex((item) => item.id === setupSection)}
-              className="space-y-0.5"
-            >
-              {setupSections.map((item) => {
-                const Icon = item.icon;
-                const active = setupSection === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    title={item.label}
-                    onClick={() => onSetupSectionChange(item.id)}
-                    className={`ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
-                  >
-                    <Icon size={15} strokeWidth={1.75} />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </NavSelectionTrack>
-          </>
         ) : (
           <>
             <div className="ui-nav-section">Planner</div>
             <NavSelectionTrack
-              activeIndex={plannerModules.findIndex((module) => module.id === activeModule)}
+              activeIndex={mainModules.findIndex((module) => module.id === activeModule)}
               className="space-y-0.5"
             >
-              {plannerModules.map((module) => {
+              {mainModules.map((module) => {
                 const Icon = module.icon;
                 const active = activeModule === module.id;
                 return (
@@ -199,6 +163,19 @@ export function Sidebar({
                 );
               })}
             </NavSelectionTrack>
+            <div className="mt-3 border-t border-line pt-2">
+              <button type="button" className="ui-nav-item ui-nav-item-idle w-full" aria-expanded={setupExpanded} aria-controls="planner-setup-sections" onClick={() => setSetupExpanded(value => !value)}>
+                <ClipboardList size={15} strokeWidth={1.75} /><span>Setup</span>
+                <ChevronDown size={13} className={`ml-auto transition-transform duration-200 motion-reduce:transition-none ${setupExpanded ? "rotate-180" : ""}`} />
+              </button>
+              <div id="planner-setup-sections" className="ui-setup-accordion" data-open={setupExpanded} inert={!setupExpanded} aria-hidden={!setupExpanded}>
+                <div className="min-h-0 overflow-hidden">
+                  <NavSelectionTrack activeIndex={isSetupModule ? setupSections.findIndex(item => item.id === setupSection) : -1} className="ml-3 space-y-0.5 border-l border-line pl-2 pt-1">
+                    {setupSections.map(item => <button key={item.id} type="button" title={item.label} onClick={() => { if (!isSetupModule) onChange("setup"); onSetupSectionChange(item.id); }} className={`ui-nav-item ${isSetupModule && setupSection === item.id ? "ui-nav-item-active" : "ui-nav-item-idle"}`}><span>{item.label}</span></button>)}
+                  </NavSelectionTrack>
+                </div>
+              </div>
+            </div>
           </>
         )}
       </nav>

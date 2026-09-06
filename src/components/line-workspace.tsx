@@ -27,7 +27,6 @@ import {
   useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
 } from "react";
 import {
   applyCalculatedFields,
@@ -201,8 +200,6 @@ import { ChecklistWorkspace } from "./line-workspace/planner-foundation-pages";
 import {
   Sidebar,
   SidebarReopenButton,
-  comingSoonModuleIds,
-  plannerModules,
   quickSwitchModules,
   type SetupSection,
 } from "./line-workspace/nav";
@@ -354,30 +351,6 @@ async function requestIeSmartAllocationPlan(request: IeSmartAllocationRequest): 
 
 
 
-function ComingSoonModuleView({
-  children,
-  moduleLabel,
-}: {
-  children: ReactNode;
-  moduleLabel: string;
-}) {
-  return (
-    <section className="ui-coming-soon-module" aria-label={`${moduleLabel} coming soon`}>
-      <div className="ui-coming-soon-module-preview" aria-hidden="true">
-        {children}
-      </div>
-      <div className="ui-coming-soon-module-overlay">
-        <div className="ui-coming-soon-module-panel">
-          <div className="ui-mono-label">Coming soon</div>
-          <h2 className="ui-section-title">{moduleLabel}</h2>
-          <p className="ui-section-subtitle">
-            This workspace is not ready yet. The current planner data is preserved.
-          </p>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 function PlaybackPanel({
   tasks,
@@ -3527,8 +3500,6 @@ export function LineWorkspace({
   const isSettingsModule = activeModule === "settings";
   const requiresCompletePlannerState = !isDashboardModule && !isSettingsModule;
   const sidebarActiveModule = isProjectSwitching ? "dashboard" : activeModule;
-  const isComingSoonModule = comingSoonModuleIds.has(activeModule);
-  const comingSoonModuleLabel = plannerModules.find((module) => module.id === activeModule)?.label ?? "Workspace";
   const plannerChromeContext = isDashboardModule ? buildPlannerChromeContext(derivedState.product) : undefined;
   if (!isProjectSwitching && plannerChromeContext) {
     stablePlannerChromeContextRef.current = plannerChromeContext;
@@ -6363,11 +6334,6 @@ export function LineWorkspace({
                         pushWorkspaceModuleHistory("procedure");
                       }}
                     />
-                  ) : isComingSoonModule ? (
-                    <ComingSoonModuleView moduleLabel={comingSoonModuleLabel}>
-                      <KpiStrip kpis={kpis} product={derivedState.product} />
-                      {lineReadinessPanel}
-                    </ComingSoonModuleView>
                   ) : (
                     <>
                       <KpiStrip kpis={kpis} product={derivedState.product} />

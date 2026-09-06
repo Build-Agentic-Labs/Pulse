@@ -14,7 +14,7 @@ export function CompanyTopNav({
 }) {
   return (
     <header
-      className="ui-chrome ui-chrome-planner sticky top-0 z-10 h-12 shrink-0"
+      className="ui-chrome ui-chrome-planner ui-company-chrome sticky top-0 z-10 h-12 shrink-0"
       aria-busy={loading || undefined}
     >
       <div className="ui-chrome-planner-brand">
@@ -27,7 +27,7 @@ export function CompanyTopNav({
         {loading ? (
           <span className="ui-skeleton-line block h-3 w-24" aria-hidden="true" />
         ) : workspaceName ? (
-          <span className="ui-chrome-context-title truncate">{workspaceName}</span>
+          <span className="truncate text-xs font-normal text-ink-secondary">{workspaceName}</span>
         ) : null}
       </div>
       <div className="ui-chrome-planner-actions">

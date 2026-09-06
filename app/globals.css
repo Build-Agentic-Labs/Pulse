@@ -3415,41 +3415,9 @@ body {
 
   
 
-  .ui-coming-soon-module {
-    position: relative;
-    min-height: min(34rem, calc(100vh - 8rem));
-    overflow: hidden;
-    border-top: 2px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    border-bottom: 2px solid color-mix(in srgb, var(--color-border) 68%, transparent);
-    background: transparent;
-  }
 
-  .ui-coming-soon-module-preview {
-    pointer-events: none;
-    filter: blur(5px);
-    opacity: 0.42;
-    transform: scale(1.01);
-    transform-origin: center top;
-  }
 
-  .ui-coming-soon-module-overlay {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    padding: 1.25rem;
-    background: color-mix(in srgb, var(--color-surface-muted) 34%, transparent);
-  }
 
-  .ui-coming-soon-module-panel {
-    width: min(24rem, 100%);
-    border: 1px solid color-mix(in srgb, var(--color-border-strong) 52%, transparent);
-    border-radius: 0.75rem;
-    background: color-mix(in srgb, var(--color-surface) 88%, transparent);
-    padding: 1.25rem;
-    text-align: center;
-    box-shadow: 0 18px 44px color-mix(in srgb, #000 12%, transparent);
-  }
 
   
 
@@ -3682,4 +3650,42 @@ body {
   line-height: 1.5;
   color: var(--color-ink-secondary);
   overflow-wrap: anywhere;
+}
+
+/* Home has no sidebar rail: keep the organization beside the brand. */
+.ui-chrome-planner.ui-company-chrome {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.ui-company-chrome .ui-chrome-planner-brand { width: auto; }
+.ui-company-chrome .ui-chrome-planner-context {
+  padding-left: 0.875rem;
+  border-left: 1px solid var(--color-border);
+  align-items: center;
+  min-height: 1rem;
+}
+.ui-company-chrome .ui-chrome-planner-context:empty { border-left: 0; }
+
+/* Subtle monochrome drafting texture for the home screen. */
+.ui-home-ambient-light {
+  position: fixed;
+  inset: 3rem 0 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, transparent, black 20%, black 75%, transparent);
+}
+.ui-home-ambient-light::before {
+  content: "";
+  position: absolute;
+  inset: -32px;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--color-ink) 9%, transparent) 0.65px, transparent 0.9px);
+  background-size: 32px 32px;
+  animation: ui-home-grid-drift 48s linear infinite;
+}
+@keyframes ui-home-grid-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(32px, 32px, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-home-ambient-light::before { animation: none; }
 }

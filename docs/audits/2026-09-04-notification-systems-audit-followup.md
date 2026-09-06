@@ -32,12 +32,12 @@ design not exercised. pgTAP runs in CI on the pushed branch.
 | 2.2 | No proof the cron has ever run | **Built, needs go-live** | `notification_drain_runs` written on every run (cron/kick/manual); `GET /api/notifications/health` flags "cron has never run" / silence > 26h. Live once migration 1 is applied. |
 | 2.3 | 503 health signal has no consumer | **Built, needs go-live** | Read-only health endpoint for an uptime monitor + runbook §1.4 (hourly heartbeat drain). The monitor itself must be created by the user (needs an account). |
 | 2.4 | Duplicate-send window (no Idempotency-Key) | **Fixed** | `Idempotency-Key: <ledger>:<row id>` on every Resend POST; ledger rows snapshot their rendered content so retries are byte-identical (Resend 409s on a changed body). |
-| 2.5 | `sent_at` means accepted, not delivered | **Built, needs go-live** | `/api/webhooks/resend` (Svix signature, replay dedupe) → `email_deliveries`; permanent bounces and complaints → `email_suppressions`, honoured by the drain. Needs `RESEND_WEBHOOK_SECRET` + the webhook configured in Resend. |
+| 2.5 | `sent_at` means accepted, not delivered | **Live — verified 2026-09-05 with real traffic (15 `email.sent` + 15 `email.delivered` events recorded)** | `/api/webhooks/resend` (Svix signature, replay dedupe) → `email_deliveries`; permanent bounces and complaints → `email_suppressions`, honoured by the drain. Needs `RESEND_WEBHOOK_SECRET` + the webhook configured in Resend. |
 | 2.6 | Invites and recovery bypass the ledger | **Fixed** | `transactional_emails` records every invitation, access-granted, and recovery send (outcome only, never a code). Shown in the console. |
 | 2.7 | Welcome email never fired | **Open (by design)** | Unchanged: invite redemptions are deliberately covered by the invitation email. Membership kinds (`role_changed`, `member_removed`, `invite_accepted`) now share the store, so the path is exercised as soon as any membership changes. |
 | 2.8 | Silence after day 6 | **Fixed** | Escalation to workspace owners/admins 4 days after the last unanswered nudge, once per manager per cycle, naming who it waits on; weekly stalled digest to owners/admins + Quality. |
 | 2.9 | Retry budget ~3.5h then silent death | **Fixed** | Dead rows (attempts exhausted, < 7d) counted per ledger and folded into the health verdict; console lists them with a one-click Resend that revives and drains immediately. The 3-attempt budget itself is unchanged and now visible. |
-| 2.10 | Auth mail on Supabase's built-in mailer | **Open — user action** | `scripts/apply-auth-config.mjs --report` prints the hosted mailer config; runbook §1.5 gives the Resend SMTP settings. Could not be verified from this session (management-API token access blocked). |
+| 2.10 | Auth mail on Supabase's built-in mailer | **Closed 2026-09-05 — verified, no change needed** | `--report` run by the owner: hosted auth mail is already on Resend SMTP (`smtp.resend.com:465`, sender `Pulse <notifications@pulse.agenticlabs.studio>`, matching `RESEND_FROM`); `rate_limit_email_sent` 30/h; `mailer_otp_exp` 86400 is deliberate (set 2026-08-13). |
 | 2.11 | Bell acks per device; app-wide polling | **Partly fixed** | Inbox read state is server-side via RPCs (cross-device). The derived actionable count is unchanged (its `localStorage` acks and 60s polling remain — the badge semantics were a deliberate 2026-07-22 decision). |
 | 2.12 | Constant-time secret, retry wording, per-instance limiter | **Fixed / accepted** | `CRON_SECRET` compared with `timingSafeEqual`. Retried wording is now moot (snapshot). Rate limiter remains per instance (documented). |
 
@@ -56,19 +56,22 @@ design not exercised. pgTAP runs in CI on the pushed branch.
 | 3.2 | Preferences | **Fixed (email); partial (channels)** | Per-kind email switches (Settings → Account), workspace-scoped rows honoured by the drain; `push` per-kind preference honoured; Teams is workspace-level (no per-user switch by design). No digest-frequency option beyond the weekly digest's own kind. |
 | 3.3 | Persistent inbox | **Fixed** | `notifications` table written before delivery; bell "Recent" list with cross-device read state, mark-on-open, mark-all-read. |
 | 3.4 | Escalation and SLA | **Fixed** | Day 3/6 nudges → day 10 escalation → weekly digest. No per-workspace SLA settings yet (constants). |
-| 3.5 | Delivery tracking + suppression | **Built, needs go-live** | Webhook + suppression + console view + manual unsuppress. |
+| 3.5 | Delivery tracking + suppression | **Live — webhook verified 2026-09-05** | Webhook + suppression + console view + manual unsuppress. |
 | 3.6 | Operational visibility + runbook | **Fixed** | Run log, health endpoint, admin console, `docs/runbooks/notifications.md`. No Sentry (would need a dependency + account; the run log and heartbeat cover alerting). |
-| 3.7 | Channels | **Built, needs go-live** | Teams incoming webhook (one Adaptive Card per decision; admin form + test send) and browser push (VAPID + aes128gcm on Node crypto, service worker, device switch). Push needs the VAPID env; Teams needs a webhook saved. |
+| 3.7 | Channels | **Push live (verified 2026-09-05); Teams declined by owner** | Teams incoming webhook (one Adaptive Card per decision; admin form + test send) and browser push (VAPID + aes128gcm on Node crypto, service worker, device switch). Push verified end-to-end in production 2026-09-05: device subscribed from Settings → Account, test push accepted by FCM (HTTP 201). Teams: the owner chose not to configure it (2026-09-05); the channel stays in the code, inert until a webhook is saved. |
 | 3.8 | Test coverage | **Fixed** | Drain store: 0 → 13 tests; request core tested with fake stores; every new module has a colocated test; pgTAP `notifications_test.sql` (29 assertions) covers ledger posture, inbox RLS, RPCs, triggers, integrations, push. Bell: 1 → 3 tests. No end-to-end Inbucket test (would need local Supabase in CI beyond the existing pgTAP job). |
 
 ## What the user must do to make it live
 
-1. Verify the branch on the preview deployment (this push creates one).
-2. Apply the four migrations in order and regenerate types (runbook §1.1).
-3. Set `RESEND_WEBHOOK_SECRET`, and for push the three VAPID vars; redeploy.
-4. Configure the Resend webhook; create the heartbeat monitor(s).
-5. Run `apply-auth-config.mjs --report`; move auth mail to Resend SMTP if needed.
-6. Merge to main; delete the branch.
+**All done 2026-09-05.** Kept for the record:
+
+1. ~~Verify the branch on the preview deployment.~~ Reviewed, then merged.
+2. ~~Apply the four migrations in order and regenerate types.~~ Applied via `apply-migration-safely`; `gen:types` diff empty.
+3. ~~Set `RESEND_WEBHOOK_SECRET` and the three VAPID vars; redeploy.~~ Set in Vercel Production.
+4. ~~Configure the Resend webhook; create the heartbeat monitor(s).~~ Webhook verified by real traffic (30 events); cron-job.org checks health every 15 min and drains hourly.
+5. ~~Run `apply-auth-config.mjs --report`; move auth mail to Resend SMTP if needed.~~ Already on Resend SMTP.
+6. ~~Merge to main; delete the branch.~~ Fast-forwarded; branch and worktree deleted.
+7. Browser push verified end to end on the owner’s Mac. Teams channel left unconfigured by choice.
 
 ## UI changes in this branch (for the user's review)
 

@@ -1,7 +1,8 @@
 import { escapeHtml, renderEmailShell } from "@/domain/notification-email-shell";
 
 export interface PasswordRecoveryEmailInput {
-  code: string;
+  /** The /reset-password link carrying the token in its fragment. */
+  actionLink: string;
   email: string;
   origin: string;
 }
@@ -15,47 +16,51 @@ export interface PasswordRecoveryEmailContent {
 const RECOVERY_REASON = "You are receiving this because someone requested a password reset for your Pulse account.";
 
 /**
- * Keep the credential out of the URL. Corporate link scanners can safely inspect
- * the Pulse link without consuming the one-time recovery code.
+ * The reset link mirrors the invitation link: the one-time token travels in the
+ * URL fragment, which browsers never send to a server and mail scanners never
+ * consume. Pulse verifies it only when the recipient submits a new password.
  */
+export function passwordResetUrl(siteUrl: string, email: string, tokenHash: string): string {
+  const url = new URL("/reset-password", siteUrl);
+  url.hash = new URLSearchParams({
+    email: email.trim().toLowerCase(),
+    token_hash: tokenHash,
+    type: "recovery",
+  }).toString();
+  return url.toString();
+}
+
 export function renderPasswordRecoveryEmail({
-  code,
+  actionLink,
   email,
   origin,
 }: PasswordRecoveryEmailInput): PasswordRecoveryEmailContent {
   const normalizedOrigin = origin.replace(/\/$/, "");
-  // Route directly to the recovery form without putting the one-time code in
-  // the URL. A fragment is not sent to the web server and is consumed by Pulse.
-  const recoveryHref = `${normalizedOrigin}/#auth=recovery&email=${encodeURIComponent(email)}`;
-  const safeCode = escapeHtml(code);
+  const safeEmail = escapeHtml(email);
   const body =
     `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#3f3f46;">` +
-    `Enter this one-time code in Pulse to continue resetting your password.</p>` +
-    `<div style="margin:18px 0 8px;padding:14px 18px;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:4px;` +
-    `font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:28px;font-weight:700;` +
-    `letter-spacing:0.22em;text-align:center;color:#111111;cursor:text;user-select:all;-webkit-user-select:all;">${safeCode}</div>` +
-    `<p style="margin:0 0 14px;font-size:12px;line-height:1.5;text-align:center;color:#71717a;">` +
-    `Select the code above to copy it, then use Paste code in Pulse.</p>` +
+    `Someone asked to reset the password for <strong>${safeEmail}</strong>. ` +
+    `Choose a new one with the button below.</p>` +
     `<p style="margin:0;font-size:13px;line-height:1.6;color:#71717a;">` +
-    `This code expires and can only be used once. If you did not request a reset, you can ignore this email.</p>`;
+    `The link expires and works once. If you did not request a reset, you can ignore this email — ` +
+    `your password stays as it is.</p>`;
 
   return {
     subject: "Reset your Pulse password",
     text: [
       "Reset your Pulse password",
-      `Your one-time recovery code is: ${code}`,
-      "Enter this code in Pulse to continue. It expires and can only be used once.",
-      `Open Pulse: ${recoveryHref}`,
-      "If you did not request a password reset, you can ignore this email.",
+      `Someone asked to reset the password for ${email}. Open this link to choose a new one:`,
+      actionLink,
+      "The link expires and works once. If you did not request a reset, you can ignore this email — your password stays as it is.",
     ].join("\n\n"),
     html: renderEmailShell({
       accent: "#2563eb",
       subtitle: "Account security",
-      eyebrow: "Password recovery",
+      eyebrow: "Password reset",
       heading: "Reset your Pulse password",
       bodyParagraphsHtml: body,
-      ctaLabel: "Open Pulse",
-      ctaHref: recoveryHref,
+      ctaLabel: "Set a new password",
+      ctaHref: actionLink,
       reason: RECOVERY_REASON,
       origin: normalizedOrigin,
     }),

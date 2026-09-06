@@ -14,6 +14,13 @@
       "runtimeArgs": ["run", "start"],
       "port": 3000,
       "autoPort": false
+    },
+    {
+      "name": "start-3100",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start", "--", "-p", "3100"],
+      "port": 3100,
+      "autoPort": false
     }
   ]
 }

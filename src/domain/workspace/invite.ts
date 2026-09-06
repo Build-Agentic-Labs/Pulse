@@ -77,12 +77,16 @@ export function isAlreadyRegisteredAuthError(
 }
 
 /**
- * An invitee who has never signed in has never set a password: re-sending them a
- * setup link is the right move. Someone who HAS signed in owns a password and
- * should use Forgot password instead of receiving a fresh credential by email.
+ * Has this invitee actually finished setting up — i.e. joined a workspace? Only
+ * then is a resend a "sign-in reminder" rather than a fresh setup link.
+ *
+ * Membership is the evidence, NOT `last_sign_in_at`: on 2026-08-12 a mail
+ * scanner opened eleven invite links within two minutes of delivery, which
+ * verified the tokens and stamped a sign-in on accounts whose owners never saw
+ * Pulse. Keying on sign-in left all eleven stuck as "already registered".
  */
 export function inviteeHasCompletedSetup(
-  user: { last_sign_in_at?: string | null } | null | undefined,
+  invitee: { workspaceMemberships?: number | null } | null | undefined,
 ): boolean {
-  return Boolean(user?.last_sign_in_at);
+  return (invitee?.workspaceMemberships ?? 0) > 0;
 }

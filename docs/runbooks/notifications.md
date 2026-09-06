@@ -33,6 +33,11 @@ invocation is recorded in `notification_drain_runs`.
    | `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | browser push | for push |
    | `NOTIFICATION_EMAIL_REDIRECT_TO` | **test only**: every outbound email goes to this one address, subject prefixed `[TEST → original]` | never in production |
 
+   **Preview deployments** get none of the service-role variables on purpose, so
+   invitations, password reset and the drain are off there; the app shows a
+   yellow "Preview deployment" banner and those routes answer with a message that
+   says so. Production `*.vercel.app` URLs redirect to `NEXT_PUBLIC_SITE_URL`.
+
    Generate the VAPID pair once with `node scripts/generate-vapid-keys.mjs`.
    Rotating it invalidates every browser subscription.
 
@@ -70,6 +75,19 @@ invocation is recorded in `notification_drain_runs`.
    emails per hour, not for production). Point it at Resend SMTP
    (`smtp.resend.com:465`, user `resend`, password = API key, sender =
    `RESEND_FROM`) in the dashboard, or extend the script's `DESIRED` block.
+6. **Prove the auth-mail path once, with your own account**: on the production
+   site use *Forgot password?* → *Email me a reset link*, open the email, set a
+   new password. Then confirm the row:
+   ```sql
+   select kind, recipient_email, status, error, created_at from transactional_emails order by created_at desc limit 5;
+   ```
+   From then on the heartbeat watches it for you: `/api/notifications/health`
+   carries `authMail` — the missing-variable names, if any, and the number of
+   password-reset / invitation sends that **failed in the last 24 h** with the
+   latest error text. Any failure flips the heartbeat to 503, so a broken path
+   surfaces the first time a real person hits it. (A synthetic daily canary was
+   considered and rejected: it would have needed an exemption in the
+   signup-domain trigger for an off-domain account.)
 
 ## 2. Reading the system
 
@@ -80,6 +98,14 @@ invocation is recorded in `notification_drain_runs`.
 - **Settings → Account → Notifications** (everyone): per-kind email switches,
   browser push for this device.
 - **Bell**: actionable count (things waiting on you) + Recent inbox with read state.
+- **Password reset** (`Forgot password?` → `Email me a reset link`): the route
+  mints a Supabase recovery token and emails ONE link,
+  `/reset-password#email=…&token_hash=…&type=recovery`. The token lives in the
+  fragment, so it never reaches a server or a mail scanner; the page verifies it
+  only when the person submits a new password. Same pattern as `/invite`. Every
+  request — sent, or failed before/at send — is a `transactional_emails` row
+  (`kind = password_recovery`), visible in the console; the public response never
+  says whether the account exists.
 - **SQL** (service role):
   ```sql
   select * from notification_drain_runs order by started_at desc limit 20;
@@ -101,7 +127,11 @@ invocation is recorded in `notification_drain_runs`.
 | Ledger row `skipped` = preference | recipient turned that kind's email off | Nothing — the inbox row still exists; they chose this |
 | Delivery column empty for sent rows | webhook not configured or secret wrong | §1 step 3; check `RESEND_WEBHOOK_SECRET`; 401s appear in Vercel logs |
 | Teams test card fails | webhook URL not Microsoft, or channel connector removed | Re-create the incoming webhook in Teams; URL must be `*.webhook.office.com` or `*.logic.azure.com` over https |
-| Push never arrives | VAPID env missing, or the browser subscription was pruned (410) | Set VAPID env; user toggles push off/on in Account settings |
+| Push never arrives | VAPID env missing, or the browser subscription was pruned (410) | Set VAPID env; user toggles push off/on in Account settings; on macOS check System Settings → Notifications → Chrome is allowed |
+| "Password recovery is temporarily unavailable" / "…disabled on preview deployments" | Missing config on THAT deployment, or link generation / send failed | Vercel → Logs, search `password-reset`: check the **Host** column first (preview host = expected), then the `missing: […]` or `stage` in the error line. Failed attempts also appear as `failed` rows in the console's transactional ledger |
+| Health: "auth mail: N send(s) failed in the last 24h (latest: …)" | A real password-reset or invitation email failed at link generation or at the provider | Read the latest error: `generate_link: …` → Supabase auth (service role key, project status); an HTTP status → Resend (`RESEND_FROM`, key, suppression). Rows are in the console's transactional ledger. Clears on its own 24 h after the last failure |
+| Members → an invitee stays "pending" although `auth.users.last_sign_in_at` is set | Their invite link was opened by a mail scanner on delivery (token consumed, no password ever set) | Click **Resend** on the pending row: since 2026-09-05 the resend keys on workspace membership, so they get a fresh fragment-token setup link, not a "you already have access" reminder |
+| Visiting a `*.vercel.app` URL lands on pulse.agenticlabs.studio | By design: production deployment hosts redirect (308) to `NEXT_PUBLIC_SITE_URL` | Nothing. Preview hosts are not redirected |
 | An SOP sits for weeks | author-side stall | Now covered: the author gets `review_complete`, nudges at day 3/6, managers at day 10, and the weekly digest lists it |
 
 Never edit `enforce_sop_transition` or `sign_sop` to add notifications; the
@@ -132,3 +162,10 @@ are separate functions on top of the live `append_sop_event`.
 - Teams posts one card per decision (not per recipient); push goes to every
   subscribed device of a recipient whose `push` preference is on.
 - Digests run only on the scheduled (cron) caller, once per ISO week.
+- Credential links (invite, reset) carry the one-time token in the URL fragment
+  and verify it only on a user gesture; a link scanner cannot consume it. The
+  token itself is never logged or ledgered — only who, what kind, and whether the
+  provider accepted the message.
+- Missing configuration is never silent: the route logs the missing variable
+  NAMES (never values) with the deployment environment, and the health endpoint
+  lists them under `authMail.problems`.

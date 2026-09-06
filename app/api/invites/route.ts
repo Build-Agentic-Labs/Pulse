@@ -23,6 +23,7 @@ import {
   type OrganizationInviteRole,
   type WorkspaceInviteEntitlements,
 } from "@/domain/workspace/invite-access";
+import { describeUnavailable, logMissingConfig } from "@/lib/auth/password-recovery-request";
 import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
 import { recordTransactionalEmail, type TransactionalEmailKind } from "@/lib/notifications/transactional-log";
 import { createResendSender, type EmailSender } from "@/lib/sop/notifications-drain";
@@ -44,7 +45,7 @@ const GRANT_EXPIRY_DAYS = 30;
 type SetupLink =
   | { kind: "link"; tokenHash: string; type: WorkspaceInviteVerificationType }
   | { kind: "already_registered" }
-  | { kind: "unavailable"; message: string };
+  | { kind: "unavailable"; message: string; code: string | null; status: number | null };
 
 /**
  * Mint the one-time token behind the "create your password" link.
@@ -53,8 +54,24 @@ type SetupLink =
  * generateLink(type: "invite") — which is what every RESEND is — comes back
  * "already registered" and, before this helper existed, silently sent nothing.
  * For an existing user we mint a recovery token instead, which the /invite page
- * already knows how to verify, unless they have actually signed in before.
+ * already knows how to verify — unless they already belong to a workspace, in
+ * which case they own a password and get a reminder, not a credential.
  */
+async function countWorkspaceMemberships(admin: SupabaseClient<Database>, userId: string | undefined): Promise<number> {
+  if (!userId) return 0;
+  const { count, error } = await admin
+    .from("workspace_members")
+    .select("user_id", { count: "exact", head: true })
+    .eq("user_id", userId);
+  if (error) {
+    // Unknown is treated as "not set up": a setup link is the safe default, since
+    // it only takes effect if the invitee clicks it and chooses a password.
+    console.error("Invite resend: membership lookup failed", { message: error.message });
+    return 0;
+  }
+  return count ?? 0;
+}
+
 async function generateSetupLink(
   admin: SupabaseClient<Database>,
   email: string,
@@ -65,14 +82,25 @@ async function generateSetupLink(
     return { kind: "link", tokenHash: invite.data.properties.hashed_token, type: "invite" };
   }
   if (!invite.error || !isAlreadyRegisteredAuthError(invite.error)) {
-    return { kind: "unavailable", message: invite.error?.message ?? "Supabase returned no invitation token." };
+    return {
+      kind: "unavailable",
+      message: invite.error?.message ?? "Supabase returned no invitation token.",
+      code: invite.error?.code ?? null,
+      status: invite.error?.status ?? null,
+    };
   }
 
   const recovery = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo } });
   if (recovery.error || !recovery.data.properties?.hashed_token) {
-    return { kind: "unavailable", message: recovery.error?.message ?? "Supabase returned no recovery token." };
+    return {
+      kind: "unavailable",
+      message: recovery.error?.message ?? "Supabase returned no recovery token.",
+      code: recovery.error?.code ?? null,
+      status: recovery.error?.status ?? null,
+    };
   }
-  if (inviteeHasCompletedSetup(recovery.data.user)) {
+  const workspaceMemberships = await countWorkspaceMemberships(admin, recovery.data.user?.id);
+  if (inviteeHasCompletedSetup({ workspaceMemberships })) {
     return { kind: "already_registered" };
   }
   return { kind: "link", tokenHash: recovery.data.properties.hashed_token, type: "recovery" };
@@ -301,10 +329,13 @@ export async function POST(request: Request) {
   const resendFrom = process.env.RESEND_FROM ?? "";
 
   if (!serviceRoleKey) {
+    // Admin-facing, so naming the variable is useful; the log line is what the
+    // operator greps for. Preview deployments lack this key by design.
+    logMissingConfig("Invitations", ["SUPABASE_SERVICE_ROLE_KEY"], process.env.VERCEL_ENV);
     return NextResponse.json({
       granted: true,
       emailSent: false,
-      reason: "Email service is not configured (SUPABASE_SERVICE_ROLE_KEY missing).",
+      reason: `${describeUnavailable("Invitations", process.env.VERCEL_ENV)} Missing configuration: SUPABASE_SERVICE_ROLE_KEY.`,
     });
   }
 
@@ -375,7 +406,19 @@ export async function POST(request: Request) {
       });
     }
 
-    console.error("Invitation link generation failed", { message: setupLink.message });
+    console.error("Invitation link generation failed", { message: setupLink.message, code: setupLink.code, status: setupLink.status });
+    // No email exists yet, but the console must still see that this invite hit a wall.
+    await recordTransactionalEmail(admin, {
+      kind: "invite",
+      recipientEmail: email,
+      workspaceId,
+      result: {
+        ok: false,
+        status: setupLink.status ?? 0,
+        error: `generate_link: ${setupLink.code ?? setupLink.message}`,
+        failure: "configuration",
+      },
+    });
   }
 
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
@@ -389,14 +432,15 @@ export async function POST(request: Request) {
   }
 
   // Supabase-mail resend: the user row exists from the first invite. Send a
-  // recovery email (same redirect, same password-setup flow) unless they have
-  // signed in before.
+  // recovery email (same redirect, same password-setup flow) unless they already
+  // belong to a workspace.
   const { data: existing } = await admin.auth.admin.generateLink({
     type: "recovery",
     email,
     options: { redirectTo },
   });
-  if (existing?.user && !inviteeHasCompletedSetup(existing.user)) {
+  const existingMemberships = existing?.user ? await countWorkspaceMemberships(admin, existing.user.id) : 0;
+  if (existing?.user && !inviteeHasCompletedSetup({ workspaceMemberships: existingMemberships })) {
     const { error: recoverError } = await admin.auth.resetPasswordForEmail(email, { redirectTo });
     if (!recoverError) {
       return NextResponse.json({ granted: true, emailSent: true });

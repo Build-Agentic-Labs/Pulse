@@ -77,9 +77,14 @@ describe("resend detection", () => {
     expect(isAlreadyRegisteredAuthError(null)).toBe(false);
   });
 
-  it("treats an invitee as set up only once they have signed in", () => {
-    expect(inviteeHasCompletedSetup({ last_sign_in_at: null })).toBe(false);
+  it("treats an invitee as set up only once they belong to a workspace — a sign-in alone proves nothing", () => {
+    // 2026-08-12: a mail scanner opened eleven invite links within two minutes of
+    // delivery, which verified the tokens and stamped last_sign_in_at on accounts
+    // whose owners never saw Pulse. Membership is the only evidence of a finished setup.
+    expect(inviteeHasCompletedSetup({ workspaceMemberships: 0 })).toBe(false);
+    expect(inviteeHasCompletedSetup({ workspaceMemberships: null })).toBe(false);
     expect(inviteeHasCompletedSetup(undefined)).toBe(false);
-    expect(inviteeHasCompletedSetup({ last_sign_in_at: "2026-08-02T00:00:00Z" })).toBe(true);
+    expect(inviteeHasCompletedSetup({ workspaceMemberships: 1 })).toBe(true);
+    expect(inviteeHasCompletedSetup({ workspaceMemberships: 3 })).toBe(true);
   });
 });

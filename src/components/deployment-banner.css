@@ -1,0 +1,15 @@
+/* Preview-deployment notice. Component-scoped by design (see CLAUDE.md: never globals). */
+.deployment-banner {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 1000;
+  padding: 6px 12px;
+  font-family: var(--font-ui-family);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  text-align: center;
+  color: #1c1917;
+  background: #fde68a;
+  border-bottom: 1px solid #f59e0b;
+}

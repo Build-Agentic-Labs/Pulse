@@ -85,7 +85,7 @@ export function useAuthFormActions(supabase: SupabaseClient) {
 
   async function handleResetPassword(email: string) {
     if (!email.trim()) {
-      setMessage("Enter your email first, then request a recovery code.");
+      setMessage("Enter your email first, then request a reset link.");
       return false;
     }
 
@@ -98,34 +98,12 @@ export function useAuthFormActions(supabase: SupabaseClient) {
       });
       const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
       if (!response.ok) {
-        throw new Error(payload.error || "Unable to send the recovery code.");
+        throw new Error(payload.error || "Unable to send the reset link.");
       }
       requested = true;
-      return payload.message || "If an account exists, a recovery code has been sent.";
-    }, "Unable to send the recovery code.");
+      return payload.message || "If an account exists, a reset link has been sent.";
+    }, "Unable to send the reset link.");
     return requested;
-  }
-
-  async function handleVerifyRecoveryCode(email: string, code: string) {
-    const normalizedEmail = email.trim();
-    const normalizedCode = code.replace(/\s/g, "");
-    if (!normalizedEmail || !/^\d{6,8}$/.test(normalizedCode)) {
-      setMessage("Enter the recovery code from your email.");
-      return false;
-    }
-
-    let verified = false;
-    await run(async () => {
-      const { error } = await supabase.auth.verifyOtp({
-        email: normalizedEmail,
-        token: normalizedCode,
-        type: "recovery",
-      });
-      if (error) throw error;
-      verified = true;
-      return "Recovery code verified. Choose a new password.";
-    }, "Unable to verify the recovery code.");
-    return verified;
   }
 
   async function handleResendConfirmation(email: string) {
@@ -160,7 +138,6 @@ export function useAuthFormActions(supabase: SupabaseClient) {
     handleCreateAccount,
     handleMicrosoftSignIn,
     handleResetPassword,
-    handleVerifyRecoveryCode,
     handleResendConfirmation,
     handleUpdatePassword,
   };

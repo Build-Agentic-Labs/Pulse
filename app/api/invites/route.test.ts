@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   generateLink: vi.fn(),
   grantUpsert: vi.fn(),
   inviteUserByEmail: vi.fn(),
+  ledgerInsert: vi.fn(),
+  /** workspace_members rows for the invitee across all workspaces (service-role count). */
+  memberCount: 0,
   rpc: vi.fn(),
   send: vi.fn(),
 }));
@@ -17,6 +20,10 @@ vi.mock("@supabase/supabase-js", () => ({
         inviteUserByEmail: mocks.inviteUserByEmail,
       },
     },
+    from: (table: string) =>
+      table === "workspace_members"
+        ? { select: () => ({ eq: () => Promise.resolve({ count: mocks.memberCount, error: null }) }) }
+        : { insert: mocks.ledgerInsert },
   }),
 }));
 
@@ -53,6 +60,7 @@ function inviteRequest(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.memberCount = 0;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
   process.env.RESEND_API_KEY = "resend-key";
@@ -220,7 +228,39 @@ describe("workspace invite route — resend to a pending invitee", () => {
     );
   });
 
-  it("emails a sign-in reminder, not a credential, to someone who already finished setup", async () => {
+  it("re-sends a setup link when the account was 'signed in' by a link scanner but never joined a workspace", async () => {
+    // The 2026-08-12 batch: tokens verified within two minutes of delivery, so
+    // last_sign_in_at is set, yet the person has no membership anywhere.
+    mocks.memberCount = 0;
+    mocks.generateLink.mockImplementation(async ({ type }: { type: string }) => {
+      if (type === "invite") return emailExists;
+      return {
+        data: {
+          properties: { hashed_token: "recovery-hash" },
+          user: {
+            id: "user-1",
+            email: "first.user@anacorp.com",
+            email_confirmed_at: "2026-08-12T22:17:18Z",
+            last_sign_in_at: "2026-08-12T22:17:18Z",
+          },
+        },
+        error: null,
+      };
+    });
+    mocks.send.mockResolvedValue({ ok: true, id: "email-4" });
+
+    const response = await POST(inviteRequest());
+    const payload = await response.json();
+
+    expect(payload).toEqual({ granted: true, emailSent: true });
+    expect(mocks.send.mock.calls[0]?.[1].subject).not.toMatch(/now have access/i);
+    expect(mocks.send.mock.calls[0]?.[1].html).toContain(
+      "https://pulse.anacorp.com/invite#email=first.user%40anacorp.com&token_hash=recovery-hash&type=recovery",
+    );
+  });
+
+  it("emails a sign-in reminder, not a credential, to someone who already belongs to a workspace", async () => {
+    mocks.memberCount = 1;
     mocks.generateLink.mockImplementation(async ({ type }: { type: string }) => {
       if (type === "invite") return emailExists;
       return {
@@ -248,5 +288,53 @@ describe("workspace invite route — resend to a pending invitee", () => {
     expect(mocks.send.mock.calls[0]?.[1].subject).toBe("You now have access to ANA Corp in Pulse");
     expect(mocks.send.mock.calls[0]?.[1].html).toContain("https://pulse.anacorp.com/");
     expect(mocks.send.mock.calls[0]?.[1].html).not.toContain("token_hash");
+  });
+});
+
+describe("workspace invite route — configuration and link failures are loud", () => {
+  it("names the missing variable in the log and the admin-facing reason when the service role key is absent", async () => {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(inviteRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      granted: true,
+      emailSent: false,
+      reason: "Invitations are temporarily unavailable. Missing configuration: SUPABASE_SERVICE_ROLE_KEY.",
+    });
+    expect(error).toHaveBeenCalledWith("Invitations unavailable: missing configuration", {
+      missing: ["SUPABASE_SERVICE_ROLE_KEY"],
+      environment: "unknown",
+    });
+    error.mockRestore();
+  });
+
+  it("records a failed ledger row when Supabase cannot mint a setup link, then falls back to Supabase mail", async () => {
+    mocks.generateLink.mockResolvedValue({
+      data: { properties: null, user: null },
+      error: Object.assign(new Error("boom"), { status: 500, code: "unexpected_failure" }),
+    });
+    mocks.inviteUserByEmail.mockResolvedValue({ error: null });
+    mocks.ledgerInsert.mockResolvedValue({ error: null });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(inviteRequest());
+    const payload = await response.json();
+
+    expect(payload).toEqual({ granted: true, emailSent: true });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.ledgerInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "invite",
+        recipient_email: "first.user@anacorp.com",
+        workspace_id: "workspace-1",
+        status: "failed",
+        error: "500: generate_link: unexpected_failure",
+      }),
+    );
+    error.mockRestore();
   });
 });

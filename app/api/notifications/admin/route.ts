@@ -1,5 +1,5 @@
 /**
- * Notifications console API. Owners/admins only (has_workspace_role, checked
+ * Notifications console API. Platform superadmins only (is_super_admin, checked
  * with the CALLER's client so RLS is the gate); the service role is used only
  * for the ledgers, which users can never read directly.
  *
@@ -37,16 +37,13 @@ function adminClient() {
   return createClient<Database>(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
-async function requireManager(request: Request, workspaceId: string) {
+async function requireSuperAdmin(request: Request) {
   const auth = await requireApiUser(request);
   if (auth.failure) return { failure: auth.failure, userId: null };
-  const { data, error } = await auth.supabase.rpc("has_workspace_role", {
-    target_workspace_id: workspaceId,
-    allowed_roles: ["owner", "admin"],
-  });
+  const { data, error } = await auth.supabase.rpc("is_super_admin");
   if (error) return { failure: NextResponse.json({ error: error.message }, { status: 500 }), userId: null };
   if (data !== true) {
-    return { failure: NextResponse.json({ error: "Only owners and admins can view notifications." }, { status: 403 }), userId: null };
+    return { failure: NextResponse.json({ error: "Only platform superadmins can access notification diagnostics." }, { status: 403 }), userId: null };
   }
   return { failure: null, userId: auth.userId };
 }
@@ -59,7 +56,7 @@ function siteOrigin(request: Request): string {
 export async function GET(request: Request) {
   const workspaceId = new URL(request.url).searchParams.get("workspaceId")?.trim() ?? "";
   if (!workspaceId) return NextResponse.json({ error: "workspaceId is required." }, { status: 400 });
-  const gate = await requireManager(request, workspaceId);
+  const gate = await requireSuperAdmin(request);
   if (gate.failure) return gate.failure;
   const admin = adminClient();
   if (!admin) return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY missing." }, { status: 503 });
@@ -82,7 +79,7 @@ export async function POST(request: Request) {
   const action = typeof body.action === "string" ? body.action : "";
   if (!workspaceId || !action) return NextResponse.json({ error: "workspaceId and action are required." }, { status: 400 });
 
-  const gate = await requireManager(request, workspaceId);
+  const gate = await requireSuperAdmin(request);
   if (gate.failure) return gate.failure;
   if (!actionRateLimit(gate.userId ?? workspaceId)) {
     return NextResponse.json({ error: "Too many requests." }, { status: 429 });

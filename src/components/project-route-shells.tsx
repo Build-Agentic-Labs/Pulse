@@ -1,6 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { PlannerState, WorkspaceProjectGroup } from "@/domain/types";
 import type { WorkOrderSummary } from "@/lib/planning/store";
@@ -213,16 +215,45 @@ export function MobilePhotoRouteShell({
   initialGroups,
   initialPlannerState,
 }: { projectId?: string; initialPlannerState?: PlannerState } & ShellProps) {
+  const searchParams = useSearchParams();
   return (
-    <AuthProjectGate projectId={projectId} routeKind="mobile-photos" initialGroups={initialGroups}>
-      {(project, onReady) => (
-        <MobilePhotoPortal
-          projectContext={project}
-          projectId={project?.projectId ?? projectId}
-          onReady={onReady}
-          initialPlannerState={initialPlannerState}
-        />
-      )}
+    <AuthProjectGate initialGroups={initialGroups} renderHome={({ groups }) => (
+      <UniversalPhotoPortal groups={groups} requestedProjectId={projectId ?? searchParams.get("project") ?? undefined} initialPlannerState={initialPlannerState} />
+    )}>
+      {() => null}
     </AuthProjectGate>
   );
+}
+
+function UniversalPhotoPortal({ groups, requestedProjectId, initialPlannerState }: {
+  groups: WorkspaceProjectGroup[];
+  requestedProjectId?: string;
+  initialPlannerState?: PlannerState;
+}) {
+  const [chosenProjectId, setChosenProjectId] = useState(requestedProjectId);
+  const projects = groups.flatMap(group => group.projects.filter(project => project.status !== "archived").map(project => ({
+    projectId: project.id, projectName: project.name, workspaceId: group.workspace.id,
+    workspaceName: group.workspace.name, role: group.role,
+    accessLevel: group.isSuperAdmin || group.role === "owner" || group.role === "admin" ? "edit" as const : project.accessLevel,
+  })));
+  const selected = projects.find(project => project.projectId === chosenProjectId);
+  useEffect(() => {
+    if (selected) {
+      try { localStorage.setItem("pulse:photo-portal-project", selected.projectId); } catch { /* Storage may be unavailable. */ }
+    }
+  }, [selected]);
+  if (!selected) return <main className="min-h-dvh bg-canvas px-4 py-8 text-ink"><div className="mx-auto max-w-md space-y-5">
+    <h1 className="text-xl font-medium">Photo Portal</h1>
+    <p className="text-sm text-ink-secondary">Choose a project to capture photos for its tasks and steps.</p>
+    {projects.length ? <div className="space-y-2" role="list" aria-label="Projects">
+      {projects.map(project => <button key={project.projectId} type="button" role="listitem"
+        className="flex min-h-16 w-full items-center justify-between rounded-md border border-line bg-surface px-4 text-left transition-colors active:bg-surface-muted"
+        onClick={() => setChosenProjectId(project.projectId)}>
+        <span className="min-w-0"><span className="block truncate text-base font-medium">{project.projectName}</span><span className="block truncate text-xs text-ink-secondary">{project.workspaceName}</span></span>
+        <ChevronRight size={16} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+      </button>)}
+    </div> : <p>No projects are available for your account.</p>}
+  </div></main>;
+  return <MobilePhotoPortal key={selected.projectId} projectId={selected.projectId} projectContext={selected}
+    onBackToProjects={() => setChosenProjectId(undefined)} initialPlannerState={requestedProjectId === selected.projectId ? initialPlannerState : undefined} />;
 }

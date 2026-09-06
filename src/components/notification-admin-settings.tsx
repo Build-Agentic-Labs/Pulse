@@ -27,8 +27,8 @@ function when(iso: string | null): string {
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
-function isManager(group: WorkspaceProjectGroup): boolean {
-  return Boolean(group.isSuperAdmin) || group.role === "owner" || group.role === "admin";
+function isPlatformAdmin(group: WorkspaceProjectGroup): boolean {
+  return group.isSuperAdmin === true;
 }
 
 async function callAdmin<T>(token: string | null, init: RequestInit & { query?: string }): Promise<T> {
@@ -40,7 +40,7 @@ async function callAdmin<T>(token: string | null, init: RequestInit & { query?: 
 }
 
 /**
- * Settings → Organization → Notifications: the operator's view. Owners/admins
+ * Settings → Organization → Notifications: platform diagnostics. Superadmins
  * only (the API enforces it; the component simply hides itself otherwise).
  */
 export function NotificationAdminSettings() {
@@ -75,7 +75,7 @@ export function NotificationAdminSettings() {
         const accessToken = session.access_token ?? null;
         setToken(accessToken);
         const groups = await loadWorkspaceProjectGroups();
-        const group = groups.find(isManager);
+        const group = groups.find(isPlatformAdmin);
         if (!mounted || !group) return;
         setWorkspace({ id: group.workspace.id, name: group.workspace.name });
         await refresh(group.workspace.id, accessToken);

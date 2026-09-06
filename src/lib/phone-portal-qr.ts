@@ -95,8 +95,8 @@ export function usePhonePortalQr(project?: PlannerProjectContext, size = 200): P
   const [isUrlResolved, setIsUrlResolved] = useState(false);
 
   const openPortalHref = useMemo(
-    () => (project?.projectId ? projectPortalPath(project.projectId) : portalUrl || "/mobile-photos"),
-    [portalUrl, project?.projectId],
+    () => (project?.projectId ? projectPortalPath(project.projectId) : "/mobile-photos"),
+    [project?.projectId],
   );
 
   useEffect(() => {
@@ -106,14 +106,6 @@ export function usePhonePortalQr(project?: PlannerProjectContext, size = 200): P
     // New resolve cycle: hold the QR until we have the final URL.
     setIsUrlResolved(false);
 
-    if (!projectId) {
-      setPortalUrl(fallbackPortalUrl());
-      setIsUrlResolved(true);
-      return () => {
-        mounted = false;
-      };
-    }
-
     // Warm the QR encoder chunk in parallel with the URL resolve below.
     void loadQrcodeModule().catch(() => undefined);
 
@@ -121,7 +113,7 @@ export function usePhonePortalQr(project?: PlannerProjectContext, size = 200): P
     // the cached value immediately and revalidate in the background. Without a cached
     // value, seed the field with the fallback but leave the QR gated until the API
     // (or its fallback) settles the real URL.
-    const cachedPortalUrl = readCachedPortalUrl(projectId);
+    const cachedPortalUrl = readCachedPortalUrl(projectId ?? "universal");
     if (cachedPortalUrl) {
       setPortalUrl(cachedPortalUrl);
       setIsUrlResolved(true);
@@ -129,7 +121,7 @@ export function usePhonePortalQr(project?: PlannerProjectContext, size = 200): P
       setPortalUrl(fallbackPortalUrl(projectId));
     }
 
-    const phonePortalApiUrl = `/api/phone-portal-url?projectId=${encodeURIComponent(projectId)}`;
+    const phonePortalApiUrl = projectId ? `/api/phone-portal-url?projectId=${encodeURIComponent(projectId)}` : "/api/phone-portal-url";
 
     const resolvePortalUrl = async () => {
       const supabase = createPlannerSupabaseClient();
@@ -149,7 +141,7 @@ export function usePhonePortalQr(project?: PlannerProjectContext, size = 200): P
 
       const payload = (await response.json()) as { url?: string };
       const resolvedUrl = ensureProjectPortalUrl(payload.url ?? fallbackPortalUrl(projectId), projectId);
-      writeCachedPortalUrl(projectId, resolvedUrl);
+      writeCachedPortalUrl(projectId ?? "universal", resolvedUrl);
       if (mounted) {
         // Identical to the cached value in the common case, which React treats as a
         // no-op; a changed LAN address re-encodes the QR once.

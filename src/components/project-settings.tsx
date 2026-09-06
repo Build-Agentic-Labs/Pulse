@@ -40,7 +40,6 @@ export function ProjectSettings({
   );
   const editableGroups = useMemo(() => groups.filter(canCreate), [groups]);
   const [projects, setProjects] = useState<Project[]>(() => projectsFrom(groups));
-  const [selectedProjectId, setSelectedProjectId] = useState(activeProject?.projectId ?? projects[0]?.id ?? "");
   const [createWorkspaceId, setCreateWorkspaceId] = useState(
     activeProject?.workspaceId ?? editableGroups[0]?.workspace.id ?? "",
   );
@@ -61,24 +60,7 @@ export function ProjectSettings({
       ...Object.fromEntries(next.map((project) => [project.id, project.name])),
       ...current,
     }));
-    setSelectedProjectId((current) => {
-      if (current && next.some((project) => project.id === current)) return current;
-      return activeProject?.projectId ?? next[0]?.id ?? "";
-    });
   }, [activeProject?.projectId, groups]);
-
-  const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  const selectedGroup = selectedProject ? groupByWorkspaceId.get(selectedProject.workspaceId) : undefined;
-  const selectedContext: PlannerProjectContext | undefined = selectedProject && selectedGroup
-    ? {
-        projectId: selectedProject.id,
-        projectName: selectedProject.name,
-        workspaceId: selectedProject.workspaceId,
-        workspaceName: selectedGroup.workspace.name,
-        role: selectedGroup.role,
-        accessLevel: selectedGroup.isSuperAdmin || canManage(selectedGroup) ? "edit" : selectedProject.accessLevel,
-      }
-    : undefined;
 
   async function createProject() {
     const name = newProjectName.trim();
@@ -99,7 +81,6 @@ export function ProjectSettings({
       };
       setProjects((current) => [...current, project]);
       setDraftNames((current) => ({ ...current, [project.id]: project.name }));
-      setSelectedProjectId(project.id);
       setNewProjectName("");
       setShowCreate(false);
       setMessage(`${project.name} created.`);
@@ -310,31 +291,7 @@ export function ProjectSettings({
         {message ? <p className="ui-settings-section-desc mt-2 text-ink">{message}</p> : null}
       </section>
 
-      {projects.length ? (
-        <section className="ui-settings-section">
-          <h3 className="ui-settings-section-title">Project tools</h3>
-          <p className="ui-settings-section-desc">Choose the project used by project-specific settings below.</p>
-          <div className="ui-settings-group">
-            <div className="ui-settings-group-row">
-              <div className="ui-settings-group-row-copy">
-                <div className="ui-settings-group-row-label">Active project</div>
-                <div className="ui-settings-group-row-desc">This selection does not change your current Product workspace.</div>
-              </div>
-              <div className="ui-settings-group-row-control sm:min-w-[260px]">
-                <ThemedSelect
-                  className="w-full"
-                  value={selectedProjectId}
-                  onChange={setSelectedProjectId}
-                  ariaLabel="Project settings selection"
-                  options={projects.map((project) => ({ value: project.id, label: project.name }))}
-                />
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {selectedContext ? <PhonePhotoPortalPanel project={selectedContext} /> : null}
+      <PhonePhotoPortalPanel />
 
       <ThemedFeedbackLayer
         confirm={confirm}

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadWorkspaceProjectGroups } from "@/domain/supabase-planner";
 import { NotificationAdminSettings } from "./notification-admin-settings";
 
 vi.mock("@/domain/supabase-planner", () => ({
   createPlannerSupabaseClient: () => ({}),
-  loadWorkspaceProjectGroups: vi.fn(async () => [{ workspace: { id: "ws-1", name: "Anacorp" }, role: "owner", projects: [] }]),
+  loadWorkspaceProjectGroups: vi.fn(async () => [{ workspace: { id: "ws-1", name: "Anacorp", createdAt: "", updatedAt: "" }, role: "owner", isSuperAdmin: true, projects: [] }]),
 }));
 
 vi.mock("@/lib/supabase-auth", () => ({
@@ -31,6 +32,7 @@ const overview = {
 describe("NotificationAdminSettings", () => {
   const fetchMock = vi.fn();
   beforeEach(() => {
+    vi.mocked(loadWorkspaceProjectGroups).mockResolvedValue([{ workspace: { id: "ws-1", name: "Anacorp", createdAt: "", updatedAt: "" }, role: "owner", isSuperAdmin: true, projects: [] }] as Awaited<ReturnType<typeof loadWorkspaceProjectGroups>>);
     fetchMock.mockReset();
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") return new Response(JSON.stringify({ ok: true, revived: true }), { status: 200 });
@@ -39,7 +41,15 @@ describe("NotificationAdminSettings", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
   afterEach(() => {
+    cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["owner", "admin", "editor", "viewer"] as const)("hides diagnostics for a regular %s without requesting its API", async (role) => {
+    vi.mocked(loadWorkspaceProjectGroups).mockResolvedValue([{ workspace: { id: "ws-1", name: "Anacorp", createdAt: "", updatedAt: "" }, role, isSuperAdmin: false, projects: [] }] as Awaited<ReturnType<typeof loadWorkspaceProjectGroups>>);
+    await act(async () => { render(<NotificationAdminSettings />); });
+    expect(screen.queryByText("Notifications · Health")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("shows the health verdict and a dead ledger row with a Resend action", async () => {

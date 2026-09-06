@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import NextImage from "next/image";
 
 import { usePhonePortalQr } from "@/lib/phone-portal-qr";
@@ -9,13 +10,15 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
   const { portalUrl: phonePortalUrl, setPortalUrl: setPhonePortalUrl, qrDataUrl: phonePortalQrDataUrl, openPortalHref } =
     usePhonePortalQr(project);
 
+  const [copyStatus, setCopyStatus] = useState("");
+
   return (
     <section className="ui-settings-section">
       <h3 className="ui-settings-section-title">Phone photo portal</h3>
       <p className="ui-settings-section-desc">
         {project?.projectId
           ? `Open or scan the portal for ${project.projectName}. It loads manufacturing steps from this project only.`
-          : "Scan the QR code on a phone to capture step photos in the procedure editor."}
+          : "One link for every project. Scan on your phone, choose a project, then capture photos for its tasks and steps."}
       </p>
 
       <div className="ui-settings-group">
@@ -55,6 +58,11 @@ export function PhonePhotoPortalPanel({ project }: { project?: PlannerProjectCon
               >
                 Open portal
               </button>
+              <button type="button" className="ui-btn-ghost h-8 px-3" disabled={!phonePortalUrl} onClick={async () => {
+                try { await navigator.clipboard.writeText(phonePortalUrl); setCopyStatus("Link copied"); }
+                catch { setCopyStatus("Select the URL above to copy it."); }
+              }}>Copy link</button>
+              <span role="status" className="text-xs text-ink-secondary">{copyStatus}</span>
               {project?.projectId ? (
                 <span className="ui-settings-group-row-desc font-medium text-steel">
                   Opens `/projects/{project.projectId}/mobile-photos`

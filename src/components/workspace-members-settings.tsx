@@ -3,6 +3,7 @@
 import { formatDate } from "@/domain/formatting";
 import { ChevronRight, MailPlus, RotateCw, Search, ShieldCheck, Trash2, UserMinus } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { MemberAccessDrawer } from "./member-access-drawer";
 import { ThemedSelect } from "@/components/themed-select";
 import { WorkspaceInviteComposer } from "@/components/workspace-invite-composer";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
@@ -38,10 +39,10 @@ import {
 
 // Local copies of the settings primitives (kept here to avoid a circular import with
 // app-settings-panel, which imports this component).
-function Block({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+function Block({ title, description, children, action }: { title: string; description?: string; children: ReactNode; action?: ReactNode }) {
   return (
     <section className="ui-settings-section">
-      <h3 className="ui-settings-section-title">{title}</h3>
+      <div className="flex items-center justify-between gap-3"><h3 className="ui-settings-section-title">{title}</h3>{action}</div>
       {description ? <p className="ui-settings-section-desc">{description}</p> : null}
       <div className="ui-settings-group">{children}</div>
     </section>
@@ -105,6 +106,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
   const [spaceAccess, setSpaceAccess] = useState<SpaceAccessRow[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>();
   const [search, setSearch] = useState("");
+  const [inviteOpen, setInviteOpen] = useState(false);
   // Two-step confirmation targets for destructive actions.
   const [confirmRemoveUserId, setConfirmRemoveUserId] = useState<string>();
   const [confirmCancelEmail, setConfirmCancelEmail] = useState<string>();
@@ -397,7 +399,8 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     <>
       {message ? <p className="ui-settings-section-desc px-1 text-ink-secondary">{message}</p> : null}
 
-      <Block title="Members" description="Everyone in this organization, including invites that haven't been accepted yet.">
+      <Block title="Members" description="Select a member to manage their access." action={<button type="button" className="ui-btn-ghost h-8 gap-1.5 px-2 text-xs" aria-expanded={inviteOpen} aria-controls="member-invitation" onClick={() => setInviteOpen(true)} disabled={inviteOpen}><MailPlus size={14} />Invite</button>}>
+        {inviteOpen ? <div id="member-invitation" className="mb-4 border-b border-line"><WorkspaceInviteComposer defaultOpen onClose={() => setInviteOpen(false)} callerIsOwner={callerIsOwner} departments={departments} isSubmitting={isSubmitting} onSubmit={invite} projects={projects} /></div> : null}
         <div className="flex items-center gap-2 border-b border-line px-3.5 py-1.5">
           <Search size={13} className="shrink-0 text-ink-tertiary" />
           <input
@@ -409,12 +412,11 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
           />
         </div>
 
+        <div className="max-h-[440px] overflow-y-auto overscroll-contain">
         {filteredMembers.length || pendingGrants.length ? (
           <>
             {filteredMembers.map((member) => {
-              const manager = isManagerRole(member.role);
               const active = member.userId === selectedUserId;
-              const joined = formatDate(member.joinedAt);
               return (
                 <button
                   key={member.userId}
@@ -431,15 +433,9 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                       {memberLabel(member)}
                       {member.isSelf ? " (you)" : ""}
                     </div>
-                    <div className="ui-settings-group-row-desc">
-                      <span title={ROLE_DESCRIPTIONS[member.role]}>
-                        {organizationRoleLabel(member.role)}
-                      </span>
-                      {manager ? " · full access" : ""}
-                      {member.email ? ` · ${member.email}` : ""}
-                      {joined ? ` · joined ${joined}` : ""}
-                    </div>
+                    {member.email && member.email !== memberLabel(member) ? <div className="ui-settings-group-row-desc truncate">{member.email}</div> : null}
                   </div>
+                  <span className="ml-auto shrink-0 text-xs text-ink-secondary" title={ROLE_DESCRIPTIONS[member.role]}>{organizationRoleLabel(member.role)}</span>
                   <div className="ui-settings-group-row-control ui-settings-member-row-chevron">
                     <ChevronRight
                       size={14}
@@ -450,6 +446,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
               );
             })}
 
+            {pendingGrants.length ? <div className="border-y border-line bg-surface px-3.5 py-2 text-[11px] text-ink-secondary">Pending invitations · {pendingGrants.length}</div> : null}
             {pendingGrants.map((grant) => {
               const expires = formatDate(grant.expiresAt);
               const expired = grant.expiresAt ? new Date(grant.expiresAt).getTime() < Date.now() : false;
@@ -519,11 +516,14 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
             {query ? "No members match your search." : "No members yet."}
           </div>
         )}
+        </div>
       </Block>
 
       {selected ? (
+        <MemberAccessDrawer name={memberLabel(selected)} description={[selected.email, `Joined ${formatDate(selected.joinedAt)}`].filter(Boolean).join(" · ")} onClose={() => { setSelectedUserId(undefined); setConfirmRemoveUserId(undefined); }}>
+        {message ? <p role="status" className="mb-4 text-xs text-ink-secondary">{message}</p> : null}
         <Block
-          title={`Access · ${memberLabel(selected)}`}
+          title="Permissions"
           description={
             isManagerRole(selected.role)
               ? "Owners and admins automatically have full module and project access."
@@ -633,20 +633,10 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
             </div>
           ) : null}
         </Block>
+        </MemberAccessDrawer>
       ) : null}
 
-      <Block
-        title="Invite a user"
-        description="Anacorp work emails only. Configure organization, resource, project, and SOP workflow access before sending."
-      >
-        <WorkspaceInviteComposer
-          callerIsOwner={callerIsOwner}
-          departments={departments}
-          isSubmitting={isSubmitting}
-          onSubmit={invite}
-          projects={projects}
-        />
-      </Block>
+
     </>
   );
 }

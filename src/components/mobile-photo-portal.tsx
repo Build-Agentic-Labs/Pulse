@@ -75,7 +75,6 @@ import { NothingSpinner } from "@/components/nothing-ui";
 import { StepExplodedViewGallery } from "@/components/step-exploded-view-gallery";
 import { TaskVideoGallery } from "@/components/task-video-gallery";
 import { ThemedSelect } from "@/components/themed-select";
-import { BackToDashboardButton, UserNav } from "@/components/user-nav";
 
 const MAX_IMAGE_EDGE = 1280;
 const JPEG_QUALITY = 0.72;
@@ -802,11 +801,13 @@ function withUpdatedTask(state: PlannerState, nextTask: Task, shouldReschedule =
 export function MobilePhotoPortal({
   projectId,
   projectContext,
+  onBackToProjects,
   onReady,
   initialPlannerState,
 }: {
   projectId?: string;
   projectContext?: PlannerProjectContext;
+  onBackToProjects?: () => void;
   onReady?: () => void;
   /**
    * Server-fetched planner state (Stage 5 pattern): the capture list paints from
@@ -1332,7 +1333,7 @@ export function MobilePhotoPortal({
       window.removeEventListener("resize", measureHeader);
       viewport?.removeEventListener("resize", measureHeader);
     };
-  }, []);
+  }, [saveState]);
 
   useEffect(() => {
     function warnBeforeLeaving(event: BeforeUnloadEvent) {
@@ -3452,13 +3453,17 @@ export function MobilePhotoPortal({
         ref={mobileHeaderRef}
         className="ui-photo-mobile-site-header fixed inset-x-0 top-0 z-50 border-b border-line bg-surface text-ink"
       >
-        <div className="mx-auto max-w-5xl">
+        <div className="mx-auto max-w-xl">
           <div className="ui-photo-mobile-site-header-row">
+            {onBackToProjects ? (
+              <button type="button" className="ui-photo-mobile-header-btn shrink-0" onClick={onBackToProjects}>
+                <ChevronLeft size={14} />
+                Projects
+              </button>
+            ) : null}
             <div className="ui-photo-mobile-site-header-brand min-w-0 flex-1">
               <div className="ui-photo-mobile-site-eyebrow">Pulse Capture</div>
-              <h1 className="ui-photo-mobile-page-title truncate">
-                {derivedState?.product.name ?? "Manufacturing Photos"}
-              </h1>
+              <h1 className="ui-photo-mobile-page-title truncate">{derivedState?.product.name ?? projectContext?.projectName ?? "Manufacturing Photos"}</h1>
             </div>
             <div className="ui-photo-mobile-header-actions">
               {headerCaptureTimers.length > 0 ? (
@@ -3545,8 +3550,6 @@ export function MobilePhotoPortal({
                   Not saved
                 </span>
               ) : null}
-              <BackToDashboardButton />
-              <UserNav showSpacesLink={false} />
             </div>
           </div>
         </div>

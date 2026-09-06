@@ -67,19 +67,23 @@ function StepChoice({
 }
 
 export function WorkspaceInviteComposer({
+  defaultOpen = false,
+  onClose,
   callerIsOwner,
   departments,
   isSubmitting,
   onSubmit,
   projects,
 }: {
+  defaultOpen?: boolean;
+  onClose?: () => void;
   callerIsOwner: boolean;
   departments: readonly Department[];
   isSubmitting: boolean;
   onSubmit: (email: string, entitlements: WorkspaceInviteEntitlements) => Promise<boolean>;
   projects: readonly Project[];
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [step, setStep] = useState(0);
   const [email, setEmail] = useState("");
   const [personError, setPersonError] = useState("");
@@ -96,6 +100,7 @@ export function WorkspaceInviteComposer({
 
   function reset() {
     setOpen(false);
+    onClose?.();
     setStep(0);
     setEmail("");
     setPersonError("");

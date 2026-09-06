@@ -1115,3 +1115,12 @@
   flex-shrink: 0;
   color: var(--color-ink-secondary);
 }
+
+/* Keep capture navigation comfortable on a phone, including safe-area devices. */
+@media (pointer: coarse) {
+  .mobile-photo-portal .ui-photo-mobile-header-btn,
+  .mobile-photo-portal .ui-photo-mobile-header-timer-chip {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

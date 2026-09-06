@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { resolveCanonicalRedirect } from "@/domain/deployment/canonical-host";
 import type { Database } from "@/lib/database.types";
 
 /**
@@ -15,6 +16,18 @@ import type { Database } from "@/lib/database.types";
  * with a cookie fallback) and must not depend on middleware ordering.
  */
 export async function proxy(request: NextRequest) {
+  // A production deployment answers on its *.vercel.app URL too; send those
+  // visitors to the canonical domain so bookmarks, links and cookies all agree.
+  // Preview deployments are served as-is (see src/domain/deployment/canonical-host.ts).
+  const canonical = resolveCanonicalRedirect({
+    requestUrl: request.url,
+    vercelEnv: process.env.VERCEL_ENV,
+    siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
+  });
+  if (canonical) {
+    return NextResponse.redirect(canonical, 308);
+  }
+
   let response = NextResponse.next({ request });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

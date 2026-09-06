@@ -23,6 +23,7 @@ import {
   type OrganizationInviteRole,
   type WorkspaceInviteEntitlements,
 } from "@/domain/workspace/invite-access";
+import { describeUnavailable, logMissingConfig } from "@/lib/auth/password-recovery-request";
 import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
 import { recordTransactionalEmail, type TransactionalEmailKind } from "@/lib/notifications/transactional-log";
 import { createResendSender, type EmailSender } from "@/lib/sop/notifications-drain";
@@ -44,7 +45,7 @@ const GRANT_EXPIRY_DAYS = 30;
 type SetupLink =
   | { kind: "link"; tokenHash: string; type: WorkspaceInviteVerificationType }
   | { kind: "already_registered" }
-  | { kind: "unavailable"; message: string };
+  | { kind: "unavailable"; message: string; code: string | null; status: number | null };
 
 /**
  * Mint the one-time token behind the "create your password" link.
@@ -65,12 +66,22 @@ async function generateSetupLink(
     return { kind: "link", tokenHash: invite.data.properties.hashed_token, type: "invite" };
   }
   if (!invite.error || !isAlreadyRegisteredAuthError(invite.error)) {
-    return { kind: "unavailable", message: invite.error?.message ?? "Supabase returned no invitation token." };
+    return {
+      kind: "unavailable",
+      message: invite.error?.message ?? "Supabase returned no invitation token.",
+      code: invite.error?.code ?? null,
+      status: invite.error?.status ?? null,
+    };
   }
 
   const recovery = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo } });
   if (recovery.error || !recovery.data.properties?.hashed_token) {
-    return { kind: "unavailable", message: recovery.error?.message ?? "Supabase returned no recovery token." };
+    return {
+      kind: "unavailable",
+      message: recovery.error?.message ?? "Supabase returned no recovery token.",
+      code: recovery.error?.code ?? null,
+      status: recovery.error?.status ?? null,
+    };
   }
   if (inviteeHasCompletedSetup(recovery.data.user)) {
     return { kind: "already_registered" };
@@ -301,10 +312,13 @@ export async function POST(request: Request) {
   const resendFrom = process.env.RESEND_FROM ?? "";
 
   if (!serviceRoleKey) {
+    // Admin-facing, so naming the variable is useful; the log line is what the
+    // operator greps for. Preview deployments lack this key by design.
+    logMissingConfig("Invitations", ["SUPABASE_SERVICE_ROLE_KEY"], process.env.VERCEL_ENV);
     return NextResponse.json({
       granted: true,
       emailSent: false,
-      reason: "Email service is not configured (SUPABASE_SERVICE_ROLE_KEY missing).",
+      reason: `${describeUnavailable("Invitations", process.env.VERCEL_ENV)} Missing configuration: SUPABASE_SERVICE_ROLE_KEY.`,
     });
   }
 
@@ -375,7 +389,19 @@ export async function POST(request: Request) {
       });
     }
 
-    console.error("Invitation link generation failed", { message: setupLink.message });
+    console.error("Invitation link generation failed", { message: setupLink.message, code: setupLink.code, status: setupLink.status });
+    // No email exists yet, but the console must still see that this invite hit a wall.
+    await recordTransactionalEmail(admin, {
+      kind: "invite",
+      recipientEmail: email,
+      workspaceId,
+      result: {
+        ok: false,
+        status: setupLink.status ?? 0,
+        error: `generate_link: ${setupLink.code ?? setupLink.message}`,
+        failure: "configuration",
+      },
+    });
   }
 
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });

@@ -1,18 +1,29 @@
-import { createHash, randomUUID } from "node:crypto";
+/**
+ * Public "forgot password" endpoint. Validates, rate limits, then hands off to
+ * requestPasswordRecovery so the email and the ledger row are the same ones the
+ * daily canary produces. Every reason for a 503 is logged by NAME (never value)
+ * so a misconfigured deployment is visible in Vercel logs instead of silent.
+ */
+
+import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { renderPasswordRecoveryEmail } from "@/domain/auth/password-recovery";
 import { createApiRateLimiter } from "@/lib/api-auth";
+import {
+  describeUnavailable,
+  logMissingConfig,
+  readPasswordRecoveryConfig,
+  requestPasswordRecovery,
+} from "@/lib/auth/password-recovery-request";
 import type { Database } from "@/lib/database.types";
 import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
-import { recordTransactionalEmail } from "@/lib/notifications/transactional-log";
 import { createResendSender } from "@/lib/sop/notifications-drain";
 
 export const dynamic = "force-dynamic";
 
 const checkEmailRateLimit = createApiRateLimiter({ windowMs: 15 * 60_000, maxRequests: 3 });
 const checkIpRateLimit = createApiRateLimiter({ windowMs: 15 * 60_000, maxRequests: 10 });
-const ACCEPTED_MESSAGE = "If an account exists, a recovery code has been sent.";
+const ACCEPTED_MESSAGE = "If an account exists, a reset link has been sent.";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function json(body: object, status = 200) {
@@ -24,6 +35,10 @@ function json(body: object, status = 200) {
 
 function accepted() {
   return json({ accepted: true, message: ACCEPTED_MESSAGE });
+}
+
+function unavailable() {
+  return json({ error: describeUnavailable("Password recovery", process.env.VERCEL_ENV) }, 503);
 }
 
 function clientAddress(request: Request): string {
@@ -69,11 +84,6 @@ export function passwordRecoveryOrigin(request: Request): string {
   return "";
 }
 
-function isMissingUserError(error: { message?: string; code?: string } | null): boolean {
-  if (!error) return false;
-  return /user[^a-z]+not[^a-z]+found/i.test(error.message ?? "") || error.code === "user_not_found";
-}
-
 export async function POST(request: Request) {
   let body: { email?: unknown };
   try {
@@ -93,59 +103,35 @@ export async function POST(request: Request) {
     return json({ error: "Too many recovery requests. Wait a few minutes and try again." }, 429);
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  const resendApiKey = process.env.RESEND_API_KEY ?? "";
-  const resendFrom = process.env.RESEND_FROM ?? "";
   const origin = passwordRecoveryOrigin(request);
-  if (!supabaseUrl || !serviceRoleKey || !resendApiKey || !resendFrom || !origin) {
-    return json({ error: "Password recovery is temporarily unavailable." }, 503);
+  const config = readPasswordRecoveryConfig(process.env, origin);
+  if (!config.ok) {
+    logMissingConfig("Password recovery", config.missing, process.env.VERCEL_ENV);
+    return unavailable();
   }
 
   try {
-    const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
+    const admin = createClient<Database>(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "", process.env.SUPABASE_SERVICE_ROLE_KEY ?? "", {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { data, error } = await supabase.auth.admin.generateLink({
-      type: "recovery",
-      email,
-      options: { redirectTo: origin },
-    });
-
-    // The public response deliberately does not reveal whether an account exists.
-    if (isMissingUserError(error)) {
-      return accepted();
-    }
-    if (error || !data.properties?.email_otp) {
-      console.error("Password recovery code generation failed", {
-        code: error?.code ?? "missing_otp",
-        status: error?.status ?? null,
-      });
-      return json({ error: "Password recovery is temporarily unavailable." }, 503);
-    }
-
     // Honours NOTIFICATION_EMAIL_REDIRECT_TO during a test window.
-    const send = createEmailSenderFromEnv().send ?? createResendSender(resendApiKey, resendFrom);
-    const result = await send(
-      email,
-      renderPasswordRecoveryEmail({ code: data.properties.email_otp, email, origin }),
-      { idempotencyKey: `recovery:${randomUUID()}` },
-    );
-    // The ledger records that a recovery email went out — never the code.
-    await recordTransactionalEmail(supabase, { kind: "password_recovery", recipientEmail: email, result });
-    if (!result.ok) {
-      console.error("Password recovery email delivery request failed", {
-        status: result.status,
-        failure: result.failure,
-      });
-      return json({ error: "Password recovery is temporarily unavailable." }, 503);
+    const send =
+      createEmailSenderFromEnv().send ??
+      createResendSender(process.env.RESEND_API_KEY ?? "", process.env.RESEND_FROM ?? "");
+
+    const outcome = await requestPasswordRecovery({ email, origin, admin, send });
+    if (outcome.kind === "failed") {
+      console.error("Password recovery failed", { stage: outcome.stage, detail: outcome.detail });
+      return unavailable();
     }
   } catch (error) {
-    console.error("Password recovery request failed unexpectedly", {
+    console.error("Password recovery request threw", {
       kind: error instanceof Error ? error.name : "unknown",
+      message: error instanceof Error ? error.message : String(error),
     });
-    return json({ error: "Password recovery is temporarily unavailable." }, 503);
+    return unavailable();
   }
 
+  // Unknown accounts get the same answer as real ones.
   return accepted();
 }

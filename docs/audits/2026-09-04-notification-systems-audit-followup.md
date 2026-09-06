@@ -100,3 +100,22 @@ design not exercised. pgTAP runs in CI on the pushed branch.
   recorded per channel on the inbox row, never retried.
 - Digest retries need the content snapshot; a digest row claimed without one
   is left to the dead-row report rather than re-rendered.
+
+
+## Incident 2026-09-05 evening — "Password recovery is temporarily unavailable"
+
+The owner tested the reset flow and got a 503. Vercel runtime logs showed the
+request had gone to the afternoon **preview** deployment host, which has no
+service-role key by design; production answered 200 and delivered a real reset
+email minutes later. Not a production bug — but the failure was silent (no log
+line, no ledger row, health green) and the preview host looked identical to
+production. Plus the typed recovery code was poor UX.
+
+Fixed on branch `worktree-password-reset-hardening`
+(plan: `docs/superpowers/plans/2026-09-05-password-reset-hardening.md`):
+link-only reset on the invite fragment-token pattern (`/reset-password`);
+`requestPasswordRecovery` shared by the route and a daily canary, with a ledger
+row for every failure; missing config logged by name and reported by the health
+endpoint (`authMail`); production `*.vercel.app` hosts redirect to the canonical
+domain; preview deployments show a banner and say why email features are off;
+invitations get the same loud-failure treatment.

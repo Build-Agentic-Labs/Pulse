@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   generateLink: vi.fn(),
   grantUpsert: vi.fn(),
   inviteUserByEmail: vi.fn(),
+  ledgerInsert: vi.fn(),
   rpc: vi.fn(),
   send: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock("@supabase/supabase-js", () => ({
         inviteUserByEmail: mocks.inviteUserByEmail,
       },
     },
+    from: () => ({ insert: mocks.ledgerInsert }),
   }),
 }));
 
@@ -248,5 +250,53 @@ describe("workspace invite route — resend to a pending invitee", () => {
     expect(mocks.send.mock.calls[0]?.[1].subject).toBe("You now have access to ANA Corp in Pulse");
     expect(mocks.send.mock.calls[0]?.[1].html).toContain("https://pulse.anacorp.com/");
     expect(mocks.send.mock.calls[0]?.[1].html).not.toContain("token_hash");
+  });
+});
+
+describe("workspace invite route — configuration and link failures are loud", () => {
+  it("names the missing variable in the log and the admin-facing reason when the service role key is absent", async () => {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(inviteRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      granted: true,
+      emailSent: false,
+      reason: "Invitations are temporarily unavailable. Missing configuration: SUPABASE_SERVICE_ROLE_KEY.",
+    });
+    expect(error).toHaveBeenCalledWith("Invitations unavailable: missing configuration", {
+      missing: ["SUPABASE_SERVICE_ROLE_KEY"],
+      environment: "unknown",
+    });
+    error.mockRestore();
+  });
+
+  it("records a failed ledger row when Supabase cannot mint a setup link, then falls back to Supabase mail", async () => {
+    mocks.generateLink.mockResolvedValue({
+      data: { properties: null, user: null },
+      error: Object.assign(new Error("boom"), { status: 500, code: "unexpected_failure" }),
+    });
+    mocks.inviteUserByEmail.mockResolvedValue({ error: null });
+    mocks.ledgerInsert.mockResolvedValue({ error: null });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(inviteRequest());
+    const payload = await response.json();
+
+    expect(payload).toEqual({ granted: true, emailSent: true });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.ledgerInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "invite",
+        recipient_email: "first.user@anacorp.com",
+        workspace_id: "workspace-1",
+        status: "failed",
+        error: "500: generate_link: unexpected_failure",
+      }),
+    );
+    error.mockRestore();
   });
 });

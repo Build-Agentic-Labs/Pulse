@@ -48,7 +48,7 @@ export function logMissingConfig(
   vercelEnv: string | undefined,
   log: ConfigLogger = console.error,
 ): void {
-  log(`${feature} unavailable: missing configuration`, { missing, environment: vercelEnv ?? "unknown" });
+  log(`${feature} unavailable: missing configuration`, { missing, environment: vercelEnv || "unknown" });
 }
 
 export function isMissingUserError(error: { message?: string; code?: string } | null | undefined): boolean {

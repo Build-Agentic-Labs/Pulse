@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
-import { recordTransactionalEmail } from "./transactional-log";
+import { latestTransactionalEmailFor, recordTransactionalEmail } from "./transactional-log";
 
 type Result = { data: unknown; error: { message: string } | null };
 
@@ -53,5 +53,45 @@ describe("recordTransactionalEmail", () => {
       result: { ok: true, id: "re_1" },
     });
     expect(ok).toBe(false);
+  });
+});
+
+/** Query builder fake: records the filters and resolves `maybeSingle()` with the given row. */
+function makeReader(row: Record<string, unknown> | null, seen: { filters: [string, string][]; order: [string, unknown][] }) {
+  const builder: Record<string, unknown> = {};
+  Object.assign(builder, {
+    select: () => builder,
+    eq: (column: string, value: string) => {
+      seen.filters.push([column, value]);
+      return builder;
+    },
+    order: (column: string, options: unknown) => {
+      seen.order.push([column, options]);
+      return builder;
+    },
+    limit: () => builder,
+    maybeSingle: async () => ({ data: row, error: null }),
+  });
+  return { from: () => builder } as unknown as SupabaseClient<Database>;
+}
+
+describe("latestTransactionalEmailFor", () => {
+  it("returns the newest row for the address, normalised", async () => {
+    const seen = { filters: [] as [string, string][], order: [] as [string, unknown][] };
+    const admin = makeReader(
+      { created_at: "2026-09-06T12:00:00Z", status: "sent", error: null, resend_message_id: "re_c1" },
+      seen,
+    );
+
+    const latest = await latestTransactionalEmailFor(admin, " Delivered@Resend.dev ");
+
+    expect(latest).toEqual({ createdAt: "2026-09-06T12:00:00Z", status: "sent", error: null, resendMessageId: "re_c1" });
+    expect(seen.filters).toEqual([["recipient_email", "delivered@resend.dev"]]);
+    expect(seen.order).toEqual([["created_at", { ascending: false }]]);
+  });
+
+  it("returns null when the address has never been written to", async () => {
+    const seen = { filters: [] as [string, string][], order: [] as [string, unknown][] };
+    expect(await latestTransactionalEmailFor(makeReader(null, seen), "nobody@example.com")).toBeNull();
   });
 });

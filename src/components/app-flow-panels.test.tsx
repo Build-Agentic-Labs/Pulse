@@ -23,9 +23,8 @@ beforeAll(() => {
 });
 
 describe("AuthFormPanel password recovery", () => {
-  it("moves from email request to six-digit code verification", async () => {
+  it("requests a reset link by email and never asks for a code", async () => {
     const onResetPassword = vi.fn().mockResolvedValue(true);
-    const onVerifyRecoveryCode = vi.fn().mockResolvedValue(true);
 
     render(
       <AuthFormPanel
@@ -34,50 +33,42 @@ describe("AuthFormPanel password recovery", () => {
         onSignIn={vi.fn()}
         onCreateAccount={vi.fn()}
         onResetPassword={onResetPassword}
-        onVerifyRecoveryCode={onVerifyRecoveryCode}
       />,
     );
 
     fireEvent.change(screen.getByLabelText("Work email"), { target: { value: "person@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
     expect(screen.getByRole("heading", { name: "Reset password" })).toBeInTheDocument();
+    expect(screen.getByText(/email you a link/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Send recovery code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Email me a reset link" }));
     await waitFor(() => expect(onResetPassword).toHaveBeenCalledWith("person@example.com"));
-    expect(await screen.findByRole("heading", { name: "Enter recovery code" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Work email")).toBeDisabled();
 
-    readClipboard.mockResolvedValueOnce("98 76-54 32");
-    fireEvent.click(screen.getByRole("button", { name: "Paste code" }));
-    await waitFor(() => expect(screen.getByLabelText("Recovery code")).toHaveValue("98765432"));
+    // Still on the reset step: the person may need another link, or may go back.
+    expect(await screen.findByRole("button", { name: "Send another link" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Reset password" })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/recovery code/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /paste code/i })).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Recovery code"), { target: { value: "12a3456789" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verify code" }));
-
-    await waitFor(() =>
-      expect(onVerifyRecoveryCode).toHaveBeenCalledWith("person@example.com", "12345678"),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Back to sign in" }));
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
 
-  it("opens an emailed recovery link directly on the code-entry step", async () => {
-    window.history.replaceState(null, "", "/#auth=recovery&email=person%40example.com");
-
+  it("shows the sent-link confirmation as information, not as an error", () => {
     render(
       <AuthFormPanel
-        message=""
+        message="If an account exists, a reset link has been sent."
         isSubmitting={false}
         onSignIn={vi.fn()}
         onCreateAccount={vi.fn()}
         onResetPassword={vi.fn().mockResolvedValue(true)}
-        onVerifyRecoveryCode={vi.fn().mockResolvedValue(true)}
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Enter recovery code" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Work email")).toHaveValue("person@example.com");
-    expect(screen.getByLabelText("Work email")).toBeDisabled();
-    expect(screen.getByLabelText("Recovery code")).toHaveAttribute("maxlength", "8");
-    expect(window.location.hash).toBe("");
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("If an account exists, a reset link has been sent");
+    expect(notice).toHaveClass("ui-auth-msg-info");
   });
 });
 

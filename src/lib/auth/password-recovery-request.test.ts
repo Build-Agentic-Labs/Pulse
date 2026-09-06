@@ -86,10 +86,12 @@ describe("logMissingConfig", () => {
     });
   });
 
-  it("reports an unknown environment when VERCEL_ENV is unset", () => {
+  it("reports an unknown environment when VERCEL_ENV is unset or empty", () => {
     const log = vi.fn();
     logMissingConfig("Invitations", ["RESEND_FROM"], undefined, log);
+    logMissingConfig("Invitations", ["RESEND_FROM"], "", log);
     expect(log.mock.calls[0]?.[1]).toEqual({ missing: ["RESEND_FROM"], environment: "unknown" });
+    expect(log.mock.calls[1]?.[1]).toEqual({ missing: ["RESEND_FROM"], environment: "unknown" });
   });
 });
 

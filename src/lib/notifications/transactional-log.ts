@@ -44,6 +44,35 @@ export async function recordTransactionalEmail(admin: SupabaseClient<Database>, 
   }
 }
 
+export interface LatestTransactionalEmail {
+  createdAt: string;
+  status: string;
+  error: string | null;
+  resendMessageId: string | null;
+}
+
+/** The newest ledger row for one address — how the health check reads the canary. */
+export async function latestTransactionalEmailFor(
+  admin: SupabaseClient<Database>,
+  recipientEmail: string,
+): Promise<LatestTransactionalEmail | null> {
+  const { data, error } = await admin
+    .from("transactional_emails")
+    .select("created_at, status, error, resend_message_id")
+    .eq("recipient_email", recipientEmail.trim().toLowerCase())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return {
+    createdAt: String(data.created_at),
+    status: String(data.status),
+    error: (data.error as string | null) ?? null,
+    resendMessageId: (data.resend_message_id as string | null) ?? null,
+  };
+}
+
 export interface TransactionalEmailRow {
   id: number;
   kind: string;

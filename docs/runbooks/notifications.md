@@ -32,7 +32,6 @@ invocation is recorded in `notification_drain_runs`.
    | `RESEND_WEBHOOK_SECRET` | delivery webhook signature (`whsec_…`) | for delivery tracking |
    | `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | browser push | for push |
    | `NOTIFICATION_EMAIL_REDIRECT_TO` | **test only**: every outbound email goes to this one address, subject prefixed `[TEST → original]` | never in production |
-   | `AUTH_MAIL_CANARY_EMAIL` | daily password-reset canary recipient (`delivered@resend.dev`, Resend's always-delivers sink) | for the auth-mail canary (step 6) |
 
    **Preview deployments** get none of the service-role variables on purpose, so
    invitations, password reset and the drain are off there; the app shows a
@@ -76,19 +75,19 @@ invocation is recorded in `notification_drain_runs`.
    emails per hour, not for production). Point it at Resend SMTP
    (`smtp.resend.com:465`, user `resend`, password = API key, sender =
    `RESEND_FROM`) in the dashboard, or extend the script's `DESIRED` block.
-6. **Auth-mail canary** (proves the password-reset wire every day without
-   touching a real inbox):
-   ```bash
-   node scripts/create-auth-mail-canary.mjs        # once: confirmed auth user for delivered@resend.dev
+6. **Prove the auth-mail path once, with your own account**: on the production
+   site use *Forgot password?* → *Email me a reset link*, open the email, set a
+   new password. Then confirm the row:
+   ```sql
+   select kind, recipient_email, status, error, created_at from transactional_emails order by created_at desc limit 5;
    ```
-   Set `AUTH_MAIL_CANARY_EMAIL=delivered@resend.dev` in Vercel Production and
-   redeploy. The Vercel cron (`vercel.json`) calls
-   `GET /api/auth/password-reset/canary` daily at 12:30 UTC; run it once by hand
-   with the `CRON_SECRET` bearer and expect `{"ok":true,…}`. From then on
-   `/api/notifications/health` includes `authMail.canary`: `ok` when the last
-   canary was sent within 26 h and Resend reported it delivered; `undelivered`,
-   `failed`, `stale` or `never_ran` otherwise — all of which flip the heartbeat
-   to 503 so the monitor alerts.
+   From then on the heartbeat watches it for you: `/api/notifications/health`
+   carries `authMail` — the missing-variable names, if any, and the number of
+   password-reset / invitation sends that **failed in the last 24 h** with the
+   latest error text. Any failure flips the heartbeat to 503, so a broken path
+   surfaces the first time a real person hits it. (A synthetic daily canary was
+   considered and rejected: it would have needed an exemption in the
+   signup-domain trigger for an off-domain account.)
 
 ## 2. Reading the system
 
@@ -130,7 +129,7 @@ invocation is recorded in `notification_drain_runs`.
 | Teams test card fails | webhook URL not Microsoft, or channel connector removed | Re-create the incoming webhook in Teams; URL must be `*.webhook.office.com` or `*.logic.azure.com` over https |
 | Push never arrives | VAPID env missing, or the browser subscription was pruned (410) | Set VAPID env; user toggles push off/on in Account settings; on macOS check System Settings → Notifications → Chrome is allowed |
 | "Password recovery is temporarily unavailable" / "…disabled on preview deployments" | Missing config on THAT deployment, or link generation / send failed | Vercel → Logs, search `password-reset`: check the **Host** column first (preview host = expected), then the `missing: […]` or `stage` in the error line. Failed attempts also appear as `failed` rows in the console's transactional ledger |
-| Health: "auth-mail canary …" (`never_ran`, `stale`, `failed`, `undelivered`) | The daily reset canary did not go out, or Resend never confirmed delivery | `never_ran`/`stale`: Vercel → Crons, run `/api/auth/password-reset/canary` by hand; `failed`: read the ledger error; `undelivered`: check the Resend webhook (§1 step 3) — real users' mail is probably not confirming either |
+| Health: "auth mail: N send(s) failed in the last 24h (latest: …)" | A real password-reset or invitation email failed at link generation or at the provider | Read the latest error: `generate_link: …` → Supabase auth (service role key, project status); an HTTP status → Resend (`RESEND_FROM`, key, suppression). Rows are in the console's transactional ledger. Clears on its own 24 h after the last failure |
 | Visiting a `*.vercel.app` URL lands on pulse.agenticlabs.studio | By design: production deployment hosts redirect (308) to `NEXT_PUBLIC_SITE_URL` | Nothing. Preview hosts are not redirected |
 | An SOP sits for weeks | author-side stall | Now covered: the author gets `review_complete`, nudges at day 3/6, managers at day 10, and the weekly digest lists it |
 

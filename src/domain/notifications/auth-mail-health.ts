@@ -1,62 +1,28 @@
 /**
  * Auth-mail readiness for the health endpoint. Pure. Two questions: is every
- * variable the password-reset / invitation path needs present, and did the most
- * recent canary reset actually get sent AND delivered recently?
+ * variable the password-reset / invitation path needs present, and did any real
+ * reset or invitation send fail recently? Real traffic is the probe — there is no
+ * synthetic account, so the signup-domain trigger stays untouched.
  */
 
-/** The canary runs daily; past this, silence is a failure. */
-export const CANARY_STALE_HOURS = 26;
-/** Resend's delivery webhook normally lands within seconds; allow a slow provider. */
-export const CANARY_DELIVERY_GRACE_MINUTES = 15;
+/** How far back the health check looks for failed transactional sends. */
+export const FAILURE_WINDOW_HOURS = 24;
 
-export interface CanaryObservation {
-  requestedAt: string;
-  status: "sent" | "failed";
-  error: string | null;
-  deliveredAt: string | null;
+export interface RecentTransactionalFailures {
+  count: number;
+  /** Ledger error text of the newest failure, e.g. "500: generate_link: unexpected_failure". */
+  latestError: string | null;
 }
 
 export interface AuthMailHealthInput {
-  now: Date;
   missingConfig: string[];
-  /** Null when AUTH_MAIL_CANARY_EMAIL is unset — the canary is simply off. */
-  canaryEmail: string | null;
-  latestCanary: CanaryObservation | null;
+  recentFailures: RecentTransactionalFailures;
 }
-
-export type CanaryState = "not_configured" | "never_ran" | "ok" | "stale" | "failed" | "undelivered";
 
 export interface AuthMailHealth {
   healthy: boolean;
   problems: string[];
-  canary: CanaryState;
-}
-
-const MINUTE_MS = 60 * 1000;
-const HOUR_MS = 60 * MINUTE_MS;
-
-function assessCanary(now: Date, latest: CanaryObservation | null): { state: CanaryState; problem: string | null } {
-  if (!latest) return { state: "never_ran", problem: "auth-mail canary has never run" };
-
-  const ageMs = now.getTime() - new Date(latest.requestedAt).getTime();
-  if (latest.status === "failed") {
-    return { state: "failed", problem: `auth-mail canary failed: ${latest.error ?? "unknown error"}` };
-  }
-  if (ageMs > CANARY_STALE_HOURS * HOUR_MS) {
-    return {
-      state: "stale",
-      problem: `auth-mail canary last ran ${Math.round(ageMs / HOUR_MS)}h ago (threshold ${CANARY_STALE_HOURS}h)`,
-    };
-  }
-  if (!latest.deliveredAt && ageMs > CANARY_DELIVERY_GRACE_MINUTES * MINUTE_MS) {
-    return {
-      state: "undelivered",
-      problem:
-        `auth-mail canary sent ${Math.round(ageMs / MINUTE_MS)} min ago but no delivery event yet ` +
-        `(grace ${CANARY_DELIVERY_GRACE_MINUTES} min)`,
-    };
-  }
-  return { state: "ok", problem: null };
+  failedInWindow: number;
 }
 
 export function assessAuthMailHealth(input: AuthMailHealthInput): AuthMailHealth {
@@ -64,13 +30,11 @@ export function assessAuthMailHealth(input: AuthMailHealthInput): AuthMailHealth
   if (input.missingConfig.length > 0) {
     problems.push(`auth mail: missing ${input.missingConfig.join(", ")}`);
   }
-
-  let canary: CanaryState = "not_configured";
-  if (input.canaryEmail) {
-    const verdict = assessCanary(input.now, input.latestCanary);
-    canary = verdict.state;
-    if (verdict.problem) problems.push(verdict.problem);
+  if (input.recentFailures.count > 0) {
+    problems.push(
+      `auth mail: ${input.recentFailures.count} send(s) failed in the last ${FAILURE_WINDOW_HOURS}h ` +
+        `(latest: ${input.recentFailures.latestError ?? "unknown error"})`,
+    );
   }
-
-  return { healthy: problems.length === 0, problems, canary };
+  return { healthy: problems.length === 0, problems, failedInWindow: input.recentFailures.count };
 }

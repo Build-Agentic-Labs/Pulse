@@ -1,110 +1,56 @@
 import { describe, expect, it } from "vitest";
-import {
-  CANARY_DELIVERY_GRACE_MINUTES,
-  CANARY_STALE_HOURS,
-  assessAuthMailHealth,
-  type CanaryObservation,
-} from "./auth-mail-health";
-
-const NOW = new Date("2026-09-06T12:00:00Z");
-const minutesAgo = (m: number) => new Date(NOW.getTime() - m * 60 * 1000).toISOString();
-const hoursAgo = (h: number) => minutesAgo(h * 60);
-const CANARY = "delivered@resend.dev";
-
-const observation = (over: Partial<CanaryObservation> = {}): CanaryObservation => ({
-  requestedAt: hoursAgo(2),
-  status: "sent",
-  error: null,
-  deliveredAt: hoursAgo(2),
-  ...over,
-});
+import { FAILURE_WINDOW_HOURS, assessAuthMailHealth } from "./auth-mail-health";
 
 describe("assessAuthMailHealth", () => {
   it("lists every missing variable by name and is unhealthy", () => {
     const verdict = assessAuthMailHealth({
-      now: NOW,
       missingConfig: ["RESEND_API_KEY", "RESEND_FROM"],
-      canaryEmail: null,
-      latestCanary: null,
+      recentFailures: { count: 0, latestError: null },
     });
-    expect(verdict.healthy).toBe(false);
-    expect(verdict.problems).toEqual(["auth mail: missing RESEND_API_KEY, RESEND_FROM"]);
-    expect(verdict.canary).toBe("not_configured");
+    expect(verdict).toEqual({
+      healthy: false,
+      problems: ["auth mail: missing RESEND_API_KEY, RESEND_FROM"],
+      failedInWindow: 0,
+    });
   });
 
-  it("is healthy with the canary not configured when config is complete", () => {
-    expect(assessAuthMailHealth({ now: NOW, missingConfig: [], canaryEmail: null, latestCanary: null })).toEqual({
+  it("is healthy when config is complete and nothing failed recently", () => {
+    expect(assessAuthMailHealth({ missingConfig: [], recentFailures: { count: 0, latestError: null } })).toEqual({
       healthy: true,
       problems: [],
-      canary: "not_configured",
+      failedInWindow: 0,
     });
   });
 
-  it("is unhealthy when the canary is configured but has never run", () => {
-    const verdict = assessAuthMailHealth({ now: NOW, missingConfig: [], canaryEmail: CANARY, latestCanary: null });
-    expect(verdict).toEqual({ healthy: false, problems: ["auth-mail canary has never run"], canary: "never_ran" });
-  });
-
-  it("surfaces the ledger error when the latest canary failed", () => {
+  it("surfaces real failed sends with the latest error so the operator knows where it broke", () => {
     const verdict = assessAuthMailHealth({
-      now: NOW,
       missingConfig: [],
-      canaryEmail: CANARY,
-      latestCanary: observation({ status: "failed", error: "503: provider down", deliveredAt: null, requestedAt: minutesAgo(5) }),
+      recentFailures: { count: 2, latestError: "500: generate_link: unexpected_failure" },
     });
-    expect(verdict.canary).toBe("failed");
-    expect(verdict.problems).toEqual(["auth-mail canary failed: 503: provider down"]);
-  });
-
-  it("gives a fresh send a grace period before demanding a delivery event", () => {
-    const verdict = assessAuthMailHealth({
-      now: NOW,
-      missingConfig: [],
-      canaryEmail: CANARY,
-      latestCanary: observation({ requestedAt: minutesAgo(3), deliveredAt: null }),
-    });
-    expect(verdict).toEqual({ healthy: true, problems: [], canary: "ok" });
-  });
-
-  it("flags a send that never produced a delivery event once the grace period passes", () => {
-    const verdict = assessAuthMailHealth({
-      now: NOW,
-      missingConfig: [],
-      canaryEmail: CANARY,
-      latestCanary: observation({ requestedAt: minutesAgo(20), deliveredAt: null }),
-    });
-    expect(verdict.canary).toBe("undelivered");
+    expect(verdict.healthy).toBe(false);
+    expect(verdict.failedInWindow).toBe(2);
     expect(verdict.problems).toEqual([
-      `auth-mail canary sent 20 min ago but no delivery event yet (grace ${CANARY_DELIVERY_GRACE_MINUTES} min)`,
+      `auth mail: 2 send(s) failed in the last ${FAILURE_WINDOW_HOURS}h (latest: 500: generate_link: unexpected_failure)`,
     ]);
   });
 
-  it("flags a canary that has not run within the staleness window even if it was delivered", () => {
-    const verdict = assessAuthMailHealth({
-      now: NOW,
-      missingConfig: [],
-      canaryEmail: CANARY,
-      latestCanary: observation({ requestedAt: hoursAgo(30), deliveredAt: hoursAgo(30) }),
-    });
-    expect(verdict.canary).toBe("stale");
-    expect(verdict.problems).toEqual([`auth-mail canary last ran 30h ago (threshold ${CANARY_STALE_HOURS}h)`]);
+  it("copes with a failed row that carries no error text", () => {
+    const verdict = assessAuthMailHealth({ missingConfig: [], recentFailures: { count: 1, latestError: null } });
+    expect(verdict.problems).toEqual([`auth mail: 1 send(s) failed in the last ${FAILURE_WINDOW_HOURS}h (latest: unknown error)`]);
   });
 
-  it("is ok when the latest canary is recent and delivered", () => {
-    expect(assessAuthMailHealth({ now: NOW, missingConfig: [], canaryEmail: CANARY, latestCanary: observation() })).toEqual({
-      healthy: true,
-      problems: [],
-      canary: "ok",
-    });
-  });
-
-  it("combines config and canary problems", () => {
+  it("combines config and failure problems, config first", () => {
     const verdict = assessAuthMailHealth({
-      now: NOW,
       missingConfig: ["RESEND_FROM"],
-      canaryEmail: CANARY,
-      latestCanary: null,
+      recentFailures: { count: 1, latestError: "422: Invalid `from`" },
     });
-    expect(verdict.problems).toEqual(["auth mail: missing RESEND_FROM", "auth-mail canary has never run"]);
+    expect(verdict.problems).toEqual([
+      "auth mail: missing RESEND_FROM",
+      `auth mail: 1 send(s) failed in the last ${FAILURE_WINDOW_HOURS}h (latest: 422: Invalid \`from\`)`,
+    ]);
+  });
+
+  it("looks back one day", () => {
+    expect(FAILURE_WINDOW_HOURS).toBe(24);
   });
 });

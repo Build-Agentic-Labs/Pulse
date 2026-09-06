@@ -114,8 +114,10 @@ production. Plus the typed recovery code was poor UX.
 Fixed on branch `worktree-password-reset-hardening`
 (plan: `docs/superpowers/plans/2026-09-05-password-reset-hardening.md`):
 link-only reset on the invite fragment-token pattern (`/reset-password`);
-`requestPasswordRecovery` shared by the route and a daily canary, with a ledger
-row for every failure; missing config logged by name and reported by the health
-endpoint (`authMail`); production `*.vercel.app` hosts redirect to the canonical
+`requestPasswordRecovery` as one shared request core with a ledger row for every
+failure; missing config logged by name, and both missing config and any failed
+reset / invitation send in the last 24 h reported by the health endpoint
+(`authMail`) — a synthetic daily canary was built, then dropped at the owner's
+decision because it would have needed an exemption in the signup-domain trigger; production `*.vercel.app` hosts redirect to the canonical
 domain; preview deployments show a banner and say why email features are off;
 invitations get the same loud-failure treatment.

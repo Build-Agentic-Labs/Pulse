@@ -1,8 +1,8 @@
 /**
  * Public "forgot password" endpoint. Validates, rate limits, then hands off to
- * requestPasswordRecovery so the email and the ledger row are the same ones the
- * daily canary produces. Every reason for a 503 is logged by NAME (never value)
- * so a misconfigured deployment is visible in Vercel logs instead of silent.
+ * requestPasswordRecovery, which sends the link-only email and writes the ledger
+ * row. Every reason for a 503 is logged by NAME (never value) so a misconfigured
+ * deployment is visible in Vercel logs instead of silent.
  */
 
 import { createHash } from "node:crypto";

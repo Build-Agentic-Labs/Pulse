@@ -1,42 +1,25 @@
 /**
  * Read-only notification health for an uptime monitor: GET with the CRON_SECRET
- * bearer. Sends nothing and claims nothing — it reads the run log and the
- * auth-mail canary's ledger row and answers 200 only when the latest drain was
- * clean, the cron has run recently, every auth-mail variable is present, and the
- * last canary reset was sent and delivered. 503 otherwise, with the problems
- * spelled out.
+ * bearer. Sends nothing and claims nothing — it reads the drain run log and the
+ * transactional-email ledger and answers 200 only when the latest drain was
+ * clean, the cron has run recently, every auth-mail variable is present, and no
+ * password-reset or invitation send failed in the last 24 hours. 503 otherwise,
+ * with the problems spelled out.
  */
 
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { assessAuthMailHealth, type CanaryObservation } from "@/domain/notifications/auth-mail-health";
+import { FAILURE_WINDOW_HOURS, assessAuthMailHealth } from "@/domain/notifications/auth-mail-health";
 import { assessRunFreshness } from "@/domain/notifications/health";
 import { readPasswordRecoveryConfig } from "@/lib/auth/password-recovery-request";
 import type { Database } from "@/lib/database.types";
-import { latestDeliveryStatuses } from "@/lib/notifications/deliveries-store";
 import { latestDrainRuns } from "@/lib/notifications/drain-runs-store";
-import { latestTransactionalEmailFor } from "@/lib/notifications/transactional-log";
+import { countRecentTransactionalFailures } from "@/lib/notifications/transactional-log";
 import { isAuthorizedCronRequest } from "@/lib/sop/notifications-drain";
 
 export const dynamic = "force-dynamic";
 
-type Admin = ReturnType<typeof createClient<Database>>;
-
-async function observeCanary(admin: Admin, canaryEmail: string): Promise<CanaryObservation | null> {
-  const latest = await latestTransactionalEmailFor(admin, canaryEmail);
-  if (!latest) return null;
-  let deliveredAt: string | null = null;
-  if (latest.resendMessageId) {
-    const status = (await latestDeliveryStatuses(admin, [latest.resendMessageId])).get(latest.resendMessageId);
-    if (status?.latestEvent === "email.delivered") deliveredAt = status.occurredAt;
-  }
-  return {
-    requestedAt: latest.createdAt,
-    status: latest.status === "sent" ? "sent" : "failed",
-    error: latest.error,
-    deliveredAt,
-  };
-}
+const HOUR_MS = 60 * 60 * 1000;
 
 function siteOrigin(request: Request): string {
   const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "";
@@ -63,12 +46,10 @@ export async function GET(request: Request) {
     const runs = await latestDrainRuns(admin, 20);
     const drain = assessRunFreshness(now, runs);
 
-    const canaryEmail = (process.env.AUTH_MAIL_CANARY_EMAIL ?? "").trim().toLowerCase() || null;
+    const since = new Date(now.getTime() - FAILURE_WINDOW_HOURS * HOUR_MS);
     const authMail = assessAuthMailHealth({
-      now,
       missingConfig: readPasswordRecoveryConfig(process.env, siteOrigin(request)).missing,
-      canaryEmail,
-      latestCanary: canaryEmail ? await observeCanary(admin, canaryEmail) : null,
+      recentFailures: await countRecentTransactionalFailures(admin, since),
     });
 
     const healthy = drain.healthy && authMail.healthy;

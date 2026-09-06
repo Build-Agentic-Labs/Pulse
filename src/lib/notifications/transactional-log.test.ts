@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
-import { latestTransactionalEmailFor, recordTransactionalEmail } from "./transactional-log";
+import { countRecentTransactionalFailures, recordTransactionalEmail } from "./transactional-log";
 
 type Result = { data: unknown; error: { message: string } | null };
 
@@ -56,13 +56,24 @@ describe("recordTransactionalEmail", () => {
   });
 });
 
-/** Query builder fake: records the filters and resolves `maybeSingle()` with the given row. */
-function makeReader(row: Record<string, unknown> | null, seen: { filters: [string, string][]; order: [string, unknown][] }) {
+/** Query-builder fake: records filters, resolves with the given rows and exact count. */
+function makeFailureReader(
+  rows: { error: string | null }[],
+  count: number,
+  seen: { select: unknown[]; eq: [string, string][]; gte: [string, string][]; order: [string, unknown][] },
+) {
   const builder: Record<string, unknown> = {};
   Object.assign(builder, {
-    select: () => builder,
+    select: (columns: string, options: unknown) => {
+      seen.select.push([columns, options]);
+      return builder;
+    },
     eq: (column: string, value: string) => {
-      seen.filters.push([column, value]);
+      seen.eq.push([column, value]);
+      return builder;
+    },
+    gte: (column: string, value: string) => {
+      seen.gte.push([column, value]);
       return builder;
     },
     order: (column: string, options: unknown) => {
@@ -70,28 +81,30 @@ function makeReader(row: Record<string, unknown> | null, seen: { filters: [strin
       return builder;
     },
     limit: () => builder,
-    maybeSingle: async () => ({ data: row, error: null }),
+    then: (resolve: (r: { data: unknown; count: number | null; error: null }) => void) =>
+      resolve({ data: rows, count, error: null }),
   });
   return { from: () => builder } as unknown as SupabaseClient<Database>;
 }
 
-describe("latestTransactionalEmailFor", () => {
-  it("returns the newest row for the address, normalised", async () => {
-    const seen = { filters: [] as [string, string][], order: [] as [string, unknown][] };
-    const admin = makeReader(
-      { created_at: "2026-09-06T12:00:00Z", status: "sent", error: null, resend_message_id: "re_c1" },
-      seen,
-    );
+describe("countRecentTransactionalFailures", () => {
+  const since = new Date("2026-09-05T12:00:00Z");
 
-    const latest = await latestTransactionalEmailFor(admin, " Delivered@Resend.dev ");
+  it("counts failed rows since the cut-off and returns the newest error text", async () => {
+    const seen = { select: [] as unknown[], eq: [] as [string, string][], gte: [] as [string, string][], order: [] as [string, unknown][] };
+    const admin = makeFailureReader([{ error: "500: generate_link: unexpected_failure" }], 2, seen);
 
-    expect(latest).toEqual({ createdAt: "2026-09-06T12:00:00Z", status: "sent", error: null, resendMessageId: "re_c1" });
-    expect(seen.filters).toEqual([["recipient_email", "delivered@resend.dev"]]);
+    const result = await countRecentTransactionalFailures(admin, since);
+
+    expect(result).toEqual({ count: 2, latestError: "500: generate_link: unexpected_failure" });
+    expect(seen.select).toEqual([["error", { count: "exact" }]]);
+    expect(seen.eq).toEqual([["status", "failed"]]);
+    expect(seen.gte).toEqual([["created_at", "2026-09-05T12:00:00.000Z"]]);
     expect(seen.order).toEqual([["created_at", { ascending: false }]]);
   });
 
-  it("returns null when the address has never been written to", async () => {
-    const seen = { filters: [] as [string, string][], order: [] as [string, unknown][] };
-    expect(await latestTransactionalEmailFor(makeReader(null, seen), "nobody@example.com")).toBeNull();
+  it("reports zero with no error when nothing failed", async () => {
+    const seen = { select: [] as unknown[], eq: [] as [string, string][], gte: [] as [string, string][], order: [] as [string, unknown][] };
+    expect(await countRecentTransactionalFailures(makeFailureReader([], 0, seen), since)).toEqual({ count: 0, latestError: null });
   });
 });

@@ -226,3 +226,17 @@ redirect must key on the Host header — a self-hosted Next server reports its o
 bind address in `request.url`.
 
 Remaining, user-gated: review the preview → merge → Task 10 go-live.
+
+## Change of plan — 2026-09-05, after merge
+
+Merged to main (42da9a4) and verified in production. Go-live then hit
+`enforce_signup_domain()`: the canary account (`delivered@resend.dev`) cannot be
+created because only approved work domains may exist in `auth.users`. The owner
+chose NOT to weaken that trigger, so **Tasks 6 and the canary half of Task 7 are
+withdrawn** (branch `fix/drop-auth-mail-canary`): canary route, cron entry,
+creation script and `AUTH_MAIL_CANARY_EMAIL` removed; the trigger-exemption
+migration was never applied and its branch deleted. Replacement signal, no
+synthetic account: the health endpoint's `authMail` now reports the number of
+password-reset / invitation sends that failed in the last 24 h with the latest
+ledger error, so a broken path surfaces on the heartbeat the first time a real
+person hits it. The owner's own reset on production is the acceptance test.

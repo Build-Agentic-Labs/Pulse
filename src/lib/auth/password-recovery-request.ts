@@ -1,8 +1,8 @@
 /**
- * Password recovery, independent of HTTP: the same code path serves the public
- * route and the daily canary, and every outcome — including a failure before any
- * email exists — lands in the transactional ledger so the console and the health
- * check can see it. Nothing here ever logs or stores a token.
+ * Password recovery, independent of HTTP, so the route stays a thin adapter and
+ * the logic is testable on its own. Every outcome — including a failure before
+ * any email exists — lands in the transactional ledger so the console and the
+ * health check can see it. Nothing here ever logs or stores a token.
  */
 
 import { randomUUID } from "node:crypto";

@@ -44,33 +44,29 @@ export async function recordTransactionalEmail(admin: SupabaseClient<Database>, 
   }
 }
 
-export interface LatestTransactionalEmail {
-  createdAt: string;
-  status: string;
-  error: string | null;
-  resendMessageId: string | null;
+export interface RecentTransactionalFailures {
+  count: number;
+  latestError: string | null;
 }
 
-/** The newest ledger row for one address — how the health check reads the canary. */
-export async function latestTransactionalEmailFor(
+/**
+ * Failed reset / invitation sends since `since` — the health endpoint's auth-mail
+ * probe. One query: exact count plus the newest row's error text.
+ */
+export async function countRecentTransactionalFailures(
   admin: SupabaseClient<Database>,
-  recipientEmail: string,
-): Promise<LatestTransactionalEmail | null> {
-  const { data, error } = await admin
+  since: Date,
+): Promise<RecentTransactionalFailures> {
+  const { data, count, error } = await admin
     .from("transactional_emails")
-    .select("created_at, status, error, resend_message_id")
-    .eq("recipient_email", recipientEmail.trim().toLowerCase())
+    .select("error", { count: "exact" })
+    .eq("status", "failed")
+    .gte("created_at", since.toISOString())
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
   if (error) throw new Error(error.message);
-  if (!data) return null;
-  return {
-    createdAt: String(data.created_at),
-    status: String(data.status),
-    error: (data.error as string | null) ?? null,
-    resendMessageId: (data.resend_message_id as string | null) ?? null,
-  };
+  const latest = data?.[0];
+  return { count: count ?? 0, latestError: (latest?.error as string | null) ?? null };
 }
 
 export interface TransactionalEmailRow {

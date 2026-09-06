@@ -136,6 +136,12 @@ reminder / already-registered branch instead of minting a fresh setup link.
 
 Fix (branch `fix/invite-resend-membership`): `inviteeHasCompletedSetup` now keys on
 **workspace membership**, looked up with the service role, not on sign-in; a
-signed-in-but-never-joined account gets a setup link again. Follow-up noted, not
-fixed here: re-inviting an existing member resets that grant's `redeemed_at` to
-null in the upsert, which would make a real member look pending.
+signed-in-but-never-joined account gets a setup link again.
+
+Adjacent display fix (branch `fix/members-panel-access-update-pending`): re-inviting
+an existing member resets that grant's `redeemed_at` to null **on purpose** —
+`redeem_workspace_access_grants()` applies only unredeemed grants, so that is how
+changed entitlements reach a member at their next sign-in. The Members panel used to
+list such a grant as a second, pending person; it now stays on the member's row as
+"access update applies at next sign-in" (`partitionAccessGrants`). The database
+behaviour is unchanged.

@@ -1,6 +1,7 @@
 "use client";
 
 import { formatDate } from "@/domain/formatting";
+import { partitionAccessGrants } from "@/domain/workspace/invite";
 import { ChevronRight, MailPlus, RotateCw, Search, ShieldCheck, Trash2, UserMinus } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ThemedSelect } from "@/components/themed-select";
@@ -383,9 +384,14 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
       )
     : members;
   const selected = members.find((member) => member.userId === selectedUserId);
-  const pendingGrants = grants.filter(
-    (grant) => !grant.redeemedAt && (!query || grant.email.toLowerCase().includes(query)),
+  // A re-invited member's grant is unredeemed on purpose (it carries their new
+  // access to the next sign-in); list them once, as a member with a pending
+  // update, never as a second pending person.
+  const { pendingInvites, accessUpdatesByEmail } = partitionAccessGrants(
+    grants,
+    members.map((member) => member.email),
   );
+  const pendingGrants = pendingInvites.filter((grant) => !query || grant.email.toLowerCase().includes(query));
   const selectedIsManager = isManagerRole(selected?.role);
   // Ownership controls elevation: admins may manage Member access but cannot mint or demote managers.
   const canEditSelectedRole = Boolean(selected && !selected.isSelf && (callerIsOwner || !selectedIsManager));
@@ -415,6 +421,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
               const manager = isManagerRole(member.role);
               const active = member.userId === selectedUserId;
               const joined = formatDate(member.joinedAt);
+              const accessUpdatePending = Boolean(member.email && accessUpdatesByEmail.has(member.email.toLowerCase()));
               return (
                 <button
                   key={member.userId}
@@ -438,6 +445,17 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                       {manager ? " · full access" : ""}
                       {member.email ? ` · ${member.email}` : ""}
                       {joined ? ` · joined ${joined}` : ""}
+                      {accessUpdatePending ? (
+                        <>
+                          {" · "}
+                          <span
+                            className="text-ink-secondary"
+                            title="You re-invited this member with different access. The change takes effect the next time they sign in."
+                          >
+                            access update applies at next sign-in
+                          </span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                   <div className="ui-settings-group-row-control ui-settings-member-row-chevron">

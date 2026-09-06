@@ -705,8 +705,11 @@ export function LineWorkspace({
   const chromeStatusTimerRef = useRef<number | null>(null);
   const detailDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const workspaceToasts = useMemo<FeedbackToast[]>(
-    () => (workspaceNotice ? [{ id: 1, ...workspaceNotice }] : []),
-    [workspaceNotice],
+    () => [
+      ...(chromeStatus ? [{ id: 0, title: chromeStatus.message, tone: chromeStatus.error ? "danger" as const : "neutral" as const }] : []),
+      ...(workspaceNotice ? [{ id: 1, ...workspaceNotice }] : []),
+    ],
+    [workspaceNotice, chromeStatus],
   );
 
   const [derivePlanner] = useState(createPlannerDerivation);
@@ -3163,7 +3166,8 @@ export function LineWorkspace({
     }
   }
 
-  function dismissWorkspaceNotice() {
+  function dismissWorkspaceNotice(id = 1) {
+    if (id === 0) { clearChromeStatusTimer(); setChromeStatus(null); return; }
     setWorkspaceNotice(null);
   }
 
@@ -3173,18 +3177,12 @@ export function LineWorkspace({
       return;
     }
 
-    const statusText = [message.title, message.body].filter(Boolean).join(": ");
-    const error = message.tone === "danger" || message.tone === "warning";
-
     clearChromeStatusTimer();
-    setChromeStatus({ message: statusText, error });
-
-    if (!message.persistent) {
-      chromeStatusTimerRef.current = window.setTimeout(() => {
-        setChromeStatus(null);
-        chromeStatusTimerRef.current = null;
-      }, error ? 9000 : 5200);
-    }
+    setChromeStatus(null);
+    setWorkspaceNotice({
+      ...message,
+      autoDismissMs: message.persistent ? undefined : (message.autoDismissMs ?? (message.tone === "danger" || message.tone === "warning" ? 9000 : 5200)),
+    });
   }
 
   function notifyRestoreAction({
@@ -3577,7 +3575,6 @@ export function LineWorkspace({
       >
         <TopNav
           context={displayedPlannerChromeContext}
-          chromeStatus={chromeStatus}
         />
         <div className={`relative ${workspaceGridClass}`}>
           <SidebarReopenButton
@@ -6174,7 +6171,6 @@ export function LineWorkspace({
       >
         <TopNav
           context={displayedPlannerChromeContext}
-          chromeStatus={chromeStatus}
           presence={presencePeers}
         />
 

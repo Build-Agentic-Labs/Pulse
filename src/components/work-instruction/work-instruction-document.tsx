@@ -18,6 +18,7 @@
  * See docs/superpowers/specs/2026-08-04-assembly-work-instruction-design.md
  */
 
+import { instructionBlocks } from "@/domain/instruction-bullets";
 import { formatMinutes } from "@/domain/calculations";
 import { formatDateControlled } from "@/domain/formatting";
 import { paginateWorkInstruction } from "@/domain/work-instruction/paginate";
@@ -164,6 +165,11 @@ const PRINT_STYLES = `
   flex: 1; min-height: 0; padding-top: 0.16em;
   font-size: 11pt; line-height: 1.35; white-space: pre-wrap; overflow: hidden;
 }
+.wi-instruction-blocks { white-space: normal; }
+.wi-instruction-item { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 0.55em; margin-bottom: 0.2em; break-inside: avoid; }
+.wi-instruction-item > div, .wi-instruction-paragraph { white-space: pre-wrap; }
+.wi-instruction-label { min-width: 1.35em; font-weight: 700; }
+.wi-instruction-note, .wi-instruction-check { color: #333; }
 .wi-card-part-citation, .wi-card-part-marker > span {
   display: inline-block; min-width: 1.6em; padding: 0.05em 0.18em;
   border: 0.6pt solid #666; border-radius: 2px; background: #f1f1f1; color: #1a1a1a;
@@ -545,13 +551,13 @@ function WorkInstructionPhotoMedia({
   );
 }
 
-function PartReferencedInstruction({ card }: { card: WorkInstructionCard }) {
+function PartReferencedText({ card, text }: { card: WorkInstructionCard; text: string }) {
   const references = new Map((card.partReferences ?? []).map((part) => [String(part.marker), part]));
   if (references.size === 0) {
-    return card.instruction;
+    return text;
   }
 
-  const segments = card.instruction.split(/(\[\d+\])/g);
+  const segments = text.split(/(\[\d+\])/g);
   return segments.map((segment, index) => {
     const marker = segment.match(/^\[(\d+)\]$/)?.[1];
     if (!marker || !references.has(marker)) {
@@ -581,6 +587,18 @@ function PartReferencedInstruction({ card }: { card: WorkInstructionCard }) {
       </span>
     );
   });
+}
+
+function PartReferencedInstruction({card}: {card:WorkInstructionCard}) {
+  const blocks = instructionBlocks(card.instruction);
+  if (blocks.every(block=>block.kind === "text")) return <PartReferencedText card={card} text={card.instruction} />;
+  return <div className="wi-instruction-blocks">{blocks.map((block,index)=>
+    block.kind === "text" ? <div key={index} className="wi-instruction-paragraph"><PartReferencedText card={card} text={block.body || "\u00a0"}/></div>
+    : <div key={index} className={`wi-instruction-item wi-instruction-${block.kind}`}>
+      <strong className="wi-instruction-label">{block.kind === "list" && /^[*•-]$/.test(block.marker ?? "") ? "•" : block.marker}</strong>
+      <div><PartReferencedText card={card} text={block.body}/></div>
+    </div>
+  )}</div>;
 }
 
 function StepCardCell({ card }: { card: WorkInstructionCard }) {

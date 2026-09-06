@@ -1,7 +1,6 @@
 "use client";
 
-import { Bell } from "lucide-react";
-import Link from "next/link";
+import { Bell, CheckCheck, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -66,12 +65,14 @@ function useNotificationState(): {
   acknowledge: (item: QueueSummaryItem) => void;
   markRead: (id: number) => void;
   markAllRead: () => void;
+  dismissInbox: (ids: number[]) => void;
 } {
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [summary, setSummary] = useState<QueueSummary | null>(null);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const storageKeyRef = useRef<string | null>(null);
+  const dismissedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -106,7 +107,10 @@ function useNotificationState(): {
           workspaceId ? fetchReviewQueueData(workspaceId, user.id) : Promise.resolve(null),
         ]);
         if (!mounted) return;
-        setInbox(items);
+        const dismissedKey = `pulse:notification-dismissed:v1:${user.id}`;
+        dismissedKeyRef.current = dismissedKey;
+        const dismissed = readAcknowledged(dismissedKey);
+        setInbox(items.filter(item => !dismissed.has(String(item.id))));
         if (workspaceId && queue) {
           const storageKey = `${ACKNOWLEDGED_STORAGE_PREFIX}:${workspaceId}:${user.id}`;
           storageKeyRef.current = storageKey;
@@ -163,14 +167,38 @@ function useNotificationState(): {
     });
   }, [supabase]);
 
-  return { summary, inbox, loading: !loaded, acknowledge, markRead, markAllRead };
+  const dismissInbox = useCallback((ids: number[]) => {
+    const key = dismissedKeyRef.current;
+    if (key) {
+      const dismissed = readAcknowledged(key);
+      ids.forEach(id => dismissed.add(String(id)));
+      writeAcknowledged(key, dismissed);
+    }
+    setInbox(current => current.filter(item => !ids.includes(item.id)));
+  }, []);
+
+  return { summary, inbox, loading: !loaded, acknowledge, markRead, markAllRead, dismissInbox };
 }
 
 export function NotificationBell() {
   const router = useRouter();
-  const { summary, inbox, loading, acknowledge, markRead, markAllRead } = useNotificationState();
+  const { summary, inbox, loading, acknowledge, markRead, markAllRead, dismissInbox } = useNotificationState();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const [leaving, setLeaving] = useState<number[]>([]);
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (dismissTimer.current) clearTimeout(dismissTimer.current); }, []);
+  function animateDismiss(ids: number[]) {
+    if (!ids.length || leaving.length) return;
+    setLeaving(ids);
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    dismissTimer.current = setTimeout(() => {
+      dismissInbox(ids);
+      setLeaving([]);
+      dismissTimer.current = null;
+    }, reduced ? 0 : 420);
+  }
 
   // Same outside-click/Escape dismissal UserNav's menus use.
   useEffect(() => {
@@ -198,6 +226,7 @@ export function NotificationBell() {
   const total = summary?.total ?? 0;
   const sections = summary?.sections ?? [];
   const unread = inbox.filter((item) => !item.readAt).length;
+  const notificationCount = total > 0 ? total : unread;
 
   return (
     <div ref={containerRef} className="relative flex shrink-0 items-center">
@@ -205,19 +234,27 @@ export function NotificationBell() {
         type="button"
         onClick={() => setOpen((current) => !current)}
         className="ui-btn-ghost relative inline-flex h-8 w-8 items-center justify-center px-0"
-        title="SOP notifications"
+        title="Notifications"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-busy={loading ? "true" : undefined}
-        aria-label={total > 0 ? `SOP notifications: ${total} waiting on you` : "SOP notifications"}
+        aria-description={unread > 0 ? `${unread} unread notifications` : undefined}
+        aria-label={total > 0 ? `Notifications: ${total} waiting on you` : "Notifications"}
       >
         <Bell size={15} strokeWidth={1.75} />
-        {total > 0 ? <span className="bell-badge">{badgeLabel(total)}</span> : null}
-        {total === 0 && unread > 0 ? <span className="bell-dot" aria-hidden="true" /> : null}
+        {notificationCount > 0 ? <span className="bell-badge" aria-hidden="true">{badgeLabel(notificationCount)}</span> : null}
       </button>
 
-      {open ? (
-        <div role="menu" className="bell-panel absolute right-0 top-full z-50 mt-2 w-80 ui-panel p-1.5 shadow-modal">
+      {(
+        <div role="menu" data-open={open} aria-hidden={!open} inert={!open} aria-label="Notifications" className="bell-panel absolute right-0 top-full z-50 mt-2">
+          <div className="bell-panel-header">
+            <div><h2>Notifications</h2><p>{unread > 0 ? `${unread} unread` : "You’re up to date"}</p></div>
+            <div className="flex items-center gap-1">
+            {inbox.some(item => item.readAt) ? <button type="button" role="menuitem" className="ui-btn-ghost h-8 px-2 text-[11px]" disabled={leaving.length > 0} onClick={() => animateDismiss(inbox.filter(item => item.readAt).map(item => item.id))}>Clear read</button> : null}
+            {inbox.length > 0 ? <button type="button" role="menuitem" className="ui-btn-ghost h-8 gap-1.5 px-2 text-[11px]" onClick={() => markAllRead()} disabled={unread === 0}><CheckCheck size={14} />Mark all read</button> : null}
+            </div>
+          </div>
+          <div className="bell-panel-list">
           {loading ? (
             <div className="px-2.5 py-3 text-[12px] text-ink-tertiary">Checking notifications…</div>
           ) : sections.length === 0 && inbox.length === 0 ? (
@@ -232,14 +269,14 @@ export function NotificationBell() {
                       key={item.notificationId}
                       type="button"
                       role="menuitem"
-                      className="ui-btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2.5 text-[12px]"
+                      className="bell-queue-item ui-btn-ghost flex w-full items-center justify-start gap-2 px-2.5 text-[12px]"
                       onClick={() => {
                         acknowledge(item);
                         setOpen(false);
                         router.push(`/sops/${item.sopId}`);
                       }}
                     >
-                      <span className="truncate">
+                      <span className="bell-message-title">
                         {item.sopNumber} · {item.title || "Untitled SOP"}
                       </span>
                     </button>
@@ -250,8 +287,9 @@ export function NotificationBell() {
                 <div>
                   <div className="px-2.5 pb-1 pt-2 ui-mono-label text-ink-tertiary">Recent</div>
                   {inbox.map((item) => (
+                    <div key={item.id} className="bell-dismiss-row" data-leaving={leaving.includes(item.id)} inert={leaving.includes(item.id)}>
+                    <div className="bell-dismiss-clip"><div className="bell-dismiss-content">
                     <button
-                      key={item.id}
                       type="button"
                       role="menuitem"
                       data-unread={item.readAt ? "false" : "true"}
@@ -259,42 +297,26 @@ export function NotificationBell() {
                       onClick={() => {
                         markRead(item.id);
                         setOpen(false);
-                        router.push(item.link ?? "/sops/review");
+                        if (item.link) router.push(item.link);
                       }}
                     >
                       <span className="bell-inbox-marker" aria-hidden="true" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate">{item.title}</span>
-                        {item.body ? <span className="block truncate text-ink-tertiary">{item.body}</span> : null}
+                        <span className="bell-message-title">{item.title}</span>
+                        {item.body ? <span className="bell-message-body">{item.body}</span> : null}
                       </span>
-                      <span className="shrink-0 ui-mono-label text-ink-tertiary">{timeAgo(item.createdAt)}</span>
+                      <span className="bell-message-time">{timeAgo(item.createdAt)}</span>
                     </button>
+                    <button type="button" className="bell-dismiss-button ui-btn-ghost" aria-label={`Dismiss ${item.title}`} disabled={leaving.length > 0} onClick={() => animateDismiss([item.id])}><X size={13} /></button>
+                    </div></div></div>
                   ))}
                 </div>
               ) : null}
             </>
           )}
-          <div className="my-1 h-px bg-line" />
-          {inbox.length > 0 ? (
-            <button
-              type="button"
-              role="menuitem"
-              className="ui-btn-ghost flex h-8 w-full items-center justify-start px-2.5 text-[12px]"
-              onClick={() => markAllRead()}
-            >
-              Mark all read
-            </button>
-          ) : null}
-          <Link
-            href="/sops/review"
-            role="menuitem"
-            className="ui-btn-ghost flex h-8 w-full items-center justify-start px-2.5 text-[12px]"
-            onClick={() => setOpen(false)}
-          >
-            Open review queue
-          </Link>
+          </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

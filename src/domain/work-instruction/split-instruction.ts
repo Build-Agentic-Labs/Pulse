@@ -22,6 +22,7 @@
  * that card overflowing, which is the one case a human has to resolve.
  */
 
+import { instructionBlocks } from "../instruction-bullets";
 import { estimateLines, NEWLINE } from "./estimate-lines";
 
 /** What one card's text box can hold. Both figures are measured in the browser. */
@@ -53,7 +54,18 @@ function pack(pieces: string[], joiner: string, budgetAt: (index: number) => Car
 }
 
 /** Break one over-tall line down: sentences first, then words, then give up. */
-function breakLine(line: string, budgetAt: (index: number) => CardTextBudget): string[] {
+function breakLine(line: string, budgetAt: (index: number) => CardTextBudget, structured = true): string[] {
+  const block = instructionBlocks(line)[0];
+  if (structured && block && block.kind !== "text") {
+    // Repeat the item identity when even a whole continuation card cannot hold it.
+    const bodyBudget = (index: number) => {
+      const budget = budgetAt(index);
+      return {lines: Math.max(1, budget.lines - 1), charsPerLine: Math.max(1, budget.charsPerLine - (block.marker?.length ?? 1) - 14)};
+    };
+    return breakLine(block.body, bodyBudget, false).map((body,index) =>
+      `${block.marker} ${index ? "(continued) " : ""}${body}`,
+    );
+  }
   const sentences = line.split(SENTENCE_BREAK).filter((part) => part.trim() !== "");
   const packedSentences = pack(sentences, " ", budgetAt);
 
@@ -79,7 +91,7 @@ export function splitInstruction(text: string, first: CardTextBudget, rest: Card
 
   // Hard lines are the unit of packing, so they survive into the output joined
   // by the same newline the author typed.
-  const lines = trimmed.split(NEWLINE);
+  const lines = instructionBlocks(trimmed).map(block => block.raw);
   const pieces = lines.flatMap((line, index) => {
     const { lines: budgetLines, charsPerLine } = budgetAt(index === 0 ? 0 : 1);
     return estimateLines(line, charsPerLine) <= budgetLines ? [line] : breakLine(line, budgetAt);

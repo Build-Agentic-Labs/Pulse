@@ -3,7 +3,6 @@
 import {
   ChevronsLeft,
   ChevronsRight,
-  ListChecks,
   Plus,
   RotateCcw,
   Trash2,
@@ -11,7 +10,7 @@ import {
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { formatMinutes } from "@/domain/calculations";
 import { formatManHours, statusLabel } from "@/domain/formatting";
-import { applyInstructionBullets } from "@/domain/instruction-bullets";
+import { InstructionFormatToolbar } from "./instruction-format-toolbar";
 import { getManufacturingStepCheckDefinitions } from "@/domain/manufacturing-step-checks";
 import { type MasterBom } from "@/domain/master-bom";
 import {
@@ -719,6 +718,7 @@ export function DetailDrawer({
                   return (
                     <div
                       key={step.id}
+                      data-instruction-step={step.id}
                       className="grid grid-cols-[minmax(0,1fr)_22px] gap-1.5 border-b border-line/70 px-1 pb-2 last:border-b-0 last:pb-0"
                     >
                       <div className="min-w-0 space-y-1">
@@ -747,36 +747,43 @@ export function DetailDrawer({
                             onValueChange={(value) => updateManufacturingStep(step.id, { durationMinutes: value })}
                           />
                         </div>
-                        <LinkedInstructionTextarea
-                          task={currentTask}
-                          step={step}
-                          aria-label={`Step ${step.sequence} instruction`}
-                          className="ui-field-standalone min-h-[86px] resize-none py-2 text-sm leading-snug"
-                          value={getProcedureFieldValue(taskId, step.id, "instruction", step.instruction)}
-                          onFocus={() => onProcedureFieldFocus(taskId, step.id, "instruction", step.instruction)}
-                          onBlur={() => onProcedureFieldBlur(taskId, step.id, "instruction")}
-                          onSelect={(event) => captureInstructionSelection(step.id, event.currentTarget)}
-                          onChange={(event) => updateManufacturingStepInstruction(step.id, event.target.value)}
-                          onKeyDown={(event) =>
-                            handleInstructionBulletKeyDown(event, (instruction) =>
-                              updateManufacturingStepInstruction(step.id, instruction),
-                            )
-                          }
-                          onMentionClick={(mention, anchor) =>
-                            setInstructionSelections((current) => ({
-                              ...current,
-                              [step.id]: {
-                                start: mention.start,
-                                end: mention.end,
-                                text: mention.text,
-                                anchor,
-                                mentionId: mention.id,
-                                partReferenceId: mention.partReferenceId,
-                              },
-                            }))
-                          }
-                          placeholder="Describe the manufacturing step"
-                        />
+                        <div className="ui-instruction-composer">
+                          <div className="ui-instruction-composer-toolbar">
+                            <InstructionFormatToolbar sequence={step.sequence}
+                              value={getProcedureFieldValue(taskId, step.id, "instruction", step.instruction)}
+                              onChange={instruction => updateManufacturingStepInstruction(step.id, instruction)} />
+                          </div>
+                          <LinkedInstructionTextarea
+                            task={currentTask}
+                            step={step}
+                            aria-label={`Step ${step.sequence} instruction`}
+                            className="ui-field-standalone min-h-[86px] resize-none py-2 text-sm leading-snug"
+                            value={getProcedureFieldValue(taskId, step.id, "instruction", step.instruction)}
+                            onFocus={() => onProcedureFieldFocus(taskId, step.id, "instruction", step.instruction)}
+                            onBlur={() => onProcedureFieldBlur(taskId, step.id, "instruction")}
+                            onSelect={(event) => captureInstructionSelection(step.id, event.currentTarget)}
+                            onChange={(event) => updateManufacturingStepInstruction(step.id, event.target.value)}
+                            onKeyDown={(event) =>
+                              handleInstructionBulletKeyDown(event, (instruction) =>
+                                updateManufacturingStepInstruction(step.id, instruction),
+                              )
+                            }
+                            onMentionClick={(mention, anchor) =>
+                              setInstructionSelections((current) => ({
+                                ...current,
+                                [step.id]: {
+                                  start: mention.start,
+                                  end: mention.end,
+                                  text: mention.text,
+                                  anchor,
+                                  mentionId: mention.id,
+                                  partReferenceId: mention.partReferenceId,
+                                },
+                              }))
+                            }
+                            placeholder="Describe the manufacturing step"
+                          />
+                        </div>
                         <StepPartMentionEditor
                           task={currentTask}
                           step={step}
@@ -787,23 +794,7 @@ export function DetailDrawer({
                           onCancelSelection={() => clearInstructionSelection(step.id)}
                           onRemoveMention={(mentionId) => removeInstructionPartMention(step.id, mentionId)}
                         />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateManufacturingStepInstruction(
-                              step.id,
-                              applyInstructionBullets(
-                                getProcedureFieldValue(taskId, step.id, "instruction", step.instruction),
-                              ),
-                            )
-                          }
-                          className="ui-btn-ghost h-8 gap-1.5 px-2"
-                          aria-label={`Format step ${step.sequence} as bullets`}
-                          title={`Format step ${step.sequence} as bullets`}
-                        >
-                          <ListChecks size={11} />
-                          Bullets
-                        </button>
+
                         <div className="space-y-1">
                           <div className="grid grid-cols-[42px_minmax(0,1fr)] items-center gap-1">
                             <span className="ui-mono-label">Tools</span>

@@ -295,7 +295,7 @@ export function DisplayNamePrompt() {
           <ChevronLeft size={14} strokeWidth={2} aria-hidden="true" />
         </button>
         <section
-          className="ui-feedback-toast pointer-events-auto overflow-hidden rounded-lg border border-accent/35 bg-surface shadow-modal"
+          className="ui-feedback-toast pointer-events-auto overflow-hidden rounded-lg border border-line bg-surface"
           role="region"
           aria-labelledby="display-name-prompt-title"
           aria-describedby="display-name-prompt-description"

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_QUEUE } from "@/lib/sop/review-queue-data";
 import { NotificationBell } from "./notification-bell";
@@ -50,7 +50,7 @@ describe("NotificationBell", () => {
     resolveSupabaseSession.mockImplementationOnce(() => new Promise(() => undefined));
     render(<NotificationBell />);
 
-    const button = screen.getByRole("button", { name: "SOP notifications" });
+    const button = screen.getByRole("button", { name: "Notifications" });
     expect(button).toBeTruthy();
     expect(button.getAttribute("aria-busy")).toBe("true");
   });
@@ -58,11 +58,14 @@ describe("NotificationBell", () => {
   it("lists recent inbox items with their read state, and marks one read when opened", async () => {
     resolveSupabaseSession.mockImplementation(async () => ({ session: { user: { id: "u1" } } }));
     render(<NotificationBell />);
-    const button = await screen.findByRole("button", { name: "SOP notifications" });
+    const button = await screen.findByRole("button", { name: "Notifications" });
     fireEvent.click(button);
 
+    expect(screen.queryByRole("menuitem", { name: "Open review queue" })).toBeNull();
     const unread = await screen.findByRole("menuitem", { name: /Ready for final approval: SOP-0042/ });
     expect(unread.getAttribute("data-unread")).toBe("true");
+    expect(button.querySelector(".bell-badge")?.textContent).toBe("1");
+    expect(button.querySelector(".bell-dot")).toBeNull();
     const read = screen.getByRole("menuitem", { name: /Review requested: SOP-0041/ });
     expect(read.getAttribute("data-unread")).toBe("false");
 
@@ -71,10 +74,22 @@ describe("NotificationBell", () => {
     expect(push).toHaveBeenCalledWith("/sops/s1");
   });
 
-  it("marks everything read from the panel footer", async () => {
+  it("animates clearing read items while keeping unread notifications", async () => {
     resolveSupabaseSession.mockImplementation(async () => ({ session: { user: { id: "u1" } } }));
     render(<NotificationBell />);
-    fireEvent.click(await screen.findByRole("button", { name: "SOP notifications" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Notifications" }));
+    const read = await screen.findByRole("menuitem", { name: /Review requested: SOP-0041/ });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear read" }));
+    expect(read.closest(".bell-dismiss-row")?.getAttribute("data-leaving")).toBe("true");
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: /Review requested: SOP-0041/ })).toBeNull());
+    expect(screen.getByRole("menuitem", { name: /Ready for final approval: SOP-0042/ })).toBeTruthy();
+    await waitFor(() => expect(window.localStorage.getItem("pulse:notification-dismissed:v1:u1")).toContain("1"));
+  });
+
+  it("marks everything read from the panel header", async () => {
+    resolveSupabaseSession.mockImplementation(async () => ({ session: { user: { id: "u1" } } }));
+    render(<NotificationBell />);
+    fireEvent.click(await screen.findByRole("button", { name: "Notifications" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Mark all read" }));
     expect(markAllInboxRead).toHaveBeenCalledTimes(1);
   });

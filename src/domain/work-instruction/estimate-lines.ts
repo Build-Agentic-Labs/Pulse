@@ -1,3 +1,4 @@
+import { instructionBlocks } from "../instruction-bullets";
 /**
  * How many visual lines a block of instruction text will occupy in a card.
  *
@@ -24,13 +25,13 @@
 const NEWLINE = String.fromCharCode(10);
 
 export function estimateLines(text: string, charsPerLine: number): number {
-  if (!text) {
-    return 0;
-  }
+  if (!text) return 0;
   const width = Math.max(1, charsPerLine);
-  return text
-    .split(NEWLINE)
-    .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / width)), 0);
+  return Math.ceil(instructionBlocks(text).reduce((total, block) => {
+    if (block.kind === "text") return total + Math.max(1, Math.ceil(block.body.length / width));
+    const bodyWidth = Math.max(1, width - (block.marker?.length ?? 1) - 2);
+    return total + block.body.split("\n").reduce((lines, line) => lines + Math.max(1,Math.ceil(line.length / bodyWidth)),0) + 0.2;
+  },0));
 }
 
 export { NEWLINE };

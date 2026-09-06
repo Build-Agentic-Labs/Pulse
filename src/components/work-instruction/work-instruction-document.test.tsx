@@ -415,3 +415,13 @@ describe("WorkInstructionDocument", () => {
     expect(sheets()).toHaveLength(2);
   });
 });
+
+it("renders micro-steps and checks with linked part emphasis",()=>{
+ const card=makeCard(3,{instruction:"Prepare the assembly.\nA. Fit connector[1]\n  Keep the label visible.\nB. Inspect the connection.\nNote: Keep labels readable.\nCheck: All labels match.",partReferences:[{marker:1,text:"connector",partNumber:"P-100",description:"Harness connector",quantity:1}]});
+ render(<WorkInstructionDocument instruction={makeInstruction([card])}/>);
+ expect(document.querySelectorAll('.wi-instruction-list')).toHaveLength(2);
+ expect(document.querySelector('.wi-instruction-note')).toHaveTextContent('Note:Keep labels readable.');
+ expect(document.querySelector('.wi-instruction-check')).toHaveTextContent('Check:All labels match.');
+ expect(document.querySelector('.wi-instruction-list > div strong')).toHaveTextContent('connector');
+ expect(screen.getByLabelText('Part reference 1',{selector:'.wi-card-part-citation'})).toHaveTextContent('P1');
+});

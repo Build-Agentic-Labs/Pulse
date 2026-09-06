@@ -6,9 +6,9 @@ import { ClearableNumberInput } from "../clearable-number-input";
 
 export type ProcedureDraftFieldName = "instruction" | "name";
 
-function applyTextareaCursor(textarea: HTMLTextAreaElement, cursorPosition: number) {
+function applyTextareaCursor(textarea: HTMLTextAreaElement, cursorPosition: number, value: string) {
   window.requestAnimationFrame(() => {
-    textarea.setSelectionRange(cursorPosition, cursorPosition);
+    if (textarea.isConnected && document.activeElement === textarea && textarea.value === value) textarea.setSelectionRange(cursorPosition, cursorPosition);
   });
 }
 
@@ -16,20 +16,22 @@ export function handleInstructionBulletKeyDown(
   event: ReactKeyboardEvent<HTMLTextAreaElement>,
   onValue: (value: string) => void,
 ) {
-  if (event.key !== "Enter" || event.shiftKey) {
+  if (event.key !== "Enter" || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey) {
     return;
   }
 
   const textarea = event.currentTarget;
-  const nextValue = resolveBulletEnter(textarea.value, textarea.selectionStart, textarea.selectionEnd);
+  const nextValue = resolveBulletEnter(textarea.value, textarea.selectionStart, textarea.selectionEnd, event.shiftKey);
 
   if (!nextValue) {
     return;
   }
 
   event.preventDefault();
+  textarea.setRangeText(nextValue.value, 0, textarea.value.length, "end");
+  textarea.setSelectionRange(nextValue.selectionStart, nextValue.selectionStart);
   onValue(nextValue.value);
-  applyTextareaCursor(textarea, nextValue.selectionStart);
+  applyTextareaCursor(textarea, nextValue.selectionStart, nextValue.value);
 }
 
 export type ProductNumberField =

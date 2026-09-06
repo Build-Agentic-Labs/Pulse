@@ -115,3 +115,18 @@ describe("splitInstruction", () => {
     }
   });
 });
+
+it("keeps a lettered micro-step and its soft continuation together",()=>{
+ const text="Introduction\nA. First action\n  Supporting detail\nB. Next action";
+ const chunks=splitInstruction(text,{lines:3,charsPerLine:58},{lines:6,charsPerLine:58});
+ expect(chunks[0]).toBe("Introduction");
+ expect(chunks[1]).toContain("A. First action\n  Supporting detail");
+ expect(chunks.join("\n")).toContain("B. Next action");
+});
+it("retains the micro-step label when a very long item needs continuation",()=>{
+ const text="A. "+"Verify the panel label. ".repeat(18);
+ const chunks=splitInstruction(text,{lines:5,charsPerLine:58},{lines:5,charsPerLine:58});
+ expect(chunks.length).toBeGreaterThan(1);
+ expect(chunks[1]).toMatch(/^A\. \(continued\)/);
+ for(const chunk of chunks) expect(estimateLines(chunk,58)).toBeLessThanOrEqual(5);
+});

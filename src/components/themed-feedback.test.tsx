@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemedFeedbackLayer } from "./themed-feedback";
@@ -39,5 +39,20 @@ describe("ThemedFeedbackLayer auto-dismiss", () => {
 
     act(() => vi.advanceTimersByTime(1));
     expect(onDismissToast).toHaveBeenCalledWith(7);
+  });
+});
+
+
+describe("ThemedFeedbackLayer persistent notices", () => {
+  it("keeps actionable notices until dismissed and preserves the content", () => {
+    vi.useFakeTimers();
+    const dismiss = vi.fn();
+    render(<ThemedFeedbackLayer toasts={[{ id: 9, title: "Photo placed", body: "Placed on Step 7.", tone: "success", persistent: true }]} onDismissToast={dismiss} onCancelConfirm={vi.fn()} onConfirm={vi.fn()} />);
+    expect(screen.getByText("Photo placed")).toBeVisible();
+    expect(screen.getByText("Placed on Step 7.")).toBeVisible();
+    act(() => vi.advanceTimersByTime(30000));
+    expect(dismiss).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    expect(dismiss).toHaveBeenCalledWith(9);
   });
 });

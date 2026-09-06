@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ClipboardPaste, Copy, ImageIcon, Link2, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, ClipboardPaste, Copy, ImageIcon, Link2, Trash2, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -192,6 +192,7 @@ type StepPhotoAttachmentEditorProps = {
   step: ManufacturingStep;
   photos: StepPhotoAttachment[];
   compact?: boolean;
+  carousel?: boolean;
   isUploading?: boolean;
   onFilesSelected: (files: File[]) => void;
   onRequestRemove: (photo: StepPhotoAttachment) => void;
@@ -202,10 +203,12 @@ function StepPhotoThumbnail({
   photo,
   stepSequence,
   compact,
+  fullResolution = false,
 }: {
   photo: StepPhotoAttachment;
   stepSequence: number;
   compact: boolean;
+  fullResolution?: boolean;
 }) {
   const markerId = `step-photo-thumbnail-arrow-${useId().replace(/:/g, "")}`;
   const annotations = normalizePhotoAnnotationDocument(photo.annotations).items;
@@ -239,8 +242,8 @@ function StepPhotoThumbnail({
         </marker>
       </defs>
       <RecoveringPhoto svg
-        url={photo.thumbnailUrl ?? photo.dataUrl}
-        storagePath={photo.thumbnailUrl ? (photo.thumbnailStoragePath ?? photo.storagePath) : photo.storagePath}
+        url={fullResolution ? photo.dataUrl : (photo.thumbnailUrl ?? photo.dataUrl)}
+        storagePath={!fullResolution && photo.thumbnailUrl ? (photo.thumbnailStoragePath ?? photo.storagePath) : photo.storagePath}
         alt={`Step ${stepSequence} photo`}
         width={width} height={height}
       />
@@ -298,14 +301,40 @@ export function StepPhotoAttachmentEditor({
   step,
   photos,
   compact = false,
+  carousel = false,
   isUploading = false,
   onFilesSelected,
   onRequestRemove,
   onUpdatePhoto,
 }: StepPhotoAttachmentEditorProps) {
+  const [activePhotoId, setActivePhotoId] = useState<string>();
+  const activePhotoIndex = Math.max(0, photos.findIndex(photo => photo.id === activePhotoId));
+  const visiblePhotos = carousel ? photos.slice(activePhotoIndex, activePhotoIndex + 1) : photos;
   const [previewPhoto, setPreviewPhoto] = useState<StepPhotoAttachment | null>(null);
   const { entry, putOnClipboard, pasteInto, isPasting, setActiveStep, clearActiveStep } = useStepPhotoClipboard();
   const photoAreaRef = useRef<HTMLDivElement>(null);
+  const displayedPhotoId = photos[activePhotoIndex]?.id;
+  // Match the default writing area to the displayed image, including responsive resizing.
+  useEffect(() => {
+    if (!carousel || typeof ResizeObserver === "undefined") return;
+    const card = photoAreaRef.current?.closest<HTMLElement>(".ui-procedure-card-body");
+    const photo = photoAreaRef.current?.querySelector<SVGElement>(".step-photo-carousel > .shrink-0 svg");
+    const textarea = card?.querySelector<HTMLTextAreaElement>("textarea");
+    const toolbar = card?.querySelector<HTMLElement>(".ui-instruction-composer-toolbar");
+    if (!card || !photo || !textarea) return;
+    const syncHeight = () => {
+      const photoHeight = photo.getBoundingClientRect().height;
+      card.style.setProperty("--instruction-photo-height", `${Math.max(120, photoHeight - (toolbar?.offsetHeight ?? 0) - 2)}px`);
+    };
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(photo);
+    if (toolbar) observer.observe(toolbar);
+    syncHeight();
+    return () => {
+      observer.disconnect();
+      card.style.removeProperty("--instruction-photo-height");
+    };
+  }, [carousel, activePhotoIndex, photos.length, displayedPhotoId]);
   const [pasteHint, setPasteHint] = useState("");
   const [readingClipboard, setReadingClipboard] = useState(false);
   const clipboardReadRef = useRef(0);
@@ -436,8 +465,9 @@ export function StepPhotoAttachmentEditor({
       </div>
 
       {photos.length > 0 ? (
-        <div className="step-photo-strip flex max-w-full gap-3 overflow-x-auto overscroll-x-contain pb-2">
-          {photos.map((photo) => (
+        <div className={carousel ? "step-photo-carousel" : "step-photo-strip flex max-w-full gap-3 overflow-x-auto overscroll-x-contain pb-2"}
+          style={carousel ? { width: "100%" } : undefined}>
+          {visiblePhotos.map((photo) => (
             <StepPhotoThumbnailSlot key={photo.id} photo={photo} taskId={taskId} stepId={step.id}>
               <div
                 className={`group relative transition ${
@@ -451,7 +481,7 @@ export function StepPhotoAttachmentEditor({
                   aria-label={`Open step ${step.sequence} photo ${photo.name}`}
                   title="Open photo"
                 >
-                  <StepPhotoThumbnail photo={photo} stepSequence={step.sequence} compact={compact} />
+                  <StepPhotoThumbnail photo={photo} stepSequence={step.sequence} compact={compact} fullResolution={carousel} />
                 </button>
                 <button
                   type="button"
@@ -489,6 +519,18 @@ export function StepPhotoAttachmentEditor({
               </div>
             </StepPhotoThumbnailSlot>
           ))}
+          {carousel && photos.length > 1 ? (
+            <>
+              <div className="step-photo-carousel-navigation" role="group" aria-label={`Step ${step.sequence} photo navigation`}>
+                <button type="button" className="ui-btn-ghost h-8 w-8 p-0" aria-label={`Previous photo for step ${step.sequence}`} disabled={activePhotoIndex === 0} onClick={() => setActivePhotoId(photos[activePhotoIndex - 1].id)}><ChevronLeft size={16} /></button>
+                <span className="text-[11px] text-ink-secondary" aria-live="polite">{activePhotoIndex + 1} of {photos.length}</span>
+                <button type="button" className="ui-btn-ghost h-8 w-8 p-0" aria-label={`Next photo for step ${step.sequence}`} disabled={activePhotoIndex === photos.length - 1} onClick={() => setActivePhotoId(photos[activePhotoIndex + 1].id)}><ChevronRight size={16} /></button>
+              </div>
+              <div className="step-photo-carousel-thumbnails flex gap-2 overflow-x-auto pb-1">
+                {photos.map((photo, index) => <button key={photo.id} type="button" className="shrink-0 rounded focus-visible:ring-2 focus-visible:ring-accent" aria-label={`Show photo ${index + 1} for step ${step.sequence}`} aria-pressed={index === activePhotoIndex} onClick={() => setActivePhotoId(photo.id)}><StepPhotoThumbnail photo={photo} stepSequence={step.sequence} compact /></button>)}
+              </div>
+            </>
+          ) : null}
         </div>
       ) : (
         <button type="button" disabled={pasteBusy}

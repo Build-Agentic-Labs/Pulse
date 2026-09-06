@@ -1482,7 +1482,14 @@ body {
   }
 
   .ui-feedback-toast {
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--type-sans);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    box-shadow: 0 4px 20px rgb(0 0 0 / 0.08);
     animation: ui-feedback-toast-in 180ms var(--ease-ui) both;
   }
 
@@ -3658,4 +3665,21 @@ body {
   
 
   
+}
+
+.ui-feedback-title {
+  font-family: var(--type-sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-ink);
+}
+.ui-feedback-toast .ui-workspace-notice-body {
+  margin-top: 0.25rem;
+  font-family: var(--type-sans);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--color-ink-secondary);
+  overflow-wrap: anywhere;
 }

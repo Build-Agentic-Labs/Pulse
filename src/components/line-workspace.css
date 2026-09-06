@@ -88,11 +88,11 @@
   }
 
 .ui-procedure-step-header {
-    @apply flex flex-wrap items-end justify-between gap-x-4 gap-y-2;
+    @apply flex flex-wrap items-center justify-between gap-x-4 gap-y-2;
   }
 
 .ui-procedure-step-header-fields {
-    @apply flex flex-1 flex-nowrap items-baseline gap-5;
+    @apply flex flex-1 items-center;
     min-width: 0;
   }
 
@@ -102,19 +102,21 @@
 
 .ui-procedure-step-title-field {
     flex: 1 1 34rem;
-    min-width: 13rem;
-    max-width: min(100%, 52rem);
+    min-width: min(13rem, 100%);
+    max-width: 100%;
     display: flex;
-    flex-direction: row;
-    align-items: baseline;
-    gap: 1rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
   }
 
 .ui-procedure-step-title {
     flex: 0 0 auto;
     font-family: var(--type-sans);
-    font-size: 0.9375rem;
-    font-weight: 800;
+    font-size: 0.625rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
     line-height: 1.2;
     color: var(--color-ink);
     white-space: nowrap;
@@ -1301,14 +1303,18 @@
   }
 
 .ui-procedure-main .ui-section-title {
-    font-size: 0.9375rem;
-    font-weight: 800;
+    font-size: 0.625rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
     line-height: 1.2;
   }
 
 .ui-procedure-main .ui-setup-section-title {
-    font-size: 0.9375rem;
-    font-weight: 800;
+    font-size: 0.625rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
     line-height: 1.2;
   }
 
@@ -1404,6 +1410,35 @@
     font-weight: 400;
     line-height: 1.55;
     color: var(--color-ink-secondary);
+  }
+
+.ui-instruction-composer {
+    border-radius: var(--radius-control);
+    @apply border border-line;
+  }
+
+.ui-procedure-step-instruction-field > .ui-instruction-composer {
+    margin-top: 0.375rem;
+  }
+
+.ui-instruction-composer:focus-within {
+    @apply border-border-strong;
+  }
+
+.ui-instruction-composer-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    padding: 0.125rem 0.375rem;
+    @apply border-b border-line;
+  }
+
+.ui-instruction-composer .ui-field-standalone,
+.ui-procedure-step .ui-instruction-composer .ui-field-standalone.ui-procedure-step-instruction {
+    display: block;
+    margin-top: 0;
+    border: 0;
+    border-radius: 0 0 var(--radius-control) var(--radius-control);
+    box-shadow: none;
   }
 
 .ui-linked-instruction-editor {
@@ -2809,3 +2844,287 @@
 @media (prefers-reduced-motion: reduce) {
   .step-photo-copy-pop { animation: none; }
 }
+
+/* Step actions share the quiet toolbar treatment; task names have room in the menu. */
+.ui-procedure-step-move .ui-procedure-step-move-trigger {
+  height: 1.75rem;
+  width: auto;
+  min-width: 4.5rem;
+  padding: 0 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--color-ink-secondary);
+  background: transparent;
+  border-color: transparent;
+}
+.ui-procedure-step-move .ui-procedure-step-move-trigger:hover,
+.ui-procedure-step-move .ui-procedure-step-move-trigger[aria-expanded="true"] {
+  color: var(--color-ink);
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
+/* Quiet metadata aligns with the step actions. */
+.ui-procedure-step-metrics {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: 1.75rem;
+    gap: 0.25rem;
+    margin-right: 0.5rem;
+  }
+
+.ui-procedure-step-metrics .ui-procedure-step-inline-field {
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0 0.5rem;
+    height: 100%;
+  }
+
+.ui-procedure-step-metrics .ui-procedure-step-inline-field + .ui-procedure-step-inline-field {
+    border-left: 0;
+  }
+
+.ui-procedure-step-metrics .ui-field-label {
+    font-size: 0.625rem;
+    letter-spacing: 0.04em;
+    color: var(--color-ink-tertiary);
+  }
+
+.ui-procedure-step .ui-procedure-step-metrics .ui-procedure-step-inline-value {
+    width: 2rem;
+    height: 1.5rem;
+    border: 0;
+    border-radius: 2px;
+    padding: 0;
+    font-family: var(--type-sans);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+.ui-procedure-step-metrics .ui-procedure-step-inline-field:focus-within {
+    box-shadow: inset 0 -2px var(--color-border-strong);
+  }
+
+.ui-procedure-main .ui-procedure-step .ui-procedure-step-name-input {
+    flex: none;
+    width: 100%;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+.ui-procedure-step-title-field .ui-procedure-step-title {
+    color: var(--color-ink-tertiary);
+  }
+
+.ui-procedure-step-header > .ui-procedure-step-header-fields {
+    flex-basis: 16rem;
+  }
+
+.ui-procedure-step-header > .ui-procedure-step-toolbar {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+.ui-procedure-step-metrics .ui-procedure-step-inline-field {
+    border-radius: var(--radius-control);
+    transition: background 150ms ease;
+  }
+
+.ui-procedure-step-metrics .ui-procedure-step-inline-field:hover,
+.ui-procedure-step-metrics .ui-procedure-step-inline-field:focus-within {
+    background: var(--color-surface-hover);
+  }
+
+.ui-procedure-card-body {
+    display: grid;
+    gap: 1rem;
+    margin-top: 0.875rem;
+    padding: 0;
+    align-items: start;
+    column-gap: 1.5rem;
+    container-type: inline-size;
+  }
+.ui-procedure-card-body-with-photos {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  }
+.ui-procedure-card-body .ui-procedure-step-instruction-field {
+    margin-top: 0;
+    min-width: 0;
+  }
+.ui-procedure-card-photos { min-width: 0; }
+.step-photo-carousel > .shrink-0 > .group > button:first-child { width: 100%; }
+.step-photo-carousel > .shrink-0 > .group > button:first-child > svg {
+    width: 100% !important;
+    height: 17rem;
+    background: transparent;
+    border: 0;
+  }
+.step-photo-carousel-thumbnails svg { width: 3rem !important; height: 3rem; }
+
+.ui-procedure-card-body .ui-instruction-composer { margin-top: 0.5rem; }
+.ui-procedure-step .ui-procedure-card-body .ui-procedure-step-instruction { min-height: 19rem; }
+.ui-procedure-card-photos .ui-btn-ghost { font-size: 0.6875rem; padding-left: 0.375rem; padding-right: 0.375rem; }
+@media (max-width: 1100px) {
+    .ui-procedure-card-body-with-photos { grid-template-columns: minmax(0, 1fr); }
+  }
+
+/* The step is a single open work surface, with chrome reserved for editing. */
+.ui-procedure-card-body .ui-procedure-step-instruction-field > .ui-field-label {
+    display: flex;
+    align-items: center;
+    min-height: 2rem;
+    font-size: 0.625rem;
+    letter-spacing: 0.06em;
+    color: var(--color-ink-tertiary);
+  }
+.ui-procedure-card-photos > [role="region"] > div:first-child { min-height: 2rem; }
+.ui-procedure-card-photos > [role="region"] > div:first-child .ui-field-label {
+    font-size: 0.625rem;
+    letter-spacing: 0.06em;
+    color: var(--color-ink-tertiary);
+  }
+.ui-procedure-card-photos label.ui-btn-ghost { height: 2rem; }
+.ui-procedure-card-body .ui-instruction-composer {
+    border-color: transparent;
+    margin-top: 0.5rem;
+    transition: border-color 150ms ease;
+  }
+.ui-procedure-card-body .ui-instruction-composer:hover { border-color: var(--color-border); }
+.ui-procedure-card-body .ui-instruction-composer:focus-within { border-color: var(--color-border-strong); }
+.ui-procedure-card-body .ui-instruction-composer-toolbar { padding-left: 0; }
+.ui-procedure-step .ui-procedure-card-body .ui-procedure-step-instruction {
+    min-height: 17rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+.step-photo-carousel-thumbnails { justify-content: safe center; padding: 4px 3px 6px; }
+.step-photo-carousel-thumbnails svg { border-color: transparent; opacity: 0.6; }
+.step-photo-carousel-thumbnails button[aria-pressed="true"] svg,
+.step-photo-carousel-thumbnails button:hover svg { opacity: 1; }
+.step-photo-carousel > .shrink-0 > .group {
+    width: fit-content;
+    max-width: 100%;
+    margin-inline: auto;
+  }
+.step-photo-carousel > .shrink-0 > .group > button:first-child { width: auto; max-width: 100%; }
+.step-photo-carousel > .shrink-0 > .group > button:first-child > svg {
+    width: auto !important;
+    max-width: 100%;
+  }
+
+.step-photo-carousel-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: fit-content;
+    margin: 0.75rem auto 0.375rem;
+  }
+.step-photo-carousel-navigation > span {
+    min-width: 3.5rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.6875rem;
+    color: var(--color-ink-secondary);
+  }
+.step-photo-carousel-navigation .ui-btn-ghost {
+    border-radius: 50%;
+    background: var(--color-surface-muted);
+    transition: background 150ms ease, transform 150ms ease;
+  }
+.step-photo-carousel-navigation .ui-btn-ghost:hover:not(:disabled) { background: var(--color-surface-hover); }
+.step-photo-carousel-navigation .ui-btn-ghost:active:not(:disabled) { transform: scale(0.92); }
+.step-photo-carousel-navigation .ui-btn-ghost:disabled { opacity: 0.3; }
+.step-photo-carousel > .shrink-0 > .group > button:first-child > svg {
+    border-radius: 0.625rem;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.07);
+  }
+.step-photo-carousel > .shrink-0 { animation: step-photo-reveal 180ms ease-out; }
+.step-photo-carousel-thumbnails button {
+    border-radius: 0.5rem;
+    padding: 2px;
+    border: 1px solid transparent;
+    transition: border-color 150ms ease, background 150ms ease;
+  }
+.step-photo-carousel-thumbnails svg {
+    border-radius: 0.375rem;
+    transition: opacity 150ms ease;
+  }
+.step-photo-carousel-thumbnails button[aria-pressed="true"] {
+    border-color: var(--color-border-strong);
+    background: var(--color-surface-muted);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
+  }
+@keyframes step-photo-reveal {
+    from { opacity: 0.65; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+@media (prefers-reduced-motion: reduce) {
+    .step-photo-carousel > .shrink-0 { animation: none; }
+    .step-photo-carousel-navigation .ui-btn-ghost { transition: none; }
+  }
+/* Keep the image and instruction together like the printed work instruction. */
+.ui-procedure-card-body-with-photos {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 0.875rem;
+  }
+.step-photo-carousel > .shrink-0 > .group {
+    margin-left: auto;
+    margin-right: 0;
+  }
+.step-photo-carousel > .shrink-0 > .group > button:first-child > svg {
+    height: 23rem;
+  }
+.ui-procedure-step .ui-procedure-card-body .ui-procedure-step-instruction {
+    min-height: 21rem;
+  }
+@media (max-width: 1100px) {
+    .ui-procedure-card-body-with-photos { grid-template-columns: minmax(0, 1fr); }
+    .step-photo-carousel > .shrink-0 > .group { margin-inline: auto; }
+  }
+
+@media (max-width: 1100px) {
+    .step-photo-carousel { margin-right: auto; }
+  }
+
+/* Align the media column with the step title and give the editor the remainder. */
+.ui-procedure-card-body-with-photos {
+    grid-template-columns: minmax(0, 35%) minmax(0, 1fr);
+  }
+.step-photo-carousel > .shrink-0 > .group {
+    width: 100%;
+    margin-inline: 0;
+  }
+.step-photo-carousel > .shrink-0 > .group > button:first-child { width: 100%; }
+.step-photo-carousel > .shrink-0 > .group > button:first-child > svg {
+    width: 100% !important;
+    height: auto;
+  }
+@media (max-width: 1100px) {
+    .ui-procedure-card-body-with-photos { grid-template-columns: minmax(0, 1fr); }
+    .step-photo-carousel { max-width: 23rem; margin-left: 0; margin-right: auto; }
+  }
+
+.ui-procedure-step .ui-procedure-card-body .ui-procedure-step-instruction {
+    height: var(--instruction-photo-height, 21rem);
+    min-height: 7.5rem;
+  }
+.step-photo-carousel-navigation {
+    gap: 0.125rem;
+    margin-top: 0.375rem;
+    margin-bottom: 0.125rem;
+  }
+.step-photo-carousel-navigation .ui-btn-ghost {
+    background: transparent;
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+.step-photo-carousel-navigation > span {
+    min-width: 2.75rem;
+    font-size: 0.625rem;
+    color: var(--color-ink-tertiary);
+  }
+@media (max-width: 1100px) {
+    .ui-procedure-step .ui-procedure-card-body .ui-procedure-step-instruction { height: 16rem; }
+  }

@@ -21,7 +21,7 @@ import {
 } from "react";
 import { calculateTaskManHours, formatMinutes } from "@/domain/calculations";
 import { formatManHours } from "@/domain/formatting";
-import { applyInstructionBullets } from "@/domain/instruction-bullets";
+import { InstructionFormatToolbar } from "./instruction-format-toolbar";
 import { getManufacturingStepCheckDefinitions } from "@/domain/manufacturing-step-checks";
 import { getMasterBom } from "@/domain/master-bom";
 import { taskDisplayCode } from "@/domain/nomenclature";
@@ -925,7 +925,8 @@ export function ProcedureWorkspace({
                   const stepTools = getStepToolList(task, step.id);
 
                   return (
-                    <div key={step.id} className="ui-procedure-step space-y-3">
+                    <div key={step.id} data-instruction-step={step.id}
+                        className="ui-procedure-step space-y-3">
                       <div>
                         <div className="ui-procedure-step-header mb-1">
                           <div className="ui-procedure-step-header-fields">
@@ -944,45 +945,51 @@ export function ProcedureWorkspace({
                                 placeholder={`Step ${step.sequence} name`}
                               />
                             </label>
-                            <label className="ui-procedure-step-inline-field">
-                              <span className="ui-field-label mb-0">Seq</span>
-                              <ClearableNumberInput
-                                aria-label={`Step ${step.sequence} sequence`}
-                                className="number-input ui-procedure-step-inline-value"
-                                value={step.sequence}
-                                min={1}
-                                fallbackValue={step.sequence}
-                                precision={0}
-                                normalize={Math.round}
-                                onValueChange={(value) => moveManufacturingStep(step.id, value)}
-                              />
-                            </label>
-                            <label className="ui-procedure-step-inline-field">
-                              <span className="ui-field-label mb-0">Min</span>
-                              <ClearableNumberInput
-                                aria-label={`Step ${step.sequence} duration minutes`}
-                                className="number-input ui-procedure-step-inline-value ui-procedure-step-inline-value-wide"
-                                value={step.durationMinutes ?? 0}
-                                min={0}
-                                fallbackValue={step.durationMinutes ?? 0}
-                                precision={1}
-                                onValueChange={(value) => updateManufacturingStep(step.id, { durationMinutes: value })}
-                              />
-                            </label>
+
                           </div>
                           <div className="ui-procedure-step-toolbar">
+                            <div className="ui-procedure-step-metrics">
+                              <label className="ui-procedure-step-inline-field">
+                                <span className="ui-field-label mb-0">Seq</span>
+                                <ClearableNumberInput
+                                  aria-label={`Step ${step.sequence} sequence`}
+                                  className="number-input ui-procedure-step-inline-value"
+                                  value={step.sequence}
+                                  min={1}
+                                  fallbackValue={step.sequence}
+                                  precision={0}
+                                  normalize={Math.round}
+                                  onValueChange={(value) => moveManufacturingStep(step.id, value)}
+                                />
+                              </label>
+                              <label className="ui-procedure-step-inline-field">
+                                <span className="ui-field-label mb-0">Min</span>
+                                <ClearableNumberInput
+                                  aria-label={`Step ${step.sequence} duration minutes`}
+                                  className="number-input ui-procedure-step-inline-value ui-procedure-step-inline-value-wide"
+                                  value={step.durationMinutes ?? 0}
+                                  min={0}
+                                  fallbackValue={step.durationMinutes ?? 0}
+                                  precision={1}
+                                  onValueChange={(value) => updateManufacturingStep(step.id, { durationMinutes: value })}
+                                />
+                              </label>
+                            </div>
                             {moveTargetTasks.length > 0 ? (
                               <ThemedSelect
                                 ariaLabel={`Move step ${step.sequence} to another task`}
                                 value=""
-                                className="w-[9.5rem]"
-                                triggerClassName="h-7 px-2 text-[10px]"
+                                className="ui-procedure-step-move"
+                                triggerClassName="ui-procedure-step-move-trigger"
+                                menuAlign="right"
+                                menuMinWidth={320}
                                 placeholder="Move"
                                 options={[
                                   { value: "", label: "Move" },
                                   ...moveTargetTasks.map((targetTask) => ({
                                     value: targetTask.id,
-                                    label: `${taskDisplayCode(targetTask)} ${targetTask.name || "Untitled task"}`,
+                                    label: taskDisplayCode(targetTask),
+                                    description: targetTask.name || "Untitled task",
                                   })),
                                 ]}
                                 onChange={(targetTaskId) => {
@@ -1003,23 +1010,7 @@ export function ProcedureWorkspace({
                                 }}
                               />
                             ) : null}
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateManufacturingStepInstruction(
-                                  step.id,
-                                  applyInstructionBullets(
-                                    getProcedureFieldValue(task.id, step.id, "instruction", step.instruction),
-                                  ),
-                                )
-                              }
-                              className="ui-btn-ghost h-7 gap-1 px-2 text-[10px]"
-                              title={`Format step ${step.sequence} as bullets`}
-                              aria-label={`Format step ${step.sequence} as bullets`}
-                            >
-                              <ListChecks size={12} strokeWidth={1.75} />
-                              Bullets
-                            </button>
+
                             <button
                               type="button"
                               onClick={() => requestRemoveManufacturingStep(step.id)}
@@ -1032,38 +1023,61 @@ export function ProcedureWorkspace({
                             </button>
                           </div>
                         </div>
+                        <div className={`ui-procedure-card-body ${showPhotos ? "ui-procedure-card-body-with-photos" : ""}`}>
+                      {showPhotos ? (
+                        <div className="ui-procedure-card-photos">
+                          <StepPhotoAttachmentEditor
+                            carousel
+                            taskId={task.id}
+                            step={step}
+                            photos={stepPhotos}
+                            isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
+                            onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
+                            onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
+                            onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
+                          />
+                        </div>
+                      ) : null}
                         <div className="ui-procedure-step-instruction-field block">
                           <span className="ui-field-label mb-0 block">Instruction</span>
-                          <LinkedInstructionTextarea
-                            task={task}
-                            step={step}
-                            aria-label={`Step ${step.sequence} instruction`}
-                            className="ui-field-standalone ui-procedure-step-instruction h-auto w-full resize-y"
-                            value={getProcedureFieldValue(task.id, step.id, "instruction", step.instruction)}
-                            onFocus={() => onProcedureFieldFocus(task.id, step.id, "instruction", step.instruction)}
-                            onBlur={() => onProcedureFieldBlur(task.id, step.id, "instruction")}
-                            onSelect={(event) => captureInstructionSelection(step.id, event.currentTarget)}
-                            onChange={(event) => updateManufacturingStepInstruction(step.id, event.target.value)}
-                            onKeyDown={(event) =>
-                              handleInstructionBulletKeyDown(event, (instruction) =>
-                                updateManufacturingStepInstruction(step.id, instruction),
-                              )
-                            }
-                            onMentionClick={(mention, anchor) =>
-                              setInstructionSelections((current) => ({
-                                ...current,
-                                [step.id]: {
-                                  start: mention.start,
-                                  end: mention.end,
-                                  text: mention.text,
-                                  anchor,
-                                  mentionId: mention.id,
-                                  partReferenceId: mention.partReferenceId,
-                                },
-                              }))
-                            }
-                            placeholder="Write the manufacturing instruction for this operation."
-                          />
+                          <div className="ui-instruction-composer">
+                            <div className="ui-instruction-composer-toolbar">
+                              <InstructionFormatToolbar sequence={step.sequence}
+                              value={getProcedureFieldValue(task.id, step.id, "instruction", step.instruction)}
+                              onChange={instruction => updateManufacturingStepInstruction(step.id, instruction)} />
+                            </div>
+                            <LinkedInstructionTextarea
+                              task={task}
+                              step={step}
+                              aria-label={`Step ${step.sequence} instruction`}
+                              className="ui-field-standalone ui-procedure-step-instruction h-auto w-full resize-y"
+                              value={getProcedureFieldValue(task.id, step.id, "instruction", step.instruction)}
+                              onFocus={() => onProcedureFieldFocus(task.id, step.id, "instruction", step.instruction)}
+                              onBlur={() => onProcedureFieldBlur(task.id, step.id, "instruction")}
+                              onSelect={(event) => captureInstructionSelection(step.id, event.currentTarget)}
+                              onChange={(event) => updateManufacturingStepInstruction(step.id, event.target.value)}
+                              onKeyDown={(event) =>
+                                handleInstructionBulletKeyDown(event, (instruction) =>
+                                  updateManufacturingStepInstruction(step.id, instruction),
+                                )
+                              }
+                              onMentionClick={(mention, anchor) =>
+                                setInstructionSelections((current) => ({
+                                  ...current,
+                                  [step.id]: {
+                                    start: mention.start,
+                                    end: mention.end,
+                                    text: mention.text,
+                                    anchor,
+                                    mentionId: mention.id,
+                                    partReferenceId: mention.partReferenceId,
+                                  },
+                                }))
+                              }
+                              placeholder="Write the manufacturing instruction for this operation."
+                            />
+                          </div>
+                        </div>
                         </div>
                         <StepPartMentionEditor
                           task={task}
@@ -1076,19 +1090,7 @@ export function ProcedureWorkspace({
                         />
                       </div>
 
-                      {showPhotos ? (
-                        <div className="ui-procedure-step-divider">
-                          <StepPhotoAttachmentEditor
-                            taskId={task.id}
-                            step={step}
-                            photos={stepPhotos}
-                            isUploading={(stepPhotoUploadCounts[step.id] ?? 0) > 0}
-                            onFilesSelected={(files) => void uploadManufacturingStepPhotos(step.id, files)}
-                            onRequestRemove={(photo) => requestRemoveManufacturingStepPhoto(step.id, photo)}
-                            onUpdatePhoto={(photoId, patch) => updateManufacturingStepPhoto(step.id, photoId, patch)}
-                          />
-                        </div>
-                      ) : null}
+
 
                       {showStepDetails ? (
                       <div className="ui-procedure-step-details">

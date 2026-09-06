@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { CircleCheck, Info, TriangleAlert, CircleAlert, X } from "lucide-react";
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 
 export type FeedbackTone = "neutral" | "success" | "warning" | "danger";
@@ -58,6 +58,11 @@ const toneStyles: Record<FeedbackTone, { border: string; label: string; text: st
     text: "text-danger",
   },
 };
+function FeedbackIcon({ tone }: { tone: FeedbackTone }) {
+  const Icon = { neutral: Info, success: CircleCheck, warning: TriangleAlert, danger: CircleAlert }[tone];
+  return <Icon size={18} strokeWidth={1.7} className={`mt-0.5 shrink-0 ${toneStyles[tone].text}`} aria-hidden="true" />;
+}
+
 function BodyText({ body, compact = false }: { body?: string; compact?: boolean }) {
   if (!body) {
     return null;
@@ -179,14 +184,13 @@ export function ThemedFeedbackLayer({
       <div className="pointer-events-none fixed right-4 top-20 z-[90] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
         {cornerToasts.map((toast) => {
           const tone = toast.tone ?? "neutral";
-          const style = toneStyles[tone];
 
           return (
             <div
               key={toast.id}
               className={`ui-feedback-toast pointer-events-auto overflow-hidden rounded-lg border bg-surface ${
                 toast.autoDismissMs ? "ui-feedback-toast-auto" : ""
-              } ${style.border}`}
+              } border-line`}
               style={
                 toast.autoDismissMs
                   ? ({ "--toast-duration": `${toast.autoDismissMs}ms` } as CSSProperties)
@@ -194,10 +198,10 @@ export function ThemedFeedbackLayer({
               }
               role="status"
             >
-              <div className="flex items-start gap-2.5 p-2.5">
+              <div className="flex items-start gap-3 p-3.5">
+                <FeedbackIcon tone={tone} />
                 <div className="min-w-0 flex-1">
-                  <div className="ui-mono-label">{style.label}</div>
-                  <div className="ui-section-title mt-1">{toast.title}</div>
+                  <div className="ui-feedback-title">{toast.title}</div>
                   {toast.content ?? <BodyText body={toast.body} compact />}
                 </div>
                 <button
@@ -219,19 +223,18 @@ export function ThemedFeedbackLayer({
           <div className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[min(860px,calc(100vw-2rem))] flex-col gap-3 sm:max-h-[calc(100dvh-2rem)]">
             {centerToasts.map((toast) => {
               const tone = toast.tone ?? "neutral";
-              const style = toneStyles[tone];
+
 
               return (
                 <div
                   key={toast.id}
-                  className={`pointer-events-auto flex max-h-[inherit] flex-col overflow-hidden rounded-md border bg-surface  ${style.border}`}
+                  className="ui-feedback-toast pointer-events-auto flex max-h-[inherit] flex-col overflow-hidden border border-line bg-surface"
                   role="status"
                 >
                   <div className="shrink-0 border-b border-line px-4 py-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="ui-mono-label">{style.label}</div>
-                        <div className="ui-section-title mt-1">{toast.title}</div>
+                        <div className="flex items-start gap-3"><FeedbackIcon tone={tone} /><div className="ui-feedback-title">{toast.title}</div></div>
                       </div>
                       <button
                         type="button"

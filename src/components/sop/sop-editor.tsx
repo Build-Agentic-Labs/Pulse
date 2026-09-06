@@ -1632,7 +1632,7 @@ export function SopEditor({
               <div
                 role="status"
                 aria-live="polite"
-                className={`ui-notice ui-notice-warn fixed right-4 top-16 z-[55] flex w-[min(24rem,calc(100vw-2rem))] items-start gap-2 px-3 py-2 transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
+                className={`ui-feedback-toast fixed right-4 top-16 z-[55] flex w-[min(24rem,calc(100vw-2rem))] items-start gap-2 px-3 py-2 transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
                   reviewVisible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
                 }`}
               >

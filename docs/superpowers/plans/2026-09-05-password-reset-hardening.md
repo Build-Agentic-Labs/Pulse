@@ -208,3 +208,21 @@ export function deploymentBannerText(vercelEnv: string | undefined): string | nu
 - [ ] Audit follow-up: append "2026-09-05 evening incident" paragraph linking this plan.
 - [ ] `npm run typecheck && npm run lint && npx vitest run && npm run build` → all green. Push branch; CI green; report UI changes (reset form copy, `/reset-password`, preview banner) and wait for the user's review before merge.
 - [ ] Go-live (after merge, user-gated where noted): set `AUTH_MAIL_CANARY_EMAIL=delivered@resend.dev` in Vercel Production (user), run the creation script (service role from `.env.local`), hit the canary once, verify health `authMail.canary === "ok"`, verify the user's own reset end to end on pulse.agenticlabs.studio.
+
+## Status — 2026-09-05 evening
+
+Tasks 1–9 implemented test-first on branch `worktree-password-reset-hardening`
+(commits 932fd9f, 971bc98, f01b66b); CI green on both jobs for every push.
+
+Verified live on a local production build (`:3100`): the reset page verifies the
+fragment token only on submit and rejects a bogus token with the friendly
+message; the no-link state; the new reset form copy; request → "If an account
+exists, a reset link has been sent." → "Send another link" → back to sign in;
+`Host: *.vercel.app` → 308 to the canonical domain with path and query intact;
+API paths untouched. Verified on the branch's Vercel preview deployment: banner
+rendered, reset route answers the preview-specific 503, no redirect on the
+preview host. One defect found by that verification and fixed in f01b66b: the
+redirect must key on the Host header — a self-hosted Next server reports its own
+bind address in `request.url`.
+
+Remaining, user-gated: review the preview → merge → Task 10 go-live.

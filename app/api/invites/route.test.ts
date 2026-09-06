@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   grantUpsert: vi.fn(),
   inviteUserByEmail: vi.fn(),
   ledgerInsert: vi.fn(),
+  /** workspace_members rows for the invitee across all workspaces (service-role count). */
+  memberCount: 0,
   rpc: vi.fn(),
   send: vi.fn(),
 }));
@@ -18,7 +20,10 @@ vi.mock("@supabase/supabase-js", () => ({
         inviteUserByEmail: mocks.inviteUserByEmail,
       },
     },
-    from: () => ({ insert: mocks.ledgerInsert }),
+    from: (table: string) =>
+      table === "workspace_members"
+        ? { select: () => ({ eq: () => Promise.resolve({ count: mocks.memberCount, error: null }) }) }
+        : { insert: mocks.ledgerInsert },
   }),
 }));
 
@@ -55,6 +60,7 @@ function inviteRequest(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.memberCount = 0;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
   process.env.RESEND_API_KEY = "resend-key";
@@ -222,7 +228,39 @@ describe("workspace invite route — resend to a pending invitee", () => {
     );
   });
 
-  it("emails a sign-in reminder, not a credential, to someone who already finished setup", async () => {
+  it("re-sends a setup link when the account was 'signed in' by a link scanner but never joined a workspace", async () => {
+    // The 2026-08-12 batch: tokens verified within two minutes of delivery, so
+    // last_sign_in_at is set, yet the person has no membership anywhere.
+    mocks.memberCount = 0;
+    mocks.generateLink.mockImplementation(async ({ type }: { type: string }) => {
+      if (type === "invite") return emailExists;
+      return {
+        data: {
+          properties: { hashed_token: "recovery-hash" },
+          user: {
+            id: "user-1",
+            email: "first.user@anacorp.com",
+            email_confirmed_at: "2026-08-12T22:17:18Z",
+            last_sign_in_at: "2026-08-12T22:17:18Z",
+          },
+        },
+        error: null,
+      };
+    });
+    mocks.send.mockResolvedValue({ ok: true, id: "email-4" });
+
+    const response = await POST(inviteRequest());
+    const payload = await response.json();
+
+    expect(payload).toEqual({ granted: true, emailSent: true });
+    expect(mocks.send.mock.calls[0]?.[1].subject).not.toMatch(/now have access/i);
+    expect(mocks.send.mock.calls[0]?.[1].html).toContain(
+      "https://pulse.anacorp.com/invite#email=first.user%40anacorp.com&token_hash=recovery-hash&type=recovery",
+    );
+  });
+
+  it("emails a sign-in reminder, not a credential, to someone who already belongs to a workspace", async () => {
+    mocks.memberCount = 1;
     mocks.generateLink.mockImplementation(async ({ type }: { type: string }) => {
       if (type === "invite") return emailExists;
       return {

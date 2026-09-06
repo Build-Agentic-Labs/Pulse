@@ -54,8 +54,24 @@ type SetupLink =
  * generateLink(type: "invite") — which is what every RESEND is — comes back
  * "already registered" and, before this helper existed, silently sent nothing.
  * For an existing user we mint a recovery token instead, which the /invite page
- * already knows how to verify, unless they have actually signed in before.
+ * already knows how to verify — unless they already belong to a workspace, in
+ * which case they own a password and get a reminder, not a credential.
  */
+async function countWorkspaceMemberships(admin: SupabaseClient<Database>, userId: string | undefined): Promise<number> {
+  if (!userId) return 0;
+  const { count, error } = await admin
+    .from("workspace_members")
+    .select("user_id", { count: "exact", head: true })
+    .eq("user_id", userId);
+  if (error) {
+    // Unknown is treated as "not set up": a setup link is the safe default, since
+    // it only takes effect if the invitee clicks it and chooses a password.
+    console.error("Invite resend: membership lookup failed", { message: error.message });
+    return 0;
+  }
+  return count ?? 0;
+}
+
 async function generateSetupLink(
   admin: SupabaseClient<Database>,
   email: string,
@@ -83,7 +99,8 @@ async function generateSetupLink(
       status: recovery.error?.status ?? null,
     };
   }
-  if (inviteeHasCompletedSetup(recovery.data.user)) {
+  const workspaceMemberships = await countWorkspaceMemberships(admin, recovery.data.user?.id);
+  if (inviteeHasCompletedSetup({ workspaceMemberships })) {
     return { kind: "already_registered" };
   }
   return { kind: "link", tokenHash: recovery.data.properties.hashed_token, type: "recovery" };
@@ -415,14 +432,15 @@ export async function POST(request: Request) {
   }
 
   // Supabase-mail resend: the user row exists from the first invite. Send a
-  // recovery email (same redirect, same password-setup flow) unless they have
-  // signed in before.
+  // recovery email (same redirect, same password-setup flow) unless they already
+  // belong to a workspace.
   const { data: existing } = await admin.auth.admin.generateLink({
     type: "recovery",
     email,
     options: { redirectTo },
   });
-  if (existing?.user && !inviteeHasCompletedSetup(existing.user)) {
+  const existingMemberships = existing?.user ? await countWorkspaceMemberships(admin, existing.user.id) : 0;
+  if (existing?.user && !inviteeHasCompletedSetup({ workspaceMemberships: existingMemberships })) {
     const { error: recoverError } = await admin.auth.resetPasswordForEmail(email, { redirectTo });
     if (!recoverError) {
       return NextResponse.json({ granted: true, emailSent: true });

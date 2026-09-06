@@ -121,3 +121,21 @@ reset / invitation send in the last 24 h reported by the health endpoint
 decision because it would have needed an exemption in the signup-domain trigger; production `*.vercel.app` hosts redirect to the canonical
 domain; preview deployments show a banner and say why email features are off;
 invitations get the same loud-failure treatment.
+
+## Finding 2026-09-05 late — eleven invitations stuck since 2026-08-12
+
+While looking for a resend target, the data showed eleven `workspace_access_grants`
+rows still unredeemed from the 2026-08-11/12 invite batch. Every one of those auth
+accounts carries `email_confirmed_at = last_sign_in_at` between 62 and 150 seconds
+after its invite email was delivered, and none has a workspace membership: a mail
+security scanner opened the old-style Supabase `action_link`s on delivery and
+consumed the one-time tokens (the exact failure the 2026-08-13 fragment-link
+redesign fixed). The resend logic then judged these people "already set up" because
+it keyed on `last_sign_in_at`, so every later resend (08-13, 09-03) went down the
+reminder / already-registered branch instead of minting a fresh setup link.
+
+Fix (branch `fix/invite-resend-membership`): `inviteeHasCompletedSetup` now keys on
+**workspace membership**, looked up with the service role, not on sign-in; a
+signed-in-but-never-joined account gets a setup link again. Follow-up noted, not
+fixed here: re-inviting an existing member resets that grant's `redeemed_at` to
+null in the upsert, which would make a real member look pending.

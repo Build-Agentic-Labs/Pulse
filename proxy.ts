@@ -21,6 +21,7 @@ export async function proxy(request: NextRequest) {
   // Preview deployments are served as-is (see src/domain/deployment/canonical-host.ts).
   const canonical = resolveCanonicalRedirect({
     requestUrl: request.url,
+    host: request.headers.get("x-forwarded-host") ?? request.headers.get("host"),
     vercelEnv: process.env.VERCEL_ENV,
     siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
   });

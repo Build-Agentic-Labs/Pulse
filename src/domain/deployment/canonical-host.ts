@@ -10,7 +10,14 @@
 const VERCEL_HOST_SUFFIX = ".vercel.app";
 
 export interface CanonicalRedirectInput {
+  /** Used for path + query only. */
   requestUrl: string;
+  /**
+   * The host the browser asked for: `x-forwarded-host`, else `host`. This is the
+   * only reliable source — a self-hosted Next server reports its own bind
+   * address in `request.url`, not the Host header.
+   */
+  host: string | null | undefined;
   /** Vercel's VERCEL_ENV: "production" | "preview" | "development" | undefined off-platform. */
   vercelEnv: string | undefined;
   /** NEXT_PUBLIC_SITE_URL. */
@@ -27,13 +34,15 @@ function parseUrl(value: string | undefined): URL | null {
 }
 
 /** The URL to redirect to, or null when the request should be served as-is. */
-export function resolveCanonicalRedirect({ requestUrl, vercelEnv, siteUrl }: CanonicalRedirectInput): string | null {
+export function resolveCanonicalRedirect({ requestUrl, host, vercelEnv, siteUrl }: CanonicalRedirectInput): string | null {
   if (vercelEnv !== "production") return null;
   const canonical = parseUrl(siteUrl);
   const request = parseUrl(requestUrl);
-  if (!canonical || !request) return null;
-  if (!request.hostname.endsWith(VERCEL_HOST_SUFFIX)) return null;
-  if (request.host === canonical.host) return null;
+  const requestedHost = (host ?? "").trim().toLowerCase();
+  if (!canonical || !request || !requestedHost) return null;
+  const requestedHostname = requestedHost.split(":")[0];
+  if (!requestedHostname.endsWith(VERCEL_HOST_SUFFIX)) return null;
+  if (requestedHostname === canonical.hostname) return null;
   return new URL(request.pathname + request.search, canonical.origin).toString();
 }
 

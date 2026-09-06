@@ -90,3 +90,36 @@ export function inviteeHasCompletedSetup(
 ): boolean {
   return (invitee?.workspaceMemberships ?? 0) > 0;
 }
+
+export interface AccessGrantPartition<G> {
+  /** Unredeemed grants for people who are not members yet — the Pending invitations list. */
+  pendingInvites: G[];
+  /** Unredeemed grants for CURRENT members, keyed by lower-cased email — access changes awaiting their next sign-in. */
+  accessUpdatesByEmail: Map<string, G>;
+}
+
+/**
+ * Re-inviting an existing member resets their grant to unredeemed on purpose:
+ * `redeem_workspace_access_grants()` applies only unredeemed grants, so that is
+ * how changed entitlements reach them at next sign-in. The Members panel must
+ * therefore not list such a grant as a second, pending person — it belongs on the
+ * member's own row as a pending access update.
+ */
+export function partitionAccessGrants<G extends { email: string; redeemedAt?: string | null }>(
+  grants: readonly G[],
+  memberEmails: Iterable<string | null | undefined>,
+): AccessGrantPartition<G> {
+  const members = new Set<string>();
+  for (const email of memberEmails) {
+    if (email) members.add(email.trim().toLowerCase());
+  }
+  const pendingInvites: G[] = [];
+  const accessUpdatesByEmail = new Map<string, G>();
+  for (const grant of grants) {
+    if (grant.redeemedAt) continue;
+    const email = grant.email.trim().toLowerCase();
+    if (members.has(email)) accessUpdatesByEmail.set(email, grant);
+    else pendingInvites.push(grant);
+  }
+  return { pendingInvites, accessUpdatesByEmail };
+}

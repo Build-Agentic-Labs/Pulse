@@ -1,6 +1,7 @@
 "use client";
 
 import { formatDate } from "@/domain/formatting";
+import { partitionAccessGrants } from "@/domain/workspace/invite";
 import { ChevronRight, MailPlus, RotateCw, Search, ShieldCheck, Trash2, UserMinus } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { MemberAccessDrawer } from "./member-access-drawer";
@@ -385,9 +386,11 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
       )
     : members;
   const selected = members.find((member) => member.userId === selectedUserId);
-  const pendingGrants = grants.filter(
-    (grant) => !grant.redeemedAt && (!query || grant.email.toLowerCase().includes(query)),
+  const { pendingInvites, accessUpdatesByEmail } = partitionAccessGrants(
+    grants,
+    members.map((member) => member.email),
   );
+  const pendingGrants = pendingInvites.filter((grant) => !query || grant.email.toLowerCase().includes(query));
   const selectedIsManager = isManagerRole(selected?.role);
   // Ownership controls elevation: admins may manage Member access but cannot mint or demote managers.
   const canEditSelectedRole = Boolean(selected && !selected.isSelf && (callerIsOwner || !selectedIsManager));
@@ -417,6 +420,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
           <>
             {filteredMembers.map((member) => {
               const active = member.userId === selectedUserId;
+              const accessUpdatePending = Boolean(member.email && accessUpdatesByEmail.has(member.email.toLowerCase()));
               return (
                 <button
                   key={member.userId}
@@ -434,6 +438,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                       {member.isSelf ? " (you)" : ""}
                     </div>
                     {member.email && member.email !== memberLabel(member) ? <div className="ui-settings-group-row-desc truncate">{member.email}</div> : null}
+                    {accessUpdatePending ? <div className="text-xs text-ink-tertiary">Access update applies at next sign-in</div> : null}
                   </div>
                   <span className="ml-auto shrink-0 text-xs text-ink-secondary" title={ROLE_DESCRIPTIONS[member.role]}>{organizationRoleLabel(member.role)}</span>
                   <div className="ui-settings-group-row-control ui-settings-member-row-chevron">

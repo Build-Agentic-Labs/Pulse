@@ -20,8 +20,8 @@ import { createStalledDigestDrainStore } from "@/lib/notifications/digest-store"
 import { recordDrainRun } from "@/lib/notifications/drain-runs-store";
 import { loadTeamsIntegration } from "@/lib/notifications/integrations-store";
 import { runDrainRequest } from "@/lib/notifications/run-drain-request";
+import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
 import { createTeamsSender } from "@/lib/notifications/teams-sender";
-import { createResendSender } from "@/lib/sop/notifications-drain";
 import { createSopNotificationDrainStore } from "@/lib/sop/notifications-store";
 import { createWorkspaceWelcomeDrainStore } from "@/lib/workspace/welcome-store";
 
@@ -98,9 +98,7 @@ export async function POST(request: Request) {
       const revived = await resetLedgerRow(admin, ledger, id, workspaceId);
       if (!revived) return NextResponse.json({ ok: false, revived: false, reason: "Row not found, already sent, or outside this workspace." });
       // Drain immediately so the admin sees the outcome instead of waiting for the cron.
-      const resendApiKey = process.env.RESEND_API_KEY ?? "";
-      const resendFrom = process.env.RESEND_FROM ?? "";
-      const send = resendApiKey && resendFrom ? createResendSender(resendApiKey, resendFrom) : null;
+      const { send } = createEmailSenderFromEnv();
       const result = await runDrainRequest({
         caller: "manual",
         stores: [

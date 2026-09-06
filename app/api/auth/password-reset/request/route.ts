@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { renderPasswordRecoveryEmail } from "@/domain/auth/password-recovery";
 import { createApiRateLimiter } from "@/lib/api-auth";
 import type { Database } from "@/lib/database.types";
+import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
 import { recordTransactionalEmail } from "@/lib/notifications/transactional-log";
 import { createResendSender } from "@/lib/sop/notifications-drain";
 
@@ -123,7 +124,8 @@ export async function POST(request: Request) {
       return json({ error: "Password recovery is temporarily unavailable." }, 503);
     }
 
-    const send = createResendSender(resendApiKey, resendFrom);
+    // Honours NOTIFICATION_EMAIL_REDIRECT_TO during a test window.
+    const send = createEmailSenderFromEnv().send ?? createResendSender(resendApiKey, resendFrom);
     const result = await send(
       email,
       renderPasswordRecoveryEmail({ code: data.properties.email_otp, email, origin }),

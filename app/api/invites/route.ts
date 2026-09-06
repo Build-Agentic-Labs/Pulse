@@ -23,6 +23,7 @@ import {
   type OrganizationInviteRole,
   type WorkspaceInviteEntitlements,
 } from "@/domain/workspace/invite-access";
+import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
 import { recordTransactionalEmail, type TransactionalEmailKind } from "@/lib/notifications/transactional-log";
 import { createResendSender, type EmailSender } from "@/lib/sop/notifications-drain";
 import { normalizeJobTitle } from "@/domain/departments";
@@ -319,7 +320,8 @@ export async function POST(request: Request) {
 
   if (resendApiKey && resendFrom) {
     const setupLink = await generateSetupLink(admin, email, redirectTo);
-    const send = createResendSender(resendApiKey, resendFrom);
+    // Honours NOTIFICATION_EMAIL_REDIRECT_TO during a test window.
+    const send = createEmailSenderFromEnv().send ?? createResendSender(resendApiKey, resendFrom);
     const projectNames = new Map((projectsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
     const departmentNames = new Map((departmentsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
     const accessSummary = describeInviteEntitlements(entitlements, projectNames, departmentNames);

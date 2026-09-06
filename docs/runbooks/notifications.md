@@ -31,9 +31,23 @@ invocation is recorded in `notification_drain_runs`.
    | `NEXT_PUBLIC_SITE_URL` | links in email/cards | yes (already set) |
    | `RESEND_WEBHOOK_SECRET` | delivery webhook signature (`whsec_…`) | for delivery tracking |
    | `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | browser push | for push |
+   | `NOTIFICATION_EMAIL_REDIRECT_TO` | **test only**: every outbound email goes to this one address, subject prefixed `[TEST → original]` | never in production |
 
    Generate the VAPID pair once with `node scripts/generate-vapid-keys.mjs`.
    Rotating it invalidates every browser subscription.
+
+   **Safe first drain (no coworker receives mail).** Run the drain from a local
+   server with the redirect set; ledger rows are claimed and stamped `sent`
+   exactly as in production, so the cron will not resend them later:
+   ```bash
+   NOTIFICATION_EMAIL_REDIRECT_TO=you@company.com npm run dev -- -p 3100
+   ```
+   ```bash
+   curl -s -H "Authorization: Bearer $CRON_SECRET" http://localhost:3100/api/sops/notifications/drain
+   ```
+   The response carries `emailRedirectedTo` so a redirected run is unmistakable.
+   Anything consumed this way reaches the real recipient only on its next
+   natural occurrence (a later nudge, next week's digest).
 3. **Resend webhook**: Resend → Webhooks → add
    `https://pulse.agenticlabs.studio/api/webhooks/resend` with events
    `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`,

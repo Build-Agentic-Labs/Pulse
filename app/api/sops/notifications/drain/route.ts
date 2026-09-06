@@ -16,7 +16,8 @@ import { recordDrainRun, type DrainCaller } from "@/lib/notifications/drain-runs
 import { runDrainRequest } from "@/lib/notifications/run-drain-request";
 import { createPushSender } from "@/lib/notifications/push-sender";
 import { createTeamsSender } from "@/lib/notifications/teams-sender";
-import { createResendSender, isAuthorizedCronRequest } from "@/lib/sop/notifications-drain";
+import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
+import { isAuthorizedCronRequest } from "@/lib/sop/notifications-drain";
 import { createSopNotificationDrainStore } from "@/lib/sop/notifications-store";
 import { createWorkspaceWelcomeDrainStore } from "@/lib/workspace/welcome-store";
 import type { Database } from "@/lib/database.types";
@@ -41,9 +42,6 @@ async function drain(request: Request, caller: DrainCaller): Promise<NextRespons
   const admin = createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const resendApiKey = process.env.RESEND_API_KEY ?? "";
-  const resendFrom = process.env.RESEND_FROM ?? "";
-
   // Links go into emails sent to OTHER users, so the origin must come from
   // trusted config, not the request's Host. NEXT_PUBLIC_SITE_URL wins if set;
   // Vercel's canonical production host is next; the request origin is the
@@ -54,7 +52,8 @@ async function drain(request: Request, caller: DrainCaller): Promise<NextRespons
     (vercelHost ? `https://${vercelHost}` : new URL(request.url).origin);
 
   try {
-    const send = resendApiKey && resendFrom ? createResendSender(resendApiKey, resendFrom) : null;
+    // Resend credentials + the optional NOTIFICATION_EMAIL_REDIRECT_TO test redirect.
+    const { send, redirectedTo } = createEmailSenderFromEnv();
     const result = await runDrainRequest({
       caller,
       stores: [
@@ -77,7 +76,7 @@ async function drain(request: Request, caller: DrainCaller): Promise<NextRespons
     if (!result.body.healthy) {
       console.error(`notification drain unhealthy — ${result.body.problems.join("; ")}`);
     }
-    return NextResponse.json(result.body, { status: result.status });
+    return NextResponse.json({ ...result.body, emailRedirectedTo: redirectedTo }, { status: result.status });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Drain failed.";
     return NextResponse.json({ error: message }, { status: 500 });

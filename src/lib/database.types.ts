@@ -2714,42 +2714,6 @@ export type Database = {
           },
         ]
       }
-      transactional_emails: {
-        Row: {
-          created_at: string
-          error: string | null
-          id: number
-          kind: string
-          recipient_email: string
-          recipient_id: string | null
-          resend_message_id: string | null
-          status: string
-          workspace_id: string | null
-        }
-        Insert: {
-          created_at?: string
-          error?: string | null
-          id?: never
-          kind: string
-          recipient_email: string
-          recipient_id?: string | null
-          resend_message_id?: string | null
-          status: string
-          workspace_id?: string | null
-        }
-        Update: {
-          created_at?: string
-          error?: string | null
-          id?: never
-          kind?: string
-          recipient_email?: string
-          recipient_id?: string | null
-          resend_message_id?: string | null
-          status?: string
-          workspace_id?: string | null
-        }
-        Relationships: []
-      }
       trailer_configs: {
         Row: {
           created_at: string
@@ -2794,6 +2758,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      transactional_emails: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: number
+          kind: string
+          recipient_email: string
+          recipient_id: string | null
+          resend_message_id: string | null
+          status: string
+          workspace_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: never
+          kind: string
+          recipient_email: string
+          recipient_id?: string | null
+          resend_message_id?: string | null
+          status: string
+          workspace_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: never
+          kind?: string
+          recipient_email?: string
+          recipient_id?: string | null
+          resend_message_id?: string | null
+          status?: string
+          workspace_id?: string | null
+        }
+        Relationships: []
       }
       user_signature_profiles: {
         Row: {
@@ -3600,10 +3600,7 @@ export type Database = {
         Args: { p_workspace?: string }
         Returns: number
       }
-      mark_notifications_read: {
-        Args: { p_ids: number[] }
-        Returns: number
-      }
+      mark_notifications_read: { Args: { p_ids: number[] }; Returns: number }
       mint_pending_department_reviewer: {
         Args: { p_department_id: string; p_user_id: string }
         Returns: undefined
@@ -3617,7 +3614,11 @@ export type Database = {
         Returns: string
       }
       nominate_department_reviewer: {
-        Args: { p_department_id: string; p_email: string; p_position_title: string }
+        Args: {
+          p_department_id: string
+          p_email: string
+          p_position_title: string
+        }
         Returns: Json
       }
       product_project_id: {
@@ -3808,12 +3809,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3837,11 +3838,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3862,11 +3863,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3887,11 +3888,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3904,11 +3905,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

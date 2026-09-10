@@ -181,6 +181,7 @@ export type Database = {
           department_id: string
           dept_role: Database["public"]["Enums"]["department_sop_role"]
           granted_by: string | null
+          pending_invite_at: string | null
           position_title: string
           updated_at: string
           user_id: string
@@ -189,6 +190,7 @@ export type Database = {
           department_id: string
           dept_role?: Database["public"]["Enums"]["department_sop_role"]
           granted_by?: string | null
+          pending_invite_at?: string | null
           position_title?: string
           updated_at?: string
           user_id: string
@@ -197,6 +199,7 @@ export type Database = {
           department_id?: string
           dept_role?: Database["public"]["Enums"]["department_sop_role"]
           granted_by?: string | null
+          pending_invite_at?: string | null
           position_title?: string
           updated_at?: string
           user_id?: string

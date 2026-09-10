@@ -148,14 +148,30 @@ export function SopRosterEditor({
     return Boolean(department && !department.isQualityGate && myDeptRoles?.has(departmentId));
   }
 
-  /** After a nomination: reload the roster and, when the nominee is selectable, seat them. */
+  /**
+   * After a nomination: reload the roster and, when the nominee is selectable, seat them.
+   *
+   * Deliberately does NOT route through `guarded` (which no-ops while another roster write is
+   * in flight) — the nomination has already happened server-side by the time this runs, so
+   * silently dropping the seat write here would leave the author looking at a success message
+   * with the roster still unseated and no error shown anywhere.
+   */
   async function handleNominated(seat: SopReviewSeat | null, departmentId: string, result: NominationResponse) {
     await loadMembersForDepartmentIds([departmentId]);
     if (!result.seated || !result.userId) return;
-    if (seat) {
-      await guarded(`approver-${departmentId}`, () => upsertSeat({ ...seat, rasic: "responsible", signerId: result.userId }));
-    } else {
+    if (!seat) {
       setDraft((prev) => ({ ...prev, departmentId, signerId: result.userId ?? "" }));
+      return;
+    }
+    try {
+      await upsertSeat({ ...seat, rasic: "responsible", signerId: result.userId });
+      await onChanged();
+    } catch (caught) {
+      // The invitation went out; only the seat write failed. Surface it where the author is
+      // looking (the form) instead of a success line, and keep the roster's error banner in sync.
+      const message = `${getErrorMessage(caught)} — the invitation was sent; choose them from the list to seat them.`;
+      setError(message);
+      throw new Error(message);
     }
   }
 
@@ -224,6 +240,7 @@ export function SopRosterEditor({
             onClick={() => {
               setAdding((current) => !current);
               setDraft({ departmentId: "", signerId: "" });
+              setInvitingFor(null);
             }}
           >
             {adding ? <X size={14} /> : <Plus size={14} />}
@@ -258,7 +275,13 @@ export function SopRosterEditor({
               const isQualityReviewSeat = Boolean(department?.isQualityGate);
               const approverOptions = buildApproverOptions({
                 members: members.get(seat.departmentId) ?? [],
-                signerId: seat.signerId,
+                // `members` gets a key for every department the mount effect requests, even one
+                // with no members, so `.has` — not `?? []` on the signer — is the reliable "have
+                // we loaded this department yet" check. Without it, every seated row renders the
+                // disabled "No longer in department" placeholder for the instant between mount
+                // and the members fetch resolving, because an empty and an unloaded Map value are
+                // indistinguishable through `?? []` alone.
+                signerId: members.has(seat.departmentId) ? seat.signerId : null,
                 placeholder: "Choose an approver…",
                 now: new Date(),
               });

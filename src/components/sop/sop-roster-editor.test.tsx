@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Department, DeptRole } from "@/domain/departments";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
 import { listProfileNames, removeSeat, upsertSeat, type SopReviewSeat } from "@/lib/sop/review";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import { SopRosterEditor } from "./sop-roster-editor";
@@ -57,6 +57,10 @@ describe("SopRosterEditor", () => {
     vi.mocked(listMembersForDepartments).mockResolvedValue([]);
     vi.mocked(listProfileNames).mockReset();
     vi.mocked(listProfileNames).mockResolvedValue(new Map());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("offers Quality as an additional normal-loop reviewer", () => {
@@ -229,6 +233,86 @@ describe("SopRosterEditor", () => {
     await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Required approver for MFG" }));
     expect(screen.getByRole("option", { name: /No longer in department/ })).toBeDisabled();
+  });
+
+  it("does not show 'No longer in department' before the department's members have loaded", async () => {
+    // Members never resolve during this test — a Map key only exists once the fetch
+    // returns, so before that the seat's signer must not be treated as "absent".
+    vi.mocked(listMembersForDepartments).mockReturnValue(new Promise<DepartmentMember[]>(() => {}));
+
+    render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[manufacturingSeat]} onChanged={() => {}} />);
+
+    const trigger = screen.getByRole("button", { name: "Required approver for MFG" });
+    expect(trigger).not.toHaveTextContent("No longer in department");
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("option", { name: /No longer in department/ })).toBeNull();
+  });
+
+  it("seats the nominee after a successful invite and reloads the department's members", async () => {
+    vi.mocked(upsertSeat).mockClear();
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ mode: "invite", userId: "u-new", emailSent: true, seated: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={departments}
+        seats={[manufacturingSeat]}
+        myDeptRoles={new Map<string, DeptRole>([["dept-mfg", "author"]])}
+        onChanged={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalledWith(["dept-mfg"]));
+    fireEvent.click(screen.getByRole("button", { name: "Invite a reviewer for MFG" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Reviewer email" }), { target: { value: "new@anacorp.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send invite" }));
+
+    await waitFor(() =>
+      expect(upsertSeat).toHaveBeenCalledWith({ ...manufacturingSeat, rasic: "responsible", signerId: "u-new" }),
+    );
+    // Once on mount, once more after the nomination seats the nominee.
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not seat the nominee when the invite response reports them not yet seatable", async () => {
+    vi.mocked(upsertSeat).mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ mode: "invite", userId: "u-new", emailSent: true, seated: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      ),
+    );
+
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={departments}
+        seats={[manufacturingSeat]}
+        myDeptRoles={new Map<string, DeptRole>([["dept-mfg", "author"]])}
+        onChanged={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalledWith(["dept-mfg"]));
+    fireEvent.click(screen.getByRole("button", { name: "Invite a reviewer for MFG" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Reviewer email" }), { target: { value: "new@anacorp.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send invite" }));
+
+    await waitFor(() => expect(screen.getByText(/Invitation sent to new@anacorp.com/)).toBeTruthy());
+    expect(upsertSeat).not.toHaveBeenCalled();
   });
 });
 

@@ -8,7 +8,7 @@
 --   * a workspace member with no department row is still not a member
 
 begin;
-select plan(4);
+select plan(24);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -111,6 +111,168 @@ reset role;
 
 -- Clean the hand-made provisional row so later tasks start from the RPC path.
 delete from public.department_members where user_id = 'd0000000-0000-0000-0000-000000000006';
+
+-- ---------------------------------------------------------------------------
+-- 5-8. Refusals: other department, Quality gate, revoked address, unapproved domain.
+-- ---------------------------------------------------------------------------
+select test_as('d0000000-0000-0000-0000-000000000002');
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_eng', 'nom-member@anacorp.com', 'Engineer') $$,
+  '%your own department%',
+  'an author cannot nominate into a department they do not belong to'
+);
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_qas', 'nom-member@anacorp.com', 'Quality Engineer') $$,
+  '%managed by an admin%',
+  'the Quality-gate department is never nominatable'
+);
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_prd', 'nom-revoked@anacorp.com', 'Engineer') $$,
+  '%removed by an admin%',
+  'a revoked address is refused; authors never lift revocations'
+);
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_prd', 'someone@evil.com', 'Engineer') $$,
+  '%not approved%',
+  'an unapproved email domain is refused before any write'
+);
+
+-- ---------------------------------------------------------------------------
+-- 9-13. Modes for people already in the workspace: added / lifted / already_eligible.
+-- ---------------------------------------------------------------------------
+select is(
+  (public.nominate_department_reviewer('dept_nom_prd', 'nom-member@anacorp.com', 'Production Supervisor'))->>'mode',
+  'added',
+  'a workspace member outside the department is added as reviewer'
+);
+select is(
+  (select dept_role::text from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000005'),
+  'reviewer',
+  '…with the reviewer role and no pending marker'
+);
+select is(
+  (public.nominate_department_reviewer('dept_nom_prd', 'nom-peer@anacorp.com', 'Process Engineer'))->>'mode',
+  'lifted',
+  'a department author is lifted to reviewer'
+);
+select is(
+  (public.nominate_department_reviewer('dept_nom_prd', 'nom-approver@anacorp.com', 'VP'))->>'mode',
+  'already_eligible',
+  'an approver is left untouched'
+);
+select is(
+  (select dept_role::text from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000004'),
+  'approver',
+  '…and still holds approver'
+);
+
+-- ---------------------------------------------------------------------------
+-- 14-16. Invite mode: fixed-package grant + provisional row for an existing auth user.
+-- ---------------------------------------------------------------------------
+select is(
+  (public.nominate_department_reviewer('dept_nom_prd', 'nom-invitee@anacorp.com', 'Line Lead'))->>'user_id',
+  'd0000000-0000-0000-0000-000000000006',
+  'a non-member with an auth account: invite mode returns their user id'
+);
+reset role;  -- grants are manager-only under RLS; assert the rows as the owner
+select is(
+  (select row(g.role::text, g.quality_access::text, g.planning_access, g.granted_by::text,
+              g.department_access->0->>'department_id', g.department_access->0->>'role')::text
+     from public.workspace_access_grants g
+    where g.workspace_id = 'ws_nom' and g.email = 'nom-invitee@anacorp.com'),
+  '(editor,edit,f,d0000000-0000-0000-0000-000000000002,dept_nom_prd,reviewer)',
+  'the grant carries the fixed reviewer package, authored by the nominator'
+);
+select isnt(
+  (select pending_invite_at from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000006'),
+  null,
+  'a provisional membership was minted with the pending marker set'
+);
+
+-- ---------------------------------------------------------------------------
+-- 17/18. mint_pending_department_reviewer: refused without a matching grant BY THE CALLER; idempotent with one.
+-- ---------------------------------------------------------------------------
+select test_as('d0000000-0000-0000-0000-000000000003');
+select throws_like(
+  $$ select public.mint_pending_department_reviewer('dept_nom_prd', 'd0000000-0000-0000-0000-000000000006') $$,
+  '%No matching invitation%',
+  'a peer who did not send the invitation cannot mint the provisional row'
+);
+reset role;
+select test_as('d0000000-0000-0000-0000-000000000002');
+select lives_ok(
+  $$ select public.mint_pending_department_reviewer('dept_nom_prd', 'd0000000-0000-0000-0000-000000000006') $$,
+  'the nominator can re-mint (resend) idempotently'
+);
+
+-- ---------------------------------------------------------------------------
+-- 19. RLS unchanged: an author still cannot write department_members directly.
+-- ---------------------------------------------------------------------------
+select throws_ok(
+  $$ insert into public.department_members (department_id, user_id, dept_role)
+     values ('dept_nom_prd', 'd0000000-0000-0000-0000-000000000007', 'reviewer') $$,
+  '42501',
+  null,
+  'direct department_members writes remain owner/admin-only'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 20. Gate A passes with a provisional signer; the guard is untouched.
+-- ---------------------------------------------------------------------------
+insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id)
+values ('sop_nom_1', 'dept_nom_prd', 'responsible', 'd0000000-0000-0000-0000-000000000006');
+select test_as('d0000000-0000-0000-0000-000000000002');
+select public.sign_sop('sop_nom_1', 'authorship');
+select lives_ok(
+  $$ update public.sops set status = 'in_review' where id = 'sop_nom_1' $$,
+  'draft -> in_review succeeds while the seated reviewer has not joined yet'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 21. Deleting a pending invitation cascades its provisional row (second invitee, u8).
+-- ---------------------------------------------------------------------------
+select test_as('d0000000-0000-0000-0000-000000000002');
+select public.nominate_department_reviewer('dept_nom_prd', 'nom-second@anacorp.com', 'Technician');
+reset role;
+select test_as('d0000000-0000-0000-0000-000000000001');
+delete from public.workspace_access_grants where workspace_id = 'ws_nom' and email = 'nom-second@anacorp.com';
+reset role;
+select is(
+  (select count(*) from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000008'),
+  0::bigint,
+  'removing the pending invitation deletes the provisional membership'
+);
+
+-- ---------------------------------------------------------------------------
+-- 22-24. Acceptance: redeem clears the marker, keeps the seat, and mints the workspace membership.
+-- ---------------------------------------------------------------------------
+update auth.users set email_confirmed_at = now() where id = 'd0000000-0000-0000-0000-000000000006';
+select test_as_email('d0000000-0000-0000-0000-000000000006', 'nom-invitee@anacorp.com');
+select public.redeem_workspace_access_grants();
+reset role;
+select is(
+  (select pending_invite_at from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000006'),
+  null,
+  'redeeming the grant replaces the provisional row with an ordinary reviewer membership'
+);
+select is(
+  (select signer_id::text from public.sop_review_seats where sop_id = 'sop_nom_1' and department_id = 'dept_nom_prd'),
+  'd0000000-0000-0000-0000-000000000006',
+  'the seat still names the nominee across the delete-and-reinsert'
+);
+select is(
+  (select count(*) from public.workspace_members
+    where workspace_id = 'ws_nom' and user_id = 'd0000000-0000-0000-0000-000000000006'),
+  1::bigint,
+  'the nominee is now a workspace member (the queue and seat access unlock)'
+);
 
 select * from finish();
 rollback;

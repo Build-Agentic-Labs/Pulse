@@ -3604,6 +3604,10 @@ export type Database = {
         Args: { p_ids: number[] }
         Returns: number
       }
+      mint_pending_department_reviewer: {
+        Args: { p_department_id: string; p_user_id: string }
+        Returns: undefined
+      }
       mint_sop_number_internal: {
         Args: { p_department: string; p_doc_type: string; p_workspace: string }
         Returns: string
@@ -3611,6 +3615,10 @@ export type Database = {
       next_sop_number: {
         Args: { p_department: string; p_doc_type: string; p_workspace: string }
         Returns: string
+      }
+      nominate_department_reviewer: {
+        Args: { p_department_id: string; p_email: string; p_position_title: string }
+        Returns: Json
       }
       product_project_id: {
         Args: { target_product_id: string }

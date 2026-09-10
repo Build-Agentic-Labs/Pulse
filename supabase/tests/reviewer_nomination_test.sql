@@ -6,6 +6,7 @@
 --   * a provisional row satisfies is_department_member when the CALLER asks about someone else
 --     (Gate A, seat reassignment) and never when the provisional person is the actor
 --   * a workspace member with no department row is still not a member
+--   * the Quality-gate nomination refusal is tested with a member of that department (assertion 6)
 
 begin;
 select plan(24);
@@ -53,6 +54,7 @@ insert into public.department_members (department_id, user_id, dept_role) values
   ('dept_nom_prd', 'd0000000-0000-0000-0000-000000000002', 'author'),
   ('dept_nom_prd', 'd0000000-0000-0000-0000-000000000003', 'author'),
   ('dept_nom_prd', 'd0000000-0000-0000-0000-000000000004', 'approver'),
+  ('dept_nom_qas', 'd0000000-0000-0000-0000-000000000002', 'author'),
   ('dept_nom_qas', 'd0000000-0000-0000-0000-000000000001', 'approver');
 
 insert into public.workspace_revocations (workspace_id, email, revoked_by)

@@ -398,6 +398,11 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     ? workspaceRoleOptions
     : workspaceRoleOptions.filter((option) => option.value === "editor");
 
+  const inviterLabel = (grantedBy?: string): string | null => {
+    const inviter = grantedBy ? members.find((member) => member.userId === grantedBy) : undefined;
+    return inviter ? memberLabel(inviter) : null;
+  };
+
   return (
     <>
       {message ? <p className="ui-settings-section-desc px-1 text-ink-secondary">{message}</p> : null}
@@ -467,6 +472,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
                     <div className="ui-settings-group-row-desc">
                       <span>{compactInviteEntitlementSummary(entitlementsFromWorkspaceAccessGrant(grant))}</span>
                       {expires ? ` · ${expired ? "expired" : "expires"} ${expires}` : ""}
+                      {inviterLabel(grant.grantedBy) ? ` · invited by ${inviterLabel(grant.grantedBy)}` : ""}
                     </div>
                   </div>
                   <div className="ui-settings-group-row-control flex items-center gap-1.5">

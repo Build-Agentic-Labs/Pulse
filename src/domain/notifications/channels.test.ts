@@ -16,6 +16,7 @@ describe("NOTIFICATION_KINDS", () => {
         "objection_resolved",
         "remark_added",
         "stall_escalated",
+        "reviewer_not_joined",
         "workspace_welcome",
         "invite_accepted",
         "role_changed",

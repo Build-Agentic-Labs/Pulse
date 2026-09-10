@@ -9,7 +9,7 @@
 --   * the Quality-gate nomination refusal is tested with a member of that department (assertion 6)
 
 begin;
-select plan(24);
+select plan(25);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -274,6 +274,15 @@ select is(
     where workspace_id = 'ws_nom' and user_id = 'd0000000-0000-0000-0000-000000000006'),
   1::bigint,
   'the nominee is now a workspace member (the queue and seat access unlock)'
+);
+
+-- ---------------------------------------------------------------------------
+-- 25. The ledger admits the author-side stall kind.
+-- ---------------------------------------------------------------------------
+select lives_ok(
+  $$ insert into public.sop_notifications (sop_id, recipient_id, kind, reminder_index, review_cycle)
+     values ('sop_nom_1', 'd0000000-0000-0000-0000-000000000002', 'reviewer_not_joined', 1, 0) $$,
+  'reviewer_not_joined is an accepted sop_notifications kind'
 );
 
 select * from finish();

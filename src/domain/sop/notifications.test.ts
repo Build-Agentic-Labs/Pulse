@@ -696,3 +696,56 @@ describe("resolveEventRecipients: remark_added", () => {
   });
 });
 
+
+describe("pending (invited, not yet joined) signers", () => {
+  const pendingSeat = { departmentId: "d-r", departmentName: "Engineering", rasic: "responsible" as const, signerId: "resp", signerPending: true };
+  const state = (over: Partial<SopReminderState> = {}): SopReminderState => ({
+    sop: sop(),
+    seats: [pendingSeat],
+    qualityApprovers: [],
+    reviewReturns: [],
+    openAnnotationCount: 0,
+    recalledAt: null,
+    currentDeptApprovals: [],
+    approvedAt: null,
+    reviewSentAt: "2026-07-21T12:00:00Z",
+    reminders: [],
+    workspaceManagers: [],
+    ...over,
+  });
+
+  it("review_sent skips a pending signer's first touch", () => {
+    const c = ctx({ seats: [pendingSeat, { departmentId: "d-a", departmentName: "Ops", rasic: "accountable", signerId: "acct" }] });
+    expect(ids(resolveEventRecipients(event(), c))).toEqual(["acct"]);
+  });
+
+  it("seat_reassigned to a pending signer sends nothing yet", () => {
+    const c = ctx({ seats: [pendingSeat] });
+    const reassigned = event({ eventType: "seat_reassigned", actorId: "admin", details: { department_id: "d-r", to_signer_id: "resp" } });
+    expect(resolveEventRecipients(reassigned, c)).toEqual([]);
+  });
+
+  it("nudges the AUTHOR with reviewer_not_joined instead of the pending signer, once per author", () => {
+    const later = new Date("2026-07-25T12:00:00Z");
+    const s = state({
+      seats: [pendingSeat, { ...pendingSeat, departmentId: "d-b", departmentName: "Maintenance", signerId: "resp2" }],
+      reviewSentAt: "2026-07-21T12:00:00Z",
+    });
+    const out = resolveReminders(later, [s]);
+    expect(out).toEqual([
+      { recipientId: "author", kind: "reviewer_not_joined", sopId: "sop-1", eventId: null, reminderIndex: 1, reviewCycle: 1 },
+    ]);
+  });
+
+  it("resumes the normal review_requested nudge once the signer has joined", () => {
+    const later = new Date("2026-07-25T12:00:00Z");
+    const s = state({ seats: [{ ...pendingSeat, signerPending: false }], reviewSentAt: "2026-07-21T12:00:00Z" });
+    expect(resolveReminders(later, [s]).map((n) => [n.recipientId, n.kind])).toEqual([["resp", "review_requested"]]);
+  });
+
+  it("sends no author nudge when the SOP has no author on record", () => {
+    const later = new Date("2026-07-25T12:00:00Z");
+    const s = state({ sop: sop({ authorId: null }), seats: [pendingSeat], reviewSentAt: "2026-07-21T12:00:00Z" });
+    expect(resolveReminders(later, [s])).toEqual([]);
+  });
+});

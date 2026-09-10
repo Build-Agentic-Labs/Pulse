@@ -40,7 +40,8 @@ export type SopNotificationKind =
   | "seat_assigned"
   | "objection_raised"
   | "objection_resolved"
-  | "remark_added";
+  | "remark_added"
+  | "reviewer_not_joined";
 
 /** Local copy of the RASIC union — domain must not import from src/lib. */
 export type SopSeatRasic = "responsible" | "accountable" | "support" | "consulted" | "informed";
@@ -77,6 +78,8 @@ export interface SeatSnapshot {
   departmentName: string;
   rasic: SopSeatRasic;
   signerId: string | null;
+  /** The signer holds a provisional (invited, not yet joined) membership — they cannot act yet. */
+  signerPending?: boolean;
 }
 
 export interface QualityApproverSnapshot {
@@ -204,7 +207,7 @@ function seatRecipients(
 ): PendingNotification[] {
   return dedupeByRecipient(
     ctx.seats
-      .filter((seat) => includeSeat(seat.rasic) && seat.signerId && seat.signerId !== event.actorId)
+      .filter((seat) => includeSeat(seat.rasic) && seat.signerId && !seat.signerPending && seat.signerId !== event.actorId)
       .map((seat) => firstTouch(ctx, event, seat.signerId as string, kind)),
   );
 }
@@ -274,8 +277,8 @@ export function resolveEventRecipients(
       // A first touch for the new signer — only while there is something to do.
       const { departmentId, toSignerId } = parseEventDetails(event.details);
       if (!toSignerId || sop.status !== "in_review" || toSignerId === event.actorId) return [];
-      const stillTheirs = ctx.seats.some((seat) => seat.departmentId === departmentId && seat.signerId === toSignerId);
-      if (!stillTheirs) return [];
+      const target = ctx.seats.find((seat) => seat.departmentId === departmentId && seat.signerId === toSignerId);
+      if (!target || target.signerPending) return [];
       const alreadyReturned =
         !finalApprovalPhaseActive(sop) && ctx.reviewReturns.some((entry) => entry.reviewerId === toSignerId);
       if (alreadyReturned) return [];
@@ -405,6 +408,13 @@ function signerCandidates(state: SopReminderState): ReminderCandidate[] {
     const returned = new Set(state.reviewReturns.map((entry) => entry.reviewerId));
     for (const seat of state.seats) {
       if (!isBlocking(seat.rasic) || !seat.signerId || returned.has(seat.signerId)) continue;
+      if (seat.signerPending) {
+        // The invitee cannot act; the author owns the unblock (resend, or ask an admin to reassign).
+        if (sop.authorId) {
+          candidates.push({ recipientId: sop.authorId, kind: "reviewer_not_joined", anchorAt: state.reviewSentAt, departmentId: seat.departmentId });
+        }
+        continue;
+      }
       candidates.push({
         recipientId: seat.signerId,
         kind: "review_requested",

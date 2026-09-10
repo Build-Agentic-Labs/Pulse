@@ -132,4 +132,24 @@ describe("renderSopNotificationEmail", () => {
     expect(html).not.toContain("<b>");
     expect(html).toContain("&lt;b&gt;");
   });
+
+  it("reviewer_not_joined tells the author which seat is waiting and how to unblock it", () => {
+    const email = renderSopNotificationEmail({
+      kind: "reviewer_not_joined",
+      sopNumber: "PRO-SOP-004",
+      title: "Line Clearance",
+      version: "B",
+      actorName: "System",
+      departmentName: "Engineering",
+      origin: "https://pulse.example.com",
+      sopId: "sop-1",
+      reminderIndex: 1,
+      waitingDays: 4,
+    });
+    expect(email.subject).toMatch(/^Reminder: Your reviewer hasn't joined yet: /);
+    expect(email.subject).toContain("PRO-SOP-004");
+    expect(email.text).toContain("the Engineering seat");
+    expect(email.text).toContain("has not accepted their Pulse invitation yet");
+    expect(email.text).toContain("Resend the invitation");
+  });
 });

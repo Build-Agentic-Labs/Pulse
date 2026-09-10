@@ -219,6 +219,18 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
       bundle.departmentNameById.set(department.id, department.name);
       bundle.departmentCodeById.set(department.id, String(department.code ?? ""));
     }
+
+    const seatDepartmentIds = Array.from(new Set((seatsResult.data ?? []).map((seat) => seat.department_id)));
+    const { data: pendingRows, error: pendingError } = seatDepartmentIds.length
+      ? await admin
+          .from("department_members")
+          .select("department_id, user_id")
+          .in("department_id", seatDepartmentIds)
+          .not("pending_invite_at", "is", null)
+      : { data: [], error: null };
+    if (pendingError) throw new Error(pendingError.message);
+    const pendingSigners = new Set((pendingRows ?? []).map((row) => `${row.department_id}:${row.user_id}`));
+
     for (const seat of seatsResult.data ?? []) {
       const list = bundle.seatsBySop.get(seat.sop_id) ?? [];
       bundle.seatsBySop.set(seat.sop_id, [
@@ -228,6 +240,7 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
           departmentName: bundle.departmentNameById.get(seat.department_id) ?? "Unknown department",
           rasic: seat.rasic as SeatSnapshot["rasic"],
           signerId: seat.signer_id,
+          signerPending: seat.signer_id ? pendingSigners.has(`${seat.department_id}:${seat.signer_id}`) : false,
         },
       ]);
     }
@@ -481,12 +494,13 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     if (!row) return null;
     const seats = bundle.seatsBySop.get(pending.sopId) ?? [];
     const recipientSeat = seats.find((seat) => seat.signerId === pending.recipientId);
+    const pendingSeat = pending.kind === "reviewer_not_joined" ? seats.find((seat) => seat.signerPending) : undefined;
     const email = bundle.emailByUser.get(pending.recipientId) ?? null;
     const prefs = bundle.prefsByUser.get(pending.recipientId) ?? [];
     const subscriptions = bundle.pushByUser.get(pending.recipientId) ?? [];
     const pushOn = subscriptions.length > 0 && resolveChannelEnabled(pending.kind, "push", row.workspace_id, prefs, true);
     const stalledForTemplate: SopEmailInput["stalled"] = stalled?.map((entry) => ({
-      name: bundle.nameByUser.get(entry.userId) ?? "A participant",
+      name: `${bundle.nameByUser.get(entry.userId) ?? "A participant"}${entry.kind === "reviewer_not_joined" ? " (their invited reviewer has not joined)" : ""}`,
       departmentName: entry.departmentId ? (bundle.departmentNameById.get(entry.departmentId) ?? null) : null,
       waitingDays: entry.waitingDays,
     }));
@@ -505,7 +519,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         title: row.title,
         version: row.version,
         actorName,
-        departmentName: recipientSeat?.departmentName ?? null,
+        departmentName: (pendingSeat ?? recipientSeat)?.departmentName ?? null,
         origin,
         sopId: pending.sopId,
         reminderIndex: pending.reminderIndex,

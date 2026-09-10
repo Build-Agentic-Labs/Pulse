@@ -150,6 +150,15 @@ are separate functions on top of the live `append_sop_event`.
 5. Store: add the event type to the scan list if it is new.
 6. pgTAP: add the kind to `supabase/tests/notifications_test.sql`.
 
+### Kinds added 2026-09-10
+
+- `reviewer_not_joined` — SOP, to the author, on the standard 3-day ladder,
+  when a seated reviewer's invitation has not been accepted. Unblock: resend
+  from the roster, or reassign the seat.
+- `reviewer_nominated` — workspace, in-app only (no email), to owners/admins,
+  when an author nominates a reviewer. Written by the nomination route, not a
+  drain.
+
 ## 5. Guarantees and their limits
 
 - Exactly-once claim per (event, recipient) and per (sop, recipient, kind,

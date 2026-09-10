@@ -29,6 +29,7 @@ export const NOTIFICATION_KINDS: Record<string, NotificationKindMeta> = {
   objection_resolved: { label: "Objection resolved", group: "sop", defaultEmail: true },
   remark_added: { label: "Remark added", group: "sop", defaultEmail: false },
   stall_escalated: { label: "Stalled SOP escalated to you", group: "sop", defaultEmail: true },
+  reviewer_not_joined: { label: "Your invited reviewer hasn't joined", group: "sop", defaultEmail: true },
   workspace_welcome: { label: "Welcome to a workspace", group: "workspace", defaultEmail: true },
   invite_accepted: { label: "Your invitation was accepted", group: "workspace", defaultEmail: true },
   role_changed: { label: "Your role changed", group: "workspace", defaultEmail: true },

@@ -103,6 +103,15 @@ function copyFor(input: SopEmailInput, label: string): TemplateCopy {
         happened: `Every reviewer has responded to ${label}, and no remarks remain open.`,
         needed: `Open it and send it for final approval to collect the formal department signatures.`,
       };
+    case "reviewer_not_joined":
+      return {
+        subject: `Your reviewer hasn't joined yet: ${label}`,
+        eyebrow: "Reviewer not joined",
+        accent: "#b45309",
+        reason: AUTHOR_REASON,
+        happened: `${label} is waiting on ${input.departmentName ? `the ${input.departmentName} seat` : "a review seat"}, but the reviewer you invited has not accepted their Pulse invitation yet.`,
+        needed: `Resend the invitation from the SOP's approval roster, or ask an admin to reassign the seat.`,
+      };
     case "stall_escalated":
       return {
         subject: `Stalled: ${label} needs a nudge`,

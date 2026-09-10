@@ -20,6 +20,7 @@ describe("NOTIFICATION_KINDS", () => {
         "invite_accepted",
         "role_changed",
         "member_removed",
+        "reviewer_nominated",
         "stalled_weekly",
       ].sort(),
     );

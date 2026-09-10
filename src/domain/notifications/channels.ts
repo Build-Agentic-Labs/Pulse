@@ -33,6 +33,7 @@ export const NOTIFICATION_KINDS: Record<string, NotificationKindMeta> = {
   invite_accepted: { label: "Your invitation was accepted", group: "workspace", defaultEmail: true },
   role_changed: { label: "Your role changed", group: "workspace", defaultEmail: true },
   member_removed: { label: "Removed from a workspace", group: "workspace", defaultEmail: true },
+  reviewer_nominated: { label: "A reviewer was nominated in your workspace", group: "workspace", defaultEmail: false },
   stalled_weekly: { label: "Weekly stalled-work digest", group: "digest", defaultEmail: true },
 };
 

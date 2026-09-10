@@ -1,15 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { renderWorkspaceAccessGrantedEmail, renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
 import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import type { Database, Json } from "@/lib/database.types";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
-import {
-  inviteeHasCompletedSetup,
-  isAlreadyRegisteredAuthError,
-  qualityModuleInviteRedirect,
-  workspaceInviteAcceptanceUrl,
-} from "@/domain/workspace/invite";
+import { inviteeHasCompletedSetup, isAlreadyRegisteredAuthError } from "@/domain/workspace/invite";
 import {
   describeInviteEntitlements,
   normalizedInviteEntitlements,
@@ -22,10 +16,9 @@ import {
 } from "@/domain/workspace/invite-access";
 import { describeUnavailable, logMissingConfig } from "@/lib/auth/password-recovery-request";
 import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
-import { recordTransactionalEmail } from "@/lib/notifications/transactional-log";
 import { createResendSender } from "@/lib/sop/notifications-drain";
 import { normalizeJobTitle } from "@/domain/departments";
-import { countWorkspaceMemberships, deliverInvitationEmail, generateSetupLink } from "@/lib/workspace/invite-delivery";
+import { countWorkspaceMemberships, inviteRedirectTarget, sendInvitationViaResend } from "@/lib/workspace/invite-delivery";
 
 export const dynamic = "force-dynamic";
 
@@ -248,83 +241,48 @@ export async function POST(request: Request) {
   const admin = createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const configuredSiteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ??
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : undefined);
-  const redirectTo = qualityModuleInviteRedirect(request.url, configuredSiteUrl);
+  const redirectTo = inviteRedirectTarget(request.url);
 
   if (resendApiKey && resendFrom) {
-    const setupLink = await generateSetupLink(admin, email, redirectTo);
     // Honours NOTIFICATION_EMAIL_REDIRECT_TO during a test window.
     const send = createEmailSenderFromEnv().send ?? createResendSender(resendApiKey, resendFrom);
     const projectNames = new Map((projectsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
     const departmentNames = new Map((departmentsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
     const accessSummary = describeInviteEntitlements(entitlements, projectNames, departmentNames);
     const organizationName = workspaceResult.data?.name ?? "your organization";
-    const origin = new URL(redirectTo).origin;
 
-    if (setupLink.kind === "already_registered") {
-      // They finished setup before, so no credential goes out — but the admin
-      // clicked Resend because this person is waiting on SOMETHING, so at least
-      // tell them their access is live and where to sign in.
-      const delivered = await deliverInvitationEmail(
-        send,
-        email,
-        renderWorkspaceAccessGrantedEmail({
-          accessSummary,
-          email,
-          organizationName,
-          origin,
-          signInLink: new URL("/", origin).toString(),
-        }),
-        { admin, kind: "access_granted", workspaceId },
-      );
-      return NextResponse.json({
-        granted: true,
-        emailSent: delivered,
-        alreadyRegistered: true,
-        reason: delivered ? ALREADY_REGISTERED_EMAILED_REASON : ALREADY_REGISTERED_REASON,
-      });
+    const outcome = await sendInvitationViaResend(admin, send, {
+      email,
+      redirectTo,
+      accessSummary,
+      organizationName,
+      workspaceId,
+    });
+
+    if (outcome.kind === "sent") {
+      return NextResponse.json({ granted: true, emailSent: true });
     }
-
-    if (setupLink.kind === "link") {
-      const delivered = await deliverInvitationEmail(
-        send,
-        email,
-        renderWorkspaceInviteEmail({
-          actionLink: workspaceInviteAcceptanceUrl(redirectTo, email, setupLink.tokenHash, setupLink.type),
-          accessSummary,
-          email,
-          organizationName,
-          origin,
-        }),
-        { admin, kind: "invite", workspaceId },
-      );
-      if (delivered) {
-        return NextResponse.json({ granted: true, emailSent: true });
-      }
+    if (outcome.kind === "send_failed") {
       return NextResponse.json({
         granted: true,
         emailSent: false,
         reason: "The invitation email could not be sent. Try Resend again.",
       });
     }
-
-    console.error("Invitation link generation failed", { message: setupLink.message, code: setupLink.code, status: setupLink.status });
-    // No email exists yet, but the console must still see that this invite hit a wall.
-    await recordTransactionalEmail(admin, {
-      kind: "invite",
-      recipientEmail: email,
-      workspaceId,
-      result: {
-        ok: false,
-        status: setupLink.status ?? 0,
-        error: `generate_link: ${setupLink.code ?? setupLink.message}`,
-        failure: "configuration",
-      },
-    });
+    if (outcome.kind === "already_registered") {
+      // They finished setup before, so no credential goes out — but the admin
+      // clicked Resend because this person is waiting on SOMETHING, so at least
+      // tell them their access is live and where to sign in.
+      return NextResponse.json({
+        granted: true,
+        emailSent: outcome.delivered,
+        alreadyRegistered: true,
+        reason: outcome.delivered ? ALREADY_REGISTERED_EMAILED_REASON : ALREADY_REGISTERED_REASON,
+      });
+    }
+    // outcome.kind === "unavailable": no link could be minted. The failure is
+    // already logged and ledgered by sendInvitationViaResend — fall through to
+    // the Supabase-mail fallback below rather than returning.
   }
 
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });

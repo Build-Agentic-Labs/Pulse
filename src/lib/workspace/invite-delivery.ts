@@ -1,8 +1,8 @@
 /**
  * Invitation delivery helpers shared by the admin invite route and the author-nomination route.
- * Service-role only: `admin` must be a service-role client. Moved verbatim from
- * app/api/invites/route.ts (2026-09-10) with one addition — the setup link carries the auth user
- * id so a caller can mint a provisional membership for a freshly created invitee.
+ * Service-role only: `admin` must be a service-role client. `sendInvitationViaResend` is the full
+ * Resend path (mint link → render → deliver → ledger) both routes call; each route keeps only its
+ * own sender construction and its own mapping from `ResendInviteOutcome` to an HTTP response.
  */
 
 import { randomUUID } from "node:crypto";
@@ -11,8 +11,11 @@ import type { SopEmailContent } from "@/domain/sop/notifications";
 import {
   inviteeHasCompletedSetup,
   isAlreadyRegisteredAuthError,
+  qualityModuleInviteRedirect,
+  workspaceInviteAcceptanceUrl,
   type WorkspaceInviteVerificationType,
 } from "@/domain/workspace/invite";
+import { renderWorkspaceAccessGrantedEmail, renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
 import type { Database } from "@/lib/database.types";
 import { recordTransactionalEmail, type TransactionalEmailKind } from "@/lib/notifications/transactional-log";
 import type { EmailSender } from "@/lib/sop/notifications-drain";
@@ -112,4 +115,91 @@ export async function deliverInvitationEmail(
     });
   }
   return false;
+}
+
+/** Where an invitation link should land: the configured site (production) or, failing that, the request's origin. */
+export function inviteRedirectTarget(requestUrl: string): string {
+  const configuredSiteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : undefined);
+  return qualityModuleInviteRedirect(requestUrl, configuredSiteUrl);
+}
+
+export type ResendInviteOutcome =
+  | { kind: "sent"; userId: string | null } // setup/recovery link email delivered
+  | { kind: "send_failed"; userId: string | null } // link minted, provider refused (ledger row recorded by deliverInvitationEmail)
+  | { kind: "already_registered"; delivered: boolean; userId: string | null } // access-granted reminder attempted instead of a credential
+  | { kind: "unavailable"; message: string; code: string | null; status: number | null }; // no link could be minted; a failed `invite` ledger row IS recorded here
+
+export interface ResendInviteInput {
+  email: string;
+  redirectTo: string;
+  accessSummary: readonly string[];
+  organizationName: string;
+  workspaceId: string;
+}
+
+/**
+ * The Resend path of a workspace invitation: mint the one-time link, render the right email
+ * (setup link, or an access-granted reminder for someone who already finished setup), deliver it,
+ * and record the outcome in the transactional ledger. Callers build their own HTTP response from
+ * the outcome; the Supabase-mail fallback stays with the caller.
+ */
+export async function sendInvitationViaResend(
+  admin: SupabaseClient<Database>,
+  send: EmailSender,
+  input: ResendInviteInput,
+): Promise<ResendInviteOutcome> {
+  const setupLink = await generateSetupLink(admin, input.email, input.redirectTo);
+  const origin = new URL(input.redirectTo).origin;
+
+  if (setupLink.kind === "link") {
+    const delivered = await deliverInvitationEmail(
+      send,
+      input.email,
+      renderWorkspaceInviteEmail({
+        actionLink: workspaceInviteAcceptanceUrl(input.redirectTo, input.email, setupLink.tokenHash, setupLink.type),
+        accessSummary: input.accessSummary,
+        email: input.email,
+        organizationName: input.organizationName,
+        origin,
+      }),
+      { admin, kind: "invite", workspaceId: input.workspaceId },
+    );
+    return delivered ? { kind: "sent", userId: setupLink.userId } : { kind: "send_failed", userId: setupLink.userId };
+  }
+
+  if (setupLink.kind === "already_registered") {
+    const delivered = await deliverInvitationEmail(
+      send,
+      input.email,
+      renderWorkspaceAccessGrantedEmail({
+        accessSummary: input.accessSummary,
+        email: input.email,
+        organizationName: input.organizationName,
+        origin,
+        signInLink: new URL("/", origin).toString(),
+      }),
+      { admin, kind: "access_granted", workspaceId: input.workspaceId },
+    );
+    return { kind: "already_registered", delivered, userId: setupLink.userId };
+  }
+
+  console.error("Invitation link generation failed", {
+    message: setupLink.message,
+    code: setupLink.code,
+    status: setupLink.status,
+  });
+  await recordTransactionalEmail(admin, {
+    kind: "invite",
+    recipientEmail: input.email,
+    workspaceId: input.workspaceId,
+    result: {
+      ok: false,
+      status: setupLink.status ?? 0,
+      error: `generate_link: ${setupLink.code ?? setupLink.message}`,
+      failure: "configuration",
+    },
+  });
+  return { kind: "unavailable", message: setupLink.message, code: setupLink.code, status: setupLink.status };
 }

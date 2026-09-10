@@ -5,8 +5,7 @@ const mocks = vi.hoisted(() => ({
   callerFrom: vi.fn(),
   adminFrom: vi.fn(),
   inviteUserByEmail: vi.fn(),
-  generateSetupLink: vi.fn(),
-  deliverInvitationEmail: vi.fn(),
+  sendInvitationViaResend: vi.fn(),
   insertInboxRows: vi.fn(),
   send: vi.fn(),
 }));
@@ -28,8 +27,8 @@ vi.mock("@/lib/sop/notifications-drain", () => ({
 }));
 
 vi.mock("@/lib/workspace/invite-delivery", () => ({
-  generateSetupLink: mocks.generateSetupLink,
-  deliverInvitationEmail: mocks.deliverInvitationEmail,
+  sendInvitationViaResend: mocks.sendInvitationViaResend,
+  inviteRedirectTarget: () => "https://pulse.anacorp.com/?invite=1",
 }));
 
 vi.mock("@/lib/notifications/inbox-writer", () => ({
@@ -87,8 +86,7 @@ beforeEach(() => {
     if (name === "mint_pending_department_reviewer") return Promise.resolve({ data: null, error: null });
     return Promise.resolve({ data: null, error: { message: `unexpected rpc ${name}` } });
   });
-  mocks.generateSetupLink.mockResolvedValue({ kind: "link", tokenHash: "hash-1", type: "invite", userId: "u-6" });
-  mocks.deliverInvitationEmail.mockResolvedValue(true);
+  mocks.sendInvitationViaResend.mockResolvedValue({ kind: "sent", userId: "u-6" });
   mocks.insertInboxRows.mockResolvedValue(true);
 });
 
@@ -111,7 +109,7 @@ describe("POST /api/sops/reviewers/nominate", () => {
     const response = await POST(nominateRequest());
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ mode: "added", userId: "u-5", emailSent: false, seated: true });
-    expect(mocks.generateSetupLink).not.toHaveBeenCalled();
+    expect(mocks.sendInvitationViaResend).not.toHaveBeenCalled();
     expect(mocks.insertInboxRows).toHaveBeenCalledTimes(1);
     const rows = mocks.insertInboxRows.mock.calls[0][1] as { recipientId: string; kind: string; link: string }[];
     expect(rows.map((row) => row.recipientId)).toEqual(["owner-1"]);
@@ -127,13 +125,17 @@ describe("POST /api/sops/reviewers/nominate", () => {
       p_position_title: "Line Lead",
     });
     expect(mocks.rpc).toHaveBeenCalledWith("mint_pending_department_reviewer", { p_department_id: "dept-prd", p_user_id: "u-6" });
-    expect(mocks.deliverInvitationEmail).toHaveBeenCalledTimes(1);
-    expect(mocks.deliverInvitationEmail.mock.calls[0][3]).toMatchObject({ kind: "invite", workspaceId: "ws-1" });
+    expect(mocks.sendInvitationViaResend).toHaveBeenCalledTimes(1);
+    expect(mocks.sendInvitationViaResend).toHaveBeenCalledWith(
+      expect.anything(),
+      mocks.send,
+      expect.objectContaining({ email: "new.reviewer@anacorp.com", workspaceId: "ws-1", organizationName: "ANA Corp" }),
+    );
   });
 
   it("invites a brand-new address: the user id comes from the setup link", async () => {
     mocks.rpc.mockImplementationOnce(() => Promise.resolve({ data: { mode: "invite", user_id: null }, error: null }));
-    mocks.generateSetupLink.mockResolvedValueOnce({ kind: "link", tokenHash: "hash-2", type: "invite", userId: "new-1" });
+    mocks.sendInvitationViaResend.mockResolvedValueOnce({ kind: "sent", userId: "new-1" });
     const response = await POST(nominateRequest());
     await expect(response.json()).resolves.toEqual({ mode: "invite", userId: "new-1", emailSent: true, seated: true });
     expect(mocks.rpc).toHaveBeenCalledWith("mint_pending_department_reviewer", { p_department_id: "dept-prd", p_user_id: "new-1" });
@@ -154,11 +156,56 @@ describe("POST /api/sops/reviewers/nominate", () => {
     });
   });
 
+  it("reports the unavailable reason when Resend cannot mint a link, and tells managers the email hasn't gone out yet", async () => {
+    mocks.sendInvitationViaResend.mockResolvedValueOnce({ kind: "unavailable", message: "generate_link failed", code: "x", status: 500 });
+    const response = await POST(nominateRequest());
+    await expect(response.json()).resolves.toEqual({
+      mode: "invite",
+      userId: "u-6",
+      emailSent: false,
+      seated: true,
+      error: "generate_link failed",
+    });
+    expect(mocks.insertInboxRows).toHaveBeenCalledTimes(1);
+    const rows = mocks.insertInboxRows.mock.calls[0][1] as { body: string }[];
+    expect(rows[0].body).toBe(
+      "The invitation email did not go out yet. They can be seated now; resend the invitation from the roster.",
+    );
+  });
+
+  it("reports and logs when the service-role key is missing before an invite email would go out", async () => {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await POST(nominateRequest());
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { mode: string; emailSent: boolean; seated: boolean; error?: string };
+    expect(payload).toMatchObject({ mode: "invite", emailSent: false, seated: false });
+    expect(payload.error).toEqual(expect.stringContaining("SUPABASE_SERVICE_ROLE_KEY"));
+    expect(mocks.sendInvitationViaResend).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
   it("falls back to Supabase mail when Resend is not configured", async () => {
     process.env.RESEND_API_KEY = "";
-    mocks.inviteUserByEmail.mockResolvedValue({ data: { user: { id: "u-6" } }, error: null });
+    mocks.rpc.mockImplementationOnce(() => Promise.resolve({ data: { mode: "invite", user_id: null }, error: null }));
+    mocks.inviteUserByEmail.mockResolvedValue({ data: { user: { id: "u-new" } }, error: null });
     const response = await POST(nominateRequest());
-    await expect(response.json()).resolves.toEqual({ mode: "invite", userId: "u-6", emailSent: true, seated: true });
-    expect(mocks.generateSetupLink).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({ mode: "invite", userId: "u-new", emailSent: true, seated: true });
+    expect(mocks.sendInvitationViaResend).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledWith("mint_pending_department_reviewer", { p_department_id: "dept-prd", p_user_id: "u-new" });
+  });
+
+  it("logs and skips the manager notice when the managers lookup errors", async () => {
+    mocks.adminFrom.mockImplementation((table: string) => {
+      if (table === "workspace_members") return query({ data: null, error: { message: "boom" } });
+      if (table === "profiles") return query({ data: { full_name: "Ana Author" }, error: null });
+      throw new Error(`unexpected admin table ${table}`);
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await POST(nominateRequest());
+    expect(response.status).toBe(200);
+    expect(mocks.insertInboxRows).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith("Reviewer nomination: manager notice lookup failed", { message: "boom" });
+    error.mockRestore();
   });
 });

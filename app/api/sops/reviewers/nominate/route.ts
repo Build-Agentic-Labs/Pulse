@@ -1,8 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { describeInviteEntitlements } from "@/domain/workspace/invite-access";
-import { renderWorkspaceAccessGrantedEmail, renderWorkspaceInviteEmail } from "@/domain/workspace/invite-email";
-import { qualityModuleInviteRedirect, workspaceInviteAcceptanceUrl } from "@/domain/workspace/invite";
 import {
   nominatedReviewerEntitlements,
   parseNominationBody,
@@ -16,7 +14,7 @@ import type { Database } from "@/lib/database.types";
 import { insertInboxRows } from "@/lib/notifications/inbox-writer";
 import { createEmailSenderFromEnv } from "@/lib/notifications/sender-from-env";
 import { createResendSender } from "@/lib/sop/notifications-drain";
-import { deliverInvitationEmail, generateSetupLink } from "@/lib/workspace/invite-delivery";
+import { inviteRedirectTarget, sendInvitationViaResend } from "@/lib/workspace/invite-delivery";
 
 export const dynamic = "force-dynamic";
 
@@ -53,16 +51,26 @@ async function notifyManagers(
   actorId: string,
   email: string,
   mode: NominationMode,
+  emailSent: boolean,
 ): Promise<void> {
   const [managers, actor] = await Promise.all([
     admin.from("workspace_members").select("user_id").eq("workspace_id", scope.workspaceId).in("role", ["owner", "admin"]),
     admin.from("profiles").select("full_name").eq("id", actorId).maybeSingle(),
   ]);
+  if (managers.error) {
+    console.error("Reviewer nomination: manager notice lookup failed", { message: managers.error.message });
+    return;
+  }
+  if (actor.error) {
+    console.error("Reviewer nomination: manager notice lookup failed", { message: actor.error.message });
+  }
   const actorName = actor.data?.full_name || "An author";
   const title = `${actorName} nominated ${email} as a reviewer for ${scope.departmentName}`;
   const body =
     mode === "invite"
-      ? "An invitation was sent. They can be seated now; the review will be waiting when they join."
+      ? emailSent
+        ? "An invitation was sent. They can be seated now; the review will be waiting when they join."
+        : "The invitation email did not go out yet. They can be seated now; resend the invitation from the roster."
       : "They can now be selected as a departmental approver.";
   await insertInboxRows(
     admin,
@@ -132,7 +140,11 @@ export async function POST(request: Request) {
     : null;
 
   if (outcome.mode !== "invite") {
-    if (admin) await notifyManagers(admin, scope, body.sopId, auth.userId, body.email, outcome.mode);
+    if (admin) {
+      await notifyManagers(admin, scope, body.sopId, auth.userId, body.email, outcome.mode, false);
+    } else {
+      logMissingConfig("Reviewer invitations", ["SUPABASE_SERVICE_ROLE_KEY"], process.env.VERCEL_ENV);
+    }
     const response: NominationResponse = { mode: outcome.mode, userId: outcome.userId, emailSent: false, seated: true };
     return NextResponse.json(response);
   }
@@ -149,10 +161,7 @@ export async function POST(request: Request) {
     return NextResponse.json(response);
   }
 
-  const configuredSiteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ??
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : undefined);
-  const redirectTo = qualityModuleInviteRedirect(request.url, configuredSiteUrl);
+  const redirectTo = inviteRedirectTarget(request.url);
   const resendApiKey = process.env.RESEND_API_KEY ?? "";
   const resendFrom = process.env.RESEND_FROM ?? "";
 
@@ -161,49 +170,32 @@ export async function POST(request: Request) {
   let emailError: string | undefined;
 
   if (resendApiKey && resendFrom) {
-    const setupLink = await generateSetupLink(admin, body.email, redirectTo);
     const send = createEmailSenderFromEnv().send ?? createResendSender(resendApiKey, resendFrom);
-    const origin = new URL(redirectTo).origin;
     const accessSummary = describeInviteEntitlements(
       nominatedReviewerEntitlements(scope.departmentId, body.positionTitle),
       new Map(),
       new Map([[scope.departmentId, scope.departmentName]]),
     );
-    if (setupLink.kind === "link") {
-      userId = userId ?? setupLink.userId;
-      emailSent = await deliverInvitationEmail(
-        send,
-        body.email,
-        renderWorkspaceInviteEmail({
-          actionLink: workspaceInviteAcceptanceUrl(redirectTo, body.email, setupLink.tokenHash, setupLink.type),
-          accessSummary,
-          email: body.email,
-          organizationName: scope.workspaceName,
-          origin,
-        }),
-        { admin, kind: "invite", workspaceId: scope.workspaceId },
-      );
-    } else if (setupLink.kind === "already_registered") {
-      userId = userId ?? setupLink.userId;
-      emailSent = await deliverInvitationEmail(
-        send,
-        body.email,
-        renderWorkspaceAccessGrantedEmail({
-          accessSummary,
-          email: body.email,
-          organizationName: scope.workspaceName,
-          origin,
-          signInLink: new URL("/", origin).toString(),
-        }),
-        { admin, kind: "access_granted", workspaceId: scope.workspaceId },
-      );
+    const resendOutcome = await sendInvitationViaResend(admin, send, {
+      email: body.email,
+      redirectTo,
+      accessSummary,
+      organizationName: scope.workspaceName,
+      workspaceId: scope.workspaceId,
+    });
+    if (resendOutcome.kind === "sent") {
+      emailSent = true;
+      userId = userId ?? resendOutcome.userId;
+    } else if (resendOutcome.kind === "send_failed") {
+      emailSent = false;
+      userId = userId ?? resendOutcome.userId;
+      emailError = "The invitation email could not be sent. Try Resend again.";
+    } else if (resendOutcome.kind === "already_registered") {
+      emailSent = resendOutcome.delivered;
+      userId = userId ?? resendOutcome.userId;
     } else {
-      emailError = setupLink.message;
-      console.error("Reviewer nomination: invitation link generation failed", {
-        message: setupLink.message,
-        code: setupLink.code,
-        status: setupLink.status,
-      });
+      emailSent = false;
+      emailError = resendOutcome.message;
     }
   } else {
     const { data, error } = await admin.auth.admin.inviteUserByEmail(body.email, { redirectTo });
@@ -226,7 +218,7 @@ export async function POST(request: Request) {
     else seated = true;
   }
 
-  await notifyManagers(admin, scope, body.sopId, auth.userId, body.email, "invite");
+  await notifyManagers(admin, scope, body.sopId, auth.userId, body.email, "invite", emailSent);
 
   const response: NominationResponse = {
     mode: "invite",
@@ -237,7 +229,7 @@ export async function POST(request: Request) {
       ? { error: seatError }
       : emailSent
         ? {}
-        : { error: emailError ?? "The invitation email could not be sent. Use Resend." }),
+        : { error: emailError ?? "The invitation email could not be sent. Try Resend again." }),
   };
   return NextResponse.json(response);
 }

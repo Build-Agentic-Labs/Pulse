@@ -50,10 +50,14 @@ invitee until they accept. The author waits for the accept before sending for re
 `auth.users` row the moment an invite is generated, so the nominee has a stable `user_id`
 before accepting. Both `sop_review_seats.signer_id` and `department_members.user_id`
 reference that id. Minting the `department_members` row at nomination (flagged as pending)
-makes the nominee appear in the roster dropdown and satisfies the transition guard's
-"every seat's reviewer must belong to that seat's department" check with **no change to the
-guard**. A pending member cannot sign in until they accept, so the early row grants no
-usable access.
+makes the nominee appear in the roster dropdown. The transition guard's "every seat's
+reviewer must belong to that seat's department" check stays **untouched**; it calls
+`is_department_member(dept, signer)`, whose current definition (migration `20260904120000`)
+also requires a `workspace_members` row. That predicate gains one narrowly scoped clause: a
+provisional row counts **only when the database is asked about someone other than the
+caller** (`auth.uid() is distinct from p_user`) — seating and gating — and never when the
+provisional person is the one acting. So a nominee who can already sign in still reads,
+edits, and signs nothing until they accept; the early row grants no usable access.
 
 **B. Relax the transition guard to accept a pending grant as membership.** Requires an
 in-place patch of `enforce_sop_transition` (the guarded-replace pattern) and teaches the
@@ -175,9 +179,16 @@ and delete that user's `department_members` rows in the grant's workspace where
 ### Existing gates, unchanged and still correct
 
 - `enforce_sop_transition` draft → in_review: "every seat's reviewer must belong to that
-  seat's department" — satisfied by the provisional row.
-- `sign_sop`: only the designated reviewer for the seat can sign — a pending user cannot sign
-  in, so cannot sign.
+  seat's department" — satisfied by the provisional row through the widened
+  `is_department_member` (the submitter asks about the signer, so the clause applies).
+  `is_department_member` is NOT one of the live-patched functions: its full current text is
+  the checked-in `20260904120000` definition and no migration patches it via
+  `pg_get_functiondef`. The migration still asserts the live body contains the
+  `workspace_members` join before replacing it, so a drifted base fails loudly.
+- `sign_sop`: only the designated reviewer for the seat can sign, and its own membership
+  check runs as the actor (`is_department_member(dept)` with `p_user = auth.uid()`), where
+  the provisional clause never applies — so a pending user cannot sign even if they can
+  sign in.
 - `reassign_sop_seat`: "the new reviewer must be a member of that seat's department" — a
   provisional member qualifies, which is desirable (an admin may seat them too).
 - Three-humans invariant: unaffected; the nominee is a distinct user id.
@@ -290,6 +301,8 @@ Server logs keep the full RPC error; the client never sees stack detail.
 - Grant delete cascades the provisional row; seat row unchanged.
 - Redeem clears `pending_invite_at` and keeps the seat's `signer_id`.
 - `draft → in_review` succeeds with a provisional signer (guard untouched, still passes).
+- Acting AS the provisional user, `is_department_member(dept)` is false (the clause never
+  applies to the actor); acting as the author, `is_department_member(dept, nominee)` is true.
 - `protect_manager_invitation` still blocks an author from producing an admin-role grant.
 
 **Vitest**
@@ -312,10 +325,14 @@ Server logs keep the full RPC error; the client never sees stack detail.
 ## Migrations
 
 1. `department_members.pending_invite_at` + index on `(department_id) where pending_invite_at is not null`.
-2. `nominate_department_reviewer`, `mint_pending_department_reviewer` (`security definer`,
+2. `is_department_member(text, uuid)` redefined from its `20260904120000` text plus the
+   provisional clause, guarded by a pre-check on the live definition.
+3. `nominate_department_reviewer`, `mint_pending_department_reviewer` (`security definer`,
    `search_path` pinned, execute granted to `authenticated` only).
-3. `after delete` cascade trigger on `workspace_access_grants`.
-4. `npm run gen:types`; commit `src/lib/database.types.ts`.
+4. `after delete or update of expires_at` sync trigger on `workspace_access_grants`
+   (delete cascades the provisional row; an admin resend refreshes `pending_invite_at`).
+5. `sop_notifications` kind CHECK admits `reviewer_not_joined`.
+6. `npm run gen:types`; commit `src/lib/database.types.ts`.
 
 No migration reads or rewrites `enforce_sop_transition` or `sign_sop`.
 

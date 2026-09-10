@@ -123,7 +123,9 @@ A nomination writes a grant with a fixed, non-negotiable entitlement shape:
 
 The route never accepts these fields from the client. If a grant for the email already
 exists, the nomination **merges** the department entry into `department_access` and leaves
-every other field as the admin set it; it never downgrades.
+every other field as the admin set it; it never downgrades. An existing `approver` entry for
+the same department is kept exactly as the admin wrote it — only the grant's `expires_at` is
+refreshed — and the provisional membership mirrors that `approver` role instead of `reviewer`.
 
 ### No other schema changes
 
@@ -146,7 +148,9 @@ user_id uuid | null }`. Checks, in order, each raising a clear exception:
 6. No `workspace_revocations` tombstone for (workspace, email). The admin invite route lifts
    revocations deliberately; an author never does — the nomination is refused with "ask an
    admin".
-7. Resolve `auth.users` by email. Then:
+7. No self-nomination: the nominee's email must not resolve to the caller — otherwise any
+   department author could lift their own role to `reviewer`.
+8. Resolve `auth.users` by email. Then:
    - **User is a workspace member and a department member with `author`** → update to
      `reviewer` (`lifted`).
    - **… with `reviewer` or `approver`** → no-op (`already_eligible`).

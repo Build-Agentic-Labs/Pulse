@@ -494,7 +494,12 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
     if (!row) return null;
     const seats = bundle.seatsBySop.get(pending.sopId) ?? [];
     const recipientSeat = seats.find((seat) => seat.signerId === pending.recipientId);
-    const pendingSeat = pending.kind === "reviewer_not_joined" ? seats.find((seat) => seat.signerPending) : undefined;
+    // Only a Responsible/Accountable seat blocks the release, so only that seat's department is
+    // the one the author is being nudged about; a pending Support seat would name the wrong one.
+    const pendingSeat =
+      pending.kind === "reviewer_not_joined"
+        ? seats.find((seat) => seat.signerPending && (seat.rasic === "responsible" || seat.rasic === "accountable"))
+        : undefined;
     const email = bundle.emailByUser.get(pending.recipientId) ?? null;
     const prefs = bundle.prefsByUser.get(pending.recipientId) ?? [];
     const subscriptions = bundle.pushByUser.get(pending.recipientId) ?? [];

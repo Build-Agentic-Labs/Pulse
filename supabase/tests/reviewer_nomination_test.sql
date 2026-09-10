@@ -7,9 +7,15 @@
 --     (Gate A, seat reassignment) and never when the provisional person is the actor
 --   * a workspace member with no department row is still not a member
 --   * the Quality-gate nomination refusal is tested with a member of that department (assertion 6)
+--
+-- Pins (final review): self-nomination is refused; a stale pending marker on a real member is
+-- cleared; an admin's approver invitation survives a nomination undowngraded; minting is refused
+-- for an unnamed department and for an expired grant; protect_manager_invitation still blocks an
+-- author from touching an administrator's invitation; a provisional actor can neither sign nor
+-- read; the resend trigger refreshes only provisional rows.
 
 begin;
-select plan(25);
+select plan(38);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -28,9 +34,11 @@ values
   ('d0000000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'nom-member@anacorp.com'),
   ('d0000000-0000-0000-0000-000000000006', 'authenticated', 'authenticated', 'nom-invitee@anacorp.com'),
   ('d0000000-0000-0000-0000-000000000007', 'authenticated', 'authenticated', 'nom-revoked@anacorp.com'),
-  ('d0000000-0000-0000-0000-000000000008', 'authenticated', 'authenticated', 'nom-second@anacorp.com');
+  ('d0000000-0000-0000-0000-000000000008', 'authenticated', 'authenticated', 'nom-second@anacorp.com'),
+  ('d0000000-0000-0000-0000-000000000009', 'authenticated', 'authenticated', 'nom-preapproved@anacorp.com');
 
--- u6 (invitee), u7 (revoked) and u8 (second invitee) are NOT workspace members.
+-- u6 (invitee), u7 (revoked), u8 (second invitee) and u9 (already invited by an admin as an
+-- approver) are NOT workspace members.
 insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_nom', 'd0000000-0000-0000-0000-000000000001', 'admin'),
   ('ws_nom', 'd0000000-0000-0000-0000-000000000002', 'editor'),
@@ -140,7 +148,16 @@ select throws_like(
 );
 
 -- ---------------------------------------------------------------------------
--- 9-13. Modes for people already in the workspace: added / lifted / already_eligible.
+-- 9. Nobody nominates themselves — that would be a self-service role lift.
+-- ---------------------------------------------------------------------------
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_prd', 'nom-author@anacorp.com', 'Engineer') $$,
+  '%nominate yourself%',
+  'an author cannot nominate themselves into the reviewer role'
+);
+
+-- ---------------------------------------------------------------------------
+-- 10-13. Modes for people already in the workspace: added, and a stale marker is cleared.
 -- ---------------------------------------------------------------------------
 select is(
   (public.nominate_department_reviewer('dept_nom_prd', 'nom-member@anacorp.com', 'Production Supervisor'))->>'mode',
@@ -153,6 +170,29 @@ select is(
   'reviewer',
   '…with the reviewer role and no pending marker'
 );
+
+-- A marker left behind by another join path would misroute this seat forever.
+reset role;
+update public.department_members set pending_invite_at = now()
+ where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000005';
+select test_as('d0000000-0000-0000-0000-000000000002');
+select is(
+  (public.nominate_department_reviewer('dept_nom_prd', 'nom-member@anacorp.com', 'Production Supervisor'))->>'mode',
+  'already_eligible',
+  're-nominating a real reviewer is a no-op'
+);
+reset role;
+select is(
+  (select pending_invite_at from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000005'),
+  null,
+  'a re-nomination clears a stale marker on a real member'
+);
+
+-- ---------------------------------------------------------------------------
+-- 14-16. Modes: lifted / already_eligible.
+-- ---------------------------------------------------------------------------
+select test_as('d0000000-0000-0000-0000-000000000002');
 select is(
   (public.nominate_department_reviewer('dept_nom_prd', 'nom-peer@anacorp.com', 'Process Engineer'))->>'mode',
   'lifted',
@@ -171,7 +211,7 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
--- 14-16. Invite mode: fixed-package grant + provisional row for an existing auth user.
+-- 17-19. Invite mode: fixed-package grant + provisional row for an existing auth user.
 -- ---------------------------------------------------------------------------
 select is(
   (public.nominate_department_reviewer('dept_nom_prd', 'nom-invitee@anacorp.com', 'Line Lead'))->>'user_id',
@@ -195,7 +235,41 @@ select isnt(
 );
 
 -- ---------------------------------------------------------------------------
--- 17/18. mint_pending_department_reviewer: refused without a matching grant BY THE CALLER; idempotent with one.
+-- 20-22. An admin's approver invitation is never downgraded by a nomination.
+-- ---------------------------------------------------------------------------
+select test_as('d0000000-0000-0000-0000-000000000001');
+reset role;  -- postgres bypasses RLS; the claims stay so the manager-protection trigger sees an admin
+insert into public.workspace_access_grants
+  (workspace_id, email, role, quality_access, access_package, planning_access, project_access,
+   department_access, granted_by, expires_at)
+values
+  ('ws_nom', 'nom-preapproved@anacorp.com', 'editor', 'edit', 'custom', false, '[]'::jsonb,
+   '[{"department_id":"dept_nom_prd","role":"approver","position_title":"QA Lead"}]'::jsonb,
+   'd0000000-0000-0000-0000-000000000001', now() + interval '30 days');
+
+select test_as('d0000000-0000-0000-0000-000000000002');
+select is(
+  (public.nominate_department_reviewer('dept_nom_prd', 'nom-preapproved@anacorp.com', 'Line Lead'))->>'mode',
+  'invite',
+  'nominating someone an admin already invited still reports invite'
+);
+reset role;
+select is(
+  (select g.department_access->0->>'role' from public.workspace_access_grants g
+    where g.workspace_id = 'ws_nom' and g.email = 'nom-preapproved@anacorp.com'),
+  'approver',
+  'an admin''s approver invitation is not downgraded'
+);
+select is(
+  (select dept_role::text from public.department_members
+    where user_id = 'd0000000-0000-0000-0000-000000000009' and department_id = 'dept_nom_prd'),
+  'approver',
+  'the provisional row mirrors the kept approver entry'
+);
+
+-- ---------------------------------------------------------------------------
+-- 23-25. mint_pending_department_reviewer: refused without a matching grant BY THE CALLER,
+-- refused for a department the grant does not name, idempotent with one.
 -- ---------------------------------------------------------------------------
 select test_as('d0000000-0000-0000-0000-000000000003');
 select throws_like(
@@ -205,13 +279,18 @@ select throws_like(
 );
 reset role;
 select test_as('d0000000-0000-0000-0000-000000000002');
+select throws_like(
+  $$ select public.mint_pending_department_reviewer('dept_nom_eng', 'd0000000-0000-0000-0000-000000000006') $$,
+  '%does not name this department%',
+  'the nominator cannot mint a row in a department the invitation does not name'
+);
 select lives_ok(
   $$ select public.mint_pending_department_reviewer('dept_nom_prd', 'd0000000-0000-0000-0000-000000000006') $$,
   'the nominator can re-mint (resend) idempotently'
 );
 
 -- ---------------------------------------------------------------------------
--- 19. RLS unchanged: an author still cannot write department_members directly.
+-- 26. RLS unchanged: an author still cannot write department_members directly.
 -- ---------------------------------------------------------------------------
 select throws_ok(
   $$ insert into public.department_members (department_id, user_id, dept_role)
@@ -223,7 +302,7 @@ select throws_ok(
 reset role;
 
 -- ---------------------------------------------------------------------------
--- 20. Gate A passes with a provisional signer; the guard is untouched.
+-- 27. Gate A passes with a provisional signer; the guard is untouched.
 -- ---------------------------------------------------------------------------
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id)
 values ('sop_nom_1', 'dept_nom_prd', 'responsible', 'd0000000-0000-0000-0000-000000000006');
@@ -236,10 +315,37 @@ select lives_ok(
 reset role;
 
 -- ---------------------------------------------------------------------------
--- 21. Deleting a pending invitation cascades its provisional row (second invitee, u8).
+-- 28/29. The provisional row grants the nominee nothing: they cannot sign or even read the SOP.
+-- ---------------------------------------------------------------------------
+select test_as('d0000000-0000-0000-0000-000000000006');
+select throws_ok(
+  $$ select public.sign_sop('sop_nom_1', 'dept_approval', null, 'dept_nom_prd') $$,
+  null,
+  null,
+  'a provisional signer cannot sign before joining'
+);
+select is(
+  (select count(*) from public.sops where id = 'sop_nom_1'),
+  0::bigint,
+  'a provisional signer cannot read the SOP before joining'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 30/31. An expired invitation mints nothing; deleting the invitation cascades the
+-- provisional row (second invitee, u8).
 -- ---------------------------------------------------------------------------
 select test_as('d0000000-0000-0000-0000-000000000002');
 select public.nominate_department_reviewer('dept_nom_prd', 'nom-second@anacorp.com', 'Technician');
+reset role;
+update public.workspace_access_grants set expires_at = now() - interval '1 day'
+ where workspace_id = 'ws_nom' and email = 'nom-second@anacorp.com';
+select test_as('d0000000-0000-0000-0000-000000000002');
+select throws_like(
+  $$ select public.mint_pending_department_reviewer('dept_nom_prd', 'd0000000-0000-0000-0000-000000000008') $$,
+  '%No matching invitation%',
+  'an expired invitation cannot mint a provisional row'
+);
 reset role;
 select test_as('d0000000-0000-0000-0000-000000000001');
 delete from public.workspace_access_grants where workspace_id = 'ws_nom' and email = 'nom-second@anacorp.com';
@@ -252,7 +358,52 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
--- 22-24. Acceptance: redeem clears the marker, keeps the seat, and mints the workspace membership.
+-- 32. protect_manager_invitation still stands: an author cannot touch an admin-role invitation.
+-- ---------------------------------------------------------------------------
+select test_as('d0000000-0000-0000-0000-000000000001');
+reset role;  -- an admin writes the administrator invitation; the author must not be able to merge into it
+insert into public.workspace_access_grants
+  (workspace_id, email, role, quality_access, access_package, planning_access, project_access,
+   department_access, granted_by, expires_at)
+values
+  ('ws_nom', 'nom-adminmail@anacorp.com', 'admin', 'edit', 'custom', false, '[]'::jsonb, '[]'::jsonb,
+   'd0000000-0000-0000-0000-000000000001', now() + interval '30 days');
+select test_as('d0000000-0000-0000-0000-000000000002');
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_prd', 'nom-adminmail@anacorp.com', 'Engineer') $$,
+  '%Only an owner%',
+  'an author cannot merge a reviewer entry into an administrator invitation'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 33/34. The resend trigger refreshes provisional markers only.
+-- ---------------------------------------------------------------------------
+update public.workspace_access_grants set expires_at = now() + interval '60 days'
+ where workspace_id = 'ws_nom' and email = 'nom-invitee@anacorp.com';
+select is(
+  (select pending_invite_at > now() - interval '10 seconds' from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000006'),
+  true,
+  'an admin resend refreshes the pending marker'
+);
+insert into public.workspace_access_grants
+  (workspace_id, email, role, quality_access, access_package, planning_access, project_access,
+   department_access, granted_by, expires_at)
+values
+  ('ws_nom', 'nom-member@anacorp.com', 'editor', 'edit', 'custom', false, '[]'::jsonb, '[]'::jsonb,
+   'd0000000-0000-0000-0000-000000000001', now() + interval '30 days');
+update public.workspace_access_grants set expires_at = now() + interval '60 days'
+ where workspace_id = 'ws_nom' and email = 'nom-member@anacorp.com';
+select is(
+  (select pending_invite_at from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000005'),
+  null,
+  'a resend never marks a real member pending'
+);
+
+-- ---------------------------------------------------------------------------
+-- 35-37. Acceptance: redeem clears the marker, keeps the seat, and mints the workspace membership.
 -- ---------------------------------------------------------------------------
 update auth.users set email_confirmed_at = now() where id = 'd0000000-0000-0000-0000-000000000006';
 select test_as_email('d0000000-0000-0000-0000-000000000006', 'nom-invitee@anacorp.com');
@@ -277,7 +428,7 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
--- 25. The ledger admits the author-side stall kind.
+-- 38. The ledger admits the author-side stall kind.
 -- ---------------------------------------------------------------------------
 select lives_ok(
   $$ insert into public.sop_notifications (sop_id, recipient_id, kind, reminder_index, review_cycle)

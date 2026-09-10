@@ -24,6 +24,9 @@ declare
   v_current_role public.department_sop_role;
   v_entry jsonb;
   v_grant public.workspace_access_grants%rowtype;
+  v_keep_approver boolean := false;
+  v_dept_access jsonb;
+  v_row_role public.department_sop_role := 'reviewer';
 begin
   if v_caller is null then
     raise exception 'Sign in first.';
@@ -43,9 +46,13 @@ begin
     raise exception 'Quality approvers are managed by an admin.';
   end if;
 
-  if v_email = '' or position('@' in v_email) = 0 then
+  if v_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
     raise exception 'Enter a work email address.';
   end if;
+
+  -- Two authors nominating the same address into the same department at once would otherwise race
+  -- the read-then-merge below. Serialize on (department, normalized email) for the transaction.
+  perform pg_advisory_xact_lock(hashtext(p_department_id || ':' || v_email));
 
   if not exists (
     select 1 from public.workspace_auto_join_domains rule
@@ -59,6 +66,10 @@ begin
     raise exception 'Enter the position title.';
   end if;
 
+  if char_length(v_title) > 120 then
+    raise exception 'Position title is too long (120 characters max).';
+  end if;
+
   if exists (
     select 1 from public.workspace_revocations r
     where r.workspace_id = v_department.workspace_id and r.email = v_email
@@ -67,6 +78,11 @@ begin
   end if;
 
   select u.id into v_user_id from auth.users u where lower(btrim(u.email)) = v_email limit 1;
+
+  -- Self-nomination would let any department author lift their own role to reviewer.
+  if v_user_id = v_caller then
+    raise exception 'You cannot nominate yourself.';
+  end if;
 
   v_is_member := v_user_id is not null and exists (
     select 1 from public.workspace_members m
@@ -77,6 +93,12 @@ begin
     select dept_role into v_current_role
       from public.department_members
      where department_id = v_department.id and user_id = v_user_id;
+
+    -- A membership that arrived by another path (domain auto-join after the invite expired, an
+    -- admin adding them directly) can leave the provisional marker behind; a membership is never pending.
+    update public.department_members
+       set pending_invite_at = null
+     where department_id = v_department.id and user_id = v_user_id and pending_invite_at is not null;
 
     if v_current_role is null then
       insert into public.department_members (department_id, user_id, dept_role, position_title, granted_by)
@@ -110,12 +132,27 @@ begin
        jsonb_build_array(v_entry), v_caller, now() + interval '30 days', null, null);
   else
     -- Merge: replace only this department's entry; every other field stays as the admin set it.
+    -- An admin who already invited this person AS AN APPROVER for this department keeps that
+    -- entry untouched — a nomination is never a downgrade. Only the expiry is refreshed.
+    v_keep_approver := exists (
+      select 1
+        from jsonb_array_elements(coalesce(v_grant.department_access, '[]'::jsonb)) entry
+       where entry->>'department_id' = v_department.id
+         and entry->>'role' = 'approver'
+    );
+
+    if v_keep_approver then
+      v_row_role := 'approver';
+      v_dept_access := coalesce(v_grant.department_access, '[]'::jsonb);
+    else
+      select coalesce(jsonb_agg(entry), '[]'::jsonb) into v_dept_access
+        from jsonb_array_elements(coalesce(v_grant.department_access, '[]'::jsonb)) entry
+       where entry->>'department_id' <> v_department.id;
+      v_dept_access := v_dept_access || jsonb_build_array(v_entry);
+    end if;
+
     update public.workspace_access_grants
-       set department_access = (
-             select coalesce(jsonb_agg(entry), '[]'::jsonb)
-               from jsonb_array_elements(coalesce(v_grant.department_access, '[]'::jsonb)) entry
-              where entry->>'department_id' <> v_department.id
-           ) || jsonb_build_array(v_entry),
+       set department_access = v_dept_access,
            expires_at = now() + interval '30 days',
            redeemed_by = null,
            redeemed_at = null
@@ -125,7 +162,7 @@ begin
   if v_user_id is not null then
     insert into public.department_members as dm
       (department_id, user_id, dept_role, position_title, granted_by, pending_invite_at)
-    values (v_department.id, v_user_id, 'reviewer', v_title, v_caller, now())
+    values (v_department.id, v_user_id, v_row_role, v_title, v_caller, now())
     on conflict (department_id, user_id) do update
       set position_title = excluded.position_title,
           granted_by = excluded.granted_by,
@@ -149,6 +186,8 @@ declare
   v_email text;
   v_grant public.workspace_access_grants%rowtype;
   v_title text;
+  v_role_text text;
+  v_dept_role public.department_sop_role;
 begin
   if v_caller is null then
     raise exception 'Sign in first.';
@@ -177,16 +216,22 @@ begin
     raise exception 'No matching invitation from you for that person.';
   end if;
 
-  select entry->>'position_title' into v_title
+  -- An admin's approver entry for this department is honoured as-is; the provisional row mirrors
+  -- whatever signing role the invitation actually carries.
+  select entry->>'position_title', entry->>'role'
+    into v_title, v_role_text
     from jsonb_array_elements(coalesce(v_grant.department_access, '[]'::jsonb)) entry
-   where entry->>'department_id' = v_department.id and entry->>'role' = 'reviewer';
-  if v_title is null then
+   where entry->>'department_id' = v_department.id
+     and entry->>'role' in ('reviewer', 'approver')
+   limit 1;
+  if v_role_text is null then
     raise exception 'That invitation does not name this department.';
   end if;
+  v_dept_role := (case when v_role_text = 'approver' then 'approver' else 'reviewer' end)::public.department_sop_role;
 
   insert into public.department_members as dm
     (department_id, user_id, dept_role, position_title, granted_by, pending_invite_at)
-  values (v_department.id, p_user_id, 'reviewer', v_title, v_caller, now())
+  values (v_department.id, p_user_id, v_dept_role, coalesce(v_title, ''), v_caller, now())
   on conflict (department_id, user_id) do update
     set position_title = excluded.position_title,
         granted_by = excluded.granted_by,

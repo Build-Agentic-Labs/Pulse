@@ -121,7 +121,12 @@ export async function POST(request: Request) {
     p_position_title: body.positionTitle,
   });
   if (rpcError) {
-    return NextResponse.json({ error: rpcError.message }, { status: 400 });
+    // The grants trigger answers an admin ("only an owner can manage invitations for an owner or
+    // admin"); an author cannot see invitation roles, so tell them what to do instead.
+    const message = rpcError.message.startsWith("Only an owner can manage invitations")
+      ? "That address already has an administrator invitation. Ask an admin."
+      : rpcError.message;
+    return NextResponse.json({ error: message }, { status: 400 });
   }
   const outcome = parseNominationOutcome(outcomeRaw);
   if (!outcome) {

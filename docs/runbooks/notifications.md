@@ -158,6 +158,10 @@ are separate functions on top of the live `append_sop_event`.
 - `reviewer_nominated` — workspace, in-app only (no email), to owners/admins,
   when an author nominates a reviewer. Written by the nomination route, not a
   drain.
+- Deploy order: the app selects `department_members.pending_invite_at` (the
+  roster store and the drain's seat loader), so all three `20260910*` migrations
+  must be applied live *before* a build carrying this feature is deployed — then
+  `npm run gen:types` and commit the regenerated types.
 
 ## 5. Guarantees and their limits
 

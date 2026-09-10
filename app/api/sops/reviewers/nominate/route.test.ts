@@ -104,6 +104,18 @@ describe("POST /api/sops/reviewers/nominate", () => {
     await expect(response.json()).resolves.toEqual({ error: "You can only invite reviewers into your own department." });
   });
 
+  it("rewrites the manager-invitation refusal into advice an author can act on", async () => {
+    mocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Only an owner can manage invitations for an owner or admin." },
+    });
+    const response = await POST(nominateRequest());
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "That address already has an administrator invitation. Ask an admin.",
+    });
+  });
+
   it("adds an existing member with no email and tells the other managers", async () => {
     mocks.rpc.mockImplementationOnce(() => Promise.resolve({ data: { mode: "added", user_id: "u-5" }, error: null }));
     const response = await POST(nominateRequest());

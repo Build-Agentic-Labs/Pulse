@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Department } from "@/domain/departments";
+import type { Department, DeptRole } from "@/domain/departments";
 import { listProfileNames, removeSeat, upsertSeat, type SopReviewSeat } from "@/lib/sop/review";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import { SopRosterEditor } from "./sop-roster-editor";
@@ -181,6 +181,54 @@ describe("SopRosterEditor", () => {
         "Author Member — Create access only — choose someone with Review or Approve access",
       ),
     );
+  });
+
+  it("tags an invited-but-not-joined member and keeps them selectable", async () => {
+    vi.mocked(listMembersForDepartments).mockResolvedValue([
+      { departmentId: "dept-mfg", userId: "pending-member", deptRole: "reviewer", positionTitle: "Line Lead", pendingInviteAt: new Date().toISOString() },
+    ]);
+    vi.mocked(listProfileNames).mockResolvedValue(new Map([["pending-member", "pending@anacorp.com"]]));
+
+    render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[{ ...manufacturingSeat, signerId: null }]} onChanged={() => {}} />);
+
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalledWith(["dept-mfg"]));
+    fireEvent.click(screen.getByRole("button", { name: "Required approver for MFG" }));
+    const option = screen.getByRole("option", { name: /pending@anacorp.com/ });
+    expect(option).toHaveTextContent("Invited · not yet joined");
+    expect(option).not.toBeDisabled();
+  });
+
+  it("offers 'Invite a reviewer' only for a seat in a department the caller belongs to, never for Quality", async () => {
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={departments}
+        seats={[manufacturingSeat, qualitySeat]}
+        myDeptRoles={new Map<string, DeptRole>([["dept-mfg", "author"], ["dept-quality", "approver"]])}
+        onChanged={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Invite a reviewer for MFG" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Invite a reviewer for QAS" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invite a reviewer for MFG" }));
+    expect(screen.getByRole("form", { name: "Invite a reviewer" })).toBeTruthy();
+  });
+
+  it("hides 'Invite a reviewer' for a department the caller is not in", async () => {
+    render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[manufacturingSeat]} myDeptRoles={new Map()} onChanged={() => {}} />);
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Invite a reviewer for MFG" })).toBeNull();
+  });
+
+  it("shows a signer who left the department as a disabled placeholder", async () => {
+    vi.mocked(listMembersForDepartments).mockResolvedValue([]);
+    render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[manufacturingSeat]} onChanged={() => {}} />);
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Required approver for MFG" }));
+    expect(screen.getByRole("option", { name: /No longer in department/ })).toBeDisabled();
   });
 });
 

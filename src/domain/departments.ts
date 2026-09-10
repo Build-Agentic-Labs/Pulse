@@ -40,6 +40,8 @@ export interface DepartmentMember {
   deptRole: DeptRole;
   /** Organizational job title, separate from the member's SOP access level. */
   positionTitle: string;
+  /** Set while the membership is provisional (invited, not yet joined); null/absent for ordinary members. */
+  pendingInviteAt?: string | null;
 }
 
 const STANDARD_POSITION_TITLES: Record<string, readonly string[]> = {

@@ -12,7 +12,7 @@ import type { Database } from "@/lib/database.types";
 import { throwIfError as throwIfSupabaseError, type SupabaseResultError } from "@/lib/supabase-errors";
 
 const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate, sop_target";
-const MEMBER_COLUMNS = "department_id, user_id, dept_role, position_title";
+const MEMBER_COLUMNS = "department_id, user_id, dept_role, position_title, pending_invite_at";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -55,6 +55,7 @@ function mapMember(row: Record<string, unknown>): DepartmentMember {
     userId: String(row.user_id),
     deptRole: (row.dept_role as DeptRole | null) ?? "author",
     positionTitle: String(row.position_title ?? ""),
+    pendingInviteAt: typeof row.pending_invite_at === "string" ? row.pending_invite_at : null,
   };
 }
 

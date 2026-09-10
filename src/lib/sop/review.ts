@@ -361,9 +361,12 @@ export async function listProfileNames(
   const unique = Array.from(new Set(userIds));
   if (unique.length === 0) return new Map();
   const supabase = client ?? createPlannerSupabaseClient();
-  const rows = await throwIfError(supabase.from("profiles").select("id, full_name").in("id", unique));
+  const rows = await throwIfError(supabase.from("profiles").select("id, full_name, email").in("id", unique));
   return new Map(
-    (rows ?? []).map((row: Record<string, unknown>) => [String(row.id), String(row.full_name ?? "")]),
+    (rows ?? []).map((row: Record<string, unknown>) => [
+      String(row.id),
+      String(row.full_name || row.email || ""),
+    ]),
   );
 }
 

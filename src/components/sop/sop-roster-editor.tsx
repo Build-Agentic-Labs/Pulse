@@ -1,12 +1,15 @@
 "use client";
 
-import { Check, LockKeyhole, Loader2, Plus, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, LockKeyhole, Loader2, MailPlus, Plus, Trash2, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { ThemedSelect } from "@/components/themed-select";
 import { canSignReview, type Department, type DeptRole } from "@/domain/departments";
 import type { SopApproval } from "@/domain/sop/schema";
 import { signerAfterDepartmentChange } from "@/domain/sop/approval-mapping";
+import { buildApproverOptions } from "@/domain/sop/roster-options";
+import type { NominationResponse } from "@/domain/workspace/reviewer-nomination";
 import { ConvertedApprovalsNotice } from "./converted-approvals-notice";
+import { ReviewerInviteForm } from "./reviewer-invite-form";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import {
   isBlockingSeat,
@@ -25,12 +28,18 @@ interface RosterMember {
   name: string;
   positionTitle: string;
   deptRole: DeptRole;
+  pendingInviteAt: string | null;
 }
 
 interface RosterEditorProps {
   sopId: string;
   departments: Department[];
   seats: SopReviewSeat[];
+  /**
+   * The caller's department roles. A seat whose department appears here (and is not the Quality
+   * gate) offers "Invite a reviewer" — the database re-checks membership on submit.
+   */
+  myDeptRoles?: ReadonlyMap<string, DeptRole>;
   /**
    * The legacy document's approval rows, for a converted SOP. Present means "show the author what
    * conversion decided on their behalf"; absent (hand-authored) means there is nothing to verify.
@@ -58,6 +67,7 @@ export function SopRosterEditor({
   sopId,
   departments,
   seats,
+  myDeptRoles,
   convertedApprovals,
   onMapApproval,
   onChanged,
@@ -66,6 +76,7 @@ export function SopRosterEditor({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
+  const [invitingFor, setInvitingFor] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ departmentId: string; signerId: string }>({
     departmentId: "",
     signerId: "",
@@ -99,6 +110,7 @@ export function SopRosterEditor({
                 name: names.get(row.userId) || "Unnamed member",
                 positionTitle: row.positionTitle,
                 deptRole: row.deptRole,
+                pendingInviteAt: row.pendingInviteAt ?? null,
               })),
           );
         }
@@ -129,6 +141,22 @@ export function SopRosterEditor({
       setError(getErrorMessage(caught));
     }
     setBusy(null);
+  }
+
+  function canNominateInto(departmentId: string): boolean {
+    const department = departments.find((item) => item.id === departmentId);
+    return Boolean(department && !department.isQualityGate && myDeptRoles?.has(departmentId));
+  }
+
+  /** After a nomination: reload the roster and, when the nominee is selectable, seat them. */
+  async function handleNominated(seat: SopReviewSeat | null, departmentId: string, result: NominationResponse) {
+    await loadMembersForDepartmentIds([departmentId]);
+    if (!result.seated || !result.userId) return;
+    if (seat) {
+      await guarded(`approver-${departmentId}`, () => upsertSeat({ ...seat, rasic: "responsible", signerId: result.userId }));
+    } else {
+      setDraft((prev) => ({ ...prev, departmentId, signerId: result.userId ?? "" }));
+    }
   }
 
   /**
@@ -228,41 +256,16 @@ export function SopRosterEditor({
             {workflowSeats.map((seat) => {
               const department = departments.find((item) => item.id === seat.departmentId);
               const isQualityReviewSeat = Boolean(department?.isQualityGate);
-              const options = members.get(seat.departmentId) ?? [];
-              const eligibleOptions = options.filter((member) => canSignReview(member.deptRole));
-              const ineligibleCurrentSigner = options.find(
-                (member) =>
-                  member.userId === seat.signerId &&
-                  !canSignReview(member.deptRole),
-              );
-              const approverOptions = [
-                { value: "", label: "Choose an approver…" },
-                ...(ineligibleCurrentSigner
-                  ? [{
-                      value: ineligibleCurrentSigner.userId,
-                      label: ineligibleCurrentSigner.name,
-                      description: "Create access only — choose someone with Review or Approve access",
-                      disabled: true,
-                    }]
-                  : []),
-                ...eligibleOptions.map((member) => ({
-                  value: member.userId,
-                  label: member.name,
-                  description: member.positionTitle || "Position not assigned",
-                })),
-                ...(!eligibleOptions.length && !ineligibleCurrentSigner
-                  ? [{
-                      value: "__no-eligible-approvers__",
-                      label: "No reviewers or approvers assigned",
-                      disabled: true,
-                    }]
-                  : []),
-              ];
+              const approverOptions = buildApproverOptions({
+                members: members.get(seat.departmentId) ?? [],
+                signerId: seat.signerId,
+                placeholder: "Choose an approver…",
+                now: new Date(),
+              });
+              const nominatable = canNominateInto(seat.departmentId);
               return (
-                <tr
-                  key={seat.departmentId}
-                  className="group border-b border-line/70 transition-colors hover:bg-surface-hover"
-                >
+                <Fragment key={seat.departmentId}>
+                <tr className="group border-b border-line/70 transition-colors hover:bg-surface-hover">
                   <td className="px-5 py-2.5 align-middle">
                     <ThemedSelect
                       variant="sop"
@@ -305,6 +308,19 @@ export function SopRosterEditor({
                         )
                       }
                     />
+                    {nominatable ? (
+                      <button
+                        type="button"
+                        className="ui-btn-ghost mt-1.5 h-7 gap-1 px-1.5 text-[11px]"
+                        aria-label={`Invite a reviewer for ${department?.code ?? "department"}`}
+                        aria-expanded={invitingFor === seat.departmentId}
+                        disabled={busy !== null}
+                        onClick={() => setInvitingFor((current) => (current === seat.departmentId ? null : seat.departmentId))}
+                      >
+                        <MailPlus size={12} />
+                        Invite a reviewer
+                      </button>
+                    ) : null}
                     {isQualityReviewSeat ? (
                       <p className="mt-1.5 text-[11px] leading-4 text-ink-tertiary">
                         Normal review loop. A different Quality approver completes final approval.
@@ -328,6 +344,20 @@ export function SopRosterEditor({
                     </button>
                   </td>
                 </tr>
+                {invitingFor === seat.departmentId ? (
+                  <tr className="border-b border-line/70 bg-canvas/55">
+                    <td colSpan={3} className="px-5 py-2.5">
+                      <ReviewerInviteForm
+                        sopId={sopId}
+                        departmentId={seat.departmentId}
+                        departmentCode={department?.code ?? ""}
+                        onNominated={(result) => handleNominated(seat, seat.departmentId, result)}
+                        onCancel={() => setInvitingFor(null)}
+                      />
+                    </td>
+                  </tr>
+                ) : null}
+                </Fragment>
               );
             })}
 
@@ -378,28 +408,27 @@ export function SopRosterEditor({
                     ariaLabel="Required departmental approver"
                     value={draft.signerId}
                     disabled={busy !== null || !draft.departmentId}
-                    options={[
-                      { value: "", label: "Select approver…" },
-                      ...(members.get(draft.departmentId) ?? [])
-                        .filter((member) => canSignReview(member.deptRole))
-                        .map((member) => ({
-                          value: member.userId,
-                          label: member.name,
-                          description: member.positionTitle || "Position not assigned",
-                        })),
-                      ...(draft.departmentId &&
-                      !(members.get(draft.departmentId) ?? []).some((member) =>
-                        canSignReview(member.deptRole),
-                      )
-                        ? [{
-                            value: "__no-eligible-approvers__",
-                            label: "No reviewers or approvers assigned",
-                            disabled: true,
-                          }]
-                        : []),
-                    ]}
+                    options={buildApproverOptions({
+                      members: members.get(draft.departmentId) ?? [],
+                      signerId: null,
+                      placeholder: "Select approver…",
+                      now: new Date(),
+                    })}
                     onChange={(signerId) => setDraft((prev) => ({ ...prev, signerId }))}
                   />
+                  {draft.departmentId && canNominateInto(draft.departmentId) ? (
+                    <button
+                      type="button"
+                      className="ui-btn-ghost mt-1.5 h-7 gap-1 px-1.5 text-[11px]"
+                      aria-label={`Invite a reviewer for ${departments.find((item) => item.id === draft.departmentId)?.code ?? "department"}`}
+                      aria-expanded={invitingFor === `add:${draft.departmentId}`}
+                      disabled={busy !== null}
+                      onClick={() => setInvitingFor((current) => (current === `add:${draft.departmentId}` ? null : `add:${draft.departmentId}`))}
+                    >
+                      <MailPlus size={12} />
+                      Invite a reviewer
+                    </button>
+                  ) : null}
                 </td>
                 <td className="px-2 py-2.5 align-middle">
                   <button
@@ -431,6 +460,20 @@ export function SopRosterEditor({
                       <Check size={14} className="mx-auto" />
                     )}
                   </button>
+                </td>
+              </tr>
+            ) : null}
+
+            {adding && draft.departmentId && invitingFor === `add:${draft.departmentId}` ? (
+              <tr className="border-b border-line/70 bg-canvas/55">
+                <td colSpan={3} className="px-5 py-2.5">
+                  <ReviewerInviteForm
+                    sopId={sopId}
+                    departmentId={draft.departmentId}
+                    departmentCode={departments.find((item) => item.id === draft.departmentId)?.code ?? ""}
+                    onNominated={(result) => handleNominated(null, draft.departmentId, result)}
+                    onCancel={() => setInvitingFor(null)}
+                  />
                 </td>
               </tr>
             ) : null}

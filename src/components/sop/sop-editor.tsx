@@ -17,7 +17,7 @@ import {
 } from "react";
 import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "@/components/themed-select";
-import type { Department } from "@/domain/departments";
+import type { Department, DeptRole } from "@/domain/departments";
 import { draftReviewGate } from "@/domain/sop/review-gate";
 import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc } from "@/domain/sop/schema";
 import { listDecisionBranchRequirements } from "@/domain/sop/procedure-validation";
@@ -378,6 +378,9 @@ export function SopEditor({
       );
     },
   );
+  const [approvalMyDeptRoles, setApprovalMyDeptRoles] = useState<Map<string, DeptRole>>(
+    () => new Map(initialApprovalRouting?.departmentRoles ?? []),
+  );
   const [approvalRoutingLoading, setApprovalRoutingLoading] = useState(false);
   const [approvalRoutingError, setApprovalRoutingError] = useState("");
   const [reviewAnnotations, setReviewAnnotations] = useState<SopReviewAnnotation[]>(
@@ -455,6 +458,7 @@ export function SopEditor({
       setApprovalSeats(seats.filter((seat) => isBlockingSeat(seat.rasic)));
       setApprovalSignatures(signatures);
       setApprovalReviewerNames(reviewerNames);
+      setApprovalMyDeptRoles(departmentRoles);
       setApprovalAuthorId(control?.createdBy ?? null);
       setApprovalReviewCycle(control?.reviewCycle ?? 0);
       setApprovalContentHash(control?.contentHash ?? null);
@@ -2015,6 +2019,7 @@ export function SopEditor({
                     sopId={sop.id}
                     departments={approvalDepartments}
                     seats={approvalSeats}
+                    myDeptRoles={approvalMyDeptRoles}
                     convertedApprovals={sop.source === "converted" ? sop.approvals : undefined}
                     onMapApproval={handleMapApproval}
                     onChanged={() => refreshApprovalRouting({ background: true })}

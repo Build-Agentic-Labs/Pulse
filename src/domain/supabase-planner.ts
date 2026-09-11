@@ -1118,6 +1118,52 @@ async function bumpManufacturingStepSequences(supabase: SupabaseClient, stepIds:
   );
 }
 
+type SequencedRow = { id: string; sequence: number };
+type ExistingSequencedRow = { id: unknown; sequence: unknown };
+
+// `stations` and `zones` carry UNIQUE (scenario_id, sequence). The planner save upserts them
+// before it deletes stale rows (the task FKs are ON DELETE SET NULL, so deleting first would
+// blank task.station_id / task.zone_id), and supabase-js upsert only resolves conflicts on the
+// primary key. A row about to take a sequence that a DIFFERENT existing row still holds --
+// stale or merely reordered -- therefore hits the unique index and aborts the whole save.
+// A brand-new project walks straight into this: the first autosave writes the synthetic
+// "Unzoned" station at sequence 1, the user's first zone (also sequence 1) derives a station
+// that collides with it, and nothing after that point ever persists (2026-09-11).
+export function upsertWouldCollideOnSequence(nextRows: SequencedRow[], existingRows: ExistingSequencedRow[]): boolean {
+  const holderBySequence = new Map<number, string>();
+  existingRows.forEach((row) => holderBySequence.set(num(row.sequence), String(row.id)));
+
+  return nextRows.some((row) => {
+    const holder = holderBySequence.get(row.sequence);
+    return holder !== undefined && holder !== row.id;
+  });
+}
+
+// Same remedy as bumpManufacturingStepSequences: park every existing row of the scenario at a
+// temporary sequence above anything in use so the upsert can assign the real sequences freely.
+// Kept rows get their sequence back from the upsert itself; stale rows are deleted at the end.
+async function parkSequencesIfUpsertWouldCollide(
+  supabase: SupabaseClient,
+  table: "stations" | "zones",
+  nextRows: SequencedRow[],
+  existingRows: ExistingSequencedRow[],
+) {
+  if (!upsertWouldCollideOnSequence(nextRows, existingRows)) {
+    return;
+  }
+
+  const maxSequence = Math.max(100000, ...existingRows.map((row) => num(row.sequence)));
+  const temporaryBaseSequence = maxSequence + existingRows.length + 1;
+
+  await Promise.all(
+    existingRows.map((row, index) =>
+      throwIfError(
+        supabase.from(table).update({ sequence: temporaryBaseSequence + index }).eq("id", String(row.id)),
+      ),
+    ),
+  );
+}
+
 function mapStepPhotoRecord(row: Record<string, unknown>): StepPhotoAttachment {
   return {
     id: String(row.id),
@@ -2842,7 +2888,7 @@ export function assertSaneStateDeletion(entity: string, existingCount: number, s
   }
 }
 
-export async function savePlannerStateToSupabase(state: PlannerState) {
+export async function savePlannerStateToSupabase(state: PlannerState, client?: ReturnType<typeof plannerClient>) {
   if (state.tasks.length === 0) {
     throw new Error("Refusing to save an empty Gantt. Add at least one task before saving.");
   }
@@ -2851,11 +2897,11 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
     throw new Error("Select a workspace before saving planner data.");
   }
 
-  const supabase = plannerClient();
+  const supabase = client ?? plannerClient();
   const [existingTasks, existingStations, existingZones, existingComponents, existingDocumentTypes, existingCustomColumns] = await Promise.all([
     throwIfError(supabase.from("tasks").select("id").eq("scenario_id", state.scenario.id)),
-    throwIfError(supabase.from("stations").select("id").eq("scenario_id", state.scenario.id)),
-    throwIfError(supabase.from("zones").select("id").eq("scenario_id", state.scenario.id)),
+    throwIfError(supabase.from("stations").select("id,sequence").eq("scenario_id", state.scenario.id)),
+    throwIfError(supabase.from("zones").select("id,sequence").eq("scenario_id", state.scenario.id)),
     throwIfError(supabase.from("manufacturing_components").select("id").eq("scenario_id", state.scenario.id)),
     throwIfError(
       supabase
@@ -2909,10 +2955,12 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
   await throwIfError(supabase.from("scenarios").upsert(scenarioRow(state.scenario)));
 
   if (state.stations.length) {
+    await parkSequencesIfUpsertWouldCollide(supabase, "stations", state.stations, existingStations ?? []);
     await throwIfError(supabase.from("stations").upsert(state.stations.map(stationRow)));
   }
 
   if (state.zones.length) {
+    await parkSequencesIfUpsertWouldCollide(supabase, "zones", state.zones, existingZones ?? []);
     await throwIfError(supabase.from("zones").upsert(state.zones.map(zoneRow)));
   }
 
@@ -2970,7 +3018,7 @@ export async function savePlannerStateToSupabase(state: PlannerState) {
   }
 }
 
-export async function savePlannerShellToSupabase(state: PlannerState) {
+export async function savePlannerShellToSupabase(state: PlannerState, client?: ReturnType<typeof plannerClient>) {
   if (state.tasks.length === 0) {
     throw new Error("Refusing to save an empty Gantt. Add at least one task before saving.");
   }
@@ -2979,11 +3027,11 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
     throw new Error("Select a workspace before saving planner data.");
   }
 
-  const supabase = plannerClient();
+  const supabase = client ?? plannerClient();
   const [existingTasks, existingStations, existingZones, existingComponents, existingDocumentTypes, existingCustomColumns] = await Promise.all([
     throwIfError(supabase.from("tasks").select("id").eq("scenario_id", state.scenario.id)),
-    throwIfError(supabase.from("stations").select("id").eq("scenario_id", state.scenario.id)),
-    throwIfError(supabase.from("zones").select("id").eq("scenario_id", state.scenario.id)),
+    throwIfError(supabase.from("stations").select("id,sequence").eq("scenario_id", state.scenario.id)),
+    throwIfError(supabase.from("zones").select("id,sequence").eq("scenario_id", state.scenario.id)),
     throwIfError(supabase.from("manufacturing_components").select("id").eq("scenario_id", state.scenario.id)),
     throwIfError(
       supabase
@@ -3036,10 +3084,12 @@ export async function savePlannerShellToSupabase(state: PlannerState) {
   await throwIfError(supabase.from("scenarios").upsert(scenarioRow(state.scenario)));
 
   if (state.stations.length) {
+    await parkSequencesIfUpsertWouldCollide(supabase, "stations", state.stations, existingStations ?? []);
     await throwIfError(supabase.from("stations").upsert(state.stations.map(stationRow)));
   }
 
   if (state.zones.length) {
+    await parkSequencesIfUpsertWouldCollide(supabase, "zones", state.zones, existingZones ?? []);
     await throwIfError(supabase.from("zones").upsert(state.zones.map(zoneRow)));
   }
 

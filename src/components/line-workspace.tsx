@@ -769,7 +769,13 @@ export function LineWorkspace({
     }
 
     function handleLinkNavigation(event: MouseEvent) {
-      if (!masterBomSaveInFlightRef.current) {
+      // Client-side navigation (Settings, the dashboard link) does not fire beforeunload, so
+      // without this guard clicking one while a save is pending or failing tears the workspace
+      // down and drops the in-memory edits -- the browser cache is not a safe harbour, because
+      // the next remote load overwrites it. beforeunload already covers full reloads/tab close;
+      // this mirrors that same hasLocalSaveWork predicate for in-app links.
+      const bomSaving = masterBomSaveInFlightRef.current;
+      if (!bomSaving && !hasLocalSaveWorkRef.current()) {
         return;
       }
       const eventTarget = event.target;
@@ -779,7 +785,12 @@ export function LineWorkspace({
       }
       event.preventDefault();
       event.stopPropagation();
-      setChromeStatus({ message: "BOM is still saving. Wait for Saved before leaving this page.", error: true });
+      setChromeStatus({
+        message: bomSaving
+          ? "BOM is still saving. Wait for Saved before leaving this page."
+          : "You have unsaved changes still saving. Wait for Saved before leaving this page.",
+        error: true,
+      });
     }
 
     window.addEventListener("pagehide", handlePageHide);

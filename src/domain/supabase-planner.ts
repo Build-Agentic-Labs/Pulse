@@ -1002,10 +1002,23 @@ function customFieldsRow(customFields: Task["customFields"]) {
 }
 
 export function procedureTaskUpdateRow(task: Task) {
-  // Procedure-owned metadata such as step part markers must travel with the
-  // debounced task save. customFieldsRow keeps normalized assets out because
-  // their rows have independent persistence and lifecycle handling.
-  return taskRow(task);
+  // The Procedure page owns only free text, its manufacturing steps (saved to their own
+  // table), the step-derived task duration, and step-scoped custom fields such as part
+  // markers. It must NEVER write planning/relationship columns -- station_id, zone_id,
+  // scenario_id, component_id, parent_task_id, sop_id, wbs, planned_start/finish, man-hours,
+  // operators. Those belong to the planner shell save, which rewrites them from the same
+  // state change. Emitting a full taskRow here meant a stale station_id (one whose station
+  // row the shell save had not persisted yet) rode along on every procedure autosave and
+  // raised tasks_station_id_fkey, aborting the save -- the 2026-09-11 new-user failure.
+  // planned_duration_minutes stays: it is the exact sum of the steps this same write
+  // persists, so keeping them in one row prevents a task/step duration mismatch, and unlike
+  // the relationship columns a number can never dangle against a foreign key.
+  return {
+    description: task.description ?? null,
+    safety_notes: task.safetyNotes ?? null,
+    planned_duration_minutes: task.plannedDurationMinutes,
+    custom_fields: customFieldsRow(task.customFields),
+  };
 }
 
 function dependencyRow(dependency: Dependency) {

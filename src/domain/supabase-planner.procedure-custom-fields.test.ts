@@ -52,4 +52,36 @@ describe("procedureTaskUpdateRow", () => {
       },
     });
   });
+
+  it("writes only Procedure-owned columns, never planning or relationship columns", () => {
+    const row = procedureTaskUpdateRow(makeTask());
+
+    // The exact column set the Procedure autosave is allowed to touch.
+    expect(Object.keys(row).sort()).toEqual(
+      ["custom_fields", "description", "planned_duration_minutes", "safety_notes"].sort(),
+    );
+    expect(row).toMatchObject({
+      description: null,
+      safety_notes: null,
+      planned_duration_minutes: 60,
+    });
+
+    // Relationship columns dangling here is what raised tasks_station_id_fkey (2026-09-11).
+    for (const forbidden of [
+      "station_id",
+      "zone_id",
+      "scenario_id",
+      "component_id",
+      "parent_task_id",
+      "sop_id",
+      "wbs",
+      "planned_start",
+      "planned_finish",
+      "planned_man_hours",
+      "planned_operators",
+      "name",
+    ]) {
+      expect(row).not.toHaveProperty(forbidden);
+    }
+  });
 });

@@ -4,7 +4,8 @@ import { Check, FileText, ListChecks, ScanText, Sparkles } from "lucide-react";
 import { useEffect, useState, type ComponentType } from "react";
 import { NothingSpinner } from "@/components/nothing-ui";
 
-export type ConvertPhase = "working" | "done";
+/** `uploading` holds the first stage while the source travels to Storage; `working` walks on. */
+export type ConvertPhase = "uploading" | "working" | "done";
 
 type Stage = {
   id: string;
@@ -14,7 +15,7 @@ type Stage = {
 };
 
 const STAGES: Stage[] = [
-  { id: "read", label: "Reading your document", hint: "Opening the uploaded file", icon: FileText },
+  { id: "read", label: "Reading your document", hint: "Uploading and opening the file", icon: FileText },
   { id: "extract", label: "Extracting the content", hint: "Pulling text from every page", icon: ScanText },
   { id: "map", label: "Mapping to the standard format", hint: "Analyzing the document with AI", icon: Sparkles },
   { id: "build", label: "Building your SOP", hint: "Assembling the structured document", icon: ListChecks },
@@ -36,9 +37,10 @@ export function SopConvertOverlay({ fileName, phase }: { fileName: string; phase
   const [step, setStep] = useState(0);
   const [hintIndex, setHintIndex] = useState(0);
 
-  // Walk through the quick early stages, then hold on the AI step.
+  // Walk through the quick early stages, then hold on the AI step. While the file is still
+  // uploading, stay on the first stage — a large document can take a while to leave the browser.
   useEffect(() => {
-    if (phase === "done" || step >= PARK_INDEX) return;
+    if (phase !== "working" || step >= PARK_INDEX) return;
     const delay = step === 0 ? 1200 : 1500;
     const timer = setTimeout(() => setStep((current) => Math.min(PARK_INDEX, current + 1)), delay);
     return () => clearTimeout(timer);

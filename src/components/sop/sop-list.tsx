@@ -17,6 +17,8 @@ import { getSopProcessState, SOP_PROCESS_STATE_LABELS } from "@/domain/sop/proce
 import type { Sop } from "@/domain/sop/schema";
 import type { ExtractedSop } from "@/domain/sop/extraction";
 import { listDepartments, listMyDepartments } from "@/lib/departments/store";
+import { conversionFailureMessage } from "@/domain/sop/conversion-upload";
+import { removeConversionSource, uploadConversionSource } from "@/lib/sop/conversion-upload";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import {
   deleteSop,
@@ -372,8 +374,12 @@ export function SopList({
 
   async function handleUpload(file: File) {
     if (!workspaceId) return;
-    setConvert({ fileName: file.name, phase: "working" });
+    setConvert({ fileName: file.name, phase: "uploading" });
     setError("");
+    const supabase = createPlannerSupabaseClient();
+    // Set once the source is parked in Storage so a failure before the route takes over can
+    // clean it up; the route deletes it itself once it has the bytes.
+    let storagePath: string | null = null;
     try {
       const owningDepartment = convertDepartments?.find(
         (department) => department.id === convertDepartmentId,
@@ -382,27 +388,41 @@ export function SopList({
         throw new Error("Choose one of your departments before converting this SOP.");
       }
 
-      const supabase = createPlannerSupabaseClient();
       // Conversion calls our own API route with an explicit bearer token. Unlike normal
       // Supabase queries, that fetch cannot auto-refresh a cached token after it is attached,
       // so refresh immediately before starting the long upload/extraction request.
       const { data: sessionData, error: refreshError } = await supabase.auth.refreshSession();
       const accessToken = sessionData.session?.access_token;
-      if (refreshError || !accessToken) {
+      const userId = sessionData.session?.user.id;
+      if (refreshError || !accessToken || !userId) {
         throw new Error("Your session expired. Sign in again, then retry the conversion.");
       }
 
-      const body = new FormData();
-      body.append("file", file);
-      body.append("workspaceId", workspaceId);
+      // The document goes to Storage directly, not through the route: Vercel caps function
+      // request bodies at 4.5 MB and answers a plain-text 413 above it, which photo-heavy
+      // legacy SOPs hit before any of our code ran.
+      storagePath = await uploadConversionSource({ userId, workspaceId, file }, supabase);
+      setConvert((current) => (current ? { ...current, phase: "working" } : current));
+
       const response = await fetch("/api/sops/extract", {
         method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body,
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId, storagePath }),
       });
-      const payload = (await response.json()) as { sop?: ExtractedSop; error?: string };
-      if (!response.ok || !payload.sop) {
-        throw new Error(payload.error || "Conversion failed.");
+      // Read as text first: anything in front of the route (a gateway, the platform's body
+      // guard) answers plain text, and parsing that as JSON only produces a cryptic error.
+      const bodyText = await response.text();
+      if (!response.ok) {
+        throw new Error(conversionFailureMessage(response.status, bodyText));
+      }
+      let payload: { sop?: ExtractedSop } = {};
+      try {
+        payload = JSON.parse(bodyText) as { sop?: ExtractedSop };
+      } catch {
+        throw new Error("Conversion failed: the server returned an unreadable response.");
+      }
+      if (!payload.sop) {
+        throw new Error("Conversion failed.");
       }
       const created = sopFromExtraction(payload.sop);
       // The uploaded document's number is legacy source content, and it is dropped rather than
@@ -434,6 +454,7 @@ export function SopList({
       await new Promise((resolve) => setTimeout(resolve, 700));
       router.push(`/sops/${created.id}?converted=1`);
     } catch (caught) {
+      if (storagePath) void removeConversionSource(storagePath, supabase);
       setError(caught instanceof Error ? caught.message : "Conversion failed.");
       setConvert(null);
     }

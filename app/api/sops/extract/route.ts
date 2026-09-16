@@ -6,6 +6,11 @@ import {
   SOP_SYSTEM_PROMPT,
 } from "@/domain/sop/extraction";
 import { validateExtractedSop } from "@/domain/sop/extraction-validate";
+import {
+  parseConversionUploadPath,
+  SOP_CONVERSION_MAX_BYTES,
+  SOP_CONVERSION_UPLOAD_BUCKET,
+} from "@/domain/sop/conversion-upload";
 import { prepareSopUpload, type PreparedSopUpload } from "@/lib/sop/parse-document";
 import { createApiRateLimiter, requireApiUser } from "@/lib/api-auth";
 import type { Database } from "@/lib/database.types";
@@ -18,8 +23,14 @@ export const maxDuration = 300;
 
 // Cap upload size so a huge file can't OOM the function or blow the time budget.
 // docx is parsed in-process by mammoth; a PDF is base64-encoded and sent to Claude,
-// so this also keeps the request body well under the API's document limit.
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20 MB
+// so this also keeps the Claude request well under the API's document limit.
+//
+// The document does NOT arrive in the request body. Vercel rejects function bodies over
+// 4.5 MB with a plain-text 413 before the route runs, so the browser uploads the file to
+// the private sop-conversion-uploads bucket and sends only its object name; the route
+// downloads it as the caller (Storage RLS scopes reads to the uploader's own prefix) and
+// deletes it as soon as the bytes are in memory.
+const MAX_UPLOAD_BYTES = SOP_CONVERSION_MAX_BYTES; // 20 MB
 
 const SOP_INSTRUCTION = "Convert this legacy SOP into the standardized schema.";
 
@@ -139,17 +150,15 @@ export async function POST(request: Request) {
     return RATE_LIMITED_RESPONSE();
   }
 
-  let file: File | null = null;
   let workspaceId = "";
+  let storagePath = "";
   try {
-    const form = await request.formData();
-    const value = form.get("file");
-    const workspaceValue = form.get("workspaceId");
-    file = value instanceof File ? value : null;
-    workspaceId = typeof workspaceValue === "string" ? workspaceValue.trim() : "";
+    const body = (await request.json()) as { workspaceId?: unknown; storagePath?: unknown };
+    workspaceId = typeof body.workspaceId === "string" ? body.workspaceId.trim() : "";
+    storagePath = typeof body.storagePath === "string" ? body.storagePath.trim() : "";
   } catch {
     return Response.json(
-      { error: "Expected multipart/form-data with 'file' and 'workspaceId' fields." },
+      { error: "Expected a JSON body with 'workspaceId' and 'storagePath' fields." },
       { status: 400 },
     );
   }
@@ -182,16 +191,41 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!file) {
+  // Storage RLS already refuses any object outside the caller's own prefix; this mirror
+  // exists so a mismatched path answers with a clear 400 instead of a bare "not found".
+  const parsedPath = storagePath ? parseConversionUploadPath(storagePath) : null;
+  if (!parsedPath) {
     return Response.json({ error: "No file uploaded." }, { status: 400 });
   }
+  if (parsedPath.userId !== auth.userId || parsedPath.workspaceId !== workspaceId) {
+    return Response.json(
+      { error: "The uploaded file does not belong to this conversion. Try again." },
+      { status: 400 },
+    );
+  }
 
-  if (file.size > MAX_UPLOAD_BYTES) {
+  const sourceBucket = callerSupabase.storage.from(SOP_CONVERSION_UPLOAD_BUCKET);
+  const { data: sourceBlob, error: downloadError } = await sourceBucket.download(storagePath);
+  if (downloadError || !sourceBlob) {
+    return Response.json(
+      { error: "The uploaded file could not be found. Upload it again to retry the conversion." },
+      { status: 404 },
+    );
+  }
+  // The bytes are in memory now; the source has served its purpose. Best-effort: a leftover
+  // is harmless (private, per-user) and must not fail the conversion.
+  await sourceBucket.remove([storagePath]).catch(() => undefined);
+
+  if (sourceBlob.size > MAX_UPLOAD_BYTES) {
     return Response.json(
       { error: `File is too large. The maximum size is ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB.` },
       { status: 413 },
     );
   }
+
+  const file = new File([await sourceBlob.arrayBuffer()], parsedPath.fileName, {
+    type: sourceBlob.type,
+  });
 
   let upload: PreparedSopUpload;
   try {

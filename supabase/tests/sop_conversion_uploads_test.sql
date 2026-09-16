@@ -6,11 +6,14 @@
 --   * an org-tool editor can write under users/<own uid>/<workspace>/
 --   * nobody can write under another user's prefix, even with edit access
 --   * an org-tool viewer cannot write at all
---   * another user can neither read nor delete the editor's source
---   * the editor can delete their own source
+--   * another user cannot read the editor's source; the editor can
+--
+-- The delete policy is NOT pinned here: Supabase installs a trigger on storage.objects that
+-- raises "Direct deletion from storage tables is not allowed" for SQL deletes, so the only way
+-- to exercise it is through the Storage API, which the route does (see route.test.ts).
 
 begin;
-select plan(8);
+select plan(6);
 
 insert into public.workspaces (id, name) values ('ws_cu', 'Conversion Org');
 insert into public.workspace_auto_join_domains (domain, workspace_id) values ('cu.dev', 'ws_cu');
@@ -67,7 +70,7 @@ select throws_ok(
   'an org-tool viewer cannot upload a conversion source'
 );
 
--- 4. The viewer can neither see nor delete the editor's source.
+-- 4. The viewer cannot see the editor's source.
 select is(
   (select count(*) from storage.objects
    where bucket_id = 'sop-conversion-uploads'
@@ -75,19 +78,8 @@ select is(
   0::bigint,
   'another user cannot read a conversion source they did not upload'
 );
-delete from storage.objects
-where bucket_id = 'sop-conversion-uploads'
-  and name = 'users/e0000000-0000-0000-0000-000000000001/ws_cu/u1-legacy.docx';
-reset role;
-select is(
-  (select count(*) from storage.objects
-   where bucket_id = 'sop-conversion-uploads'
-     and name = 'users/e0000000-0000-0000-0000-000000000001/ws_cu/u1-legacy.docx'),
-  1::bigint,
-  'another user''s DELETE touches nothing'
-);
 
--- 5. The editor reads and deletes their own source.
+-- 5. The editor reads their own source.
 select test_as('e0000000-0000-0000-0000-000000000001');
 select is(
   (select count(*) from storage.objects
@@ -95,16 +87,6 @@ select is(
      and name = 'users/e0000000-0000-0000-0000-000000000001/ws_cu/u1-legacy.docx'),
   1::bigint,
   'the uploader can read their own conversion source'
-);
-delete from storage.objects
-where bucket_id = 'sop-conversion-uploads'
-  and name = 'users/e0000000-0000-0000-0000-000000000001/ws_cu/u1-legacy.docx';
-select is(
-  (select count(*) from storage.objects
-   where bucket_id = 'sop-conversion-uploads'
-     and name = 'users/e0000000-0000-0000-0000-000000000001/ws_cu/u1-legacy.docx'),
-  0::bigint,
-  'the uploader can delete their own conversion source'
 );
 
 select * from finish();

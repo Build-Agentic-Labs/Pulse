@@ -7,7 +7,7 @@ import { canSignReview, type Department, type DeptRole } from "@/domain/departme
 import type { SopApproval } from "@/domain/sop/schema";
 import { signerAfterDepartmentChange } from "@/domain/sop/approval-mapping";
 import { buildApproverOptions } from "@/domain/sop/roster-options";
-import type { NominationResponse } from "@/domain/workspace/reviewer-nomination";
+import { canNominateIntoDepartment, type NominationResponse } from "@/domain/workspace/reviewer-nomination";
 import { ConvertedApprovalsNotice } from "./converted-approvals-notice";
 import { ReviewerInviteForm } from "./reviewer-invite-form";
 import { listMembersForDepartments } from "@/lib/departments/store";
@@ -41,6 +41,12 @@ interface RosterEditorProps {
    */
   myDeptRoles?: ReadonlyMap<string, DeptRole>;
   /**
+   * The SOP's owning department. When the caller belongs to it, every non-Quality seat offers
+   * "Invite a reviewer" too — the nominee joins that seat's department, never this one — and the
+   * database re-checks the seat and the caller's edit access on submit.
+   */
+  owningDepartmentId?: string;
+  /**
    * The legacy document's approval rows, for a converted SOP. Present means "show the author what
    * conversion decided on their behalf"; absent (hand-authored) means there is nothing to verify.
    */
@@ -68,6 +74,7 @@ export function SopRosterEditor({
   departments,
   seats,
   myDeptRoles,
+  owningDepartmentId,
   convertedApprovals,
   onMapApproval,
   onChanged,
@@ -144,8 +151,25 @@ export function SopRosterEditor({
   }
 
   function canNominateInto(departmentId: string): boolean {
-    const department = departments.find((item) => item.id === departmentId);
-    return Boolean(department && !department.isQualityGate && myDeptRoles?.has(departmentId));
+    return canNominateIntoDepartment({
+      department: departments.find((item) => item.id === departmentId),
+      myDeptRoles,
+      owningDepartmentId,
+    });
+  }
+
+  /**
+   * "Invite a reviewer" from the add-a-department row. The database admits a cross-department
+   * nomination only for a department already seated on this SOP, so seat it first (unstaffed,
+   * exactly as conversion does) and open the invite form on the new seat row.
+   */
+  async function inviteFromDraftRow(departmentId: string) {
+    await guarded("add", async () => {
+      await upsertSeat({ sopId, departmentId, rasic: "responsible", signerId: null });
+      setAdding(false);
+      setDraft({ departmentId: "", signerId: "" });
+      setInvitingFor(departmentId);
+    });
   }
 
   /**
@@ -444,9 +468,9 @@ export function SopRosterEditor({
                       type="button"
                       className="ui-btn-ghost mt-1.5 h-7 gap-1 px-1.5 text-[11px]"
                       aria-label={`Invite a reviewer for ${departments.find((item) => item.id === draft.departmentId)?.code ?? "department"}`}
-                      aria-expanded={invitingFor === `add:${draft.departmentId}`}
+                      aria-expanded={invitingFor === draft.departmentId}
                       disabled={busy !== null}
-                      onClick={() => setInvitingFor((current) => (current === `add:${draft.departmentId}` ? null : `add:${draft.departmentId}`))}
+                      onClick={() => void inviteFromDraftRow(draft.departmentId)}
                     >
                       <MailPlus size={12} />
                       Invite a reviewer
@@ -487,19 +511,6 @@ export function SopRosterEditor({
               </tr>
             ) : null}
 
-            {adding && draft.departmentId && invitingFor === `add:${draft.departmentId}` ? (
-              <tr className="border-b border-line/70 bg-canvas/55">
-                <td colSpan={3} className="px-5 py-2.5">
-                  <ReviewerInviteForm
-                    sopId={sopId}
-                    departmentId={draft.departmentId}
-                    departmentCode={departments.find((item) => item.id === draft.departmentId)?.code ?? ""}
-                    onNominated={(result) => handleNominated(null, draft.departmentId, result)}
-                    onCancel={() => setInvitingFor(null)}
-                  />
-                </td>
-              </tr>
-            ) : null}
           </tbody>
         </table>
       </div>

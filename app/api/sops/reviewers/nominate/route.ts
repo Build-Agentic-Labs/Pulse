@@ -43,7 +43,11 @@ async function loadScope(supabase: SupabaseClient<Database>, departmentId: strin
   };
 }
 
-/** In-app only: owners/admins learn who nominated whom. The nominator never notifies themselves. */
+/**
+ * In-app only: owners/admins learn who nominated whom, and so do the target department's existing
+ * approvers — a nomination from another department's author changes THEIR roster, so they must
+ * see it without an admin relaying it. The nominator never notifies themselves.
+ */
 async function notifyManagers(
   admin: SupabaseClient<Database>,
   scope: NominationScope,
@@ -53,17 +57,30 @@ async function notifyManagers(
   mode: NominationMode,
   emailSent: boolean,
 ): Promise<void> {
-  const [managers, actor] = await Promise.all([
+  const [managers, approvers, actor] = await Promise.all([
     admin.from("workspace_members").select("user_id").eq("workspace_id", scope.workspaceId).in("role", ["owner", "admin"]),
+    admin
+      .from("department_members")
+      .select("user_id")
+      .eq("department_id", scope.departmentId)
+      .eq("dept_role", "approver")
+      .is("pending_invite_at", null),
     admin.from("profiles").select("full_name").eq("id", actorId).maybeSingle(),
   ]);
   if (managers.error) {
     console.error("Reviewer nomination: manager notice lookup failed", { message: managers.error.message });
     return;
   }
+  if (approvers.error) {
+    console.error("Reviewer nomination: department approver lookup failed", { message: approvers.error.message });
+  }
   if (actor.error) {
     console.error("Reviewer nomination: manager notice lookup failed", { message: actor.error.message });
   }
+  const recipientIds = new Set(
+    [...(managers.data ?? []), ...(approvers.data ?? [])].map((member) => member.user_id),
+  );
+  recipientIds.delete(actorId);
   const actorName = actor.data?.full_name || "An author";
   const title = `${actorName} nominated ${email} as a reviewer for ${scope.departmentName}`;
   const body =
@@ -74,10 +91,8 @@ async function notifyManagers(
       : "They can now be selected as a departmental approver.";
   await insertInboxRows(
     admin,
-    (managers.data ?? [])
-      .filter((member) => member.user_id !== actorId)
-      .map((member) => ({
-        recipientId: member.user_id,
+    [...recipientIds].map((recipientId) => ({
+        recipientId,
         workspaceId: scope.workspaceId,
         source: "workspace" as const,
         kind: "reviewer_nominated",
@@ -115,10 +130,14 @@ export async function POST(request: Request) {
   }
 
   const supabase = auth.supabase;
+  // The SOP id is an authorization input for cross-department nominations: the database admits
+  // a target department other than the caller's own only when it is seated on this draft and
+  // the caller can edit it. Either way the nominee joins the TARGET department.
   const { data: outcomeRaw, error: rpcError } = await supabase.rpc("nominate_department_reviewer", {
     p_department_id: body.departmentId,
     p_email: body.email,
     p_position_title: body.positionTitle,
+    p_sop_id: body.sopId,
   });
   if (rpcError) {
     // The grants trigger answers an admin ("only an owner can manage invitations for an owner or

@@ -15,7 +15,7 @@
 -- read; the resend trigger refreshes only provisional rows.
 
 begin;
-select plan(38);
+select plan(44);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -129,7 +129,7 @@ select test_as('d0000000-0000-0000-0000-000000000002');
 select throws_like(
   $$ select public.nominate_department_reviewer('dept_nom_eng', 'nom-member@anacorp.com', 'Engineer') $$,
   '%your own department%',
-  'an author cannot nominate into a department they do not belong to'
+  'an author cannot nominate into a department they do not belong to without an SOP seat'
 );
 select throws_like(
   $$ select public.nominate_department_reviewer('dept_nom_qas', 'nom-member@anacorp.com', 'Quality Engineer') $$,
@@ -155,6 +155,55 @@ select throws_like(
   '%nominate yourself%',
   'an author cannot nominate themselves into the reviewer role'
 );
+
+-- ---------------------------------------------------------------------------
+-- 9a-9f. Cross-department nominations through a draft SOP (20260916130000): the nominee lands in
+-- the SEAT's department, never the author's; refused without a seat, for non-editors, and for
+-- Quality even when seated.
+-- ---------------------------------------------------------------------------
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_eng', 'nom-member@anacorp.com', 'Engineer', 'sop_nom_1') $$,
+  '%roster before inviting%',
+  'a draft SOP does not open a department that has no seat on it'
+);
+reset role;
+insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
+  ('sop_nom_1', 'dept_nom_eng', 'responsible', null),
+  ('sop_nom_1', 'dept_nom_qas', 'responsible', null);
+select test_as('d0000000-0000-0000-0000-000000000002');
+select is(
+  (public.nominate_department_reviewer('dept_nom_eng', 'nom-member@anacorp.com', 'Engineer', 'sop_nom_1'))->>'mode',
+  'added',
+  'the SOP author can nominate a workspace member into another department seated on their draft'
+);
+select is(
+  (select dept_role::text || ':' || granted_by::text
+     from public.department_members
+    where department_id = 'dept_nom_eng' and user_id = 'd0000000-0000-0000-0000-000000000005'),
+  'reviewer:d0000000-0000-0000-0000-000000000002',
+  'the nominee joins the SEAT''s department as a reviewer, attributed to the nominator'
+);
+select is(
+  (select count(*) from public.department_members
+    where department_id = 'dept_nom_prd' and user_id = 'd0000000-0000-0000-0000-000000000005'),
+  0::bigint,
+  'the nominee is NOT added to the author''s own department'
+);
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_qas', 'nom-member@anacorp.com', 'Quality Engineer', 'sop_nom_1') $$,
+  '%managed by an admin%',
+  'a seated Quality-gate department is still never nominatable through the SOP'
+);
+reset role;
+select test_as('d0000000-0000-0000-0000-000000000005');
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_eng', 'nom-peer@anacorp.com', 'Engineer', 'sop_nom_1') $$,
+  '%your own department%',
+  'a workspace member who cannot edit the draft gets nothing from naming its SOP'
+);
+reset role;
+-- Leave the roster as the later tasks expect it (27 seats PRD itself and submits).
+delete from public.sop_review_seats where sop_id = 'sop_nom_1' and department_id in ('dept_nom_eng', 'dept_nom_qas');
 
 -- ---------------------------------------------------------------------------
 -- 10-13. Modes for people already in the workspace: added, and a stale marker is cleared.

@@ -54,7 +54,7 @@ function nominateRequest(overrides: Record<string, unknown> = {}) {
 /** A chainable query stub resolving to `result` for any terminal call. */
 function query(result: unknown) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "in", "maybeSingle"]) {
+  for (const method of ["select", "eq", "in", "is", "maybeSingle"]) {
     chain[method] = () => chain;
   }
   chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve);
@@ -78,6 +78,7 @@ beforeEach(() => {
   });
   mocks.adminFrom.mockImplementation((table: string) => {
     if (table === "workspace_members") return query({ data: [{ user_id: "owner-1" }, { user_id: "author-1" }], error: null });
+    if (table === "department_members") return query({ data: [], error: null });
     if (table === "profiles") return query({ data: { full_name: "Ana Author" }, error: null });
     throw new Error(`unexpected admin table ${table}`);
   });
@@ -128,6 +129,28 @@ describe("POST /api/sops/reviewers/nominate", () => {
     expect(rows[0]).toMatchObject({ kind: "reviewer_nominated", link: "/sops/sop-1" });
   });
 
+  it("also tells the target department's approvers, once each, never the nominator", async () => {
+    mocks.adminFrom.mockImplementation((table: string) => {
+      if (table === "workspace_members") return query({ data: [{ user_id: "owner-1" }, { user_id: "author-1" }], error: null });
+      if (table === "department_members") {
+        return query({ data: [{ user_id: "approver-9" }, { user_id: "owner-1" }, { user_id: "author-1" }], error: null });
+      }
+      if (table === "profiles") return query({ data: { full_name: "Ana Author" }, error: null });
+      throw new Error(`unexpected admin table ${table}`);
+    });
+    mocks.rpc.mockImplementationOnce(() => Promise.resolve({ data: { mode: "added", user_id: "u-5" }, error: null }));
+    const response = await POST(nominateRequest({ departmentId: "dept-eng" }));
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith("nominate_department_reviewer", {
+      p_department_id: "dept-eng",
+      p_email: "new.reviewer@anacorp.com",
+      p_position_title: "Line Lead",
+      p_sop_id: "sop-1",
+    });
+    const rows = mocks.insertInboxRows.mock.calls[0][1] as { recipientId: string }[];
+    expect(rows.map((row) => row.recipientId).sort()).toEqual(["approver-9", "owner-1"]);
+  });
+
   it("invites a known auth user: sends the setup link, mints the provisional seat, normalizes the email", async () => {
     const response = await POST(nominateRequest());
     await expect(response.json()).resolves.toEqual({ mode: "invite", userId: "u-6", emailSent: true, seated: true });
@@ -135,6 +158,7 @@ describe("POST /api/sops/reviewers/nominate", () => {
       p_department_id: "dept-prd",
       p_email: "new.reviewer@anacorp.com",
       p_position_title: "Line Lead",
+      p_sop_id: "sop-1",
     });
     expect(mocks.rpc).toHaveBeenCalledWith("mint_pending_department_reviewer", { p_department_id: "dept-prd", p_user_id: "u-6" });
     expect(mocks.sendInvitationViaResend).toHaveBeenCalledTimes(1);
@@ -210,6 +234,7 @@ describe("POST /api/sops/reviewers/nominate", () => {
   it("logs and skips the manager notice when the managers lookup errors", async () => {
     mocks.adminFrom.mockImplementation((table: string) => {
       if (table === "workspace_members") return query({ data: null, error: { message: "boom" } });
+      if (table === "department_members") return query({ data: [], error: null });
       if (table === "profiles") return query({ data: { full_name: "Ana Author" }, error: null });
       throw new Error(`unexpected admin table ${table}`);
     });

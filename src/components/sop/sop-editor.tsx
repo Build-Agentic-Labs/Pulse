@@ -2020,6 +2020,7 @@ export function SopEditor({
                     departments={approvalDepartments}
                     seats={approvalSeats}
                     myDeptRoles={approvalMyDeptRoles}
+                    owningDepartmentId={selectedDepartmentId || undefined}
                     convertedApprovals={sop.source === "converted" ? sop.approvals : undefined}
                     onMapApproval={handleMapApproval}
                     onChanged={() => refreshApprovalRouting({ background: true })}

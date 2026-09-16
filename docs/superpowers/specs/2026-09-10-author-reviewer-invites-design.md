@@ -351,3 +351,35 @@ No migration reads or rewrites `enforce_sop_transition` or `sign_sop`.
 3. **Lifting `author` → `reviewer`: allowed for the nominating author.** The nominator is a
    department peer, the change is audited via `granted_by`, and the role gained is the lowest
    signing role. Approver remains admin-only.
+
+## Addendum 2026-09-16 — cross-department nominations
+
+**Change.** Requirement 1 ("own department only") is relaxed in one narrow way: an author of a
+draft SOP may also nominate a reviewer into any **non-Quality department that holds a seat on
+that SOP**. The nominee always joins the seat's department, never the author's. Nothing else a
+nomination grants changes (reviewer role only, fixed package, self-nomination refused, Quality
+still admin-only, revocations and the domain allowlist still enforced).
+
+**Why.** A seat for another department otherwise waited on an admin, which is exactly the
+round-trip this feature exists to remove. Department membership remains org-wide, not per-SOP,
+so this is deliberately bounded and visible rather than silent.
+
+**Enforcement** (`20260916130000`, `nominate_department_reviewer` gains `p_sop_id text default
+null`): the SOP must exist in the department's workspace and be a draft the caller can edit
+(`can_edit_sop_content` — org-tool edit plus owning-department membership), and the target
+department must have a `sop_review_seats` row on it. Absent a seat the call is refused with
+"Add <dept> to this SOP's roster before inviting a reviewer for it." Owners/admins and members of
+the target department pass as before. `mint_pending_department_reviewer` is unchanged: it already
+verifies against the grant the caller wrote.
+
+**Visibility.** The in-app "reviewer nominated" notice now also reaches the target department's
+existing approvers, so a roster change made from another department's SOP is seen by the people
+it affects. `granted_by` already records the nominator.
+
+**UI.** The roster offers "Invite a reviewer" on every non-Quality seat when the caller belongs
+to the SOP's owning department. From the add-a-department row the department is seated
+unstaffed first (as conversion does), then the form opens on the new seat row.
+
+**One-sentence RLS.** An author editing a draft SOP may create a reviewer-level membership or
+invite in any non-Quality department seated on that SOP; a department member may still do so
+for their own department; everything else remains owner/admin-only.

@@ -62,6 +62,23 @@ export function nominatedReviewerEntitlements(departmentId: string, positionTitl
   };
 }
 
+/**
+ * Whether the roster should offer "Invite a reviewer" for a seat's department. Mirrors the
+ * database rule (nominate_department_reviewer, 20260916130000) for UX only — the RPC re-checks on
+ * submit: never the Quality gate; the caller's own departments; and, for an author of the SOP's
+ * owning department, any other department seated on the draft.
+ */
+export function canNominateIntoDepartment(input: {
+  department: { id: string; isQualityGate: boolean } | undefined;
+  myDeptRoles: ReadonlyMap<string, unknown> | undefined;
+  owningDepartmentId: string | undefined;
+}): boolean {
+  const { department, myDeptRoles, owningDepartmentId } = input;
+  if (!department || department.isQualityGate || !myDeptRoles) return false;
+  if (myDeptRoles.has(department.id)) return true;
+  return Boolean(owningDepartmentId && myDeptRoles.has(owningDepartmentId));
+}
+
 export const PENDING_INVITE_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 

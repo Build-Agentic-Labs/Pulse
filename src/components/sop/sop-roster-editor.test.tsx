@@ -227,6 +227,44 @@ describe("SopRosterEditor", () => {
     expect(screen.queryByRole("button", { name: "Invite a reviewer for MFG" })).toBeNull();
   });
 
+  it("offers 'Invite a reviewer' on another department's seat when the caller belongs to the SOP's owning department, never for Quality", async () => {
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={departments}
+        seats={[manufacturingSeat, qualitySeat]}
+        myDeptRoles={new Map<string, DeptRole>([["dept-prd", "author"]])}
+        owningDepartmentId="dept-prd"
+        onChanged={() => {}}
+      />,
+    );
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Invite a reviewer for MFG" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Invite a reviewer for QAS" })).toBeNull();
+  });
+
+  it("seats the department unstaffed before opening the invite form from the add row", async () => {
+    vi.mocked(upsertSeat).mockClear();
+    vi.mocked(upsertSeat).mockResolvedValue(undefined as never);
+    render(
+      <SopRosterEditor
+        sopId="sop-1"
+        departments={departments}
+        seats={[]}
+        myDeptRoles={new Map<string, DeptRole>([["dept-prd", "author"]])}
+        owningDepartmentId="dept-prd"
+        onChanged={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
+    fireEvent.click(screen.getByRole("button", { name: "Department to add" }));
+    fireEvent.click(screen.getByRole("option", { name: /MFG/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Invite a reviewer for MFG" }));
+    await waitFor(() =>
+      expect(upsertSeat).toHaveBeenCalledWith({ sopId: "sop-1", departmentId: "dept-mfg", rasic: "responsible", signerId: null }),
+    );
+  });
+
   it("shows a signer who left the department as a disabled placeholder", async () => {
     vi.mocked(listMembersForDepartments).mockResolvedValue([]);
     render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[manufacturingSeat]} onChanged={() => {}} />);

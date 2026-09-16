@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canNominateIntoDepartment,
   nominatedReviewerEntitlements,
   nominationOutcomeMessage,
   parseNominationBody,
@@ -86,5 +87,33 @@ describe("nominationOutcomeMessage", () => {
     expect(nominationOutcomeMessage({ mode: "invite", userId: null, emailSent: true, seated: false }, "a@anacorp.com")).toBe(
       "Invitation sent to a@anacorp.com, but they can't be seated yet — try Resend in a moment.",
     );
+  });
+});
+
+describe("canNominateIntoDepartment", () => {
+  const mfg = { id: "dept-mfg", isQualityGate: false };
+  const qas = { id: "dept-qas", isQualityGate: true };
+  const roles = new Map([["dept-prd", "author"]]);
+
+  it("allows the caller's own department", () => {
+    expect(canNominateIntoDepartment({ department: mfg, myDeptRoles: new Map([["dept-mfg", "author"]]), owningDepartmentId: undefined })).toBe(true);
+  });
+
+  it("allows another seated department when the caller belongs to the SOP's owning department", () => {
+    expect(canNominateIntoDepartment({ department: mfg, myDeptRoles: roles, owningDepartmentId: "dept-prd" })).toBe(true);
+  });
+
+  it("refuses when the caller is in neither the target nor the owning department", () => {
+    expect(canNominateIntoDepartment({ department: mfg, myDeptRoles: roles, owningDepartmentId: "dept-eng" })).toBe(false);
+    expect(canNominateIntoDepartment({ department: mfg, myDeptRoles: roles, owningDepartmentId: undefined })).toBe(false);
+    expect(canNominateIntoDepartment({ department: mfg, myDeptRoles: undefined, owningDepartmentId: "dept-prd" })).toBe(false);
+  });
+
+  it("never offers the Quality gate, even to its own members", () => {
+    expect(canNominateIntoDepartment({ department: qas, myDeptRoles: new Map([["dept-qas", "approver"]]), owningDepartmentId: "dept-qas" })).toBe(false);
+  });
+
+  it("refuses an unknown department", () => {
+    expect(canNominateIntoDepartment({ department: undefined, myDeptRoles: roles, owningDepartmentId: "dept-prd" })).toBe(false);
   });
 });

@@ -3618,6 +3618,7 @@ export type Database = {
           p_department_id: string
           p_email: string
           p_position_title: string
+          p_sop_id?: string
         }
         Returns: Json
       }

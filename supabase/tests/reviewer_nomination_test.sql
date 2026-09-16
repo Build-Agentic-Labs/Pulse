@@ -170,6 +170,14 @@ reset role;
 insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) values
   ('sop_nom_1', 'dept_nom_eng', 'responsible', null),
   ('sop_nom_1', 'dept_nom_qas', 'responsible', null);
+-- u5 is a workspace member in no department: the seat exists, but they cannot edit the draft.
+select test_as('d0000000-0000-0000-0000-000000000005');
+select throws_like(
+  $$ select public.nominate_department_reviewer('dept_nom_eng', 'nom-peer@anacorp.com', 'Engineer', 'sop_nom_1') $$,
+  '%your own department%',
+  'a workspace member who cannot edit the draft gets nothing from naming its SOP'
+);
+reset role;
 select test_as('d0000000-0000-0000-0000-000000000002');
 select is(
   (public.nominate_department_reviewer('dept_nom_eng', 'nom-member@anacorp.com', 'Engineer', 'sop_nom_1'))->>'mode',
@@ -195,15 +203,11 @@ select throws_like(
   'a seated Quality-gate department is still never nominatable through the SOP'
 );
 reset role;
-select test_as('d0000000-0000-0000-0000-000000000005');
-select throws_like(
-  $$ select public.nominate_department_reviewer('dept_nom_eng', 'nom-peer@anacorp.com', 'Engineer', 'sop_nom_1') $$,
-  '%your own department%',
-  'a workspace member who cannot edit the draft gets nothing from naming its SOP'
-);
-reset role;
--- Leave the roster as the later tasks expect it (27 seats PRD itself and submits).
+-- Leave the roster and memberships as the later tasks expect them (27 seats PRD itself and
+-- submits; 10 adds u5 to PRD from a clean slate), then resume as the author.
 delete from public.sop_review_seats where sop_id = 'sop_nom_1' and department_id in ('dept_nom_eng', 'dept_nom_qas');
+delete from public.department_members where department_id = 'dept_nom_eng' and user_id = 'd0000000-0000-0000-0000-000000000005';
+select test_as('d0000000-0000-0000-0000-000000000002');
 
 -- ---------------------------------------------------------------------------
 -- 10-13. Modes for people already in the workspace: added, and a stale marker is cleared.

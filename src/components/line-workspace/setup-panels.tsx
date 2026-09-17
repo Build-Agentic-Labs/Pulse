@@ -1,7 +1,6 @@
 "use client";
 
 import { Eye, FileText, ListChecks, Plus, Trash2, Wrench } from "lucide-react";
-import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import {
   getManufacturingStepCheckDefinitions,
@@ -435,6 +434,9 @@ export function WorkInstructionsPanel({
   const readyCount = workTasks.filter((task) => !hasWorkInstruction(task) && isReady(task)).length;
   const incompleteCount = workTasks.filter((task) => !hasWorkInstruction(task) && !isReady(task)).length;
   const [previewSelection, setPreviewSelection] = useState<{ taskIds: string[]; scenarioId?: string } | null>(null);
+  // The blank fill-in template opens in the same in-page preview as a real work instruction —
+  // a quick look, not a trip to a new tab. The print route still serves ?blank=1 for shared links.
+  const [blankPreviewOpen, setBlankPreviewOpen] = useState(false);
 
   const UNZONED_KEY = "__unzoned__";
   const zoneById = new Map(zones.map((zone) => [zone.id, zone]));
@@ -497,14 +499,15 @@ export function WorkInstructionsPanel({
                 Preview all ({workTasks.length})
               </button>
             ) : null}
-            <Link
-              href={`/projects/${projectId}/planner/work-instructions/print?blank=1`}
-              target="_blank"
+            <button
+              type="button"
               className="ui-btn-ghost h-9 gap-2 px-3"
+              aria-haspopup="dialog"
+              onClick={() => setBlankPreviewOpen(true)}
             >
               <FileText size={15} />
               Blank template
-            </Link>
+            </button>
           </div>
         ) : null}
       </header>
@@ -598,6 +601,14 @@ export function WorkInstructionsPanel({
               : undefined
           }
           onClose={() => setPreviewSelection(null)}
+        />
+      ) : null}
+      {projectId && blankPreviewOpen ? (
+        <WorkInstructionPrintPreview
+          projectId={projectId}
+          taskIds={[]}
+          blank
+          onClose={() => setBlankPreviewOpen(false)}
         />
       ) : null}
     </div>

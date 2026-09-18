@@ -13,6 +13,9 @@ import {
 } from "@/lib/work-instruction/store";
 import { WorkInstructionControl } from "./work-instruction-control";
 
+const confirmMock = vi.hoisted(() => vi.fn(async (_options: { title: string; body?: string; confirmLabel?: string }) => true));
+vi.mock("@/components/confirm-provider", () => ({ useConfirm: () => confirmMock }));
+
 vi.mock("@/lib/work-instruction/store", () => ({
   addWorkInstructionReference: vi.fn(),
   listReferenceableSops: vi.fn(),
@@ -54,6 +57,7 @@ function renderControl(props: Partial<Parameters<typeof WorkInstructionControl>[
 
 beforeEach(() => {
   vi.clearAllMocks();
+  confirmMock.mockResolvedValue(true);
   vi.mocked(listReferenceableSops).mockResolvedValue([{ id: "sop-1", number: "QAS-SOP-004", title: "Records", version: "2.0", status: "effective" }]);
 });
 
@@ -79,6 +83,46 @@ describe("WorkInstructionControl", () => {
     });
     await waitFor(() => expect(handlers.onChanged).toHaveBeenCalled());
     expect(await screen.findByText("Released as Rev A.")).toBeTruthy();
+  });
+
+  it("asks before the permanent release and does nothing when the author backs out", async () => {
+    confirmMock.mockResolvedValue(false);
+    renderControl({ initialStep: "release" });
+    fireEvent.click(screen.getByRole("button", { name: "Release Rev A" }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(confirmMock.mock.calls[0][0]).toMatchObject({
+      title: "Release Rev A?",
+      confirmLabel: "Release Rev A",
+      body: expect.stringMatching(/cannot be edited or deleted.*release Rev B/),
+    });
+    expect(releaseWorkInstruction).not.toHaveBeenCalled();
+    // Still on the release step, ready to try again.
+    expect(screen.getByRole("button", { name: "Release Rev A" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("makes fixing the task the highlighted action while something blocks, and links the blocked reason back", () => {
+    renderControl({ instruction: instruction({ setup: { ...instruction().setup, tools: [] } }) });
+    expect(screen.getByRole("button", { name: "Edit the task" }).className).toContain("ui-btn-primary");
+    expect(screen.getByRole("button", { name: "Next: references" }).className).toContain("ui-btn-ghost");
+
+    fireEvent.click(screen.getByRole("button", { name: /Release$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Resolve the readiness items first." }));
+    expect(screen.getByText("Assign tools to the steps.")).toBeTruthy();
+  });
+
+  it("highlights Next once the document is ready", () => {
+    renderControl();
+    expect(screen.getByRole("button", { name: "Next: references" }).className).toContain("ui-btn-primary");
+    expect(screen.getByRole("button", { name: "Edit the task" }).className).toContain("ui-btn-ghost");
+  });
+
+  it("warns on the release step about a reference that was typed but never added", () => {
+    renderControl({ initialStep: "references" });
+    fireEvent.click(screen.getByRole("button", { name: "Reference kind" }));
+    fireEvent.click(screen.getByRole("option", { name: "Document" }));
+    fireEvent.change(screen.getByPlaceholderText("FRM-010"), { target: { value: "FRM-010" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next: release" }));
+    expect(screen.getByText(/started a reference but have not added it/)).toBeTruthy();
   });
 
   it("refuses to re-release an unchanged document and offers Rev B once it has drifted", () => {

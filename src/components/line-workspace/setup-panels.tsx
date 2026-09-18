@@ -480,7 +480,7 @@ export function WorkInstructionsPanel({
   // One default-layout build per task: the release fingerprint and the frozen cards both come
   // from it. Pure and cheap (no I/O), so it simply follows the planner state.
   const documents = useMemo(() => {
-    const byTask = new Map<string, { instruction: WorkInstruction; photosLoaded: boolean; state: WorkInstructionReleaseState; blocked: boolean }>();
+    const byTask = new Map<string, { instruction: WorkInstruction; photosLoaded: boolean; state: WorkInstructionReleaseState; blocked: boolean; blockers: string[] }>();
     for (const task of workTasks) {
       const withPhotos = photoLoadedTasks.get(task.id);
       const photosLoaded = Boolean(hydratedTaskIds?.has(task.id) || withPhotos);
@@ -501,6 +501,7 @@ export function WorkInstructionsPanel({
           { photosLoaded },
         ),
         blocked: releaseReadiness(instruction).blocking.length > 0,
+        blockers: releaseReadiness(instruction).blocking,
       });
     }
     return byTask;
@@ -555,7 +556,11 @@ export function WorkInstructionsPanel({
     if (entry && !entry.blocked) {
       return { label: "Ready", className: "border-accent/50 bg-accent/10 text-ink" };
     }
-    return { label: "Incomplete", className: "border-line bg-surface-raised text-ink-secondary" };
+    return {
+      label: "Incomplete",
+      className: "border-line bg-surface-raised text-ink-secondary",
+      title: entry?.blockers.length ? `Not ready to release:\n• ${entry.blockers.join("\n• ")}` : undefined,
+    };
   }
 
   // Batch preview stacks one document per task in a single print job, so a whole
@@ -659,7 +664,7 @@ export function WorkInstructionsPanel({
                               <ListChecks size={13} strokeWidth={1.75} />
                             </span>
                           </span>
-                          <span className={`ui-chip shrink-0 ${status.className}`}>
+                          <span className={`ui-chip shrink-0 ${status.className}`} title={"title" in status ? status.title : undefined}>
                             {status.label}
                           </span>
                         </button>

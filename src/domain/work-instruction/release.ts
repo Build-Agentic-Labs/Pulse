@@ -270,8 +270,35 @@ export interface ReleaseReadiness {
   warnings: string[];
 }
 
-/** What stands between this (default-layout) build and a release. */
-export function releaseReadiness(instruction: WorkInstruction): ReleaseReadiness {
+/**
+ * Step numbers as a short readable list: consecutive runs collapse to ranges, so 19 steps read as
+ * "2–12, 14–16, 18–20" instead of a wall of numbers.
+ */
+export function formatStepNumbers(numbers: readonly number[]): string {
+  const sorted = [...new Set(numbers)].sort((left, right) => left - right);
+  const runs: string[] = [];
+  for (let index = 0; index < sorted.length; index += 1) {
+    const start = sorted[index];
+    let end = start;
+    while (index + 1 < sorted.length && sorted[index + 1] === end + 1) {
+      index += 1;
+      end = sorted[index];
+    }
+    // A run of two reads better as "4, 5" than "4–5".
+    runs.push(end === start ? String(start) : end === start + 1 ? `${start}, ${end}` : `${start}–${end}`);
+  }
+  return runs.join(", ");
+}
+
+function stepsPhrase(numbers: readonly number[]): string {
+  return `${new Set(numbers).size === 1 ? "Step" : "Steps"} ${formatStepNumbers(numbers)}`;
+}
+
+/**
+ * What stands between this (default-layout) build and a release. Pass `photosLoaded: false` while
+ * the task's photos are still loading, so their absence is not reported as missing photos.
+ */
+export function releaseReadiness(instruction: WorkInstruction, options: { photosLoaded?: boolean } = {}): ReleaseReadiness {
   const blocking: string[] = [];
   const warnings: string[] = [];
   const firstCards = instruction.cards.filter((card) => card.part === 1);
@@ -279,21 +306,28 @@ export function releaseReadiness(instruction: WorkInstruction): ReleaseReadiness
   if (firstCards.length === 0) blocking.push("Add at least one step.");
   if (!instruction.meta.documentNumber) blocking.push("Give the task a manufacturing code so the document gets a WI number.");
   if (!instruction.meta.title.trim()) blocking.push("Name the task; its name is the document title.");
-  const overflowing = instruction.cards.filter((card) => card.overflowing);
+  const overflowing = instruction.cards.filter((card) => card.overflowing).map((card) => card.sequence);
   if (overflowing.length > 0) {
-    blocking.push(
-      `Step ${[...new Set(overflowing.map((card) => card.sequence))].join(", ")} has text too wide to print; shorten or break it.`,
-    );
+    const plural = new Set(overflowing).size > 1;
+    blocking.push(`${stepsPhrase(overflowing)} ${plural ? "have" : "has"} text too wide to print; shorten or break it.`);
   }
   if (firstCards.length > 0 && instruction.setup.tools.length === 0) blocking.push("Assign tools to the steps.");
   if (firstCards.length > 0 && !instruction.cards.some((card) => card.checks.length > 0)) {
     blocking.push("Assign a checklist to at least one step.");
   }
 
-  const withoutText = firstCards.filter((card) => !card.instruction.trim());
-  if (withoutText.length > 0) warnings.push(`Step ${withoutText.map((card) => card.sequence).join(", ")} has no instruction text.`);
-  const withoutPhoto = firstCards.filter((card) => !card.photo);
-  if (withoutPhoto.length > 0) warnings.push(`${withoutPhoto.length} of ${firstCards.length} steps have no photo.`);
+  const withoutText = firstCards.filter((card) => !card.instruction.trim()).map((card) => card.sequence);
+  if (withoutText.length > 0) {
+    warnings.push(
+      withoutText.length === 1
+        ? `Step ${withoutText[0]} has no instruction text.`
+        : `${withoutText.length} of ${firstCards.length} steps have no instruction text (${formatStepNumbers(withoutText)}).`,
+    );
+  }
+  if (options.photosLoaded !== false) {
+    const withoutPhoto = firstCards.filter((card) => !card.photo);
+    if (withoutPhoto.length > 0) warnings.push(`${withoutPhoto.length} of ${firstCards.length} steps have no photo.`);
+  }
   if (!instruction.setup.purpose.trim()) warnings.push("No purpose / scope recorded.");
   if (!instruction.setup.safetyNotes.trim()) warnings.push("No safety / PPE notes recorded.");
 

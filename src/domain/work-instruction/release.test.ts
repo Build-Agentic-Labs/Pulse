@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fingerprintWorkInstruction,
+  formatStepNumbers,
   frozenPhotoPath,
   isoDateOnly,
   latestRelease,
@@ -249,6 +250,38 @@ describe("releaseReadiness", () => {
       cards: [card({ partCount: 2 }), card({ part: 2, partCount: 2, photo: undefined, checks: [] }), card({ stepId: "step-2", sequence: 2, photo: undefined })],
     });
     expect(releaseReadiness(wi).warnings).toContain("1 of 2 steps have no photo.");
+  });
+
+  it("does not report missing photos while the task's photos are still loading", () => {
+    const wi = instruction({ cards: [card({ photo: undefined })] });
+    expect(releaseReadiness(wi).warnings).toContain("1 of 1 steps have no photo.");
+    expect(releaseReadiness(wi, { photosLoaded: false }).warnings.join(" ")).not.toMatch(/photo/);
+  });
+
+  it("summarises many empty steps as a count with ranges instead of a wall of numbers", () => {
+    const empty = [2, 3, 4, 5, 8, 10, 11, 14];
+    const cards = Array.from({ length: 14 }, (_, index) =>
+      card({ stepId: `s${index + 1}`, sequence: index + 1, instruction: empty.includes(index + 1) ? "  " : "Do it." }),
+    );
+    expect(releaseReadiness(instruction({ cards })).warnings).toContain("8 of 14 steps have no instruction text (2–5, 8, 10, 11, 14).");
+    expect(releaseReadiness(instruction({ cards: [card({ instruction: "" })] })).warnings).toContain("Step 1 has no instruction text.");
+  });
+
+  it("uses the plural for several unprintable steps", () => {
+    const cards = [card({ overflowing: true }), card({ stepId: "s2", sequence: 2, overflowing: true }), card({ stepId: "s3", sequence: 3, overflowing: true })];
+    expect(releaseReadiness(instruction({ cards })).blocking[0]).toBe("Steps 1–3 have text too wide to print; shorten or break it.");
+  });
+});
+
+describe("formatStepNumbers", () => {
+  it.each([
+    [[1], "1"],
+    [[1, 2], "1, 2"],
+    [[1, 2, 3], "1–3"],
+    [[5, 3, 4, 3, 9], "3–5, 9"],
+    [[], ""],
+  ])("%j -> %s", (numbers, expected) => {
+    expect(formatStepNumbers(numbers)).toBe(expected);
   });
 });
 

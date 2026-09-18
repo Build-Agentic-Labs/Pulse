@@ -14,6 +14,7 @@
 import { AlertTriangle, Check, Eye, FileCheck2, History, Link2, ListChecks, Loader2, Paperclip, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
+import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "@/components/themed-select";
 import { formatDate, formatDateTime } from "@/domain/formatting";
 import {
@@ -32,6 +33,7 @@ import {
   releaseReadiness,
   releaseStateFor,
   revisionLabel,
+  revisionLetter,
   validateReleaseInput,
   type WorkInstructionReleaseSummary,
 } from "@/domain/work-instruction/release";
@@ -52,6 +54,14 @@ const STEPS: Array<{ id: StepId; label: string; icon: ComponentType<{ size?: num
   { id: "release", label: "Release", icon: FileCheck2 },
   { id: "history", label: "History", icon: History },
 ];
+
+/** Example text for the add-a-reference fields, so the hint matches the kind being added. */
+const REFERENCE_EXAMPLES: Record<WorkInstructionReferenceKind, { number: string; title: string }> = {
+  sop: { number: "", title: "" },
+  drawing: { number: "DWG-1140 rev C", title: "Frame weldment drawing" },
+  document: { number: "FRM-010", title: "Torque log form" },
+  link: { number: "Optional", title: "Supplier installation guide" },
+};
 
 export interface WorkInstructionControlProps {
   projectId: string;
@@ -78,6 +88,11 @@ export interface WorkInstructionControlProps {
   onEditTask: () => void;
 }
 
+/** The letter after the one about to be released — only for the confirmation's wording. */
+function revisionLetterAfter(_next: string, releases: readonly WorkInstructionReleaseSummary[]): string {
+  return revisionLetter(releases.reduce((max, release) => Math.max(max, release.revisionIndex), 0) + 2);
+}
+
 function errorMessage(caught: unknown): string {
   return caught instanceof Error ? caught.message : "Something went wrong. Please try again.";
 }
@@ -101,7 +116,8 @@ export function WorkInstructionControl({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const readiness = useMemo(() => releaseReadiness(instruction), [instruction]);
+  const confirm = useConfirm();
+  const readiness = useMemo(() => releaseReadiness(instruction, { photosLoaded }), [instruction, photosLoaded]);
   const state = useMemo(() => releaseStateFor(instruction, releases, { photosLoaded }), [instruction, photosLoaded, releases]);
   const nextLetter = nextRevisionLetter(releases);
   const sortedReleases = useMemo(() => [...releases].sort((left, right) => right.revisionIndex - left.revisionIndex), [releases]);
@@ -116,6 +132,7 @@ export function WorkInstructionControl({
   const [draftUrl, setDraftUrl] = useState("");
   const [draftFile, setDraftFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const draftDirty = Boolean(draftSopId || draftNumber.trim() || draftTitle.trim() || draftUrl.trim() || draftFile);
   const [sops, setSops] = useState<Array<{ id: string; number: string; title: string; version: string; status: string }> | null>(null);
 
   useEffect(() => {
@@ -183,7 +200,9 @@ export function WorkInstructionControl({
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
-      <div className="ui-panel flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden">
+      {/* Fixed height: a dialog that resizes per step jumps, and moves the step buttons out from
+          under the cursor. */}
+      <div className="ui-panel flex h-[min(620px,88vh)] w-full max-w-4xl flex-col overflow-hidden">
         <header className="flex items-start gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0 flex-1">
             <div className="ui-mono-label text-ink-tertiary">{instruction.meta.documentNumber || "WI number pending"}</div>
@@ -217,8 +236,10 @@ export function WorkInstructionControl({
                   key={item.id}
                   type="button"
                   aria-current={active ? "step" : undefined}
-                  className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition ${
-                    active ? "bg-surface-sunken font-medium text-ink" : "text-ink-secondary hover:bg-surface-raised"
+                  className={`flex w-full items-center gap-2 rounded border-l-2 px-2.5 py-2 text-left text-sm transition ${
+                    active
+                      ? "border-ink bg-surface-sunken font-semibold text-ink"
+                      : "border-transparent text-ink-secondary hover:bg-surface-raised hover:text-ink"
                   }`}
                   onClick={() => {
                     setStep(item.id);
@@ -279,11 +300,27 @@ export function WorkInstructionControl({
                     </ul>
                   </div>
                 ) : null}
+                {photosLoaded ? null : (
+                  <p className="flex items-center gap-2 text-xs text-ink-tertiary">
+                    <Loader2 size={12} className="animate-spin" />
+                    Loading this task&apos;s photos…
+                  </p>
+                )}
+                {/* When something blocks the release, fixing it is the next step, so that is the
+                    highlighted action. */}
                 <div className="flex gap-2">
-                  <button type="button" className="ui-btn-ghost h-9 px-3" onClick={onEditTask}>
+                  <button
+                    type="button"
+                    className={`h-9 px-3 ${readiness.blocking.length > 0 ? "ui-btn-primary" : "ui-btn-ghost"}`}
+                    onClick={onEditTask}
+                  >
                     Edit the task
                   </button>
-                  <button type="button" className="ui-btn-primary h-9 px-3" onClick={() => setStep("references")}>
+                  <button
+                    type="button"
+                    className={`h-9 px-3 ${readiness.blocking.length > 0 ? "ui-btn-ghost" : "ui-btn-primary"}`}
+                    onClick={() => setStep("references")}
+                  >
                     Next: references
                   </button>
                 </div>
@@ -293,7 +330,7 @@ export function WorkInstructionControl({
             {step === "references" ? (
               <section className="space-y-4" aria-label="References">
                 <p className="ui-section-subtitle">
-                  Documents the operator may need: a Pulse SOP, a drawing or document (with the file uploaded here, a link, or both), or a plain link. They print in the setup band and are frozen into each release. A linked SOP always shows its current number and version.
+                  Documents the operator may need. Link a Pulse SOP, or add a drawing or document with an uploaded file, a link, or both. They print on the sheet and are frozen into each release.
                 </p>
                 {instruction.setup.references && instruction.setup.references.length > 0 ? (
                   <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
@@ -407,11 +444,11 @@ export function WorkInstructionControl({
                         <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
                           <label className="block">
                             <span className="ui-field-label">Document no.</span>
-                            <input className="ui-field-standalone" value={draftNumber} maxLength={80} disabled={busy !== null} onChange={(event) => setDraftNumber(event.target.value)} placeholder="DWG-1140 rev C" />
+                            <input className="ui-field-standalone" value={draftNumber} maxLength={80} disabled={busy !== null} onChange={(event) => setDraftNumber(event.target.value)} placeholder={REFERENCE_EXAMPLES[draftKind].number} />
                           </label>
                           <label className="block">
                             <span className="ui-field-label">Title</span>
-                            <input className="ui-field-standalone" value={draftTitle} maxLength={200} disabled={busy !== null} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Frame weldment drawing" />
+                            <input className="ui-field-standalone" value={draftTitle} maxLength={200} disabled={busy !== null} onChange={(event) => setDraftTitle(event.target.value)} placeholder={REFERENCE_EXAMPLES[draftKind].title} />
                           </label>
                         </div>
                       )}
@@ -430,7 +467,7 @@ export function WorkInstructionControl({
                           type="file"
                           aria-label="Reference file"
                           accept={REFERENCE_FILE_ACCEPT}
-                          className="block w-full text-sm text-ink-secondary file:mr-3 file:h-9 file:cursor-pointer file:rounded file:border file:border-line file:bg-surface-raised file:px-3 file:text-sm file:text-ink"
+                          className="sr-only"
                           disabled={busy !== null}
                           onChange={(event) => {
                             const file = event.target.files?.[0] ?? null;
@@ -440,12 +477,45 @@ export function WorkInstructionControl({
                             setDraftFile(problem ? null : file);
                           }}
                         />
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="ui-btn-ghost inline-flex h-9 cursor-pointer items-center gap-1.5 border border-line px-3"
+                            aria-hidden="true"
+                          >
+                            <Paperclip size={13} />
+                            {draftFile ? "Change file" : "Attach a file"}
+                          </span>
+                          {draftFile ? (
+                            <span className="flex min-w-0 items-center gap-1.5 text-sm text-ink">
+                              <span className="truncate">{draftFile.name}</span>
+                              <span className="shrink-0 text-xs text-ink-tertiary">
+                                {draftFile.size >= 1024 * 1024
+                                  ? `${(draftFile.size / (1024 * 1024)).toFixed(1)} MB`
+                                  : `${Math.max(1, Math.round(draftFile.size / 1024))} KB`}
+                              </span>
+                              <button
+                                type="button"
+                                className="ui-btn-ghost h-6 w-6 shrink-0 p-0 text-ink-tertiary"
+                                aria-label="Remove the attached file"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  setDraftFile(null);
+                                  if (fileInputRef.current) fileInputRef.current.value = "";
+                                }}
+                              >
+                                <X size={12} className="mx-auto" />
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="text-xs text-ink-tertiary">No file attached</span>
+                          )}
+                        </span>
                         <span className="mt-1 block text-[11px] text-ink-tertiary">
                           PDF, Word, Excel, CSV, JPG or PNG, up to 20 MB. Stored privately in Pulse; leave the title blank to use the file name.
                         </span>
                       </label>
                     ) : null}
-                    <button type="submit" className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-40" disabled={busy !== null}>
+                    <button type="submit" className="ui-btn-secondary h-9 gap-1.5 px-3 disabled:opacity-40" disabled={busy !== null || !draftDirty}>
                       {busy === "add-reference" ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                       Add reference
                     </button>
@@ -466,6 +536,14 @@ export function WorkInstructionControl({
                 <p className="ui-section-subtitle">
                   Releasing freezes this document exactly as it is now, as <strong className="text-ink">{revisionLabel(nextLetter)}</strong>. The released copy never changes; later edits in the planner show as a draft until you release again.
                 </p>
+                {draftDirty ? (
+                  <div className="ui-notice ui-notice-warn flex flex-wrap items-center gap-2 px-4 py-3 text-xs">
+                    <span>You started a reference but have not added it. It will not be part of this release.</span>
+                    <button type="button" className="underline" onClick={() => setStep("references")}>
+                      Go back to references
+                    </button>
+                  </div>
+                ) : null}
                 <label className="block">
                   <span className="ui-field-label">What changed in this revision</span>
                   <textarea
@@ -492,6 +570,15 @@ export function WorkInstructionControl({
                     disabled={Boolean(releaseBlockedReason) || busy !== null}
                     onClick={() =>
                       void run("release", async () => {
+                        // A release is permanent: it cannot be edited or deleted afterwards.
+                        const confirmed = await confirm({
+                          title: `Release ${revisionLabel(nextLetter)}?`,
+                          body: `This freezes "${instruction.meta.title}" exactly as it is now. A released revision cannot be edited or deleted; to change it you release ${revisionLabel(revisionLetterAfter(nextLetter, releases))}.`,
+                          confirmLabel: `Release ${revisionLabel(nextLetter)}`,
+                          // Permanent but deliberate: "Review", not the helper's default "Blocked".
+                          tone: "warning",
+                        });
+                        if (!confirmed) return;
                         const released = await releaseWorkInstruction({ projectId, instruction, changeDescription, effectiveDate });
                         await onChanged();
                         setChangeDescription("");
@@ -503,7 +590,15 @@ export function WorkInstructionControl({
                     {busy === "release" ? <Loader2 size={14} className="animate-spin" /> : <FileCheck2 size={14} />}
                     Release {revisionLabel(nextLetter)}
                   </button>
-                  {releaseBlockedReason ? <span className="text-xs text-ink-tertiary">{releaseBlockedReason}</span> : null}
+                  {releaseBlockedReason ? (
+                    readiness.blocking.length > 0 && !readOnly && photosLoaded ? (
+                      <button type="button" className="text-xs text-ink-secondary underline" onClick={() => setStep("readiness")}>
+                        {releaseBlockedReason}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-ink-tertiary">{releaseBlockedReason}</span>
+                    )
+                  ) : null}
                 </div>
               </section>
             ) : null}

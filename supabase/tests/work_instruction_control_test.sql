@@ -36,7 +36,7 @@ insert into public.project_access (project_id, user_id, level) values
   ('proj_wi', 'f0000000-0000-0000-0000-000000000001', 'edit'),
   ('proj_wi', 'f0000000-0000-0000-0000-000000000002', 'view');
 
-insert into public.products (id, workspace_id, project_id, name) values ('prod_wi', 'ws_wi', 'proj_wi', 'WI Product');
+insert into public.products (id, project_id, name) values ('prod_wi', 'proj_wi', 'WI Product');
 insert into public.scenarios (id, product_id, name) values ('scen_wi', 'prod_wi', 'Current');
 insert into public.tasks (id, scenario_id, name, wbs, planned_start, planned_finish)
 values ('task_wi', 'scen_wi', 'Install bracket', '1', '2026-09-18T08:00:00Z', '2026-09-18T09:00:00Z');

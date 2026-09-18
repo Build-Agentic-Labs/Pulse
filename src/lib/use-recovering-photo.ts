@@ -34,7 +34,10 @@ export function useRecoveringPhoto(url: string, storagePath?: string) {
       if (force) setState({identity, source:snapshot.source, failed:false, loading:false});
       return snapshot.source;
     }
-    if (!force && !photoUrlNeedsRefresh(snapshot.source)) return snapshot.source;
+    // A photo stored WITHOUT a link (a released work instruction keeps only the storage path,
+    // because any signed URL it saved would have expired) must be signed up front: an empty
+    // <img src> never fires the error event that would otherwise trigger recovery.
+    if (!force && snapshot.source && !photoUrlNeedsRefresh(snapshot.source)) return snapshot.source;
     setState({identity, source:snapshot.source, failed:false, loading:true});
     const fresh = await sign(storagePath);
     if (current.current !== snapshot) return fresh;

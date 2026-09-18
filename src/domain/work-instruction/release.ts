@@ -325,21 +325,29 @@ export function validateReleaseInput(input: ReleaseInput): string | null {
   return null;
 }
 
-const PROJECT_SCOPED_PATH = /^(workspaces\/[^/]+\/projects\/[^/]+)\/.+?(\.[A-Za-z0-9]{1,5})?$/;
-
 function safePathSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "x";
 }
 
 /**
- * Where a release keeps its own copy of a step photo, inside the same project-scoped prefix the
- * step-photos bucket's RLS already governs. Returns null for a path outside that convention
- * (legacy objects), which the release then references in place.
+ * Where a release keeps its own copy of a step photo: inside the project-scoped prefix the
+ * step-photos bucket's RLS governs, whatever shape the SOURCE path has. Older photos live at
+ * legacy paths (`task-…/step-…/photo.jpg`) outside that prefix, so the destination is built from
+ * the release's own workspace and project rather than derived from the source — a legacy photo
+ * gets a frozen copy like any other. The workspace and project are used verbatim (RLS compares
+ * them exactly); returns null only when they cannot form a path.
  */
-export function frozenPhotoPath(sourcePath: string, taskId: string, batchId: string, photoId: string): string | null {
-  const match = PROJECT_SCOPED_PATH.exec(sourcePath);
-  if (!match) return null;
-  const [, projectPrefix, extension = ""] = match;
-  const segments = [taskId, batchId, photoId].map(safePathSegment);
-  return `${projectPrefix}/wi-releases/${segments.join("/")}${extension.toLowerCase()}`;
+export function frozenPhotoPath(input: {
+  workspaceId: string;
+  projectId: string;
+  taskId: string;
+  batchId: string;
+  photoId: string;
+  sourcePath: string;
+}): string | null {
+  if (!input.sourcePath) return null;
+  if (!input.workspaceId || input.workspaceId.includes("/") || !input.projectId || input.projectId.includes("/")) return null;
+  const extension = /\.([A-Za-z0-9]{1,5})$/.exec(input.sourcePath)?.[1]?.toLowerCase();
+  const segments = [input.taskId, input.batchId, input.photoId].map(safePathSegment);
+  return `workspaces/${input.workspaceId}/projects/${input.projectId}/wi-releases/${segments.join("/")}${extension ? `.${extension}` : ""}`;
 }

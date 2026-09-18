@@ -267,14 +267,26 @@ describe("validateReleaseInput / isoDateOnly", () => {
 });
 
 describe("frozenPhotoPath", () => {
-  it("keeps the copy inside the same workspace and project prefix", () => {
-    expect(frozenPhotoPath("workspaces/ws-1/projects/project-flexboost/tasks/t/steps/s/abc-photo.JPG", "task flex/1", "batch-1", "photo:1")).toBe(
+  const target = { workspaceId: "ws-1", projectId: "project-flexboost", taskId: "task flex/1", batchId: "batch-1", photoId: "photo:1" };
+
+  it("puts the copy under the release's own workspace and project", () => {
+    expect(frozenPhotoPath({ ...target, sourcePath: "workspaces/ws-1/projects/project-flexboost/tasks/t/steps/s/abc-photo.JPG" })).toBe(
       "workspaces/ws-1/projects/project-flexboost/wi-releases/task-flex-1/batch-1/photo-1.jpg",
     );
   });
 
-  it("returns null for a path outside the project-scoped convention", () => {
-    expect(frozenPhotoPath("legacy/photo.jpg", "t", "b", "p")).toBeNull();
-    expect(frozenPhotoPath("", "t", "b", "p")).toBeNull();
+  it("freezes a photo at a legacy path too, since the destination does not depend on the source's shape", () => {
+    expect(frozenPhotoPath({ ...target, sourcePath: "task-1778789409179/step-abc/photo-1778789457309-7j7sbw.jpg" })).toBe(
+      "workspaces/ws-1/projects/project-flexboost/wi-releases/task-flex-1/batch-1/photo-1.jpg",
+    );
+    expect(frozenPhotoPath({ ...target, sourcePath: "legacy/photo-without-extension" })).toBe(
+      "workspaces/ws-1/projects/project-flexboost/wi-releases/task-flex-1/batch-1/photo-1",
+    );
+  });
+
+  it("returns null when there is no source or the project cannot form a path", () => {
+    expect(frozenPhotoPath({ ...target, sourcePath: "" })).toBeNull();
+    expect(frozenPhotoPath({ ...target, workspaceId: "", sourcePath: "a.jpg" })).toBeNull();
+    expect(frozenPhotoPath({ ...target, projectId: "p/x", sourcePath: "a.jpg" })).toBeNull();
   });
 });

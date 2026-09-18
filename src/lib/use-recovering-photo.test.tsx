@@ -38,4 +38,15 @@ describe("photo URL recovery",()=>{
   const {result}=renderHook(()=>useRecoveringPhoto(`https://example.test/a?token=${token}`,"expired"));
   await waitFor(()=>expect(result.current.source).toBe("https://example.test/current"));
  });
+ it("signs a photo that was stored with a path but no link, since an empty src never errors",async()=>{
+  refresh.mockResolvedValueOnce("https://example.test/frozen");
+  const {result}=renderHook(()=>useRecoveringPhoto("","workspaces/w/projects/p/wi-releases/t/b/photo.jpg"));
+  await waitFor(()=>expect(result.current.source).toBe("https://example.test/frozen"));
+  expect(refresh).toHaveBeenCalledWith("workspaces/w/projects/p/wi-releases/t/b/photo.jpg","photo");
+ });
+ it("still leaves a linkless photo alone when there is no storage path to sign",async()=>{
+  const {result}=renderHook(()=>useRecoveringPhoto("",undefined));
+  await act(async()=>{await result.current.recover();});
+  expect(refresh).not.toHaveBeenCalled();
+ });
 });

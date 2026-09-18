@@ -117,15 +117,29 @@ function newBatchId(): string {
  */
 async function freezePhotos(
   supabase: SupabaseClient<Database>,
+  projectId: string,
   instruction: WorkInstruction,
 ): Promise<{ frozen: Map<string, string>; copiedPaths: string[] }> {
   const frozen = new Map<string, string>();
   const copiedPaths: string[] = [];
+  if (!instruction.cards.some((card) => card.photo?.storagePath)) return { frozen, copiedPaths };
+
+  // The destination is built from the project, not the source path, so photos at legacy paths
+  // (outside workspaces/<ws>/projects/<project>/) are frozen too.
+  const { data: project } = await supabase.from("projects").select("workspace_id").eq("id", projectId).maybeSingle();
+  const workspaceId = project?.workspace_id ?? "";
   const batchId = newBatchId();
   for (const card of instruction.cards) {
     const photo = card.photo;
     if (!photo?.storagePath || frozen.has(photo.id)) continue;
-    const destination = frozenPhotoPath(photo.storagePath, instruction.taskId, batchId, photo.id);
+    const destination = frozenPhotoPath({
+      workspaceId,
+      projectId,
+      taskId: instruction.taskId,
+      batchId,
+      photoId: photo.id,
+      sourcePath: photo.storagePath,
+    });
     if (!destination) continue;
     const { error } = await supabase.storage.from(STEP_PHOTO_BUCKET).copy(photo.storagePath, destination);
     if (error) {
@@ -151,7 +165,7 @@ export async function releaseWorkInstruction(
   if (invalid) throw new Error(invalid);
 
   const supabase = client ?? createPlannerSupabaseClient();
-  const { frozen, copiedPaths } = await freezePhotos(supabase, input.instruction);
+  const { frozen, copiedPaths } = await freezePhotos(supabase, input.projectId, input.instruction);
   const content = snapshotForRelease(input.instruction, frozen);
 
   try {

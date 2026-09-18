@@ -120,6 +120,18 @@ export interface WorkInstructionContext {
  * There is no separate `materialKit`: a kit is a part number, so it is folded
  * into `parts` as a row rather than getting a block of its own.
  */
+export type WorkInstructionReferenceKind = "sop" | "drawing" | "document" | "link";
+
+/** One line of the setup band's "Reference documents" block. */
+export interface WorkInstructionReferenceDoc {
+  kind: WorkInstructionReferenceKind;
+  documentNumber: string;
+  title: string;
+  /** Set for a Pulse SOP: the version current when the document was built. */
+  version?: string;
+  url: string;
+}
+
 export interface WorkInstructionSetup {
   purpose: string;
   safetyNotes: string;
@@ -127,6 +139,12 @@ export interface WorkInstructionSetup {
   parts: WorkInstructionPart[];
   drawingLink: string;
   sopLink: string;
+  /**
+   * Every reference the sheet lists: the two legacy links above, then the managed references.
+   * Absent only on a hand-built setup (the blank template, older fixtures); the renderer then
+   * falls back to the two ruled legacy lines.
+   */
+  references?: WorkInstructionReferenceDoc[];
   plannedDurationMinutes: number;
   plannedOperators: number;
   qualityGate: boolean;

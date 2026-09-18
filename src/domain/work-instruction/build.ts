@@ -18,6 +18,7 @@ import {
 } from "../manufacturing-step-checks";
 import { documentDisplayCode, stepDisplayCode } from "../nomenclature";
 import { getStepPartReferenceQuantity } from "../step-part-references";
+import { referencesForSetup, type WorkInstructionReferenceRecord } from "./references";
 import {
   instructionWithPartMentionMarkers,
   numberedStepPartMentions,
@@ -44,6 +45,8 @@ export interface BuildWorkInstructionInput {
   zone?: Zone;
   /** Card-grid variant. Determines how much text a card holds, so splitting follows it. */
   layout?: WorkInstructionLayout;
+  /** Managed reference documents for this task (work_instruction_references). */
+  references?: readonly WorkInstructionReferenceRecord[];
 }
 
 /** Case-insensitive de-dupe that keeps first-seen order and drops blanks. */
@@ -162,6 +165,7 @@ export function buildWorkInstruction({
   product,
   zone,
   layout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
+  references = [],
 }: BuildWorkInstructionInput): WorkInstruction {
   const definitions = getManufacturingStepCheckDefinitions(product.customFields);
   const toolsByStep = getTaskStepToolListMap(task);
@@ -218,7 +222,9 @@ export function buildWorkInstruction({
     meta: {
       documentNumber,
       title: task.name,
-      revision: product.revision ?? "",
+      // The document has its OWN revision letter, assigned at release (see release.ts). The
+      // product revision is context, shown in the Product field, not this document's revision.
+      revision: "",
       effectiveDate: "",
       preparedBy: "",
       reviewedBy: "",
@@ -243,6 +249,7 @@ export function buildWorkInstruction({
       parts: buildParts(task),
       drawingLink: task.drawingLink ?? "",
       sopLink: task.sopLink ?? "",
+      references: referencesForSetup({ drawingLink: task.drawingLink, sopLink: task.sopLink }, references),
       plannedDurationMinutes: task.plannedDurationMinutes,
       plannedOperators: task.plannedOperators,
       qualityGate: task.qualityGate,

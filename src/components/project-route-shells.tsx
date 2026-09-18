@@ -184,6 +184,7 @@ export function WorkInstructionPrintRouteShell({
   scenarioId,
   blank,
   layoutId,
+  releaseId,
 }: {
   projectId: string;
   initialPlannerState?: PlannerState;
@@ -192,6 +193,8 @@ export function WorkInstructionPrintRouteShell({
   blank?: boolean;
   /** Already validated by the route; undefined means the app default. */
   layoutId?: string;
+  /** Print this released revision as frozen, instead of the live document. */
+  releaseId?: string;
 } & ShellProps) {
   return (
     <AuthProjectGate projectId={projectId} routeKind="planner" initialGroups={initialGroups}>
@@ -201,6 +204,7 @@ export function WorkInstructionPrintRouteShell({
           scenarioId={scenarioId}
           taskIds={taskIds}
           blank={blank}
+          pinnedReleaseId={releaseId}
           initialPlannerState={initialPlannerState}
           layout={layoutId ? WORK_INSTRUCTION_LAYOUTS[layoutId] : undefined}
           onReady={onReady}

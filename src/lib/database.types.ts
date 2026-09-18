@@ -2816,6 +2816,128 @@ export type Database = {
         }
         Relationships: []
       }
+      work_instruction_references: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          document_number: string
+          id: string
+          kind: string
+          position: number
+          project_id: string
+          sop_id: string | null
+          task_id: string
+          title: string
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          document_number?: string
+          id?: string
+          kind: string
+          position?: number
+          project_id: string
+          sop_id?: string | null
+          task_id: string
+          title?: string
+          updated_at?: string
+          url?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          document_number?: string
+          id?: string
+          kind?: string
+          position?: number
+          project_id?: string
+          sop_id?: string | null
+          task_id?: string
+          title?: string
+          updated_at?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_instruction_references_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_instruction_references_sop_id_fkey"
+            columns: ["sop_id"]
+            isOneToOne: false
+            referencedRelation: "sops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      work_instruction_releases: {
+        Row: {
+          change_description: string
+          content: Json
+          content_hash: string
+          document_number: string
+          effective_date: string
+          id: string
+          project_id: string
+          released_at: string
+          released_by: string
+          released_by_name: string
+          revision: string
+          revision_index: number
+          task_id: string
+          text_hash: string
+          title: string
+        }
+        Insert: {
+          change_description: string
+          content: Json
+          content_hash: string
+          document_number?: string
+          effective_date: string
+          id?: string
+          project_id: string
+          released_at?: string
+          released_by?: string
+          released_by_name?: string
+          revision?: string
+          revision_index?: number
+          task_id: string
+          text_hash?: string
+          title?: string
+        }
+        Update: {
+          change_description?: string
+          content?: Json
+          content_hash?: string
+          document_number?: string
+          effective_date?: string
+          id?: string
+          project_id?: string
+          released_at?: string
+          released_by?: string
+          released_by_name?: string
+          revision?: string
+          revision_index?: number
+          task_id?: string
+          text_hash?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_instruction_releases_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_order_lines: {
         Row: {
           assembly_order_no: string
@@ -3705,6 +3827,10 @@ export type Database = {
       }
       task_project_id: { Args: { target_task_id: string }; Returns: string }
       task_workspace_id: { Args: { target_task_id: string }; Returns: string }
+      work_instruction_revision_letter: {
+        Args: { p_index: number }
+        Returns: string
+      }
       workspace_has_members: {
         Args: { target_workspace_id: string }
         Returns: boolean

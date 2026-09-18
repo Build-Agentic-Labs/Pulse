@@ -6340,6 +6340,7 @@ export function LineWorkspace({
                       product={derivedState.product}
                       initialPlannerState={derivedState}
                       hydratedTaskIds={hydratedTaskIds}
+                      readOnly={isViewOnlyAccess}
                       onOpenTask={(taskId) => {
                         selectTask(taskId);
                         pushWorkspaceModuleHistory("procedure");

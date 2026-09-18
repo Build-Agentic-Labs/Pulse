@@ -22,6 +22,7 @@ import { instructionBlocks } from "@/domain/instruction-bullets";
 import { formatMinutes } from "@/domain/calculations";
 import { formatDateControlled } from "@/domain/formatting";
 import { paginateWorkInstruction } from "@/domain/work-instruction/paginate";
+import { REFERENCE_KIND_LABELS, referenceLine } from "@/domain/work-instruction/references";
 import {
   DEFAULT_WORK_INSTRUCTION_LAYOUT,
   type WorkInstruction,
@@ -264,6 +265,9 @@ const PRINT_STYLES = `
 .wi-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.05in 0.1in; font-size: 8.5pt; }
 .wi-facts > div { display: flex; justify-content: space-between; gap: 6px; border-bottom: 1px solid #ddd; }
 .wi-facts span:first-child { color: #666; }
+.wi-references > div { gap: 8px; }
+.wi-references span:first-child { flex: 0 0 auto; }
+.wi-reference-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 /* No signature or approval block by design: a work instruction is a repeated
    master, reprinted for every build, so it carries no sign-off surface. Where a
    signature is required it belongs on the referenced checklist action. */
@@ -312,16 +316,22 @@ const PRINT_STYLES = `
 }
 `;
 
+/** Rows the header's revision-history cell can hold. */
+const REVISION_ROWS = 3;
+/** Lines the setup band's reference block can hold before it would push the band taller. */
+const REFERENCE_ROWS = 7;
+
 function HeaderBand({ instruction, sheet }: { instruction: WorkInstruction; sheet: WorkInstructionSheet }) {
   const { meta, context, setup } = instruction;
-  const revisions =
-    meta.revisionHistory.length > 0
-      ? meta.revisionHistory
-      : [
-          { revision: "", date: "", description: "", author: "" },
-          { revision: "", date: "", description: "", author: "" },
-          { revision: "", date: "", description: "", author: "" },
-        ];
+  // The header cell has room for three rows. Show the most recent three, oldest first, padded
+  // with ruled blanks so a first release still leaves lines to write on. The full history lives
+  // in the release records; the sheet only needs what is current.
+  const blankRevision = { revision: "", date: "", description: "", author: "" };
+  const recentRevisions = meta.revisionHistory.slice(-REVISION_ROWS);
+  const revisions = [
+    ...recentRevisions,
+    ...Array.from({ length: Math.max(0, REVISION_ROWS - recentRevisions.length) }, () => blankRevision),
+  ];
 
   return (
     <header className="wi-hdr">
@@ -480,16 +490,36 @@ function SetupSheetBody({ instruction }: { instruction: WorkInstruction }) {
       </Block>
 
       <Block title="Reference documents">
-        <div className="wi-facts" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-          <div>
-            <span>Drawing</span>
-            <span>{setup.drawingLink || "—"}</span>
+        {setup.references && setup.references.length > 0 ? (
+          <div className="wi-facts wi-references" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+            {setup.references.slice(0, REFERENCE_ROWS).map((reference, index) => (
+              <div key={`${reference.kind}-${index}`}>
+                <span>{REFERENCE_KIND_LABELS[reference.kind]}</span>
+                <span className="wi-reference-line" title={referenceLine(reference)}>
+                  {referenceLine(reference)}
+                </span>
+              </div>
+            ))}
+            {setup.references.length > REFERENCE_ROWS ? (
+              <div>
+                <span>More</span>
+                <span>{`+${setup.references.length - REFERENCE_ROWS} in Pulse`}</span>
+              </div>
+            ) : null}
           </div>
-          <div>
-            <span>Governing SOP</span>
-            <span>{setup.sopLink || "—"}</span>
+        ) : (
+          // No references at all (and the blank fill-in form): the two ruled lines to write on.
+          <div className="wi-facts" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+            <div>
+              <span>Drawing</span>
+              <span>{setup.drawingLink || "—"}</span>
+            </div>
+            <div>
+              <span>Governing SOP</span>
+              <span>{setup.sopLink || "—"}</span>
+            </div>
           </div>
-        </div>
+        )}
       </Block>
     </div>
   );

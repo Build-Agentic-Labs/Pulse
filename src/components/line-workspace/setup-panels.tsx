@@ -1,7 +1,7 @@
 "use client";
 
-import { Eye, FileText, ListChecks, Plus, Trash2, Wrench } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Eye, FileCheck2, FileText, ListChecks, Plus, Trash2, Wrench } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   getManufacturingStepCheckDefinitions,
   getManufacturingStepCheckState,
@@ -10,6 +10,19 @@ import {
 } from "@/domain/manufacturing-step-checks";
 import { countTaskStepTools } from "@/domain/step-tools";
 import { normalizeCode } from "@/domain/nomenclature";
+import { loadTaskPrivateMediaFromSupabase } from "@/domain/supabase-planner";
+import { mergeTaskPrivateMedia } from "@/domain/task-private-media";
+import { buildWorkInstruction } from "@/domain/work-instruction/build";
+import type { WorkInstructionReferenceRecord } from "@/domain/work-instruction/references";
+import {
+  releaseReadiness,
+  releaseStateFor,
+  revisionLabel,
+  type WorkInstructionReleaseState,
+  type WorkInstructionReleaseSummary,
+} from "@/domain/work-instruction/release";
+import type { WorkInstruction } from "@/domain/work-instruction/schema";
+import { listWorkInstructionReferences, listWorkInstructionReleases } from "@/lib/work-instruction/store";
 import type {
   DemandPeriod,
   DocumentTypeCode,
@@ -22,6 +35,7 @@ import type {
 } from "@/domain/types";
 import { ClearableNumberInput } from "../clearable-number-input";
 import { ThemedSelect } from "../themed-select";
+import { WorkInstructionControl } from "../work-instruction/work-instruction-control";
 import { WorkInstructionPrintPreview } from "../work-instruction/work-instruction-print";
 import { type FeedbackConfirm } from "../themed-feedback";
 import { NumericField, StatCard, type ProductNumberField, type ProductTextField } from "./shared";
@@ -409,6 +423,7 @@ export function WorkInstructionsPanel({
   product,
   initialPlannerState,
   hydratedTaskIds,
+  readOnly = false,
   onOpenTask,
 }: {
   tasks: Task[];
@@ -416,6 +431,8 @@ export function WorkInstructionsPanel({
   product: Product;
   initialPlannerState?: PlannerState;
   hydratedTaskIds?: ReadonlySet<string>;
+  /** View-only project access: releases and references are visible but cannot be changed. */
+  readOnly?: boolean;
   onOpenTask: (taskId: string) => void;
 }) {
   const parentIds = new Set(tasks.map((task) => task.parentTaskId).filter((id): id is string => Boolean(id)));
@@ -423,17 +440,94 @@ export function WorkInstructionsPanel({
   const workTasks = tasks.filter((task) => task.rowType === "task" && !parentIds.has(task.id));
   const checkDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
 
-  const hasWorkInstruction = (task: Task) => Boolean(task.workInstructionLink || task.sopLink);
   const hasTools = (task: Task) => countTaskStepTools(task) > 0;
   const hasChecks = (task: Task) =>
     (task.manufacturingSteps ?? []).some((step) => getManufacturingStepCheckState(step.qualityCheck, checkDefinitions).selected.size > 0);
-  // Prerequisites for generating a work instruction: it needs tools AND a checklist first.
-  const isReady = (task: Task) => hasTools(task) && hasChecks(task);
 
-  const createdCount = workTasks.filter(hasWorkInstruction).length;
-  const readyCount = workTasks.filter((task) => !hasWorkInstruction(task) && isReady(task)).length;
-  const incompleteCount = workTasks.filter((task) => !hasWorkInstruction(task) && !isReady(task)).length;
-  const [previewSelection, setPreviewSelection] = useState<{ taskIds: string[]; scenarioId?: string } | null>(null);
+  // The print route reloads planner state by project, so a product with no
+  // project behind it cannot produce a shareable document.
+  const projectId = product.projectId;
+
+  // Document control: every release (without its frozen document) and every reference in the
+  // project, in two small reads. An overlay, never a dependency — if it fails to load the list
+  // still works, it just cannot say which revision anything is at.
+  const [control, setControl] = useState<{
+    releases: WorkInstructionReleaseSummary[];
+    references: WorkInstructionReferenceRecord[];
+  } | null>(null);
+  const reloadControl = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const [releases, references] = await Promise.all([
+        listWorkInstructionReleases(projectId),
+        listWorkInstructionReferences(projectId),
+      ]);
+      setControl({ releases, references });
+    } catch {
+      setControl(null);
+    }
+  }, [projectId]);
+  useEffect(() => {
+    void reloadControl();
+  }, [reloadControl]);
+
+  // The planner loads a task's photos only once its procedure is opened. Releasing must freeze
+  // the photos too, so the dialog fetches them for a task that has not been opened yet.
+  const [photoLoadedTasks, setPhotoLoadedTasks] = useState<ReadonlyMap<string, Task>>(new Map());
+  const [controlTarget, setControlTarget] = useState<{ taskId: string; step?: "readiness" | "references" | "release" | "history" } | null>(null);
+
+  const zoneLookup = useMemo(() => new Map(zones.map((zone) => [zone.id, zone])), [zones]);
+  // One default-layout build per task: the release fingerprint and the frozen cards both come
+  // from it. Pure and cheap (no I/O), so it simply follows the planner state.
+  const documents = useMemo(() => {
+    const byTask = new Map<string, { instruction: WorkInstruction; photosLoaded: boolean; state: WorkInstructionReleaseState; blocked: boolean }>();
+    for (const task of workTasks) {
+      const withPhotos = photoLoadedTasks.get(task.id);
+      const photosLoaded = Boolean(hydratedTaskIds?.has(task.id) || withPhotos);
+      // The planner's copy stays the source of text; only the photos come from the side load.
+      const source = withPhotos && !hydratedTaskIds?.has(task.id) ? mergeTaskPrivateMedia(task, withPhotos) : task;
+      const instruction = buildWorkInstruction({
+        task: source,
+        product,
+        zone: task.zoneId ? zoneLookup.get(task.zoneId) : undefined,
+        references: (control?.references ?? []).filter((reference) => reference.taskId === task.id),
+      });
+      byTask.set(task.id, {
+        instruction,
+        photosLoaded,
+        state: releaseStateFor(
+          instruction,
+          (control?.releases ?? []).filter((release) => release.taskId === task.id),
+          { photosLoaded },
+        ),
+        blocked: releaseReadiness(instruction).blocking.length > 0,
+      });
+    }
+    return byTask;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workTasks is derived from `tasks` each render
+  }, [tasks, product, zoneLookup, control, hydratedTaskIds, photoLoadedTasks]);
+
+  const releasedCount = workTasks.filter((task) => documents.get(task.id)?.state.kind === "released").length;
+  const modifiedCount = workTasks.filter((task) => documents.get(task.id)?.state.kind === "modified").length;
+  const readyCount = workTasks.filter((task) => {
+    const entry = documents.get(task.id);
+    return entry?.state.kind === "unreleased" && !entry.blocked;
+  }).length;
+  const incompleteCount = workTasks.filter((task) => {
+    const entry = documents.get(task.id);
+    return entry?.state.kind === "unreleased" && entry.blocked;
+  }).length;
+  const [previewSelection, setPreviewSelection] = useState<{ taskIds: string[]; scenarioId?: string; releaseId?: string } | null>(null);
+
+  function openControl(task: Task, step?: "readiness" | "references" | "release" | "history") {
+    setControlTarget({ taskId: task.id, step });
+    if (!projectId || hydratedTaskIds?.has(task.id) || photoLoadedTasks.has(task.id)) return;
+    void loadTaskPrivateMediaFromSupabase(task.id, projectId)
+      .then((serverTask) => {
+        if (serverTask) setPhotoLoadedTasks((current) => new Map(current).set(task.id, serverTask));
+      })
+      .catch(() => undefined);
+  }
   // The blank fill-in template opens in the same in-page preview as a real work instruction —
   // a quick look, not a trip to a new tab. The print route still serves ?blank=1 for shared links.
   const [blankPreviewOpen, setBlankPreviewOpen] = useState(false);
@@ -451,18 +545,18 @@ export function WorkInstructionsPanel({
   ];
 
   function statusOf(task: Task) {
-    if (hasWorkInstruction(task)) {
-      return { label: "Created", className: "border-accent/30 bg-accent/5 text-ink-secondary" };
+    const entry = documents.get(task.id);
+    if (entry?.state.kind === "released") {
+      return { label: revisionLabel(entry.state.release.revision), className: "border-success/40 bg-success-muted text-success" };
     }
-    if (isReady(task)) {
+    if (entry?.state.kind === "modified") {
+      return { label: `${revisionLabel(entry.state.release.revision)} · modified`, className: "border-warn/40 bg-warn/10 text-warn" };
+    }
+    if (entry && !entry.blocked) {
       return { label: "Ready", className: "border-accent/50 bg-accent/10 text-ink" };
     }
     return { label: "Incomplete", className: "border-line bg-surface-raised text-ink-secondary" };
   }
-
-  // The print route reloads planner state by project, so a product with no
-  // project behind it cannot produce a shareable document.
-  const projectId = product.projectId;
 
   // Batch preview stacks one document per task in a single print job, so a whole
   // line can go to the printer in one pass.
@@ -476,10 +570,10 @@ export function WorkInstructionsPanel({
           <p className="ui-section-subtitle">
             {workTasks.length === 0
               ? "Add tasks in the Gantt to see the work instructions you need to build."
-              : `${readyCount} of ${workTasks.length} ready to generate · ${incompleteCount} still need tools & checks.`}
+              : `${releasedCount} of ${workTasks.length} released · ${modifiedCount + readyCount} waiting to be released · ${incompleteCount} incomplete.`}
           </p>
           <p className="text-xs text-ink-tertiary">
-            A work instruction can be generated once its steps have both tools and a checklist assigned.
+            Each work instruction is released on its own, as Rev A, B, C… A released copy never changes; edits in the planner show as modified until you release again.
           </p>
         </div>
         {projectId ? (
@@ -514,9 +608,9 @@ export function WorkInstructionsPanel({
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Needed" value={String(workTasks.length)} meta="one per task" />
-        <StatCard label="Ready" value={String(readyCount)} tone={readyCount > 0 ? "good" : "neutral"} meta="tools + checks done" />
-        <StatCard label="Incomplete" value={String(incompleteCount)} tone={incompleteCount > 0 ? "warn" : "neutral"} meta="missing tools / checks" />
-        <StatCard label="Created" value={String(createdCount)} meta="generated / linked" />
+        <StatCard label="Released" value={String(releasedCount)} tone={releasedCount > 0 ? "good" : "neutral"} meta="current revision matches" />
+        <StatCard label="To release" value={String(modifiedCount + readyCount)} tone={modifiedCount > 0 ? "warn" : "neutral"} meta={`${modifiedCount} modified · ${readyCount} new`} />
+        <StatCard label="Incomplete" value={String(incompleteCount)} tone={incompleteCount > 0 ? "warn" : "neutral"} meta="not ready to release" />
       </div>
 
       {workTasks.length === 0 ? null : (
@@ -580,6 +674,18 @@ export function WorkInstructionsPanel({
                             Preview
                           </button>
                         ) : null}
+                        {projectId ? (
+                          <button
+                            type="button"
+                            onClick={() => openControl(task)}
+                            className="ui-btn-ghost h-7 shrink-0 gap-1.5 px-2 text-xs"
+                            aria-haspopup="dialog"
+                            title={`Release and revisions for ${task.name}`}
+                          >
+                            <FileCheck2 size={13} />
+                            Release
+                          </button>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -600,9 +706,35 @@ export function WorkInstructionsPanel({
               ? initialPlannerState
               : undefined
           }
+          pinnedReleaseId={previewSelection.releaseId}
           onClose={() => setPreviewSelection(null)}
         />
       ) : null}
+      {(() => {
+        const task = controlTarget ? workTasks.find((candidate) => candidate.id === controlTarget.taskId) : undefined;
+        const entry = task ? documents.get(task.id) : undefined;
+        if (!projectId || !controlTarget || !task || !entry) return null;
+        return (
+          <WorkInstructionControl
+            key={task.id}
+            projectId={projectId}
+            instruction={entry.instruction}
+            photosLoaded={entry.photosLoaded}
+            releases={(control?.releases ?? []).filter((release) => release.taskId === task.id)}
+            references={(control?.references ?? []).filter((reference) => reference.taskId === task.id)}
+            readOnly={readOnly}
+            suspended={previewSelection !== null}
+            initialStep={controlTarget.step}
+            onChanged={reloadControl}
+            onClose={() => setControlTarget(null)}
+            onPreview={(options) => setPreviewSelection({ taskIds: [task.id], scenarioId: task.scenarioId, releaseId: options?.releaseId })}
+            onEditTask={() => {
+              setControlTarget(null);
+              onOpenTask(task.id);
+            }}
+          />
+        );
+      })()}
       {projectId && blankPreviewOpen ? (
         <WorkInstructionPrintPreview
           projectId={projectId}

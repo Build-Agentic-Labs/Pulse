@@ -109,6 +109,22 @@ async function collectReferencedPaths(sources) {
   return referenced;
 }
 
+// A released work instruction keeps its OWN copy of each step photo (under .../wi-releases/...),
+// referenced only from inside the release's frozen JSON — no column names them. Without this they
+// would look like orphans and a --delete run would gut every released document.
+async function collectReleasePhotoPaths() {
+  const paths = new Set();
+  const rows = await selectAll("work_instruction_releases", () => supabase.from("work_instruction_releases").select("content"));
+  for (const row of rows) {
+    for (const card of row.content?.cards ?? []) {
+      const path = card?.photo?.storagePath;
+      if (typeof path === "string" && path) paths.add(path);
+    }
+  }
+  console.log(`  work_instruction_releases: ${rows.length} releases, ${paths.size} frozen photo paths`);
+  return paths;
+}
+
 async function removeInChunks(bucket, paths) {
   let removed = 0;
 
@@ -134,6 +150,9 @@ for (const [bucket, sources] of Object.entries(BUCKET_SOURCES)) {
   const objectPaths = await listObjectPaths(bucket);
   console.log(`${objectPaths.length} objects in Storage`);
   const referenced = await collectReferencedPaths(sources);
+  if (bucket === "step-photos") {
+    for (const path of await collectReleasePhotoPaths()) referenced.add(path);
+  }
   console.log(`${referenced.size} distinct referenced paths`);
 
   const orphans = objectPaths.filter((path) => !referenced.has(path));

@@ -12,17 +12,32 @@
 
 import { ArrowLeft, Printer, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadPlannerStateFromSupabase } from "@/domain/supabase-planner";
 import type { PlannerState } from "@/domain/types";
 import { buildWorkInstruction } from "@/domain/work-instruction/build";
+import type { WorkInstructionReferenceRecord } from "@/domain/work-instruction/references";
+import {
+  releaseStateFor,
+  releasedDocument,
+  revisionLabel,
+  withReleaseMeta,
+  type WorkInstructionRelease,
+  type WorkInstructionReleaseState,
+  type WorkInstructionReleaseSummary,
+} from "@/domain/work-instruction/release";
 import {
   DEFAULT_WORK_INSTRUCTION_LAYOUT,
   WORK_INSTRUCTION_LAYOUTS,
   type WorkInstruction,
   type WorkInstructionLayout,
 } from "@/domain/work-instruction/schema";
+import {
+  getWorkInstructionRelease,
+  listWorkInstructionReferences,
+  listWorkInstructionReleases,
+} from "@/lib/work-instruction/store";
 import { WorkInstructionDocument } from "./work-instruction-document";
 
 type LoadStatus = "loading" | "ready" | "empty" | "error";
@@ -40,10 +55,20 @@ export interface WorkInstructionPrintPreviewProps {
   onReady?: () => void;
   /** When provided, render as an in-place modal preview instead of the standalone print route. */
   onClose?: () => void;
+  /**
+   * Show exactly this released revision (its frozen content), ignoring the live planner data.
+   * Used by the revision history and by shareable `?release=` print links.
+   */
+  pinnedReleaseId?: string;
 }
 
 /** Build the requested instructions out of a loaded planner state, in the order asked for. */
-function buildFromState(state: PlannerState, taskIds: string[], layout: WorkInstructionLayout): WorkInstruction[] {
+function buildFromState(
+  state: PlannerState,
+  taskIds: string[],
+  layout: WorkInstructionLayout,
+  references: readonly WorkInstructionReferenceRecord[] = [],
+): WorkInstruction[] {
   const zoneById = new Map(state.zones.map((zone) => [zone.id, zone]));
   return taskIds
     .map((taskId) => state.tasks.find((task) => task.id === taskId))
@@ -54,6 +79,7 @@ function buildFromState(state: PlannerState, taskIds: string[], layout: WorkInst
         product: state.product,
         zone: task.zoneId ? zoneById.get(task.zoneId) : undefined,
         layout,
+        references: references.filter((reference) => reference.taskId === task.id),
       }),
     );
 }
@@ -76,6 +102,10 @@ function PrintToolbar({
   onLayoutChange,
   onClose,
   canPrint,
+  layoutLocked = false,
+  controlNote = "",
+  view,
+  onViewChange,
 }: {
   backHref: string;
   label: string;
@@ -84,6 +114,13 @@ function PrintToolbar({
   onLayoutChange: (layout: WorkInstructionLayout) => void;
   onClose?: () => void;
   canPrint: boolean;
+  /** A frozen release is pre-split for the default layout, so the switcher is disabled. */
+  layoutLocked?: boolean;
+  /** "Released Rev B", "Draft · modified since Rev B"; empty when there is nothing to say. */
+  controlNote?: string;
+  /** Present only when a draft differs from its release; lets the reader flip between them. */
+  view?: "draft" | "released";
+  onViewChange?: (view: "draft" | "released") => void;
 }) {
   return (
     <div className="wi-print-chrome sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-2">
@@ -106,12 +143,14 @@ function PrintToolbar({
               option.id === layout.id ? "bg-surface-sunken font-semibold text-ink" : "text-ink-tertiary hover:text-ink"
             }`;
 
-            return onClose ? (
+            return onClose || layoutLocked ? (
               <button
                 key={option.id}
                 type="button"
                 aria-pressed={option.id === layout.id}
-                className={className}
+                className={`${className} disabled:cursor-not-allowed disabled:opacity-40`}
+                disabled={layoutLocked && option.id !== layout.id}
+                title={layoutLocked ? "A released revision prints in the layout it was released in" : undefined}
                 onClick={() => onLayoutChange(option)}
               >
                 {option.label}
@@ -128,6 +167,30 @@ function PrintToolbar({
             );
           })}
       </div>
+
+      {view && onViewChange ? (
+        <div className="flex items-center gap-1 rounded border border-line p-0.5" role="group" aria-label="Draft or released">
+          {(["draft", "released"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={view === option}
+              className={`h-7 rounded px-2.5 text-xs leading-7 transition ${
+                view === option ? "bg-surface-sunken font-semibold text-ink" : "text-ink-tertiary hover:text-ink"
+              }`}
+              onClick={() => onViewChange(option)}
+            >
+              {option === "draft" ? "Draft" : "Released"}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {controlNote ? (
+        <span className="ui-chip shrink-0 border-line bg-surface-raised text-ink-secondary" data-testid="wi-control-note">
+          {controlNote}
+        </span>
+      ) : null}
 
       {onClose ? null : <span className="flex-1" />}
 
@@ -286,6 +349,14 @@ function blankInstruction(): WorkInstruction {
   };
 }
 
+/** Release rows and references for a project; `null` until loaded (or when the load failed). */
+interface ControlData {
+  releases: WorkInstructionReleaseSummary[];
+  references: WorkInstructionReferenceRecord[];
+}
+
+const NO_REFERENCES: readonly WorkInstructionReferenceRecord[] = [];
+
 export function WorkInstructionPrintPreview({
   projectId,
   scenarioId,
@@ -295,6 +366,7 @@ export function WorkInstructionPrintPreview({
   layout: initialLayout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
   onReady,
   onClose,
+  pinnedReleaseId,
 }: WorkInstructionPrintPreviewProps) {
   const [layout, setLayout] = useState(initialLayout);
   const seeded = blank
@@ -304,9 +376,20 @@ export function WorkInstructionPrintPreview({
       : [];
 
   const [instructions, setInstructions] = useState<WorkInstruction[]>(seeded);
+  // The same tasks built with the DEFAULT layout: releases are fingerprinted and frozen in that
+  // layout, so release state must be judged against it whatever layout is on screen.
+  const [baselines, setBaselines] = useState<WorkInstruction[]>(
+    layout.id === DEFAULT_WORK_INSTRUCTION_LAYOUT.id || blank || !serverStateIsUsable(initialPlannerState, scenarioId)
+      ? seeded
+      : buildFromState(initialPlannerState, taskIds, DEFAULT_WORK_INSTRUCTION_LAYOUT),
+  );
   const [status, setStatus] = useState<LoadStatus>(blank || seeded.length > 0 ? "ready" : "loading");
   const [error, setError] = useState("");
   const [previewScale, setPreviewScale] = useState(1);
+  const [control, setControl] = useState<ControlData | null>(null);
+  const [view, setView] = useState<"draft" | "released">("draft");
+  const [fullReleases, setFullReleases] = useState<ReadonlyMap<string, WorkInstructionRelease>>(new Map());
+  const [pinnedMissing, setPinnedMissing] = useState(false);
   const previewBodyRef = useRef<HTMLDivElement | null>(null);
   const loadedStateRef = useRef<PlannerState | undefined>(
     serverStateIsUsable(initialPlannerState, scenarioId) ? initialPlannerState : undefined,
@@ -319,28 +402,59 @@ export function WorkInstructionPrintPreview({
   // Retry still forces one.
   const seededRef = useRef(seeded.length > 0 || Boolean(blank));
 
+  const references = control?.references ?? NO_REFERENCES;
+
+  // Document control is an overlay, never a dependency: a failed load leaves the header's control
+  // fields blank rather than claiming "Draft" or a revision we could not confirm.
+  useEffect(() => {
+    if (blank || !projectId) return;
+    let alive = true;
+    Promise.all([listWorkInstructionReleases(projectId), listWorkInstructionReferences(projectId)])
+      .then(([releases, loadedReferences]) => {
+        if (alive) setControl({ releases, references: loadedReferences });
+      })
+      .catch(() => {
+        if (alive) setControl(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [blank, projectId]);
+
+  const commit = useCallback(
+    (state: PlannerState) => {
+      const built = buildFromState(state, taskIds, layout, references);
+      setInstructions(built);
+      setBaselines(
+        layout.id === DEFAULT_WORK_INSTRUCTION_LAYOUT.id
+          ? built
+          : buildFromState(state, taskIds, DEFAULT_WORK_INSTRUCTION_LAYOUT, references),
+      );
+      setStatus(built.length > 0 ? "ready" : "empty");
+    },
+    [layout, references, taskIds],
+  );
+
   const refresh = useCallback(async () => {
     if (blank) {
       setInstructions([blankInstruction()]);
+      setBaselines([]);
       setStatus("ready");
       return;
     }
     if (serverStateIsUsable(initialPlannerState, scenarioId)) {
       loadedStateRef.current = initialPlannerState;
-      const built = buildFromState(initialPlannerState, taskIds, layout);
-      setInstructions(built);
-      setStatus(built.length > 0 ? "ready" : "empty");
+      commit(initialPlannerState);
       return;
     }
     if (serverStateIsUsable(loadedStateRef.current, scenarioId)) {
-      const built = buildFromState(loadedStateRef.current, taskIds, layout);
-      setInstructions(built);
-      setStatus(built.length > 0 ? "ready" : "empty");
+      commit(loadedStateRef.current);
       return;
     }
     const seq = ++loadSeqRef.current;
     if (!projectId || taskIds.length === 0) {
       setInstructions([]);
+      setBaselines([]);
       setStatus("empty");
       return;
     }
@@ -351,19 +465,18 @@ export function WorkInstructionPrintPreview({
       if (seq !== loadSeqRef.current) return;
       if (!state) {
         setInstructions([]);
+        setBaselines([]);
         setStatus("empty");
         return;
       }
       loadedStateRef.current = state;
-      const built = buildFromState(state, taskIds, layout);
-      setInstructions(built);
-      setStatus(built.length > 0 ? "ready" : "empty");
+      commit(state);
     } catch (caught) {
       if (seq !== loadSeqRef.current) return;
       setError(caught instanceof Error ? caught.message : "Could not load the work instruction.");
       setStatus("error");
     }
-  }, [blank, initialPlannerState, layout, projectId, scenarioId, taskIds]);
+  }, [blank, commit, initialPlannerState, projectId, scenarioId, taskIds]);
 
   useEffect(() => {
     setLayout(initialLayout);
@@ -380,9 +493,87 @@ export function WorkInstructionPrintPreview({
     };
   }, [refresh]);
 
+  const releasesByTask = useMemo(() => {
+    const grouped = new Map<string, WorkInstructionReleaseSummary[]>();
+    for (const release of control?.releases ?? []) {
+      grouped.set(release.taskId, [...(grouped.get(release.taskId) ?? []), release]);
+    }
+    return grouped;
+  }, [control]);
+
+  const states = useMemo(() => {
+    const byTask = new Map<string, WorkInstructionReleaseState>();
+    if (!control) return byTask;
+    for (const baseline of baselines) {
+      byTask.set(baseline.taskId, releaseStateFor(baseline, releasesByTask.get(baseline.taskId) ?? []));
+    }
+    return byTask;
+  }, [baselines, control, releasesByTask]);
+
+  const modifiedStates = [...states.values()].filter(
+    (state): state is Extract<WorkInstructionReleaseState, { kind: "modified" }> => state.kind === "modified",
+  );
+
+  // The frozen documents this view needs: the pinned one, or — in "Released" view — the latest
+  // release of every instruction that has drifted from it.
+  const neededReleaseIds = useMemo(
+    () => (pinnedReleaseId ? [pinnedReleaseId] : view === "released" ? modifiedStates.map((state) => state.release.id) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids, not the array identity
+    [pinnedReleaseId, view, modifiedStates.map((state) => state.release.id).join(",")],
+  );
+
   useEffect(() => {
-    if (status === "ready") onReady?.();
-  }, [status, onReady]);
+    const missing = neededReleaseIds.filter((id) => !fullReleases.has(id));
+    if (missing.length === 0) return;
+    let alive = true;
+    Promise.all(missing.map((id) => getWorkInstructionRelease(id).catch(() => null))).then((loaded) => {
+      if (!alive) return;
+      const found = loaded.filter((release): release is WorkInstructionRelease => Boolean(release));
+      if (pinnedReleaseId && !found.some((release) => release.id === pinnedReleaseId)) setPinnedMissing(true);
+      if (found.length === 0) return;
+      setFullReleases((current) => {
+        const next = new Map(current);
+        for (const release of found) next.set(release.id, release);
+        return next;
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [fullReleases, neededReleaseIds, pinnedReleaseId]);
+
+  const pinnedRelease = pinnedReleaseId ? fullReleases.get(pinnedReleaseId) : undefined;
+
+  // What is actually drawn: each entry carries the layout it must be paginated with, because a
+  // frozen release is pre-split for the default layout.
+  const documents: Array<{ instruction: WorkInstruction; layout: WorkInstructionLayout }> = useMemo(() => {
+    if (pinnedReleaseId) {
+      return pinnedRelease
+        ? [
+            {
+              instruction: releasedDocument(pinnedRelease, releasesByTask.get(pinnedRelease.taskId) ?? [pinnedRelease]),
+              layout: DEFAULT_WORK_INSTRUCTION_LAYOUT,
+            },
+          ]
+        : [];
+    }
+    return instructions.map((instruction) => {
+      const state = states.get(instruction.taskId);
+      const taskReleases = releasesByTask.get(instruction.taskId) ?? [];
+      if (view === "released" && state?.kind === "modified") {
+        const frozen = fullReleases.get(state.release.id);
+        if (frozen) return { instruction: releasedDocument(frozen, taskReleases), layout: DEFAULT_WORK_INSTRUCTION_LAYOUT };
+      }
+      return { instruction: state ? withReleaseMeta(instruction, taskReleases, state) : instruction, layout };
+    });
+  }, [fullReleases, instructions, layout, pinnedRelease, pinnedReleaseId, releasesByTask, states, view]);
+
+  // A pinned release does not depend on the planner at all — its task may even be gone.
+  const effectiveStatus: LoadStatus = pinnedReleaseId ? (pinnedRelease ? "ready" : pinnedMissing ? "empty" : "loading") : status;
+
+  useEffect(() => {
+    if (effectiveStatus === "ready") onReady?.();
+  }, [effectiveStatus, onReady]);
 
   useEffect(() => {
     if (!onClose) return;
@@ -422,13 +613,33 @@ export function WorkInstructionPrintPreview({
   };
 
   const label =
-    status !== "ready"
-      ? taskIds.length === 1
+    effectiveStatus !== "ready"
+      ? taskIds.length === 1 || pinnedReleaseId
         ? "Work instruction preview"
         : `${taskIds.length} work instructions`
-      : instructions.length === 1
-      ? instructions[0].meta.documentNumber || instructions[0].meta.title || "Work instruction"
-      : `${instructions.length} work instructions`;
+      : documents.length === 1
+      ? documents[0].instruction.meta.documentNumber || documents[0].instruction.meta.title || "Work instruction"
+      : `${documents.length} work instructions`;
+
+  // One short line saying what the reader is looking at, so a draft is never mistaken for a release.
+  const soleState = documents.length === 1 ? states.get(documents[0].instruction.taskId) : undefined;
+  const controlNote = pinnedRelease
+    ? `Released ${revisionLabel(pinnedRelease.revision)}`
+    : blank || !control || effectiveStatus !== "ready"
+      ? ""
+      : soleState
+        ? soleState.kind === "released"
+          ? `Released ${revisionLabel(soleState.release.revision)}`
+          : soleState.kind === "modified"
+            ? view === "released"
+              ? `Released ${revisionLabel(soleState.release.revision)}`
+              : `Draft · modified since ${revisionLabel(soleState.release.revision)}`
+            : "Draft · not released"
+        : modifiedStates.length > 0
+          ? `${modifiedStates.length} modified since release`
+          : "";
+
+  const showingFrozen = Boolean(pinnedReleaseId) || (view === "released" && modifiedStates.length > 0);
 
   const preview = (
     <div
@@ -444,11 +655,15 @@ export function WorkInstructionPrintPreview({
       <PrintToolbar
         backHref={`/projects/${projectId}/planner`}
         label={blank ? "Blank template" : label}
-        layout={layout}
+        layout={showingFrozen ? DEFAULT_WORK_INSTRUCTION_LAYOUT : layout}
+        layoutLocked={showingFrozen}
         hrefForLayout={hrefForLayout}
         onLayoutChange={setLayout}
         onClose={onClose}
-        canPrint={status === "ready"}
+        canPrint={effectiveStatus === "ready"}
+        controlNote={controlNote}
+        view={!pinnedReleaseId && modifiedStates.length > 0 ? view : undefined}
+        onViewChange={setView}
       />
       {/* wi-print-body: the print stylesheet zeroes this padding, which would
           otherwise spill past the last sheet and print a blank trailing page. */}
@@ -456,15 +671,17 @@ export function WorkInstructionPrintPreview({
         ref={previewBodyRef}
         className={`wi-print-body px-8 py-8 ${onClose ? "min-h-0 flex-1 overflow-auto" : ""}`}
       >
-        {status === "loading" ? (
+        {effectiveStatus === "loading" ? (
           <WorkInstructionPreviewSkeleton layout={layout} modal={Boolean(onClose)} scale={previewScale} />
-        ) : status === "empty" ? (
+        ) : effectiveStatus === "empty" ? (
           <section className="wi-print-chrome ui-panel mx-auto max-w-[820px] p-5">
             <p className="ui-section-subtitle text-ink-tertiary">
-              No work instruction found for the selected task.
+              {pinnedReleaseId
+                ? "That released revision could not be found, or you do not have access to it."
+                : "No work instruction found for the selected task."}
             </p>
           </section>
-        ) : status === "error" ? (
+        ) : effectiveStatus === "error" ? (
           <section className="wi-print-chrome ui-panel mx-auto max-w-[820px] p-5">
             <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load the work instruction."}</p>
             <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refresh()}>
@@ -476,8 +693,8 @@ export function WorkInstructionPrintPreview({
             className={onClose ? "wi-preview-scale" : undefined}
             style={onClose ? { margin: "0 auto", width: "17in", zoom: previewScale } : undefined}
           >
-            {instructions.map((instruction) => (
-              <WorkInstructionDocument instruction={instruction} layout={layout} key={instruction.taskId} />
+            {documents.map((entry) => (
+              <WorkInstructionDocument instruction={entry.instruction} layout={entry.layout} key={entry.instruction.taskId} />
             ))}
           </div>
         )}

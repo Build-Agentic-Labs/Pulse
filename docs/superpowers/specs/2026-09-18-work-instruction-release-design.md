@@ -61,10 +61,29 @@ legacy free-text fields (`drawingLink`, `sopLink`) still lead the list. Referenc
 setup band (seven lines, then "+N in Pulse") and are frozen into each release, so changing one —
 or a referenced SOP gaining a new version — shows the instruction as modified.
 
+### Reference files (owner request, 2026-09-18)
+
+A drawing or document reference can carry the file itself, uploaded in the References step and
+stored in Pulse. An SOP is picked and a link is an address, so neither takes a file. A reference
+may have a file, a link, or both.
+
+- Private bucket `wi-reference-files`, 20 MB, the same types SOP annexes accept (PDF, Word,
+  Excel, CSV, JPG, PNG). The browser uploads straight to Storage, so Vercel's 4.5 MB function
+  body limit never applies.
+- Object path `workspaces/<ws>/projects/<project>/wi-references/<task>/<upload-id>-<name>`.
+  Storage RLS: project `view` reads, project `edit` uploads and deletes. The reference row's
+  trigger refuses a `storage_path` outside its own project and task, so a row cannot claim
+  another project's file.
+- Opened through a one-minute signed URL (PDFs and images inline, everything else downloads
+  under its original name). Removing the reference removes the file.
+- The file's name is part of the sheet's reference, so swapping a file shows the instruction as
+  modified. The file itself is not copied into a release: the sheet prints the reference line,
+  not the attachment.
+
 ## Data model & enforcement
 
 `work_instruction_releases` and `work_instruction_references` (migrations `20260918120000`,
-`20260918121000`).
+`20260918121000`, `20260918130000`).
 
 **RLS in one sentence:** anyone with `view` access to the task's project can read its releases
 and references; anyone with `edit` access can release and manage references; a release can never
@@ -96,5 +115,6 @@ the client.
 - Separate reviewer/approver with signatures and notifications. The header's Reviewed-by stays
   blank; when added it should be its own small tables, **not** routed through the SOP
   `enforce_sop_transition` / `sign_sop` functions.
-- Uploaded reference files (a private bucket, like SOP annexes). Today a reference is a link.
+- Freezing a copy of each reference FILE into a release (today a release freezes the reference
+  line; the file stays live and goes when its reference is removed). CAD formats are not accepted.
 - Batch release; obsoleting a revision; the phone portal showing released copies only.

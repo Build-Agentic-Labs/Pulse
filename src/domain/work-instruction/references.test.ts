@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildReferenceFilePath,
   normalizeReferenceInput,
+  referenceDownloadName,
+  referenceFileContentType,
+  referenceFileProblem,
+  referenceKindAcceptsFile,
   referenceLine,
   referencesForSetup,
   type WorkInstructionReferenceRecord,
@@ -77,5 +82,60 @@ describe("referenceLine", () => {
     expect(referenceLine({ kind: "sop", documentNumber: "QAS-SOP-004", version: "2.0", title: "Records", url: "" })).toBe("QAS-SOP-004 v2.0 · Records");
     expect(referenceLine({ kind: "sop", documentNumber: "QAS-SOP-004", version: "v3", title: "", url: "" })).toBe("QAS-SOP-004 v3");
     expect(referenceLine({ kind: "link", documentNumber: "", title: "", url: "https://wiki.example/x" })).toBe("https://wiki.example/x");
+  });
+});
+
+describe("reference files", () => {
+  it("labels an untitled upload by its file name, and only drawings and documents take files", () => {
+    expect(normalizeReferenceInput({ kind: "drawing", fileName: "Frame 1140 rev C.pdf" })).toEqual({
+      value: { kind: "drawing", sopId: null, documentNumber: "", title: "Frame 1140 rev C.pdf", url: "" },
+    });
+    expect(normalizeReferenceInput({ kind: "document", documentNumber: "FRM-010", fileName: "log.xlsx" })).toMatchObject({
+      value: { documentNumber: "FRM-010", title: "" },
+    });
+    expect(normalizeReferenceInput({ kind: "link", title: "Wiki", url: "https://w.example", fileName: "a.pdf" })).toEqual({
+      error: expect.stringMatching(/drawing or a document/),
+    });
+    expect(referenceKindAcceptsFile("sop")).toBe(false);
+    expect(referenceKindAcceptsFile("document")).toBe(true);
+  });
+
+  it("judges the content type by extension and refuses what the bucket would refuse", () => {
+    expect(referenceFileContentType("Drawing.PDF")).toBe("application/pdf");
+    expect(referenceFileContentType("log.xlsx")).toMatch(/spreadsheetml/);
+    expect(referenceFileContentType("model.step")).toBeNull();
+    expect(referenceFileContentType("README")).toBeNull();
+    expect(referenceFileProblem({ name: "a.pdf", size: 0 })).toMatch(/empty/);
+    expect(referenceFileProblem({ name: "a.pdf", size: 21 * 1024 * 1024 })).toMatch(/20 MB/);
+    expect(referenceFileProblem({ name: "a.exe", size: 10 })).toMatch(/PDF, Word/);
+    expect(referenceFileProblem({ name: "a.pdf", size: 10 })).toBeNull();
+  });
+
+  it("builds a project-scoped path, sanitising only the file name", () => {
+    expect(
+      buildReferenceFilePath({
+        workspaceId: "ws_1",
+        projectId: "project-flexboost",
+        taskId: "task-flexboost-1",
+        uploadId: "u1",
+        fileName: "Frame 1140 (rev C).PDF",
+      }),
+    ).toBe("workspaces/ws_1/projects/project-flexboost/wi-references/task-flexboost-1/u1-Frame-1140-rev-C.pdf");
+    expect(() =>
+      buildReferenceFilePath({ workspaceId: "ws/1", projectId: "p", taskId: "t", uploadId: "u", fileName: "a.pdf" }),
+    ).toThrow(/workspace id/);
+  });
+
+  it("carries the file name onto the sheet reference, so swapping a file counts as a change", () => {
+    const docs = referencesForSetup({}, [
+      record({ file: { storagePath: "x", name: "log.xlsx", contentType: "application/vnd.ms-excel", sizeBytes: 10 } }),
+    ]);
+    expect(docs[0].fileName).toBe("log.xlsx");
+  });
+
+  it("opens PDFs and images inline and downloads the rest under their own name", () => {
+    expect(referenceDownloadName({ contentType: "application/pdf", name: "a.pdf" })).toBeUndefined();
+    expect(referenceDownloadName({ contentType: "image/png", name: "a.png" })).toBeUndefined();
+    expect(referenceDownloadName({ contentType: "text/csv", name: "log.csv" })).toBe("log.csv");
   });
 });

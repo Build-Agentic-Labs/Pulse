@@ -11,14 +11,17 @@
  * Spec: docs/superpowers/specs/2026-09-18-work-instruction-release-design.md
  */
 
-import { AlertTriangle, Check, Eye, FileCheck2, History, Link2, ListChecks, Loader2, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { AlertTriangle, Check, Eye, FileCheck2, History, Link2, ListChecks, Loader2, Paperclip, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { ThemedSelect } from "@/components/themed-select";
 import { formatDate, formatDateTime } from "@/domain/formatting";
 import {
+  REFERENCE_FILE_ACCEPT,
   REFERENCE_KINDS,
   REFERENCE_KIND_LABELS,
+  referenceFileProblem,
+  referenceKindAcceptsFile,
   referenceLine,
   type WorkInstructionReferenceRecord,
 } from "@/domain/work-instruction/references";
@@ -36,6 +39,7 @@ import type { WorkInstruction, WorkInstructionReferenceKind } from "@/domain/wor
 import {
   addWorkInstructionReference,
   listReferenceableSops,
+  openWorkInstructionReferenceFile,
   releaseWorkInstruction,
   removeWorkInstructionReference,
 } from "@/lib/work-instruction/store";
@@ -110,6 +114,8 @@ export function WorkInstructionControl({
   const [draftNumber, setDraftNumber] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
+  const [draftFile, setDraftFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sops, setSops] = useState<Array<{ id: string; number: string; title: string; version: string; status: string }> | null>(null);
 
   useEffect(() => {
@@ -287,7 +293,7 @@ export function WorkInstructionControl({
             {step === "references" ? (
               <section className="space-y-4" aria-label="References">
                 <p className="ui-section-subtitle">
-                  Documents the operator may need. They print in the setup band and are frozen into each release. A linked SOP always shows its current number and version.
+                  Documents the operator may need: a Pulse SOP, a drawing or document (with the file uploaded here, a link, or both), or a plain link. They print in the setup band and are frozen into each release. A linked SOP always shows its current number and version.
                 </p>
                 {instruction.setup.references && instruction.setup.references.length > 0 ? (
                   <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
@@ -299,6 +305,18 @@ export function WorkInstructionControl({
                         <li key={`${reference.kind}-${index}`} className="flex items-center gap-3 px-3 py-2.5">
                           <span className="ui-chip shrink-0 border-line bg-surface-raised text-ink-secondary">{REFERENCE_KIND_LABELS[reference.kind]}</span>
                           <span className="min-w-0 flex-1 truncate text-sm text-ink">{referenceLine(reference)}</span>
+                          {record?.file ? (
+                            <button
+                              type="button"
+                              className="ui-btn-ghost h-7 shrink-0 gap-1 px-2 text-xs"
+                              title={`${record.file.name} · ${(record.file.sizeBytes / (1024 * 1024)).toFixed(1)} MB`}
+                              disabled={busy !== null}
+                              onClick={() => void run(`open-${record.id}`, () => openWorkInstructionReferenceFile(record.file!))}
+                            >
+                              {busy === `open-${record.id}` ? <Loader2 size={12} className="animate-spin" /> : <Paperclip size={12} />}
+                              Open file
+                            </button>
+                          ) : null}
                           {reference.url ? (
                             <a href={reference.url} target="_blank" rel="noreferrer" className="ui-btn-ghost h-7 shrink-0 px-2 text-xs">
                               Open
@@ -312,7 +330,7 @@ export function WorkInstructionControl({
                               disabled={busy !== null}
                               onClick={() =>
                                 void run(`remove-${record.id}`, async () => {
-                                  await removeWorkInstructionReference(record.id);
+                                  await removeWorkInstructionReference(record);
                                   await onChanged();
                                 })
                               }
@@ -340,11 +358,14 @@ export function WorkInstructionControl({
                         await addWorkInstructionReference(
                           { projectId, taskId: instruction.taskId, position: references.reduce((max, item) => Math.max(max, item.position), 0) + 1 },
                           { kind: draftKind, sopId: draftSopId, documentNumber: draftNumber, title: draftTitle, url: draftUrl },
+                          referenceKindAcceptsFile(draftKind) ? draftFile : null,
                         );
                         setDraftSopId("");
                         setDraftNumber("");
                         setDraftTitle("");
                         setDraftUrl("");
+                        setDraftFile(null);
+                        if (fileInputRef.current) fileInputRef.current.value = "";
                         await onChanged();
                       });
                     }}
@@ -401,6 +422,29 @@ export function WorkInstructionControl({
                         <input className="ui-field-standalone" type="url" value={draftUrl} disabled={busy !== null} onChange={(event) => setDraftUrl(event.target.value)} placeholder="https://" />
                       </label>
                     )}
+                    {referenceKindAcceptsFile(draftKind) ? (
+                      <label className="block">
+                        <span className="ui-field-label">File (optional)</span>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          aria-label="Reference file"
+                          accept={REFERENCE_FILE_ACCEPT}
+                          className="block w-full text-sm text-ink-secondary file:mr-3 file:h-9 file:cursor-pointer file:rounded file:border file:border-line file:bg-surface-raised file:px-3 file:text-sm file:text-ink"
+                          disabled={busy !== null}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0] ?? null;
+                            const problem = file ? referenceFileProblem(file) : null;
+                            setError(problem ?? "");
+                            if (problem) event.target.value = "";
+                            setDraftFile(problem ? null : file);
+                          }}
+                        />
+                        <span className="mt-1 block text-[11px] text-ink-tertiary">
+                          PDF, Word, Excel, CSV, JPG or PNG, up to 20 MB. Stored privately in Pulse; leave the title blank to use the file name.
+                        </span>
+                      </label>
+                    ) : null}
                     <button type="submit" className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-40" disabled={busy !== null}>
                       {busy === "add-reference" ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                       Add reference

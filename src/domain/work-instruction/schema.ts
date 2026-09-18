@@ -130,6 +130,8 @@ export interface WorkInstructionReferenceDoc {
   /** Set for a Pulse SOP: the version current when the document was built. */
   version?: string;
   url: string;
+  /** Name of the file stored in Pulse for this reference, when it has one. */
+  fileName?: string;
 }
 
 export interface WorkInstructionSetup {

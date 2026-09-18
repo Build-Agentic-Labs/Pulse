@@ -2818,42 +2818,54 @@ export type Database = {
       }
       work_instruction_references: {
         Row: {
+          content_type: string
           created_at: string
           created_by: string | null
           document_number: string
+          file_name: string
           id: string
           kind: string
           position: number
           project_id: string
+          size_bytes: number | null
           sop_id: string | null
+          storage_path: string | null
           task_id: string
           title: string
           updated_at: string
           url: string
         }
         Insert: {
+          content_type?: string
           created_at?: string
           created_by?: string | null
           document_number?: string
+          file_name?: string
           id?: string
           kind: string
           position?: number
           project_id: string
+          size_bytes?: number | null
           sop_id?: string | null
+          storage_path?: string | null
           task_id: string
           title?: string
           updated_at?: string
           url?: string
         }
         Update: {
+          content_type?: string
           created_at?: string
           created_by?: string | null
           document_number?: string
+          file_name?: string
           id?: string
           kind?: string
           position?: number
           project_id?: string
+          size_bytes?: number | null
           sop_id?: string | null
+          storage_path?: string | null
           task_id?: string
           title?: string
           updated_at?: string

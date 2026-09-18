@@ -11,8 +11,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import {
+  buildReferenceFilePath,
   normalizeReferenceInput,
+  referenceDownloadName,
+  referenceFileContentType,
+  referenceFileProblem,
   type ReferenceInput,
+  type WorkInstructionReferenceFile,
   type WorkInstructionReferenceRecord,
 } from "@/domain/work-instruction/references";
 import {
@@ -178,11 +183,25 @@ export async function releaseWorkInstruction(
   }
 }
 
-const REFERENCE_COLUMNS = "id, task_id, kind, sop_id, document_number, title, url, position";
+const REFERENCE_FILE_BUCKET = "wi-reference-files";
+
+const REFERENCE_COLUMNS =
+  "id, task_id, kind, sop_id, document_number, title, url, position, storage_path, file_name, content_type, size_bytes";
 
 type ReferenceRow = Pick<
   Database["public"]["Tables"]["work_instruction_references"]["Row"],
-  "id" | "task_id" | "kind" | "sop_id" | "document_number" | "title" | "url" | "position"
+  | "id"
+  | "task_id"
+  | "kind"
+  | "sop_id"
+  | "document_number"
+  | "title"
+  | "url"
+  | "position"
+  | "storage_path"
+  | "file_name"
+  | "content_type"
+  | "size_bytes"
 >;
 
 function mapReference(row: ReferenceRow): WorkInstructionReferenceRecord {
@@ -195,6 +214,16 @@ function mapReference(row: ReferenceRow): WorkInstructionReferenceRecord {
     title: row.title,
     url: row.url,
     position: row.position,
+    ...(row.storage_path
+      ? {
+          file: {
+            storagePath: row.storage_path,
+            name: row.file_name,
+            contentType: row.content_type,
+            sizeBytes: Number(row.size_bytes ?? 0),
+          },
+        }
+      : {}),
   };
 }
 
@@ -225,31 +254,98 @@ export async function listWorkInstructionReferences(
   });
 }
 
+/**
+ * Add a reference, optionally with a file stored in Pulse. The file goes to the private
+ * wi-reference-files bucket first (straight from the browser — never through a route, so Vercel's
+ * 4.5 MB body limit does not apply), then the row names it. If the row cannot be saved the upload
+ * is removed again, so a failed add leaves nothing behind.
+ */
 export async function addWorkInstructionReference(
   target: { projectId: string; taskId: string; position: number },
   input: ReferenceInput,
+  file?: File | null,
   client?: SupabaseClient<Database>,
 ): Promise<void> {
-  const normalized = normalizeReferenceInput(input);
+  const normalized = normalizeReferenceInput({ ...input, fileName: file?.name });
   if ("error" in normalized) throw new Error(normalized.error);
   const supabase = client ?? createPlannerSupabaseClient();
-  await throwIfError(
-    supabase.from("work_instruction_references").insert({
-      project_id: target.projectId,
-      task_id: target.taskId,
-      position: target.position,
-      kind: normalized.value.kind,
-      sop_id: normalized.value.sopId,
-      document_number: normalized.value.documentNumber,
-      title: normalized.value.title,
-      url: normalized.value.url,
-    }),
-  );
+
+  let upload: { storagePath: string; contentType: string } | null = null;
+  if (file) {
+    const problem = referenceFileProblem(file);
+    if (problem) throw new Error(problem);
+    const project = await throwIfError(supabase.from("projects").select("workspace_id").eq("id", target.projectId).maybeSingle());
+    if (!project?.workspace_id) throw new Error("This project could not be loaded, so the file has nowhere to go.");
+    const contentType = referenceFileContentType(file.name) ?? "";
+    const storagePath = buildReferenceFilePath({
+      workspaceId: project.workspace_id,
+      projectId: target.projectId,
+      taskId: target.taskId,
+      uploadId: newBatchId(),
+      fileName: file.name,
+    });
+    await throwIfError(
+      supabase.storage.from(REFERENCE_FILE_BUCKET).upload(storagePath, file, { upsert: false, contentType, cacheControl: "3600" }),
+    );
+    upload = { storagePath, contentType };
+  }
+
+  try {
+    await throwIfError(
+      supabase.from("work_instruction_references").insert({
+        project_id: target.projectId,
+        task_id: target.taskId,
+        position: target.position,
+        kind: normalized.value.kind,
+        sop_id: normalized.value.sopId,
+        document_number: normalized.value.documentNumber,
+        title: normalized.value.title,
+        url: normalized.value.url,
+        ...(upload && file
+          ? { storage_path: upload.storagePath, file_name: file.name.slice(0, 260), content_type: upload.contentType, size_bytes: file.size }
+          : {}),
+      }),
+    );
+  } catch (caught) {
+    if (upload) await supabase.storage.from(REFERENCE_FILE_BUCKET).remove([upload.storagePath]).catch(() => undefined);
+    throw caught;
+  }
 }
 
-export async function removeWorkInstructionReference(referenceId: string, client?: SupabaseClient<Database>): Promise<void> {
+/** Remove a reference and, best-effort, the file stored for it. The row is what matters. */
+export async function removeWorkInstructionReference(
+  reference: Pick<WorkInstructionReferenceRecord, "id" | "file">,
+  client?: SupabaseClient<Database>,
+): Promise<void> {
   const supabase = client ?? createPlannerSupabaseClient();
-  await throwIfError(supabase.from("work_instruction_references").delete().eq("id", referenceId));
+  await throwIfError(supabase.from("work_instruction_references").delete().eq("id", reference.id));
+  if (reference.file) {
+    const { error } = await supabase.storage.from(REFERENCE_FILE_BUCKET).remove([reference.file.storagePath]);
+    if (error) console.warn(`Could not remove reference file ${reference.file.storagePath}: ${error.message}`);
+  }
+}
+
+/**
+ * Open a reference's file in a new tab through a one-minute signed URL. The tab is opened
+ * synchronously (inside the click) and pointed at the URL once it exists; opening it after the
+ * await would be blocked as a pop-up.
+ */
+export async function openWorkInstructionReferenceFile(file: WorkInstructionReferenceFile): Promise<void> {
+  const tab = window.open("about:blank", "_blank");
+  if (tab) tab.opener = null;
+  try {
+    const supabase = createPlannerSupabaseClient();
+    const downloadName = referenceDownloadName(file);
+    const { data, error } = await supabase.storage
+      .from(REFERENCE_FILE_BUCKET)
+      .createSignedUrl(file.storagePath, 60, downloadName ? { download: downloadName } : undefined);
+    if (error || !data?.signedUrl) throw new Error(error?.message ?? "The file could not be opened.");
+    if (tab) tab.location.href = data.signedUrl;
+    else window.location.assign(data.signedUrl);
+  } catch (caught) {
+    tab?.close();
+    throw caught;
+  }
 }
 
 /** SOPs a work instruction in this project may reference: its own organization's, newest first. */

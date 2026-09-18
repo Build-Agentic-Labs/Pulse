@@ -11,7 +11,7 @@
 --   * references: editor writes, viewer reads only, an SOP from another organization is refused
 
 begin;
-select plan(19);
+select plan(25);
 
 insert into public.workspaces (id, name) values ('ws_wi', 'WI Org'), ('ws_wi_other', 'Other Org');
 insert into public.workspace_auto_join_domains (domain, workspace_id) values ('wi.dev', 'ws_wi');
@@ -163,6 +163,57 @@ select throws_ok(
   '42501',
   null,
   'a project viewer cannot add a reference'
+);
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- 20-25. Reference files (20260918130000): stored under the reference's own project and task;
+-- view reads, edit uploads. (Storage forbids SQL deletes, so the delete policy is exercised
+-- through the Storage API by the app, not here.)
+-- ---------------------------------------------------------------------------
+select is(
+  (select public from storage.buckets where id = 'wi-reference-files'),
+  false,
+  'the reference-files bucket is private'
+);
+select test_as('f0000000-0000-0000-0000-000000000001');
+select lives_ok(
+  $$ insert into storage.objects (bucket_id, name)
+     values ('wi-reference-files', 'workspaces/ws_wi/projects/proj_wi/wi-references/task_wi/u1-frame.pdf') $$,
+  'a project editor can upload a reference file under their project'
+);
+select lives_ok(
+  $$ insert into public.work_instruction_references
+       (project_id, task_id, kind, title, storage_path, file_name, content_type, size_bytes)
+     values ('proj_wi', 'task_wi', 'drawing', 'Frame',
+             'workspaces/ws_wi/projects/proj_wi/wi-references/task_wi/u1-frame.pdf', 'frame.pdf', 'application/pdf', 1024) $$,
+  'a reference may name a file stored under its own project and task'
+);
+select throws_like(
+  $$ insert into public.work_instruction_references
+       (project_id, task_id, kind, title, storage_path, file_name, content_type, size_bytes)
+     values ('proj_wi', 'task_wi', 'drawing', 'Stolen',
+             'workspaces/ws_wi_other/projects/proj_else/wi-references/task_else/u9-secret.pdf', 'secret.pdf', 'application/pdf', 1024) $$,
+  '%not stored under this work instruction%',
+  'a reference cannot claim a file from another project'
+);
+reset role;
+
+select test_as('f0000000-0000-0000-0000-000000000002');
+select throws_ok(
+  $$ insert into storage.objects (bucket_id, name)
+     values ('wi-reference-files', 'workspaces/ws_wi/projects/proj_wi/wi-references/task_wi/u2-viewer.pdf') $$,
+  '42501',
+  null,
+  'a project viewer cannot upload a reference file'
+);
+reset role;
+
+select test_as('f0000000-0000-0000-0000-000000000003');
+select is(
+  (select count(*) from storage.objects where bucket_id = 'wi-reference-files'),
+  0::bigint,
+  'a user without project access cannot see reference files'
 );
 reset role;
 

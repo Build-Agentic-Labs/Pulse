@@ -7,6 +7,7 @@ import type { WorkInstruction } from "@/domain/work-instruction/schema";
 import {
   addWorkInstructionReference,
   listReferenceableSops,
+  openWorkInstructionReferenceFile,
   releaseWorkInstruction,
   removeWorkInstructionReference,
 } from "@/lib/work-instruction/store";
@@ -15,6 +16,7 @@ import { WorkInstructionControl } from "./work-instruction-control";
 vi.mock("@/lib/work-instruction/store", () => ({
   addWorkInstructionReference: vi.fn(),
   listReferenceableSops: vi.fn(),
+  openWorkInstructionReferenceFile: vi.fn(),
   releaseWorkInstruction: vi.fn(),
   removeWorkInstructionReference: vi.fn(),
 }));
@@ -116,7 +118,7 @@ describe("WorkInstructionControl", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Remove reference FRM-010 · Torque log" }));
-    await waitFor(() => expect(removeWorkInstructionReference).toHaveBeenCalledWith("ref-1"));
+    await waitFor(() => expect(removeWorkInstructionReference).toHaveBeenCalledWith(expect.objectContaining({ id: "ref-1" })));
 
     await waitFor(() => expect(listReferenceableSops).toHaveBeenCalledWith("project-1"));
     fireEvent.click(await screen.findByRole("button", { name: "SOP to reference" }));
@@ -126,9 +128,44 @@ describe("WorkInstructionControl", () => {
       expect(addWorkInstructionReference).toHaveBeenCalledWith(
         { projectId: "project-1", taskId: "task-1", position: 2 },
         expect.objectContaining({ kind: "sop", sopId: "sop-1" }),
+        null,
       ),
     );
     expect(handlers.onChanged).toHaveBeenCalled();
+  });
+
+  it("uploads a file with a drawing reference, refuses a bad one, and opens a stored file", async () => {
+    vi.mocked(addWorkInstructionReference).mockResolvedValue(undefined);
+    vi.mocked(openWorkInstructionReferenceFile).mockResolvedValue(undefined);
+    const stored = { storagePath: "workspaces/w/projects/p/wi-references/task-1/u-frame.pdf", name: "frame.pdf", contentType: "application/pdf", sizeBytes: 2_500_000 };
+    renderControl({
+      instruction: instruction({ setup: { ...instruction().setup, references: [{ kind: "drawing", documentNumber: "DWG-1140", title: "Frame", url: "", fileName: "frame.pdf" }] } }),
+      initialStep: "references",
+      references: [{ id: "ref-9", taskId: "task-1", kind: "drawing", sopId: null, documentNumber: "DWG-1140", title: "Frame", url: "", position: 1, file: stored }],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Open file/ }));
+    await waitFor(() => expect(openWorkInstructionReferenceFile).toHaveBeenCalledWith(stored));
+
+    // An SOP is picked, not uploaded: the file input only appears for drawings and documents.
+    expect(screen.queryByLabelText("Reference file")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Reference kind" }));
+    fireEvent.click(screen.getByRole("option", { name: "Drawing" }));
+    const input = screen.getByLabelText("Reference file") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [new File(["x"], "model.step", { type: "application/octet-stream" })] } });
+    expect(screen.getByText("Choose a PDF, Word, Excel, CSV, JPG or PNG file.")).toBeTruthy();
+
+    const pdf = new File(["%PDF-1.7"], "Harness layout.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [pdf] } });
+    fireEvent.click(screen.getByRole("button", { name: "Add reference" }));
+    await waitFor(() =>
+      expect(addWorkInstructionReference).toHaveBeenCalledWith(
+        { projectId: "project-1", taskId: "task-1", position: 2 },
+        expect.objectContaining({ kind: "drawing" }),
+        pdf,
+      ),
+    );
   });
 
   it("hides every write control for view-only access", () => {

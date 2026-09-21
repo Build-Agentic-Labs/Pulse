@@ -50,6 +50,7 @@ export interface NotifiableEvent {
   id: number;
   sopId: string;
   eventType: string;
+  reviewCycle?: number;
   actorId: string | null;
   actorName: string;
   details: unknown;
@@ -232,14 +233,16 @@ export function resolveEventRecipients(
   ctx: SopNotificationContext,
 ): PendingNotification[] {
   const { sop } = ctx;
-  if (sop.deletedAt) return [];
+  if (sop.deletedAt || (event.reviewCycle !== undefined && event.reviewCycle !== sop.reviewCycle)) return [];
 
   switch (event.eventType) {
     case "review_sent": {
       // Only required departmental approvers participate in draft review.
       // Procedure Consult / Support / Inform roles are not approval recipients.
       if (sop.status !== "in_review" || finalApprovalPhaseActive(sop)) return [];
-      return seatRecipients(event, ctx, "review_requested", isBlocking);
+      const returned = new Set(ctx.reviewReturns.map((entry) => entry.reviewerId));
+      return seatRecipients(event, ctx, "review_requested", isBlocking)
+        .filter((notification) => !returned.has(notification.recipientId));
     }
 
     case "final_approval_requested": {
@@ -431,6 +434,17 @@ function signerCandidates(state: SopReminderState): ReminderCandidate[] {
         (approval) => approval.signerId === seat.signerId && approval.departmentId === seat.departmentId,
       );
       if (signed) continue;
+      if (seat.signerPending) {
+        if (sop.authorId) {
+          candidates.push({
+            recipientId: sop.authorId,
+            kind: "reviewer_not_joined",
+            anchorAt: sop.finalApprovalRequestedAt,
+            departmentId: seat.departmentId,
+          });
+        }
+        continue;
+      }
       candidates.push({
         recipientId: seat.signerId,
         kind: "final_approval_requested",

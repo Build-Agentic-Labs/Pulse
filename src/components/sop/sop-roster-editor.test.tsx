@@ -3,7 +3,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
-import { listProfileNames, removeSeat, upsertSeat, type SopReviewSeat } from "@/lib/sop/review";
+import { listProfileNames, moveSeat, removeSeat, upsertSeat, type SopReviewSeat } from "@/lib/sop/review";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import { SopRosterEditor } from "./sop-roster-editor";
 
@@ -15,6 +15,7 @@ vi.mock("@/lib/sop/review", () => ({
   isBlockingSeat: (rasic: string) => rasic === "responsible" || rasic === "accountable",
   listProfileNames: vi.fn(async () => new Map()),
   removeSeat: vi.fn(),
+  moveSeat: vi.fn(),
   upsertSeat: vi.fn(),
 }));
 
@@ -61,6 +62,19 @@ describe("SopRosterEditor", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("moves a department atomically using freshly loaded signer eligibility", async () => {
+    vi.mocked(moveSeat).mockResolvedValue(undefined);
+    vi.mocked(listMembersForDepartments).mockImplementation(async (ids) => ids.map((departmentId) => ({
+      departmentId, userId: "reviewer-member", deptRole: "reviewer", positionTitle: "Reviewer",
+    })));
+    render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[manufacturingSeat]} onChanged={() => {}} />);
+    await waitFor(() => expect(listMembersForDepartments).toHaveBeenCalledWith(["dept-mfg"]));
+    fireEvent.click(screen.getByRole("button", { name: "Department for the Manufacturing/Production approval" }));
+    fireEvent.click(screen.getByRole("option", { name: /Quality/ }));
+    await waitFor(() => expect(moveSeat).toHaveBeenCalledWith("sop-1", "dept-mfg", "dept-quality", "reviewer-member"));
+    expect(removeSeat).not.toHaveBeenCalled();
   });
 
   it("offers Quality as an additional normal-loop reviewer", () => {

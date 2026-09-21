@@ -15,6 +15,7 @@ import {
   isBlockingSeat,
   listProfileNames,
   removeSeat,
+  moveSeat,
   upsertSeat,
   type SopReviewSeat,
 } from "@/lib/sop/review";
@@ -199,33 +200,14 @@ export function SopRosterEditor({
     }
   }
 
-  /**
-   * Move a seat to a different department.
-   *
-   * (sop_id, department_id) is the primary key, so this is a delete-and-insert rather than an
-   * update. Both halves are legal only while the SOP is a draft — enforce_seat_freeze refuses
-   * INSERT and DELETE once it has been submitted — and this editor only renders for drafts.
-   *
-   * The signer is carried over ONLY if they are also a member of the new department. Gate A
-   * requires every seat's reviewer to belong to that seat's department, so keeping an outside
-   * signer would leave a roster that looks complete and then fails at submission with "Every
-   * seat's reviewer must belong to that seat's department". Blanking it asks the obvious
-   * question now instead of raising a confusing one later.
-   */
+  /** Fetch current eligibility and move the seat in one database update. */
   async function changeSeatDepartment(seat: SopReviewSeat, nextDepartmentId: string) {
     if (!nextDepartmentId || nextDepartmentId === seat.departmentId) return;
-    await loadMembersForDepartmentIds([nextDepartmentId]);
     await guarded(`department-${seat.departmentId}`, async () => {
-      const nextMemberIds = (members.get(nextDepartmentId) ?? [])
-        .filter((member) => canSignReview(member.deptRole))
-        .map((member) => member.userId);
-      await removeSeat(sopId, seat.departmentId);
-      await upsertSeat({
-        sopId,
-        departmentId: nextDepartmentId,
-        rasic: "responsible",
-        signerId: signerAfterDepartmentChange(seat.signerId, nextMemberIds),
-      });
+      const nextMembers = await listMembersForDepartments([nextDepartmentId]);
+      const nextMemberIds = nextMembers.filter((member) => canSignReview(member.deptRole)).map((member) => member.userId);
+      await moveSeat(sopId, seat.departmentId, nextDepartmentId,
+        signerAfterDepartmentChange(seat.signerId, nextMemberIds));
     });
   }
 

@@ -5,6 +5,7 @@ import type { SopListItem } from "@/lib/sop/store";
 import { listProfileNames, listSeatsForSops } from "@/lib/sop/review";
 import { listSopReviewSubmissions } from "@/lib/sop/review-annotations";
 import { fetchSopListReviewData } from "./list-review-data";
+import { listReviewProgress } from "./list-review-progress";
 
 vi.mock("@/lib/sop/review", () => ({
   listProfileNames: vi.fn(),
@@ -13,6 +14,10 @@ vi.mock("@/lib/sop/review", () => ({
 
 vi.mock("@/lib/sop/review-annotations", () => ({
   listSopReviewSubmissions: vi.fn(),
+}));
+
+vi.mock("./list-review-progress", () => ({
+  listReviewProgress: vi.fn().mockResolvedValue({ signatures: [], comments: [] }),
 }));
 
 const client = {} as SupabaseClient<Database>;
@@ -48,6 +53,7 @@ describe("fetchSopListReviewData", () => {
     vi.mocked(listProfileNames).mockReset();
     vi.mocked(listSeatsForSops).mockReset();
     vi.mocked(listSopReviewSubmissions).mockReset();
+    vi.mocked(listReviewProgress).mockResolvedValue({ signatures: [], comments: [] });
   });
 
   it("loads review progress for visible SOPs from every department and author", async () => {
@@ -92,18 +98,19 @@ describe("fetchSopListReviewData", () => {
     const result = await fetchSopListReviewData(sops, "current-user", client);
 
     expect(listSeatsForSops).toHaveBeenCalledWith(
-      ["mine", "other-department"],
+      ["mine", "other-department", "draft"],
       client,
     );
     expect(result.participantGroups).toEqual([
       {
         sopId: "mine",
-        participants: [{ userId: "reviewer-1", name: "First Reviewer" }],
+        participants: [{ userId: "reviewer-1", name: "First Reviewer", status: "reviewing" }],
       },
       {
         sopId: "other-department",
-        participants: [{ userId: "reviewer-2", name: "Other Reviewer" }],
+        participants: [{ userId: "reviewer-2", name: "Other Reviewer", status: "review_complete" }],
       },
+      { sopId: "draft", participants: [] },
     ]);
     expect(result.submissions).toHaveLength(1);
   });
@@ -141,4 +148,31 @@ describe("fetchSopListReviewData", () => {
       "Visible From Submission",
     );
   });
+  it("requires current signatures for every assigned seat and retains them awaiting Quality", async () => {
+    const document = { ...sop("one", "author"), finalApprovalRequestedAt: "today", finalApprovalContentHash: "hash" };
+    vi.mocked(listSeatsForSops).mockResolvedValue(["a", "b"].map(departmentId => ({
+      sopId: "one", departmentId, signerId: "reviewer", rasic: "responsible" as const,
+    })));
+    vi.mocked(listProfileNames).mockResolvedValue(new Map([["reviewer", "Reviewer"]]));
+    vi.mocked(listSopReviewSubmissions).mockResolvedValue([]);
+    const signature = { sop_id: "one", signer_id: "reviewer", seat_department_id: "a", review_cycle: 1, signed_content_hash: "hash" };
+    const state = async () => (await fetchSopListReviewData([document], "user", client)).participantGroups[0].participants[0].status;
+    for (const wrong of [
+      { ...signature, sop_id: "other" },
+      { ...signature, review_cycle: 0 },
+      { ...signature, signed_content_hash: "old" },
+      { ...signature, signer_id: "previous-reviewer" },
+      signature,
+    ]) {
+      vi.mocked(listReviewProgress).mockResolvedValue({ signatures: [wrong], comments: [] });
+      expect(await state()).toBe("awaiting_signature");
+    }
+    vi.mocked(listReviewProgress).mockResolvedValue({
+      signatures: [signature, { ...signature, seat_department_id: "b" }], comments: [],
+    });
+    expect(await state()).toBe("signed");
+    document.status = "approved";
+    expect(await state()).toBe("signed");
+  });
+
 });

@@ -29,6 +29,14 @@ export interface SopEmailInput {
   stalled?: { name: string; departmentName: string | null; waitingDays: number }[];
 }
 
+/** Review and signature actions live in the recipient queue, not the author editor. */
+export function sopNotificationPath(kind: SopNotificationKind, sopId: string): string {
+  if (kind === "review_requested" || kind === "final_approval_requested" || kind === "seat_assigned") {
+    return "/sops?tab=review";
+  }
+  return `/sops/${encodeURIComponent(sopId)}`;
+}
+
 const SEAT_REASON = "You are receiving this because you hold a review seat on this SOP.";
 const AUTHOR_REASON = "You are receiving this because you are the author of this SOP.";
 const QUALITY_REASON = "You are receiving this because you are a Quality approver in this workspace.";
@@ -71,7 +79,7 @@ function copyFor(input: SopEmailInput, label: string): TemplateCopy {
         eyebrow: "Signature needed",
         accent: "#7c3aed",
         reason: SEAT_REASON,
-        happened: `Every reviewer accepted ${label}.`,
+        happened: `Draft review is complete for ${label}.`,
         needed: input.departmentName
           ? `Your formal ${input.departmentName} department signature is needed to approve it.`
           : `Your formal department signature is needed to approve it.`,
@@ -173,7 +181,7 @@ function copyFor(input: SopEmailInput, label: string): TemplateCopy {
 
 export function renderSopNotificationEmail(input: SopEmailInput): SopEmailContent {
   const label = `${input.sopNumber ?? "SOP"} "${input.title ?? "Untitled SOP"}"`;
-  const link = `${input.origin}/sops/${input.sopId}`;
+  const link = `${input.origin}${sopNotificationPath(input.kind, input.sopId)}`;
   const copy = copyFor(input, label);
 
   const isReminder = input.reminderIndex > 0;

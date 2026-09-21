@@ -31,6 +31,8 @@ export function selectReadyForFinalApproval(input: ReadyForFinalApprovalInput): 
     if (sop.createdBy !== input.userId || sop.status !== "in_review") return false;
     if (finalApprovalUnderway(sop)) return false;
 
+    const requiredSeats = input.seats.filter((seat) => seat.sopId === sop.id && isBlocking(seat.rasic));
+    if (requiredSeats.some((seat) => !seat.signerId)) return false;
     const signers = Array.from(
       new Set(
         input.seats

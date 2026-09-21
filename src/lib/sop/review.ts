@@ -325,7 +325,7 @@ export async function listMySignaturesFor(
   sopIds: readonly string[],
   userId: string,
   client?: SupabaseClient<Database>,
-): Promise<SopSignature[]> {
+): Promise<(SopSignature & { sopId: string })[]> {
   const unique = Array.from(new Set(sopIds));
   if (unique.length === 0) return [];
   const supabase = client ?? createPlannerSupabaseClient();
@@ -333,13 +333,14 @@ export async function listMySignaturesFor(
     supabase
       .from("sop_signatures")
       .select(
-        "id, signer_id, signer_printed_name, meaning, rejected_reason, signed_at, seat_department_id, review_cycle, resolves_signature_id, signed_content_hash, signature_strokes",
+        "id, sop_id, signer_id, signer_printed_name, meaning, rejected_reason, signed_at, seat_department_id, review_cycle, resolves_signature_id, signed_content_hash, signature_strokes",
       )
       .in("sop_id", unique)
       .eq("signer_id", userId),
   );
   return (rows ?? []).map((row: Record<string, unknown>) => ({
     id: String(row.id),
+    sopId: String(row.sop_id),
     signerId: String(row.signer_id),
     signerName: String(row.signer_printed_name ?? ""),
     meaning: (row.meaning as SignatureMeaning) ?? "review",
@@ -423,6 +424,25 @@ export async function upsertSeat(seat: SopReviewSeat): Promise<void> {
   );
 }
 
+/** Move a draft seat atomically: a rejected destination must not erase its original routing. */
+export async function moveSeat(
+  sopId: string,
+  departmentId: string,
+  nextDepartmentId: string,
+  signerId: string | null,
+): Promise<void> {
+  const supabase = createPlannerSupabaseClient();
+  const row = await throwIfError(
+    supabase.from("sop_review_seats")
+      .update({ department_id: nextDepartmentId, signer_id: signerId })
+      .eq("sop_id", sopId)
+      .eq("department_id", departmentId)
+      .select("department_id")
+      .maybeSingle(),
+  );
+  if (!row) throw new Error("The approval roster changed. Reload it before moving this department.");
+}
+
 export async function removeSeat(sopId: string, departmentId: string): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   await throwIfError(
@@ -443,6 +463,7 @@ export async function reassignSeat(sopId: string, departmentId: string, newSigne
       p_new_signer: newSignerId,
     }),
   );
+  kickSopNotifications();
 }
 
 export interface TransitionPatch {

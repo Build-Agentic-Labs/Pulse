@@ -15,7 +15,7 @@ import { resolveChannelEnabled, resolveEmailEnabled, type PreferenceRow } from "
 import { loadTeamsIntegrations, type TeamsIntegration } from "@/lib/notifications/integrations-store";
 import { deletePushSubscription, listPushSubscriptions, type PushSubscriptionRow } from "@/lib/notifications/push-store";
 import { inboxEntryFromEmail } from "@/domain/notifications/inbox";
-import { renderSopNotificationEmail, type SopEmailInput } from "@/domain/sop/notification-templates";
+import { renderSopNotificationEmail, sopNotificationPath, type SopEmailInput } from "@/domain/sop/notification-templates";
 import {
   REMINDER_AFTER_DAYS,
   SOP_NOTIFIABLE_EVENT_TYPES,
@@ -517,7 +517,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         suppressed: email !== null && bundle.suppressed.has(email.toLowerCase()),
         push: pushOn ? { subscriptions } : null,
       },
-      inbox: { link: `/sops/${pending.sopId}`, entityType: "sop", entityId: pending.sopId, workspaceId: row.workspace_id },
+      inbox: { link: sopNotificationPath(pending.kind, pending.sopId), entityType: "sop", entityId: pending.sopId, workspaceId: row.workspace_id },
       content: renderSopNotificationEmail({
         kind: pending.kind,
         sopNumber: row.sop_number,
@@ -551,6 +551,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       const events: NotifiableEvent[] = (eventRows ?? []).map((row) => ({
         id: Number(row.id),
         sopId: row.sop_id,
+        reviewCycle: row.review_cycle,
         eventType: row.event_type,
         actorId: row.actor_id,
         actorName: row.actor_name || "Someone",

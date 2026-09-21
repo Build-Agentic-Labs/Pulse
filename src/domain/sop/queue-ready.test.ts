@@ -80,6 +80,12 @@ describe("selectReadyForFinalApproval", () => {
     expect(selectReadyForFinalApproval(reset).map((s) => s.id)).toEqual(["sop-1"]);
   });
 
+  it("waits for an unstaffed required seat even when all staffed seats returned", () => {
+    const data = input();
+    data.seats = [...data.seats, { sopId: "sop-1", rasic: "responsible", signerId: null }];
+    expect(selectReadyForFinalApproval(data)).toEqual([]);
+  });
+
   it("needs at least one seated required approver — an unstaffed SOP is not 'complete'", () => {
     expect(selectReadyForFinalApproval(input({ seats: [{ sopId: "sop-1", rasic: "informed", signerId: null }] }))).toEqual([]);
   });

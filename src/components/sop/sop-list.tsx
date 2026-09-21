@@ -1,5 +1,6 @@
 "use client";
 
+import { REVIEWER_STATUS_LABELS, type ReviewerStatus } from "@/domain/sop/reviewer-status";
 import { formatDate, reviewerInitials } from "@/domain/formatting";
 import { FileText, Loader2, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
@@ -74,6 +75,14 @@ function markImportDone(workspaceId: string) {
     // Ignore storage failures in private browsing.
   }
 }
+
+const REVIEWER_STATUS_COLORS: Record<ReviewerStatus, string> = {
+  reviewing: "bg-zinc-400 text-white",
+  changes_requested: "bg-red-600 text-white",
+  review_complete: "bg-emerald-600 text-white",
+  awaiting_signature: "bg-amber-500 text-white",
+  signed: "bg-emerald-600 text-white",
+};
 
 const REVIEW_FEEDBACK_LABELS: Record<string, string> = {
   document: "Document control",
@@ -279,8 +288,8 @@ export function SopList({
   }, [filteredSops, departments]);
 
   const showReviewStatus = useMemo(
-    () => filteredSops.some((sop) => sop.status === "in_review"),
-    [filteredSops],
+    () => filteredSops.some((sop) => (reviewParticipants.get(sop.id)?.length ?? 0) > 0),
+    [filteredSops, reviewParticipants],
   );
 
   // Departments power the grouped sections.
@@ -695,7 +704,6 @@ export function SopList({
                                 {group.sops.map((sop) => {
                               const processState = getSopProcessState(sop);
                               const flag = reviewFlag(sop.nextReviewDate);
-                              const rowReviewResults = reviewResults.get(sop.id) ?? [];
                               const rowReviewers = reviewParticipants.get(sop.id) ?? [];
                               const isViewOnly = Boolean(
                                 sop.departmentId && !memberDepartmentIds.has(sop.departmentId),
@@ -761,7 +769,7 @@ export function SopList({
                                 </td>
                                 {showReviewStatus ? (
                                   <td className="px-3 py-2.5 align-middle">
-                                    {sop.status === "in_review" && rowReviewers.length ? (
+                                    {rowReviewers.length ? (
                                       <button
                                         type="button"
                                         className="flex -space-x-1.5 rounded-full p-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
@@ -769,23 +777,15 @@ export function SopList({
                                         onClick={() => void openFeedback(sop)}
                                       >
                                         {rowReviewers.slice(0, 4).map((reviewer) => {
-                                          const result = rowReviewResults.find((item) => item.reviewerId === reviewer.userId);
-                                          const label = !result
-                                            ? `${reviewer.name}: still reviewing`
-                                            : result.noChanges
-                                              ? `${reviewer.name}: no changes needed`
-                                              : `${reviewer.name}: feedback returned`;
+                                          const label = `${reviewer.name}: ${REVIEWER_STATUS_LABELS[reviewer.status]}`;
                                           return (
                                             <span
                                               key={reviewer.userId}
                                               className={`inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-surface text-[9px] font-semibold ${
-                                                !result
-                                                  ? "bg-zinc-400 text-white"
-                                                  : result.noChanges
-                                                    ? "bg-emerald-600 text-white"
-                                                    : "bg-red-600 text-white"
+                                                REVIEWER_STATUS_COLORS[reviewer.status]
                                               }`}
                                               title={label}
+                                              aria-label={label}
                                             >
                                               {reviewerInitials(reviewer.name)}
                                             </span>
@@ -886,14 +886,8 @@ export function SopList({
                             {result ? `Returned ${formatDate(result.submittedAt)}` : "Review in progress"}
                           </div>
                         </div>
-                        <span className={`ui-chip ${
-                          !result
-                            ? "border-line text-ink-tertiary"
-                            : result.noChanges
-                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                              : "border-red-200 bg-red-50 text-red-700"
-                        }`}>
-                          {!result ? "Still reviewing" : result.noChanges ? "No changes needed" : "Feedback returned"}
+                        <span className={`ui-chip ${REVIEWER_STATUS_COLORS[reviewer.status]}`}>
+                          {REVIEWER_STATUS_LABELS[reviewer.status]}
                         </span>
                       </div>
 

@@ -70,6 +70,14 @@ describe("resolveEventRecipients: review_sent", () => {
     expect(out.every((n) => n.eventId === 10 && n.reminderIndex === 0)).toBe(true);
   });
 
+  it("does not ask a reviewer to repeat a completed review after recall and resubmission", () => {
+    expect(ids(resolveEventRecipients(event(), ctx({ reviewReturns: [returned("resp")] })))).toEqual(["acct"]);
+  });
+
+  it("ignores workflow events from a previous release cycle", () => {
+    expect(resolveEventRecipients(event({ reviewCycle: 0 }), ctx())).toEqual([]);
+  });
+
   it("never emails Support or Inform participants", () => {
     const recipients = ids(resolveEventRecipients(event(), ctx()));
     expect(recipients).not.toContain("supp");
@@ -735,6 +743,12 @@ describe("pending (invited, not yet joined) signers", () => {
     expect(out).toEqual([
       { recipientId: "author", kind: "reviewer_not_joined", sopId: "sop-1", eventId: null, reminderIndex: 1, reviewCycle: 1 },
     ]);
+  });
+
+  it("nudges the author when a pending replacement holds a final-approval seat", () => {
+    const s = state({ sop: sop({ finalApprovalRequestedAt: "2026-07-21T12:00:00Z", finalApprovalContentHash: "hash-1" }) });
+    expect(resolveReminders(new Date("2026-07-25T12:00:00Z"), [s]).map((n) => [n.recipientId, n.kind]))
+      .toEqual([["author", "reviewer_not_joined"]]);
   });
 
   it("resumes the normal review_requested nudge once the signer has joined", () => {

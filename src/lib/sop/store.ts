@@ -38,7 +38,7 @@ const SOP_COLUMNS =
 // "Could not embed because more than one relationship was found for 'sops' and 'departments'".
 // Must stay a single string literal: supabase-js parses it at the type level.
 const SOP_LIST_COLUMNS =
-  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash, department:departments!sops_department_id_fkey(code)";
+  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, submitted_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash, department:departments!sops_department_id_fkey(code)";
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
@@ -64,6 +64,7 @@ export interface SopListItem {
   effectiveDate: string | null;
   nextReviewDate: string | null;
   createdBy: string | null;
+  submittedBy?: string | null;
   /** Mirror of the objection that sent this SOP back; the signature is the source of truth. */
   rejectedReason: string | null;
   reviewCycle: number;
@@ -165,6 +166,7 @@ function mapSopListItem(row: Record<string, unknown>): SopListItem {
     effectiveDate: (row.effective_date as string | null) ?? null,
     nextReviewDate: (row.next_review_date as string | null) ?? null,
     createdBy: (row.created_by as string | null) ?? null,
+    submittedBy: (row.submitted_by as string | null) ?? null,
     rejectedReason: (row.rejected_reason as string | null) ?? null,
     reviewCycle: Number(row.review_cycle ?? 0),
     contentHash: (row.content_hash as string | null) ?? null,

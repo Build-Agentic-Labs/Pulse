@@ -74,7 +74,7 @@ describe("backfill script stays in sync with the canonical module", () => {
     // JSON.stringify-normalize both to compare content including the •
     // escape without being tripped by template-literal vs source formatting.
     expect(script).toContain("Return ONLY the restructured text");
-    expect(script.includes(RESTRUCTURE_INSTRUCTION)).toBe(true);
+    expect(script.replace(/\r\n/g, "\n").includes(RESTRUCTURE_INSTRUCTION.replace(/\r\n/g, "\n"))).toBe(true);
   });
 
   it("carries the canonical projection regex", () => {

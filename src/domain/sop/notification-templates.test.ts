@@ -77,10 +77,16 @@ describe("renderSopNotificationEmail", () => {
     expect(renderSopNotificationEmail(input({ kind: "stall_escalated" })).text).toContain("has not responded to two reminders");
   });
 
-  it("body links to the SOP in both text and html", () => {
+  it("review requests link to the actionable review queue in both text and html", () => {
     const { text, html } = renderSopNotificationEmail(input());
-    expect(text).toContain("https://pulse.example.com/sops/sop-1");
-    expect(html).toContain('href="https://pulse.example.com/sops/sop-1"');
+    expect(text).toContain("https://pulse.example.com/sops?tab=review");
+    expect(html).toContain('href="https://pulse.example.com/sops?tab=review"');
+  });
+
+  it("keeps author and Quality actions linked to the specific SOP", () => {
+    for (const kind of ["sent_back", "review_complete", "quality_release_requested"] as const) {
+      expect(renderSopNotificationEmail(input({ kind })).text).toContain("https://pulse.example.com/sops/sop-1");
+    }
   });
 
   it("reminders get the prefix and the waiting line", () => {

@@ -89,9 +89,10 @@ export async function fetchReviewQueueData(
   const draftReviewSeats = inReviewSeats.filter((seat) => !finalApprovalSopIds.has(seat.sopId));
   const authoredInReview = sops.filter((sop) => sop.createdBy === userId && sop.status === "in_review");
   const authoredIds = authoredInReview.map((sop) => sop.id);
+  const qualitySops = isQualityApprover ? sops.filter((sop) => sop.status === "approved") : [];
   const [mySubmissions, mySignatures, authoredSeats, openAnnotations] = await Promise.all([
     listSopReviewSubmissions([...draftReviewSeats.map((seat) => seat.sopId), ...authoredIds], client),
-    listMySignaturesFor(finalApprovalSeats.map((seat) => seat.sopId), userId, client),
+    listMySignaturesFor([...finalApprovalSeats.map((seat) => seat.sopId), ...qualitySops.map((sop) => sop.id)], userId, client),
     listSeatsForSops(authoredIds, client),
     listOpenSopReviewAnnotationsFor(authoredIds, client),
   ]);
@@ -112,6 +113,7 @@ export async function fetchReviewQueueData(
       (seat) =>
         !mySignatures.some(
           (signature) =>
+            signature.sopId === seat.sopId &&
             signature.meaning === "dept_approval" &&
             signature.seatDepartmentId === seat.departmentId &&
             signature.reviewCycle === seat.reviewCycle &&
@@ -134,7 +136,16 @@ export async function fetchReviewQueueData(
     ),
     awaitingQuality: isQualityApprover
       ? sops
-          .filter((sop) => sop.status === "approved")
+          .filter((sop) =>
+            sop.status === "approved" &&
+            sop.createdBy !== userId &&
+            sop.submittedBy !== userId &&
+            !seats.some((seat) => seat.sopId === sop.id) &&
+            !mySignatures.some((signature) =>
+              signature.sopId === sop.id &&
+              signature.meaning === "objection_overruled" &&
+              signature.reviewCycle === sop.reviewCycle),
+          )
           .map((sop) => {
             const department = sop.departmentId ? departmentById.get(sop.departmentId) : undefined;
             return {

@@ -25,6 +25,9 @@ const securityHeaders = [
       `img-src 'self' data: blob: ${supabaseOrigin}`,
       `connect-src 'self' ${supabaseOrigin} ${supabaseRealtimeOrigin}${webVitalsOrigin ? ` ${webVitalsOrigin}` : ""}${isDevelopment ? " ws://localhost:* ws://127.0.0.1:*" : ""}`,
       "font-src 'self' data:",
+      // Reference PDFs use an iframe with a short-lived, permission-checked
+      // Storage URL. Without frame-src, default-src 'self' blocks that preview.
+      `frame-src 'self' ${supabaseOrigin}/storage/v1/object/sign/sop-annexes/`,
       "frame-ancestors 'self' https://*.office.com https://*.officeapps.live.com https://*.microsoft.com",
       "form-action 'self'",
     ].join("; "),

@@ -52,15 +52,7 @@ export function decisionBranchRequirement(
     };
   }
 
-  if (targets.yes === targets.no) {
-    return {
-      activityId: activity.id,
-      step: activity.step,
-      affectedOutcomes: ["yes", "no"],
-      message: `Required: Yes and No cannot point to the same destination in decision step ${activity.step}. Choose a different step or End process for one branch.`,
-    };
-  }
-
+  // Distinct outcomes may reconverge on a shared notification or recording step.
   return undefined;
 }
 

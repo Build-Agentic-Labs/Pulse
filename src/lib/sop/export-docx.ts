@@ -29,7 +29,7 @@ import {
   WidthType,
 } from "docx";
 import { formatDateControlled } from "@/domain/formatting";
-import { classifyProcedureLine } from "@/domain/sop/procedure-text";
+import { classifyProcedureLine, formatProcedureText } from "@/domain/sop/procedure-text";
 import { linkedSopLabel, rasicLegend, type Sop } from "@/domain/sop/schema";
 import { renderProcedureFlowImages } from "./procedure-flow-image";
 
@@ -78,43 +78,28 @@ function bulletList(items: string[]): Paragraph[] {
  * output this replaced.
  */
 function procedureNarrativeBlocks(text: string): Paragraph[] {
-  const blocks: Paragraph[] = [];
-  let bulletRun: string[] = [];
-  const flushBullets = () => {
-    if (bulletRun.length === 0) return;
-    blocks.push(...bulletList(bulletRun));
-    bulletRun = [];
-  };
-  for (const line of text.split(/\r?\n/)) {
-    const classified = classifyProcedureLine(line);
-    if (classified.kind === "bullet") {
-      bulletRun.push(classified.text);
-      continue;
+  const lines = formatProcedureText(text).split(/\r?\n/).map(classifyProcedureLine);
+  const keep = new Set<number>();
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].kind !== "heading") continue;
+    let end = i + 1;
+    while (end < lines.length && lines[end].kind !== "heading") end += 1;
+    // Conservative Word estimate; the browser uses actual measured heights.
+    const group = lines.slice(i, end);
+    if (group.reduce((sum, line) => sum + Math.max(1, Math.ceil(line.text.length / 80)), 0) <= 16) {
+      while (end > i + 1 && !lines[end - 1].text.trim()) end -= 1;
+      for (let j = i; j < end - 1; j += 1) keep.add(j);
     }
-    flushBullets();
-    if (classified.kind === "heading") {
-      blocks.push(
-        new Paragraph({
-          spacing: { before: 120, after: 80 },
-          // Same orphan rule the preview's keepWithNext enforces: a sub-heading
-          // never strands at the foot of a Word page (sectionHeading's precedent).
-          keepNext: true,
-          children: [new TextRun({ text: classified.text, bold: true, size: 20, color: INK, font: FONT })],
-        }),
-      );
-      continue;
-    }
-    if (classified.text.trim() === "") {
-      // A blank line is paragraph spacing. bodyText("") would render its
-      // em-dash empty-state — a literal "—" printed into the Word document —
-      // the same leak the preview's nbsp fix closed.
-      blocks.push(new Paragraph({ spacing: { after: 80 } }));
-      continue;
-    }
-    blocks.push(bodyText(classified.text));
   }
-  flushBullets();
-  return blocks;
+  return lines.map((line, index) => new Paragraph({
+    keepNext: line.kind === "heading" || keep.has(index),
+    keepLines: true,
+    ...(line.kind === "bullet" ? { bullet: { level: 0 } } : {}),
+    spacing: { before: line.kind === "heading" ? 120 : 0, after: line.kind === "bullet" ? 40 : 80 },
+    children: [new TextRun({
+      text: line.text, bold: line.kind === "heading", size: 20, color: INK, font: FONT,
+    })],
+  }));
 }
 
 function cellText(text: string, opts: { bold?: boolean; color?: string } = {}): Paragraph {

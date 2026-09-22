@@ -164,6 +164,15 @@ export async function uploadSopAnnexFile(input: {
   }
 }
 
+export async function renameSopAnnexFile(file: SopAnnexFile, name: string): Promise<SopAnnexFile> {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length > 260) throw new Error("Enter a name between 1 and 260 characters.");
+  const supabase = createPlannerSupabaseClient();
+  const row = await throwIfError(supabase.from("sop_annex_files")
+    .update({ original_name: trimmed }).eq("id", file.id).select(COLUMNS).single());
+  return mapFile(row as Record<string, unknown>);
+}
+
 export async function removeSopAnnexFile(file: SopAnnexFile): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   // Delete the metadata row first — it is the authoritative reference the

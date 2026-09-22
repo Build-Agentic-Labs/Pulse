@@ -35,7 +35,7 @@ describe("decision branch requirements", () => {
     expect(listDecisionBranchRequirements(activities)).toEqual([]);
   });
 
-  it("requires correction when conversion maps Yes and No to the same step", () => {
+  it("accepts Yes and No reconverging on the same follow-up step", () => {
     const activities = baseActivities.map((activity, index) =>
       index === 0
         ? {
@@ -45,10 +45,7 @@ describe("decision branch requirements", () => {
         : activity,
     );
 
-    expect(decisionBranchRequirement(activities[0], activities)).toMatchObject({
-      affectedOutcomes: ["yes", "no"],
-      message: expect.stringContaining("cannot point to the same destination"),
-    });
+    expect(decisionBranchRequirement(activities[0], activities)).toBeUndefined();
   });
 
   it("requires correction when a destination no longer exists", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyProcedureLine } from "./procedure-text";
+import { classifyProcedureLine, formatProcedureText } from "./procedure-text";
 
 describe("classifyProcedureLine", () => {
   // The real lines from SOP-QAS-### that motivated this feature.
@@ -69,5 +69,22 @@ describe("classifyProcedureLine", () => {
   it("keeps a lone glyph as a paragraph", () => {
     expect(classifyProcedureLine("•").kind).toBe("paragraph");
     expect(classifyProcedureLine("-").kind).toBe("paragraph");
+  });
+});
+
+describe("procedure display numbering", () => {
+  it("renumbers headings and explicit references without changing measurements", () => {
+    expect(formatProcedureText("4.1 Sales Notification\nSee section 4.2; use 4.2 mm.\n\n4.2 Planning Review"))
+      .toBe("1. Sales Notification\nSee section 2; use 4.2 mm.\n\n2. Planning Review");
+  });
+  it("is stable on already formatted text and follows reordered headings", () => {
+    const text = "4.2 Planning Review\nSee section 4.1\n4.1 Sales Notification";
+    const formatted = formatProcedureText(text);
+    expect(formatted).toBe("1. Planning Review\nSee section 2\n2. Sales Notification");
+    expect(formatProcedureText(formatted)).toBe(formatted);
+  });
+  it("leaves unrecognized prose and references unchanged", () => {
+    expect(formatProcedureText("4.5 mm tolerance applies. See section 7.2."))
+      .toBe("4.5 mm tolerance applies. See section 7.2.");
   });
 });

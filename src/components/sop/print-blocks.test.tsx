@@ -170,7 +170,7 @@ describe("buildPrintBlocks", () => {
     expect(sub!.splittable).toBeFalsy();
     const { container } = render(<>{sub!.render()}</>);
     expect(container.querySelector("p.sop-export-subheading")?.textContent).toBe(
-      "4.4 Document Creation",
+      "1. Document Creation",
     );
     expect(container.querySelector("[data-review-category='procedure']")).not.toBeNull();
     // The following prose line is still an ordinary splittable paragraph block.

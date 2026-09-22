@@ -73,6 +73,28 @@ describe("buildProcedureSvgPages", () => {
     });
   });
 
+  it("renders separate labelled paths when both outcomes share the next step", () => {
+    const shared = createEmptySop("shared", "2026-01-01T00:00:00.000Z");
+    shared.procedure.activities = [
+      {
+        id: "decision", step: 1, shape: "decision", description: "Order approved?",
+        decisionBranches: { yesTargetActivityId: "notify", noTargetActivityId: "notify" },
+        assignments: {},
+      },
+      {
+        id: "notify", step: 2, shape: "process", description: "Communicate the decision",
+        assignments: {},
+      },
+    ];
+    const svg = buildProcedureSvgPages(shared)[0].svg;
+    expect(svg).toContain('data-branch="yes"');
+    expect(svg).toContain('data-branch="no"');
+    expect(svg).toContain(">Yes</text>");
+    expect(svg).toContain(">No</text>");
+    expect(svg).not.toContain("decision-branch-end");
+    expect(svg).not.toContain("decision-branch-stub");
+  });
+
   it("splits a long flow across pages, repeating headers with a continued label", () => {
     const tall = applySampleData(createEmptySop("tall", "2026-01-01T00:00:00.000Z"));
     tall.procedure.activities = Array.from({ length: 40 }, (_, i) => ({

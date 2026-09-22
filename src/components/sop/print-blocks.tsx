@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { formatDateControlled } from "@/domain/formatting";
 import type { PlacedLineRange } from "@/domain/sop/pagination";
-import { classifyProcedureLine } from "@/domain/sop/procedure-text";
+import { classifyProcedureLine, formatProcedureText } from "@/domain/sop/procedure-text";
 import { linkedSopLabel, type Sop } from "@/domain/sop/schema";
 
 /** A leaf block before measurement. Task 3 adds `height`/`lineHeight`. */
@@ -11,6 +11,7 @@ export interface PrintBlock {
   sectionTitle: string;
   keepWithNext?: boolean;
   splittable?: boolean;
+  keepGroup?: string;
   /** `lineRange` is supplied when the packer cut this block across pages. */
   render: (lineRange?: PlacedLineRange) => ReactNode;
 }
@@ -225,14 +226,18 @@ function proseBlocks(category: string, sectionTitle: string, value: string): Pri
  * radius to the section with the problem keeps this reviewable.
  */
 function procedureBlocks(category: string, sectionTitle: string, value: string): PrintBlock[] {
+  value = formatProcedureText(value);
   const plain = proseBlocks(category, sectionTitle, value);
   if (!value) return plain;
   const lines = value.split(/\r?\n/);
-  return lines.map((line, index) => {
+  let group = "";
+  const blocks = lines.map((line, index): PrintBlock => {
     const classified = classifyProcedureLine(line);
-    if (classified.kind === "paragraph") return plain[index];
+    if (classified.kind === "paragraph") return { ...plain[index], keepGroup: group };
     if (classified.kind === "heading") {
+      group = `${category}-group${index}`;
       return {
+        keepGroup: group,
         id: `${category}-p${index}`,
         category,
         sectionTitle,
@@ -245,6 +250,7 @@ function procedureBlocks(category: string, sectionTitle: string, value: string):
       };
     }
     return {
+      keepGroup: group,
       id: `${category}-p${index}`,
       category,
       sectionTitle,
@@ -257,6 +263,7 @@ function procedureBlocks(category: string, sectionTitle: string, value: string):
       ),
     };
   });
+  return blocks;
 }
 
 // ---------------------------------------------------------------------------

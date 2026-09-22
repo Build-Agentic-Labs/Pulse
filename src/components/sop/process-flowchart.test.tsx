@@ -103,7 +103,7 @@ describe("ProcessFlowchart decision branches", () => {
     );
   });
 
-  it("marks converted decisions whose Yes and No paths are identical", () => {
+  it("allows both decision outcomes to share a follow-up without an error", () => {
     const duplicate = activities.map((activity, index) =>
       index === 0
         ? {
@@ -124,16 +124,11 @@ describe("ProcessFlowchart decision branches", () => {
       />,
     );
 
-    expect(screen.getByRole("img", { name: /Yes and No cannot point to the same destination/ })).toBeInTheDocument();
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent(
-      "Yes and No cannot point to the same destination",
-    );
-    expect(alert.parentElement).toHaveClass("border-danger", "bg-danger-muted");
-    expect(screen.getByRole("button", { name: "Yes branch destination for activity 1" })).toHaveClass(
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Yes branch destination for activity 1" })).not.toHaveClass(
       "!border-danger",
     );
-    expect(screen.getByRole("button", { name: "No branch destination for activity 1" })).toHaveClass(
+    expect(screen.getByRole("button", { name: "No branch destination for activity 1" })).not.toHaveClass(
       "!border-danger",
     );
   });

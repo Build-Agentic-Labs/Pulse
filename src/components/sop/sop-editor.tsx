@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Pencil, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -53,8 +53,10 @@ import { listSopAuditEvents, type SopAuditEvent } from "@/lib/sop/audit-events";
 import type { SopApprovalRoutingInitialData } from "@/lib/sop/detail-data";
 import {
   listSopAnnexFiles,
+  createSopAnnexFileUrl,
   openSopAnnexFile,
   removeSopAnnexFile,
+  renameSopAnnexFile,
   SOP_ANNEX_FILE_ACCEPT,
   uploadSopAnnexFile,
   type SopAnnexFile,
@@ -65,6 +67,7 @@ import { ProcessFlowchart } from "./process-flowchart";
 import { ResponsiblePersonsField } from "./responsible-persons-field";
 import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopPrintPreview } from "./sop-print-preview";
+import { ReferencePdfPreview } from "./reference-pdf-preview";
 import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
 import { SopRosterEditor } from "./sop-roster-editor";
 import { SopSearch } from "./sop-search";
@@ -333,6 +336,7 @@ export function SopEditor({
   const [linkableSops, setLinkableSops] = useState<SopListItem[] | undefined>(undefined);
   const [linkableSopsError, setLinkableSopsError] = useState("");
   const [referenceDocError, setReferenceDocError] = useState("");
+  const [referencePreview, setReferencePreview] = useState<{ name: string; url: string } | null>(null);
   const [uploadingReferenceDoc, setUploadingReferenceDoc] = useState(false);
   const [uploadingAnnexId, setUploadingAnnexId] = useState<string | null>(null);
   const [annexUploadStatus, setAnnexUploadStatus] = useState<AnnexUploadStatus | null>(null);
@@ -1051,7 +1055,12 @@ export function SopEditor({
   async function handleAnnexOpen(file: SopAnnexFile) {
     setAnnexFileError("");
     try {
-      await openSopAnnexFile(file);
+      if (file.contentType === "application/pdf") {
+        const url = await createSopAnnexFileUrl(file, 600);
+        setReferencePreview({ name: file.originalName, url });
+      } else {
+        await openSopAnnexFile(file);
+      }
     } catch (error) {
       setAnnexFileError(error instanceof Error ? error.message : "Could not open the form.");
     }
@@ -1105,7 +1114,12 @@ export function SopEditor({
     }
     setReferenceDocError("");
     try {
-      await openSopAnnexFile(file);
+      if (file.contentType === "application/pdf") {
+        const url = await createSopAnnexFileUrl(file, 600);
+        setReferencePreview({ name: doc.name, url });
+      } else {
+        await openSopAnnexFile(file);
+      }
     } catch (error) {
       setReferenceDocError(error instanceof Error ? error.message : "Could not open the document.");
     }
@@ -1904,7 +1918,7 @@ export function SopEditor({
                     onChange={(definitions) => update({ definitions })}
                   />
                 </Section>
-                <Section title="References" reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
+                <Section title="References" hideHeading reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
                   <ReferenceLibraryEditor
                     references={sop.references}
                     links={sop.linkedSops}
@@ -1919,6 +1933,9 @@ export function SopEditor({
                     uploading={uploadingReferenceDoc}
                     onChangeReferences={(references) => update({ references })}
                     onChangeLinks={(linkedSops) => update({ linkedSops })}
+                    onRenameDoc={(id, name) => update({
+                      referenceDocs: sop.referenceDocs.map((doc) => doc.id === id ? { ...doc, name } : doc),
+                    })}
                     onUpload={(file) => void handleReferenceDocUpload(file)}
                     onOpenDoc={(doc) => void handleReferenceDocOpen(doc)}
                     onRemoveDoc={(doc) => void handleReferenceDocRemove(doc)}
@@ -1994,6 +2011,10 @@ export function SopEditor({
                     }
                     onUpload={handleAnnexUpload}
                     onOpen={(file) => void handleAnnexOpen(file)}
+                    onRename={async (file, name) => {
+                      const renamed = await renameSopAnnexFile(file, name);
+                      setAnnexFiles((current) => current.map((item) => item.id === renamed.id ? renamed : item));
+                    }}
                     onRemoveFile={(file) => void handleAnnexFileRemove(file)}
                     onRemoveRow={(index) => void handleAnnexRowRemove(index)}
                   />
@@ -2629,6 +2650,9 @@ export function SopEditor({
             onClose={closePreview}
           />
         ) : null}
+        {referencePreview ? (
+          <ReferencePdfPreview {...referencePreview} onClose={() => setReferencePreview(null)} />
+        ) : null}
         {qualityApprovalOpen ? (
           <SopQualityApprovalWorkspace
             sopId={sop.id}
@@ -2646,10 +2670,12 @@ export function SopEditor({
 
 function Section({
   title,
+  hideHeading = false,
   children,
   reviewAttention = false,
 }: {
   title: string;
+  hideHeading?: boolean;
   children: ReactNode;
   reviewAttention?: boolean;
 }) {
@@ -2662,7 +2688,7 @@ function Section({
       } : undefined}
       data-review-attention={reviewAttention ? "true" : undefined}
     >
-      <h2 className="ui-setup-section-title mb-3">{title}</h2>
+      {hideHeading ? null : <h2 className="ui-setup-section-title mb-3">{title}</h2>}
       {children}
     </section>
   );
@@ -2746,6 +2772,7 @@ function ReferenceLibraryEditor({
   onUpload,
   onOpenDoc,
   onRemoveDoc,
+  onRenameDoc,
 }: {
   references: string[];
   links: SopLinkedSop[];
@@ -2763,10 +2790,17 @@ function ReferenceLibraryEditor({
   onUpload: (file: File) => void;
   onOpenDoc: (doc: SopReferenceDoc) => void;
   onRemoveDoc: (doc: SopReferenceDoc) => void;
+  onRenameDoc: (id: string, name: string) => void;
 }) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerMode, setComposerMode] = useState<"sop" | "text">("sop");
   const [typedReference, setTypedReference] = useState("");
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  function saveReferenceName() {
+    if (disabled || !renaming?.name.trim()) return;
+    onRenameDoc(renaming.id, renaming.name.trim());
+    setRenaming(null);
+  }
   const available = options.filter((option) => !links.some((link) => link.sopId === option.id));
 
   function addTypedReference() {
@@ -2779,6 +2813,28 @@ function ReferenceLibraryEditor({
 
   return (
     <div className="space-y-2">
+      <div className="mb-3 flex min-h-9 items-center justify-between gap-3">
+        <h2 className="ui-setup-section-title">References</h2>
+        {!disabled && !composerOpen ? (
+          <ThemedSelect
+            className="w-fit shrink-0"
+            menuAlign="right"
+            triggerClassName="h-9 gap-2.5 px-3 text-xs font-medium"
+            leadingIcon={<Plus size={14} />}
+            ariaLabel="Add reference"
+            value=""
+            placeholder="Add reference"
+            options={[
+              { value: "sop", label: "Effective SOP" },
+              { value: "text", label: "Typed reference" },
+            ]}
+            onChange={(mode) => {
+              setComposerMode(mode === "text" ? "text" : "sop");
+              setComposerOpen(true);
+            }}
+          />
+        ) : null}
+      </div>
       {references.map((reference, index) => (
         <div key={`reference-${index}`} className="flex min-h-9 items-center gap-2">
           <input
@@ -2827,6 +2883,29 @@ function ReferenceLibraryEditor({
             <span className="flex h-7 w-7 shrink-0 items-center justify-center text-ink-tertiary">
               <Paperclip size={14} />
             </span>
+            {renaming?.id === doc.id && !disabled ? (
+              <>
+                <input
+                  autoFocus
+                  aria-label="Reference name"
+                  className="ui-field-standalone min-w-0 flex-1"
+                  value={renaming.name}
+                  maxLength={260}
+                  onChange={(event) => setRenaming({ id: doc.id, name: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") { event.preventDefault(); saveReferenceName(); }
+                    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setRenaming(null); }
+                  }}
+                />
+                <button type="button" className="ui-btn-ghost h-9 w-9 shrink-0 px-0" aria-label="Save reference name" title="Save reference name" disabled={!renaming.name.trim()} onClick={saveReferenceName}>
+                  <Check size={14} />
+                </button>
+                <button type="button" className="ui-btn-ghost h-9 w-9 shrink-0 px-0" aria-label="Cancel rename" title="Cancel rename" onClick={() => setRenaming(null)}>
+                  <X size={14} />
+                </button>
+              </>
+            ) : (
+              <>
             <button
               type="button"
               className="min-w-0 flex-1 truncate text-left text-sm text-ink hover:underline"
@@ -2834,12 +2913,17 @@ function ReferenceLibraryEditor({
               onClick={() => onOpenDoc(doc)}
             >
               {doc.name}
-              {file ? (
-                <span className="ml-2 text-[11px] text-ink-tertiary">{formatFileSize(file.sizeBytes)}</span>
-              ) : (
+              {!file ? (
                 <span className="ml-2 text-[11px] text-danger">file missing</span>
-              )}
+              ) : null}
             </button>
+            {disabled ? null : (
+              <button type="button" className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary" aria-label={`Rename ${doc.name}`} title="Rename reference" onClick={() => setRenaming({ id: doc.id, name: doc.name })}>
+                <Pencil size={13} />
+              </button>
+            )}
+              </>
+            )}
             {disabled ? null : (
               <RowDeleteButton title="Remove document reference" onClick={() => onRemoveDoc(doc)} />
             )}
@@ -2956,21 +3040,7 @@ function ReferenceLibraryEditor({
             </div>
           </div>
         ) : (
-          <ThemedSelect
-            className="mt-2 w-44"
-            triggerClassName="ui-themed-select-trigger-compact"
-            ariaLabel="Add reference"
-            value=""
-            placeholder="+ Add reference"
-            options={[
-              { value: "sop", label: "Effective SOP" },
-              { value: "text", label: "Typed reference" },
-            ]}
-            onChange={(mode) => {
-              setComposerMode(mode === "text" ? "text" : "sop");
-              setComposerOpen(true);
-            }}
-          />
+          null
         )
       )}
     </div>
@@ -3075,12 +3145,6 @@ function PairListEditor<K extends string, V extends string>({
     </div>
   );
 }
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function AnnexesEditor({
   sopId,
   rows,
@@ -3091,6 +3155,7 @@ function AnnexesEditor({
   onChange,
   onUpload,
   onOpen,
+  onRename,
   onRemoveFile,
   onRemoveRow,
 }: {
@@ -3103,9 +3168,24 @@ function AnnexesEditor({
   onChange: (changeRows: (current: Sop["annexes"]) => Sop["annexes"]) => void;
   onUpload: (index: number, file: File) => void | Promise<void>;
   onOpen: (file: SopAnnexFile) => void;
+  onRename: (file: SopAnnexFile, name: string) => Promise<void>;
   onRemoveFile: (file: SopAnnexFile) => void;
   onRemoveRow: (index: number) => void;
 }) {
+  const [renaming, setRenaming] = useState<{ file: SopAnnexFile; name: string } | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState("");
+  async function saveName() {
+    if (!renaming?.name.trim() || renameBusy || disabled) return;
+    setRenameBusy(true);
+    setRenameError("");
+    try {
+      await onRename(renaming.file, renaming.name.trim());
+      setRenaming(null);
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : "Could not rename the attachment.");
+    } finally { setRenameBusy(false); }
+  }
   function patch(index: number, field: "label" | "description", value: string) {
     onChange((current) =>
       current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
@@ -3160,7 +3240,18 @@ function AnnexesEditor({
               </div>
 
               <div className="mt-2 flex min-h-9 items-center gap-2 border-t border-line/70 pt-2">
-                {file ? (
+                {file && renaming?.file.id === file.id && !disabled ? (
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <input autoFocus aria-label="Attachment name" className="ui-field-standalone min-w-0 flex-1" maxLength={260} value={renaming.name} disabled={renameBusy}
+                      onChange={(event) => setRenaming({ file, name: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") { event.preventDefault(); void saveName(); }
+                        if (event.key === "Escape" && !renameBusy) { event.preventDefault(); setRenaming(null); setRenameError(""); }
+                      }} />
+                    <button type="button" className="ui-btn-ghost h-9 w-9 px-0" aria-label="Save attachment name" disabled={renameBusy || !renaming.name.trim()} onClick={() => void saveName()}>{renameBusy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}</button>
+                    <button type="button" className="ui-btn-ghost h-9 w-9 px-0" aria-label="Cancel attachment rename" disabled={renameBusy} onClick={() => { setRenaming(null); setRenameError(""); }}><X size={14} /></button>
+                  </div>
+                ) : file ? (
                   <button
                     type="button"
                     className="group flex min-w-0 flex-1 items-center gap-2 text-left"
@@ -3174,9 +3265,6 @@ function AnnexesEditor({
                       <span className="block truncate text-xs font-medium text-ink group-hover:underline">
                         {file.originalName}
                       </span>
-                      <span className="mt-0.5 block text-[11px] text-ink-tertiary">
-                        PDF · {formatFileSize(file.sizeBytes)}
-                      </span>
                     </span>
                   </button>
                 ) : (
@@ -3189,6 +3277,7 @@ function AnnexesEditor({
                 )}
                 {disabled ? null : (
                   <div className="flex shrink-0 items-center gap-1">
+                    {file && !renaming ? <button type="button" className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary" aria-label={`Rename ${file.originalName}`} title="Rename attachment" onClick={() => { setRenaming({ file, name: file.originalName }); setRenameError(""); }}><Pencil size={13} /></button> : null}
                     <label
                       className={`ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 ${
                         uploading ? "pointer-events-none cursor-wait opacity-60" : "cursor-pointer"
@@ -3226,6 +3315,7 @@ function AnnexesEditor({
                   </div>
                 )}
               </div>
+              {renaming?.file.annexId === row.id && renameError ? <p role="alert" className="mt-2 text-xs text-danger">{renameError}</p> : null}
               {rowStatus ? (
                 <div
                   role="status"

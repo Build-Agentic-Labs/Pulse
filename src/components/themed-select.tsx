@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -45,6 +46,7 @@ type ThemedSelectProps = {
   /** Optional compact trigger text when the menu labels need to be more descriptive. */
   selectedLabel?: string;
   triggerClassName?: string;
+  leadingIcon?: ReactNode;
   variant?: "default" | "sop";
 };
 
@@ -63,6 +65,7 @@ export function ThemedSelect({
   placeholder,
   selectedLabel,
   triggerClassName = "",
+  leadingIcon,
   variant = "default",
 }: ThemedSelectProps) {
   const id = useId();
@@ -244,6 +247,7 @@ export function ThemedSelect({
         onClick={() => setOpen((current) => !current)}
         onKeyDown={handleTriggerKeyDown}
       >
+        {leadingIcon ? <span className="flex shrink-0 items-center" aria-hidden="true">{leadingIcon}</span> : null}
         <span className="ui-themed-select-value">{visibleLabel}</span>
         <ChevronDown size={14} className="ui-themed-select-icon" aria-hidden="true" />
       </button>

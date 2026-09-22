@@ -34,7 +34,7 @@ export function usePaginatedPages({ sections, trailing }: PaginatedSegments) {
         container.querySelector<HTMLElement>(`[data-block-id="${block.id}"]`),
       );
       const bottom = container.scrollHeight;
-      return blocks.map((block, index) => {
+      const measured = blocks.map((block, index) => {
         const node = nodes[index];
         const top = node?.offsetTop ?? 0;
         const nextTop = nodes[index + 1]?.offsetTop ?? bottom;
@@ -61,6 +61,19 @@ export function usePaginatedPages({ sections, trailing }: PaginatedSegments) {
             : undefined,
         };
       });
+      // Keep short subsections together; long ones retain normal paragraph splitting.
+      for (let i = 0; i < blocks.length; i += 1) {
+        const group = blocks[i].keepGroup;
+        if (!group) continue;
+        let end = i;
+        let height = 0;
+        while (end < blocks.length && blocks[end].keepGroup === group) height += measured[end++].height;
+        if (height <= usableHeight(root) * 0.5) {
+          for (let j = i; j < end - 1; j += 1) measured[j].keepWithNext = true;
+        }
+        i = end - 1;
+      }
+      return measured;
     }
 
     function usableHeight(root: HTMLElement): number {

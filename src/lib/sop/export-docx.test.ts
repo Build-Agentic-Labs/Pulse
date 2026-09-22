@@ -58,7 +58,7 @@ describe("exportSopToDocx — Procedure narrative structure", () => {
     const xml = new PizZip(Buffer.from(await blob.arrayBuffer())).file("word/document.xml")!.asText();
 
     // Heading should appear as text with bold (<w:b/>) and body size (w:sz="20").
-    const headingIdx = xml.indexOf("4.4 Document Creation");
+    const headingIdx = xml.indexOf("1. Document Creation");
     expect(headingIdx).toBeGreaterThan(-1);
 
     // Look backward from the heading text to find its run properties.

@@ -1,5 +1,9 @@
 "use client";
 
+import { formatProcedureText } from "@/domain/sop/procedure-text";
+
+import { ReferencePdfPreview } from "./reference-pdf-preview";
+
 import { ArrowLeft, Printer, X } from "lucide-react";
 import Link from "next/link";
 import { formatDateControlled, formatDateTime } from "@/domain/formatting";
@@ -775,22 +779,7 @@ export function SopPrintPreview({
           border-radius: 4px; font-family: inherit; letter-spacing: 0; text-transform: none;
         }
         .sop-preview-content { display: flex; flex: 1; min-height: 0; }
-        .sop-inline-doc {
-          position: fixed; inset: 0; z-index: 70;
-          display: flex; flex-direction: column;
-          background: rgba(15, 18, 21, 0.62);
-        }
-        .sop-inline-doc-bar {
-          display: flex; align-items: center; justify-content: space-between;
-          gap: 12px; padding: 10px 16px; flex: none;
-          background: var(--color-surface, #fff); border-bottom: 1px solid var(--color-line, #ddd);
-        }
-        .sop-inline-doc-name {
-          min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-          font-size: 13px; color: var(--color-ink-secondary, #555);
-        }
-        .sop-inline-doc-frame { flex: 1; width: 100%; border: 0; background: #525659; }
-        @media print { .sop-inline-doc { display: none !important; } }
+
         /* The offscreen measurement tree must be display:none in print, not just
            hidden — the main print block below forces
            ".sop-print-page, .sop-print-page * { visibility: visible !important }"
@@ -1005,7 +994,18 @@ export function SopPrintPreview({
       </div>
 
       <div className="sop-preview-content">
-        <div className="sop-preview-scroll" ref={scrollRef} onScroll={handleReviewScroll}>
+        <div
+          className="sop-preview-scroll"
+          ref={scrollRef}
+          onScroll={handleReviewScroll}
+          onClick={(event) => {
+            const target = event.target;
+            if (target instanceof HTMLElement &&
+              (target === event.currentTarget || target.classList.contains("sop-print-pages"))) {
+              onClose();
+            }
+          }}
+        >
           <div className="sop-print-pages" style={{ zoom: pageScale }}>
           {fallback ? (
             <>
@@ -1085,7 +1085,7 @@ export function SopPrintPreview({
                 <Section title="Measurement" reviewCategory="measurements">
                   {sop.measurements.length ? <ul className="sop-export-list">{sop.measurements.map((item, index) => <li key={index}>{item}</li>)}</ul> : <EmptyAwareText value="" />}
                 </Section>
-                <Section title="Procedure" reviewCategory="procedure"><EmptyAwareText value={sop.procedure.processFlowDescription} /></Section>
+                <Section title="Procedure" reviewCategory="procedure"><EmptyAwareText value={formatProcedureText(sop.procedure.processFlowDescription)} /></Section>
               </DocumentPage>
 
               {flowPages.map((flowPage, index) => (
@@ -1338,28 +1338,7 @@ export function SopPrintPreview({
         ))}
       </div>
       {inlineDoc ? (
-        <div className="sop-inline-doc" role="dialog" aria-label={`Referenced document ${inlineDoc.name}`}>
-          <div className="sop-inline-doc-bar">
-            <button
-              type="button"
-              className="ui-btn-ghost inline-flex h-9 items-center gap-1.5 px-3"
-              onClick={() => setInlineDoc(null)}
-            >
-              <ArrowLeft size={15} />
-              Back
-            </button>
-            <span className="sop-inline-doc-name">{inlineDoc.name}</span>
-            <button
-              type="button"
-              className="ui-btn-ghost h-9 w-9 px-0"
-              onClick={() => setInlineDoc(null)}
-              aria-label="Close referenced document"
-            >
-              <X size={16} className="mx-auto" />
-            </button>
-          </div>
-          <iframe className="sop-inline-doc-frame" src={inlineDoc.url} title={inlineDoc.name} />
-        </div>
+        <ReferencePdfPreview {...inlineDoc} onClose={() => setInlineDoc(null)} />
       ) : null}
     </div>
   );

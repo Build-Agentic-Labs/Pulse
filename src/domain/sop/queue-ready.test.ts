@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SopListItem } from "@/lib/sop/store";
-import { selectReadyForFinalApproval, type ReadyForFinalApprovalInput } from "./queue-ready";
+import { selectFeedbackToAddress, selectReadyForFinalApproval, type ReadyForFinalApprovalInput } from "./queue-ready";
 
 const AUTHOR = "author";
 
@@ -88,5 +88,51 @@ describe("selectReadyForFinalApproval", () => {
 
   it("needs at least one seated required approver — an unstaffed SOP is not 'complete'", () => {
     expect(selectReadyForFinalApproval(input({ seats: [{ sopId: "sop-1", rasic: "informed", signerId: null }] }))).toEqual([]);
+  });
+});
+
+describe("selectFeedbackToAddress", () => {
+  const open = [{ sopId: "sop-1", reviewCycle: 1 }];
+
+  it("lists an authored SOP once every review is back and remarks remain open", () => {
+    expect(selectFeedbackToAddress(input({ openAnnotations: open })).map((item) => item.id)).toEqual(["sop-1"]);
+  });
+
+  it("never overlaps ready-for-final-approval", () => {
+    expect(selectFeedbackToAddress(input())).toEqual([]);
+    expect(selectReadyForFinalApproval(input({ openAnnotations: open }))).toEqual([]);
+  });
+
+  it("waits until every required reviewer has returned", () => {
+    const seats = [
+      { sopId: "sop-1", rasic: "responsible", signerId: "resp" },
+      { sopId: "sop-1", rasic: "responsible", signerId: "late" },
+    ];
+    expect(selectFeedbackToAddress(input({ seats, openAnnotations: open }))).toEqual([]);
+  });
+
+  it("ignores remarks from an earlier cycle and SOPs someone else wrote", () => {
+    expect(selectFeedbackToAddress(input({ openAnnotations: [{ sopId: "sop-1", reviewCycle: 0 }] }))).toEqual([]);
+    expect(selectFeedbackToAddress(input({ userId: "someone-else", openAnnotations: open }))).toEqual([]);
+  });
+});
+
+describe("feedback on a draft pulled back to work the remarks", () => {
+  const open = [{ sopId: "sop-1", reviewCycle: 1 }];
+  const recalled = sop({ status: "draft" });
+
+  it("still asks the author to address the remarks", () => {
+    expect(selectFeedbackToAddress(input({ sops: [recalled], openAnnotations: open })).map((item) => item.id)).toEqual([
+      "sop-1",
+    ]);
+  });
+
+  it("is never ready for final approval until it is resubmitted", () => {
+    expect(selectReadyForFinalApproval(input({ sops: [recalled] }))).toEqual([]);
+  });
+
+  it("leaves a rejected draft to the sent-back list", () => {
+    const rejected = sop({ status: "draft", rejectedReason: "Objection" });
+    expect(selectFeedbackToAddress(input({ sops: [rejected], openAnnotations: open }))).toEqual([]);
   });
 });

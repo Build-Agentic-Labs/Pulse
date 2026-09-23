@@ -20,10 +20,18 @@ export interface QueueSummaryItem {
    */
   sopNumber: string;
   title: string | null;
+  /** Where acting on it happens: a reviewer's review opens in the queue, never the author's builder. */
+  href: string;
 }
 
 export interface QueueSummarySection {
-  key: "awaitingMe" | "finalApprovals" | "awaitingQuality" | "sentBack" | "readyForFinalApproval";
+  key:
+    | "awaitingMe"
+    | "finalApprovals"
+    | "awaitingQuality"
+    | "sentBack"
+    | "feedbackToAddress"
+    | "readyForFinalApproval";
   label: string;
   items: QueueSummaryItem[];
 }
@@ -31,6 +39,11 @@ export interface QueueSummarySection {
 export interface QueueSummary {
   total: number;
   sections: QueueSummarySection[];
+}
+
+function sopHref(sopId: string, step?: string): string {
+  const base = `/sops/${encodeURIComponent(sopId)}`;
+  return step ? `${base}?step=${step}` : base;
 }
 
 function notificationId(section: QueueSummarySection["key"], values: Array<string | number | null>): string {
@@ -52,6 +65,7 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
         sopId: row.sopId,
         sopNumber: listNumberLabel(row.sopNumber, row.sopDepartmentCode),
         title: row.title,
+        href: `/sops?tab=review&review=${encodeURIComponent(row.sopId)}`,
       })),
     },
     {
@@ -68,6 +82,7 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
         sopId: row.sopId,
         sopNumber: listNumberLabel(row.sopNumber, row.sopDepartmentCode),
         title: row.title,
+        href: sopHref(row.sopId, "final-approval"),
       })),
     },
     {
@@ -83,6 +98,7 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
         sopId: row.id,
         sopNumber: listNumberLabel(row.sopNumber, row.departmentCode),
         title: row.title,
+        href: sopHref(row.id, "quality-approval"),
       })),
     },
     {
@@ -98,6 +114,18 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
         sopId: row.id,
         sopNumber: listNumberLabel(row.sopNumber, row.departmentCode),
         title: row.title,
+        href: sopHref(row.id, "draft-review"),
+      })),
+    },
+    {
+      key: "feedbackToAddress" as const,
+      label: "Feedback to address",
+      items: queue.feedbackToAddress.map((row) => ({
+        notificationId: notificationId("feedbackToAddress", [row.id, row.reviewCycle, row.contentHash]),
+        sopId: row.id,
+        sopNumber: listNumberLabel(row.sopNumber, row.departmentCode),
+        title: row.title,
+        href: sopHref(row.id, "draft-review"),
       })),
     },
     {
@@ -108,6 +136,7 @@ export function summarizeQueue(queue: QueueData): QueueSummary {
         sopId: row.id,
         sopNumber: listNumberLabel(row.sopNumber, row.departmentCode),
         title: row.title,
+        href: sopHref(row.id, "final-approval"),
       })),
     },
   ].filter((section) => section.items.length > 0);

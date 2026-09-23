@@ -57,6 +57,7 @@ function queue(over: Partial<QueueData> = {}): QueueData {
     sentBack: [],
     awaitingQuality: [],
     readyForFinalApproval: [],
+    feedbackToAddress: [],
     allInFlight: [],
     authorNames: {},
     isQualityApprover: false,
@@ -75,8 +76,21 @@ describe("summarizeQueue", () => {
     expect(summary.total).toBe(2);
     expect(summary.sections.map((section) => section.label)).toEqual(["Sent back", "Ready for final approval"]);
     expect(summary.sections[1].items).toEqual([
-      { notificationId: "readyForFinalApproval:s5:2:h", sopId: "s5", sopNumber: "ENG", title: "Five" },
+      { notificationId: "readyForFinalApproval:s5:2:h", sopId: "s5", sopNumber: "ENG", title: "Five", href: "/sops/s5?step=final-approval" },
     ]);
+  });
+
+  it("lists authored SOPs with every review back and remarks open, before ready-for-final-approval", () => {
+    const back = { ...sopItem("s6", "", "Six"), status: "in_review" as const, rejectedReason: null, reviewCycle: 1 };
+    const summary = summarizeQueue(
+      queue({
+        feedbackToAddress: [back],
+        readyForFinalApproval: [{ ...back, id: "s7", title: "Seven" }],
+      }),
+    );
+    expect(summary.total).toBe(2);
+    expect(summary.sections.map((section) => section.label)).toEqual(["Feedback to address", "Ready for final approval"]);
+    expect(summary.sections[0].items[0].href).toBe("/sops/s6?step=draft-review");
   });
 
   it("totals the four actionable sections and never counts allInFlight", () => {
@@ -128,6 +142,7 @@ describe("summarizeQueue", () => {
         sopId: "seat-sop",
         sopNumber: "SOP-1",
         title: "Seat Row",
+        href: "/sops?tab=review&review=seat-sop",
       },
     ]);
     expect(summary.sections[1].items).toEqual([
@@ -136,6 +151,7 @@ describe("summarizeQueue", () => {
         sopId: "list-sop",
         sopNumber: "SOP-4",
         title: "List Row",
+        href: "/sops/list-sop?step=draft-review",
       },
     ]);
   });

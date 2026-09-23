@@ -26,31 +26,47 @@ function finalApprovalUnderway(sop: SopListItem): boolean {
   return Boolean(sop.finalApprovalRequestedAt) && sop.finalApprovalContentHash === sop.contentHash;
 }
 
+/**
+ * Mine, in draft review or pulled back to draft to work the remarks (a recall, not a rejection —
+ * that one is "sent back"), with every required approver's review returned this cycle and final
+ * approval not yet asked.
+ */
+function everyReviewReturned(sop: SopListItem, input: ReadyForFinalApprovalInput): boolean {
+  if (sop.createdBy !== input.userId) return false;
+  const reviewing = sop.status === "in_review" || (sop.status === "draft" && !sop.rejectedReason);
+  if (!reviewing || finalApprovalUnderway(sop)) return false;
+
+  const requiredSeats = input.seats.filter((seat) => seat.sopId === sop.id && isBlocking(seat.rasic));
+  if (requiredSeats.some((seat) => !seat.signerId)) return false;
+  const signers = Array.from(new Set(requiredSeats.map((seat) => seat.signerId as string)));
+  if (signers.length === 0) return false;
+
+  const returned = new Set(
+    input.submissions
+      .filter((submission) => submission.sopId === sop.id && submission.reviewCycle === sop.reviewCycle)
+      .map((submission) => submission.reviewerId),
+  );
+  return signers.every((signer) => returned.has(signer));
+}
+
+function hasOpenRemarks(sop: SopListItem, input: ReadyForFinalApprovalInput): boolean {
+  return input.openAnnotations.some(
+    (annotation) => annotation.sopId === sop.id && annotation.reviewCycle === sop.reviewCycle,
+  );
+}
+
 export function selectReadyForFinalApproval(input: ReadyForFinalApprovalInput): SopListItem[] {
-  return input.sops.filter((sop) => {
-    if (sop.createdBy !== input.userId || sop.status !== "in_review") return false;
-    if (finalApprovalUnderway(sop)) return false;
+  // Only a live review can ask for signatures; a recalled draft must be resubmitted first.
+  return input.sops.filter(
+    (sop) => sop.status === "in_review" && everyReviewReturned(sop, input) && !hasOpenRemarks(sop, input),
+  );
+}
 
-    const requiredSeats = input.seats.filter((seat) => seat.sopId === sop.id && isBlocking(seat.rasic));
-    if (requiredSeats.some((seat) => !seat.signerId)) return false;
-    const signers = Array.from(
-      new Set(
-        input.seats
-          .filter((seat) => seat.sopId === sop.id && isBlocking(seat.rasic) && seat.signerId)
-          .map((seat) => seat.signerId as string),
-      ),
-    );
-    if (signers.length === 0) return false;
-
-    const returned = new Set(
-      input.submissions
-        .filter((submission) => submission.sopId === sop.id && submission.reviewCycle === sop.reviewCycle)
-        .map((submission) => submission.reviewerId),
-    );
-    if (!signers.every((signer) => returned.has(signer))) return false;
-
-    return !input.openAnnotations.some(
-      (annotation) => annotation.sopId === sop.id && annotation.reviewCycle === sop.reviewCycle,
-    );
-  });
+/**
+ * The other half of "every review is back": remarks remain open, so the author
+ * owes rework before final approval can be asked. Disjoint from
+ * selectReadyForFinalApproval by construction.
+ */
+export function selectFeedbackToAddress(input: ReadyForFinalApprovalInput): SopListItem[] {
+  return input.sops.filter((sop) => everyReviewReturned(sop, input) && hasOpenRemarks(sop, input));
 }

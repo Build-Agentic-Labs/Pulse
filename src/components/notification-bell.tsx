@@ -13,6 +13,7 @@ import {
 import { createPlannerSupabaseClient, loadWorkspaceProjectGroups } from "@/domain/supabase-planner";
 import { listInbox, markAllInboxRead, markInboxRead, type InboxItem } from "@/lib/notifications/inbox-store";
 import { fetchReviewQueueData } from "@/lib/sop/review-queue-data";
+import { publishReviewQueueCount } from "@/lib/sop/review-queue-count";
 import { SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import "./notification-bell.css";
@@ -114,7 +115,9 @@ function useNotificationState(): {
         if (workspaceId && queue) {
           const storageKey = `${ACKNOWLEDGED_STORAGE_PREFIX}:${workspaceId}:${user.id}`;
           storageKeyRef.current = storageKey;
-          setSummary(excludeAcknowledged(summarizeQueue(queue), readAcknowledged(storageKey)));
+          const summaryForQueue = summarizeQueue(queue);
+          publishReviewQueueCount(workspaceId, summaryForQueue.total);
+          setSummary(excludeAcknowledged(summaryForQueue, readAcknowledged(storageKey)));
         } else {
           setSummary(null);
         }
@@ -273,7 +276,7 @@ export function NotificationBell() {
                       onClick={() => {
                         acknowledge(item);
                         setOpen(false);
-                        router.push(`/sops/${item.sopId}`);
+                        router.push(item.href);
                       }}
                     >
                       <span className="bell-message-title">

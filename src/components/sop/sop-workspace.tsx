@@ -9,6 +9,7 @@ import type { MemberAccess } from "@/domain/types";
 import type { HistoricalSopRevision } from "@/lib/sop/review";
 import type { SopListReviewData } from "@/lib/sop/list-review-data";
 import type { QueueData } from "@/lib/sop/review-queue-data";
+import { useReviewQueueCount } from "@/lib/sop/review-queue-count";
 import type { SopListItem } from "@/lib/sop/store";
 import { SopShell } from "./sop-shell";
 import { SopTabNav, type SopTab } from "./sop-tab-nav";
@@ -96,8 +97,9 @@ export type SopWorkspaceInitialData =
     };
 
 export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } = {}) {
-  const { role } = useSopWorkspace();
+  const { role, workspaceId } = useSopWorkspace();
   const manage = canManage(role);
+  const reviewCount = useReviewQueueCount(workspaceId);
   const params = useSearchParams();
   const requested = parseTab(params.get("tab"));
   const tab = requested === "settings" && !manage ? "all" : requested;
@@ -145,7 +147,7 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
 
   const sidebar = (
     <>
-      <SopTabNav active={tab} manage={manage} onSelect={select} />
+      <SopTabNav active={tab} manage={manage} onSelect={select} reviewCount={reviewCount} />
       <SopWorkspaceSwitcher />
     </>
   );

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { WorkspaceProjectGroup, WorkspaceRole } from "@/domain/types";
 import { fetchMySpaceAccess } from "@/lib/planning/store";
 import { SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
+import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 
@@ -122,6 +123,15 @@ export function PlanningWorkspaceProvider({ groups, children }: PlanningWorkspac
       cancelled = true;
     };
   }, [workspaceId, isManager]);
+
+  // Re-check the Planning grant on tab return so a grant/revoke made by an admin in another
+  // session shows up without a reload. Keeps the current value while checking (no flash back
+  // to the "checking" state), and a failed check leaves it as it was.
+  const recheckAccess = useCallback(async () => {
+    const granted = await fetchMySpaceAccess(workspaceId, "planning");
+    setHasAccess(granted);
+  }, [workspaceId]);
+  useRefreshOnReturn(recheckAccess, Boolean(workspaceId) && !isManager);
 
   const canWrite = isManager || (role === "editor" && hasAccess === true);
   const canManage = isManager;

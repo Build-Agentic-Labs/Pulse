@@ -9,8 +9,10 @@ import {
   ensureDefaultWorkspaceMembership,
 } from "@/domain/supabase-planner";
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
+import { sameSnapshot } from "@/domain/refresh-on-return";
 import { useAuthFormActions } from "@/lib/auth-form-actions";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
+import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { activateInvitePasswordSetup, completeInvitePasswordSetup } from "@/lib/invite-password-setup";
 
 type ProjectRouteKind = "planner" | "mobile-photos";
@@ -300,6 +302,17 @@ export function AuthProjectGate({
     },
     [projectId],
   );
+
+  // An admin may change this user's role or project access from another session. RLS enforces
+  // it immediately, but this tab only learns of it on a re-read -- so re-read on tab return.
+  // Silent: no loading shell, a failed read keeps the current groups, and an unchanged result
+  // keeps the current object so the open workspace does not re-render.
+  const refreshAccessInBackground = useCallback(async () => {
+    const nextGroups = await ensureDefaultWorkspaceMembership();
+    setGroups((current) => (sameSnapshot(current, nextGroups) ? current : nextGroups));
+    writeWorkspaceGroupsCache(nextGroups);
+  }, []);
+  useRefreshOnReturn(refreshAccessInBackground, status === "ready" && session !== null);
 
   // Cache-then-revalidate (same pattern as the sidebar's project cache): paint the last
   // known workspace groups immediately while the session resolve + fresh load below run.

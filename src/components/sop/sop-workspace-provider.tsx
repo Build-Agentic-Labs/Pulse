@@ -12,6 +12,8 @@ import { useAuthFormActions } from "@/lib/auth-form-actions";
 import type { InitialSopWorkspaceData } from "@/lib/supabase/server-data";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import { activateInvitePasswordSetup, completeInvitePasswordSetup } from "@/lib/invite-password-setup";
+import { sameSnapshot } from "@/domain/refresh-on-return";
+import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
 
@@ -267,6 +269,19 @@ export function SopWorkspaceProvider({
       active = false;
     };
   }, [supabase, workspaceId]);
+
+  // Tab return: re-read memberships and Quality Module access so an admin's change in another
+  // session applies without a reload. Silent -- current values stay while reading, a failed
+  // read keeps them, and unchanged groups keep their identity.
+  const refreshAccessInBackground = useCallback(async () => {
+    const [nextGroups, level] = await Promise.all([
+      ensureDefaultWorkspaceMembership(),
+      workspaceId ? fetchOrgToolAccess(workspaceId, supabase) : Promise.resolve(undefined),
+    ]);
+    setGroups((current) => (sameSnapshot(current, nextGroups) ? current : nextGroups));
+    if (level !== undefined) setOrgToolAccess(level);
+  }, [supabase, workspaceId]);
+  useRefreshOnReturn(refreshAccessInBackground, status === "ready" && session !== null);
 
   const role = useMemo(
     () => groups.find((group) => group.workspace.id === workspaceId)?.role,

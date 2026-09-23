@@ -52,15 +52,15 @@ describe("listNumberLabel", () => {
     expect(listNumberLabel("SOP-PRO-007", "PRO")).toBe("SOP-PRO-007");
   });
 
-  it("stands in the department code while the document is unnumbered", () => {
-    expect(listNumberLabel("", "pro")).toBe("PRO");
-    expect(listNumberLabel(null, "PRO")).toBe("PRO");
-    expect(listNumberLabel("<UNKNOWN>", "PRO")).toBe("PRO");
+  it("shows the placeholder number while the document is unnumbered", () => {
+    expect(listNumberLabel("", "pro")).toBe("SOP-PRO-###");
+    expect(listNumberLabel(null, "PRO")).toBe("SOP-PRO-###");
+    expect(listNumberLabel("<UNKNOWN>", "PRO")).toBe("SOP-PRO-###");
   });
 
-  it("falls back to a dash when there is no number and no department", () => {
-    expect(listNumberLabel("", "")).toBe("—");
-    expect(listNumberLabel(null, null)).toBe("—");
+  it("drops the department segment when there is no department yet", () => {
+    expect(listNumberLabel("", "")).toBe("SOP-###");
+    expect(listNumberLabel(null, null)).toBe("SOP-###");
   });
 });
 

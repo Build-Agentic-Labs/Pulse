@@ -76,7 +76,7 @@ describe("summarizeQueue", () => {
     expect(summary.total).toBe(2);
     expect(summary.sections.map((section) => section.label)).toEqual(["Sent back", "Ready for final approval"]);
     expect(summary.sections[1].items).toEqual([
-      { notificationId: "readyForFinalApproval:s5:2:h", sopId: "s5", sopNumber: "ENG", title: "Five", href: "/sops/s5?step=final-approval" },
+      { notificationId: "readyForFinalApproval:s5:2:h", sopId: "s5", sopNumber: "SOP-ENG-###", title: "Five", href: "/sops/s5?step=final-approval" },
     ]);
   });
 

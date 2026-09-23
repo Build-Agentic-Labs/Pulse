@@ -83,7 +83,7 @@ describe("createStalledDigestDrainStore.collect", () => {
     ]);
     expect(batch.items[0].email).toBe("owner@anacorp.com");
     expect(batch.items[0].content.subject).toBe("Stalled SOP work this week: 1 SOP in Anacorp");
-    expect(batch.items[0].content.text).toContain("PRD · Line Clearance — 12 days, waiting on 1 review outstanding (Production)");
+    expect(batch.items[0].content.text).toContain("SOP-PRD-### · Line Clearance — 12 days, waiting on 1 review outstanding (Production)");
     expect(batch.items[0].inbox).toEqual({ link: "/sops/review", entityType: "workspace", entityId: "ws-1", workspaceId: "ws-1" });
     expect(batch.items[0].channels).toEqual({ email: true, suppressed: false });
   });

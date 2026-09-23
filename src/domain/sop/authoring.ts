@@ -61,18 +61,15 @@ export function documentNumberLabel(
 
 /**
  * The number as a *list* shows it — SOP list, review queue, notification bell, retired archive.
- * Unreleased documents stand in their department code, so a row reads
- * `PRO · Value Stream Mapping Standard Practices` instead of repeating `SOP-PRO-###` down the
- * column, where identical placeholders would read as duplicate rows rather than as unnumbered
- * ones. Titles already lead every one of these surfaces.
+ * An unreleased document reads `SOP-PRO-###`, the same placeholder its masthead shows, so a row
+ * says plainly that its number is still to come. (Until 2026-09-23 lists showed the bare department
+ * code instead; the owner chose the placeholder for now.)
  */
 export function listNumberLabel(
   sopNumber: string | null | undefined,
   departmentCode: string | null | undefined,
 ): string {
-  const trimmed = (sopNumber ?? "").trim();
-  if (hasEarnedNumber(trimmed)) return trimmed;
-  return (departmentCode ?? "").trim().toUpperCase() || "—";
+  return documentNumberLabel(sopNumber, departmentCode, DEFAULT_DOC_TYPE);
 }
 
 /**

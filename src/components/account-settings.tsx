@@ -12,6 +12,7 @@ import {
   splitDisplayName,
 } from "@/lib/profile-name";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
+import "./account-settings.css";
 
 /**
  * Self-serve account management (Settings → General): display name for everyone,
@@ -141,135 +142,141 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
   const nameDirty =
     name !== normalizeDisplayName(savedFullName) && !nameValidationMessage;
 
+  const nameHintClass = shouldShowNameValidation
+    ? "acct-row-hint acct-row-hint-error"
+    : nameMessage
+      ? "acct-row-hint acct-row-hint-ok"
+      : "acct-row-hint";
+
   return (
-    <section className={embedded ? "ui-settings-section ui-settings-section-embedded" : "ui-settings-section"}>
-      {!embedded ? (
-        <>
-          <h3 className="ui-settings-section-title">Account</h3>
-          <p className="ui-settings-section-desc">Your profile as teammates see it, and your sign-in credentials.</p>
-        </>
-      ) : null}
-      <div className="ui-settings-group">
-        <div className="ui-settings-group-row">
-          <div className="ui-settings-group-row-copy">
-            <div className="ui-settings-group-row-label">Email</div>
-            <div className="ui-settings-group-row-desc">Managed by your organization.</div>
+    <div className="acct-stack">
+      {!embedded ? <h3 className="ui-settings-section-title">Account</h3> : null}
+      <section className="acct-card" aria-labelledby="account-profile-title">
+        <header className="acct-card-head">
+          <div>
+            <h3 id="account-profile-title" className="acct-card-title">Profile</h3>
+            <p className="acct-card-desc">How teammates see you across Pulse.</p>
           </div>
-          <div className="ui-settings-group-row-control">
-            <span className="ui-settings-group-row-value">{email || "—"}</span>
+        </header>
+        <div className="acct-row">
+          <div className="acct-row-label">Email</div>
+          <div>
+            <div className="acct-row-value">{email || "—"}</div>
           </div>
         </div>
-
-        <div className="ui-settings-group-row">
-          <div className="ui-settings-group-row-copy">
-            <div className="ui-settings-group-row-label">Display name</div>
-            <div
-              id="account-display-name-message"
-              className={`ui-settings-group-row-desc ${shouldShowNameValidation ? "text-danger" : ""}`}
-            >
-              {visibleNameMessage || "Use your first and last name."}
+        <div className="acct-row acct-row-top">
+          <label className="acct-row-label" htmlFor="account-first-name">Name</label>
+          <div>
+            <div className="acct-fields">
+              <input
+                id="account-first-name"
+                className={`ui-field-standalone acct-field ${shouldShowNameValidation ? "!border-danger" : ""}`}
+                type="text"
+                value={firstName}
+                onChange={(event) => {
+                  setFirstName(event.target.value);
+                  setNameMessage("");
+                  setNameTouched(true);
+                }}
+                placeholder="First name"
+                aria-label="First name"
+                aria-invalid={shouldShowNameValidation || undefined}
+                aria-describedby="account-display-name-message"
+                autoComplete="given-name"
+                disabled={isSaving}
+              />
+              <input
+                className={`ui-field-standalone acct-field ${shouldShowNameValidation ? "!border-danger" : ""}`}
+                type="text"
+                value={lastName}
+                onChange={(event) => {
+                  setLastName(event.target.value);
+                  setNameMessage("");
+                  setNameTouched(true);
+                }}
+                placeholder="Last name"
+                aria-label="Last name"
+                aria-invalid={shouldShowNameValidation || undefined}
+                aria-describedby="account-display-name-message"
+                autoComplete="family-name"
+                disabled={isSaving}
+              />
             </div>
-          </div>
-          <div className="ui-settings-group-row-control flex items-end gap-1.5">
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-1.5 text-left">
-              <label className="min-w-0 text-[10px] text-ink-secondary">
-                <span className="mb-1 block">First name</span>
-                <input
-                  className={`ui-field-standalone h-9 w-full px-3 ${shouldShowNameValidation ? "!border-danger" : ""}`}
-                  type="text"
-                  value={firstName}
-                  onChange={(event) => {
-                    setFirstName(event.target.value);
-                    setNameMessage("");
-                    setNameTouched(true);
-                  }}
-                  placeholder="First name"
-                  aria-label="First name"
-                  aria-invalid={shouldShowNameValidation || undefined}
-                  aria-describedby="account-display-name-message"
-                  autoComplete="given-name"
-                  disabled={isSaving}
-                />
-              </label>
-              <label className="min-w-0 text-[10px] text-ink-secondary">
-                <span className="mb-1 block">Last name</span>
-                <input
-                  className={`ui-field-standalone h-9 w-full px-3 ${shouldShowNameValidation ? "!border-danger" : ""}`}
-                  type="text"
-                  value={lastName}
-                  onChange={(event) => {
-                    setLastName(event.target.value);
-                    setNameMessage("");
-                    setNameTouched(true);
-                  }}
-                  placeholder="Last name"
-                  aria-label="Last name"
-                  aria-invalid={shouldShowNameValidation || undefined}
-                  aria-describedby="account-display-name-message"
-                  autoComplete="family-name"
-                  disabled={isSaving}
-                />
-              </label>
+            <div id="account-display-name-message" className={nameHintClass}>
+              {visibleNameMessage || "First and last name."}
             </div>
-            <button
-              type="button"
-              className="ui-btn-ghost h-9 px-3 disabled:opacity-50"
-              onClick={() => void saveName()}
-              disabled={isSaving || !nameDirty}
-            >
-              Save
-            </button>
           </div>
         </div>
+        <footer className="acct-actions">
+          <button
+            type="button"
+            className="acct-btn acct-btn-primary"
+            onClick={() => void saveName()}
+            disabled={isSaving || !nameDirty}
+          >
+            Save name
+          </button>
+        </footer>
+      </section>
 
+      <section className="acct-card" aria-labelledby="account-password-title">
+        <header className="acct-card-head">
+          <div>
+            <h3 id="account-password-title" className="acct-card-title">Password</h3>
+            <p className="acct-card-desc">
+              {isPasswordAccount
+                ? "Used when you sign in with your email."
+                : "You sign in with Microsoft — credentials are managed by your identity provider."}
+            </p>
+          </div>
+        </header>
         {isPasswordAccount ? (
-          <div className="ui-settings-group-row">
-            <div className="ui-settings-group-row-copy">
-              <div className="ui-settings-group-row-label">Change password</div>
-              <div className="ui-settings-group-row-desc">
-                {passwordMessage || "At least 8 characters."}
+          <>
+            <div className="acct-row acct-row-top">
+              <label className="acct-row-label" htmlFor="account-new-password">New password</label>
+              <div>
+                <div className="acct-fields">
+                  <input
+                    id="account-new-password"
+                    className="ui-field-standalone acct-field"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="New password"
+                    autoComplete="new-password"
+                    aria-describedby="account-password-message"
+                    disabled={isSaving}
+                  />
+                  <input
+                    className="ui-field-standalone acct-field"
+                    type="password"
+                    value={passwordConfirm}
+                    onChange={(event) => setPasswordConfirm(event.target.value)}
+                    placeholder="Confirm"
+                    aria-label="Confirm new password"
+                    autoComplete="new-password"
+                    aria-describedby="account-password-message"
+                    disabled={isSaving}
+                  />
+                </div>
+                <div id="account-password-message" className="acct-row-hint">
+                  {passwordMessage || "At least 8 characters."}
+                </div>
               </div>
             </div>
-            <div className="ui-settings-group-row-control flex flex-wrap items-center justify-end gap-1.5">
-              <input
-                className="ui-field-standalone h-9 px-3"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="New password"
-                autoComplete="new-password"
-                disabled={isSaving}
-              />
-              <input
-                className="ui-field-standalone h-9 px-3"
-                type="password"
-                value={passwordConfirm}
-                onChange={(event) => setPasswordConfirm(event.target.value)}
-                placeholder="Confirm"
-                autoComplete="new-password"
-                disabled={isSaving}
-              />
+            <footer className="acct-actions">
               <button
                 type="button"
-                className="ui-btn-ghost h-9 px-3 disabled:opacity-50"
+                className="acct-btn acct-btn-primary"
                 onClick={() => void savePassword()}
                 disabled={isSaving || !password}
               >
-                Update
+                Update password
               </button>
-            </div>
-          </div>
-        ) : (
-          <div className="ui-settings-group-row">
-            <div className="ui-settings-group-row-copy">
-              <div className="ui-settings-group-row-label">Password</div>
-              <div className="ui-settings-group-row-desc">
-                You sign in with Microsoft — credentials are managed by your identity provider.
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
+            </footer>
+          </>
+        ) : null}
+      </section>
+    </div>
   );
 }

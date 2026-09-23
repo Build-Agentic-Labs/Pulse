@@ -13,34 +13,33 @@ import { currentPushEndpoint, isPushSupported, subscribeToPush, unsubscribeFromP
 import { deletePushSubscription, savePushSubscription } from "@/lib/notifications/push-store";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 import "./notification-preferences-settings.css";
+import "./account-settings.css";
 
 const GROUPS: { key: NotificationKindMeta["group"]; title: string; description: string }[] = [
-  {
-    key: "sop",
-    title: "SOP document control",
-    description: "Emails about reviews, signatures, releases, and stalls. Everything still shows in the bell.",
-  },
-  { key: "workspace", title: "Workspace", description: "Emails about membership and access." },
-  { key: "digest", title: "Digests", description: "Periodic summaries, sent by the daily run." },
+  { key: "sop", title: "SOP document control", description: "Reviews, signatures, releases, stalls" },
+  { key: "workspace", title: "Workspace", description: "Membership and access" },
+  { key: "digest", title: "Digests", description: "Periodic summaries" },
 ];
 
-function Block({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+function Card({ id, title, description, children }: { id: string; title: string; description: string; children: ReactNode }) {
   return (
-    <section className="ui-settings-section">
-      <h3 className="ui-settings-section-title">{title}</h3>
-      {description ? <p className="ui-settings-section-desc">{description}</p> : null}
-      <div className="ui-settings-group">{children}</div>
+    <section className="acct-card" aria-labelledby={id}>
+      <header className="acct-card-head">
+        <div>
+          <h3 id={id} className="acct-card-title">{title}</h3>
+          <p className="acct-card-desc">{description}</p>
+        </div>
+      </header>
+      {children}
     </section>
   );
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function ToggleRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="ui-settings-group-row">
-      <div className="ui-settings-group-row-copy">
-        <div className="ui-settings-group-row-label">{label}</div>
-      </div>
-      <div className="ui-settings-group-row-control">{children}</div>
+    <div className="acct-toggle-row">
+      <span>{label}</span>
+      {children}
     </div>
   );
 }
@@ -137,13 +136,47 @@ export function NotificationPreferencesSettings() {
   }
 
   return (
-    <>
+    <div className="acct-stack">
+      <Card
+        id="notif-email-title"
+        title="Email notifications"
+        description="Choose what reaches your inbox. Everything still shows in the bell."
+      >
+        {GROUPS.map((group) => {
+          const kinds = Object.entries(NOTIFICATION_KINDS).filter(([, meta]) => meta.group === group.key);
+          return (
+            <div key={group.key} className="acct-group" role="group" aria-label={group.title}>
+              <div className="acct-subhead">
+                <span className="acct-subhead-title">{group.title}</span>
+                <span className="acct-subhead-desc">{group.description}</span>
+              </div>
+              {kinds.map(([kind, meta]) => {
+                const enabled = resolveEmailEnabled(kind, null, preferences);
+                return (
+                  <ToggleRow key={kind} label={meta.label}>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={enabled}
+                      aria-label={meta.label}
+                      className="notif-switch"
+                      disabled={!loaded || !userId || saving === kind}
+                      onClick={() => void toggle(kind)}
+                    />
+                  </ToggleRow>
+                );
+              })}
+            </div>
+          );
+        })}
+      </Card>
       {pushSupported ? (
-        <Block
-          title="Notifications · This device"
-          description="Browser push shows a system notification on this device for anything that lands in your inbox."
+        <Card
+          id="notif-device-title"
+          title="This device"
+          description="Show a system notification here for anything that lands in your inbox."
         >
-          <Row label="Browser push on this device">
+          <ToggleRow label="Browser push">
             <button
               type="button"
               role="switch"
@@ -153,33 +186,10 @@ export function NotificationPreferencesSettings() {
               disabled={!loaded || !userId || pushBusy}
               onClick={() => void togglePush()}
             />
-          </Row>
-        </Block>
+          </ToggleRow>
+        </Card>
       ) : null}
-      {GROUPS.map((group) => {
-        const kinds = Object.entries(NOTIFICATION_KINDS).filter(([, meta]) => meta.group === group.key);
-        return (
-          <Block key={group.key} title={`Notifications · ${group.title}`} description={group.description}>
-            {kinds.map(([kind, meta]) => {
-              const enabled = resolveEmailEnabled(kind, null, preferences);
-              return (
-                <Row key={kind} label={meta.label}>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={enabled}
-                    aria-label={meta.label}
-                    className="notif-switch"
-                    disabled={!loaded || !userId || saving === kind}
-                    onClick={() => void toggle(kind)}
-                  />
-                </Row>
-              );
-            })}
-          </Block>
-        );
-      })}
       {message ? <p className="notif-prefs-status">{message}</p> : null}
-    </>
+    </div>
   );
 }

@@ -32,7 +32,8 @@ interface QueueRow {
   /** Who sent it; "You" for your own SOPs, "" when unknown. */
   author: string;
   status: string;
-  updatedAt: string;
+  /** When it landed on the viewer. */
+  receivedAt: string;
   /** Exactly one of href (navigate) or onOpen (open the review/signature workspace in place). */
   href?: string;
   onOpen?: () => void;
@@ -50,7 +51,7 @@ function QueueTable({ groups }: { groups: { label: string; rows: QueueRow[] }[] 
               <th className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Title</th>
               <th className="w-44 px-5 py-3 text-[11px] font-medium text-ink-secondary">Author</th>
               <th className="w-44 px-5 py-3 text-[11px] font-medium text-ink-secondary">Status</th>
-              <th className="w-28 px-5 py-3 text-[11px] font-medium text-ink-secondary">Updated</th>
+              <th className="w-28 px-5 py-3 text-[11px] font-medium text-ink-secondary">Received</th>
             </tr>
           </thead>
           <tbody>
@@ -90,7 +91,7 @@ function QueueTable({ groups }: { groups: { label: string; rows: QueueRow[] }[] 
                       </span>
                     </td>
                     <td className="px-5 py-3.5 align-middle text-[12px] tabular-nums text-ink-tertiary">
-                      {formatDate(row.updatedAt) || "—"}
+                      {formatDate(row.receivedAt) || "—"}
                     </td>
                   </tr>
                 ))}
@@ -252,7 +253,7 @@ export function ReviewQueue({
       title: sop.title || sop.sopNumber || "Untitled SOP",
       author: data.authorNames[sop.id] ?? "",
       status: "Draft review",
-      updatedAt: sop.updatedAt,
+      receivedAt: data.receivedAt[sop.id] ?? sop.updatedAt,
       onOpen: () => setSelectedReviewId(sop.id),
     })),
     ...data.finalApprovals.map((seat) => ({
@@ -261,7 +262,7 @@ export function ReviewQueue({
       title: seat.title || seat.sopNumber || "Untitled SOP",
       author: data.authorNames[seat.sopId] ?? "",
       status: "Signature needed",
-      updatedAt: seat.finalApprovalRequestedAt ?? seat.updatedAt,
+      receivedAt: seat.finalApprovalRequestedAt ?? seat.updatedAt,
       onOpen: () => setSelectedFinalApproval(seat),
     })),
   ];
@@ -271,7 +272,7 @@ export function ReviewQueue({
     title: sop.title || sop.sopNumber || "Untitled SOP",
     author: "You",
     status,
-    updatedAt: sop.updatedAt,
+    receivedAt: data.receivedAt[sop.id] ?? sop.updatedAt,
     href: `/sops/${sop.id}?step=${step}`,
   });
   const feedbackRows: QueueRow[] = [
@@ -285,7 +286,7 @@ export function ReviewQueue({
     title: sop.title || sop.sopNumber || "Untitled SOP",
     author: "",
     status: "Awaiting Quality",
-    updatedAt: sop.updatedAt,
+    receivedAt: sop.updatedAt,
     href: `/sops/${sop.id}?step=quality-approval`,
   }));
   const queueGroups = [

@@ -8,6 +8,7 @@ vi.mock("./review", () => ({ listMySeats: vi.fn(), listMySignaturesFor: vi.fn(),
 vi.mock("./review-annotations", () => ({ listSopReviewSubmissions: vi.fn(), listOpenSopReviewAnnotationsFor: vi.fn(), hasSubmittedSopReview: () => false }));
 vi.mock("@/lib/departments/store", () => ({ listDepartments: vi.fn(), fetchMyDeptRoles: vi.fn() }));
 vi.mock("./store", () => ({ listSops: vi.fn() }));
+vi.mock("./audit-events", () => ({ listSopHandoffEvents: vi.fn(async () => []) }));
 const sop = (id: string, overrides: Partial<SopListItem> = {}): SopListItem => ({
  id, title: id, sopNumber: "", version: "", source: "authored", status: "approved", updatedAt: "", departmentId: "dept",
  departmentCode: "D", effectiveDate: null, nextReviewDate: null, createdBy: "author", submittedBy: "submitter",

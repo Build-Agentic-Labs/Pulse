@@ -60,6 +60,7 @@ function queue(over: Partial<QueueData> = {}): QueueData {
     feedbackToAddress: [],
     allInFlight: [],
     authorNames: {},
+    receivedAt: {},
     isQualityApprover: false,
     ...over,
   };

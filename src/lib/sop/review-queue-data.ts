@@ -7,6 +7,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { selectFeedbackToAddress, selectReadyForFinalApproval } from "@/domain/sop/queue-ready";
+import { feedbackReceivedAt, reviewReceivedAt } from "@/domain/sop/queue-received";
+import { listSopHandoffEvents } from "@/lib/sop/audit-events";
 import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
 import {
   hasSubmittedSopReview,
@@ -59,6 +61,11 @@ export interface QueueData {
   allInFlight: SopListItem[];
   /** Author display names for the SOPs awaiting my review or approval, keyed by SOP id. */
   authorNames: Record<string, string>;
+  /**
+   * When each item landed on me, keyed by SOP id: a review I owe (sent for review, or my seat
+   * reassigned to me), or my own SOP's feedback (its last review returned). Best-effort.
+   */
+  receivedAt: Record<string, string>;
   isQualityApprover: boolean;
 }
 
@@ -71,6 +78,7 @@ export const EMPTY_QUEUE: QueueData = {
   feedbackToAddress: [],
   allInFlight: [],
   authorNames: {},
+  receivedAt: {},
   isQualityApprover: false,
 };
 
@@ -108,13 +116,23 @@ export async function fetchReviewQueueData(
   );
   const authoredIds = authoredUnderReview.map((sop) => sop.id);
   const qualitySops = isQualityApprover ? sops.filter((sop) => sop.status === "approved") : [];
-  const [mySubmissions, mySignatures, authoredSeats, openAnnotations, authorNames] = await Promise.all([
+  const [mySubmissions, mySignatures, authoredSeats, openAnnotations, authorNames, handoffs] = await Promise.all([
     listSopReviewSubmissions([...draftReviewSeats.map((seat) => seat.sopId), ...authoredIds], client),
     listMySignaturesFor([...finalApprovalSeats.map((seat) => seat.sopId), ...qualitySops.map((sop) => sop.id)], userId, client),
     listSeatsForSops(authoredIds, client),
     listOpenSopReviewAnnotationsFor(authoredIds, client),
     listSopAuthorDisplayNames(inReviewSeats.map((seat) => seat.sopId), client),
+    // A date column must never take the queue down with it.
+    listSopHandoffEvents(draftReviewSeats.map((seat) => seat.sopId), client).catch(() => []),
   ]);
+  const receivedAt = {
+    ...feedbackReceivedAt(mySubmissions, authoredUnderReview),
+    ...reviewReceivedAt(
+      handoffs,
+      draftReviewSeats.map((seat) => ({ id: seat.sopId, reviewCycle: seat.reviewCycle })),
+      userId,
+    ),
+  };
 
   const authoredReturns = {
     userId,
@@ -186,6 +204,7 @@ export async function fetchReviewQueueData(
     feedbackToAddress: selectFeedbackToAddress(authoredReturns),
     allInFlight: sops.filter((sop) => sop.status === "in_review" || sop.status === "approved"),
     authorNames,
+    receivedAt,
     isQualityApprover,
   };
 }

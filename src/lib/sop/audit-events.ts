@@ -39,3 +39,20 @@ export async function listSopAuditEvents(
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) => mapAuditEvent(row as Record<string, unknown>));
 }
+
+/** The hand-off events for a set of SOPs — when work landed on someone — for queue "Received" dates. */
+export async function listSopHandoffEvents(
+  sopIds: readonly string[],
+  client?: SupabaseClient<Database>,
+): Promise<SopAuditEvent[]> {
+  const unique = Array.from(new Set(sopIds));
+  if (unique.length === 0) return [];
+  const supabase = client ?? createPlannerSupabaseClient();
+  const { data, error } = await supabase
+    .from("sop_event_log")
+    .select("id, sop_id, review_cycle, event_type, actor_id, actor_name, details, created_at")
+    .in("sop_id", unique)
+    .in("event_type", ["review_sent", "seat_reassigned"]);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => mapAuditEvent(row as Record<string, unknown>));
+}

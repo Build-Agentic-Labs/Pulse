@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThemedSelect, type ThemedSelectOption } from "./themed-select";
 
@@ -155,5 +155,40 @@ describe("ThemedSelect with allowCustomValue", () => {
     fireEvent.keyDown(search(), { key: "Enter" });
 
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("ThemedSelect inside a modal dialog", () => {
+  // A modal <dialog> is in the top layer and makes everything outside it inert: a menu
+  // portaled to <body> renders under the dialog and cannot be clicked (member access drawer).
+  it("portals the menu into the open dialog that holds the trigger", () => {
+    render(
+      <dialog open>
+        <ThemedSelect value="" options={OPTIONS} onChange={() => {}} ariaLabel="Role" />
+      </dialog>,
+    );
+    fireEvent.click(trigger());
+
+    const dialog = document.querySelector("dialog");
+    expect(dialog?.contains(screen.getByRole("listbox"))).toBe(true);
+  });
+
+  it("portals to <body> when the trigger is not inside a dialog", () => {
+    render(<ThemedSelect value="" options={OPTIONS} onChange={() => {}} ariaLabel="Role" />);
+    fireEvent.click(trigger());
+
+    expect(screen.getByRole("listbox").parentElement).toBe(document.body);
+  });
+
+  it("claims Escape so the enclosing dialog does not close with the menu", () => {
+    render(<ThemedSelect value="" options={OPTIONS} onChange={() => {}} ariaLabel="Role" />);
+    fireEvent.click(trigger());
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => {
+      document.dispatchEvent(escape);
+    });
+
+    expect(escape.defaultPrevented).toBe(true);
+    expect(screen.queryByRole("listbox")).toBeNull();
   });
 });

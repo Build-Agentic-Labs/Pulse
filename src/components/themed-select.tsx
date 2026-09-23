@@ -74,6 +74,10 @@ export function ThemedSelect({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+  // A modal <dialog> sits in the browser's top layer and makes everything outside it inert, so a
+  // menu portaled to <body> renders underneath the dialog and can never be clicked. Portal into
+  // the open dialog that holds the trigger instead; <body> everywhere else.
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -109,6 +113,11 @@ export function ThemedSelect({
     if (autoOpen && !disabled) setOpen(true);
   }, [autoOpen, disabled]);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    setPortalTarget(buttonRef.current?.closest<HTMLDialogElement>("dialog[open]") ?? document.body);
+  }, [open]);
+
   useEffect(() => {
     if (!open) setQuery("");
   }, [open]);
@@ -128,6 +137,9 @@ export function ThemedSelect({
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        // Escape closes one layer at a time: without this, a menu inside a modal <dialog>
+        // also triggers the dialog's cancel and the whole drawer closes with it.
+        event.preventDefault();
         setOpen(false);
         buttonRef.current?.focus();
       }
@@ -252,7 +264,7 @@ export function ThemedSelect({
         <ChevronDown size={14} className="ui-themed-select-icon" aria-hidden="true" />
       </button>
 
-      {open && typeof document !== "undefined" ? createPortal(
+      {open && portalTarget ? createPortal(
         <div
           ref={menuRef}
           id={`${id}-menu`}
@@ -340,7 +352,7 @@ export function ThemedSelect({
             );
           })}
         </div>,
-        document.body,
+        portalTarget,
       ) : null}
     </div>
   );

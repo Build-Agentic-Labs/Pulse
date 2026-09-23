@@ -620,7 +620,9 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
           pending.eventId !== null
             ? `event:${pending.eventId}`
             : `${pending.sopId}:${pending.kind}:${pending.reminderIndex}:${pending.reviewCycle}`;
-        const hook = bundle.teamsByWorkspace.get(item.inbox.workspaceId ?? "") ?? null;
+        // A manual reminder is one person nudging another; it has no place in the channel.
+        const hook =
+          pending.kind === "reviewer_reminded" ? null : (bundle.teamsByWorkspace.get(item.inbox.workspaceId ?? "") ?? null);
         const teams = hook && !postedKeys.has(key) ? { webhookUrl: hook.webhookUrl } : null;
         postedKeys.add(key);
         return { ...item, channels: { ...item.channels, teams } };

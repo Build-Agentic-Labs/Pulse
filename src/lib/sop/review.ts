@@ -208,6 +208,59 @@ export async function listSopAuthorDisplayNames(
   return Object.fromEntries(results.filter(([, name]) => name !== ""));
 }
 
+/** The database refused a reminder because the reviewer was reminded in the last 24 hours. */
+export class ReminderCooldownError extends Error {
+  readonly code = "REMINDER_COOLDOWN";
+
+  constructor(readonly nextAllowedAt: string | null) {
+    super("You already reminded this reviewer. You can remind them again later.");
+    this.name = "ReminderCooldownError";
+  }
+}
+
+/**
+ * Email + in-app nudge to a reviewer who hasn't returned their draft review. The
+ * database is the gate (author only, seated and unreturned, once per 24 hours per
+ * reviewer); resolves to when the next reminder is allowed.
+ */
+export async function remindSopReviewer(
+  sopId: string,
+  reviewerId: string,
+  client?: SupabaseClient<Database>,
+): Promise<string> {
+  const supabase = client ?? createPlannerSupabaseClient();
+  const { data, error } = await supabase.rpc("remind_sop_reviewer", { p_sop: sopId, p_reviewer: reviewerId });
+  if (error) {
+    if (error.message === "reminder_cooldown") throw new ReminderCooldownError(error.details || null);
+    throw new Error(error.message);
+  }
+  kickSopNotifications();
+  return String(data);
+}
+
+/** When each reviewer of an SOP was last reminded, keyed by reviewer id (for the button's cooldown). */
+export async function listLastReviewerReminders(
+  sopId: string,
+  client?: SupabaseClient<Database>,
+): Promise<Map<string, string>> {
+  const supabase = client ?? createPlannerSupabaseClient();
+  const rows = await throwIfError(
+    supabase
+      .from("sop_event_log")
+      .select("details, created_at")
+      .eq("sop_id", sopId)
+      .eq("event_type", "reviewer_reminded")
+      .order("created_at", { ascending: false }),
+  );
+  const last = new Map<string, string>();
+  for (const row of rows ?? []) {
+    const details = row.details as Record<string, unknown> | null;
+    const reviewerId = typeof details?.reviewer_id === "string" ? details.reviewer_id : null;
+    if (reviewerId && !last.has(reviewerId)) last.set(reviewerId, row.created_at);
+  }
+  return last;
+}
+
 export interface SignOptions {
   /** Rejection reason, or the written justification on an overrule. */
   reason?: string;

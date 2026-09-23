@@ -27,6 +27,7 @@ export const SOP_NOTIFIABLE_EVENT_TYPES = [
   "signature_added",
   "seat_reassigned",
   "remark_added",
+  "reviewer_reminded",
 ] as const;
 
 export type SopNotificationKind =
@@ -41,7 +42,9 @@ export type SopNotificationKind =
   | "objection_raised"
   | "objection_resolved"
   | "remark_added"
-  | "reviewer_not_joined";
+  | "reviewer_not_joined"
+  /** The author pressed Remind on a reviewer who has not returned their draft review. */
+  | "reviewer_reminded";
 
 /** Local copy of the RASIC union — domain must not import from src/lib. */
 export type SopSeatRasic = "responsible" | "accountable" | "support" | "consulted" | "informed";
@@ -164,6 +167,7 @@ interface EventDetails {
   resolvesSignatureId?: string;
   departmentId?: string;
   toSignerId?: string;
+  reviewerId?: string;
 }
 
 function parseEventDetails(details: unknown): EventDetails {
@@ -177,6 +181,7 @@ function parseEventDetails(details: unknown): EventDetails {
     resolvesSignatureId: str("resolves_signature_id"),
     departmentId: str("department_id"),
     toSignerId: str("to_signer_id"),
+    reviewerId: str("reviewer_id"),
   };
 }
 
@@ -312,6 +317,19 @@ export function resolveEventRecipients(
         );
       }
       return [];
+    }
+
+    case "reviewer_reminded": {
+      // The author's manual nudge. Re-checked at drain time: a reviewer who returned
+      // their review (or lost the seat) between the click and the send gets nothing.
+      const { reviewerId } = parseEventDetails(event.details);
+      if (!reviewerId || sop.status !== "in_review" || finalApprovalPhaseActive(sop)) return [];
+      if (reviewerId === event.actorId) return [];
+      const seated = ctx.seats.some(
+        (seat) => isBlocking(seat.rasic) && seat.signerId === reviewerId && !seat.signerPending,
+      );
+      if (!seated || ctx.reviewReturns.some((entry) => entry.reviewerId === reviewerId)) return [];
+      return [firstTouch(ctx, event, reviewerId, "reviewer_reminded")];
     }
 
     case "remark_added": {

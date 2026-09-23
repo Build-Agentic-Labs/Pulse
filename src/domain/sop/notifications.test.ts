@@ -763,3 +763,35 @@ describe("pending (invited, not yet joined) signers", () => {
     expect(resolveReminders(later, [s])).toEqual([]);
   });
 });
+
+describe("resolveEventRecipients: reviewer_reminded", () => {
+  const remind = (over: Partial<NotifiableEvent> = {}): NotifiableEvent =>
+    event({ id: 71, eventType: "reviewer_reminded", actorId: "author", actorName: "Ada Author", details: { reviewer_id: "resp" }, ...over });
+
+  it("reaches only the reminded reviewer, as its own first-touch kind", () => {
+    expect(resolveEventRecipients(remind(), ctx())).toEqual([
+      { recipientId: "resp", kind: "reviewer_reminded", sopId: "sop-1", eventId: 71, reminderIndex: 0, reviewCycle: 1 },
+    ]);
+  });
+
+  it("drops the reminder once the reviewer has returned their review", () => {
+    expect(resolveEventRecipients(remind(), ctx({ reviewReturns: [returned("resp")] }))).toEqual([]);
+  });
+
+  it("drops the reminder once draft review is over or the cycle moved on", () => {
+    const finalPhase = sop({ finalApprovalRequestedAt: "2026-07-23T00:00:00Z", finalApprovalContentHash: "hash-1" });
+    expect(resolveEventRecipients(remind(), ctx({ sop: finalPhase }))).toEqual([]);
+    expect(resolveEventRecipients(remind(), ctx({ sop: sop({ status: "draft" }) }))).toEqual([]);
+    expect(resolveEventRecipients(remind({ reviewCycle: 0 }), ctx())).toEqual([]);
+  });
+
+  it("never reaches a non-blocking seat, a pending invitee, or someone with no seat", () => {
+    expect(resolveEventRecipients(remind({ details: { reviewer_id: "supp" } }), ctx())).toEqual([]);
+    expect(resolveEventRecipients(remind({ details: { reviewer_id: "stranger" } }), ctx())).toEqual([]);
+    expect(resolveEventRecipients(remind({ details: {} }), ctx())).toEqual([]);
+    const pending = ctx({
+      seats: [{ departmentId: "d-r", departmentName: "Engineering", rasic: "responsible", signerId: "resp", signerPending: true }],
+    });
+    expect(resolveEventRecipients(remind(), pending)).toEqual([]);
+  });
+});

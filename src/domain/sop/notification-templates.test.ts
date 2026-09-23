@@ -158,4 +158,22 @@ describe("renderSopNotificationEmail", () => {
     expect(email.text).toContain("has not accepted their Pulse invitation yet");
     expect(email.text).toContain("Resend the invitation");
   });
+
+  it("reviewer_reminded names who is waiting and links straight into the review", () => {
+    const email = renderSopNotificationEmail({
+      kind: "reviewer_reminded",
+      sopNumber: null,
+      title: "Line Clearance",
+      version: null,
+      actorName: "Jennifer Li",
+      departmentName: "Manufacturing/Production",
+      origin: "https://pulse.example.com",
+      sopId: "sop 1",
+      reminderIndex: 0,
+      waitingDays: null,
+    });
+    expect(email.subject).toBe('Reminder: Jennifer Li is waiting on your review of SOP "Line Clearance"');
+    expect(email.text).toContain("the Manufacturing/Production seat");
+    expect(email.text).toContain("https://pulse.example.com/sops?tab=review&review=sop%201");
+  });
 });

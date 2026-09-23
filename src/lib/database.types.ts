@@ -3777,6 +3777,10 @@ export type Database = {
         Returns: undefined
       }
       redeem_workspace_access_grants: { Args: never; Returns: number }
+      remind_sop_reviewer: {
+        Args: { p_reviewer: string; p_sop: string }
+        Returns: string
+      }
       remove_workspace_member: {
         Args: { target_user_id: string; target_workspace_id: string }
         Returns: undefined

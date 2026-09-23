@@ -12,7 +12,8 @@ import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { DEFAULT_DOC_TYPE, listNumberLabel } from "@/domain/sop/authoring";
 import { mapApprovalsToDepartments, seatDepartmentsFrom } from "@/domain/sop/approval-mapping";
-import { upsertSeat } from "@/lib/sop/review";
+import { listLastReviewerReminders, upsertSeat } from "@/lib/sop/review";
+import { nextReminderAllowedAt } from "@/domain/sop/reviewer-reminder";
 import { canDeleteSop } from "@/domain/sop/deletion";
 import { getSopProcessState, SOP_PROCESS_STATE_LABELS } from "@/domain/sop/process-state";
 import type { Sop } from "@/domain/sop/schema";
@@ -39,6 +40,7 @@ import {
   type SopReviewAnnotation,
   type SopReviewSubmission,
 } from "@/lib/sop/review-annotations";
+import { ReviewerRemindButton } from "./reviewer-remind-button";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
 
@@ -183,6 +185,8 @@ export function SopList({
   const [feedbackAnnotations, setFeedbackAnnotations] = useState<SopReviewAnnotation[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
+  /** Reviewer id → when they may next be reminded, for the open feedback panel. */
+  const [reminderWindows, setReminderWindows] = useState<Map<string, string>>(new Map());
   // Server-seeded data marks itself as loaded-but-stale (loadedAt: 1): the mount effect
   // sees current data and refreshes in the background instead of flashing a loader.
   const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
@@ -498,11 +502,22 @@ export function SopList({
   async function openFeedback(sop: SopListItem) {
     setFeedbackSop(sop);
     setFeedbackAnnotations([]);
+    setReminderWindows(new Map());
     setFeedbackError("");
     setFeedbackLoading(true);
+    const isAuthor = currentUserId !== null && sop.createdBy === currentUserId;
     try {
-      const annotations = await listSopReviewAnnotations(sop.id);
+      const [annotations, lastReminders] = await Promise.all([
+        listSopReviewAnnotations(sop.id),
+        // Best-effort: without it the button still works; the database enforces the window.
+        isAuthor && sop.status === "in_review"
+          ? listLastReviewerReminders(sop.id).catch(() => new Map<string, string>())
+          : Promise.resolve(new Map<string, string>()),
+      ]);
       setFeedbackAnnotations(annotations.filter((item) => item.reviewCycle === sop.reviewCycle && !item.resolvedAt));
+      setReminderWindows(
+        new Map(Array.from(lastReminders, ([reviewerId, at]) => [reviewerId, nextReminderAllowedAt(at)])),
+      );
     } catch (caught) {
       setFeedbackError(caught instanceof Error ? caught.message : "Could not load the review feedback.");
     } finally {
@@ -896,9 +911,26 @@ export function SopList({
                             {result ? `Returned ${formatDate(result.submittedAt)}` : "Review in progress"}
                           </div>
                         </div>
-                        <span className={`ui-chip ${REVIEWER_STATUS_COLORS[reviewer.status]}`}>
-                          {REVIEWER_STATUS_LABELS[reviewer.status]}
-                        </span>
+                        <div className="flex items-start gap-2">
+                          {reviewer.status === "reviewing" &&
+                          !result &&
+                          feedbackSop.status === "in_review" &&
+                          currentUserId !== null &&
+                          feedbackSop.createdBy === currentUserId ? (
+                            <ReviewerRemindButton
+                              sopId={feedbackSop.id}
+                              reviewerId={reviewer.userId}
+                              reviewerName={reviewer.name}
+                              nextAllowedAt={reminderWindows.get(reviewer.userId) ?? null}
+                              onReminded={(next) =>
+                                setReminderWindows((current) => new Map(current).set(reviewer.userId, next))
+                              }
+                            />
+                          ) : null}
+                          <span className={`ui-chip ${REVIEWER_STATUS_COLORS[reviewer.status]}`}>
+                            {REVIEWER_STATUS_LABELS[reviewer.status]}
+                          </span>
+                        </div>
                       </div>
 
                       {!result ? (

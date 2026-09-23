@@ -31,6 +31,10 @@ export interface SopEmailInput {
 
 /** Review and signature actions live in the recipient queue, not the author editor. */
 export function sopNotificationPath(kind: SopNotificationKind, sopId: string): string {
+  if (kind === "reviewer_reminded") {
+    // Straight into the review the author is waiting on.
+    return `/sops?tab=review&review=${encodeURIComponent(sopId)}`;
+  }
   if (kind === "review_requested" || kind === "final_approval_requested" || kind === "seat_assigned") {
     return "/sops?tab=review";
   }
@@ -119,6 +123,17 @@ function copyFor(input: SopEmailInput, label: string): TemplateCopy {
         reason: AUTHOR_REASON,
         happened: `${label} is waiting on ${input.departmentName ? `the ${input.departmentName} seat` : "a review seat"}, but the reviewer you invited has not accepted their Pulse invitation yet.`,
         needed: `Resend the invitation from the SOP's approval roster, or ask an admin to reassign the seat.`,
+      };
+    case "reviewer_reminded":
+      return {
+        subject: `Reminder: ${input.actorName} is waiting on your review of ${label}`,
+        eyebrow: "Reminder",
+        accent: "#2563eb",
+        reason: SEAT_REASON,
+        happened: `${input.actorName} sent you a reminder about ${label}${revision}. Your review has not been returned yet.`,
+        needed: input.departmentName
+          ? `You are the reviewer for the ${input.departmentName} seat — please review it and return your result.`
+          : `Please review it and return your result.`,
       };
     case "stall_escalated":
       return {

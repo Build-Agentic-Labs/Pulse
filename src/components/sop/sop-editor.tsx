@@ -630,7 +630,7 @@ export function SopEditor({
   const requestedStepIndex = requestedStepId
     ? steps.findIndex((entry) => entry.id === requestedStepId)
     : -1;
-  const [stepIndex, setStepIndex] = useState(() =>
+  const [rawStepIndex, setStepIndex] = useState(() =>
     initialSopEditorStepIndex(steps, initialView),
   );
   const draftReviewers = useMemo(() => {
@@ -696,7 +696,27 @@ export function SopEditor({
       signature.reviewCycle === approvalReviewCycle &&
       signature.signedContentHash === (approvalContentHash ?? ""),
   );
+  // Final approval opens only once every reviewer has responded and every returned remark is
+  // addressed (the database refuses the request otherwise); a step shown but unusable before then
+  // invited authors to skip the remarks.
+  const finalApprovalLocked = !(
+    finalApprovalReady ||
+    finalApprovalRequested ||
+    sop.status === "approved" ||
+    sop.status === "effective"
+  );
+  const finalApprovalLockReason = !reviewGate.allResponded
+    ? "Available once every reviewer has responded"
+    : "Address every returned remark to unlock final approval";
+  // However the step was reached — a deep link (?step=final-approval), a stale index, remarks
+  // reopening — a locked Final Approval renders as Draft Review, where the remarks are.
+  const draftReviewStepIndex = steps.findIndex((entry) => entry.id === "draftReview");
+  const stepIndex =
+    steps[rawStepIndex]?.id === "finalApproval" && finalApprovalLocked && draftReviewStepIndex >= 0
+      ? draftReviewStepIndex
+      : rawStepIndex;
   const step = steps[stepIndex] ?? steps[0];
+  const nextStepLocked = steps[stepIndex + 1]?.id === "finalApproval" && finalApprovalLocked;
 
   // Load the workspace SOP list the first time the overview step (which hosts the
   // References picker) becomes active; undefined = not loaded yet.
@@ -1225,6 +1245,7 @@ export function SopEditor({
 
   async function handleStepSelect(index: number) {
     const nextStep = steps[index];
+    if (nextStep?.id === "finalApproval" && finalApprovalLocked) return;
     if (nextStep?.id === "approvals" && !hasPersistedSop && !(await persist())) return;
     setStepIndex(index);
   }
@@ -1406,12 +1427,14 @@ export function SopEditor({
       setPersistedUpdatedAt(transitioned.updatedAt);
       // The review round already happened — go straight to the signature phase
       // instead of reopening the reviewers' queue.
-      if (reviewGate.allResponded) await requestSopFinalApproval(sop.id);
+      // Only with every remark addressed; otherwise the author lands back in draft review.
+      const readyForSignatures = reviewGate.allResponded && reviewAnnotations.length === 0;
+      if (readyForSignatures) await requestSopFinalApproval(sop.id);
       await refreshApprovalRouting({ background: true });
       setAuditEvents(await listSopAuditEvents(sop.id));
 
-      const nextWorkflowStep = reviewGate.allResponded ? "final-approval" : "draft-review";
-      setStepIndex(CREATOR_STEPS.length + (reviewGate.allResponded ? 1 : 0));
+      const nextWorkflowStep = readyForSignatures ? "final-approval" : "draft-review";
+      setStepIndex(CREATOR_STEPS.length + (readyForSignatures ? 1 : 0));
       window.history.replaceState(
         window.history.state,
         "",
@@ -1557,18 +1580,23 @@ export function SopEditor({
                 : entry.id === "qualityApproval"
                   ? sop.status === "effective" || Boolean(qualitySignature)
               : stepFilled(sop, entry.id);
+          const locked = entry.id === "finalApproval" && finalApprovalLocked;
           const stepButton = (
             <button
               type="button"
+              disabled={locked}
+              aria-disabled={locked || undefined}
               className={`ui-nav-item w-full ${
-                hasIssues
+                locked
+                  ? "ui-nav-item-idle cursor-not-allowed opacity-50"
+                  : hasIssues
                   ? "border border-danger/40 bg-danger-muted text-danger hover:bg-danger-muted"
                   : active
                     ? "ui-nav-item-active"
                     : "ui-nav-item-idle"
               }`}
               onClick={() => void handleStepSelect(index)}
-              title={hasIssues ? decisionBranchRequirements[0]?.message : undefined}
+              title={locked ? finalApprovalLockReason : hasIssues ? decisionBranchRequirements[0]?.message : undefined}
               data-has-issues={hasIssues || undefined}
             >
               <SopStepNavIcon
@@ -1877,7 +1905,9 @@ export function SopEditor({
                     </div>
                     <button
                       type="button"
-                      className="ui-btn-ghost h-9 gap-1.5 px-4"
+                      className="ui-btn-ghost h-9 gap-1.5 px-4 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={nextStepLocked}
+                      title={nextStepLocked ? finalApprovalLockReason : undefined}
                       onClick={() => void handleStepSelect(Math.min(steps.length - 1, stepIndex + 1))}
                     >
                       Next
@@ -2550,7 +2580,9 @@ export function SopEditor({
               ) : (
                 <button
                   type="button"
-                  className="ui-btn-ghost h-9 gap-1.5 px-4"
+                  className="ui-btn-ghost h-9 gap-1.5 px-4 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={nextStepLocked}
+                  title={nextStepLocked ? finalApprovalLockReason : undefined}
                   onClick={() => void handleStepSelect(Math.min(steps.length - 1, stepIndex + 1))}
                 >
                   Next

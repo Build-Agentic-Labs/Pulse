@@ -28,6 +28,39 @@ function statusChipClass(status: SopStatus): string {
 
 type ListStatus = "loading" | "ready" | "error";
 
+/** Row meta line: codes in the mono label style, then who sent it, e.g. "MFG · Jennifer Li". */
+function QueueRowMeta({ codes, author }: { codes: string[]; author?: string }) {
+  const codeText = codes.filter(Boolean).join(" · ");
+  return (
+    <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
+      {codeText}
+      {author ? (
+        <span className="font-sans normal-case tracking-normal">
+          {codeText ? " · " : ""}
+          {author}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** One-line card header: title, the explanation as a quiet aside, and the item count. */
+function QueueSectionHeader({ title, description, count }: { title: string; description?: string; count: number }) {
+  return (
+    <div className="flex items-baseline gap-2 px-4 py-2">
+      <h2 className="shrink-0 text-[13px] font-semibold text-ink">{title}</h2>
+      {description ? (
+        <p className="hidden min-w-0 flex-1 truncate text-[12px] text-ink-tertiary sm:block" title={description}>
+          {description}
+        </p>
+      ) : (
+        <span className="flex-1" />
+      )}
+      <span className="ml-auto shrink-0 text-[12px] tabular-nums text-ink-tertiary">{count}</span>
+    </div>
+  );
+}
+
 // PendingSeat / QualityQueueItem / QueueData / EMPTY_QUEUE and the queue assembly
 // live in @/lib/sop/review-queue-data, shared with the server page (Stage 5).
 
@@ -41,12 +74,15 @@ export function ReviewQueue({
   preload = false,
   initialQueue,
   initialWorkspaceId,
+  openReviewId = null,
 }: {
   active?: boolean;
   preload?: boolean;
   /** Server-fetched first paint (Stage 5): seeds the queue, then background-revalidates. */
   initialQueue?: QueueData;
   initialWorkspaceId?: string;
+  /** `?review=<sopId>`: open that SOP's review straight away (a reviewer clicking it elsewhere). */
+  openReviewId?: string | null;
 }) {
   const { workspaceId } = useSopWorkspace();
   const seededFromServer =
@@ -54,7 +90,18 @@ export function ReviewQueue({
   const [data, setData] = useState<QueueData>(seededFromServer ? initialQueue : EMPTY);
   const [listStatus, setListStatus] = useState<ListStatus>(seededFromServer ? "ready" : "loading");
   const [error, setError] = useState("");
-  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(openReviewId);
+  useEffect(() => {
+    if (openReviewId) setSelectedReviewId(openReviewId);
+  }, [openReviewId]);
+  // The deep link has done its job once the review closes; drop it so a reload or
+  // Back doesn't reopen a review the reviewer already left.
+  const closeReview = useCallback(() => {
+    setSelectedReviewId(null);
+    if (new URLSearchParams(window.location.search).has("review")) {
+      window.history.replaceState(null, "", "/sops?tab=review");
+    }
+  }, []);
   const [selectedFinalApproval, setSelectedFinalApproval] = useState<PendingSeat | null>(null);
   // Server-seeded data marks itself loaded-but-stale (loadedAt: 1): the mount effect
   // refreshes in the background instead of flashing a loader.
@@ -195,9 +242,7 @@ export function ReviewQueue({
         <>
           {data.sentBack.length > 0 ? (
             <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
-              <div className="px-4 py-3">
-                <h2 className="text-sm font-semibold text-ink">Sent back for rework</h2>
-              </div>
+              <QueueSectionHeader title="Sent back for rework" count={data.sentBack.length} />
               {data.sentBack.map((sop) => (
                 <Link
                   key={sop.id}
@@ -219,15 +264,11 @@ export function ReviewQueue({
 
           {data.readyForFinalApproval.length > 0 ? (
             <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
-              <div className="flex items-center justify-between gap-2 px-4 py-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-ink">Ready for final approval</h2>
-                  <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
-                    Every reviewer has responded and no remarks are open. Send these for formal signatures.
-                  </p>
-                </div>
-                <CheckCheck size={14} className="text-emerald-700" />
-              </div>
+              <QueueSectionHeader
+                title="Ready for final approval"
+                description="Every reviewer has responded and no remarks are open. Send these for formal signatures."
+                count={data.readyForFinalApproval.length}
+              />
               {data.readyForFinalApproval.map((sop) => (
                 <Link
                   key={sop.id}
@@ -324,15 +365,11 @@ export function ReviewQueue({
 
           {data.finalApprovals.length > 0 ? (
             <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
-              <div className="flex items-center justify-between gap-2 px-4 py-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-ink">Final approval</h2>
-                  <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
-                    Draft review is complete. Formally approve the current controlled document.
-                  </p>
-                </div>
-                <ShieldCheck size={14} className="text-emerald-700" />
-              </div>
+              <QueueSectionHeader
+                title="Final approval"
+                description="Draft review is complete. Formally approve the current controlled document."
+                count={data.finalApprovals.length}
+              />
               {data.finalApprovals.map((seat) => (
                 <button
                   type="button"
@@ -345,13 +382,14 @@ export function ReviewQueue({
                     <div className="truncate text-sm font-medium text-ink">
                       {seat.title || seat.sopNumber || "Untitled SOP"}
                     </div>
-                    <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
-                      {[listNumberLabel(seat.sopNumber, seat.sopDepartmentCode),
+                    <QueueRowMeta
+                      codes={[
+                        listNumberLabel(seat.sopNumber, seat.sopDepartmentCode),
                         seat.version ? `v${seat.version}` : "",
-                        seat.departmentCode]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
+                        seat.departmentCode,
+                      ]}
+                      author={data.authorNames[seat.sopId]}
+                    />
                   </div>
                   <span className="ui-chip shrink-0 border-emerald-600 text-emerald-700">Approval required</span>
                   {formatDate(seat.finalApprovalRequestedAt ?? "") ? (
@@ -366,12 +404,11 @@ export function ReviewQueue({
 
           {draftReviews.length > 0 ? (
             <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
-              <div className="px-4 py-3">
-                <h2 className="text-sm font-semibold text-ink">Draft review</h2>
-                <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
-                  Draft SOPs currently being reviewed by their required departmental approvers.
-                </p>
-              </div>
+              <QueueSectionHeader
+                title="Draft review"
+                description="Draft SOPs currently being reviewed by their required departmental approvers."
+                count={draftReviews.length}
+              />
               {draftReviews.map((sop) => (
                 <button
                   type="button"
@@ -384,11 +421,10 @@ export function ReviewQueue({
                     <div className="truncate text-sm font-medium text-ink">
                       {sop.title || sop.sopNumber || "Untitled SOP"}
                     </div>
-                    <div className="ui-mono-label mt-0.5 truncate text-ink-tertiary">
-                      {[listNumberLabel(sop.sopNumber, sop.departmentCode), sop.version ? `v${sop.version}` : ""]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
+                    <QueueRowMeta
+                      codes={[listNumberLabel(sop.sopNumber, sop.departmentCode), sop.version ? `v${sop.version}` : ""]}
+                      author={data.authorNames[sop.id]}
+                    />
                   </div>
                   <span className={`ui-chip shrink-0 ${statusChipClass(sop.status)}`}>
                     {SOP_STATUS_LABELS[sop.status]}
@@ -403,12 +439,11 @@ export function ReviewQueue({
 
           {awaitingRelease.length > 0 ? (
             <section className="ui-data-table-frame ui-data-table-frame-canvas divide-y divide-line">
-              <div className="px-4 py-3">
-                <h2 className="text-sm font-semibold text-ink">Awaiting Quality release</h2>
-                <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">
-                  Stakeholder approvals are complete. These SOPs are waiting for Quality signature and release.
-                </p>
-              </div>
+              <QueueSectionHeader
+                title="Awaiting Quality release"
+                description="Stakeholder approvals are complete. These SOPs are waiting for Quality signature and release."
+                count={awaitingRelease.length}
+              />
               {awaitingRelease.map((sop) => (
                 <Link
                   key={sop.id}
@@ -441,9 +476,9 @@ export function ReviewQueue({
       {selectedReviewId ? (
         <SopReviewWorkspace
           sopId={selectedReviewId}
-          onClose={() => setSelectedReviewId(null)}
+          onClose={closeReview}
           onSubmitted={() => {
-            setSelectedReviewId(null);
+            closeReview();
             void refreshList({ background: true });
           }}
         />

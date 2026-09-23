@@ -13,7 +13,14 @@ import {
   listOpenSopReviewAnnotationsFor,
   listSopReviewSubmissions,
 } from "@/lib/sop/review-annotations";
-import { isBlockingSeat, listMySeats, listMySignaturesFor, listSeatsForSops, type MySeatItem } from "@/lib/sop/review";
+import {
+  isBlockingSeat,
+  listMySeats,
+  listMySignaturesFor,
+  listSeatsForSops,
+  listSopAuthorDisplayNames,
+  type MySeatItem,
+} from "@/lib/sop/review";
 import { listSops, type SopListItem } from "@/lib/sop/store";
 
 /** A seat awaiting this user's signature, with the department it speaks for. */
@@ -48,6 +55,8 @@ export interface QueueData {
   readyForFinalApproval: SopListItem[];
   /** The workspace-wide board this page used to be. Kept: nothing that was visible is removed. */
   allInFlight: SopListItem[];
+  /** Author display names for the SOPs awaiting my review or approval, keyed by SOP id. */
+  authorNames: Record<string, string>;
   isQualityApprover: boolean;
 }
 
@@ -58,6 +67,7 @@ export const EMPTY_QUEUE: QueueData = {
   awaitingQuality: [],
   readyForFinalApproval: [],
   allInFlight: [],
+  authorNames: {},
   isQualityApprover: false,
 };
 
@@ -90,11 +100,12 @@ export async function fetchReviewQueueData(
   const authoredInReview = sops.filter((sop) => sop.createdBy === userId && sop.status === "in_review");
   const authoredIds = authoredInReview.map((sop) => sop.id);
   const qualitySops = isQualityApprover ? sops.filter((sop) => sop.status === "approved") : [];
-  const [mySubmissions, mySignatures, authoredSeats, openAnnotations] = await Promise.all([
+  const [mySubmissions, mySignatures, authoredSeats, openAnnotations, authorNames] = await Promise.all([
     listSopReviewSubmissions([...draftReviewSeats.map((seat) => seat.sopId), ...authoredIds], client),
     listMySignaturesFor([...finalApprovalSeats.map((seat) => seat.sopId), ...qualitySops.map((sop) => sop.id)], userId, client),
     listSeatsForSops(authoredIds, client),
     listOpenSopReviewAnnotationsFor(authoredIds, client),
+    listSopAuthorDisplayNames(inReviewSeats.map((seat) => seat.sopId), client),
   ]);
 
   const awaitingMe: PendingSeat[] = draftReviewSeats
@@ -163,6 +174,7 @@ export async function fetchReviewQueueData(
       openAnnotations,
     }),
     allInFlight: sops.filter((sop) => sop.status === "in_review" || sop.status === "approved"),
+    authorNames,
     isQualityApprover,
   };
 }

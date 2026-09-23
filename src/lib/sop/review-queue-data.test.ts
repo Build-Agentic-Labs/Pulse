@@ -4,7 +4,7 @@ import * as review from "./review";
 import * as annotations from "./review-annotations";
 import * as departments from "@/lib/departments/store";
 import { listSops, type SopListItem } from "./store";
-vi.mock("./review", () => ({ listMySeats: vi.fn(), listMySignaturesFor: vi.fn(), listSeatsForSops: vi.fn(), isBlockingSeat: (r: string) => r === "responsible" }));
+vi.mock("./review", () => ({ listMySeats: vi.fn(), listMySignaturesFor: vi.fn(), listSeatsForSops: vi.fn(), listSopAuthorDisplayNames: vi.fn(), isBlockingSeat: (r: string) => r === "responsible" }));
 vi.mock("./review-annotations", () => ({ listSopReviewSubmissions: vi.fn(), listOpenSopReviewAnnotationsFor: vi.fn(), hasSubmittedSopReview: () => false }));
 vi.mock("@/lib/departments/store", () => ({ listDepartments: vi.fn(), fetchMyDeptRoles: vi.fn() }));
 vi.mock("./store", () => ({ listSops: vi.fn() }));
@@ -25,6 +25,7 @@ beforeEach(() => {
  vi.mocked(review.listMySeats).mockResolvedValue([]);
  vi.mocked(review.listMySignaturesFor).mockResolvedValue([]);
  vi.mocked(review.listSeatsForSops).mockResolvedValue([]);
+ vi.mocked(review.listSopAuthorDisplayNames).mockResolvedValue({});
  vi.mocked(annotations.listSopReviewSubmissions).mockResolvedValue([]);
  vi.mocked(annotations.listOpenSopReviewAnnotationsFor).mockResolvedValue([]);
  vi.mocked(departments.listDepartments).mockResolvedValue([{ id: "quality", workspaceId: "ws", code: "Q", name: "Quality", isQualityGate: true, sopTarget: 0 }]);
@@ -45,5 +46,12 @@ describe("review queue routing", () => {
   const queue = await fetchReviewQueueData("ws", "viewer");
   expect(queue.awaitingQuality.map((s) => s.id)).toEqual(["eligible"]);
   expect(queue.allInFlight).toHaveLength(5);
+ });
+ it("names the author of each SOP waiting on the viewer", async () => {
+  vi.mocked(review.listMySeats).mockResolvedValue([seat("one"), seat("done", "approved")]);
+  vi.mocked(review.listSopAuthorDisplayNames).mockResolvedValue({ one: "Jennifer Li" });
+  const queue = await fetchReviewQueueData("ws", "viewer");
+  expect(review.listSopAuthorDisplayNames).toHaveBeenCalledWith(["one"], undefined);
+  expect(queue.authorNames).toEqual({ one: "Jennifer Li" });
  });
 });

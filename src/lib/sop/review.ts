@@ -187,6 +187,27 @@ export async function getSopAuthorDisplayName(sopId: string): Promise<string> {
   return String(value ?? "").trim();
 }
 
+/**
+ * Author names for a handful of SOPs (a queue's worth), keyed by SOP id. Best-effort: an SOP
+ * whose name can't be read is simply absent, so a label never blocks the list it decorates.
+ */
+export async function listSopAuthorDisplayNames(
+  sopIds: readonly string[],
+  client?: SupabaseClient<Database>,
+): Promise<Record<string, string>> {
+  const unique = Array.from(new Set(sopIds));
+  if (unique.length === 0) return {};
+  const supabase = client ?? createPlannerSupabaseClient();
+  const results = await Promise.all(
+    unique.map(async (sopId) => {
+      const { data, error } = await supabase.rpc("sop_author_display_name", { p_sop: sopId });
+      const name = error ? "" : String(data ?? "").trim();
+      return [sopId, name] as const;
+    }),
+  );
+  return Object.fromEntries(results.filter(([, name]) => name !== ""));
+}
+
 export interface SignOptions {
   /** Rejection reason, or the written justification on an overrule. */
   reason?: string;

@@ -178,6 +178,7 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
         {mountedTabs.has("review") ? (
           <ReviewQueue
             active={tab === "review"}
+            openReviewId={tab === "review" ? params.get("review") : null}
             initialQueue={initial?.tab === "review" ? initial.queue : undefined}
             initialWorkspaceId={initial?.tab === "review" ? initial.workspaceId : undefined}
           />

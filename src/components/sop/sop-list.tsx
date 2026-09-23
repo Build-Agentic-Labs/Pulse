@@ -178,6 +178,7 @@ export function SopList({
   const [reviewParticipants, setReviewParticipants] = useState<
     Map<string, SopListReviewParticipant[]>
   >(() => reviewParticipantsFrom(seededReview));
+  const [currentUserId, setCurrentUserId] = useState<string | null>(seededReview?.currentUserId ?? null);
   const [feedbackSop, setFeedbackSop] = useState<SopListItem | null>(null);
   const [feedbackAnnotations, setFeedbackAnnotations] = useState<SopReviewAnnotation[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
@@ -229,6 +230,7 @@ export function SopList({
       setSops(next);
       setReviewResults(reviewResultsFrom(review));
       setReviewParticipants(reviewParticipantsFrom(review));
+      setCurrentUserId(review.currentUserId);
       setListStatus("ready");
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return next;
@@ -708,7 +710,15 @@ export function SopList({
                               const isViewOnly = Boolean(
                                 sop.departmentId && !memberDepartmentIds.has(sop.departmentId),
                               );
-                              const editorHref = isViewOnly
+                              // A reviewer reviews from the queue, never the author's builder —
+                              // even when the SOP belongs to a department they can't edit.
+                              const isMyDraftReview =
+                                processState === "draft_review" &&
+                                currentUserId !== null &&
+                                rowReviewers.some((reviewer) => reviewer.userId === currentUserId);
+                              const editorHref = isMyDraftReview
+                                ? `/sops?tab=review&review=${encodeURIComponent(sop.id)}`
+                                : isViewOnly
                                 ? `/sops/${sop.id}?preview=pdf`
                                 : processState === "draft_review"
                                   ? `/sops/${sop.id}?step=draft-review`

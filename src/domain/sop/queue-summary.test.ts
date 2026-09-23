@@ -58,6 +58,7 @@ function queue(over: Partial<QueueData> = {}): QueueData {
     awaitingQuality: [],
     readyForFinalApproval: [],
     allInFlight: [],
+    authorNames: {},
     isQualityApprover: false,
     ...over,
   };

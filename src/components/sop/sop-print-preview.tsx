@@ -133,22 +133,29 @@ function DocumentPage({
 
 
 /**
- * Screen-only highlight for flagged review sections: a warm wash with a left rule, so a remark's
+ * Screen-only highlight for flagged review sections: a warm band with a left rule, so a remark's
  * section stands out while the page itself still reads as the controlled document.
  */
 const MARGIN_COLUMN_PX = 340;
 const MARGIN_GAP_PX = 24;
 
 function highlightCss(categories: readonly string[]): string {
-  const selectors = categories
-    .filter((category) => /^[a-z_]+$/.test(category))
-    .map((category) => `.sop-preview-overlay .sop-preview-scroll [data-review-category="${category}"]`);
+  const safe = categories.filter((category) => /^[a-z_]+$/.test(category));
+  const block = (category: string) => `.sop-preview-overlay .sop-preview-scroll [data-review-category="${category}"]`;
+  const selectors = safe.map(block);
+  // A block continuing the section above it reaches up over the collapsed-margin gap between them.
+  const continuations = safe.map((category) => `${block(category)} + [data-review-category="${category}"]`);
   if (selectors.length === 0) return "";
   return `@media screen {
+  ${continuations.join(", ")} {
+    box-shadow: -8px 0 0 0 #fdf6dd, 8px 0 0 0 #fdf6dd, -11px 0 0 0 #f59e0b,
+      -8px -8px 0 0 #fdf6dd, 8px -8px 0 0 #fdf6dd, -11px -8px 0 0 #f59e0b, 0 -8px 0 0 #fdf6dd !important;
+  }
   ${selectors.join(", ")} {
-    background: rgb(254 243 199 / 0.6);
-    box-shadow: -4px 0 0 0 #f59e0b, 0 0 0 6px rgb(254 243 199 / 0.6);
-    border-radius: 2px;
+    /* Opaque, square and widened sideways only: a section is paginated into several blocks
+       (heading, each item), and this lets them join into one unbroken band. */
+    background: #fdf6dd;
+    box-shadow: -8px 0 0 0 #fdf6dd, 8px 0 0 0 #fdf6dd, -11px 0 0 0 #f59e0b;
   }
 }`;
 }

@@ -3,6 +3,7 @@
 import { Inbox } from "lucide-react";
 import Link from "next/link";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { viaReviewQueue } from "@/domain/sop/queue-navigation";
 import { summarizeQueue } from "@/domain/sop/queue-summary";
 import { publishReviewQueueCount } from "@/lib/sop/review-queue-count";
 import { QuietLoading } from "@/components/quiet-loading";
@@ -273,7 +274,7 @@ export function ReviewQueue({
     author: "You",
     status,
     receivedAt: data.receivedAt[sop.id] ?? sop.updatedAt,
-    href: `/sops/${sop.id}?step=${step}`,
+    href: viaReviewQueue(`/sops/${sop.id}?step=${step}`),
   });
   const feedbackRows: QueueRow[] = [
     ...data.feedbackToAddress.map((sop) => authoredRow(sop, "Remarks to address", "draft-review")),
@@ -287,7 +288,7 @@ export function ReviewQueue({
     author: "",
     status: "Awaiting Quality",
     receivedAt: sop.updatedAt,
-    href: `/sops/${sop.id}?step=quality-approval`,
+    href: viaReviewQueue(`/sops/${sop.id}?step=quality-approval`),
   }));
   const queueGroups = [
     { label: "Needs your review", rows: reviewRows },
@@ -376,7 +377,7 @@ export function ReviewQueue({
                           </thead>
                           <tbody>
                             {group.sops.map((sop) => {
-                              const href = `/sops/${sop.id}?step=quality-approval`;
+                              const href = viaReviewQueue(`/sops/${sop.id}?step=quality-approval`);
                               return (
                                 <tr
                                   key={sop.id}

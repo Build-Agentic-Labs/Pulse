@@ -68,6 +68,7 @@ import { ResponsiblePersonsField } from "./responsible-persons-field";
 import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopPrintPreview } from "./sop-print-preview";
 import { SopRemarkCard } from "./sop-feedback-panel";
+import { QUEUE_ORIGIN_PARAM, QUEUE_ORIGIN_VALUE, REVIEW_QUEUE_HREF } from "@/domain/sop/queue-navigation";
 import type { MarginNote } from "./sop-margin-notes";
 import { ReferencePdfPreview } from "./reference-pdf-preview";
 import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
@@ -300,6 +301,8 @@ export function SopEditor({
   // "?from=<sopId>&fromNumber=<label>" marks a preview reached via another SOP's
   // References list; surface a Back button that returns to that SOP's preview.
   const previewBackSopId = searchParams.get("from");
+  // Captured once: later in-page URL rewrites (step changes) drop the flag, the origin doesn't.
+  const [cameFromQueue] = useState(() => searchParams.get(QUEUE_ORIGIN_PARAM) === QUEUE_ORIGIN_VALUE);
   const previewBackLink = previewBackSopId
     ? { href: `/sops/${encodeURIComponent(previewBackSopId)}?preview=pdf`, label: "Back" }
     : undefined;
@@ -1692,6 +1695,10 @@ export function SopEditor({
   }
 
   function leaveFeedbackView() {
+    if (cameFromQueue) {
+      router.push(REVIEW_QUEUE_HREF);
+      return;
+    }
     const draftReviewIndex = steps.findIndex((entry) => entry.id === "draftReview");
     setEditingCategory(null);
     void handleStepSelect(Math.max(0, draftReviewIndex - 1));
@@ -1854,7 +1861,7 @@ export function SopEditor({
       crumb={sop.meta.title || sop.meta.sopNumber || "Untitled"}
       actions={actions}
       sidebar={sidebar}
-      back={{ href: "/sops", label: "All SOPs" }}
+      back={cameFromQueue ? { href: REVIEW_QUEUE_HREF, label: "Review queue" } : { href: "/sops", label: "All SOPs" }}
       confirmLeave={confirmLeave}
       contentRef={contentScrollRef}
     >

@@ -9,6 +9,7 @@
 
 import type { QueueData } from "@/lib/sop/review-queue-data";
 import { listNumberLabel } from "./authoring";
+import { viaReviewQueue } from "./queue-navigation";
 
 export interface QueueSummaryItem {
   notificationId: string;
@@ -43,7 +44,7 @@ export interface QueueSummary {
 
 function sopHref(sopId: string, step?: string): string {
   const base = `/sops/${encodeURIComponent(sopId)}`;
-  return step ? `${base}?step=${step}` : base;
+  return viaReviewQueue(step ? `${base}?step=${step}` : base);
 }
 
 function notificationId(section: QueueSummarySection["key"], values: Array<string | number | null>): string {

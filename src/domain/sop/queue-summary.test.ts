@@ -77,7 +77,7 @@ describe("summarizeQueue", () => {
     expect(summary.total).toBe(2);
     expect(summary.sections.map((section) => section.label)).toEqual(["Sent back", "Ready for final approval"]);
     expect(summary.sections[1].items).toEqual([
-      { notificationId: "readyForFinalApproval:s5:2:h", sopId: "s5", sopNumber: "SOP-ENG-###", title: "Five", href: "/sops/s5?step=final-approval" },
+      { notificationId: "readyForFinalApproval:s5:2:h", sopId: "s5", sopNumber: "SOP-ENG-###", title: "Five", href: "/sops/s5?step=final-approval&via=review" },
     ]);
   });
 
@@ -91,7 +91,7 @@ describe("summarizeQueue", () => {
     );
     expect(summary.total).toBe(2);
     expect(summary.sections.map((section) => section.label)).toEqual(["Feedback to address", "Ready for final approval"]);
-    expect(summary.sections[0].items[0].href).toBe("/sops/s6?step=draft-review");
+    expect(summary.sections[0].items[0].href).toBe("/sops/s6?step=draft-review&via=review");
   });
 
   it("totals the four actionable sections and never counts allInFlight", () => {
@@ -152,7 +152,7 @@ describe("summarizeQueue", () => {
         sopId: "list-sop",
         sopNumber: "SOP-4",
         title: "List Row",
-        href: "/sops/list-sop?step=draft-review",
+        href: "/sops/list-sop?step=draft-review&via=review",
       },
     ]);
   });

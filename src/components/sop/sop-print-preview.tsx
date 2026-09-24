@@ -131,6 +131,24 @@ function DocumentPage({
 }
 
 
+/**
+ * Screen-only highlight for flagged review sections: a warm wash with a left rule, so a remark's
+ * section stands out while the page itself still reads as the controlled document.
+ */
+function highlightCss(categories: readonly string[]): string {
+  const selectors = categories
+    .filter((category) => /^[a-z_]+$/.test(category))
+    .map((category) => `.sop-preview-overlay .sop-preview-scroll [data-review-category="${category}"]`);
+  if (selectors.length === 0) return "";
+  return `@media screen {
+  ${selectors.join(", ")} {
+    background: rgb(254 243 199 / 0.6);
+    box-shadow: -4px 0 0 0 #f59e0b, 0 0 0 6px rgb(254 243 199 / 0.6);
+    border-radius: 2px;
+  }
+}`;
+}
+
 function Section({ title, children, reviewCategory }: { title: string; children: ReactNode; reviewCategory?: string }) {
   return (
     <section className="sop-export-section" data-review-category={reviewCategory}>
@@ -269,6 +287,7 @@ export function SopPrintPreview({
   onSelectAnnotation,
   reviewPanel,
   toolbarNote,
+  highlightCategories,
   onReviewCategoryChange,
   approvalRefreshKey = 0,
   revealSignatureId,
@@ -290,6 +309,8 @@ export function SopPrintPreview({
   reviewPanel?: ReactNode;
   /** Replaces the mode's default toolbar note (e.g. the author reading returned feedback). */
   toolbarNote?: string;
+  /** Review categories to highlight on screen (never in print) — e.g. sections with open remarks. */
+  highlightCategories?: readonly string[];
   onReviewCategoryChange?: (category: string) => void;
   approvalRefreshKey?: number;
   revealSignatureId?: string | null;
@@ -756,6 +777,7 @@ export function SopPrintPreview({
 
   return (
     <div ref={previewRootRef} className="sop-preview-overlay" role="dialog" aria-modal="true" aria-label="SOP document preview">
+      {highlightCategories?.length ? <style>{highlightCss(highlightCategories)}</style> : null}
       <style>{`
         .sop-preview-overlay {
           position: fixed; inset: 0; z-index: 60;

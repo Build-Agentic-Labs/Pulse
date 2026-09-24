@@ -1562,6 +1562,9 @@ export function SopEditor({
 
   // --- Draft review: the document with the returned feedback beside it ---
   const openRemarkCount = reviewAnnotations.length;
+  const flaggedCategories = Array.from(
+    new Set(reviewAnnotations.map((annotation) => annotation.category || "overall")),
+  );
   const waitingReviewerCount = draftReviewers.filter((reviewer) => !reviewer.submission).length;
   const startApprovalDisabled =
     saveDisabled ||
@@ -2195,6 +2198,7 @@ export function SopEditor({
                 annexFiles={annexFiles}
                 mode="review"
                 toolbarNote="Returned feedback · address each remark, then send it on"
+                highlightCategories={flaggedCategories}
                 reviewPanel={feedbackPanel}
                 onReviewCategoryChange={(category) => {
                   if (!feedbackScrollLockRef.current) setFeedbackCategory(category);

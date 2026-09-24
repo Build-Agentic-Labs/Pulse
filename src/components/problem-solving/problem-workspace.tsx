@@ -34,6 +34,7 @@ function Workspace({ workspaceId, initial }: { workspaceId?: string; initial?: I
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(!initial);
   const [creating, setCreating] = useState(false);
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false);
   const dirty = useRef(false);
   const generation = useRef(0);
   const today = new Date().toLocaleDateString("en-CA");
@@ -49,6 +50,16 @@ function Workspace({ workspaceId, initial }: { workspaceId?: string; initial?: I
     finally { if (request === generation.current) setLoading(false); }
   }, [workspaceId]);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Tab") setKeyboardNavigation(true); };
+    const onPointerDown = () => setKeyboardNavigation(false);
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, []);
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => { if (dirty.current) { event.preventDefault(); event.returnValue = ""; } };
     window.addEventListener("beforeunload", guard);
@@ -67,7 +78,7 @@ function Workspace({ workspaceId, initial }: { workspaceId?: string; initial?: I
     <p className="ps-pilot-note">Private pilot · rlopez</p>
   </>;
   return <SopShell sidebar={sidebar} crumb="Quality / Problem Solving" confirmLeave={leave}>
-    <div className="ps-workspace">
+    <div className="ps-workspace" data-keyboard-navigation={keyboardNavigation}>
       {selected ? <ProblemCaseForm key={selected.id} initial={selected} onDirty={value => { dirty.current = value; }} onBack={() => navigate(tab)} onSaved={row => { setSelected(row); setCases(current => current.map(c => c.id === row.id ? row : c)); void refresh(); }} /> : <>
         <header className="ps-heading"><div><p className="ps-eyebrow">QUALITY · PRIVATE PILOT</p><h1>Problem Solving</h1><p>From evidence to a verified solution.</p></div><button className="ui-btn-primary" disabled={!workspaceId || loading || creating} onClick={() => setTitle("")}><Plus size={16} />New case</button></header>
         <div className="ps-tabs" aria-label="Case views">{(["dashboard","open","closed"] as const).map(t => <button key={t} onClick={() => navigate(t)} aria-pressed={tab === t} className={tab === t ? "ps-tab-active" : ""}>{t[0].toUpperCase() + t.slice(1)}</button>)}</div>

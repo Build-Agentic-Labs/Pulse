@@ -8,7 +8,7 @@
 .ps-panel { background: transparent; border: 0; border-radius: 0; margin-bottom: 20px; }
 .ps-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--color-border, #e0e4e9); padding-bottom: 10px; margin-bottom: 20px; }
 .ps-tabs button { padding: 7px 17px; font-size: 13px; border-radius: 0; border-bottom: 2px solid transparent; color: var(--color-ink-secondary); }
-.ps-tabs .ps-tab-active { background: transparent; border-bottom-color: var(--color-ink); color: var(--color-ink); font-weight: 600; }
+.ps-tabs .ps-tab-active { background: transparent; color: var(--color-ink); font-weight: 600; }
 .ps-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-bottom: 26px; padding: 4px 0 24px; border-bottom: 1px solid var(--color-border); }
 .ps-metrics > * { background: transparent; border: 0; border-radius: 0; padding: 0; text-align: left; }
 .ps-metrics span { display: block; font-size: 12px; font-weight: 550; }
@@ -18,7 +18,8 @@
 .ps-workspace label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 550; }
 .ps-workspace input, .ps-workspace textarea, .ps-workspace select { border: 1px solid var(--color-border, #dce1e7); background: transparent; color: inherit; border-radius: 4px; padding: 9px 10px; width: 100%; font-size: 13px; font-weight: 400; }
 .ps-workspace textarea { resize: vertical; min-height: 76px; }
-.ps-workspace input:focus, .ps-workspace textarea:focus, .ps-workspace select:focus { outline: 2px solid var(--color-ink); outline-offset: 1px; }
+.ps-workspace :focus { outline: none; }
+.ps-workspace[data-keyboard-navigation="true"] :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
 .ps-workspace button:disabled { opacity: .5; cursor: not-allowed; }
 .ps-search { flex-direction: row !important; align-items: center; width: 310px; }
 .ps-search input { padding: 7px 9px; }

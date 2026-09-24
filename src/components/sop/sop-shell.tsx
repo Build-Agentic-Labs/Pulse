@@ -1,7 +1,6 @@
 "use client";
 
-import { ChevronLeft, PanelLeft, PanelLeftClose } from "lucide-react";
-import Link from "next/link";
+import { PanelLeft, PanelLeftClose } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type MouseEvent, type ReactNode, type Ref } from "react";
 import { SpaceTopNav } from "@/components/space-top-nav";
@@ -22,6 +21,10 @@ export function SopShell({
   children,
 }: {
   sidebar: ReactNode;
+  /**
+   * Where the header's back arrow goes (e.g. the Review queue or All SOPs). Omitted, the arrow
+   * returns to the company dashboard. There is deliberately one back control, in the header.
+   */
   back?: { href: string; label: string };
   crumb?: string;
   actions?: ReactNode;
@@ -53,6 +56,8 @@ export function SopShell({
     <div className="ui-sop-shell fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink">
       <SpaceTopNav
         onNavigate={guardNavigation}
+        backHref={back?.href}
+        backLabel={back ? `Back to ${back.label}` : undefined}
         context={crumb ?? "Quality"}
         contextLeading={
           <button
@@ -89,12 +94,6 @@ export function SopShell({
             className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-3"
             onClick={() => setMobileOpen(false)}
           >
-            {back ? (
-              <Link href={back.href} className="ui-settings-back" title={back.label} onClick={guardNavigation}>
-                <ChevronLeft size={14} strokeWidth={1.75} />
-                {back.label}
-              </Link>
-            ) : null}
             {sidebar}
           </nav>
         </aside>

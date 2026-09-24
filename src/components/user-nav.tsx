@@ -8,6 +8,7 @@ import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { NotificationBell } from "@/components/notification-bell";
 import { SPACE_META, SPACE_ORDER, SpaceIcon, spaceDisabledLabel, spaceHref } from "@/components/spaces";
 import { announceAccountMenuVisibility } from "@/lib/app-chrome-events";
+import { canGoBackInApp } from "@/lib/history-back";
 import { normalizeDisplayName, PROFILE_NAME_UPDATED_EVENT } from "@/lib/profile-name";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
 
@@ -224,22 +225,47 @@ function useUserProfile(supabase: ReturnType<typeof createPlannerSupabaseClient>
 }
 
 /**
- * The consistent far-left back affordance on every space surface: a full arrow (distinct
- * from the sidebar-collapse chevron) that returns to the company dashboard. Pass
- * `onNavigate` to guard the exit (e.g. unsaved-changes confirms).
+ * The one far-left back affordance on every space surface: a full arrow (distinct from the
+ * sidebar-collapse chevron) that goes back one page, like the browser's Back. With no earlier
+ * Pulse page in this tab (a new tab, a link from an email) it goes to `fallbackHref` instead —
+ * the page's natural parent, or the company dashboard.
+ *
+ * `onNavigate` guards the fallback link (it intercepts the click and navigates itself);
+ * `confirmLeave` guards stepping back through history. Pass both to guard every exit.
  */
-export function BackToDashboardButton({
+export function BackArrowButton({
+  fallbackHref = "/",
+  label = "Back",
   onNavigate,
+  confirmLeave,
 }: {
+  fallbackHref?: string;
+  label?: string;
   onNavigate?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  confirmLeave?: () => boolean | Promise<boolean>;
 }) {
+  const router = useRouter();
+
+  function handleClick(event: MouseEvent<HTMLAnchorElement>) {
+    // Modified clicks (new tab/window) keep the plain link behaviour.
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!canGoBackInApp()) {
+      onNavigate?.(event);
+      return;
+    }
+    event.preventDefault();
+    void Promise.resolve(confirmLeave ? confirmLeave() : true).then((ok) => {
+      if (ok) router.back();
+    });
+  }
+
   return (
     <Link
-      href="/"
-      onClick={onNavigate}
+      href={fallbackHref}
+      onClick={handleClick}
       className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
-      title="Back to dashboard"
-      aria-label="Back to the company dashboard"
+      title={label}
+      aria-label={label}
     >
       <ArrowLeft size={15} strokeWidth={1.75} />
     </Link>

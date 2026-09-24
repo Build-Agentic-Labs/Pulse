@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { PresencePeer } from "@/lib/use-planner-presence";
 import { NothingStatus } from "./nothing-ui";
 import { buildPlannerChromeContext } from "./planner-dashboard-panel";
-import { BackToDashboardButton, UserNav } from "./user-nav";
+import { BackArrowButton, UserNav } from "./user-nav";
 
 function presenceInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -58,7 +58,7 @@ export function TopNav({
   return (
     <header className="ui-chrome ui-chrome-planner z-40 h-12 shrink-0" aria-busy={loading || undefined}>
       <div className="ui-chrome-planner-brand">
-        <BackToDashboardButton />
+        <BackArrowButton />
         <Link href="/" className="ui-brand-compact shrink-0" title="Company dashboard">
           Pulse
         </Link>

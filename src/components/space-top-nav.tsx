@@ -1,17 +1,19 @@
 "use client";
 
-import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { MouseEvent, ReactNode } from "react";
-import { BackToDashboardButton, UserNav } from "./user-nav";
+import { BackArrowButton, UserNav } from "./user-nav";
 
 type SpaceTopNavProps = {
   context: ReactNode;
   actions?: ReactNode;
   contextLeading?: ReactNode;
+  /** Where the back arrow goes when there is no earlier Pulse page to step back to. */
   backHref?: string;
   backLabel?: string;
   onNavigate?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  /** Guard for the back arrow stepping back through history (e.g. unsaved changes). */
+  confirmLeave?: () => boolean | Promise<boolean>;
   fixed?: boolean;
   loading?: boolean;
   loadingLabel?: string;
@@ -29,6 +31,7 @@ export function SpaceTopNav({
   backHref,
   backLabel = "Back",
   onNavigate,
+  confirmLeave,
   fixed = false,
   loading = false,
   loadingLabel,
@@ -39,19 +42,12 @@ export function SpaceTopNav({
       aria-busy={loading || undefined}
     >
       <div className="ui-chrome-planner-brand">
-        {backHref ? (
-          <Link
-            href={backHref}
-            onClick={onNavigate}
-            className="ui-btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center px-0"
-            title={backLabel}
-            aria-label={backLabel}
-          >
-            <ArrowLeft size={15} strokeWidth={1.75} />
-          </Link>
-        ) : (
-          <BackToDashboardButton onNavigate={onNavigate} />
-        )}
+        <BackArrowButton
+          fallbackHref={backHref ?? "/"}
+          label={backHref ? backLabel : "Back"}
+          onNavigate={onNavigate}
+          confirmLeave={confirmLeave}
+        />
         <Link
           href="/"
           className="ui-brand-compact shrink-0"

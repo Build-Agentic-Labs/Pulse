@@ -56,6 +56,7 @@ export function SopShell({
     <div className="ui-sop-shell fixed inset-0 flex h-[100dvh] flex-col overflow-hidden bg-surface text-ink">
       <SpaceTopNav
         onNavigate={guardNavigation}
+        confirmLeave={confirmLeave}
         backHref={back?.href}
         backLabel={back ? `Back to ${back.label}` : undefined}
         context={crumb ?? "Quality"}

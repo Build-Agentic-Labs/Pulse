@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { MouseEvent, ReactNode } from "react";
 import { NavSelectionTrack } from "@/components/nav-selection-track";
 import { badgeLabel } from "@/domain/sop/queue-summary";
+import { ProblemPilotLink } from "@/components/problem-solving/problem-pilot-link";
 
 export type SopTab = "dashboard" | "all" | "review" | "library" | "retired" | "settings";
 
@@ -72,6 +73,7 @@ export function SopTabNav({
         {item("library", <Library size={15} strokeWidth={1.75} />, "Effective library")}
         {item("retired", <Archive size={15} strokeWidth={1.75} />, "Retired")}
       </NavSelectionTrack>
+      <ProblemPilotLink />
       {manage ? (
         <>
           <div className="ui-nav-section mt-3">Manage</div>

@@ -805,6 +805,218 @@ export type Database = {
         }
         Relationships: []
       }
+      problem_actions: {
+        Row: {
+          case_id: string
+          completion_evidence: string
+          created_at: string
+          description: string
+          due_on: string
+          id: string
+          kind: string
+          owner: string
+          status: string
+        }
+        Insert: {
+          case_id: string
+          completion_evidence?: string
+          created_at?: string
+          description: string
+          due_on: string
+          id?: string
+          kind: string
+          owner: string
+          status?: string
+        }
+        Update: {
+          case_id?: string
+          completion_evidence?: string
+          created_at?: string
+          description?: string
+          due_on?: string
+          id?: string
+          kind?: string
+          owner?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "problem_actions_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "problem_cases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      problem_cases: {
+        Row: {
+          affected: string
+          cause_evidence: string
+          closed_at: string | null
+          closed_by: string | null
+          containment: string
+          created_at: string
+          created_by: string
+          expected: string
+          id: string
+          number: number
+          owner: string
+          prevention: string
+          problem: string
+          reported_on: string
+          root_cause: string
+          severity: string
+          source: string
+          stage: string
+          title: string
+          updated_at: string
+          verification_plan: string
+          verification_result: string
+          verified_on: string | null
+          version: number
+          workspace_id: string
+        }
+        Insert: {
+          affected?: string
+          cause_evidence?: string
+          closed_at?: string | null
+          closed_by?: string | null
+          containment?: string
+          created_at?: string
+          created_by?: string
+          expected?: string
+          id?: string
+          number?: never
+          owner?: string
+          prevention?: string
+          problem?: string
+          reported_on?: string
+          root_cause?: string
+          severity?: string
+          source?: string
+          stage?: string
+          title: string
+          updated_at?: string
+          verification_plan?: string
+          verification_result?: string
+          verified_on?: string | null
+          version?: number
+          workspace_id: string
+        }
+        Update: {
+          affected?: string
+          cause_evidence?: string
+          closed_at?: string | null
+          closed_by?: string | null
+          containment?: string
+          created_at?: string
+          created_by?: string
+          expected?: string
+          id?: string
+          number?: never
+          owner?: string
+          prevention?: string
+          problem?: string
+          reported_on?: string
+          root_cause?: string
+          severity?: string
+          source?: string
+          stage?: string
+          title?: string
+          updated_at?: string
+          verification_plan?: string
+          verification_result?: string
+          verified_on?: string | null
+          version?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "problem_cases_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      problem_evidence: {
+        Row: {
+          case_id: string
+          created_at: string
+          created_by: string
+          file_name: string
+          id: string
+          section: string
+          storage_path: string
+        }
+        Insert: {
+          case_id: string
+          created_at?: string
+          created_by?: string
+          file_name: string
+          id?: string
+          section: string
+          storage_path: string
+        }
+        Update: {
+          case_id?: string
+          created_at?: string
+          created_by?: string
+          file_name?: string
+          id?: string
+          section?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "problem_evidence_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "problem_cases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      problem_history: {
+        Row: {
+          actor: string
+          case_id: string
+          created_at: string
+          entity: string
+          event: string
+          id: string
+          snapshot: Json
+        }
+        Insert: {
+          actor?: string
+          case_id: string
+          created_at?: string
+          entity: string
+          event: string
+          id?: string
+          snapshot: Json
+        }
+        Update: {
+          actor?: string
+          case_id?: string
+          created_at?: string
+          entity?: string
+          event?: string
+          id?: string
+          snapshot?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "problem_history_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "problem_cases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           active_takt_minutes: number
@@ -3657,6 +3869,10 @@ export type Database = {
           set_no: string
         }[]
       }
+      can_access_problem_workspace: {
+        Args: { p_workspace: string }
+        Returns: boolean
+      }
       can_edit_sop_content: { Args: { p_sop: string }; Returns: boolean }
       can_edit_sop_roster: { Args: { p_sop: string }; Returns: boolean }
       can_read_sop: { Args: { p_sop: string }; Returns: boolean }
@@ -3725,6 +3941,7 @@ export type Database = {
         Args: { dept_id: string; p_user?: string }
         Returns: boolean
       }
+      is_problem_solving_pilot: { Args: never; Returns: boolean }
       is_quality_approver: {
         Args: { p_user?: string; p_workspace: string }
         Returns: boolean

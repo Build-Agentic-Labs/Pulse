@@ -67,6 +67,7 @@ import { ProcessFlowchart } from "./process-flowchart";
 import { ResponsiblePersonsField } from "./responsible-persons-field";
 import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopPrintPreview } from "./sop-print-preview";
+import { SopFeedbackPanel, type FeedbackAction } from "./sop-feedback-panel";
 import { ReferencePdfPreview } from "./reference-pdf-preview";
 import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
 import { SopRosterEditor } from "./sop-roster-editor";
@@ -402,6 +403,8 @@ export function SopEditor({
   const [recallingReview, setRecallingReview] = useState(false);
   const [requestingFinalApproval, setRequestingFinalApproval] = useState(false);
   const [resolvingAnnotationId, setResolvingAnnotationId] = useState<string | null>(null);
+  const [feedbackCategory, setFeedbackCategory] = useState("document");
+  const feedbackScrollLockRef = useRef(false);
   const [submittingForApproval, setSubmittingForApproval] = useState(false);
   const [controlledChangeKind, setControlledChangeKind] = useState<ChangeSignificance | null>(null);
   const [controlledChangeReason, setControlledChangeReason] = useState("");
@@ -1557,6 +1560,86 @@ export function SopEditor({
     </>
   );
 
+  // --- Draft review: the document with the returned feedback beside it ---
+  const openRemarkCount = reviewAnnotations.length;
+  const waitingReviewerCount = draftReviewers.filter((reviewer) => !reviewer.submission).length;
+  const startApprovalDisabled =
+    saveDisabled ||
+    submittingForApproval ||
+    approvalRoutingLoading ||
+    !approvalRoutingReady ||
+    decisionBranchRequirements.length > 0;
+  let feedbackAction: FeedbackAction | null = null;
+  let feedbackNote = "";
+  if (finalApprovalRequested) {
+    feedbackNote = "Sent for signatures. The approvers will find it in their Review queue.";
+  } else if (sop.status === "in_review") {
+    if (!reviewGate.allResponded) {
+      feedbackNote = `Waiting on ${waitingReviewerCount} ${waitingReviewerCount === 1 ? "reviewer" : "reviewers"}.`;
+    } else if (openRemarkCount > 0) {
+      feedbackAction = {
+        label: recallingReview ? "Recalling…" : "Make changes",
+        icon: <RotateCcw size={14} />,
+        onClick: () => void handleRecallForChanges(),
+        disabled: !reviewGate.canMakeChanges,
+        busy: recallingReview,
+      };
+      feedbackNote = "Takes the draft back so you can edit it and address the remarks.";
+    } else {
+      feedbackAction = {
+        label: requestingFinalApproval ? "Sending…" : "Send for final approval",
+        icon: <ShieldCheck size={14} />,
+        onClick: () => void handleRequestFinalApproval(),
+        busy: requestingFinalApproval,
+      };
+      feedbackNote = "Every remark is addressed. The approvers sign next.";
+    }
+  } else if (sop.status === "draft" && canEdit) {
+    feedbackAction = {
+      label: submittingForApproval ? "Sending…" : reviewGate.allResponded ? "Send for signatures" : "Send for review",
+      icon: <ShieldCheck size={14} />,
+      onClick: () => void handleStartApproval(),
+      disabled: startApprovalDisabled || openRemarkCount > 0,
+      busy: submittingForApproval,
+      title: openRemarkCount > 0 ? "Address every returned remark first" : undefined,
+    };
+    feedbackNote =
+      openRemarkCount > 0
+        ? `${openRemarkCount} ${openRemarkCount === 1 ? "remark" : "remarks"} left to address.`
+        : "Every remark is addressed.";
+  }
+
+  function focusFeedbackCategory(category: string) {
+    setFeedbackCategory(category);
+    feedbackScrollLockRef.current = true;
+    document
+      .querySelector<HTMLElement>(`.sop-preview-scroll [data-review-category="${category}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => {
+      feedbackScrollLockRef.current = false;
+    }, 700);
+  }
+
+  function leaveFeedbackView() {
+    const draftReviewIndex = steps.findIndex((entry) => entry.id === "draftReview");
+    void handleStepSelect(Math.max(0, draftReviewIndex - 1));
+  }
+
+  const feedbackPanel = (
+    <SopFeedbackPanel
+      reviewers={draftReviewers}
+      remarks={reviewAnnotations}
+      activeCategory={feedbackCategory}
+      canResolve={sop.status === "draft" && canEdit}
+      resolvingId={resolvingAnnotationId}
+      note={feedbackNote}
+      action={feedbackAction}
+      onFocusCategory={focusFeedbackCategory}
+      onEditSection={openRemarkSection}
+      onResolve={(annotationId) => void handleMarkRemarkAddressed(annotationId)}
+    />
+  );
+
   const sidebar = (
     <>
       <div className="ui-nav-section">SOP Builder</div>
@@ -2106,164 +2189,18 @@ export function SopEditor({
             ) : null}
 
             {step.id === "draftReview" ? (
-              <div className="space-y-5">
-                <section className="ui-panel overflow-hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <MessageSquare size={14} className="text-ink-secondary" />
-                        <h2 className="ui-setup-section-title">Draft review</h2>
-                      </div>
-                      <p className="mt-1 text-xs text-ink-tertiary">
-                        {sop.status === "in_review"
-                          ? "Track each reviewer and read the remarks returned on this draft."
-                          : "Work through the returned remarks, then send the updated draft for a new review."}
-                      </p>
-                    </div>
-                    {sop.status === "in_review" && draftReviewers.length && !finalApprovalRequested ? (
-                      <button
-                        type="button"
-                        className="ui-btn-primary h-9 gap-2 px-4 disabled:opacity-50"
-                        onClick={() => void handleRecallForChanges()}
-                        disabled={recallingReview || !reviewGate.canMakeChanges}
-                        title={
-                          reviewGate.reason === "waiting"
-                            ? "Available once every reviewer has responded."
-                            : reviewGate.reason === "approved"
-                              ? "Every reviewer returned no changes needed — send for final approval instead."
-                              : "Recall the draft to address the returned feedback."
-                        }
-                      >
-                        {recallingReview ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                        {recallingReview ? "Recalling…" : "Make changes"}
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="divide-y divide-line">
-                    {draftReviewers.length ? draftReviewers.map((reviewer) => {
-                      const status = !reviewer.submission
-                        ? "Reviewing"
-                        : reviewer.submission.noChanges
-                          ? "No changes needed"
-                          : "Changes requested";
-                      const statusClass = !reviewer.submission
-                        ? "bg-zinc-400"
-                        : reviewer.submission.noChanges
-                          ? "bg-emerald-600"
-                          : "bg-red-600";
-                      return (
-                        <div key={reviewer.userId} className="flex items-center gap-3 px-4 py-3">
-                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusClass}`} aria-hidden />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-ink">{reviewer.name}</p>
-                            <p className="mt-0.5 text-xs text-ink-tertiary">{status}</p>
-                          </div>
-                          {reviewer.submission ? (
-                            <span className="shrink-0 text-xs tabular-nums text-ink-tertiary">
-                              {formatReviewDate(reviewer.submission.submittedAt)}
-                            </span>
-                          ) : null}
-                        </div>
-                      );
-                    }) : (
-                      <p className="px-4 py-8 text-center text-xs text-ink-tertiary">
-                        Reviewer assignments are still being prepared.
-                      </p>
-                    )}
-                  </div>
-                </section>
-
-                {finalApprovalReady || finalApprovalRequested ? (
-                  <section className="ui-panel overflow-hidden">
-                    <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-4">
-                      <div className="flex min-w-0 items-start gap-3">
-                        <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
-                        <div>
-                          <h2 className="ui-setup-section-title">
-                            {finalApprovalRequested ? "Final approval requested" : "Draft review complete"}
-                          </h2>
-                          <p className="mt-1 text-xs leading-5 text-ink-tertiary">
-                            {finalApprovalRequested
-                              ? "The required approvers can now find this SOP under Final approval in their Review Queue."
-                              : reviewGate.changesRequested
-                                ? "Every reviewer has responded and the returned remarks are addressed. Send the current document to its formal approvers."
-                                : "Every reviewer returned No changes needed. Send the current document to its formal approvers."}
-                          </p>
-                        </div>
-                      </div>
-                      {finalApprovalRequested ? (
-                        <span className="ui-chip shrink-0 border-emerald-600 text-emerald-700">Sent</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="ui-btn-primary h-9 shrink-0 gap-2 px-4 disabled:opacity-50"
-                          onClick={() => void handleRequestFinalApproval()}
-                          disabled={requestingFinalApproval}
-                        >
-                          {requestingFinalApproval
-                            ? <Loader2 size={14} className="animate-spin" />
-                            : <ShieldCheck size={14} />}
-                          {requestingFinalApproval ? "Sending…" : "Send for final approval"}
-                        </button>
-                      )}
-                    </div>
-                  </section>
-                ) : null}
-
-                <section className="ui-panel overflow-hidden">
-                  <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-                    <h2 className="ui-setup-section-title">Returned remarks</h2>
-                    {reviewAnnotations.length ? (
-                      <span className="ui-chip">{reviewAnnotations.length}</span>
-                    ) : null}
-                  </div>
-                  {reviewAnnotations.length ? (
-                    <div className="divide-y divide-line">
-                      {reviewAnnotations.map((annotation) => (
-                        <div key={annotation.id} className="grid gap-3 px-4 py-3 sm:grid-cols-[10rem_1fr_auto] sm:items-center">
-                          <span className="ui-chip w-fit">
-                            {REVIEW_CATEGORY_LABELS[annotation.category] ?? "Overall remarks"}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-xs leading-5 text-ink">{annotation.body}</p>
-                            <p className="mt-1 text-[11px] text-ink-tertiary">{annotation.authorName}</p>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                            <button
-                              type="button"
-                              className="ui-btn-ghost h-8 px-3"
-                              onClick={() => openRemarkSection(annotation.category)}
-                            >
-                              Open section
-                            </button>
-                            {sop.status === "draft" && canEdit ? (
-                              <button
-                                type="button"
-                                className="ui-btn-ghost h-8 gap-1.5 px-3 text-emerald-700 disabled:opacity-50"
-                                onClick={() => void handleMarkRemarkAddressed(annotation.id)}
-                                disabled={Boolean(resolvingAnnotationId)}
-                              >
-                                {resolvingAnnotationId === annotation.id
-                                  ? <Loader2 size={13} className="animate-spin" />
-                                  : <CircleCheck size={13} />}
-                                Addressed
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="px-4 py-8 text-center">
-                      <p className="text-sm font-medium text-ink">No remarks returned</p>
-                      <p className="mt-1 text-xs text-ink-tertiary">
-                        Reviewer progress will continue to update here while the SOP is in review.
-                      </p>
-                    </div>
-                  )}
-                </section>
-
-              </div>
+              <SopPrintPreview
+                sop={renderedSop}
+                departmentCode={selectedDept?.code}
+                annexFiles={annexFiles}
+                mode="review"
+                toolbarNote="Returned feedback · address each remark, then send it on"
+                reviewPanel={feedbackPanel}
+                onReviewCategoryChange={(category) => {
+                  if (!feedbackScrollLockRef.current) setFeedbackCategory(category);
+                }}
+                onClose={leaveFeedbackView}
+              />
             ) : null}
 
             {step.id === "finalApproval" ? (

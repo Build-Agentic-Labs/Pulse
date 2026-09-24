@@ -268,6 +268,7 @@ export function SopPrintPreview({
   onAnnotate,
   onSelectAnnotation,
   reviewPanel,
+  toolbarNote,
   onReviewCategoryChange,
   approvalRefreshKey = 0,
   revealSignatureId,
@@ -287,6 +288,8 @@ export function SopPrintPreview({
   onAnnotate?: (pageNumber: number, xPercent: number, yPercent: number) => void;
   onSelectAnnotation?: (annotationId: string) => void;
   reviewPanel?: ReactNode;
+  /** Replaces the mode's default toolbar note (e.g. the author reading returned feedback). */
+  toolbarNote?: string;
   onReviewCategoryChange?: (category: string) => void;
   approvalRefreshKey?: number;
   revealSignatureId?: string | null;
@@ -974,9 +977,9 @@ export function SopPrintPreview({
           </span>
           {mode === "review" || mode === "approval" ? (
             <span className="ui-mono-label shrink-0 text-ink-tertiary">
-              {mode === "review"
+              {toolbarNote ?? (mode === "review"
                 ? "Draft PDF review · add section remarks in the review panel"
-                : "Final approval · review the controlled PDF and add your digital signature"}
+                : "Final approval · review the controlled PDF and add your digital signature")}
             </span>
           ) : null}
         </div>

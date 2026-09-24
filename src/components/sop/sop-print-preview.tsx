@@ -23,6 +23,7 @@ import { buildProcedureSvgPages } from "@/lib/sop/procedure-flow-image";
 import type { SopReviewAnnotation } from "@/lib/sop/review-annotations";
 import { buildPrintBlocks, type PrintBlock, type PrintBlockExtras } from "./print-blocks";
 import { usePaginatedPages } from "./use-paginated-pages";
+import { MarginNotesColumn, type MarginNote } from "./sop-margin-notes";
 
 interface RenderedAnnexPage {
   fileId: string;
@@ -135,6 +136,9 @@ function DocumentPage({
  * Screen-only highlight for flagged review sections: a warm wash with a left rule, so a remark's
  * section stands out while the page itself still reads as the controlled document.
  */
+const MARGIN_COLUMN_PX = 340;
+const MARGIN_GAP_PX = 24;
+
 function highlightCss(categories: readonly string[]): string {
   const selectors = categories
     .filter((category) => /^[a-z_]+$/.test(category))
@@ -288,6 +292,8 @@ export function SopPrintPreview({
   reviewPanel,
   toolbarNote,
   highlightCategories,
+  marginNotes,
+  toolbarActions,
   onReviewCategoryChange,
   approvalRefreshKey = 0,
   revealSignatureId,
@@ -311,6 +317,10 @@ export function SopPrintPreview({
   toolbarNote?: string;
   /** Review categories to highlight on screen (never in print) — e.g. sections with open remarks. */
   highlightCategories?: readonly string[];
+  /** Comments pinned in the margin beside their sections (replaces a side panel). */
+  marginNotes?: MarginNote[];
+  /** Extra toolbar controls, placed before the close button. */
+  toolbarActions?: ReactNode;
   onReviewCategoryChange?: (category: string) => void;
   approvalRefreshKey?: number;
   revealSignatureId?: string | null;
@@ -349,6 +359,8 @@ export function SopPrintPreview({
   const previewRootRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [pageScale, setPageScale] = useState(1);
+  const pagesRef = useRef<HTMLDivElement | null>(null);
+  const hasMarginNotes = Boolean(marginNotes?.length);
   const [flowRendererReady, setFlowRendererReady] = useState(false);
   // Block ids already warned about this mount — re-measures (debounced edits,
   // resize) repeat the same overflowing block on every pass otherwise.
@@ -547,13 +559,14 @@ export function SopPrintPreview({
       // Floored at 0.1: a clientWidth at or below the 32px padding allowance
       // (e.g. a collapsed/hidden container mid-layout) would otherwise divide
       // out to zero or negative, and `zoom: 0` collapses the pages entirely.
-      setPageScale(Math.max(0.1, Math.min(1, (scrollEl.clientWidth - 32) / PAGE_WIDTH_PX)));
+      const reserved = 32 + (hasMarginNotes ? MARGIN_COLUMN_PX + MARGIN_GAP_PX : 0);
+      setPageScale(Math.max(0.1, Math.min(1, (scrollEl.clientWidth - reserved) / PAGE_WIDTH_PX)));
     };
     updateScale();
     const observer = new ResizeObserver(updateScale);
     observer.observe(scrollEl);
     return () => observer.disconnect();
-  }, []);
+  }, [hasMarginNotes]);
 
   // A page the packer could not split anything on gets flagged rather than
   // silently clipped (see `.sop-print-page-overflowing` below); this is the
@@ -820,6 +833,9 @@ export function SopPrintPreview({
           background: var(--color-surface, #fff); border-left: 1px solid var(--color-line, #ddd);
         }
         .sop-print-pages { display: grid; gap: 24px; justify-content: center; }
+        .sop-pages-row { display: flex; align-items: flex-start; justify-content: center; gap: ${MARGIN_GAP_PX}px; }
+        .sop-margin-notes { position: relative; flex: none; width: ${MARGIN_COLUMN_PX}px; }
+        .sop-margin-note { position: absolute; left: 0; right: 0; transition: top 120ms ease; }
         .sop-print-page {
           box-sizing: border-box; width: 8.5in; height: 11in; overflow: hidden;
           display: flex; flex-direction: column;
@@ -975,6 +991,8 @@ export function SopPrintPreview({
              Without this, a review-mode window narrower than ~1360px prints
              every page shrunk by whatever scale the screen last computed. */
           .sop-print-pages { display: block; zoom: 1 !important; }
+          .sop-pages-row { display: block; }
+          .sop-margin-notes { display: none !important; }
           .sop-print-page {
             width: 8.5in; height: 11in; min-height: 11in; margin: 0;
             padding: 0.52in 0.75in 0.42in; box-shadow: none;
@@ -1012,6 +1030,7 @@ export function SopPrintPreview({
               Save as PDF
             </button>
           ) : null}
+          {toolbarActions}
           <button type="button" className="ui-btn-ghost h-9 w-9 px-0" onClick={onClose} aria-label="Close preview">
             <X size={16} className="mx-auto" />
           </button>
@@ -1026,12 +1045,15 @@ export function SopPrintPreview({
           onClick={(event) => {
             const target = event.target;
             if (target instanceof HTMLElement &&
-              (target === event.currentTarget || target.classList.contains("sop-print-pages"))) {
+              (target === event.currentTarget ||
+                target.classList.contains("sop-print-pages") ||
+                target.classList.contains("sop-pages-row"))) {
               onClose();
             }
           }}
         >
-          <div className="sop-print-pages" style={{ zoom: pageScale }}>
+          <div className="sop-pages-row">
+          <div className="sop-print-pages" ref={pagesRef} style={{ zoom: pageScale }}>
           {fallback ? (
             <>
               {/* Fallback pages carry the overflowing class so the pre-pagination
@@ -1293,6 +1315,8 @@ export function SopPrintPreview({
             );
           })}
           {mode === "review" ? <div data-review-category="overall" className="h-px" /> : null}
+          </div>
+          {marginNotes?.length ? <MarginNotesColumn notes={marginNotes} pagesRef={pagesRef} /> : null}
           </div>
         </div>
         {reviewPanel ? <aside className="sop-review-panel">{reviewPanel}</aside> : null}

@@ -67,7 +67,8 @@ import { ProcessFlowchart } from "./process-flowchart";
 import { ResponsiblePersonsField } from "./responsible-persons-field";
 import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopPrintPreview } from "./sop-print-preview";
-import { SopFeedbackPanel, type FeedbackAction } from "./sop-feedback-panel";
+import { SopRemarkCard } from "./sop-feedback-panel";
+import type { MarginNote } from "./sop-margin-notes";
 import { ReferencePdfPreview } from "./reference-pdf-preview";
 import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
 import { SopRosterEditor } from "./sop-roster-editor";
@@ -403,8 +404,8 @@ export function SopEditor({
   const [recallingReview, setRecallingReview] = useState(false);
   const [requestingFinalApproval, setRequestingFinalApproval] = useState(false);
   const [resolvingAnnotationId, setResolvingAnnotationId] = useState<string | null>(null);
-  const [feedbackCategory, setFeedbackCategory] = useState("document");
-  const feedbackScrollLockRef = useRef(false);
+  /** The remark card whose section editor is open in the review margin. */
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [submittingForApproval, setSubmittingForApproval] = useState(false);
   const [controlledChangeKind, setControlledChangeKind] = useState<ChangeSignificance | null>(null);
   const [controlledChangeReason, setControlledChangeReason] = useState("");
@@ -1560,6 +1561,77 @@ export function SopEditor({
     </>
   );
 
+  // One editor per section, shared by the builder steps and the review margin cards.
+  const sectionEditors = {
+    purpose: (
+      <AutoTextarea
+        className="ui-field-standalone min-h-20 py-2"
+        value={sop.purpose}
+        placeholder="Define the purpose of this process"
+        disabled={!canEdit}
+        onChange={(event) => update({ purpose: event.target.value })}
+      />
+    ),
+    scope: (
+      <AutoTextarea
+        className="ui-field-standalone min-h-20 py-2"
+        value={sop.scope}
+        placeholder="For which products, processes or areas this applies"
+        disabled={!canEdit}
+        onChange={(event) => update({ scope: event.target.value })}
+      />
+    ),
+    definitions: (
+      <PairListEditor
+        rows={sop.definitions}
+        keyLabel="Term"
+        valueLabel="Definition"
+        keyName="term"
+        valueName="definition"
+        disabled={!canEdit}
+        onChange={(definitions) => update({ definitions })}
+      />
+    ),
+    references: (
+      <ReferenceLibraryEditor
+        references={sop.references}
+        links={sop.linkedSops}
+        docs={sop.referenceDocs}
+        files={referenceFileByDocId}
+        options={(linkableSops ?? []).filter(
+          (item) => item.id !== sop.id && item.status === "effective",
+        )}
+        loading={linkableSops === undefined && !linkableSopsError}
+        error={linkableSopsError || referenceDocError}
+        disabled={!canEdit}
+        uploading={uploadingReferenceDoc}
+        onChangeReferences={(references) => update({ references })}
+        onChangeLinks={(linkedSops) => update({ linkedSops })}
+        onRenameDoc={(id, name) => update({
+          referenceDocs: sop.referenceDocs.map((doc) => doc.id === id ? { ...doc, name } : doc),
+        })}
+        onUpload={(file) => void handleReferenceDocUpload(file)}
+        onOpenDoc={(doc) => void handleReferenceDocOpen(doc)}
+        onRemoveDoc={(doc) => void handleReferenceDocRemove(doc)}
+      />
+    ),
+    responsible: (
+      <ResponsiblePersonsField
+        entries={sop.responsiblePersons}
+        disabled={!canEdit}
+        onChange={(responsiblePersons) => update({ responsiblePersons })}
+      />
+    ),
+    measurements: (
+      <StringListEditor
+        items={sop.measurements}
+        placeholder="e.g. % of released SOPs"
+        disabled={!canEdit}
+        onChange={(measurements) => update({ measurements })}
+      />
+    ),
+  };
+
   // --- Draft review: the document with the returned feedback beside it ---
   const openRemarkCount = reviewAnnotations.length;
   const flaggedCategories = Array.from(
@@ -1572,7 +1644,14 @@ export function SopEditor({
     approvalRoutingLoading ||
     !approvalRoutingReady ||
     decisionBranchRequirements.length > 0;
-  let feedbackAction: FeedbackAction | null = null;
+  let feedbackAction: {
+    label: string;
+    icon: ReactNode;
+    onClick: () => void;
+    disabled?: boolean;
+    busy?: boolean;
+    title?: string;
+  } | null = null;
   let feedbackNote = "";
   if (finalApprovalRequested) {
     feedbackNote = "Sent for signatures. The approvers will find it in their Review queue.";
@@ -1612,35 +1691,65 @@ export function SopEditor({
         : "Every remark is addressed.";
   }
 
-  function focusFeedbackCategory(category: string) {
-    setFeedbackCategory(category);
-    feedbackScrollLockRef.current = true;
-    document
-      .querySelector<HTMLElement>(`.sop-preview-scroll [data-review-category="${category}"]`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    window.setTimeout(() => {
-      feedbackScrollLockRef.current = false;
-    }, 700);
-  }
-
   function leaveFeedbackView() {
     const draftReviewIndex = steps.findIndex((entry) => entry.id === "draftReview");
+    setEditingCategory(null);
     void handleStepSelect(Math.max(0, draftReviewIndex - 1));
   }
 
-  const feedbackPanel = (
-    <SopFeedbackPanel
-      reviewers={draftReviewers}
-      remarks={reviewAnnotations}
-      activeCategory={feedbackCategory}
-      canResolve={sop.status === "draft" && canEdit}
-      resolvingId={resolvingAnnotationId}
-      note={feedbackNote}
-      action={feedbackAction}
-      onFocusCategory={focusFeedbackCategory}
-      onEditSection={openRemarkSection}
-      onResolve={(annotationId) => void handleMarkRemarkAddressed(annotationId)}
-    />
+  const remarkEditable = sop.status === "draft" && canEdit;
+  const remarkLockedReason =
+    sop.status === "in_review"
+      ? reviewGate.allResponded
+        ? "Choose Make changes to edit the draft and address this."
+        : "You can edit once every reviewer has responded."
+      : "";
+  const remarkMarginNotes: MarginNote[] = flaggedCategories.map((category) => ({
+    key: category,
+    category,
+    node: (
+      <SopRemarkCard
+        label={REVIEW_CATEGORY_LABELS[category] ?? "Overall remarks"}
+        remarks={reviewAnnotations.filter((annotation) => (annotation.category || "overall") === category)}
+        editor={sectionEditors[category as keyof typeof sectionEditors] ?? null}
+        editing={editingCategory === category}
+        editable={remarkEditable}
+        lockedReason={remarkLockedReason}
+        resolvingId={resolvingAnnotationId}
+        onToggleEdit={() => setEditingCategory((current) => (current === category ? null : category))}
+        onOpenInBuilder={() => openRemarkSection(category)}
+        onResolve={(annotationId) => void handleMarkRemarkAddressed(annotationId)}
+      />
+    ),
+  }));
+  const reviewerSummary = draftReviewers
+    .map((reviewer) => {
+      const state = !reviewer.submission
+        ? "reviewing"
+        : reviewer.submission.noChanges
+          ? "no changes needed"
+          : "changes requested";
+      return `${reviewer.name}: ${state}`;
+    })
+    .join(" · ");
+  const feedbackToolbar = (
+    <>
+      <span className="hidden max-w-[16rem] truncate text-[11px] text-ink-tertiary lg:inline" title={feedbackNote}>
+        {feedbackNote}
+      </span>
+      {feedbackAction ? (
+        <button
+          type="button"
+          className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4 disabled:opacity-40"
+          disabled={feedbackAction.disabled || feedbackAction.busy}
+          title={feedbackAction.title ?? feedbackNote}
+          onClick={feedbackAction.onClick}
+        >
+          {feedbackAction.busy ? <Loader2 size={14} className="animate-spin" /> : feedbackAction.icon}
+          {feedbackAction.label}
+        </button>
+      ) : null}
+    </>
   );
 
   const sidebar = (
@@ -2007,56 +2116,16 @@ export function SopEditor({
             {step.id === "overview" ? (
               <>
                 <Section title="Purpose" reviewAttention={reviewCategoriesNeedingAttention.has("purpose")}>
-                  <AutoTextarea
-                    className="ui-field-standalone min-h-20 py-2"
-                    value={sop.purpose}
-                    placeholder="Define the purpose of this process"
-                    disabled={!canEdit}
-                    onChange={(event) => update({ purpose: event.target.value })}
-                  />
+                  {sectionEditors.purpose}
                 </Section>
                 <Section title="Scope" reviewAttention={reviewCategoriesNeedingAttention.has("scope")}>
-                  <AutoTextarea
-                    className="ui-field-standalone min-h-20 py-2"
-                    value={sop.scope}
-                    placeholder="For which products, processes or areas this applies"
-                    disabled={!canEdit}
-                    onChange={(event) => update({ scope: event.target.value })}
-                  />
+                  {sectionEditors.scope}
                 </Section>
                 <Section title="Definitions" reviewAttention={reviewCategoriesNeedingAttention.has("definitions")}>
-                  <PairListEditor
-                    rows={sop.definitions}
-                    keyLabel="Term"
-                    valueLabel="Definition"
-                    keyName="term"
-                    valueName="definition"
-                    disabled={!canEdit}
-                    onChange={(definitions) => update({ definitions })}
-                  />
+                  {sectionEditors.definitions}
                 </Section>
                 <Section title="References" hideHeading reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
-                  <ReferenceLibraryEditor
-                    references={sop.references}
-                    links={sop.linkedSops}
-                    docs={sop.referenceDocs}
-                    files={referenceFileByDocId}
-                    options={(linkableSops ?? []).filter(
-                      (item) => item.id !== sop.id && item.status === "effective",
-                    )}
-                    loading={linkableSops === undefined && !linkableSopsError}
-                    error={linkableSopsError || referenceDocError}
-                    disabled={!canEdit}
-                    uploading={uploadingReferenceDoc}
-                    onChangeReferences={(references) => update({ references })}
-                    onChangeLinks={(linkedSops) => update({ linkedSops })}
-                    onRenameDoc={(id, name) => update({
-                      referenceDocs: sop.referenceDocs.map((doc) => doc.id === id ? { ...doc, name } : doc),
-                    })}
-                    onUpload={(file) => void handleReferenceDocUpload(file)}
-                    onOpenDoc={(doc) => void handleReferenceDocOpen(doc)}
-                    onRemoveDoc={(doc) => void handleReferenceDocRemove(doc)}
-                  />
+                  {sectionEditors.references}
                 </Section>
               </>
             ) : null}
@@ -2067,22 +2136,13 @@ export function SopEditor({
                   title="Responsible person(s)"
                   reviewAttention={reviewCategoriesNeedingAttention.has("responsible")}
                 >
-                  <ResponsiblePersonsField
-                    entries={sop.responsiblePersons}
-                    disabled={!canEdit}
-                    onChange={(responsiblePersons) => update({ responsiblePersons })}
-                  />
+                  {sectionEditors.responsible}
                 </Section>
                 <Section
                   title="Measurement (KPIs)"
                   reviewAttention={reviewCategoriesNeedingAttention.has("measurements")}
                 >
-                  <StringListEditor
-                    items={sop.measurements}
-                    placeholder="e.g. % of released SOPs"
-                    disabled={!canEdit}
-                    onChange={(measurements) => update({ measurements })}
-                  />
+                  {sectionEditors.measurements}
                 </Section>
                 <Section title="Procedure" reviewAttention={reviewCategoriesNeedingAttention.has("procedure")}>
                   <Field label="Process flow description" optional>
@@ -2197,12 +2257,10 @@ export function SopEditor({
                 departmentCode={selectedDept?.code}
                 annexFiles={annexFiles}
                 mode="review"
-                toolbarNote="Returned feedback · address each remark, then send it on"
+                toolbarNote={reviewerSummary || "Returned feedback"}
                 highlightCategories={flaggedCategories}
-                reviewPanel={feedbackPanel}
-                onReviewCategoryChange={(category) => {
-                  if (!feedbackScrollLockRef.current) setFeedbackCategory(category);
-                }}
+                marginNotes={remarkMarginNotes}
+                toolbarActions={feedbackToolbar}
                 onClose={leaveFeedbackView}
               />
             ) : null}

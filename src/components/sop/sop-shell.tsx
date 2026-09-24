@@ -99,7 +99,7 @@ export function SopShell({
           </nav>
         </aside>
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           <div ref={contentRef} className="h-full overflow-auto bg-canvas p-4 md:p-6 lg:rounded-tl-2xl">
             {children}
           </div>

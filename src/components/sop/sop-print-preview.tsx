@@ -294,6 +294,7 @@ export function SopPrintPreview({
   highlightCategories,
   marginNotes,
   toolbarActions,
+  embedded = false,
   onReviewCategoryChange,
   approvalRefreshKey = 0,
   revealSignatureId,
@@ -321,6 +322,11 @@ export function SopPrintPreview({
   marginNotes?: MarginNote[];
   /** Extra toolbar controls, placed before the close button. */
   toolbarActions?: ReactNode;
+  /**
+   * Fill the page's content area (below the app header, beside its sidebar) instead of covering
+   * the whole window — for a preview that *is* the step, not a pop-over on top of it.
+   */
+  embedded?: boolean;
   onReviewCategoryChange?: (category: string) => void;
   approvalRefreshKey?: number;
   revealSignatureId?: string | null;
@@ -789,7 +795,13 @@ export function SopPrintPreview({
   }, [formFiles]);
 
   return (
-    <div ref={previewRootRef} className="sop-preview-overlay" role="dialog" aria-modal="true" aria-label="SOP document preview">
+    <div
+      ref={previewRootRef}
+      className={`sop-preview-overlay${embedded ? " sop-preview-embedded" : ""}`}
+      role={embedded ? "region" : "dialog"}
+      aria-modal={embedded ? undefined : true}
+      aria-label="SOP document preview"
+    >
       {highlightCategories?.length ? <style>{highlightCss(highlightCategories)}</style> : null}
       <style>{`
         .sop-preview-overlay {
@@ -802,6 +814,16 @@ export function SopPrintPreview({
           display: flex; align-items: center; justify-content: space-between;
           gap: 12px; padding: 10px 16px; flex: none;
           background: var(--color-surface, #fff); border-bottom: 1px solid var(--color-line, #ddd);
+        }
+        .sop-preview-overlay.sop-preview-embedded {
+          position: absolute; z-index: 10;
+          background: var(--color-surface-sunken, #f4f4f5);
+        }
+        @media (min-width: 1024px) {
+          .sop-preview-overlay.sop-preview-embedded { border-top-left-radius: 1rem; overflow: hidden; }
+        }
+        .sop-preview-embedded .sop-preview-bar {
+          background: var(--color-canvas, #fff); padding: 12px 24px;
         }
         .sop-preview-doc-id {
           min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1044,7 +1066,7 @@ export function SopPrintPreview({
           onScroll={handleReviewScroll}
           onClick={(event) => {
             const target = event.target;
-            if (target instanceof HTMLElement &&
+            if (!embedded && target instanceof HTMLElement &&
               (target === event.currentTarget ||
                 target.classList.contains("sop-print-pages") ||
                 target.classList.contains("sop-pages-row"))) {

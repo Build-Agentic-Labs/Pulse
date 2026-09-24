@@ -2260,6 +2260,7 @@ export function SopEditor({
                 toolbarNote={reviewerSummary || "Returned feedback"}
                 highlightCategories={flaggedCategories}
                 marginNotes={remarkMarginNotes}
+                embedded
                 toolbarActions={feedbackToolbar}
                 onClose={leaveFeedbackView}
               />

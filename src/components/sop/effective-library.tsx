@@ -5,7 +5,7 @@ import { listNumberLabel } from "@/domain/sop/authoring";
 import { formatDate } from "@/domain/formatting";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { QuietLoading } from "@/components/quiet-loading";
+import { QualitySkeleton } from "./quality-skeleton";
 import type { Department } from "@/domain/departments";
 import { SOP_STATUS_LABELS } from "@/domain/sop/schema";
 import { listDepartments } from "@/lib/departments/store";
@@ -126,7 +126,7 @@ export function EffectiveLibrary({
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
-        <QuietLoading active={active} label="Loading effective SOPs" />
+        <QualitySkeleton active={active} label="Loading effective SOPs" />
       ) : listStatus === "error" ? (
         <section className="ui-empty-state">
           <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load effective SOPs."}</p>

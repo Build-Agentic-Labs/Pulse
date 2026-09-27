@@ -25,6 +25,8 @@ import { getServerAuthContext } from "@/lib/supabase/request-context";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type InitialSopWorkspaceData = {
+  userId?: string;
+  problemPilotAllowed?: boolean;
   groups: WorkspaceProjectGroup[];
   orgToolAccess: AccessLevel;
   workspaceId?: string;
@@ -155,7 +157,10 @@ export async function fetchInitialSopWorkspaceData(): Promise<InitialSopWorkspac
       return undefined;
     }
 
-    const groups = await fetchInitialWorkspaceGroups();
+    const [groups, pilot] = await Promise.all([
+      fetchInitialWorkspaceGroups(),
+      supabase.rpc("is_problem_solving_pilot"),
+    ]);
     if (!groups) return undefined;
     const requestedWorkspaceId = cookieStore.get(SOP_WORKSPACE_COOKIE)?.value;
     const workspaceId =
@@ -166,7 +171,7 @@ export async function fetchInitialSopWorkspaceData(): Promise<InitialSopWorkspac
       ? await fetchOrgToolAccess(workspaceId, supabase).catch(() => "none" as const)
       : "none";
 
-    return { groups, orgToolAccess, workspaceId };
+    return { groups, orgToolAccess, workspaceId, userId: user.id, problemPilotAllowed: !pilot.error && pilot.data === true };
   } catch {
     return undefined;
   }

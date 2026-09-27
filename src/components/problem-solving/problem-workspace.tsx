@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEventHandler } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useConfirm } from "@/components/confirm-provider";
 import { ArrowLeft, CheckCircle2, ClipboardList, LayoutDashboard, Plus, Search } from "lucide-react";
+import { QualitySkeleton } from "@/components/sop/quality-skeleton";
 import { SopShell } from "@/components/sop/sop-shell";
 import { useSopWorkspace } from "@/components/sop/sop-workspace-provider";
 import { formatDateTime } from "@/domain/formatting";
@@ -71,12 +72,7 @@ function Workspace({ workspaceId, initial }: { workspaceId?: string; initial?: I
   const closed = cases.filter(c => c.stage === "closed");
   const overdue = actions.filter(a => open.some(c => c.id === a.case_id) && isOverdue(a, today));
   const visible = (tab === "closed" ? closed : tab === "open" ? open : cases).filter(c => `${caseLabel(c.number)} ${c.title} ${c.source} ${c.owner}`.toLowerCase().includes(search.toLowerCase()));
-  const sidebar = <>
-    <Link href="/sops" className="ui-nav-item ui-nav-item-idle" onClick={async e => { e.preventDefault(); if (await leave()) router.push("/sops"); }}><ArrowLeft size={15} />Quality / SOPs</Link>
-    <div className="ui-nav-section mt-4">Problem Solving</div>
-    {([ ["dashboard", "Dashboard", LayoutDashboard], ["open", "Open", ClipboardList], ["closed", "Closed", CheckCircle2] ] as const).map(([key, label, Icon]) => <button type="button" key={key} onClick={() => navigate(key)} className={`ui-nav-item w-full ${tab === key ? "ui-nav-item-active" : "ui-nav-item-idle"}`}><Icon size={15} />{label}<span className="ml-auto">{key === "open" ? open.length : key === "closed" ? closed.length : ""}</span></button>)}
-    <p className="ps-pilot-note">Private pilot · rlopez</p>
-  </>;
+  const sidebar = <ProblemSidebar tab={tab} navigate={navigate} openCount={open.length} closedCount={closed.length} onBack={async e => { e.preventDefault(); if (await leave()) router.push("/sops"); }} />;
   return <SopShell sidebar={sidebar} crumb="Quality / Problem Solving" confirmLeave={leave}>
     <div className="ps-workspace" data-keyboard-navigation={keyboardNavigation}>
       {selected ? <ProblemCaseForm key={selected.id} initial={selected} onDirty={value => { dirty.current = value; }} onBack={() => navigate(tab)} onSaved={row => { setSelected(row); setCases(current => current.map(c => c.id === row.id ? row : c)); void refresh(); }} /> : <>
@@ -92,9 +88,23 @@ function Workspace({ workspaceId, initial }: { workspaceId?: string; initial?: I
         </div>}
         {tab === "dashboard" && overdue.length > 0 && <section className="ps-panel ps-attention"><h2>Actions needing attention</h2>{overdue.map(a => <button key={a.id} onClick={() => setSelected(cases.find(c => c.id === a.case_id) ?? null)}><span>{a.description}<small>{a.owner} · Due {a.due_on}</small></span><span className="ps-danger">Overdue →</span></button>)}</section>}
         <section className="ps-panel"><div className="ps-list-heading"><h2>{tab === "dashboard" ? "Recent cases" : tab === "open" ? "Open cases" : "Closed cases"}</h2><label className="ps-search"><Search size={15} /><span className="sr-only">Search cases</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search cases, customers or owners" /></label></div>
-          {loading ? <p className="ps-empty" role="status">Loading cases…</p> : !workspaceId ? <p className="ps-empty">Select a Quality workspace to get started.</p> : !visible.length ? <div className="ps-empty"><ClipboardList size={30} /><h3>{search ? "No matching cases" : tab === "closed" ? "No closed cases yet" : "No cases yet"}</h3><p>{search ? "Try a different search." : tab === "closed" ? "Cases appear here after effectiveness verification and sign-off." : "Create a case to capture the problem, evidence and actions in one place."}</p></div> : <div className="ps-table-wrap"><table><thead><tr><th>Case / problem</th><th>Customer / source</th><th>Owner</th><th>Stage</th><th>Actions</th><th>Updated</th></tr></thead><tbody>{visible.map(c => { const tasks = actions.filter(a => a.case_id === c.id); const late = tasks.filter(a => isOverdue(a,today)); return <tr key={c.id}><td><button className="ps-case-link" onClick={() => setSelected(c)}><small>{caseLabel(c.number)}</small>{c.title}</button></td><td>{c.source || "—"}</td><td>{c.owner || "Unassigned"}</td><td><span className={`ps-badge ${c.stage === "closed" ? "ps-done" : ""}`}>{stageLabels[c.stage]}</span></td><td>{tasks.filter(a => a.status === "done").length}/{tasks.length}{late.length > 0 && <small className="ps-danger">{late.length} overdue</small>}</td><td>{formatDateTime(c.updated_at)}</td></tr>; })}</tbody></table></div>}
+          {loading ? <QualitySkeleton label="Loading cases" /> : !workspaceId ? <p className="ps-empty">Select a Quality workspace to get started.</p> : !visible.length ? <div className="ps-empty"><ClipboardList size={30} /><h3>{search ? "No matching cases" : tab === "closed" ? "No closed cases yet" : "No cases yet"}</h3><p>{search ? "Try a different search." : tab === "closed" ? "Cases appear here after effectiveness verification and sign-off." : "Create a case to capture the problem, evidence and actions in one place."}</p></div> : <div className="ps-table-wrap"><table><thead><tr><th>Case / problem</th><th>Customer / source</th><th>Owner</th><th>Stage</th><th>Actions</th><th>Updated</th></tr></thead><tbody>{visible.map(c => { const tasks = actions.filter(a => a.case_id === c.id); const late = tasks.filter(a => isOverdue(a,today)); return <tr key={c.id}><td><button className="ps-case-link" onClick={() => setSelected(c)}><small>{caseLabel(c.number)}</small>{c.title}</button></td><td>{c.source || "—"}</td><td>{c.owner || "Unassigned"}</td><td><span className={`ps-badge ${c.stage === "closed" ? "ps-done" : ""}`}>{stageLabels[c.stage]}</span></td><td>{tasks.filter(a => a.status === "done").length}/{tasks.length}{late.length > 0 && <small className="ps-danger">{late.length} overdue</small>}</td><td>{formatDateTime(c.updated_at)}</td></tr>; })}</tbody></table></div>}
         </section>
       </>}
     </div>
   </SopShell>;
+}
+
+function ProblemSidebar({ tab = "dashboard", navigate = () => {}, openCount = null, closedCount = null, onBack }: { tab?: Tab; navigate?: (tab: Tab) => void; openCount?: number | null; closedCount?: number | null; onBack?: MouseEventHandler<HTMLAnchorElement> }) {
+  return <>
+    <Link href="/sops" className="ui-nav-item ui-nav-item-idle" onClick={onBack}><ArrowLeft size={15} />Quality / SOPs</Link>
+    <div className="ui-nav-section mt-4">Problem Solving</div>
+    {([ ["dashboard", "Dashboard", LayoutDashboard], ["open", "Open", ClipboardList], ["closed", "Closed", CheckCircle2] ] as const).map(([key, label, Icon]) => <button type="button" key={key} onClick={() => navigate(key)} className={`ui-nav-item w-full ${tab === key ? "ui-nav-item-active" : "ui-nav-item-idle"}`}><Icon size={15} />{label}<span className="ml-auto">{key === "open" ? openCount : key === "closed" ? closedCount : ""}</span></button>)}
+    <p className="ps-pilot-note">Private pilot · rlopez</p>
+  </>;
+}
+
+
+export function ProblemWorkspaceLoadingState() {
+  return <SopShell sidebar={<ProblemSidebar />} crumb="Quality / Problem Solving"><QualitySkeleton variant="dashboard" label="Opening Problem Solving" /></SopShell>;
 }

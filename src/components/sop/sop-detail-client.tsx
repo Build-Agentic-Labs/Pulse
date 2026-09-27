@@ -2,7 +2,7 @@
 
 import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Department } from "@/domain/departments";
 import { listDepartments, listMyDepartments } from "@/lib/departments/store";
@@ -43,6 +43,7 @@ export function SopDetailClient({
   initialView?: SopEditorInitialView;
 }) {
   const params = useParams<{ sopId: string }>();
+  const searchParams = useSearchParams();
   const { canEditSops, workspaceId } = useSopWorkspace();
   const [state, setState] = useState<DetailState>(() => initial
     ? {
@@ -119,39 +120,5 @@ export function SopDetailClient({
     );
   }
 
-  // PDF preview entry: render the preview's own backdrop and a blank letter page
-  // while the SOP loads, so the document appears in place with no app-shell or
-  // spinner flash in between.
-  if (initialView === "pdf") {
-    return (
-      <div className="sop-preview-pending" aria-busy="true" aria-label="Loading document preview">
-        <style>{`
-          .sop-preview-pending {
-            position: fixed; inset: 0; z-index: 60;
-            display: flex; flex-direction: column;
-            background: rgba(15, 18, 21, 0.62);
-          }
-          .sop-preview-pending-bar {
-            flex: none; height: 57px;
-            background: var(--color-surface, #fff);
-            border-bottom: 1px solid var(--color-line, #ddd);
-          }
-          .sop-preview-pending-scroll { flex: 1; overflow: hidden; padding: 24px 16px; }
-          .sop-preview-pending-page {
-            width: 8.5in; max-width: 100%; height: 11in; margin: 0 auto;
-            background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3);
-            animation: sop-preview-pending-pulse 1.6s ease-in-out infinite;
-          }
-          @keyframes sop-preview-pending-pulse { 50% { opacity: .82; } }
-          @media (prefers-reduced-motion: reduce) { .sop-preview-pending-page { animation: none; } }
-        `}</style>
-        <div className="sop-preview-pending-bar" />
-        <div className="sop-preview-pending-scroll">
-          <div className="sop-preview-pending-page" />
-        </div>
-      </div>
-    );
-  }
-
-  return <SopDetailLoadingState initialView={initialView} />;
+  return <SopDetailLoadingState initialView={initialView} fromReviewQueue={searchParams.get("via") === "review"} />;
 }

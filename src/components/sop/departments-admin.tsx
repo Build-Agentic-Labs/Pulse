@@ -3,7 +3,7 @@
 import { Building2, Flag, Loader2, Plus, Trash2, UserPlus, UsersRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
-import { QuietLoading } from "@/components/quiet-loading";
+import { QualitySkeleton } from "./quality-skeleton";
 import { ThemedSelect } from "@/components/themed-select";
 import {
   DEPT_ROLE_ACCESS,
@@ -306,7 +306,7 @@ export function DepartmentsAdmin({
         <div className="ui-dept-workbench grid grid-cols-1 lg:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)]">
           <section className="min-w-0 overflow-hidden">
             {status === "loading" ? (
-              <QuietLoading
+              <QualitySkeleton variant="form"
                 active={active}
                 label="Loading departments"
                 reserveClassName="min-h-[120px]"

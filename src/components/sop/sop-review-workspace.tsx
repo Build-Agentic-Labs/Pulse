@@ -1,7 +1,10 @@
 "use client";
 
-import { Loader2, Send, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { SopReviewLoading } from "./sop-review-loading";
+
+import { Check, Loader2, Send, Trash2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { SopReviewComment } from "./sop-review-comment";
 import { useConfirm } from "@/components/confirm-provider";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { listSopAnnexFiles, type SopAnnexFile } from "@/lib/sop/annex-files";
@@ -36,7 +39,6 @@ export function reviewCategoryLabel(category: string): string {
   return REVIEW_CATEGORIES.find((item) => item.key === category)?.label ?? "Overall remarks";
 }
 
-const REMARK_AUTOSAVE_DELAY_MS = 700;
 
 export function SopReviewWorkspace({
   sopId,
@@ -51,18 +53,40 @@ export function SopReviewWorkspace({
   const [record, setRecord] = useState<SopRecord | null>(null);
   const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
   const [annotations, setAnnotations] = useState<SopReviewAnnotation[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [submission, setSubmission] = useState<SopReviewSubmission | null>(null);
   const [noChanges, setNoChanges] = useState(false);
   const [reviewCycle, setReviewCycle] = useState(0);
-  const [activeCategory, setActiveCategory] = useState("document");
+  const commentFieldRef = useRef<HTMLTextAreaElement | null>(null);
+  const [commentAttachment, setCommentAttachment] = useState<{ id: string; name: string } | null>(null);
+  const [commentBody, setCommentBody] = useState("");
+  const [commentSaving, setCommentSaving] = useState(false);
+  const commentSavingRef = useRef(false);
+  const [commentDismissKey, setCommentDismissKey] = useState(0);
+  const [pendingQuote, setPendingQuote] = useState<{ category: string; text: string } | null>(null);
+  const [activeCategory, setActiveCategory] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [autosaveStatus, setAutosaveStatus] = useState<"idle" | "waiting" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
-  const pdfNavigationRef = useRef(false);
-  const pdfNavigationTimerRef = useRef<number | null>(null);
-  const autosaveInFlightRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const field = commentFieldRef.current;
+    if (!field) return;
+    const resize = () => {
+      field.style.height = "auto";
+      field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`;
+    };
+    resize();
+    let width = field.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (field.clientWidth === width) return;
+      width = field.clientWidth;
+      resize();
+    });
+    observer.observe(field);
+    return () => observer.disconnect();
+  }, [commentBody, activeCategory]);
+
 
   useEffect(() => {
     let active = true;
@@ -98,11 +122,6 @@ export function SopReviewWorkspace({
         setSubmission(currentSubmission);
         setNoChanges(currentSubmission?.noChanges ?? false);
         setReviewCycle(control?.reviewCycle ?? 0);
-        setDrafts(Object.fromEntries(
-          activeComments
-            .filter((comment) => comment.createdBy === userId)
-            .map((comment) => [comment.category, comment.body]),
-        ));
         setAutosaveStatus("saved");
         setStatus("ready");
       })
@@ -116,106 +135,25 @@ export function SopReviewWorkspace({
     };
   }, [sopId]);
 
-  const myRemarks = useMemo(
-    () => new Map(annotations.filter((item) => item.createdBy === currentUserId).map((item) => [item.category, item])),
-    [annotations, currentUserId],
-  );
-  const hasChanges = REVIEW_CATEGORIES.some(({ key }) =>
-    (drafts[key] ?? "").trim() !== (myRemarks.get(key)?.body ?? "").trim(),
-  );
-  const hasAnyRemarks = REVIEW_CATEGORIES.some(({ key }) => Boolean((drafts[key] ?? "").trim()));
-
-  useEffect(() => () => {
-    if (pdfNavigationTimerRef.current !== null) window.clearTimeout(pdfNavigationTimerRef.current);
-  }, []);
+  const hasAnyRemarks = annotations.some((item) => item.createdBy === currentUserId);
 
   useEffect(() => {
-    if (!hasChanges) return;
+    if (!commentBody.trim()) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [hasChanges]);
+  }, [commentBody]);
 
-  function focusPdfCategory(category: string) {
-    setActiveCategory(category);
-    pdfNavigationRef.current = true;
-    if (pdfNavigationTimerRef.current !== null) window.clearTimeout(pdfNavigationTimerRef.current);
-    const panel = document.querySelector<HTMLElement>(".sop-review-panel");
-    if (panel) panel.dataset.scrollSyncPaused = "true";
-    document
-      .querySelector<HTMLElement>(`.sop-preview-scroll [data-review-category="${category}"]`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    pdfNavigationTimerRef.current = window.setTimeout(() => {
-      pdfNavigationRef.current = false;
-      pdfNavigationTimerRef.current = null;
-      if (panel) delete panel.dataset.scrollSyncPaused;
-    }, 700);
-  }
-
-  async function refreshAnnotations(adoptSavedDrafts = false) {
+  async function refreshAnnotations() {
     const comments = await listSopReviewAnnotations(sopId);
-    const activeComments = comments.filter(
-      (comment) => comment.reviewCycle === reviewCycle && !comment.resolvedAt,
-    );
-    setAnnotations(activeComments);
-    if (adoptSavedDrafts) {
-      setDrafts(Object.fromEntries(
-        activeComments
-          .filter((comment) => comment.createdBy === currentUserId)
-          .map((comment) => [comment.category, comment.body]),
-      ));
-    }
+    setAnnotations(comments.filter((comment) => comment.reviewCycle === reviewCycle && !comment.resolvedAt));
   }
-
-  async function persistRemarks(snapshot = drafts) {
-    await Promise.all(
-      REVIEW_CATEGORIES.filter(({ key }) =>
-        (snapshot[key] ?? "").trim() !== (myRemarks.get(key)?.body ?? "").trim(),
-      ).map(({ key }) => saveSopReviewRemark({ sopId, category: key, body: snapshot[key] ?? "" })),
-    );
-    await refreshAnnotations();
-  }
-
-  useEffect(() => {
-    if (!record || submission || !hasChanges || status === "loading" || status === "saving") return;
-    const snapshot = { ...drafts };
-    setAutosaveStatus("waiting");
-    const timer = window.setTimeout(() => {
-      if (autosaveInFlightRef.current) return;
-      autosaveInFlightRef.current = true;
-      setStatus("saving");
-      setAutosaveStatus("saving");
-      setError("");
-      void (async () => {
-        try {
-          await Promise.all(
-            REVIEW_CATEGORIES.filter(({ key }) =>
-              (snapshot[key] ?? "").trim() !== (myRemarks.get(key)?.body ?? "").trim(),
-            ).map(({ key }) => saveSopReviewRemark({ sopId, category: key, body: snapshot[key] ?? "" })),
-          );
-          const comments = await listSopReviewAnnotations(sopId);
-          setAnnotations(comments.filter(
-            (comment) => comment.reviewCycle === reviewCycle && !comment.resolvedAt,
-          ));
-          setStatus("ready");
-          setAutosaveStatus("saved");
-        } catch (caught) {
-          setError(caught instanceof Error ? caught.message : "The review remarks could not be saved.");
-          setStatus("error");
-          setAutosaveStatus("error");
-        } finally {
-          autosaveInFlightRef.current = false;
-        }
-      })();
-    }, REMARK_AUTOSAVE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [drafts, hasChanges, myRemarks, record, reviewCycle, sopId, status, submission]);
 
   async function submitReview() {
-    if (status === "saving" || submission) return;
+    if (status === "saving" || submission || activeCategory) return;
     if (noChanges && hasAnyRemarks) {
       setError("Remove your remarks before selecting No changes needed.");
       setStatus("error");
@@ -230,7 +168,6 @@ export function SopReviewWorkspace({
     setStatus("saving");
     setError("");
     try {
-      if (hasChanges) await persistRemarks();
       const id = await submitSopReviewResult(sopId, noChanges);
       setSubmission({
         id,
@@ -262,7 +199,7 @@ export function SopReviewWorkspace({
     setError("");
     try {
       await deleteSopReviewAnnotation(annotation.id);
-      await refreshAnnotations(true);
+      await refreshAnnotations();
       setAutosaveStatus("saved");
       setStatus("ready");
     } catch (caught) {
@@ -272,146 +209,98 @@ export function SopReviewWorkspace({
   }
 
   async function handleClose() {
-    const needsFlush =
-      !submission &&
-      (hasChanges || autosaveStatus === "waiting" || autosaveStatus === "saving" || autosaveStatus === "error");
-    if (needsFlush) {
-      setStatus("saving");
-      setAutosaveStatus("saving");
-      setError("");
-      try {
-        await persistRemarks();
-        setStatus("ready");
-        setAutosaveStatus("saved");
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "The review remarks could not be saved.");
-        setStatus("error");
-        setAutosaveStatus("error");
-        return;
-      }
+    if (commentSavingRef.current) return;
+    if (commentBody.trim()) {
+      const discard = await confirm({ title: "Discard unsaved comment?", body: "This comment has not been saved. Your saved comments will remain.", confirmLabel: "Discard comment", tone: "warning" });
+      if (!discard) return;
     }
     onClose();
   }
 
-  const panel = (
-    <div className="flex h-full min-h-0 flex-col">
-      <div
-        data-review-panel-header
-        className="flex-none border-b border-line bg-canvas px-4 py-3"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="ui-mono-label text-ink-tertiary">Structured review remarks</div>
-            <p className="ui-section-subtitle mt-1 text-ink-secondary">Add remarks under the section they apply to.</p>
-          </div>
-          {autosaveStatus === "error" ? (
-            <div role="alert" className="shrink-0 text-[11px] text-danger">
-              Autosave failed
+  function addComment(category: string, quote = "", attachment?: { id: string; name: string }) {
+    setCommentAttachment(attachment ?? null);
+    setActiveCategory(category);
+    setCommentBody("");
+    setError("");
+    setPendingQuote(quote ? { category, text: quote } : null);
+    window.setTimeout(() => document.getElementById(`review-${category}`)?.focus(), 0);
+  }
+
+  function cancelComment() {
+    if (commentSavingRef.current) return;
+    setActiveCategory("");
+    setCommentAttachment(null);
+    setPendingQuote(null);
+    setCommentBody("");
+    setError("");
+    setCommentDismissKey((key) => key + 1);
+  }
+
+  async function saveComment() {
+    if (!activeCategory || !commentBody.trim() || commentSavingRef.current) return;
+    commentSavingRef.current = true;
+    setCommentSaving(true);
+    setError("");
+    const category = activeCategory;
+    const comment = commentAttachment ? `[Attachment:${encodeURIComponent(commentAttachment.id)}] ${commentAttachment.name}\n${commentBody.trim()}` : pendingQuote?.text ? `Selected text: “${pendingQuote.text}”\n${commentBody.trim()}` : commentBody.trim();
+    const body = comment;
+    try {
+      const saved = await saveSopReviewRemark({ sopId, category, body });
+      if (!saved) throw new Error("The comment was not saved. Please try again.");
+      setAnnotations((current) => [...current.filter((item) => item.id !== saved.id), saved]);
+      setNoChanges(false);
+      setAutosaveStatus("saved");
+      commentSavingRef.current = false;
+      cancelComment();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The comment could not be saved. Try again.");
+    } finally {
+      commentSavingRef.current = false;
+      setCommentSaving(false);
+    }
+  }
+
+  const marginNotes = REVIEW_CATEGORIES.filter(({ key }) =>
+    key === activeCategory || annotations.some((item) => item.category === key),
+  ).map(({ key, label }) => ({
+    key,
+    category: key,
+    node: (
+      <section className={activeCategory === key ? "rounded-md bg-canvas" : "space-y-2"}>
+        <label htmlFor={`review-${key}`} className="sr-only">{label}</label>
+        <div className={activeCategory === key ? "relative" : "space-y-2"}>
+          {activeCategory === key ? <>
+            <textarea ref={commentFieldRef} id={`review-${key}`} rows={2} className="ui-field-standalone block min-h-24 w-full resize-none overflow-hidden rounded-md !pb-10 text-xs" placeholder="What needs to change?" value={commentBody} disabled={commentSaving} onChange={(event) => { setCommentBody(event.target.value); setError(""); }} />
+            {error ? <p role="alert" className="text-xs text-danger">{error}</p> : null}
+            <div className="absolute bottom-1.5 right-2 flex gap-1">
+              <button type="button" aria-label="Cancel" title="Cancel" className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center p-0" disabled={commentSaving} onClick={cancelComment}><X size={15} /></button>
+              <button type="button" aria-label="Save comment" title="Save comment" className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center p-0 disabled:opacity-40" disabled={commentSaving || !commentBody.trim()} onClick={() => void saveComment()}>{commentSaving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}</button>
             </div>
-          ) : null}
+          </> : <>
+            {annotations.filter((item) => item.category === key).map((remark) => (
+              <SopReviewComment key={remark.id} remark={remark} actions={remark.createdBy === currentUserId && !submission ? (
+                <button type="button" className="ui-btn-ghost h-7 w-7 shrink-0 px-0 text-ink-tertiary" aria-label={`Delete ${label} remarks`} disabled={status === "saving" || Boolean(activeCategory)} onClick={() => void removeRemark(remark)}><Trash2 size={12} className="mx-auto" /></button>
+              ) : undefined} />
+            ))}
+          </>}
         </div>
-      </div>
-
-      <div data-review-panel-scroll className="min-h-0 flex-1 space-y-4 overflow-auto p-4">
-      {error ? <div className="ui-notice ui-notice-warn px-3 py-2 text-xs">{error}</div> : null}
-
-      {REVIEW_CATEGORIES.map(({ key, label }) => {
-        const mine = myRemarks.get(key);
-        const others = annotations.filter((item) => item.category === key && item.createdBy !== currentUserId);
-        return (
-          <section
-            key={key}
-            data-review-field={key}
-            className={`rounded-md border p-3 transition-colors ${
-              activeCategory === key ? "border-ink bg-surface-hover" : "border-line"
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <label htmlFor={`review-${key}`} className="text-xs font-medium text-ink">{label}</label>
-              {mine ? (
-                <button
-                  type="button"
-                  className="ui-btn-ghost h-7 w-7 px-0 text-danger disabled:opacity-40"
-                  aria-label={`Delete ${label} remarks`}
-                  title="Delete remarks"
-                  disabled={status === "saving" || Boolean(submission)}
-                  onClick={() => void removeRemark(mine)}
-                >
-                  <Trash2 size={13} className="mx-auto" />
-                </button>
-              ) : null}
-            </div>
-            <textarea
-              id={`review-${key}`}
-              className="ui-field-standalone sop-review-remark-field mt-2 min-h-20 w-full resize-y"
-              placeholder={`Add ${label.toLowerCase()} remarks…`}
-              value={drafts[key] ?? ""}
-              disabled={Boolean(submission)}
-              onChange={(event) => {
-                setDrafts((current) => ({ ...current, [key]: event.target.value }));
-                setError("");
-                if (status === "error") setStatus("ready");
-              }}
-              onFocus={() => focusPdfCategory(key)}
-            />
-            {others.length ? (
-              <div className="mt-2 space-y-2 border-t border-line pt-2">
-                {others.map((remark) => (
-                  <div key={remark.id}>
-                    <p className="text-xs leading-5 text-ink-secondary">{remark.body}</p>
-                    <p className="ui-section-subtitle mt-0.5 text-ink-tertiary">{remark.authorName}</p>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </section>
-        );
-      })}
-      </div>
-      <div className="flex-none border-t border-line bg-canvas p-4">
-        <label className="flex cursor-pointer items-start gap-2.5 text-sm text-ink">
-          <input
-            type="checkbox"
-            className="mt-0.5 h-4 w-4 rounded border-line"
-            checked={noChanges}
-            disabled={status === "saving" || Boolean(submission)}
-            onChange={(event) => {
-              setNoChanges(event.target.checked);
-              setError("");
-              if (status === "error") setStatus("ready");
-            }}
-          />
-          <span>
-            <span className="block font-medium">No changes needed</span>
-            <span className="mt-0.5 block text-xs leading-5 text-ink-secondary">
-              Leave unchecked when your remarks should be returned to the author.
-            </span>
-          </span>
-        </label>
-        <button
-          type="button"
-          className="ui-btn-primary mt-3 h-9 w-full gap-2 px-4 disabled:opacity-40"
-          disabled={status === "saving" || Boolean(submission)}
-          onClick={() => void submitReview()}
-        >
-          {status === "saving" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-          {submission ? "Sent to author" : "Send back to author"}
-        </button>
-      </div>
-    </div>
+      </section>
+    ),
+  }));
+  const toolbar = (
+    <>
+      {error ? <span role="alert" className="max-w-64 text-xs text-danger">{error}</span> : null}
+      <span role="status" className="text-[11px] text-ink-tertiary">{commentSaving ? "Saving comment…" : commentBody.trim() ? "Unsaved comment" : autosaveStatus === "error" ? "Save failed" : autosaveStatus === "saving" || autosaveStatus === "waiting" ? "Saving…" : "Saved"}</span>
+      <label className="flex shrink-0 items-center gap-2 text-xs"><input type="checkbox" checked={noChanges} disabled={status === "saving" || Boolean(submission) || hasAnyRemarks || Boolean(activeCategory)} onChange={(event) => { setNoChanges(event.target.checked); setError(""); }} />No changes needed</label>
+      <button type="button" className="ui-btn-primary inline-flex h-9 shrink-0 items-center gap-2 px-4 disabled:opacity-40" disabled={status === "saving" || Boolean(submission) || Boolean(activeCategory)} onClick={() => void submitReview()}>
+        {status === "saving" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+        {submission ? "Review submitted" : noChanges ? "Submit review" : "Send feedback to author"}
+      </button>
+    </>
   );
 
   if (!record || status === "loading") {
-    return (
-      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
-        {status === "error" ? (
-          <div className="ui-panel max-w-sm p-5 text-center">
-            <p className="ui-section-subtitle text-danger">{error}</p>
-            <button type="button" className="ui-btn-ghost mt-3 h-9 px-4" onClick={onClose}>Back to review queue</button>
-          </div>
-        ) : <Loader2 size={22} className="animate-spin text-white" />}
-      </div>
-    );
+    return <SopReviewLoading label="Review document" error={status === "error" ? error : undefined} onClose={onClose} />;
   }
 
   return (
@@ -421,10 +310,16 @@ export function SopReviewWorkspace({
       annexFiles={annexFiles}
       onClose={() => void handleClose()}
       mode="review"
-      reviewPanel={panel}
-      onReviewCategoryChange={(category) => {
-        if (!pdfNavigationRef.current) setActiveCategory(category);
-      }}
+      embedded
+      taskLabel="Review document"
+      toolbarNote="Highlight text to add a comment."
+      footerActions={toolbar}
+      marginNotes={marginNotes}
+      highlightRemarks={annotations}
+      onSelectReviewSection={submission ? undefined : addComment}
+      onDismissReviewComment={cancelComment}
+      commentDismissKey={commentDismissKey}
+      commentBusy={commentSaving}
     />
   );
 }

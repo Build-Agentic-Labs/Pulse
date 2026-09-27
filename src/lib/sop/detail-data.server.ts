@@ -69,7 +69,7 @@ export async function fetchSopDetailInitialData(sopId: string): Promise<SopDetai
       departmentRoles: [...departmentRoles].filter(([id]) => workspaceDepartmentIds.has(id)),
       reviewerNames: [...reviewerNames],
       reviewAnnotations: annotations.filter(
-        (annotation) => annotation.reviewCycle === reviewCycle && !annotation.resolvedAt,
+        (annotation) => annotation.reviewCycle === reviewCycle,
       ),
       reviewSubmissions: submissions.filter(
         (submission) => submission.reviewCycle === reviewCycle,

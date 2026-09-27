@@ -1,10 +1,10 @@
+import { QualitySkeleton } from "@/components/sop/quality-skeleton";
 import { PanelLeftClose } from "lucide-react";
 import { CompanyTopNav } from "@/components/company-top-nav";
 import { PlanningNav } from "@/components/planning/planning-nav";
 import { TopNav } from "@/components/planner-top-nav";
 import { SettingsNavigation } from "@/components/settings-navigation";
 import { SpaceTopNav } from "@/components/space-top-nav";
-import { SopTabNav } from "@/components/sop/sop-tab-nav";
 
 function LoadingStatus({ label }: { label: string }) {
   return (
@@ -336,19 +336,7 @@ export function SopTableSkeleton() {
 }
 
 export function QualityListLoadingContent() {
-  return (
-    <div className="mx-auto max-w-6xl" aria-busy="true">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <SkeletonLine className="h-5 w-20" />
-          <SkeletonLine className="mt-3 h-2 w-80 max-w-full" />
-        </div>
-        <SkeletonLine className="h-9 w-24" />
-      </div>
-      <SkeletonLine className="mb-5 h-9 w-72 max-w-full" />
-      <SopTableSkeleton />
-    </div>
-  );
+  return <div className="mx-auto max-w-6xl"><QualitySkeleton label="Opening Quality" /></div>;
 }
 
 export function QualityLoadingState({ label = "Opening Quality" }: { label?: string }) {
@@ -363,7 +351,14 @@ export function QualityLoadingState({ label = "Opening Quality" }: { label?: str
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <aside className="ui-nav-sidebar">
           <nav className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-3">
-            <SopTabNav active="all" manage={false} />
+            <div className="space-y-2" aria-label="Loading Quality navigation" role="status">
+              {Array.from({ length: 7 }, (_, index) => (
+                <div key={index} className={`flex h-8 items-center gap-2 px-2 ${index === 5 ? "!mt-5" : ""}`} aria-hidden="true">
+                  <span className="ui-skeleton-line h-4 w-4 shrink-0" />
+                  <span className="ui-skeleton-line h-2 w-24" />
+                </div>
+              ))}
+            </div>
           </nav>
         </aside>
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">

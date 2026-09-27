@@ -1,7 +1,11 @@
 "use client";
 
+import { SopReviewLoading } from "./sop-review-loading";
+
 import { formatProcedureText } from "@/domain/sop/procedure-text";
 
+import { AttachmentCommentButton } from "./attachment-comment-button";
+import { reviewQuotes, reviewTextRange } from "./review-text-highlights";
 import { ReferencePdfPreview } from "./reference-pdf-preview";
 
 import { ArrowLeft, Printer, X } from "lucide-react";
@@ -298,9 +302,16 @@ export function SopPrintPreview({
   onSelectAnnotation,
   reviewPanel,
   toolbarNote,
+  taskLabel,
+  onSelectReviewSection,
+  onDismissReviewComment,
+  commentDismissKey = 0,
+  commentBusy = false,
   highlightCategories,
+  highlightRemarks = [],
   marginNotes,
   toolbarActions,
+  footerActions,
   embedded = false,
   onReviewCategoryChange,
   approvalRefreshKey = 0,
@@ -323,12 +334,19 @@ export function SopPrintPreview({
   reviewPanel?: ReactNode;
   /** Replaces the mode's default toolbar note (e.g. the author reading returned feedback). */
   toolbarNote?: string;
+  taskLabel?: "Review document" | "Address feedback";
+  onDismissReviewComment?: () => void;
+  commentDismissKey?: number;
+  commentBusy?: boolean;
+  onSelectReviewSection?: (category: string, quote: string, attachment?: { id: string; name: string }) => void;
   /** Review categories to highlight on screen (never in print) — e.g. sections with open remarks. */
   highlightCategories?: readonly string[];
+  highlightRemarks?: readonly { category: string; body: string }[];
   /** Comments pinned in the margin beside their sections (replaces a side panel). */
   marginNotes?: MarginNote[];
   /** Extra toolbar controls, placed before the close button. */
   toolbarActions?: ReactNode;
+  footerActions?: ReactNode;
   /**
    * Fill the page's content area (below the app header, beside its sidebar) instead of covering
    * the whole window — for a preview that *is* the step, not a pop-over on top of it.
@@ -373,8 +391,42 @@ export function SopPrintPreview({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [pageScale, setPageScale] = useState(1);
   const pagesRef = useRef<HTMLDivElement | null>(null);
-  const hasMarginNotes = Boolean(marginNotes?.length);
+  const [commentSelection, setCommentSelection] = useState<{ category: string; quote: string; left: number; top: number; expanded: boolean } | null>(null);
+  useEffect(() => {
+    const dismissUnselectedComment = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+        setCommentSelection((current) => current?.expanded ? current : null);
+      }
+    };
+    document.addEventListener("selectionchange", dismissUnselectedComment);
+    return () => document.removeEventListener("selectionchange", dismissUnselectedComment);
+  }, []);
+  useEffect(() => {
+    setCommentSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }, [commentDismissKey]);
+  useEffect(() => {
+    const pages = pagesRef.current;
+    const registry = (CSS as unknown as { highlights?: Map<string, unknown> }).highlights;
+    const HighlightClass = (window as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+    if (!pages || !registry || !HighlightClass) return;
+    const update = () => {
+      const ranges = highlightRemarks.flatMap((remark) => reviewQuotes(remark.body).flatMap((quote) => {
+        const range = reviewTextRange(pages, remark.category, quote);
+        return range ? [range] : [];
+      }));
+      registry.set("sop-review-text", new HighlightClass(...ranges));
+    };
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(pages, { childList: true, subtree: true, characterData: true });
+    return () => { observer.disconnect(); registry.delete("sop-review-text"); };
+  }, [highlightRemarks]);
+  const hasMarginNotes = Boolean(marginNotes);
   const [flowRendererReady, setFlowRendererReady] = useState(false);
+  const [approvalDetailsReady, setApprovalDetailsReady] = useState(false);
+  const [initialPagesReady, setInitialPagesReady] = useState(false);
   // Block ids already warned about this mount — re-measures (debounced edits,
   // resize) repeat the same overflowing block on every pass otherwise.
   const warnedOverflowBlockIds = useRef<Set<string>>(new Set());
@@ -383,6 +435,12 @@ export function SopPrintPreview({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (commentBusy) return;
+      if (commentSelection) {
+        setCommentSelection(null);
+        onDismissReviewComment?.();
+        return;
+      }
       // An inline referenced document sits on top: Escape peels that layer
       // first and returns to the SOP, a second Escape closes the preview.
       setInlineDoc((current) => {
@@ -393,7 +451,7 @@ export function SopPrintPreview({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, commentSelection, onDismissReviewComment, commentBusy]);
 
   useEffect(() => () => {
     if (reviewScrollFrame.current !== null) window.cancelAnimationFrame(reviewScrollFrame.current);
@@ -413,9 +471,10 @@ export function SopPrintPreview({
         if (!active) return;
         setApprovalEntries(entries);
         setSystemAuthorName(authorName);
+        setApprovalDetailsReady(true);
       })
       .catch(() => {
-        if (active) setApprovalEntries(null);
+        if (active) { setApprovalEntries(null); setApprovalDetailsReady(true); }
       });
     return () => {
       active = false;
@@ -464,24 +523,25 @@ export function SopPrintPreview({
   // Preview-owned state (approvals node, annex file lines, reference renderers)
   // injected into the otherwise-pure print-block builder. Memoized so `segments`
   // below stays referentially stable across unrelated re-renders.
+  const canCommentOnAttachments = Boolean(onSelectReviewSection);
   const extras = useMemo<PrintBlockExtras>(
     () => ({
       renderLinkedSop: (link) => (
-        <Link
+        <><Link
           className="sop-export-link"
           href={`/sops/${link.sopId}?preview=pdf&from=${encodeURIComponent(sop.id)}`}
           title="Open this SOP's document preview"
         >
           {linkedSopLabel(link)}
-        </Link>
+        </Link>{canCommentOnAttachments ? <AttachmentCommentButton id={link.sopId} name={linkedSopLabel(link)} category="references" /> : null}</>
       ),
       renderReferenceDoc: (doc) => {
         // The binary sits in the annex-file table keyed by this doc's id.
         // Storage URLs are short-lived signed URLs, so mint one on click.
         const file = annexFiles.find((item) => item.annexId === doc.id);
-        if (!file) return doc.name;
+        if (!file) return <>{doc.name}{canCommentOnAttachments ? <AttachmentCommentButton id={doc.id} name={doc.name} category="references" /> : null}</>;
         return (
-          <button
+          <><button
             type="button"
             className="sop-export-link"
             onClick={() => {
@@ -500,7 +560,7 @@ export function SopPrintPreview({
             title="Open the referenced file"
           >
             {doc.name}
-          </button>
+          </button>{canCommentOnAttachments ? <AttachmentCommentButton id={doc.id} name={doc.name} category="references" /> : null}</>
         );
       },
       changeAuthor: (entry) =>
@@ -508,10 +568,11 @@ export function SopPrintPreview({
       approvalsTable: approvalEntries?.length ? (
         <ApprovalTable entries={approvalEntries} revealSignatureId={revealSignatureId} />
       ) : undefined,
+      renderAnnexComment: canCommentOnAttachments ? (annex) => <AttachmentCommentButton id={annex.id || annex.label} name={annexFileLines.get(annex.id ?? "")?.name || annex.label} category="annexes" /> : undefined,
       annexFileLines,
       annexLoading: annexPreview.loading,
     }),
-    [sop, annexFiles, systemAuthorName, approvalEntries, revealSignatureId, annexFileLines, annexPreview.loading],
+    [sop, annexFiles, systemAuthorName, approvalEntries, revealSignatureId, annexFileLines, annexPreview.loading, canCommentOnAttachments],
   );
 
   // `buildPrintBlocks` stays pure of preview UI state (see PrintBlockExtras),
@@ -609,6 +670,15 @@ export function SopPrintPreview({
   // one long hand-assigned page beats no document — this component gates
   // approvals.
   const fallback = failed || sectionPages.length === 0;
+
+  // Reveal once after the first measured layout. Never blank the document again
+  // for edits or background updates. Measurement failure retains the readable fallback.
+  useEffect(() => {
+    if (!flowRendererReady || !approvalDetailsReady || measuring) return;
+    const frame = requestAnimationFrame(() => setInitialPagesReady(true));
+    return () => cancelAnimationFrame(frame);
+  }, [flowRendererReady, approvalDetailsReady, measuring]);
+
 
   // The measurement layer cannot prove the render layer honest on its own: a
   // leak it hasn't imagined (the :first-child scoping above was exactly such a
@@ -804,33 +874,37 @@ export function SopPrintPreview({
   return (
     <div
       ref={previewRootRef}
-      className={`sop-preview-overlay${embedded ? " sop-preview-embedded" : ""}`}
+      className={`sop-preview-overlay${embedded ? " sop-preview-embedded" : ""}${!initialPagesReady ? " sop-preview-preparing" : ""}`}
       role={embedded ? "region" : "dialog"}
       aria-modal={embedded ? undefined : true}
       aria-label="SOP document preview"
     >
+      {!initialPagesReady ? <SopReviewLoading inline label={taskLabel ?? (mode === "approval" ? "Final approval" : mode === "review" ? "Review document" : "Document preview")} onClose={onClose} /> : null}
       {highlightCategories?.length ? <style>{highlightCss(highlightCategories)}</style> : null}
       <style>{`
+        ::highlight(sop-review-text) { background-color: #fff0ad; color: inherit; }
+        @media print { ::highlight(sop-review-text) { background-color: transparent; } }
         .sop-preview-overlay {
           position: fixed; inset: 0; z-index: 60;
           display: flex; flex-direction: column;
           background: rgba(15, 18, 21, 0.62);
           font-family: var(--font-ui-family);
         }
-        .sop-preview-bar {
-          display: flex; align-items: center; justify-content: space-between;
-          gap: 12px; padding: 10px 16px; flex: none;
-          background: var(--color-surface, #fff); border-bottom: 1px solid var(--color-line, #ddd);
+        .sop-preview-preparing > .sop-preview-bar,
+        .sop-preview-preparing > .sop-preview-content,
+        .sop-preview-preparing > .sop-review-footer {
+          position: absolute; inset: 0; visibility: hidden; pointer-events: none;
         }
         .sop-preview-overlay.sop-preview-embedded {
           position: absolute; z-index: 10;
           background: var(--color-surface-sunken, #f4f4f5);
         }
+        /* Override the builder's sibling spacing: this view fills the shell. */
+        .space-y-5 > .sop-preview-overlay.sop-preview-embedded {
+          margin: 0;
+        }
         @media (min-width: 1024px) {
           .sop-preview-overlay.sop-preview-embedded { border-top-left-radius: 1rem; overflow: hidden; }
-        }
-        .sop-preview-embedded .sop-preview-bar {
-          background: var(--color-canvas, #fff); padding: 12px 24px;
         }
         .sop-preview-doc-id {
           min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -845,6 +919,7 @@ export function SopPrintPreview({
         .sop-preview-overlay .ui-chip {
           border-radius: 4px; font-family: inherit; letter-spacing: 0; text-transform: none;
         }
+        .sop-floating-comment > section { border: 0; box-shadow: none; }
         .sop-preview-content { display: flex; flex: 1; min-height: 0; }
 
         /* The offscreen measurement tree must be display:none in print, not just
@@ -856,7 +931,7 @@ export function SopPrintPreview({
            hidden box fragment across printed pages; display:none removes it from
            layout entirely, so it can never contribute extra printed sheets. */
         @media print { .sop-print-measure { display: none !important; } }
-        .sop-preview-scroll { flex: 1; min-width: 0; overflow: auto; padding: 24px 16px 64px; }
+        .sop-preview-scroll { position: relative; flex: 1; min-width: 0; overflow: auto; padding: 24px 16px 64px; }
         .sop-review-panel {
           width: clamp(520px, 38vw, 680px); flex: none; overflow: hidden;
           background: var(--color-surface, #fff); border-left: 1px solid var(--color-line, #ddd);
@@ -1012,7 +1087,7 @@ export function SopPrintPreview({
           body { visibility: hidden !important; margin: 0 !important; }
           .sop-preview-overlay { position: absolute; inset: 0; display: block; background: #fff; z-index: 0; }
           .sop-preview-overlay, .sop-print-pages, .sop-print-page, .sop-print-page * { visibility: visible !important; }
-          .sop-preview-bar { display: none !important; }
+          .sop-preview-bar, .sop-review-footer, .sop-attachment-comment { display: none !important; }
           .sop-preview-scroll { overflow: visible; padding: 0; }
           /* zoom:1 !important beats the screen-only inline "zoom: pageScale" —
              inline styles normally win over stylesheet rules, but an author
@@ -1033,26 +1108,27 @@ export function SopPrintPreview({
         }
       `}</style>
 
-      <div className="sop-preview-bar">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="sop-preview-bar sop-document-toolbar">
+        <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
           {backLink ? (
             <Link href={backLink.href} className="ui-btn-ghost inline-flex h-9 shrink-0 items-center gap-1.5 px-3">
               <ArrowLeft size={15} />
               {backLink.label}
             </Link>
           ) : null}
+          {taskLabel ? <span className="ui-chip shrink-0 border border-line bg-surface-hover px-2 py-1 text-xs font-semibold">{taskLabel}</span> : null}
           <span className="sop-preview-doc-id" title={[sop.meta.sopNumber, sop.meta.title].filter(Boolean).join(" — ")}>
             {[sop.meta.sopNumber, sop.meta.title].filter(Boolean).join(" — ") || "Untitled SOP"}
           </span>
           {mode === "review" || mode === "approval" ? (
-            <span className="ui-mono-label shrink-0 text-ink-tertiary">
+            <span className="ui-mono-label min-w-0 truncate text-ink-tertiary">
               {toolbarNote ?? (mode === "review"
                 ? "Draft PDF review · add section remarks in the review panel"
                 : "Final approval · review the controlled PDF and add your digital signature")}
             </span>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex max-w-[55%] shrink-0 items-center gap-2 overflow-x-auto">
           {canDownloadPdf ? (
             <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" onClick={() => window.print()}>
               <Printer size={15} />
@@ -1073,6 +1149,16 @@ export function SopPrintPreview({
           onScroll={handleReviewScroll}
           onClick={(event) => {
             const target = event.target;
+            const attachmentButton = target instanceof Element ? target.closest<HTMLElement>("[data-comment-attachment]") : null;
+            if (attachmentButton && onSelectReviewSection && !commentSelection?.expanded) {
+              const scroll = event.currentTarget;
+              const rect = attachmentButton.getBoundingClientRect();
+              const viewport = scroll.getBoundingClientRect();
+              const category = attachmentButton.dataset.commentCategory!;
+              onSelectReviewSection(category, "", { id: attachmentButton.dataset.commentAttachment!, name: attachmentButton.dataset.commentName! });
+              setCommentSelection({ category, quote: "", expanded: true, left: Math.max(12, Math.min(rect.left - viewport.left, scroll.clientWidth - 344)), top: rect.bottom - viewport.top + scroll.scrollTop + 8 });
+              return;
+            }
             if (!embedded && target instanceof HTMLElement &&
               (target === event.currentTarget ||
                 target.classList.contains("sop-print-pages") ||
@@ -1081,8 +1167,38 @@ export function SopPrintPreview({
             }
           }}
         >
-          <div className="sop-pages-row">
-          <div className="sop-print-pages" ref={pagesRef} style={{ zoom: pageScale }}>
+          <div className="sop-pages-row" style={{ visibility: initialPagesReady ? "visible" : "hidden" }} aria-hidden={!initialPagesReady}>
+          <div className="sop-print-pages" ref={pagesRef} style={{ zoom: pageScale }}
+            onMouseUp={(event) => {
+              if (!onSelectReviewSection || commentSelection?.expanded) return;
+              const target = event.target instanceof Element ? event.target : null;
+              if (target?.closest("button, a, input, textarea")) return;
+              const selection = window.getSelection();
+              if (!selection || selection.isCollapsed || !selection.rangeCount || !selection.toString().trim()) {
+                setCommentSelection(null);
+                return;
+              }
+              const start = selection?.anchorNode instanceof Element ? selection.anchorNode : selection?.anchorNode?.parentElement;
+              const end = selection?.focusNode instanceof Element ? selection.focusNode : selection?.focusNode?.parentElement;
+              const selectedSection = start?.closest<HTMLElement>("[data-review-category]");
+              const section = selectedSection;
+              if (!section || !event.currentTarget.contains(section) || !end || !section.contains(end)) {
+                setCommentSelection(null);
+                return;
+              }
+              const scroll = scrollRef.current;
+              if (!scroll) return;
+              const bounds = selection.getRangeAt(0).getBoundingClientRect();
+              const viewport = scroll.getBoundingClientRect();
+              setCommentSelection({
+                category: section.dataset.reviewCategory!,
+                quote: selection.toString().trim(),
+                left: Math.max(12, Math.min(bounds.left - viewport.left + scroll.scrollLeft, scroll.clientWidth - 344)),
+                top: bounds.bottom - viewport.top + scroll.scrollTop + 8,
+                expanded: false,
+              });
+            }}
+          >
           {fallback ? (
             <>
               {/* Fallback pages carry the overflowing class so the pre-pagination
@@ -1150,6 +1266,7 @@ export function SopPrintPreview({
                             ) : (
                               doc.name
                             )}
+                            {onSelectReviewSection ? <AttachmentCommentButton id={doc.id} name={doc.name} category="references" /> : null}
                           </li>
                         );
                       })}
@@ -1178,7 +1295,7 @@ export function SopPrintPreview({
                     const error = file ? annexPreview.errors[file.id] : "";
                     return (
                       <div key={annex.id ?? index}>
-                        <p className="sop-export-annex"><strong>{annex.label}: </strong>{annex.description}</p>
+                        <p className="sop-export-annex"><strong>{annex.label}: </strong>{annex.description}{extras.renderAnnexComment?.(annex)}</p>
                         {file ? (
                           <p className={`sop-export-annex-file ${error ? "sop-export-annex-file-error" : ""}`}>
                             Attached form: {file.originalName}{error ? ` - ${error}` : ""}
@@ -1345,11 +1462,27 @@ export function SopPrintPreview({
           })}
           {mode === "review" ? <div data-review-category="overall" className="h-px" /> : null}
           </div>
-          {marginNotes?.length ? <MarginNotesColumn notes={marginNotes} pagesRef={pagesRef} /> : null}
+          {marginNotes ? <MarginNotesColumn notes={marginNotes.filter((note) => !(commentSelection?.expanded && note.category === commentSelection.category))} pagesRef={pagesRef} /> : null}
           </div>
+          {commentSelection && onSelectReviewSection ? (
+            <div className="absolute z-20 w-80 max-w-[calc(100%-24px)]" style={{ left: commentSelection.left, top: commentSelection.top }}>
+              {commentSelection.expanded ? (
+                <div role="dialog" aria-label="Comment on selected text" className="sop-floating-comment rounded-md bg-canvas shadow-xl">
+                  {marginNotes?.find((note) => note.category === commentSelection.category)?.node}
+                </div>
+              ) : (
+                <button type="button" className="ui-btn-primary h-8 gap-1.5 px-3 shadow-lg" onMouseDown={(event) => event.preventDefault()} onClick={() => {
+                  onSelectReviewSection(commentSelection.category, commentSelection.quote);
+                  setCommentSelection({ ...commentSelection, expanded: true });
+                }}>Comment</button>
+              )}
+            </div>
+          ) : null}
         </div>
         {reviewPanel ? <aside className="sop-review-panel">{reviewPanel}</aside> : null}
       </div>
+
+      {footerActions ? <div className="sop-review-footer flex flex-wrap items-center justify-end gap-4 border-t border-line bg-canvas px-4 py-3">{footerActions}</div> : null}
 
       {/* Offscreen measurement tree. Renders unconditionally on every path,
           including the fallback branch above — if this ever moved inside a

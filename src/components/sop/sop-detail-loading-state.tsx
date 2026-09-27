@@ -1,9 +1,14 @@
 "use client";
 
-import { QuietLoading } from "@/components/quiet-loading";
+import { useRouter } from "next/navigation";
+import { SopReviewLoading } from "./sop-review-loading";
+import { QualitySkeleton } from "./quality-skeleton";
 import type { SopEditorInitialView } from "./sop-editor";
 import { SopShell } from "./sop-shell";
 import { SopStepNavIcon } from "./sop-step-nav-icon";
+import { SopTabNav } from "./sop-tab-nav";
+import { canManage, useSopWorkspace } from "./sop-workspace-provider";
+import { useReviewQueueCount } from "@/lib/sop/review-queue-count";
 
 const BUILDER_STEPS = ["Document", "Overview", "Procedure", "Annexes & history", "Approvals"];
 
@@ -67,7 +72,10 @@ export function BuilderLoadingSidebar({ initialView }: { initialView?: SopEditor
   );
 }
 
-export function SopDetailLoadingState({ initialView }: { initialView?: SopEditorInitialView }) {
+export function SopDetailLoadingState({ initialView, fromReviewQueue = false }: { initialView?: SopEditorInitialView; fromReviewQueue?: boolean }) {
+  const router = useRouter();
+  const { role, workspaceId } = useSopWorkspace();
+  const reviewCount = useReviewQueueCount(workspaceId);
   const heading =
     initialView === "draft-review"
       ? "Draft review"
@@ -79,11 +87,11 @@ export function SopDetailLoadingState({ initialView }: { initialView?: SopEditor
 
   return (
     <SopShell
-      sidebar={<BuilderLoadingSidebar initialView={initialView} />}
-      back={{ href: "/sops", label: "All SOPs" }}
-      crumb="SOP"
+      sidebar={fromReviewQueue ? <SopTabNav active="review" manage={canManage(role)} reviewCount={reviewCount} /> : <BuilderLoadingSidebar initialView={initialView} />}
+      back={fromReviewQueue ? undefined : { href: "/sops", label: "All SOPs" }}
+      crumb={fromReviewQueue ? "Quality / Review queue" : "SOP"}
     >
-      <QuietLoading label={`Opening ${heading}`} reserveClassName="min-h-[300px]" />
+      {initialView === "draft-review" || initialView === "final-approval" || initialView === "pdf" ? <SopReviewLoading label={initialView === "draft-review" ? "Address feedback" : heading} onClose={() => router.push(fromReviewQueue ? "/sops?tab=review" : "/sops")} /> : <QualitySkeleton variant="form" label={`Opening ${heading}`} reserveClassName="min-h-[300px]" />}
     </SopShell>
   );
 }

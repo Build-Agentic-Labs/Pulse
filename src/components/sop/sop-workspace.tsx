@@ -1,9 +1,11 @@
 "use client";
 
+import { parseSopWorkspaceTab } from "@/domain/sop/workspace-navigation";
+
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { QualityListLoadingContent } from "@/components/space-loading-states";
+import { QualitySkeleton } from "./quality-skeleton";
 import type { Department, DepartmentMember } from "@/domain/departments";
 import type { MemberAccess } from "@/domain/types";
 import type { HistoricalSopRevision } from "@/lib/sop/review";
@@ -16,10 +18,9 @@ import { SopTabNav, type SopTab } from "./sop-tab-nav";
 import { canManage, SopWorkspaceSwitcher, useSopWorkspace } from "./sop-workspace-provider";
 
 function SopTabChunkLoading() {
-  // Tab chunks are mounted while their panels are hidden so they are ready before selection.
-  // Keep that background work visually silent; the active panel's data loader owns any
-  // foreground loading feedback once the chunk is available.
-  return <div className="min-h-[260px]" aria-hidden />;
+  const params = useSearchParams();
+  const active = parseSopWorkspaceTab(params.get("tab"), params.get("via"));
+  return active === "settings" ? <QualitySkeleton variant="form" label="Loading Quality settings" /> : <QualityWorkspaceSkeleton active={active} />;
 }
 
 const EffectiveLibrary = dynamic(
@@ -58,10 +59,6 @@ const CRUMB: Record<Tab, string> = {
   settings: "Quality / Quality settings",
 };
 
-function parseTab(raw: string | null): Tab {
-  if (raw === "dashboard" || raw === "review" || raw === "library" || raw === "retired" || raw === "settings") return raw;
-  return "all";
-}
 
 /**
  * The persistent SOP workspace: one shell (header + sidebar) that stays mounted while the tabs
@@ -101,7 +98,7 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
   const manage = canManage(role);
   const reviewCount = useReviewQueueCount(workspaceId);
   const params = useSearchParams();
-  const requested = parseTab(params.get("tab"));
+  const requested = parseSopWorkspaceTab(params.get("tab"), params.get("via"));
   const tab = requested === "settings" && !manage ? "all" : requested;
   const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set([tab]));
 
@@ -179,8 +176,11 @@ export function SopWorkspace({ initial }: { initial?: SopWorkspaceInitialData } 
       <div hidden={tab !== "review"} aria-hidden={tab !== "review"}>
         {mountedTabs.has("review") ? (
           <ReviewQueue
+            key={workspaceId}
             active={tab === "review"}
             openReviewId={tab === "review" ? params.get("review") : null}
+            openApprovalId={tab === "review" ? params.get("approval") : null}
+            openApprovalDepartment={params.get("department")}
             initialQueue={initial?.tab === "review" ? initial.queue : undefined}
             initialWorkspaceId={initial?.tab === "review" ? initial.workspaceId : undefined}
           />
@@ -260,20 +260,32 @@ function QualitySettingsPanel({
  * server-data wait changes only the content body—not labels, icons, permissions,
  * or active-row styling in the shell.
  */
-export function SopWorkspaceLoadingState({ active = "all" }: { active?: Tab }) {
-  const { role } = useSopWorkspace();
+export function SopWorkspaceLoadingState({ active }: { active?: Tab }) {
+  const params = useSearchParams();
+  active = active ?? parseSopWorkspaceTab(params.get("tab"), params.get("via"));
+  const { role, workspaceId } = useSopWorkspace();
+  const reviewCount = useReviewQueueCount(workspaceId);
   const manage = canManage(role);
   const safeActive = active === "settings" && !manage ? "all" : active;
   const sidebar = (
     <>
-      <SopTabNav active={safeActive} manage={manage} />
+      <SopTabNav active={safeActive} manage={manage} reviewCount={reviewCount} />
       <SopWorkspaceSwitcher />
     </>
   );
 
   return (
     <SopShell sidebar={sidebar} crumb={CRUMB[safeActive]}>
-      <QualityListLoadingContent />
+      <QualityWorkspaceSkeleton active={safeActive} />
     </SopShell>
   );
+}
+
+function QualityWorkspaceSkeleton({ active }: { active: Tab }) {
+  return <div className="mx-auto max-w-6xl space-y-6">
+    <div><h1 className="ui-section-title">{CRUMB[active].replace("Quality / ", "")}</h1>
+      {active === "library" ? <p className="ui-section-subtitle">The single approved, in-force version of every SOP. Select a document to open its controlled PDF.</p> : null}
+    </div>
+    <QualitySkeleton variant={active === "dashboard" ? "dashboard" : active === "settings" ? "form" : "list"} label={`Opening ${CRUMB[active]}`} />
+  </div>;
 }

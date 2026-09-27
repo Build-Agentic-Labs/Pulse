@@ -1,5 +1,7 @@
 "use client";
 
+import { SopReviewLoading } from "./sop-review-loading";
+
 import { formatDateTime } from "@/domain/formatting";
 import { CheckCircle2, Loader2, Save, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -159,20 +161,7 @@ export function SopFinalApprovalWorkspace({
   }
 
   if (!record || !control || status === "loading") {
-    return (
-      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
-        {status === "error" ? (
-          <div className="ui-panel max-w-sm p-5 text-center">
-            <p className="ui-section-subtitle text-danger">{error}</p>
-            <button type="button" className="ui-btn-ghost mt-3 h-9 px-4" onClick={onClose}>
-              Back to review queue
-            </button>
-          </div>
-        ) : (
-          <Loader2 size={22} className="animate-spin text-white" />
-        )}
-      </div>
-    );
+    return <SopReviewLoading label="Final approval" error={status === "error" ? error : undefined} onClose={onClose} />;
   }
 
   const panel = (
@@ -285,6 +274,7 @@ export function SopFinalApprovalWorkspace({
       annexFiles={annexFiles}
       onClose={onClose}
       mode="approval"
+      embedded
       reviewPanel={panel}
       approvalRefreshKey={approvalRefreshKey}
       revealSignatureId={revealSignatureId}

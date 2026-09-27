@@ -1780,6 +1780,8 @@ export type Database = {
       }
       sop_review_annotations: {
         Row: {
+          author_response: string
+          author_responded_at: string | null
           author_name: string
           body: string
           category: string
@@ -1795,6 +1797,8 @@ export type Database = {
           y_percent: number | null
         }
         Insert: {
+          author_response?: string
+          author_responded_at?: string | null
           author_name?: string
           body: string
           category?: string
@@ -1810,6 +1814,8 @@ export type Database = {
           y_percent?: number | null
         }
         Update: {
+          author_response?: string
+          author_responded_at?: string | null
           author_name?: string
           body?: string
           category?: string

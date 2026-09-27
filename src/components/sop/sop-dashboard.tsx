@@ -2,7 +2,7 @@
 
 import { ChartPie, LayoutGrid } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { QuietLoading } from "@/components/quiet-loading";
+import { QualitySkeleton } from "./quality-skeleton";
 import type { Department } from "@/domain/departments";
 import {
   buildSopDashboardMetrics,
@@ -269,7 +269,7 @@ export function SopDashboard({
   );
 
   if (status === "loading") {
-    return <QuietLoading active={active} label="Loading dashboard" reserveClassName="min-h-[360px]" />;
+    return <QualitySkeleton variant="dashboard" active={active} label="Loading dashboard" reserveClassName="min-h-[360px]" />;
   }
 
   if (status === "error") {

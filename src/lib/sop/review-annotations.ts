@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import type { Database, TablesInsert } from "@/lib/database.types";
 import { kickSopNotifications } from "./notify-kick";
 
@@ -14,6 +14,9 @@ export interface SopReviewAnnotation {
   body: string;
   createdBy: string;
   authorName: string;
+  authorAvatarUrl?: string | null;
+  authorResponse?: string;
+  authorRespondedAt?: string | null;
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
@@ -62,10 +65,22 @@ function mapAnnotation(row: Record<string, unknown>): SopReviewAnnotation {
     body: String(row.body ?? ""),
     createdBy: String(row.created_by),
     authorName: String(row.author_name || "Reviewer"),
+    authorResponse: String(row.author_response ?? ""),
+    authorRespondedAt: (row.author_responded_at as string | null) ?? null,
     createdAt: String(row.created_at),
     resolvedAt: (row.resolved_at as string | null) ?? null,
     resolvedBy: (row.resolved_by as string | null) ?? null,
   };
+}
+
+async function withReviewerProfiles(comments: SopReviewAnnotation[], supabase: SupabaseClient<Database>): Promise<SopReviewAnnotation[]> {
+  if (!comments.length) return comments;
+  const { data } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", [...new Set(comments.map((item) => item.createdBy))]);
+  const profiles = new Map((data ?? []).map((profile) => [profile.id, profile]));
+  return comments.map((comment) => {
+    const profile = profiles.get(comment.createdBy);
+    return { ...comment, authorName: profile?.full_name?.trim() || comment.authorName, authorAvatarUrl: profile?.avatar_url ?? null };
+  });
 }
 
 function mapSubmission(row: Record<string, unknown>): SopReviewSubmission {
@@ -139,7 +154,7 @@ export async function listSopReviewAnnotations(
     .eq("sop_id", sopId)
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => mapAnnotation(row as Record<string, unknown>));
+  return withReviewerProfiles((data ?? []).map((row) => mapAnnotation(row as Record<string, unknown>)), supabase);
 }
 
 export async function addSopReviewAnnotation(input: {
@@ -167,7 +182,7 @@ export async function addSopReviewAnnotation(input: {
     .select("*")
     .single();
   if (error) throw new Error(error.message);
-  return mapAnnotation(data as Record<string, unknown>);
+  return (await withReviewerProfiles([mapAnnotation(data as Record<string, unknown>)], supabase))[0];
 }
 
 export async function saveSopReviewRemark(input: {
@@ -176,46 +191,13 @@ export async function saveSopReviewRemark(input: {
   body: string;
 }): Promise<SopReviewAnnotation | null> {
   const supabase = createPlannerSupabaseClient();
-  const userResult = await getUserFromSession(supabase);
-  const userId = userResult.data.user?.id;
-  if (!userId) throw new Error("Your session expired. Sign in again before saving remarks.");
-
-  const { data: control, error: controlError } = await supabase
-    .from("sops")
-    .select("review_cycle")
-    .eq("id", input.sopId)
-    .single();
-  if (controlError) throw new Error(controlError.message);
-
-  const { data: existing, error: findError } = await supabase
-    .from("sop_review_annotations")
-    .select("id")
-    .eq("sop_id", input.sopId)
-    .eq("category", input.category)
-    .eq("created_by", userId)
-    .eq("review_cycle", Number(control.review_cycle ?? 0))
-    .is("resolved_at", null)
-    .maybeSingle();
-  if (findError) throw new Error(findError.message);
-
   const body = input.body.trim();
-  if (!body) {
-    if (existing?.id) await deleteSopReviewAnnotation(String(existing.id));
-    return null;
-  }
-
-  const operation = existing?.id
-    ? supabase.from("sop_review_annotations").update({ body }).eq("id", existing.id).select("*").single()
-    : supabase.from("sop_review_annotations").insert({
-        sop_id: input.sopId,
-        review_cycle: 0,
-        category: input.category,
-        body,
-        // created_by/coordinates stamped or defaulted by the DB trigger — see above.
-      } as TablesInsert<"sop_review_annotations">).select("*").single();
-  const { data, error } = await operation;
+  if (!body) return null;
+  const { data, error } = await supabase.from("sop_review_annotations").insert({
+    sop_id: input.sopId, review_cycle: 0, category: input.category, body,
+  } as TablesInsert<"sop_review_annotations">).select("*").single();
   if (error) throw new Error(error.message);
-  return mapAnnotation(data as Record<string, unknown>);
+  return (await withReviewerProfiles([mapAnnotation(data as Record<string, unknown>)], supabase))[0];
 }
 
 export async function deleteSopReviewAnnotation(annotationId: string): Promise<void> {
@@ -224,11 +206,16 @@ export async function deleteSopReviewAnnotation(annotationId: string): Promise<v
   if (error) throw new Error(error.message);
 }
 
-export async function resolveSopReviewAnnotation(annotationId: string): Promise<void> {
+export async function resolveSopReviewAnnotation(annotationId: string, resolved = true): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   const { error } = await supabase.rpc("resolve_sop_review_annotation", {
     p_annotation: annotationId,
-    p_resolved: true,
+    p_resolved: resolved,
   });
+  if (error) throw new Error(error.message);
+}
+
+export async function saveSopAuthorResponse(id: string, response: string): Promise<void> {
+  const { error } = await createPlannerSupabaseClient().from("sop_review_annotations").update({ author_response: response.trim() }).eq("id", id);
   if (error) throw new Error(error.message);
 }

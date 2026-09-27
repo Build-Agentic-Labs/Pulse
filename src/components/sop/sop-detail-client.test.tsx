@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SopDetailInitialData } from "@/lib/sop/detail-data";
 
 const mocks = vi.hoisted(() => ({ workspace: { workspaceId: "org-a", canEditSops: false } }));
-vi.mock("next/navigation", () => ({ useParams: () => ({ sopId: "sop-1" }) }));
+vi.mock("next/navigation", () => ({ useParams: () => ({ sopId: "sop-1" }), useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/departments/store", () => ({ listDepartments: vi.fn(), listMyDepartments: vi.fn() }));
 vi.mock("@/lib/sop/store", () => ({ getSop: vi.fn() }));
 vi.mock("./sop-workspace-provider", () => ({

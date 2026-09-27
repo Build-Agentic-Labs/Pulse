@@ -2,7 +2,7 @@
 
 import { Archive } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { QuietLoading } from "@/components/quiet-loading";
+import { QualitySkeleton } from "./quality-skeleton";
 import { formatDate } from "@/domain/formatting";
 import { listNumberLabel } from "@/domain/sop/authoring";
 import { listSops, type SopListItem } from "@/lib/sop/store";
@@ -122,7 +122,7 @@ export function RetiredSops({
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {status === "loading" ? (
-        <QuietLoading active={active} label="Loading retired SOPs" />
+        <QualitySkeleton active={active} label="Loading retired SOPs" />
       ) : status === "error" ? (
         <section className="ui-empty-state">
           <button type="button" className="ui-btn-ghost inline-flex h-9 px-3" onClick={() => void refresh()}>

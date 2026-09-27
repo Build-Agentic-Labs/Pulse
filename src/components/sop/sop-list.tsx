@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-provider";
-import { QuietLoading } from "@/components/quiet-loading";
+import { QualitySkeleton } from "./quality-skeleton";
 import { ThemedSelect } from "@/components/themed-select";
 import type { Department } from "@/domain/departments";
 import { DEFAULT_DOC_TYPE, listNumberLabel } from "@/domain/sop/authoring";
@@ -662,7 +662,7 @@ export function SopList({
         ) : null}
 
         {listStatus === "loading" ? (
-          <QuietLoading active={active} label="Loading SOPs" />
+          <QualitySkeleton active={active} label="Loading SOPs" />
         ) : listStatus === "error" ? (
           <section className="ui-empty-state">
             <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load SOPs."}</p>

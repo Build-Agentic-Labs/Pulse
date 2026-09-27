@@ -394,8 +394,9 @@ export function SopEditor({
   const [approvalRoutingLoading, setApprovalRoutingLoading] = useState(false);
   const [approvalRoutingError, setApprovalRoutingError] = useState("");
   const [reviewAnnotations, setReviewAnnotations] = useState<SopReviewAnnotation[]>(
-    () => initialApprovalRouting?.reviewAnnotations ?? [],
+    () => (initialApprovalRouting?.reviewAnnotations ?? []).filter((item) => !item.resolvedAt),
   );
+  const [addressedAnnotations, setAddressedAnnotations] = useState<SopReviewAnnotation[]>(() => (initialApprovalRouting?.reviewAnnotations ?? []).filter((item) => Boolean(item.resolvedAt)));
   const [reviewSubmissions, setReviewSubmissions] = useState<SopReviewSubmission[]>(
     () => initialApprovalRouting?.reviewSubmissions ?? [],
   );
@@ -518,6 +519,7 @@ export function SopEditor({
             (annotation) => annotation.reviewCycle === approvalReviewCycle && !annotation.resolvedAt,
           ),
         );
+        setAddressedAnnotations(annotations.filter((item) => item.reviewCycle === approvalReviewCycle && item.resolvedAt));
         // Cycle-scoped, NOT hash-scoped: the draft review is a single round per
         // cycle, so verdicts stay valid after the author recalls and edits.
         setReviewSubmissions(
@@ -1329,13 +1331,16 @@ export function SopEditor({
     }
   }
 
-  async function handleMarkRemarkAddressed(annotationId: string) {
+  async function handleMarkRemarkAddressed(annotationId: string, resolved = true) {
     if (resolvingAnnotationId) return;
     setResolvingAnnotationId(annotationId);
     setSaveError("");
     try {
-      await resolveSopReviewAnnotation(annotationId);
-      setReviewAnnotations((current) => current.filter((item) => item.id !== annotationId));
+      if (resolved && !(await persist())) return;
+      await resolveSopReviewAnnotation(annotationId, resolved);
+      const comments = await listSopReviewAnnotations(sop.id);
+      setReviewAnnotations(comments.filter((item) => item.reviewCycle === approvalReviewCycle && !item.resolvedAt));
+      setAddressedAnnotations(comments.filter((item) => item.reviewCycle === approvalReviewCycle && item.resolvedAt));
       setAuditEvents(await listSopAuditEvents(sop.id));
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The remark could not be marked addressed.");
@@ -1638,7 +1643,7 @@ export function SopEditor({
   // --- Draft review: the document with the returned feedback beside it ---
   const openRemarkCount = reviewAnnotations.length;
   const flaggedCategories = Array.from(
-    new Set(reviewAnnotations.map((annotation) => annotation.category || "overall")),
+    new Set([...reviewAnnotations, ...addressedAnnotations].map((annotation) => annotation.category || "overall")),
   );
   const waitingReviewerCount = draftReviewers.filter((reviewer) => !reviewer.submission).length;
   const startApprovalDisabled =
@@ -1718,6 +1723,15 @@ export function SopEditor({
       <SopRemarkCard
         label={REVIEW_CATEGORY_LABELS[category] ?? "Overall remarks"}
         remarks={reviewAnnotations.filter((annotation) => (annotation.category || "overall") === category)}
+        addressedRemarks={addressedAnnotations.filter((item) => item.category === category)}
+        onUndo={(id) => void handleMarkRemarkAddressed(id, false)}
+        onOpenAttachment={(id) => {
+          const file = annexFiles.find((item) => item.annexId === id || item.id === id);
+          if (file) { void handleAnnexOpen(file); return; }
+          const linked = sop.linkedSops.find((item) => item.sopId === id);
+          if (linked) { router.push(`/sops/${encodeURIComponent(id)}?preview=pdf&from=${encodeURIComponent(sop.id)}`); return; }
+          setAnnexFileError("This attachment is no longer available. Open the section in the builder to check its replacement.");
+        }}
         editor={sectionEditors[category as keyof typeof sectionEditors] ?? null}
         editing={editingCategory === category}
         editable={remarkEditable}
@@ -1741,6 +1755,7 @@ export function SopEditor({
     .join(" · ");
   const feedbackToolbar = (
     <>
+      {saveError || annexFileError ? <span role="alert" className="max-w-72 text-xs text-danger">{saveError || annexFileError}</span> : null}
       <span className="hidden max-w-[16rem] truncate text-[11px] text-ink-tertiary lg:inline" title={feedbackNote}>
         {feedbackNote}
       </span>
@@ -1853,7 +1868,7 @@ export function SopEditor({
   }
 
   if (requestedStepId && requestedStepIndex < 0) {
-    return <SopDetailLoadingState initialView={initialView} />;
+    return <SopDetailLoadingState initialView={initialView} fromReviewQueue={cameFromQueue} />;
   }
 
   return (
@@ -2264,8 +2279,9 @@ export function SopEditor({
                 departmentCode={selectedDept?.code}
                 annexFiles={annexFiles}
                 mode="review"
-                toolbarNote={reviewerSummary || "Returned feedback"}
-                highlightCategories={flaggedCategories}
+                taskLabel="Address feedback"
+                toolbarNote={reviewerSummary || "Edit the flagged sections and mark comments addressed."}
+                highlightRemarks={reviewAnnotations}
                 marginNotes={remarkMarginNotes}
                 embedded
                 toolbarActions={feedbackToolbar}

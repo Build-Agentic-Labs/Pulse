@@ -1,3 +1,4 @@
+import { ProblemPilotAccessProvider } from "@/components/problem-solving/problem-pilot-link";
 import { Suspense, type ReactNode } from "react";
 import { QualityLoadingState } from "@/components/space-loading-states";
 import { SopWorkspaceProvider } from "@/components/sop/sop-workspace-provider";
@@ -14,9 +15,10 @@ export const metadata = {
  * "Loading SOPs" flash on every navigation. The persistent tabbed shell lives in SopWorkspace.
  */
 async function AuthenticatedSopWorkspace({ children }: { children: ReactNode }) {
+  const initial = await fetchInitialSopWorkspaceData();
   return (
-    <SopWorkspaceProvider initial={await fetchInitialSopWorkspaceData()}>
-      {children}
+    <SopWorkspaceProvider initial={initial}>
+      <ProblemPilotAccessProvider initialUserId={initial?.userId} initialAllowed={initial?.problemPilotAllowed}>{children}</ProblemPilotAccessProvider>
     </SopWorkspaceProvider>
   );
 }

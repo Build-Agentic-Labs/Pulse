@@ -6,14 +6,13 @@ import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useS
 import { viaReviewQueue } from "@/domain/sop/queue-navigation";
 import { summarizeQueue } from "@/domain/sop/queue-summary";
 import { publishReviewQueueCount } from "@/lib/sop/review-queue-count";
-import { QuietLoading } from "@/components/quiet-loading";
+import { QualitySkeleton } from "./quality-skeleton";
 import { formatDate } from "@/domain/formatting";
 import { listNumberLabel } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import {
   EMPTY_QUEUE as EMPTY,
   fetchReviewQueueData,
-  type PendingSeat,
   type QualityQueueItem,
   type QueueData,
 } from "@/lib/sop/review-queue-data";
@@ -134,6 +133,8 @@ export function ReviewQueue({
   initialQueue,
   initialWorkspaceId,
   openReviewId = null,
+  openApprovalId = null,
+  openApprovalDepartment = null,
 }: {
   active?: boolean;
   preload?: boolean;
@@ -142,6 +143,8 @@ export function ReviewQueue({
   initialWorkspaceId?: string;
   /** `?review=<sopId>`: open that SOP's review straight away (a reviewer clicking it elsewhere). */
   openReviewId?: string | null;
+  openApprovalId?: string | null;
+  openApprovalDepartment?: string | null;
 }) {
   const { workspaceId } = useSopWorkspace();
   const seededFromServer =
@@ -149,19 +152,13 @@ export function ReviewQueue({
   const [data, setData] = useState<QueueData>(seededFromServer ? initialQueue : EMPTY);
   const [listStatus, setListStatus] = useState<ListStatus>(seededFromServer ? "ready" : "loading");
   const [error, setError] = useState("");
-  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(openReviewId);
-  useEffect(() => {
-    if (openReviewId) setSelectedReviewId(openReviewId);
-  }, [openReviewId]);
-  // The deep link has done its job once the review closes; drop it so a reload or
-  // Back doesn't reopen a review the reviewer already left.
+  // The URL owns the open review so sidebar navigation and browser history
+  // always agree with the content being displayed.
+  const selectedReviewId = active ? openReviewId : null;
   const closeReview = useCallback(() => {
-    setSelectedReviewId(null);
-    if (new URLSearchParams(window.location.search).has("review")) {
-      window.history.replaceState(null, "", "/sops?tab=review");
-    }
+    window.history.pushState(null, "", "/sops?tab=review");
   }, []);
-  const [selectedFinalApproval, setSelectedFinalApproval] = useState<PendingSeat | null>(null);
+  const selectedFinalApproval = active && openApprovalId ? data.finalApprovals.find((seat) => seat.sopId === openApprovalId && seat.departmentId === openApprovalDepartment) ?? null : null;
   // Server-seeded data marks itself loaded-but-stale (loadedAt: 1): the mount effect
   // refreshes in the background instead of flashing a loader.
   const freshnessRef = useRef<{ workspaceId?: string; loadedAt: number }>(
@@ -170,8 +167,18 @@ export function ReviewQueue({
   // Bumped at the start of every refresh so an in-flight load for a prior workspace
   // bails instead of overwriting the current one after a switch.
   const refreshGenerationRef = useRef(0);
+  const refreshPendingRef = useRef(false);
 
-  const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
+  useEffect(() => () => {
+    // Ignore late results after leaving this queue or changing organizations.
+    refreshGenerationRef.current += 1;
+    refreshPendingRef.current = false;
+  }, [workspaceId]);
+
+  const refreshList = useCallback(async (options: { background?: boolean; coalesce?: boolean } = {}) => {
+    if (options.coalesce && (refreshPendingRef.current || (
+      freshnessRef.current.workspaceId === workspaceId && Date.now() - freshnessRef.current.loadedAt < 1_000
+    ))) return;
     const generation = ++refreshGenerationRef.current;
     const isCurrent = () => refreshGenerationRef.current === generation;
     if (!workspaceId) {
@@ -184,6 +191,7 @@ export function ReviewQueue({
       setListStatus("loading");
       setError("");
     }
+    refreshPendingRef.current = true;
     try {
       const supabase = createPlannerSupabaseClient();
       const userResult = await getUserFromSession(supabase);
@@ -208,6 +216,8 @@ export function ReviewQueue({
         setError(caught instanceof Error ? caught.message : "Could not load your review queue.");
         setListStatus("error");
       }
+    } finally {
+      if (isCurrent()) refreshPendingRef.current = false;
     }
   }, [workspaceId]);
 
@@ -227,7 +237,7 @@ export function ReviewQueue({
     if (!active || !workspaceId) return;
 
     const refreshInBackground = () => {
-      if (document.visibilityState === "visible") void refreshList({ background: true });
+      if (document.visibilityState === "visible") void refreshList({ background: true, coalesce: true });
     };
     const interval = window.setInterval(refreshInBackground, 15_000);
     window.addEventListener("focus", refreshInBackground);
@@ -255,7 +265,7 @@ export function ReviewQueue({
       author: data.authorNames[sop.id] ?? "",
       status: "Draft review",
       receivedAt: data.receivedAt[sop.id] ?? sop.updatedAt,
-      onOpen: () => setSelectedReviewId(sop.id),
+      onOpen: () => window.history.pushState(null, "", `/sops?tab=review&review=${encodeURIComponent(sop.id)}`),
     })),
     ...data.finalApprovals.map((seat) => ({
       key: `sign:${seat.sopId}:${seat.departmentId}`,
@@ -264,7 +274,7 @@ export function ReviewQueue({
       author: data.authorNames[seat.sopId] ?? "",
       status: "Signature needed",
       receivedAt: seat.finalApprovalRequestedAt ?? seat.updatedAt,
-      onOpen: () => setSelectedFinalApproval(seat),
+      onOpen: () => window.history.pushState(null, "", `/sops?tab=review&approval=${encodeURIComponent(seat.sopId)}&department=${encodeURIComponent(seat.departmentId)}`),
     })),
   ];
   const authoredRow = (sop: SopListItem, status: string, step: string): QueueRow => ({
@@ -325,6 +335,33 @@ export function ReviewQueue({
     return Array.from(groups.values()).sort((left, right) => left.name.localeCompare(right.name));
   }, [data.awaitingQuality]);
 
+  if (selectedFinalApproval) {
+    return (
+        <SopFinalApprovalWorkspace
+          key={`${selectedFinalApproval.sopId}:${selectedFinalApproval.departmentId}`}
+          sopId={selectedFinalApproval.sopId}
+          departmentId={selectedFinalApproval.departmentId}
+          departmentCode={selectedFinalApproval.departmentCode}
+          onClose={closeReview}
+          onSigned={() => void refreshList({ background: true })}
+        />
+    );
+  }
+
+  if (selectedReviewId) {
+    return (
+      <SopReviewWorkspace
+        key={selectedReviewId}
+        sopId={selectedReviewId}
+        onClose={closeReview}
+        onSubmitted={() => {
+          closeReview();
+          void refreshList({ background: true });
+        }}
+      />
+    );
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
@@ -334,7 +371,7 @@ export function ReviewQueue({
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
-        <QuietLoading active={active} label="Loading review queue" />
+        <QualitySkeleton active={active} label="Loading review queue" />
       ) : listStatus === "error" ? (
         <section className="ui-empty-state">
           <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load your review queue."}</p>
@@ -422,25 +459,7 @@ export function ReviewQueue({
           ) : null}
         </>
       )}
-      {selectedReviewId ? (
-        <SopReviewWorkspace
-          sopId={selectedReviewId}
-          onClose={closeReview}
-          onSubmitted={() => {
-            closeReview();
-            void refreshList({ background: true });
-          }}
-        />
-      ) : null}
-      {selectedFinalApproval ? (
-        <SopFinalApprovalWorkspace
-          sopId={selectedFinalApproval.sopId}
-          departmentId={selectedFinalApproval.departmentId}
-          departmentCode={selectedFinalApproval.departmentCode}
-          onClose={() => setSelectedFinalApproval(null)}
-          onSigned={() => void refreshList({ background: true })}
-        />
-      ) : null}
+
     </div>
   );
 }

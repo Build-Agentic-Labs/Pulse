@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CircleCheck, ExternalLink, Loader2, PencilLine } from "lucide-react";
+import { Check, CircleCheck, ExternalLink, Loader2, MessageSquare, PencilLine } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { SopReviewComment } from "./sop-review-comment";
 import type { SopReviewAnnotation } from "@/lib/sop/review-annotations";
@@ -12,6 +12,7 @@ import type { SopReviewAnnotation } from "@/lib/sop/review-annotations";
  */
 export function SopRemarkCard({
   label,
+  hideEditAction = false,
   remarks,
   addressedRemarks = [],
   onUndo,
@@ -26,6 +27,7 @@ export function SopRemarkCard({
   onResolve,
 }: {
   label: string;
+  hideEditAction?: boolean;
   remarks: SopReviewAnnotation[];
   addressedRemarks?: SopReviewAnnotation[];
   onUndo?: (id: string) => void;
@@ -48,8 +50,8 @@ export function SopRemarkCard({
       className="space-y-1"
     >
       <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-[11px] font-medium text-ink-secondary">{label}</span>
-        {editable ? (
+        <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-ink-secondary"><MessageSquare size={12} className="shrink-0" aria-hidden="true" /><span>Feedback on {label}</span></span>
+        {editable && !hideEditAction ? (
           editor ? (
             <button type="button" className="ui-btn-ghost h-7 gap-1 px-2 text-[11px]" onClick={onToggleEdit}>
               {editing ? <Check size={12} /> : <PencilLine size={12} />}

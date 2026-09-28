@@ -212,6 +212,7 @@ export function ReviewQueue({
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };
     } catch (caught) {
       if (!isCurrent()) return;
+      if (options.background) setError("Couldn’t refresh. Showing the last loaded queue.");
       if (!options.background) {
         setError(caught instanceof Error ? caught.message : "Could not load your review queue.");
         setListStatus("error");
@@ -225,7 +226,7 @@ export function ReviewQueue({
     if (!active && !preload) return;
     const hasCurrentData =
       freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
-    if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 15_000) return;
+
     void refreshList({ background: hasCurrentData });
   }, [active, preload, refreshList, workspaceId]);
 
@@ -254,9 +255,6 @@ export function ReviewQueue({
   const draftReviews = data.allInFlight.filter(
     (sop) => sop.status === "in_review" && pendingReviewIds.has(sop.id),
   );
-  const awaitingRelease = data.isQualityApprover
-    ? []
-    : data.allInFlight.filter((sop) => sop.status === "approved");
   const reviewRows: QueueRow[] = [
     ...draftReviews.map((sop) => ({
       key: `review:${sop.id}`,
@@ -267,6 +265,8 @@ export function ReviewQueue({
       receivedAt: data.receivedAt[sop.id] ?? sop.updatedAt,
       onOpen: () => window.history.pushState(null, "", `/sops?tab=review&review=${encodeURIComponent(sop.id)}`),
     })),
+  ];
+  const signatureRows: QueueRow[] = [
     ...data.finalApprovals.map((seat) => ({
       key: `sign:${seat.sopId}:${seat.departmentId}`,
       number: listNumberLabel(seat.sopNumber, seat.sopDepartmentCode),
@@ -288,31 +288,29 @@ export function ReviewQueue({
   });
   const feedbackRows: QueueRow[] = [
     ...data.feedbackToAddress.map((sop) => authoredRow(sop, "Remarks to address", "draft-review")),
-    ...data.readyForFinalApproval.map((sop) => authoredRow(sop, "Ready for final approval", "final-approval")),
+    ...data.readyForFinalApproval.map((sop) => authoredRow(sop, "Ready for signatures", "draft-review")),
     ...data.sentBack.map((sop) => authoredRow(sop, "Sent back", "draft-review")),
   ];
-  const releaseRows: QueueRow[] = awaitingRelease.map((sop) => ({
-    key: `release:${sop.id}`,
-    number: listNumberLabel(sop.sopNumber, sop.departmentCode),
-    title: sop.title || sop.sopNumber || "Untitled SOP",
-    author: "",
-    status: "Awaiting Quality",
-    receivedAt: sop.updatedAt,
-    href: viaReviewQueue(`/sops/${sop.id}?step=quality-approval`),
+  const replyRows: QueueRow[] = (data.authorReplies ?? []).map((sop) => ({
+    key: `reply:${sop.id}`, number: listNumberLabel(sop.sopNumber, sop.departmentCode),
+    title: sop.title || "Untitled SOP", author: data.authorNames[sop.id] ?? "",
+    status: "Author replied", receivedAt: sop.updatedAt,
+    onOpen: () => window.history.pushState(null, "", `/sops?tab=review&review=${encodeURIComponent(sop.id)}`),
   }));
   const queueGroups = [
+    { label: "Author replies", rows: replyRows },
     { label: "Needs your review", rows: reviewRows },
+    { label: "Needs your signature", rows: signatureRows },
     { label: "Feedback on your SOPs", rows: feedbackRows },
-    { label: "Awaiting Quality release", rows: releaseRows },
   ].filter((group) => group.rows.length > 0);
   const needsReviewCount = draftReviews.length + data.finalApprovals.length;
   const feedbackBackCount =
     data.feedbackToAddress.length + data.readyForFinalApproval.length + data.sentBack.length;
   const nothingToDo =
+    replyRows.length === 0 &&
     needsReviewCount === 0 &&
     feedbackBackCount === 0 &&
-    data.awaitingQuality.length === 0 &&
-    awaitingRelease.length === 0;
+    data.awaitingQuality.length === 0;
 
   // Keep the sidebar badge in step with what this page shows, between bell refreshes.
   useEffect(() => {
@@ -368,7 +366,7 @@ export function ReviewQueue({
         <h1 className="ui-section-title">{data.isQualityApprover ? "Quality review queue" : "Review queue"}</h1>
       </div>
 
-      {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
+      {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}<button type="button" className="ui-btn-ghost ml-2 text-xs" onClick={() => void refreshList({ background: true })}>Retry</button></div> : null}
 
       {listStatus === "loading" ? (
         <QualitySkeleton active={active} label="Loading review queue" />

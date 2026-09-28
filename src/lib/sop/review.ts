@@ -710,3 +710,13 @@ export async function listHistoricalRevisions(
     }];
   });
 }
+
+export async function sendSopForSignatures(sopId: string, hash: string, cycle: number): Promise<void> {
+  await throwIfError(createPlannerSupabaseClient().rpc("send_sop_for_signatures", { p_sop: sopId, p_expected_hash: hash, p_expected_cycle: cycle }));
+  kickSopNotifications();
+}
+export async function signSopWithMark(sopId: string, meaning: "dept_approval" | "quality_approval", strokes: SignatureStrokes, hash: string, cycle: number, department: string | null = null): Promise<string> {
+  const id = await throwIfError(createPlannerSupabaseClient().rpc("sign_sop_with_mark", { p_sop: sopId, p_meaning: meaning, p_strokes: strokes as unknown as Json, p_department: department, p_hash: hash, p_cycle: cycle }));
+  kickSopNotifications();
+  return String(id);
+}

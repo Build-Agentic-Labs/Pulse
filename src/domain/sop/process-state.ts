@@ -21,7 +21,7 @@ export const SOP_PROCESS_STATE_LABELS: Record<SopProcessState, string> = {
   draft: "Draft",
   changes_requested: "Changes requested",
   draft_review: "Draft review",
-  final_approval: "Final approval",
+  final_approval: "Awaiting signatures",
   awaiting_quality: "Awaiting Quality",
   effective: "Effective",
   retired: "Retired",

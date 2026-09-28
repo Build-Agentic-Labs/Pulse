@@ -3,7 +3,7 @@
 import { SopReviewLoading } from "./sop-review-loading";
 
 import { formatDateTime } from "@/domain/formatting";
-import { CheckCircle2, Loader2, Save, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import type { SignatureStrokes } from "@/domain/sop/signature";
@@ -14,14 +14,13 @@ import {
   isSignatureCurrent,
   listProfileNames,
   listSignatures,
-  saveMySignatureProfile,
-  signSop,
+  signSopWithMark,
   type SopControl,
   type SopSignature,
 } from "@/lib/sop/review";
 import { getSop, type SopRecord } from "@/lib/sop/store";
 import { SopPrintPreview } from "./sop-print-preview";
-import { SignaturePad } from "./signature-pad";
+import { SignatureInput } from "./signature-input";
 
 
 export function SopFinalApprovalWorkspace({
@@ -48,9 +47,6 @@ export function SopFinalApprovalWorkspace({
   const [approvalRefreshKey, setApprovalRefreshKey] = useState(0);
   const [revealSignatureId, setRevealSignatureId] = useState<string | null>(null);
   const [signatureStrokes, setSignatureStrokes] = useState<SignatureStrokes>([]);
-  const [savedSignatureStrokes, setSavedSignatureStrokes] = useState<SignatureStrokes>([]);
-  const [savingSignature, setSavingSignature] = useState(false);
-
   useEffect(() => {
     let active = true;
     setStatus("loading");
@@ -79,7 +75,6 @@ export function SopFinalApprovalWorkspace({
         setCurrentUserId(userId);
         setCurrentUserName((userId ? names.get(userId) : "") || "You");
         setSignatureStrokes(signatureProfile?.strokes ?? []);
-        setSavedSignatureStrokes(signatureProfile?.strokes ?? []);
         setStatus("ready");
       })
       .catch((caught) => {
@@ -103,49 +98,16 @@ export function SopFinalApprovalWorkspace({
     ) ?? null;
   }, [control, currentUserId, departmentId, signatures]);
 
-  const signatureChanged = useMemo(
-    () => JSON.stringify(signatureStrokes) !== JSON.stringify(savedSignatureStrokes),
-    [savedSignatureStrokes, signatureStrokes],
-  );
-
-  async function saveSignature(): Promise<boolean> {
-    if (!signatureStrokes.length) {
-      setError("Draw your signature before saving it.");
-      return false;
-    }
-    setSavingSignature(true);
-    setError("");
-    try {
-      const saved = await saveMySignatureProfile(signatureStrokes);
-      setSignatureStrokes(saved.strokes);
-      setSavedSignatureStrokes(saved.strokes);
-      return true;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Your signature could not be saved.");
-      return false;
-    } finally {
-      setSavingSignature(false);
-    }
-  }
-
   async function addSignature() {
     if (!control || status === "signing" || mySignature) return;
     if (!signatureStrokes.length) {
-      setError("Draw and save your signature before signing this SOP.");
+      setError("Draw or type your signature before signing this SOP.");
       return;
     }
     setStatus("signing");
     setError("");
     try {
-      if (signatureChanged && !(await saveSignature())) {
-        setStatus("error");
-        return;
-      }
-      const signatureId = await signSop(sopId, "dept_approval", {
-        seatDepartmentId: departmentId,
-        expectedContentHash: control.contentHash,
-        expectedReviewCycle: control.reviewCycle,
-      });
+      const signatureId = await signSopWithMark(sopId, "dept_approval", signatureStrokes, control.contentHash ?? "", control.reviewCycle, departmentId);
       const [nextControl, nextSignatures] = await Promise.all([getSopControl(sopId), listSignatures(sopId)]);
       if (!nextControl) throw new Error("The signed SOP could not be reloaded.");
       setControl(nextControl);
@@ -165,104 +127,22 @@ export function SopFinalApprovalWorkspace({
   }
 
   const panel = (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
-      <div className="border-b border-line px-5 py-4">
-        <div className="flex items-center gap-2">
-          <ShieldCheck size={15} className="text-emerald-700" />
-          <h2 className="text-sm font-medium text-ink">Final approval</h2>
+    <div className="flex h-full min-h-0 flex-col bg-canvas">
+      <div className="min-h-0 flex-1 space-y-5 overflow-auto p-5">
+        <div>
+          <h2 className="text-sm font-medium text-ink">{mySignature ? "Signed" : "Your signature"}</h2>
+          <p className="mt-1 text-xs text-ink-secondary">{currentUserName} · {departmentCode} approval</p>
         </div>
-        <p className="mt-1 text-xs leading-5 text-ink-secondary">
-          Review the controlled PDF, then add your digital signature to its approval table.
-        </p>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-auto p-5">
-        {error ? <div className="ui-notice ui-notice-warn px-3 py-2 text-xs">{error}</div> : null}
-        <section className="rounded-md border border-line bg-surface-raised p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="ui-mono-label text-ink-tertiary">Signature for</div>
-              <p className="mt-1 truncate text-sm font-medium text-ink">{currentUserName}</p>
-              <p className="mt-0.5 text-xs text-ink-secondary">{departmentCode} department approval</p>
-            </div>
-            <span className={`ui-chip shrink-0 ${mySignature ? "border-emerald-600 text-emerald-700" : ""}`}>
-              {mySignature ? "Signed" : "Pending"}
-            </span>
-          </div>
-          {mySignature ? (
-            <div className="mt-4 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-emerald-800">
-              <CheckCircle2 size={15} className="mt-0.5 shrink-0" />
-              <div>
-                <p className="text-xs font-medium">Digitally signed by {mySignature.signerName || currentUserName}</p>
-                <p className="mt-0.5 text-[11px] tabular-nums">{formatDateTime(mySignature.signedAt)}</p>
-              </div>
-            </div>
-          ) : null}
-        </section>
-
-        {!mySignature ? (
-          <section className="mt-4 rounded-md border border-line bg-surface-raised p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-xs font-medium text-ink">Your saved signature</h3>
-                <p className="mt-1 text-[11px] leading-4 text-ink-tertiary">
-                  Draw it once and reuse it for future SOP approvals.
-                </p>
-              </div>
-              <span className={`ui-chip shrink-0 ${!signatureChanged && signatureStrokes.length ? "border-emerald-600 text-emerald-700" : ""}`}>
-                {!signatureStrokes.length ? "Not created" : signatureChanged ? "Unsaved" : "Saved"}
-              </span>
-            </div>
-            <div className="mt-3">
-              <SignaturePad
-                value={signatureStrokes}
-                disabled={savingSignature || status === "signing"}
-                onChange={(strokes) => {
-                  setSignatureStrokes(strokes);
-                  setError("");
-                  if (status === "error") setStatus("ready");
-                }}
-              />
-            </div>
-            <div className="mt-3 flex justify-end">
-              <button
-                type="button"
-                className="ui-btn-ghost h-8 gap-1.5 px-3 disabled:opacity-40"
-                disabled={!signatureStrokes.length || !signatureChanged || savingSignature || status === "signing"}
-                onClick={() => void saveSignature()}
-              >
-                {savingSignature ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                {savingSignature ? "Saving…" : "Save signature"}
-              </button>
-            </div>
-          </section>
-        ) : null}
-
-        <div className="mt-4 rounded-md border border-dashed border-line px-4 py-3">
-          <p className="text-xs leading-5 text-ink-secondary">
-            Your signature is bound to version <span className="font-mono text-ink">{control.version}</span> and this
-            exact document content. The PDF records your printed name and timestamp automatically.
-          </p>
-        </div>
-      </div>
-
-      <div className="border-t border-line bg-surface p-4">
+        {error ? <p role="alert" className="text-xs text-danger">{error}</p> : null}
         {mySignature ? (
-          <button type="button" className="ui-btn-primary h-9 w-full gap-2 px-4" onClick={onClose}>
-            <CheckCircle2 size={14} />
-            Signed · back to review queue
-          </button>
+          <p className="text-xs text-ink-secondary">Signed by {mySignature.signerName || currentUserName} · {formatDateTime(mySignature.signedAt)}</p>
         ) : (
-          <button
-            type="button"
-            className="ui-btn-primary h-9 w-full gap-2 px-4 disabled:opacity-40"
-            disabled={status === "signing" || savingSignature || !signatureStrokes.length}
-            onClick={() => void addSignature()}
-          >
-            {status === "signing" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
-            {status === "signing" ? "Adding signature…" : "Add signature and send to author"}
-          </button>
+          <SignatureInput value={signatureStrokes} disabled={status === "signing"} onChange={strokes => { setSignatureStrokes(strokes); setError(""); }} />
         )}
+        <p className="text-[11px] leading-5 text-ink-secondary">Signing approves version {control.version} of this document. Your account name and signing time are recorded.</p>
+      </div>
+      <div className="border-t border-line p-4">
+        {mySignature ? <button type="button" className="ui-btn-primary h-9 w-full gap-2" onClick={onClose}><CheckCircle2 size={14} />Back to review queue</button> : <button type="button" className="ui-btn-primary h-9 w-full gap-2 disabled:opacity-40" disabled={status === "signing" || !signatureStrokes.length} onClick={() => void addSignature()}>{status === "signing" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}{status === "signing" ? "Signing…" : "Sign SOP"}</button>}
       </div>
     </div>
   );
@@ -274,6 +154,8 @@ export function SopFinalApprovalWorkspace({
       annexFiles={annexFiles}
       onClose={onClose}
       mode="approval"
+      taskLabel="Signatures"
+      toolbarNote="Review the document, then sign to approve."
       embedded
       reviewPanel={panel}
       approvalRefreshKey={approvalRefreshKey}

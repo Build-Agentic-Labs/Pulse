@@ -72,7 +72,7 @@ describe("selectReadyForFinalApproval", () => {
   it("drops the SOP once final approval is underway or it has left review", () => {
     const underway = input({ sops: [sop({ finalApprovalRequestedAt: "2026-07-30T00:00:00Z", finalApprovalContentHash: "h1" })] });
     expect(selectReadyForFinalApproval(underway)).toEqual([]);
-    expect(selectReadyForFinalApproval(input({ sops: [sop({ status: "draft" })] }))).toEqual([]);
+    expect(selectReadyForFinalApproval(input({ sops: [sop({ status: "draft" })] })).map(s => s.id)).toEqual(["sop-1"]);
   });
 
   it("re-lists an SOP whose content changed after a stale final-approval request", () => {
@@ -127,8 +127,8 @@ describe("feedback on a draft pulled back to work the remarks", () => {
     ]);
   });
 
-  it("is never ready for final approval until it is resubmitted", () => {
-    expect(selectReadyForFinalApproval(input({ sops: [recalled] }))).toEqual([]);
+  it("keeps a corrected draft actionable until it is sent for signatures", () => {
+    expect(selectReadyForFinalApproval(input({ sops: [recalled] })).map(s => s.id)).toEqual(["sop-1"]);
   });
 
   it("leaves a rejected draft to the sent-back list", () => {

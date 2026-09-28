@@ -334,7 +334,7 @@ export function SopPrintPreview({
   reviewPanel?: ReactNode;
   /** Replaces the mode's default toolbar note (e.g. the author reading returned feedback). */
   toolbarNote?: string;
-  taskLabel?: "Review document" | "Address feedback";
+  taskLabel?: "Review document" | "Address feedback" | "Review conversation" | "Signatures" | "Quality approval";
   onDismissReviewComment?: () => void;
   commentDismissKey?: number;
   commentBusy?: boolean;

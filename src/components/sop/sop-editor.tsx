@@ -32,7 +32,7 @@ import {
   listSeats,
   listSignatures,
   listProfileNames,
-  requestSopFinalApproval,
+  sendSopForSignatures,
   signSop,
   transitionSop,
   type SopReviewSeat,
@@ -1201,7 +1201,7 @@ export function SopEditor({
   // initial INSERT and number assignment; simply opening the builder never creates an empty
   // draft. A failed save waits for a retry or the next edit, and conflicts stop autosave.
   const autosaveArmed =
-    canEdit && Boolean(workspaceId) && dirty && !conflicted && Boolean(selectedDept) && saveStatus === "idle";
+    canEdit && !submittingForApproval && !requestingFinalApproval && Boolean(workspaceId) && dirty && !conflicted && Boolean(selectedDept) && saveStatus === "idle";
   useEffect(() => {
     if (!autosaveArmed) return;
     const timer = window.setTimeout(() => {
@@ -1265,25 +1265,40 @@ export function SopEditor({
     if (targetIndex >= 0) void handleStepSelect(targetIndex);
   }
 
-  async function handleRecallForChanges() {
-    if (recallingReview || !reviewGate.canMakeChanges) return;
+  // Unlock a completed review with feedback on the author's behalf. Never
+  // advance to final approval here: that remains an explicit author action.
+  const feedbackUnlockAttempt = useRef<string | null>(null);
+  useEffect(() => {
+    if (submittingForApproval || requestingFinalApproval || !isCurrentUserAuthor || !canEditPermission || approvalRoutingLoading ||
+        sop.status !== "in_review" || finalApprovalRequested || !reviewGate.canMakeChanges) return;
+    const attempt = `${sop.id}:${approvalReviewCycle}`;
+    if (feedbackUnlockAttempt.current === attempt) return;
+    feedbackUnlockAttempt.current = attempt;
     setRecallingReview(true);
     setSaveError("");
-    try {
-      const latest = await getSopControl(sop.id);
-      if (!latest) throw new Error("The SOP could not be loaded before recalling it.");
-      if (latest.status !== "in_review") {
-        router.replace(`/sops/${sop.id}?step=draft-review`);
-        return;
+    void (async () => {
+      try {
+        const latest = await getSopControl(sop.id);
+        if (!latest) throw new Error("The SOP could not be loaded to enable editing.");
+        const updated = latest.status === "in_review"
+          ? await transitionSop(sop.id, "draft", latest.updatedAt)
+          : latest;
+        // The workflow transition writes the row too. Advance the save token
+        // before enabling editing so autosave does not conflict with our own update.
+        persistedUpdatedAtRef.current = updated.updatedAt;
+        setPersistedUpdatedAt(updated.updatedAt);
+        setSop((current) => current.id === sop.id
+          ? { ...current, status: updated.status, updatedAt: updated.updatedAt }
+          : current);
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Could not enable editing. Reload to retry.");
+        setSaveStatus("error");
+      } finally {
+        setRecallingReview(false);
       }
-      await transitionSop(sop.id, "draft", latest.updatedAt);
-      router.replace(`/sops/${sop.id}?step=draft-review`);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "The SOP could not be recalled for changes.");
-      setSaveStatus("error");
-      setRecallingReview(false);
-    }
-  }
+    })();
+  }, [approvalReviewCycle, approvalRoutingLoading, canEditPermission, finalApprovalRequested,
+    isCurrentUserAuthor, reviewGate.canMakeChanges, sop.id, sop.status, submittingForApproval, requestingFinalApproval]);
 
   async function handleStartControlledChange() {
     const reason = controlledChangeReason.trim();
@@ -1364,12 +1379,24 @@ export function SopEditor({
     }));
   }
 
+  async function syncSignatureRequestControl() {
+    const control = await getSopControl(sop.id);
+    if (!control) throw new Error("The signature request could not be refreshed. Reload the SOP.");
+    persistedUpdatedAtRef.current = control.updatedAt;
+    setPersistedUpdatedAt(control.updatedAt);
+    setSop(current => ({ ...current, status: control.status, updatedAt: control.updatedAt }));
+    setFinalApprovalRequestedAt(control.finalApprovalRequestedAt);
+    setFinalApprovalContentHash(control.finalApprovalContentHash);
+    setApprovalContentHash(control.contentHash);
+  }
+
   async function handleRequestFinalApproval() {
     if (requestingFinalApproval || finalApprovalRequested) return;
     setRequestingFinalApproval(true);
     setSaveError("");
     try {
-      await requestSopFinalApproval(sop.id);
+      await sendSopForSignatures(sop.id, approvalContentHash ?? "", approvalReviewCycle);
+      await syncSignatureRequestControl();
       await refreshApprovalRouting();
       setAuditEvents(await listSopAuditEvents(sop.id));
     } catch (error) {
@@ -1417,6 +1444,16 @@ export function SopEditor({
         return;
       }
 
+      if (reviewGate.allResponded && reviewAnnotations.length === 0) {
+        await sendSopForSignatures(sop.id, control.contentHash ?? "", control.reviewCycle);
+        await syncSignatureRequestControl();
+        await refreshApprovalRouting({ background: true });
+        setAuditEvents(await listSopAuditEvents(sop.id));
+        setStepIndex(CREATOR_STEPS.length + 1);
+        window.history.replaceState(window.history.state, "", `/sops/${encodeURIComponent(sop.id)}?step=final-approval`);
+        return;
+      }
+
       const supabase = createPlannerSupabaseClient();
       const userResult = await getUserFromSession(supabase);
       const userId = userResult.data.user?.id;
@@ -1441,7 +1478,7 @@ export function SopEditor({
       // instead of reopening the reviewers' queue.
       // Only with every remark addressed; otherwise the author lands back in draft review.
       const readyForSignatures = reviewGate.allResponded && reviewAnnotations.length === 0;
-      if (readyForSignatures) await requestSopFinalApproval(sop.id);
+
       await refreshApprovalRouting({ background: true });
       setAuditEvents(await listSopAuditEvents(sop.id));
 
@@ -1667,17 +1704,10 @@ export function SopEditor({
     if (!reviewGate.allResponded) {
       feedbackNote = `Waiting on ${waitingReviewerCount} ${waitingReviewerCount === 1 ? "reviewer" : "reviewers"}.`;
     } else if (openRemarkCount > 0) {
-      feedbackAction = {
-        label: recallingReview ? "Recalling…" : "Make changes",
-        icon: <RotateCcw size={14} />,
-        onClick: () => void handleRecallForChanges(),
-        disabled: !reviewGate.canMakeChanges,
-        busy: recallingReview,
-      };
-      feedbackNote = "Takes the draft back so you can edit it and address the remarks.";
+      feedbackNote = recallingReview ? "Preparing changes…" : "All reviews returned.";
     } else {
       feedbackAction = {
-        label: requestingFinalApproval ? "Sending…" : "Send for final approval",
+        label: requestingFinalApproval ? "Sending…" : "Send for signatures",
         icon: <ShieldCheck size={14} />,
         onClick: () => void handleRequestFinalApproval(),
         busy: requestingFinalApproval,
@@ -1699,6 +1729,43 @@ export function SopEditor({
         : "Every remark is addressed.";
   }
 
+  useEffect(() => {
+    let alive = true;
+    let pending = false;
+    const refresh = async () => {
+      if (pending || document.visibilityState !== "visible") return;
+      pending = true;
+      try {
+        const comments = await listSopReviewAnnotations(sop.id);
+        if (!alive) return;
+        setReviewAnnotations(comments.filter(item => item.reviewCycle === approvalReviewCycle && !item.resolvedAt));
+        setAddressedAnnotations(comments.filter(item => item.reviewCycle === approvalReviewCycle && item.resolvedAt));
+      } finally { pending = false; }
+    };
+    const run = () => { void refresh().catch(() => { /* Retain the last conversation; retry on the next focus or interval. */ }); };
+    const timer = window.setInterval(run, 15000);
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", run);
+    return () => { alive = false; window.clearInterval(timer); window.removeEventListener("focus", run); document.removeEventListener("visibilitychange", run); };
+  }, [sop.id, approvalReviewCycle]);
+
+  const builderHasFeedback = showDraftReview && step.id !== "draftReview" &&
+    [...reviewAnnotations, ...addressedAnnotations].some((remark) =>
+      (REVIEW_CATEGORY_STEPS[remark.category] ?? "document") === step.id);
+  function builderFeedback(category: string) {
+    if (!showDraftReview) return null;
+    const matches = (item: SopReviewAnnotation) => item.category === category || (category === "document" && item.category === "overall");
+    const remarks = reviewAnnotations.filter(matches);
+    const addressed = addressedAnnotations.filter(matches);
+    if (!remarks.length && !addressed.length) return null;
+    return <SopRemarkCard label={REVIEW_CATEGORY_LABELS[category] ?? category}
+      remarks={remarks} addressedRemarks={addressed} hideEditAction
+      editor={null} editing={false} editable={canEdit} lockedReason=""
+      resolvingId={resolvingAnnotationId} onToggleEdit={() => {}} onOpenInBuilder={() => {}}
+      onResolve={(id) => void handleMarkRemarkAddressed(id)}
+      onUndo={(id) => void handleMarkRemarkAddressed(id, false)} />;
+  }
+
   function leaveFeedbackView() {
     if (cameFromQueue) {
       router.push(REVIEW_QUEUE_HREF);
@@ -1713,7 +1780,7 @@ export function SopEditor({
   const remarkLockedReason =
     sop.status === "in_review"
       ? reviewGate.allResponded
-        ? "Choose Make changes to edit the draft and address this."
+        ? ""
         : "You can edit once every reviewer has responded."
       : "";
   const remarkMarginNotes: MarginNote[] = flaggedCategories.map((category) => ({
@@ -1889,7 +1956,7 @@ export function SopEditor({
         onInputCapture={handleFieldInput}
         onScrollCapture={() => setFieldHint(null)}
       >
-        <div className={`mx-auto max-w-4xl ${step.id === "document" ? "" : "pb-16"}`}>
+        <div className={`mx-auto ${builderHasFeedback ? "max-w-[92rem]" : "max-w-4xl"} ${step.id === "document" ? "" : "pb-16"}`}>
           <div className="min-w-0 space-y-5">
 
             {showConvertedReview && !reviewDismissed ? (
@@ -1950,59 +2017,10 @@ export function SopEditor({
               Step {stepIndex + 1} of {steps.length} · {step.label}
             </div>
 
-            {showDraftReview && step.id !== "draftReview" && stepReviewAnnotations.length ? (
-              <section className="ui-panel overflow-hidden">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <MessageSquare size={14} className="text-amber-700" />
-                    <div>
-                      <h2 className="ui-setup-section-title">Review feedback for {step.label}</h2>
-                      <p className="mt-0.5 text-xs text-ink-tertiary">
-                        Update this section using the reviewer remarks below.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="ui-btn-ghost h-8 px-3"
-                    onClick={() => void handleStepSelect(steps.findIndex((item) => item.id === "draftReview"))}
-                  >
-                    View all feedback
-                  </button>
-                </div>
-                <div className="divide-y divide-line">
-                  {stepReviewAnnotations.map((annotation) => (
-                    <div key={annotation.id} className="flex flex-wrap items-start gap-3 px-4 py-3">
-                      <span className="ui-chip mt-0.5 shrink-0">
-                        {REVIEW_CATEGORY_LABELS[annotation.category] ?? "Overall remarks"}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm leading-5 text-ink">{annotation.body}</p>
-                        <p className="mt-1 text-[11px] text-ink-tertiary">Requested by {annotation.authorName}</p>
-                      </div>
-                      {sop.status === "draft" && canEdit ? (
-                        <button
-                          type="button"
-                          className="ui-btn-ghost h-8 shrink-0 gap-1.5 px-3 text-emerald-700 disabled:opacity-50"
-                          onClick={() => void handleMarkRemarkAddressed(annotation.id)}
-                          disabled={Boolean(resolvingAnnotationId)}
-                        >
-                          {resolvingAnnotationId === annotation.id
-                            ? <Loader2 size={13} className="animate-spin" />
-                            : <CircleCheck size={13} />}
-                          Addressed
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
             {step.id === "document" ? (
-              <div className="flex min-h-[calc(100dvh-8rem)] py-8">
+              <div className={`grid min-h-[calc(100dvh-8rem)] gap-6 py-8 ${builderHasFeedback ? "xl:grid-cols-[minmax(0,16rem)_minmax(0,56rem)_minmax(0,16rem)]" : ""}`}>
                 <section
-                  className="flex w-full flex-col px-2 py-4 sm:px-5 sm:py-8"
+                  className={`flex min-w-0 w-full flex-col px-2 py-4 sm:px-5 sm:py-8 ${builderHasFeedback ? "xl:col-start-2" : ""}`}
                   data-review-attention={
                     reviewCategoriesNeedingAttention.has("document") ||
                     reviewCategoriesNeedingAttention.has("overall")
@@ -2132,21 +2150,22 @@ export function SopEditor({
                     </button>
                   </div>
                 </section>
+                {builderHasFeedback ? <aside className="min-w-0 xl:col-start-3">{builderFeedback("document")}</aside> : null}
               </div>
             ) : null}
 
             {step.id === "overview" ? (
               <>
-                <Section title="Purpose" reviewAttention={reviewCategoriesNeedingAttention.has("purpose")}>
+                <Section title="Purpose" reserveMargin={builderHasFeedback} feedback={builderFeedback("purpose")} reviewAttention={reviewCategoriesNeedingAttention.has("purpose")}>
                   {sectionEditors.purpose}
                 </Section>
-                <Section title="Scope" reviewAttention={reviewCategoriesNeedingAttention.has("scope")}>
+                <Section title="Scope" reserveMargin={builderHasFeedback} feedback={builderFeedback("scope")} reviewAttention={reviewCategoriesNeedingAttention.has("scope")}>
                   {sectionEditors.scope}
                 </Section>
-                <Section title="Definitions" reviewAttention={reviewCategoriesNeedingAttention.has("definitions")}>
+                <Section title="Definitions" reserveMargin={builderHasFeedback} feedback={builderFeedback("definitions")} reviewAttention={reviewCategoriesNeedingAttention.has("definitions")}>
                   {sectionEditors.definitions}
                 </Section>
-                <Section title="References" hideHeading reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
+                <Section title="References" reserveMargin={builderHasFeedback} feedback={builderFeedback("references")} hideHeading reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
                   {sectionEditors.references}
                 </Section>
               </>
@@ -2157,16 +2176,18 @@ export function SopEditor({
                 <Section
                   title="Responsible person(s)"
                   reviewAttention={reviewCategoriesNeedingAttention.has("responsible")}
+                  reserveMargin={builderHasFeedback} feedback={builderFeedback("responsible")}
                 >
                   {sectionEditors.responsible}
                 </Section>
                 <Section
                   title="Measurement (KPIs)"
                   reviewAttention={reviewCategoriesNeedingAttention.has("measurements")}
+                  reserveMargin={builderHasFeedback} feedback={builderFeedback("measurements")}
                 >
                   {sectionEditors.measurements}
                 </Section>
-                <Section title="Procedure" reviewAttention={reviewCategoriesNeedingAttention.has("procedure")}>
+                <Section title="Procedure" reserveMargin={builderHasFeedback} feedback={builderFeedback("procedure")} reviewAttention={reviewCategoriesNeedingAttention.has("procedure")}>
                   <Field label="Process flow description" optional>
                     <AutoTextarea
                       className="ui-field-standalone min-h-16 py-2"
@@ -2197,7 +2218,7 @@ export function SopEditor({
 
             {step.id === "annexes" ? (
               <>
-                <Section title="Annexes & forms" reviewAttention={reviewCategoriesNeedingAttention.has("annexes")}>
+                <Section title="Annexes & forms" reserveMargin={builderHasFeedback} feedback={builderFeedback("annexes")} reviewAttention={reviewCategoriesNeedingAttention.has("annexes")}>
                   <AnnexesEditor
                     sopId={sop.id}
                     rows={sop.annexes}
@@ -2219,7 +2240,7 @@ export function SopEditor({
                   />
                   {annexFileError ? <p className="mt-2 text-xs text-danger">{annexFileError}</p> : null}
                 </Section>
-                <Section title="Change history" reviewAttention={reviewCategoriesNeedingAttention.has("history")}>
+                <Section title="Change history" reserveMargin={builderHasFeedback} feedback={builderFeedback("history")} reviewAttention={reviewCategoriesNeedingAttention.has("history")}>
                   <SystemChangeHistory rows={sop.changeHistory} />
                 </Section>
               </>
@@ -2290,67 +2311,33 @@ export function SopEditor({
             ) : null}
 
             {step.id === "finalApproval" ? (
-              <div className="space-y-5">
-                <section className="ui-panel overflow-hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-4 py-4">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
-                      <div>
-                        <h2 className="ui-setup-section-title">Final approval</h2>
-                        <p className="mt-1 text-xs leading-5 text-ink-tertiary">
-                          Review the controlled document and track every required stakeholder signature before Quality release.
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="ui-btn-ghost h-9 gap-2 border border-line px-3"
-                      onClick={() => setPreviewing(true)}
-                    >
-                      <FileText size={14} />
-                      {finalApprovalRequested ? "Preview signed PDF" : "Preview document"}
-                    </button>
-                  </div>
-
-                  {!finalApprovalRequested ? (
-                    <div className="border-b border-line bg-surface-subtle px-4 py-3">
-                      <p className="text-xs font-medium text-ink">Upcoming step</p>
-                      <p className="mt-1 text-xs leading-5 text-ink-tertiary">
-                        Final approval has not been requested yet. Complete Draft Review, then send the SOP to its formal approvers.
-                      </p>
-                    </div>
-                  ) : null}
-
-                  <div className="divide-y divide-line">
+              <SopPrintPreview
+                sop={renderedSop}
+                departmentCode={selectedDept?.code}
+                annexFiles={annexFiles}
+                mode="approval"
+                taskLabel="Signatures"
+                toolbarNote={finalApprovalRequested ? "Approvers sign next, then Quality verifies and releases the SOP." : "Complete draft review and send for signatures."}
+                embedded
+                onClose={leaveFeedbackView}
+                marginNotes={[{
+                  key: "signature-status",
+                  category: "document",
+                  node: <section className="space-y-3">
+                    <p className="text-[11px] font-medium text-ink-secondary">Required signatures</p>
                     {finalApprovalStakeholders.map(({ seat, department, name, signature }) => (
-                      <div key={seat.departmentId} className="flex items-center gap-3 px-4 py-3">
-                        <span
-                          className={`h-2.5 w-2.5 shrink-0 rounded-full ${signature ? "bg-emerald-600" : "bg-zinc-400"}`}
-                          aria-hidden
-                        />
-                        <span className="ui-chip shrink-0">{department?.code ?? "—"}</span>
+                      <div key={seat.departmentId} className="flex items-center gap-2 border-b border-line pb-3 last:border-0">
+                        <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${signature ? "bg-accent" : "bg-ink-tertiary"}`} />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-ink">{name}</p>
-                          <p className="mt-0.5 truncate text-xs text-ink-tertiary">
-                            {department?.name ?? "Unknown department"} · Required approval
-                          </p>
+                          <p className="text-xs font-medium text-ink">{name}</p>
+                          <p className="text-[11px] text-ink-tertiary">{department?.name ?? "Department approver"}</p>
                         </div>
-                        <div className="shrink-0 text-right">
-                          <p className={`text-xs font-medium ${signature ? "text-emerald-700" : "text-ink-tertiary"}`}>
-                            {signature ? "Signed" : finalApprovalRequested ? "Waiting for signature" : "Not requested"}
-                          </p>
-                          {signature ? (
-                            <p className="mt-0.5 text-[11px] tabular-nums text-ink-tertiary">
-                              {formatReviewDate(signature.signedAt)}
-                            </p>
-                          ) : null}
-                        </div>
+                        <span className="text-[11px] text-ink-secondary">{signature ? "Signed" : finalApprovalRequested ? "Awaiting signature" : "Not requested"}</span>
                       </div>
                     ))}
-                  </div>
-                </section>
-
-              </div>
+                  </section>,
+                }]}
+              />
             ) : null}
 
             {step.id === "qualityApproval" ? (
@@ -2729,15 +2716,20 @@ function Section({
   hideHeading = false,
   children,
   reviewAttention = false,
+  feedback,
+  reserveMargin = false,
 }: {
   title: string;
   hideHeading?: boolean;
   children: ReactNode;
   reviewAttention?: boolean;
+  feedback?: ReactNode;
+  reserveMargin?: boolean;
 }) {
   return (
+    <div className={`grid gap-4 ${reserveMargin ? "xl:grid-cols-[minmax(0,16rem)_minmax(0,56rem)_minmax(0,16rem)] xl:gap-6" : ""}`}>
     <section
-      className="border-b border-line bg-transparent px-5 py-4 transition-[border-color,background-color] duration-200"
+      className={`min-w-0 border-b border-line bg-transparent px-5 py-4 transition-[border-color,background-color] duration-200 ${reserveMargin ? "xl:col-start-2" : ""}`}
       style={reviewAttention ? {
         borderColor: "var(--color-warn)",
         backgroundColor: "color-mix(in srgb, var(--color-warn) 5%, var(--color-canvas))",
@@ -2747,6 +2739,8 @@ function Section({
       {hideHeading ? null : <h2 className="ui-setup-section-title mb-3">{title}</h2>}
       {children}
     </section>
+    {feedback ? <aside className="min-w-0 py-4 xl:col-start-3">{feedback}</aside> : null}
+    </div>
   );
 }
 function Field({

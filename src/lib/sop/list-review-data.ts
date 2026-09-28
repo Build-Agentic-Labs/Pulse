@@ -7,6 +7,7 @@ import {
 } from "@/lib/sop/review-annotations";
 import type { SopListItem } from "@/lib/sop/store";
 import { reviewerStatus, type ReviewerStatus } from "@/domain/sop/reviewer-status";
+import { selectFeedbackToAddress, selectReadyForFinalApproval } from "@/domain/sop/queue-ready";
 import { listReviewProgress } from "./list-review-progress";
 
 export interface SopListReviewParticipant {
@@ -17,6 +18,7 @@ export interface SopListReviewParticipant {
 
 export interface SopListReviewData {
   currentUserId: string | null;
+  authorActions?: Array<{ sopId: string; label: "Address feedback" | "Ready for signatures" }>;
   submissions: SopReviewSubmission[];
   participantGroups: Array<{
     sopId: string;
@@ -89,5 +91,10 @@ export async function fetchSopListReviewData(
     return { sopId: sop.id, participants: Array.from(unique.values()) };
   });
 
-  return { currentUserId, submissions, participantGroups };
+  const gate = { userId: currentUserId, sops, seats, submissions, openAnnotations: progress.comments.map(item => ({ sopId: item.sop_id, reviewCycle: item.review_cycle })) };
+  const authorActions: NonNullable<SopListReviewData["authorActions"]> = [
+    ...selectFeedbackToAddress(gate).map(item => ({ sopId: item.id, label: "Address feedback" as const })),
+    ...selectReadyForFinalApproval(gate).map(item => ({ sopId: item.id, label: "Ready for signatures" as const })),
+  ];
+  return { currentUserId, submissions, participantGroups, authorActions };
 }

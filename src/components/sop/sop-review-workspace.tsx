@@ -54,6 +54,7 @@ export function SopReviewWorkspace({
   const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
   const [annotations, setAnnotations] = useState<SopReviewAnnotation[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [conversationOpen, setConversationOpen] = useState(false);
   const [submission, setSubmission] = useState<SopReviewSubmission | null>(null);
   const [noChanges, setNoChanges] = useState(false);
   const [reviewCycle, setReviewCycle] = useState(0);
@@ -113,13 +114,14 @@ export function SopReviewWorkspace({
             item.reviewCycle === control?.reviewCycle,
         ) ?? null;
         const activeComments = comments.filter(
-          (comment) => comment.reviewCycle === (control?.reviewCycle ?? 0) && !comment.resolvedAt,
+          (comment) => comment.reviewCycle === (control?.reviewCycle ?? 0) && (!comment.resolvedAt || Boolean(comment.authorResponse) || Boolean(comment.replies?.length)),
         );
         setRecord(nextRecord);
         setAnnexFiles(files);
         setAnnotations(activeComments);
         setCurrentUserId(userId);
         setSubmission(currentSubmission);
+        setConversationOpen(Boolean(control && ["draft", "in_review"].includes(control.status) && !control.finalApprovalRequestedAt));
         setNoChanges(currentSubmission?.noChanges ?? false);
         setReviewCycle(control?.reviewCycle ?? 0);
         setAutosaveStatus("saved");
@@ -134,6 +136,25 @@ export function SopReviewWorkspace({
       active = false;
     };
   }, [sopId]);
+
+  useEffect(() => {
+    let alive = true;
+    let pending = false;
+    const refresh = async () => {
+      if (pending || document.visibilityState !== "visible") return;
+      pending = true;
+      try {
+        const comments = await listSopReviewAnnotations(sopId);
+        if (!alive) return;
+        setAnnotations(comments.filter(item => item.reviewCycle === reviewCycle && (!item.resolvedAt || Boolean(item.authorResponse) || Boolean(item.replies?.length))));
+      } finally { pending = false; }
+    };
+    const run = () => { void refresh().catch(() => { /* Retain the last conversation; retry on the next focus or interval. */ }); };
+    const timer = window.setInterval(run, 15000);
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", run);
+    return () => { alive = false; window.clearInterval(timer); window.removeEventListener("focus", run); document.removeEventListener("visibilitychange", run); };
+  }, [sopId, reviewCycle]);
 
   const hasAnyRemarks = annotations.some((item) => item.createdBy === currentUserId);
 
@@ -278,7 +299,7 @@ export function SopReviewWorkspace({
             </div>
           </> : <>
             {annotations.filter((item) => item.category === key).map((remark) => (
-              <SopReviewComment key={remark.id} remark={remark} actions={remark.createdBy === currentUserId && !submission ? (
+              <SopReviewComment key={remark.id} remark={remark} viewerIsReviewer={remark.createdBy === currentUserId} canReviewerReply={conversationOpen && Boolean(submission) && remark.createdBy === currentUserId} actions={remark.createdBy === currentUserId && !submission ? (
                 <button type="button" className="ui-btn-ghost h-7 w-7 shrink-0 px-0 text-ink-tertiary" aria-label={`Delete ${label} remarks`} disabled={status === "saving" || Boolean(activeCategory)} onClick={() => void removeRemark(remark)}><Trash2 size={12} className="mx-auto" /></button>
               ) : undefined} />
             ))}
@@ -311,8 +332,8 @@ export function SopReviewWorkspace({
       onClose={() => void handleClose()}
       mode="review"
       embedded
-      taskLabel="Review document"
-      toolbarNote="Highlight text to add a comment."
+      taskLabel={submission ? "Review conversation" : "Review document"}
+      toolbarNote={submission ? "Review submitted · Author responses appear beside your comments." : "Highlight text to add a comment."}
       footerActions={toolbar}
       marginNotes={marginNotes}
       highlightRemarks={annotations}

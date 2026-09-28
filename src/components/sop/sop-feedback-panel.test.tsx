@@ -32,7 +32,7 @@ describe("minimal author feedback actions", () => {
     fireEvent.change(screen.getByLabelText("Author reply"),{target:{value:"Added the field."}});
     fireEvent.click(screen.getByLabelText("Save reply"));
     await waitFor(() => expect(saveSopAuthorResponse).toHaveBeenCalledWith("r1","Added the field."));
-    expect(await screen.findByText("Author response")).toBeInTheDocument();
+    expect(await screen.findByText("You")).toBeInTheDocument();
     expect(screen.getByText("Add signature")).toBeInTheDocument();
   });
 });

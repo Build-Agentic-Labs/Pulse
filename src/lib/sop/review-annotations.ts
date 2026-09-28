@@ -15,6 +15,7 @@ export interface SopReviewAnnotation {
   createdBy: string;
   authorName: string;
   authorAvatarUrl?: string | null;
+  replies?: { id: string; createdBy: string; body: string; createdAt: string }[];
   authorResponse?: string;
   authorRespondedAt?: string | null;
   createdAt: string;
@@ -77,9 +78,11 @@ async function withReviewerProfiles(comments: SopReviewAnnotation[], supabase: S
   if (!comments.length) return comments;
   const { data } = await supabase.from("profiles").select("id, full_name, avatar_url").in("id", [...new Set(comments.map((item) => item.createdBy))]);
   const profiles = new Map((data ?? []).map((profile) => [profile.id, profile]));
+  const { data: replies, error: replyError } = await supabase.from("sop_comment_replies").select("*").in("annotation_id", comments.map(item => item.id)).order("created_at");
+  if (replyError) throw new Error(replyError.message);
   return comments.map((comment) => {
     const profile = profiles.get(comment.createdBy);
-    return { ...comment, authorName: profile?.full_name?.trim() || comment.authorName, authorAvatarUrl: profile?.avatar_url ?? null };
+    return { ...comment, replies: (replies ?? []).filter(reply => reply.annotation_id === comment.id).map(reply => ({ id: reply.id, createdBy: reply.created_by, body: reply.body, createdAt: reply.created_at })), authorName: profile?.full_name?.trim() || comment.authorName, authorAvatarUrl: profile?.avatar_url ?? null };
   });
 }
 
@@ -218,4 +221,14 @@ export async function resolveSopReviewAnnotation(annotationId: string, resolved 
 export async function saveSopAuthorResponse(id: string, response: string): Promise<void> {
   const { error } = await createPlannerSupabaseClient().from("sop_review_annotations").update({ author_response: response.trim() }).eq("id", id);
   if (error) throw new Error(error.message);
+}
+
+export async function addSopCommentReply(annotationId: string, body: string, requestId: string) {
+ const { error } = await createPlannerSupabaseClient().from("sop_comment_replies")
+  .upsert({ id: requestId, annotation_id: annotationId, body: body.trim() }, { onConflict: "id", ignoreDuplicates: true });
+ if (error) throw new Error(error.message);
+ const { data: saved, error: readError } = await createPlannerSupabaseClient().from("sop_comment_replies").select("*").eq("id", requestId).single();
+ if (readError) throw new Error(readError.message);
+ const data = saved;
+ return { id: data.id, createdBy: data.created_by, body: data.body, createdAt: data.created_at };
 }

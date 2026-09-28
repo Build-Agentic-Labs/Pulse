@@ -56,9 +56,9 @@ function hasOpenRemarks(sop: SopListItem, input: ReadyForFinalApprovalInput): bo
 }
 
 export function selectReadyForFinalApproval(input: ReadyForFinalApprovalInput): SopListItem[] {
-  // Only a live review can ask for signatures; a recalled draft must be resubmitted first.
+  // Recalled drafts still require the author to send the completed review for signatures.
   return input.sops.filter(
-    (sop) => sop.status === "in_review" && everyReviewReturned(sop, input) && !hasOpenRemarks(sop, input),
+    (sop) => everyReviewReturned(sop, input) && !hasOpenRemarks(sop, input),
   );
 }
 

@@ -4,6 +4,8 @@ import * as review from "./review";
 import * as annotations from "./review-annotations";
 import * as departments from "@/lib/departments/store";
 import { listSops, type SopListItem } from "./store";
+const replies = vi.hoisted(() => ({ rows: [] as { sop_id: string; review_cycle: number }[] }));
+vi.mock("@/domain/supabase-planner", () => ({ createPlannerSupabaseClient: () => ({ from: () => ({ select: () => ({ eq: () => ({ neq: async () => ({ data: replies.rows, error: null }) }) }) }) }) }));
 vi.mock("./review", () => ({ listMySeats: vi.fn(), listMySignaturesFor: vi.fn(), listSeatsForSops: vi.fn(), listSopAuthorDisplayNames: vi.fn(), isBlockingSeat: (r: string) => r === "responsible" }));
 vi.mock("./review-annotations", () => ({ listSopReviewSubmissions: vi.fn(), listOpenSopReviewAnnotationsFor: vi.fn(), hasSubmittedSopReview: () => false }));
 vi.mock("@/lib/departments/store", () => ({ listDepartments: vi.fn(), fetchMyDeptRoles: vi.fn() }));
@@ -23,6 +25,7 @@ const signature = (sopId: string, meaning: review.SignatureMeaning = "dept_appro
  reviewCycle: 1, resolvesSignatureId: null, signedContentHash: "same-hash", signatureStrokes: [],
 });
 beforeEach(() => {
+ replies.rows = [];
  vi.mocked(review.listMySeats).mockResolvedValue([]);
  vi.mocked(review.listMySignaturesFor).mockResolvedValue([]);
  vi.mocked(review.listSeatsForSops).mockResolvedValue([]);
@@ -55,4 +58,25 @@ describe("review queue routing", () => {
   expect(review.listSopAuthorDisplayNames).toHaveBeenCalledWith(["one"], undefined);
   expect(queue.authorNames).toEqual({ one: "Jennifer Li" });
  });
+});
+
+it("keeps current-cycle author replies accessible while the SOP is back in draft", async () => {
+ vi.mocked(listSops).mockResolvedValue([sop("reply", { status: "draft" }), sop("old", { status: "draft", reviewCycle: 2 })]);
+ replies.rows = [{ sop_id: "reply", review_cycle: 1 }, { sop_id: "old", review_cycle: 1 }];
+ const queue = await fetchReviewQueueData("ws", "viewer");
+ expect(queue.authorReplies?.map(item => item.id)).toEqual(["reply"]);
+});
+
+it("removes author replies from the queue once signatures or later stages begin", async () => {
+ const stages = [
+  sop("signing", { status: "in_review" }),
+  sop("quality"),
+  sop("released", { status: "effective" }),
+  sop("retired", { status: "obsolete" }),
+  sop("reviewing", { status: "in_review", finalApprovalRequestedAt: null, finalApprovalContentHash: null }),
+ ];
+ vi.mocked(listSops).mockResolvedValue(stages);
+ replies.rows = stages.map(item => ({ sop_id: item.id, review_cycle: 1 }));
+ const queue = await fetchReviewQueueData("ws", "viewer");
+ expect(queue.authorReplies?.map(item => item.id)).toEqual(["reviewing"]);
 });

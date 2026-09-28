@@ -1778,6 +1778,12 @@ export type Database = {
           },
         ]
       }
+      sop_comment_replies: {
+        Row: { id: string; annotation_id: string; created_by: string; body: string; created_at: string }
+        Insert: { id?: string; annotation_id: string; created_by?: string; body: string; created_at?: string }
+        Update: { body?: string }
+        Relationships: []
+      }
       sop_review_annotations: {
         Row: {
           author_response: string
@@ -3863,6 +3869,9 @@ export type Database = {
       }
     }
     Functions: {
+      send_sop_for_signatures: { Args: { p_sop: string; p_expected_hash: string; p_expected_cycle: number }; Returns: undefined };
+      sign_sop_with_mark: { Args: { p_sop: string; p_meaning: string; p_strokes: Json; p_department: string | null; p_hash: string; p_cycle: number }; Returns: string };
+
       append_sop_event: {
         Args: { p_details?: Json; p_event_type: string; p_sop: string }
         Returns: undefined

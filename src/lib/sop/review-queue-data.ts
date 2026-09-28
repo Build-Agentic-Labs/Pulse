@@ -4,6 +4,8 @@
  * verbatim from review-queue.tsx so the queue derivation exists exactly once.
  */
 
+import { getSopProcessState } from "@/domain/sop/process-state";
+import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { selectFeedbackToAddress, selectReadyForFinalApproval } from "@/domain/sop/queue-ready";
@@ -42,6 +44,7 @@ export interface QualityQueueItem extends SopListItem {
 }
 
 export interface QueueData {
+  authorReplies?: SopListItem[];
   /** Seats I hold that are unsigned against the SOP's current content and cycle. */
   awaitingMe: PendingSeat[];
   /** Formal approvals requested after every draft reviewer accepted the content. */
@@ -93,6 +96,17 @@ export async function fetchReviewQueueData(
     listDepartments(workspaceId, client),
     fetchMyDeptRoles(workspaceId, client),
   ]);
+
+  const db = client ?? createPlannerSupabaseClient();
+  const { data: replyRows, error: replyError } = await db.from("sop_review_annotations")
+    .select("sop_id, review_cycle, author_responded_at")
+    .eq("created_by", userId).neq("author_response", "");
+  if (replyError) throw new Error(replyError.message);
+  const authorReplies = sops.filter((sop) => {
+    const phase = getSopProcessState(sop);
+    return (phase === "draft" || phase === "changes_requested" || phase === "draft_review") &&
+      (replyRows ?? []).some((reply) => reply.sop_id === sop.id && reply.review_cycle === sop.reviewCycle);
+  });
 
   const codeById = new Map(departments.map((department) => [department.id, department.code]));
   const departmentById = new Map(departments.map((department) => [department.id, department]));
@@ -172,6 +186,7 @@ export async function fetchReviewQueueData(
     }));
 
   return {
+    authorReplies,
     awaitingMe,
     finalApprovals,
     // Mine, sent back by a reviewer. rejectedReason is the DB's mirror of the objection

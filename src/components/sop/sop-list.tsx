@@ -36,8 +36,6 @@ import {
   type SopListReviewParticipant,
 } from "@/lib/sop/list-review-data";
 import {
-  listSopReviewAnnotations,
-  type SopReviewAnnotation,
   type SopReviewSubmission,
 } from "@/lib/sop/review-annotations";
 import { ReviewerRemindButton } from "./reviewer-remind-button";
@@ -84,20 +82,6 @@ const REVIEWER_STATUS_COLORS: Record<ReviewerStatus, string> = {
   review_complete: "bg-emerald-600 text-white",
   awaiting_signature: "bg-amber-500 text-white",
   signed: "bg-emerald-600 text-white",
-};
-
-const REVIEW_FEEDBACK_LABELS: Record<string, string> = {
-  document: "Document control",
-  purpose: "Purpose",
-  scope: "Scope",
-  definitions: "Definitions",
-  responsible: "Responsible parties",
-  references: "References",
-  measurements: "Measurements",
-  procedure: "Procedure & process flow",
-  annexes: "Annexes & forms",
-  history: "Change history",
-  overall: "Overall remarks",
 };
 
 function reviewResultsFrom(data?: SopListReviewData): Map<string, SopReviewSubmission[]> {
@@ -174,6 +158,8 @@ export function SopList({
     seededMemberDepartments?.[0]?.id ?? "",
   );
   const seededReview = seededFromServer ? initialReview : undefined;
+  const [refreshWarning, setRefreshWarning] = useState(false);
+  const [authorActions, setAuthorActions] = useState(seededReview?.authorActions ?? []);
   const [reviewResults, setReviewResults] = useState<Map<string, SopReviewSubmission[]>>(
     () => reviewResultsFrom(seededReview),
   );
@@ -182,7 +168,6 @@ export function SopList({
   >(() => reviewParticipantsFrom(seededReview));
   const [currentUserId, setCurrentUserId] = useState<string | null>(seededReview?.currentUserId ?? null);
   const [feedbackSop, setFeedbackSop] = useState<SopListItem | null>(null);
-  const [feedbackAnnotations, setFeedbackAnnotations] = useState<SopReviewAnnotation[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
   /** Reviewer id → when they may next be reminded, for the open feedback panel. */
@@ -201,7 +186,7 @@ export function SopList({
   sopsRef.current = sops;
   const converting = convert !== null;
 
-  const refreshList = useCallback(async (options: { background?: boolean } = {}) => {
+  const refreshList = useCallback(async (options: { background?: boolean; force?: boolean } = {}) => {
     if (!workspaceId) {
       setSops([]);
       setReviewResults(new Map());
@@ -216,7 +201,7 @@ export function SopList({
       const justRefreshed =
         freshnessRef.current.workspaceId === workspaceId &&
         Date.now() - freshnessRef.current.loadedAt < 2_000;
-      if (backgroundRefreshInFlight.current || justRefreshed) {
+      if (backgroundRefreshInFlight.current || (!options.force && justRefreshed)) {
         return sopsRef.current;
       }
       backgroundRefreshInFlight.current = true;
@@ -232,13 +217,16 @@ export function SopList({
       const userId = userResult.data.user?.id ?? null;
       const review = await fetchSopListReviewData(next, userId, supabase);
       setSops(next);
+      setRefreshWarning(false);
       setReviewResults(reviewResultsFrom(review));
+      setAuthorActions(review.authorActions ?? []);
       setReviewParticipants(reviewParticipantsFrom(review));
       setCurrentUserId(review.currentUserId);
       setListStatus("ready");
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return next;
     } catch (caught) {
+      if (options.background) setRefreshWarning(true);
       if (!options.background) {
         setError(caught instanceof Error ? caught.message : "Could not load SOPs.");
         setListStatus("error");
@@ -350,10 +338,11 @@ export function SopList({
     if (!active && !preload) return;
     const hasCurrentData =
       freshnessRef.current.workspaceId === workspaceId && freshnessRef.current.loadedAt > 0;
-    if (hasCurrentData && Date.now() - freshnessRef.current.loadedAt < 15_000) return;
+    // Revalidate on activation even when the previous visit was recent: workflow
+    // actions can change the status while this panel is retained in memory.
 
     let alive = true;
-    void refreshList({ background: hasCurrentData }).then((loaded) => {
+    void refreshList({ background: hasCurrentData, force: true }).then((loaded) => {
       if (!alive || !workspaceId) return;
       if (!editable || isImportDone(workspaceId)) {
         setPendingImport([]);
@@ -501,25 +490,19 @@ export function SopList({
 
   async function openFeedback(sop: SopListItem) {
     setFeedbackSop(sop);
-    setFeedbackAnnotations([]);
     setReminderWindows(new Map());
     setFeedbackError("");
     setFeedbackLoading(true);
     const isAuthor = currentUserId !== null && sop.createdBy === currentUserId;
     try {
-      const [annotations, lastReminders] = await Promise.all([
-        listSopReviewAnnotations(sop.id),
-        // Best-effort: without it the button still works; the database enforces the window.
-        isAuthor && sop.status === "in_review"
-          ? listLastReviewerReminders(sop.id).catch(() => new Map<string, string>())
-          : Promise.resolve(new Map<string, string>()),
-      ]);
-      setFeedbackAnnotations(annotations.filter((item) => item.reviewCycle === sop.reviewCycle && !item.resolvedAt));
+      const lastReminders = isAuthor && sop.status === "in_review"
+        ? await listLastReviewerReminders(sop.id).catch(() => new Map<string, string>())
+        : new Map<string, string>();
       setReminderWindows(
         new Map(Array.from(lastReminders, ([reviewerId, at]) => [reviewerId, nextReminderAllowedAt(at)])),
       );
     } catch (caught) {
-      setFeedbackError(caught instanceof Error ? caught.message : "Could not load the review feedback.");
+      setFeedbackError(caught instanceof Error ? caught.message : "Could not load the review status.");
     } finally {
       setFeedbackLoading(false);
     }
@@ -584,25 +567,26 @@ export function SopList({
             </p>
           </div>
           {editable ? (
-            <div className="flex items-center gap-2">
+            <div className="flex max-w-full flex-wrap items-center gap-2">
               {convertDepartments && convertDepartments.length > 1 ? (
-                <ThemedSelect
-                  variant="sop"
-                  className="w-auto min-w-44"
-                  triggerClassName="h-9"
-                  value={convertDepartmentId}
-                  disabled={converting}
-                  onChange={setConvertDepartmentId}
-                  ariaLabel="Owning department for converted SOP"
-                  options={convertDepartments.map((department) => ({
-                    value: department.id,
-                    label: `${department.code} · ${department.name}`,
-                  }))}
-                />
+                <div className="w-64 max-w-full shrink-0">
+                  <ThemedSelect
+                    variant="sop"
+                    triggerClassName="ui-sop-select-inline"
+                    value={convertDepartmentId}
+                    disabled={converting}
+                    onChange={setConvertDepartmentId}
+                    ariaLabel="Owning department for converted SOP"
+                    options={convertDepartments.map((department) => ({
+                      value: department.id,
+                      label: `${department.code} · ${department.name}`,
+                    }))}
+                  />
+                </div>
               ) : null}
               <button
                 type="button"
-                className="ui-btn-ghost h-9 gap-1.5 px-3 disabled:opacity-50"
+                className="ui-btn-ghost h-9 shrink-0 gap-1.5 whitespace-nowrap px-3 disabled:opacity-50"
                 disabled={converting || !workspaceId || !convertDepartmentId}
                 onClick={() => fileInputRef.current?.click()}
                 title={
@@ -614,7 +598,7 @@ export function SopList({
                 {converting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                 {converting ? "Converting…" : "Convert"}
               </button>
-              <Link href="/sops/new" className="ui-btn-primary h-9 gap-1.5 px-3">
+              <Link href="/sops/new" className="ui-btn-primary h-9 shrink-0 gap-1.5 whitespace-nowrap px-3">
                 <Plus size={14} strokeWidth={2} />
                 New SOP
               </Link>
@@ -622,6 +606,7 @@ export function SopList({
           ) : null}
         </div>
 
+        {refreshWarning ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">Couldn’t refresh. Showing the last loaded list.<button type="button" className="ui-btn-ghost ml-2 text-xs" onClick={() => void refreshList({ background: true, force: true })}>Retry</button></div> : null}
         {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
         {listStatus === "ready" && activeSops.length > 0 ? (
@@ -722,6 +707,7 @@ export function SopList({
                               const processState = getSopProcessState(sop);
                               const flag = reviewFlag(sop.nextReviewDate);
                               const rowReviewers = reviewParticipants.get(sop.id) ?? [];
+                              const authorAction = authorActions.find(item => item.sopId === sop.id)?.label ?? null;
                               const isViewOnly = Boolean(
                                 sop.departmentId && !memberDepartmentIds.has(sop.departmentId),
                               );
@@ -731,7 +717,9 @@ export function SopList({
                                 processState === "draft_review" &&
                                 currentUserId !== null &&
                                 rowReviewers.some((reviewer) => reviewer.userId === currentUserId);
-                              const editorHref = isMyDraftReview
+                              const editorHref = authorAction
+                                ? `/sops/${sop.id}?step=draft-review&via=review`
+                                : isMyDraftReview
                                 ? `/sops?tab=review&review=${encodeURIComponent(sop.id)}`
                                 : isViewOnly
                                 ? `/sops/${sop.id}?preview=pdf`
@@ -784,9 +772,19 @@ export function SopList({
                                 </td>
                                 <td className="px-5 py-3.5 align-middle">
                                   <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">
-                                    <span className="inline-flex shrink-0 items-center rounded bg-surface-muted px-2 py-1 text-[11px] font-medium text-ink-secondary">
-                                      {SOP_PROCESS_STATE_LABELS[processState]}
-                                    </span>
+                                    {authorAction ? (
+                                      <Link href={editorHref} className="group/action flex flex-col items-start gap-1 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                                        <span className="inline-flex items-center gap-1.5 rounded bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent">
+                                          <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                                          {authorAction}
+                                        </span>
+                                        <span className="px-2 text-[10px] text-ink-secondary">Your action</span>
+                                      </Link>
+                                    ) : (
+                                      <span className="inline-flex shrink-0 items-center rounded bg-surface-muted px-2 py-1 text-[11px] font-medium text-ink-secondary">
+                                        {SOP_PROCESS_STATE_LABELS[processState]}
+                                      </span>
+                                    )}
                                   </div>
                                 </td>
                                 <td className="px-5 py-3.5 align-middle text-[12px] tabular-nums text-ink-tertiary">
@@ -859,35 +857,30 @@ export function SopList({
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4"
           role="dialog"
           aria-modal="true"
-          aria-label={`Review feedback for ${feedbackSop.title || feedbackSop.sopNumber || "Untitled SOP"}`}
+          aria-label={`Review status for ${feedbackSop.title || feedbackSop.sopNumber || "Untitled SOP"}`}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setFeedbackSop(null);
           }}
         >
-          <section className="ui-panel flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden shadow-2xl">
+          <section className="ui-panel flex max-h-[82vh] w-full max-w-xl flex-col overflow-hidden shadow-2xl">
             <div className="flex flex-none items-start justify-between gap-4 border-b border-line px-5 py-4">
               <div className="min-w-0">
-                <div className="ui-mono-label text-ink-tertiary">Review feedback</div>
-                <h2 className="mt-1 truncate text-base font-semibold text-ink">
+                <h2 className="text-sm font-semibold text-ink">Review status</h2>
+                <p className="mt-1 truncate text-xs text-ink-secondary">
                   {feedbackSop.title || feedbackSop.sopNumber || "Untitled SOP"}
-                </h2>
-                <p className="ui-section-subtitle mt-0.5 text-ink-secondary">
-                  {[feedbackSop.sopNumber, feedbackSop.version ? `v${feedbackSop.version}` : ""]
-                    .filter(Boolean)
-                    .join(" · ")}
                 </p>
               </div>
               <button
                 type="button"
                 className="ui-btn-ghost h-9 w-9 shrink-0 px-0"
-                aria-label="Close review feedback"
+                aria-label="Close review status"
                 onClick={() => setFeedbackSop(null)}
               >
                 <X size={16} className="mx-auto" />
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-3 overflow-auto p-5">
+            <div className="min-h-0 flex-1 divide-y divide-line overflow-auto px-5">
               {feedbackLoading ? (
                 <div className="flex justify-center py-10">
                   <Loader2 size={18} className="animate-spin text-ink-tertiary" />
@@ -899,18 +892,17 @@ export function SopList({
                   const result = (reviewResults.get(feedbackSop.id) ?? []).find(
                     (item) => item.reviewerId === reviewer.userId,
                   );
-                  const remarks = result ? feedbackAnnotations.filter(
-                    (annotation) => annotation.createdBy === reviewer.userId,
-                  ) : [];
                   return (
-                    <article key={reviewer.userId} className="rounded-lg border border-line p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-medium text-ink">{reviewer.name}</div>
-                          <div className="ui-section-subtitle mt-0.5 text-ink-tertiary">
-                            {result ? `Returned ${formatDate(result.submittedAt)}` : "Review in progress"}
-                          </div>
+                    <article key={reviewer.userId} className="py-4">
+                      <div className="flex items-center gap-3">
+                        <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line text-[10px] font-medium text-ink-secondary">
+                          {reviewerInitials(reviewer.name)}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold text-ink">{reviewer.name}</div>
+                          <div className="mt-0.5 text-[11px] text-ink-tertiary">{REVIEWER_STATUS_LABELS[reviewer.status]}</div>
                         </div>
+                        {result ? <time dateTime={result.submittedAt} className="shrink-0 text-[11px] text-ink-tertiary">{formatDate(result.submittedAt)}</time> : null}
                         <div className="flex items-start gap-2">
                           {reviewer.status === "reviewing" &&
                           !result &&
@@ -927,30 +919,9 @@ export function SopList({
                               }
                             />
                           ) : null}
-                          <span className={`ui-chip ${REVIEWER_STATUS_COLORS[reviewer.status]}`}>
-                            {REVIEWER_STATUS_LABELS[reviewer.status]}
-                          </span>
                         </div>
                       </div>
 
-                      {!result ? (
-                        <p className="mt-3 text-sm text-ink-secondary">This reviewer has not returned their review yet.</p>
-                      ) : result.noChanges ? (
-                        <p className="mt-3 text-sm text-ink-secondary">The reviewer returned this SOP without remarks.</p>
-                      ) : remarks.length ? (
-                        <div className="mt-3 space-y-3 border-t border-line pt-3">
-                          {remarks.map((remark) => (
-                            <div key={remark.id}>
-                              <div className="text-xs font-medium text-ink">
-                                {REVIEW_FEEDBACK_LABELS[remark.category] ?? "Overall remarks"}
-                              </div>
-                              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-ink-secondary">{remark.body}</p>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-sm text-ink-secondary">No section remarks were found.</p>
-                      )}
                     </article>
                   );
                 })

@@ -154,6 +154,8 @@ export interface WorkInstructionSetup {
 
 export interface WorkInstruction {
   taskId: string;
+  /** Frozen print format. Missing on legacy releases means ledger v2. */
+  printLayoutId?: string;
   meta: WorkInstructionMeta;
   context: WorkInstructionContext;
   setup: WorkInstructionSetup;
@@ -218,6 +220,12 @@ export interface WorkInstructionLayout {
 const MARGIN_LINES = 1;
 
 export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
+  letter: {
+    id: "letter", label: "Letter portrait", columns: 1, cardsPerSheet: 3, cardsOnFirstSheet: 2,
+    photoWidth: "66.6667%",
+    instruction: { lines: 7, charsPerLine: 29 },
+    continuation: { lines: 7, charsPerLine: 29 },
+  },
   /**
    * 3x2. Six steps a sheet, 5.25in cards, 2.45in portrait photo.
    *
@@ -269,3 +277,9 @@ export const CARDS_PER_SHEET = DEFAULT_WORK_INSTRUCTION_LAYOUT.cardsPerSheet;
 export const CARDS_ON_FIRST_SHEET = DEFAULT_WORK_INSTRUCTION_LAYOUT.cardsOnFirstSheet;
 export const INSTRUCTION_BUDGET = DEFAULT_WORK_INSTRUCTION_LAYOUT.instruction;
 export const CONTINUATION_BUDGET = DEFAULT_WORK_INSTRUCTION_LAYOUT.continuation;
+
+/** Display default. The canonical build stays v2 to preserve release fingerprints. */
+export const DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT = WORK_INSTRUCTION_LAYOUTS.letter;
+export function releasedPrintLayout(instruction: WorkInstruction): WorkInstructionLayout {
+  return WORK_INSTRUCTION_LAYOUTS[instruction.printLayoutId ?? "v2"] ?? WORK_INSTRUCTION_LAYOUTS.v2;
+}

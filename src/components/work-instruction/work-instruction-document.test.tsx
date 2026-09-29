@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
+  WORK_INSTRUCTION_LAYOUTS,
   CARDS_ON_FIRST_SHEET,
   CARDS_PER_SHEET,
   type WorkInstruction,
@@ -67,7 +68,7 @@ function sheets(): HTMLElement[] {
 
 describe("WorkInstructionDocument", () => {
   it("lets modal previews expand across every printed sheet", () => {
-    const { container } = render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    const { container } = render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([makeCard(1)])} />);
     const printStyles = container.querySelector("style")?.textContent ?? "";
 
     expect(printStyles).toContain("html, body");
@@ -80,14 +81,14 @@ describe("WorkInstructionDocument", () => {
 
   it("fits a first-row-sized instruction on one sheet", () => {
     const cards = Array.from({ length: CARDS_ON_FIRST_SHEET }, (_, index) => makeCard(index + 1));
-    render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction(cards)} />);
 
     expect(sheets()).toHaveLength(1);
   });
 
   it("starts the procedure on the setup sheet to save a page", () => {
     const cards = Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, index) => makeCard(index + 1));
-    render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction(cards)} />);
 
     const first = sheets()[0];
     expect(first.querySelector(".wi-setup-band")).not.toBeNull();
@@ -97,7 +98,7 @@ describe("WorkInstructionDocument", () => {
 
   it("puts the ANA logo and document number in the header of every sheet", () => {
     render(
-      <WorkInstructionDocument
+      <WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2}
         instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
       />,
     );
@@ -108,7 +109,7 @@ describe("WorkInstructionDocument", () => {
 
   it("numbers each sheet page N of M", () => {
     render(
-      <WorkInstructionDocument
+      <WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2}
         instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
       />,
     );
@@ -118,7 +119,7 @@ describe("WorkInstructionDocument", () => {
   });
 
   it("carries the ANA confidentiality line on every sheet", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([makeCard(1)])} />);
 
     const lines = document.querySelectorAll(".wi-ftr-confidential");
     expect(lines).toHaveLength(1);
@@ -129,7 +130,7 @@ describe("WorkInstructionDocument", () => {
 
   it("keeps safety on the sheet canvas, not in the header", () => {
     render(
-      <WorkInstructionDocument
+      <WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2}
         instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
       />,
     );
@@ -142,7 +143,7 @@ describe("WorkInstructionDocument", () => {
 
   it("puts revision history and production data in every sheet header", () => {
     render(
-      <WorkInstructionDocument
+      <WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2}
         instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
       />,
     );
@@ -155,7 +156,7 @@ describe("WorkInstructionDocument", () => {
   });
 
   it("lists setup tools, parts and references", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([makeCard(1)])} />);
 
     expect(screen.getByText("Torque wrench")).toBeInTheDocument();
     expect(screen.getByText("BRK-1001")).toBeInTheDocument();
@@ -164,7 +165,7 @@ describe("WorkInstructionDocument", () => {
   });
 
   it("renders one equal-height container per setup block, with no material-kit block", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([makeCard(1)])} />);
 
     // Purpose, Safety, Tools, Parts, References — the kit is a parts row now.
     expect(document.querySelectorAll(".wi-setup > .wi-block")).toHaveLength(5);
@@ -172,7 +173,7 @@ describe("WorkInstructionDocument", () => {
   });
 
   it("pads the setup sheet's card row with ruled blanks", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([makeCard(1)])} />);
 
     expect(document.querySelectorAll(".wi-card")).toHaveLength(CARDS_ON_FIRST_SHEET);
     expect(document.querySelectorAll(".wi-card-blank")).toHaveLength(CARDS_ON_FIRST_SHEET - 1);
@@ -185,7 +186,7 @@ describe("WorkInstructionDocument", () => {
     const withPhoto = makeCard(1, { photo: { id: "p1", url: "https://example.test/a.jpg", caption: "Bracket seated" } });
     const withoutPhoto = makeCard(2);
     const continued = makeCard(3, { part: 2, partCount: 2 });
-    render(<WorkInstructionDocument instruction={makeInstruction([withPhoto, withoutPhoto, continued])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([withPhoto, withoutPhoto, continued])} />);
 
     const cards = document.querySelectorAll(".wi-card");
     expect(cards.length).toBeGreaterThan(0);
@@ -196,7 +197,7 @@ describe("WorkInstructionDocument", () => {
 
   it("distinguishes a real step with no photo from an empty fill-in slot", () => {
     const withPhoto = makeCard(1, { photo: { id: "p1", url: "https://example.test/a.jpg", caption: "Bracket seated" } });
-    render(<WorkInstructionDocument instruction={makeInstruction([withPhoto, makeCard(2)])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([withPhoto, makeCard(2)])} />);
 
     expect(screen.getByAltText("Bracket seated")).toBeInTheDocument();
     expect(screen.getByAltText("Bracket seated").parentElement?.classList.contains("wi-card-photo-populated")).toBe(true);
@@ -293,7 +294,7 @@ describe("WorkInstructionDocument", () => {
       },
     });
 
-    render(<WorkInstructionDocument instruction={makeInstruction([annotated])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([annotated])} />);
 
     expect(screen.getByRole("img", { name: "Annotated bracket" })).toHaveClass("wi-card-photo-svg");
     for (const type of ["arrow", "rectangle", "ellipse", "highlight", "freehand", "text"]) {
@@ -308,7 +309,7 @@ describe("WorkInstructionDocument", () => {
       tools: ["Torque wrench", "10mm socket"],
       checks: [{ key: "torque_required", label: "Torque Spec", spec: "45 Nm" }],
     });
-    render(<WorkInstructionDocument instruction={makeInstruction([card])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([card])} />);
 
     expect(screen.getByLabelText("Target time 20m")).toHaveTextContent("Target20m");
     expect(document.querySelector(".wi-card-duration-value")).toHaveTextContent("20m");
@@ -333,7 +334,7 @@ describe("WorkInstructionDocument", () => {
         },
       ],
     });
-    render(<WorkInstructionDocument instruction={makeInstruction([card])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([card])} />);
 
     const instruction = document.querySelector(".wi-card-instruction");
     expect(instruction).toHaveTextContent("Stage M8 bolts. Mount M8 boltsP1");
@@ -360,7 +361,7 @@ describe("WorkInstructionDocument", () => {
 
   it("marks an unbreakable card loudly instead of clipping its text", () => {
     const long = "x".repeat(2000);
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1, { overflowing: true, instruction: long })])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([makeCard(1, { overflowing: true, instruction: long })])} />);
 
     expect(document.querySelectorAll(".wi-card-overflowing")).toHaveLength(1);
     expect(screen.getByText(long)).toBeInTheDocument();
@@ -371,7 +372,7 @@ describe("WorkInstructionDocument", () => {
       makeCard(1, { part: 1, partCount: 2, instruction: "First half." }),
       makeCard(1, { part: 2, partCount: 2, instruction: "Second half." }),
     ];
-    render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction(cards)} />);
 
     expect(screen.getByText("(1 of 2)")).toBeInTheDocument();
     expect(screen.getByText("(2 of 2)")).toBeInTheDocument();
@@ -383,7 +384,7 @@ describe("WorkInstructionDocument", () => {
   it("prints no signature or approval surface anywhere", () => {
     // A repeated master carries no sign-off; signatures live on the referenced
     // checklist action.
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([makeCard(1)])} />);
 
     expect(document.querySelectorAll(".wi-card-signoff")).toHaveLength(0);
     expect(screen.queryByText("Prepared by")).not.toBeInTheDocument();
@@ -394,13 +395,13 @@ describe("WorkInstructionDocument", () => {
   });
 
   it("still draws the ruled revision history, which is not a signature", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([makeCard(1)])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([makeCard(1)])} />);
 
     expect(screen.getByText("Revision history")).toBeInTheDocument();
   });
 
   it("renders ruled blank slots across both sheets for an empty instruction", () => {
-    render(<WorkInstructionDocument instruction={makeInstruction([])} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([])} />);
 
     expect(sheets()).toHaveLength(2);
     expect(document.querySelectorAll(".wi-card-blank")).toHaveLength(CARDS_ON_FIRST_SHEET + CARDS_PER_SHEET);
@@ -409,8 +410,8 @@ describe("WorkInstructionDocument", () => {
   it("renders several instructions back to back for batch printing", () => {
     const first = makeInstruction([makeCard(1)]);
     const second = { ...makeInstruction([makeCard(1)]), taskId: "task-2" };
-    render(<WorkInstructionDocument instruction={first} />);
-    render(<WorkInstructionDocument instruction={second} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={first} />);
+    render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={second} />);
 
     expect(sheets()).toHaveLength(2);
   });
@@ -418,10 +419,30 @@ describe("WorkInstructionDocument", () => {
 
 it("renders micro-steps and checks with linked part emphasis",()=>{
  const card=makeCard(3,{instruction:"Prepare the assembly.\nA. Fit connector[1]\n  Keep the label visible.\nB. Inspect the connection.\nNote: Keep labels readable.\nCheck: All labels match.",partReferences:[{marker:1,text:"connector",partNumber:"P-100",description:"Harness connector",quantity:1}]});
- render(<WorkInstructionDocument instruction={makeInstruction([card])}/>);
+ render(<WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2} instruction={makeInstruction([card])}/>);
  expect(document.querySelectorAll('.wi-instruction-list')).toHaveLength(2);
  expect(document.querySelector('.wi-instruction-note')).toHaveTextContent('Note:Keep labels readable.');
  expect(document.querySelector('.wi-instruction-check')).toHaveTextContent('Check:All labels match.');
  expect(document.querySelector('.wi-instruction-list > div strong')).toHaveTextContent('connector');
  expect(screen.getByLabelText('Part reference 1',{selector:'.wi-card-part-citation'})).toHaveTextContent('P1');
+});
+
+it("prints Letter by default with setup only on page one and three continuation rows", () => {
+  const cards = Array.from({length:5},(_,i)=>makeCard(i+1));
+  render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
+  expect(document.querySelector('[data-wi-layout="letter"]')).not.toBeNull();
+  expect(sheets()).toHaveLength(2);
+  expect(sheets()[0].querySelectorAll('.wi-letter-card')).toHaveLength(2);
+  expect(sheets()[1].querySelectorAll('.wi-letter-card')).toHaveLength(3);
+  expect(screen.getAllByText('Purpose / scope')).toHaveLength(1);
+  expect(screen.getAllByText('Safety / PPE')).toHaveLength(1);
+  expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+});
+
+it("keeps all BOM items and references in the Letter setup", () => {
+  const doc=makeInstruction([makeCard(1)]);
+  doc.setup.parts=Array.from({length:8},(_,i)=>({partNumber:`PART-${i}`,description:`Material ${i}`,quantity:1}));
+  render(<WorkInstructionDocument instruction={doc}/>);
+  expect(screen.getByText('PART-7')).toBeInTheDocument();
+  expect(screen.getByText(/SOP-MFG-014/)).toBeInTheDocument();
 });

@@ -29,7 +29,8 @@ import {
 } from "@/domain/work-instruction/release";
 import {
   DEFAULT_WORK_INSTRUCTION_LAYOUT,
-  WORK_INSTRUCTION_LAYOUTS,
+  DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT,
+  releasedPrintLayout,
   type WorkInstruction,
   type WorkInstructionLayout,
 } from "@/domain/work-instruction/schema";
@@ -78,7 +79,7 @@ function buildFromState(
         task,
         product: state.product,
         zone: task.zoneId ? zoneById.get(task.zoneId) : undefined,
-        layout,
+        layout: layout.id === "letter" ? DEFAULT_WORK_INSTRUCTION_LAYOUT : layout,
         references: references.filter((reference) => reference.taskId === task.id),
       }),
     );
@@ -98,8 +99,6 @@ function PrintToolbar({
   backHref,
   label,
   layout,
-  hrefForLayout,
-  onLayoutChange,
   onClose,
   canPrint,
   layoutLocked = false,
@@ -135,38 +134,9 @@ function PrintToolbar({
         </Link>
       )}
 
-      <div className="flex items-center gap-1 rounded border border-line p-0.5" role="group" aria-label="Steps per sheet">
-        {Object.values(WORK_INSTRUCTION_LAYOUTS)
-          .sort((left, right) => left.cardsPerSheet - right.cardsPerSheet)
-          .map((option) => {
-            const className = `h-7 rounded px-2.5 text-xs leading-7 transition ${
-              option.id === layout.id ? "bg-surface-sunken font-semibold text-ink" : "text-ink-tertiary hover:text-ink"
-            }`;
-
-            return onClose || layoutLocked ? (
-              <button
-                key={option.id}
-                type="button"
-                aria-pressed={option.id === layout.id}
-                className={`${className} disabled:cursor-not-allowed disabled:opacity-40`}
-                disabled={layoutLocked && option.id !== layout.id}
-                title={layoutLocked ? "A released revision prints in the layout it was released in" : undefined}
-                onClick={() => onLayoutChange(option)}
-              >
-                {option.label}
-              </button>
-            ) : (
-              <Link
-                key={option.id}
-                href={hrefForLayout(option.id)}
-                aria-current={option.id === layout.id ? "page" : undefined}
-                className={className}
-              >
-                {option.label}
-              </Link>
-            );
-          })}
-      </div>
+      <span className="text-xs text-ink-tertiary" title={layoutLocked ? "Original released format" : "The landscape template is currently disabled"}>
+        {layout.id === "letter" ? "Letter · portrait" : "Ledger · released format"}
+      </span>
 
       {view && onViewChange ? (
         <div className="flex items-center gap-1 rounded border border-line p-0.5" role="group" aria-label="Draft or released">
@@ -233,6 +203,15 @@ function WorkInstructionPreviewSkeleton({
   modal: boolean;
   scale: number;
 }) {
+  if (layout.id === "letter") return (
+    <div className="wi-preview-skeleton wi-print-chrome" role="status" aria-label="Loading work instruction preview" style={{margin:"0 auto",width:"8.5in",height:"11in",padding:".4in",background:"white",zoom:modal?scale:1,display:"flex",flexDirection:"column",gap:12}}>
+      <PreviewSkeletonBar className="h-20 w-full" rectangular />
+      <PreviewSkeletonBar className="h-10 w-full" rectangular />
+      <PreviewSkeletonBar className="h-10 w-full" rectangular />
+      <PreviewSkeletonBar className="h-28 w-full" rectangular />
+      {[0,1].map(i=><div key={i} style={{flex:1,display:"grid",gridTemplateColumns:"2fr 1fr",gap:12}}><PreviewSkeletonBar className="h-full w-full" rectangular/><div><PreviewSkeletonBar className="h-4 w-full"/><PreviewSkeletonBar className="mt-4 h-3 w-full"/><PreviewSkeletonBar className="mt-2 h-3 w-4/5"/></div></div>)}
+    </div>
+  );
   return (
     <div
       className="wi-preview-skeleton wi-print-chrome"
@@ -363,12 +342,12 @@ export function WorkInstructionPrintPreview({
   taskIds,
   blank,
   initialPlannerState,
-  layout: initialLayout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
+  layout: initialLayout = DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT,
   onReady,
   onClose,
   pinnedReleaseId,
 }: WorkInstructionPrintPreviewProps) {
-  const [layout, setLayout] = useState(initialLayout);
+  const [layout, setLayout] = useState(initialLayout.id === "letter" ? initialLayout : DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT);
   const seeded = blank
     ? [blankInstruction()]
     : serverStateIsUsable(initialPlannerState, scenarioId)
@@ -391,6 +370,7 @@ export function WorkInstructionPrintPreview({
   const [fullReleases, setFullReleases] = useState<ReadonlyMap<string, WorkInstructionRelease>>(new Map());
   const [pinnedMissing, setPinnedMissing] = useState(false);
   const previewBodyRef = useRef<HTMLDivElement | null>(null);
+  const [printBlocked, setPrintBlocked] = useState(false);
   const loadedStateRef = useRef<PlannerState | undefined>(
     serverStateIsUsable(initialPlannerState, scenarioId) ? initialPlannerState : undefined,
   );
@@ -542,6 +522,16 @@ export function WorkInstructionPrintPreview({
     };
   }, [fullReleases, neededReleaseIds, pinnedReleaseId]);
 
+  useEffect(() => {
+    const body = previewBodyRef.current;
+    if (!body) return;
+    const check = () => setPrintBlocked(Boolean(body.querySelector('[data-print-overflow="true"]')));
+    const observer = new MutationObserver(check);
+    observer.observe(body, {childList:true, subtree:true, attributes:true, attributeFilter:["data-print-overflow"]});
+    check();
+    return () => observer.disconnect();
+  }, []);
+
   const pinnedRelease = pinnedReleaseId ? fullReleases.get(pinnedReleaseId) : undefined;
 
   // What is actually drawn: each entry carries the layout it must be paginated with, because a
@@ -552,7 +542,7 @@ export function WorkInstructionPrintPreview({
         ? [
             {
               instruction: releasedDocument(pinnedRelease, releasesByTask.get(pinnedRelease.taskId) ?? [pinnedRelease]),
-              layout: DEFAULT_WORK_INSTRUCTION_LAYOUT,
+              layout: releasedPrintLayout(pinnedRelease.content),
             },
           ]
         : [];
@@ -562,7 +552,7 @@ export function WorkInstructionPrintPreview({
       const taskReleases = releasesByTask.get(instruction.taskId) ?? [];
       if (view === "released" && state?.kind === "modified") {
         const frozen = fullReleases.get(state.release.id);
-        if (frozen) return { instruction: releasedDocument(frozen, taskReleases), layout: DEFAULT_WORK_INSTRUCTION_LAYOUT };
+        if (frozen) return { instruction: releasedDocument(frozen, taskReleases), layout: releasedPrintLayout(frozen.content) };
       }
       return { instruction: state ? withReleaseMeta(instruction, taskReleases, state) : instruction, layout };
     });
@@ -584,6 +574,9 @@ export function WorkInstructionPrintPreview({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
+  const displayLayout = documents[0]?.layout ?? layout;
+  const paperWidth = displayLayout.id === "letter" ? 8.5 : 17;
+
   useEffect(() => {
     if (!onClose || typeof ResizeObserver === "undefined") return;
     const previewBody = previewBodyRef.current;
@@ -593,14 +586,14 @@ export function WorkInstructionPrintPreview({
       // Ledger landscape is 17in = 1632 CSS px. The modal body contributes
       // 32px of padding on each side, matching the SOP preview's inset paper.
       const availableWidth = Math.max(0, previewBody.clientWidth - 64);
-      setPreviewScale(Math.min(1, availableWidth / (17 * 96)));
+      setPreviewScale(Math.min(1, availableWidth / (paperWidth * 96)));
     };
 
     fitPreviewToWidth();
     const resizeObserver = new ResizeObserver(fitPreviewToWidth);
     resizeObserver.observe(previewBody);
     return () => resizeObserver.disconnect();
-  }, [onClose]);
+  }, [onClose, paperWidth]);
 
   // Layout lives in the URL so a preview link carries the variant it was shared as.
   const hrefForLayout = (layoutId: string) => {
@@ -655,12 +648,12 @@ export function WorkInstructionPrintPreview({
       <PrintToolbar
         backHref={`/projects/${projectId}/planner`}
         label={blank ? "Blank template" : label}
-        layout={showingFrozen ? DEFAULT_WORK_INSTRUCTION_LAYOUT : layout}
+        layout={displayLayout}
         layoutLocked={showingFrozen}
         hrefForLayout={hrefForLayout}
         onLayoutChange={setLayout}
         onClose={onClose}
-        canPrint={effectiveStatus === "ready"}
+        canPrint={effectiveStatus === "ready" && !printBlocked}
         controlNote={controlNote}
         view={!pinnedReleaseId && modifiedStates.length > 0 ? view : undefined}
         onViewChange={setView}
@@ -691,7 +684,7 @@ export function WorkInstructionPrintPreview({
         ) : (
           <div
             className={onClose ? "wi-preview-scale" : undefined}
-            style={onClose ? { margin: "0 auto", width: "17in", zoom: previewScale } : undefined}
+            style={onClose ? { margin: "0 auto", width: `${paperWidth}in`, zoom: previewScale } : undefined}
           >
             {documents.map((entry) => (
               <WorkInstructionDocument instruction={entry.instruction} layout={entry.layout} key={entry.instruction.taskId} />

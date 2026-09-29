@@ -18,20 +18,22 @@
  * See docs/superpowers/specs/2026-08-04-assembly-work-instruction-design.md
  */
 
+import { LETTER_TEMPLATE_STYLES } from "./work-instruction-letter-styles";
+import { letterCards } from "@/domain/work-instruction/letter";
+import { DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT } from "@/domain/work-instruction/schema";
 import { instructionBlocks } from "@/domain/instruction-bullets";
 import { formatMinutes } from "@/domain/calculations";
 import { formatDateControlled } from "@/domain/formatting";
 import { paginateWorkInstruction } from "@/domain/work-instruction/paginate";
 import { REFERENCE_KIND_LABELS, referenceLine } from "@/domain/work-instruction/references";
 import {
-  DEFAULT_WORK_INSTRUCTION_LAYOUT,
   type WorkInstruction,
   type WorkInstructionCard,
   type WorkInstructionLayout,
   type WorkInstructionPhoto,
   type WorkInstructionSheet,
 } from "@/domain/work-instruction/schema";
-import { Fragment, useId } from "react";
+import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import { RecoveringPhoto } from "../recovering-photo";
 import { StaticPhotoAnnotation } from "../static-photo-annotation";
 
@@ -312,7 +314,8 @@ const PRINT_STYLES = `
     break-after: page; page-break-after: always;
   }
   .wi-sheet:last-child { break-after: auto; page-break-after: auto; }
-  @page { size: 17in 11in; margin: 0; }
+  .wi-sheet { page: wi-ledger; }
+  @page wi-ledger { size: 17in 11in; margin: 0; }
 }
 `;
 
@@ -770,11 +773,12 @@ function CardCells({ cards, slots }: { cards: WorkInstructionCard[]; slots: numb
 
 export function WorkInstructionDocument({
   instruction,
-  layout = DEFAULT_WORK_INSTRUCTION_LAYOUT,
+  layout = DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT,
 }: {
   instruction: WorkInstruction;
   layout?: WorkInstructionLayout;
 }) {
+  if (layout.id === "letter") return <LetterDocument instruction={instruction} layout={layout} />;
   const sheets = paginateWorkInstruction(instruction, layout);
   // Grid shape travels as custom properties so one stylesheet serves every
   // variant — a forked renderer per layout would drift within a week.
@@ -810,4 +814,105 @@ export function WorkInstructionDocument({
       </div>
     </>
   );
+}
+
+function LetterDocument({ instruction, layout }: { instruction: WorkInstruction; layout: WorkInstructionLayout }) {
+  const root = useRef<HTMLDivElement>(null);
+  const [capacity, setCapacity] = useState({first:2, later:3, overflow:false});
+  const sheets = paginateWorkInstruction({ ...instruction, cards: letterCards(instruction.cards) }, {...layout,cardsOnFirstSheet:capacity.first,cardsPerSheet:capacity.later});
+  // Measure the real narrow column: long setup lists or tall checks need fewer
+  // rows, rather than text overlapping the next step or disappearing in print.
+  useLayoutEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const measure = () => {
+      const page = node.querySelector<HTMLElement>(".wil-sheet");
+      if (!page) return;
+      const scale = page.getBoundingClientRect().width / page.offsetWidth || 1;
+      const bodies = Array.from(node.querySelectorAll<HTMLElement>(".wil-step-body"));
+      const needed = Math.max(1, ...bodies.map(body => 26 + Array.from(body.children).reduce((sum, child) => {
+        if (child.classList.contains("wil-instructions")) {
+          const range = document.createRange(); range.selectNodeContents(child);
+          return sum + range.getBoundingClientRect().height / scale + 18;
+        }
+        return sum + (child as HTMLElement).offsetHeight + 5;
+      },0)));
+      const header = page.querySelector<HTMLElement>(".wil-header")?.offsetHeight ?? 75;
+      const footer = page.querySelector<HTMLElement>(".wil-footer")?.offsetHeight ?? 36;
+      const setupHeight = page.querySelector<HTMLElement>(".wi-setup-band")?.offsetHeight ?? 0;
+      const available = 1056 - 77 - header - footer;
+      const first = Math.max(0, Math.min(2, Math.floor((available - setupHeight) / needed)));
+      const later = Math.max(1, Math.min(3, Math.floor(available / needed)));
+      const overflow = needed > available || setupHeight > available;
+      setCapacity(old => old.first === first && old.later === later && old.overflow === overflow ? old : {first,later,overflow});
+    };
+    // jsdom has no geometry; browser measurement remains the authority.
+    if (node.getBoundingClientRect().width === 0) return;
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(node);
+    return () => observer.disconnect();
+  }, [instruction, capacity.first, capacity.later]);
+  const { meta, setup } = instruction;
+  const latestRevision = meta.revisionHistory.at(-1);
+  return <>
+    <style>{PRINT_STYLES}</style>
+    <style>{LETTER_TEMPLATE_STYLES}{`
+      .wil-pages.wi-pages { padding:0; min-width:0; }
+      .wil-sheet .wil-image { flex-direction:column; padding:10px; min-width:0; min-height:0; overflow:hidden; }
+      .wil-image .wi-card-photo { flex:1; width:100%; min-height:0; border:0; background:transparent; }
+      .wil-image .wi-card-photo img { height:100%; width:100%; object-fit:contain; }
+      .wil-image .wi-card-caption { height:auto; max-width:100%; white-space:normal; font-size:7pt; }
+      .wil-instructions { font-size:10pt; padding:9px 0; overflow-wrap:anywhere; }
+      .wil-step-heading { align-items:flex-start; }
+      .wil-step-heading h2 { overflow-wrap:anywhere; }
+      .wil-step-body .wi-card-parts { margin-top:5px; }
+      .wil-step-body .wi-card-checks { margin-top:5px; }
+      .wil-reference { font-size:7pt; overflow-wrap:anywhere; padding:5px 0; border-bottom:1px solid #96999b; }
+      .wil-reference a { color:inherit; }
+      .wil-sheet .wil-preparation { flex:none; }
+      .wil-sheet .wil-bom td { overflow-wrap:anywhere; }
+      .wil-step-body { overflow:visible; flex-shrink:0; }
+      .wil-sheet .wil-footer { margin-top:auto; }
+      @media print { @page wi-letter { size:8.5in 11in; margin:0; } .wil-sheet.wi-sheet { page:wi-letter; width:8.5in; height:11in; padding:.4in; gap:0; } }
+      .wil-sheet.wi-sheet { width:8.5in; height:11in; padding:.4in; gap:0; font-family:Arial,sans-serif; }
+    `}</style>
+    {capacity.overflow && <div className="wi-print-chrome ui-notice ui-notice-warn" role="alert">This instruction has more setup or step detail than one Letter page can hold. Shorten the detail before printing.</div>}
+    <div ref={root} className="wil-pages wi-pages" data-wi-layout="letter" data-print-overflow={capacity.overflow}>
+      {sheets.map((sheet) => <article className="wil-sheet wi-sheet" key={sheet.page}>
+        <header className="wil-header">
+          <div className="wil-logo">
+            {/* eslint-disable-next-line @next/next/no-img-element -- document logo */}
+            <img src="/sop/ana-logo.png" alt="ANA Inc." />
+          </div>
+          <div className="wil-title"><span className="wil-label">Work instruction</span><h1>{meta.title || "Work instruction"}</h1><span style={{fontSize:"7pt",marginTop:4}}>{meta.documentNumber || "WI number pending"}</span></div>
+          <table className="wil-revision"><thead><tr><th>Rev</th><th>Date</th><th>Description</th></tr></thead><tbody><tr><td>{meta.revision || "Draft"}</td><td>{formatDateControlled(meta.effectiveDate)}</td><td>{meta.revision === "Draft" || !meta.revision ? "Not released" : latestRevision?.description}</td></tr></tbody></table>
+        </header>
+        {sheet.kind === "setup" && <div className="wi-setup-band">
+          <section className="wil-summary"><h2>Purpose / scope</h2><p>{setup.purpose || (instruction.blank ? "" : "Not recorded")}</p></section>
+          <section className="wil-summary wil-safety"><h2>Safety / PPE</h2><p>{setup.safetyNotes || (instruction.blank ? "" : "Not recorded")}</p></section>
+          <div className="wil-preparation">
+            <section><h2>BOM / materials</h2><table className="wil-bom"><thead><tr><th>Part number</th><th>Description</th><th>Qty</th></tr></thead><tbody>{setup.parts.length ? setup.parts.map((part,i)=><tr key={i}><td>{part.partNumber}</td><td>{part.description}</td><td>{part.quantity ?? "—"}</td></tr>) : Array.from({length:3},(_,i)=><tr key={i}><td>&nbsp;</td><td/><td/></tr>)}</tbody></table></section>
+            <section><h2>Tools &amp; equipment</h2><ul>{setup.tools.length ? setup.tools.map((tool,i)=><li key={i}>{tool}</li>) : <li>&nbsp;</li>}</ul></section>
+          </div>
+          {(setup.references?.length || setup.drawingLink || setup.sopLink) ? <div className="wil-reference"><strong>References: </strong>{setup.references?.length ? setup.references.map((reference,i)=><Fragment key={i}>{i > 0 ? " · " : ""}<a href={reference.url}>{referenceLine(reference)}</a></Fragment>) : [setup.drawingLink,setup.sopLink].filter(Boolean).join(" · ")}</div> : null}
+        </div>}
+        <main className="wil-steps" style={{gridTemplateRows:`repeat(${sheet.kind === "setup" ? capacity.first : capacity.later}, minmax(0,1fr))`}}>
+          {Array.from({length:sheet.kind === "setup" ? capacity.first : capacity.later},(_,index)=>{
+            const card=sheet.cards[index];
+            return <section className="wil-step wi-letter-card" key={index}>
+              <div className="wil-image">{card?.photo ? <><div className="wi-card-photo wi-card-photo-populated"><WorkInstructionPhotoMedia photo={card.photo} sequence={card.sequence}/></div><div className="wi-card-caption">{card.photo.caption}</div></> : <span>{card ? "No photo" : "Image / reference view"}</span>}</div>
+              <div className="wil-step-body">
+                <div className="wil-step-heading"><span className="wil-number">{card?.sequence ?? ""}</span><h2>{card?.name || "Instructions"}{card && card.partCount > 1 ? <small style={{display:"block",fontWeight:400}}>Continued · {card.part} of {card.partCount}</small> : null}</h2></div>
+                <div className="wil-instructions">{card && <PartReferencedInstruction card={card}/>}</div>
+                {card?.partReferences?.length ? <div className="wi-card-parts">{card.partReferences.map((part,i)=><div key={i}><strong>P{part.marker} · {part.partNumber}</strong> ×{part.quantity ?? "—"}</div>)}</div> : null}
+                {card?.checks.length ? <div className="wi-card-checks">{card.checks.map(check=><div key={check.key}><strong>{check.label}</strong> {check.spec}</div>)}</div> : null}
+                <div className="wil-tools"><h3>Tools</h3><p>{card?.tools.join(" · ")}</p></div>
+              </div>
+            </section>;
+          })}
+        </main>
+        <footer className="wil-footer"><div><strong>{meta.documentNumber || "Document no. pending"}</strong><span>Rev. {meta.revision || "Draft"}</span><span>Page {sheet.page} of {sheet.total}</span></div><p>{CONFIDENTIAL_LINE}</p></footer>
+      </article>)}
+    </div>
+  </>;
 }

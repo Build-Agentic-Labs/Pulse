@@ -121,7 +121,7 @@ describe("WorkInstructionsPanel", () => {
     expect(screen.queryByRole("dialog", { name: "Work instruction document preview" })).toBeNull();
   });
 
-  it("uses the current planner annotations and switches layouts inside the modal", () => {
+  it("uses current planner annotations in Letter with legacy layout switching disabled", () => {
     render(
       <WorkInstructionsPanel
         tasks={[annotatedTask]}
@@ -136,9 +136,9 @@ describe("WorkInstructionsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
 
     expect(document.querySelector('[data-annotation-type="rectangle"]')).not.toBeNull();
-    expect(document.querySelector('[data-wi-layout="v2"]')).not.toBeNull();
-    expect(screen.getByRole("group", { name: "Steps per sheet" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "6 per sheet" }));
-    expect(document.querySelector('[data-wi-layout="v1"]')).not.toBeNull();
+    expect(document.querySelector('[data-wi-layout="letter"]')).not.toBeNull();
+    expect(screen.queryByRole("group", { name: "Steps per sheet" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "6 per sheet" })).toBeNull();
+    expect(screen.getByText("Letter · portrait")).toBeInTheDocument();
   });
 });

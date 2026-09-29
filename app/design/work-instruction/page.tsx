@@ -1,14 +1,15 @@
+import { WorkInstructionLetterTemplate } from "@/components/work-instruction/work-instruction-letter-template";
 import type { Metadata } from "next";
 import { WorkInstructionDocument } from "@/components/work-instruction/work-instruction-document";
 import { sampleWorkInstruction } from "@/domain/work-instruction/sample";
 import {
-  DEFAULT_WORK_INSTRUCTION_LAYOUT,
+  DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT,
   WORK_INSTRUCTION_LAYOUTS,
 } from "@/domain/work-instruction/schema";
 
 export const metadata: Metadata = {
   title: "Work Instruction Template · Pulse",
-  description: "ISO-conformant assembly work instruction on 11x17 landscape ledger",
+  description: "Assembly work instruction on portrait Letter paper",
 };
 
 /**
@@ -23,10 +24,14 @@ export const metadata: Metadata = {
 export default async function WorkInstructionDesignPage({
   searchParams,
 }: {
-  searchParams: Promise<{ blank?: string; v?: string }>;
+  searchParams: Promise<{ blank?: string; v?: string; format?: string }>;
 }) {
-  const { blank, v } = await searchParams;
-  const layout = (v && WORK_INSTRUCTION_LAYOUTS[`v${v}`]) || DEFAULT_WORK_INSTRUCTION_LAYOUT;
+  const { blank, v, format } = await searchParams;
+  const layout = (v && WORK_INSTRUCTION_LAYOUTS[`v${v}`]) || DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT;
+
+  if (format === "letter") {
+    return <WorkInstructionLetterTemplate example={sampleWorkInstruction()} blankOnly={blank === "1"} />;
+  }
 
   return (
     <div className="wi-print-body h-full overflow-auto bg-canvas p-8">

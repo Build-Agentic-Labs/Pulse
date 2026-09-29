@@ -160,6 +160,7 @@ export function snapshotForRelease(
 ): WorkInstruction {
   return {
     ...instruction,
+    printLayoutId: "letter",
     meta: { ...instruction.meta, ...EMPTY_CONTROL_META },
     cards: instruction.cards.map((card) => {
       if (!card.photo) return card;

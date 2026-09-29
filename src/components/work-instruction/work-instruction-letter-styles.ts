@@ -32,7 +32,7 @@ export const LETTER_TEMPLATE_STYLES = `
 .wil-preparation h2 { margin-bottom:5px; }
 .wil-bom { width:100%; border-collapse:collapse; table-layout:fixed; font-size:7.5pt; }
 .wil-bom th { text-align:left; color:#62666a; font-weight:400; font-size:6.5pt; }
-.wil-bom th:first-child { width:31%; }
+.wil-bom th:first-child { width:22%; }
 .wil-bom th:last-child { width:9%; }
 .wil-bom td, .wil-bom th { border-bottom:1px solid #e0e1e2; padding:2px 3px 2px 0; height:17px; }
 .wil-bom td:last-child, .wil-bom th:last-child { text-align:right; }

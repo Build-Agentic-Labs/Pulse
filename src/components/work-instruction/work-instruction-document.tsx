@@ -19,7 +19,7 @@
  */
 
 import { LETTER_TEMPLATE_STYLES } from "./work-instruction-letter-styles";
-import { letterCards } from "@/domain/work-instruction/letter";
+import { letterCards, letterPageCounts } from "@/domain/work-instruction/letter";
 import { DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT } from "@/domain/work-instruction/schema";
 import { instructionBlocks } from "@/domain/instruction-bullets";
 import { formatMinutes } from "@/domain/calculations";
@@ -818,8 +818,16 @@ export function WorkInstructionDocument({
 
 function LetterDocument({ instruction, layout }: { instruction: WorkInstruction; layout: WorkInstructionLayout }) {
   const root = useRef<HTMLDivElement>(null);
-  const [capacity, setCapacity] = useState({first:2, later:3, overflow:false});
-  const sheets = paginateWorkInstruction({ ...instruction, cards: letterCards(instruction.cards) }, {...layout,cardsOnFirstSheet:capacity.first,cardsPerSheet:capacity.later});
+  const [capacity, setCapacity] = useState<{counts: number[]; heights: number[]; overflow: boolean}>({counts:[], heights:[], overflow:false});
+  const cards = letterCards(instruction.cards);
+  let cardOffset = 0;
+  const sheets: WorkInstructionSheet[] = capacity.counts.length && !instruction.blank
+    ? capacity.counts.map((count, index) => {
+      const sheet = {kind: index === 0 ? "setup" as const : "steps" as const, page:index + 1, total:capacity.counts.length, cards:cards.slice(cardOffset, cardOffset + count)};
+      cardOffset += count;
+      return sheet;
+    })
+    : paginateWorkInstruction({...instruction, cards}, layout);
   // Measure the real narrow column: long setup lists or tall checks need fewer
   // rows, rather than text overlapping the next step or disappearing in print.
   useLayoutEffect(() => {
@@ -830,28 +838,28 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
       if (!page) return;
       const scale = page.getBoundingClientRect().width / page.offsetWidth || 1;
       const bodies = Array.from(node.querySelectorAll<HTMLElement>(".wil-step-body"));
-      const needed = Math.max(1, ...bodies.map(body => 26 + Array.from(body.children).reduce((sum, child) => {
+      const heights = bodies.filter(body => body.dataset.stepId).map(body => Math.ceil(26 + Array.from(body.children).reduce((sum, child) => {
         if (child.classList.contains("wil-instructions")) {
           const range = document.createRange(); range.selectNodeContents(child);
           return sum + range.getBoundingClientRect().height / scale + 18;
         }
-        return sum + (child as HTMLElement).offsetHeight + 5;
+        const style = getComputedStyle(child);
+        return sum + child.getBoundingClientRect().height / scale + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
       },0)));
       const header = page.querySelector<HTMLElement>(".wil-header")?.offsetHeight ?? 75;
       const footer = page.querySelector<HTMLElement>(".wil-footer")?.offsetHeight ?? 36;
       const setupHeight = page.querySelector<HTMLElement>(".wi-setup-band")?.offsetHeight ?? 0;
       const available = 1056 - 77 - header - footer;
-      const first = Math.max(0, Math.min(2, Math.floor((available - setupHeight) / needed)));
-      const later = Math.max(1, Math.min(3, Math.floor(available / needed)));
-      const overflow = needed > available || setupHeight > available;
-      setCapacity(old => old.first === first && old.later === later && old.overflow === overflow ? old : {first,later,overflow});
+      const counts = letterPageCounts(heights, available - setupHeight, available);
+      const overflow = heights.some(height => height > available) || setupHeight > available;
+      setCapacity(old => JSON.stringify(old) === JSON.stringify({counts, heights, overflow}) ? old : {counts, heights, overflow});
     };
     // jsdom has no geometry; browser measurement remains the authority.
     if (node.getBoundingClientRect().width === 0) return;
     measure();
     const observer = new ResizeObserver(measure); observer.observe(node);
     return () => observer.disconnect();
-  }, [instruction, capacity.first, capacity.later]);
+  }, [instruction, capacity.counts]);
   const { meta, setup } = instruction;
   const latestRevision = meta.revisionHistory.at(-1);
   return <>
@@ -863,10 +871,18 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
       .wil-image .wi-card-photo img { height:100%; width:100%; object-fit:contain; }
       .wil-image .wi-card-caption { height:auto; max-width:100%; white-space:normal; font-size:7pt; }
       .wil-instructions { font-size:10pt; padding:9px 0; overflow-wrap:anywhere; }
-      .wil-step-heading { align-items:flex-start; }
+      .wil-step-heading { align-items:flex-start; flex:none; }
       .wil-step-heading h2 { overflow-wrap:anywhere; }
       .wil-step-body .wi-card-parts { margin-top:5px; }
-      .wil-step-body .wi-card-checks { margin-top:5px; }
+      .wil-step-details { border-top:1px solid #d2d4d5; padding-top:4px; margin-top:5px; flex:none; }
+      .wil-step-details h3 { font-size:7pt; color:#62666a; font-weight:600; margin:0 0 4px; }
+      .wil-detail-list { list-style:none; padding:0; margin:0; font-size:8pt; line-height:1.4; }
+      .wil-detail-list li + li { margin-top:2px; }
+      .wil-check-row { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+      .wil-check-row strong { font-weight:600; white-space:nowrap; }
+      .wil-part-row { display:grid; grid-template-columns:22px minmax(0,1fr) max-content; gap:5px; }
+      .wil-part-row > :first-child { color:#62666a; }
+
       .wil-reference { font-size:7pt; overflow-wrap:anywhere; padding:5px 0; border-bottom:1px solid #96999b; }
       .wil-reference a { color:inherit; }
       .wil-sheet .wil-preparation { flex:none; }
@@ -896,17 +912,17 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
           </div>
           {(setup.references?.length || setup.drawingLink || setup.sopLink) ? <div className="wil-reference"><strong>References: </strong>{setup.references?.length ? setup.references.map((reference,i)=><Fragment key={i}>{i > 0 ? " · " : ""}<a href={reference.url}>{referenceLine(reference)}</a></Fragment>) : [setup.drawingLink,setup.sopLink].filter(Boolean).join(" · ")}</div> : null}
         </div>}
-        <main className="wil-steps" style={{gridTemplateRows:`repeat(${sheet.kind === "setup" ? capacity.first : capacity.later}, minmax(0,1fr))`}}>
-          {Array.from({length:sheet.kind === "setup" ? capacity.first : capacity.later},(_,index)=>{
+        <main className="wil-steps" style={{gridTemplateRows: sheet.cards.length && capacity.heights.length ? sheet.cards.map(card => `minmax(${capacity.heights[cards.findIndex(item => item.stepId === card.stepId)] ?? 0}px,1fr)`).join(" ") : `repeat(${sheet.kind === "setup" ? 2 : 3},minmax(0,1fr))`}}>
+          {Array.from({length:instruction.blank ? (sheet.kind === "setup" ? 2 : 3) : sheet.cards.length},(_,index)=>{
             const card=sheet.cards[index];
             return <section className="wil-step wi-letter-card" key={index}>
               <div className="wil-image">{card?.photo ? <><div className="wi-card-photo wi-card-photo-populated"><WorkInstructionPhotoMedia photo={card.photo} sequence={card.sequence}/></div><div className="wi-card-caption">{card.photo.caption}</div></> : <span>{card ? "No photo" : "Image / reference view"}</span>}</div>
-              <div className="wil-step-body">
+              <div className="wil-step-body" data-step-id={card?.stepId}>
                 <div className="wil-step-heading"><span className="wil-number">{card?.sequence ?? ""}</span><h2>{card?.name || "Instructions"}{card && card.partCount > 1 ? <small style={{display:"block",fontWeight:400}}>Continued · {card.part} of {card.partCount}</small> : null}</h2></div>
                 <div className="wil-instructions">{card && <PartReferencedInstruction card={card}/>}</div>
-                {card?.partReferences?.length ? <div className="wi-card-parts">{card.partReferences.map((part,i)=><div key={i}><strong>P{part.marker} · {part.partNumber}</strong> ×{part.quantity ?? "—"}</div>)}</div> : null}
-                {card?.checks.length ? <div className="wi-card-checks">{card.checks.map(check=><div key={check.key}><strong>{check.label}</strong> {check.spec}</div>)}</div> : null}
-                <div className="wil-tools"><h3>Tools</h3><p>{card?.tools.join(" · ")}</p></div>
+                {card?.partReferences?.length ? <section className="wil-step-details"><h3>Parts used</h3><ul className="wil-detail-list">{card.partReferences.map((part,i)=><li className="wil-part-row" key={i}><span>P{part.marker}</span><span>{part.partNumber}</span><span>×{part.quantity ?? "—"}</span></li>)}</ul></section> : null}
+                {card?.checks.length ? <section className="wil-step-details"><h3>Checks</h3><ul className="wil-detail-list">{card.checks.map(check=><li className="wil-check-row" key={check.key}><span>{check.label}</span>{check.spec && <strong>{check.spec}</strong>}</li>)}</ul></section> : null}
+                {(!card || card.tools.length > 0) && <section className="wil-step-details"><h3>Tools</h3><ul className="wil-detail-list">{card?.tools.map((tool,i)=><li key={i}>{tool}</li>)}</ul></section>}
               </div>
             </section>;
           })}

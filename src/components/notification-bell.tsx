@@ -272,15 +272,16 @@ export function NotificationBell() {
                       key={item.notificationId}
                       type="button"
                       role="menuitem"
-                      className="bell-queue-item ui-btn-ghost flex w-full items-center justify-start gap-2 px-2.5 text-[12px]"
+                      className="bell-queue-item ui-btn-ghost flex w-full items-center justify-start gap-2 px-2.5 text-left text-[12px]"
                       onClick={() => {
                         acknowledge(item);
                         setOpen(false);
                         router.push(item.href);
                       }}
                     >
-                      <span className="bell-message-title">
-                        {item.sopNumber} · {item.title || "Untitled SOP"}
+                      <span className="min-w-0 flex-1">
+                        <span className="bell-message-title">{item.title || "Untitled SOP"}</span>
+                        <span className="bell-message-meta">{item.sopNumber}</span>
                       </span>
                     </button>
                   ))}
@@ -289,13 +290,15 @@ export function NotificationBell() {
               {inbox.length > 0 ? (
                 <div>
                   <div className="px-2.5 pb-1 pt-2 ui-mono-label text-ink-tertiary">Recent</div>
-                  {inbox.map((item) => (
-                    <div key={item.id} className="bell-dismiss-row" data-leaving={leaving.includes(item.id)} inert={leaving.includes(item.id)}>
+                  {inbox.map((item) => {
+                    const sopTitle = item.link?.startsWith("/sops") ? item.title.match(/^([^:]+):\s*(?:SOP\s+)?["“]?(.+?)["”]?$/) : null;
+                    return <div key={item.id} className="bell-dismiss-row" data-leaving={leaving.includes(item.id)} inert={leaving.includes(item.id)}>
                     <div className="bell-dismiss-clip"><div className="bell-dismiss-content">
                     <button
                       type="button"
                       role="menuitem"
                       data-unread={item.readAt ? "false" : "true"}
+                      aria-label={item.title}
                       className="bell-inbox-item ui-btn-ghost flex w-full items-start justify-start gap-2 px-2.5 py-1.5 text-left text-[12px]"
                       onClick={() => {
                         markRead(item.id);
@@ -305,14 +308,15 @@ export function NotificationBell() {
                     >
                       <span className="bell-inbox-marker" aria-hidden="true" />
                       <span className="min-w-0 flex-1">
-                        <span className="bell-message-title">{item.title}</span>
-                        {item.body ? <span className="bell-message-body">{item.body}</span> : null}
+                        {sopTitle ? <span className="bell-message-meta bell-message-action">{sopTitle[1]}</span> : null}
+                        <span className="bell-message-title">{sopTitle ? sopTitle[2] : item.title}</span>
+                        {!sopTitle && item.body ? <span className="bell-message-body">{item.body}</span> : null}
                       </span>
                       <span className="bell-message-time">{timeAgo(item.createdAt)}</span>
                     </button>
                     <button type="button" className="bell-dismiss-button ui-btn-ghost" aria-label={`Dismiss ${item.title}`} disabled={leaving.length > 0} onClick={() => animateDismiss([item.id])}><X size={13} /></button>
-                    </div></div></div>
-                  ))}
+                    </div></div></div>;
+                  })}
                 </div>
               ) : null}
             </>

@@ -10,6 +10,29 @@ import {
 } from "./photo-annotations";
 
 describe("photo annotations", () => {
+  it("preserves additional callout endpoints through save normalization", () => {
+    const document = normalizePhotoAnnotationDocument({ version: 2, items: [{
+      id: "multi", type: "text", text: "Remove bolts", x: 0.2, y: 0.2,
+      anchorX: 0.3, anchorY: 0.5,
+      additionalAnchors: [{ x: 0.6, y: 0.5 }, { x: 2, y: -1 }, null, { x: "bad", y: 0.2 }],
+    }] });
+    expect(document.items[0]).toMatchObject({
+      anchorX: 0.3, anchorY: 0.5,
+      additionalAnchors: [{ x: 0.6, y: 0.5 }, { x: 1, y: 0 }],
+    });
+    expect(normalizePhotoAnnotationDocument(JSON.parse(JSON.stringify(document)))).toEqual(document);
+  });
+  it.each([
+    [undefined, "left"], ["invalid", "left"], ["left", "left"], ["center", "center"], ["right", "right"],
+  ])("normalizes text alignment %s to %s", (textAlign, expected) => {
+    const document = normalizePhotoAnnotationDocument({
+      version: 2,
+      items: [{ id: "label", type: "text", text: "D1", textAlign, x: 0.2, y: 0.2 }],
+    });
+    expect(document.items[0]).toMatchObject({ textAlign: expected, text: "D1" });
+    expect(normalizePhotoAnnotationDocument(JSON.parse(JSON.stringify(document)))).toEqual(document);
+  });
+
   it("normalizes WI shapes while upgrading older annotation documents", () => {
     const normalized = normalizePhotoAnnotationDocument({
       version: 1,

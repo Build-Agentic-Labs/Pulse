@@ -117,6 +117,19 @@ describe("StepPhotoAttachmentEditor clipboard paste", () => {
             width: 0.4,
             height: 0.3,
           },
+          {
+            id: "text-1",
+            type: "text",
+            color: "#d71921",
+            text: "D1",
+            fontSize: 20,
+            x: 0.7,
+            y: 0.2,
+            width: 0.12,
+            height: 0.064,
+            anchorX: 0.6,
+            anchorY: 0.4,
+          },
         ],
       },
     };
@@ -130,6 +143,8 @@ describe("StepPhotoAttachmentEditor clipboard paste", () => {
     expect(preview).toHaveAttribute("preserveAspectRatio", "xMidYMid meet");
     expect(preview.querySelector("image")).toHaveAttribute("preserveAspectRatio", "none");
     expect(preview.querySelector('[data-annotation-type="rectangle"]')).not.toBeNull();
+    // Thumbnail dimensions must not inflate text inside its saved normalized box.
+    expect(preview.querySelector("foreignObject div")).toHaveStyle({ fontSize: "20px" });
   });
 
   it("copies a photo onto another step through the clipboard", async () => {

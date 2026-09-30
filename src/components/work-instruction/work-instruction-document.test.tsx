@@ -427,16 +427,17 @@ it("renders micro-steps and checks with linked part emphasis",()=>{
  expect(screen.getByLabelText('Part reference 1',{selector:'.wi-card-part-citation'})).toHaveTextContent('P1');
 });
 
-it("prints Letter by default with setup only on page one and three continuation rows", () => {
+it("prints Letter with setup only on page one and at most two steps per page", () => {
   const cards = Array.from({length:5},(_,i)=>makeCard(i+1));
   render(<WorkInstructionDocument instruction={makeInstruction(cards)} />);
   expect(document.querySelector('[data-wi-layout="letter"]')).not.toBeNull();
-  expect(sheets()).toHaveLength(2);
+  expect(sheets()).toHaveLength(3);
   expect(sheets()[0].querySelectorAll('.wi-letter-card')).toHaveLength(2);
-  expect(sheets()[1].querySelectorAll('.wi-letter-card')).toHaveLength(3);
+  expect(sheets()[1].querySelectorAll('.wi-letter-card')).toHaveLength(2);
+  expect(sheets()[2].querySelectorAll('.wi-letter-card')).toHaveLength(1);
   expect(screen.getAllByText('Purpose / scope')).toHaveLength(1);
   expect(screen.getAllByText('Safety / PPE')).toHaveLength(1);
-  expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+  expect(screen.getByText('Page 3 of 3')).toBeInTheDocument();
 });
 
 it("keeps all BOM items and references in the Letter setup", () => {

@@ -11,6 +11,8 @@ export const PHOTO_ANNOTATION_COLORS = [
 
 export const PHOTO_ANNOTATION_FONT_SIZES = [12, 14, 16, 20] as const;
 
+export type PhotoTextAlignment = "left" | "center" | "right";
+
 export type PhotoAnnotationTool =
   | "select"
   | "arrow"
@@ -18,6 +20,7 @@ export type PhotoAnnotationTool =
   | "ellipse"
   | "freehand"
   | "text"
+  | "pointer"
   | "highlight";
 
 export type PhotoArrowAnnotation = {
@@ -38,11 +41,13 @@ export type PhotoTextAnnotation = {
   fontSize: number;
   anchorX: number;
   anchorY: number;
+  additionalAnchors?: { x: number; y: number }[];
   x: number;
   y: number;
   width: number;
   height?: number;
   text: string;
+  textAlign?: PhotoTextAlignment;
 };
 
 type PhotoBoxGeometry = {
@@ -184,6 +189,11 @@ function sanitizePhotoAnnotation(value: unknown): PhotoAnnotation | null {
           : 14,
       anchorX: clamp01(Number(record.anchorX ?? record.x)),
       anchorY: clamp01(Number(record.anchorY ?? record.y)),
+      ...(Array.isArray(record.additionalAnchors) ? {
+        additionalAnchors: record.additionalAnchors.filter((point): point is { x: number; y: number } =>
+          Boolean(point) && typeof point === "object" && Number.isFinite(point.x) && Number.isFinite(point.y),
+        ).map((point) => ({ x: clamp01(point.x), y: clamp01(point.y) })),
+      } : {}),
       x,
       y,
       width: Math.min(Math.max(Number(record.width) || 0.22, 0.12), 0.6),
@@ -192,6 +202,7 @@ function sanitizePhotoAnnotation(value: unknown): PhotoAnnotation | null {
           ? Math.min(Math.max(Number(record.height), 0.04), 0.85)
           : undefined,
       text: typeof record.text === "string" ? record.text : "",
+      textAlign: record.textAlign === "center" || record.textAlign === "right" ? record.textAlign : "left",
     };
   }
 
@@ -483,7 +494,18 @@ export function moveTextCalloutBox(annotation: PhotoTextAnnotation, deltaX: numb
   };
 }
 
-export function moveTextCalloutAnchor(annotation: PhotoTextAnnotation, deltaX: number, deltaY: number): PhotoTextAnnotation {
+export function textCalloutAnchors(annotation: PhotoTextAnnotation) {
+  return [{ x: annotation.anchorX, y: annotation.anchorY }, ...(annotation.additionalAnchors ?? [])];
+}
+
+export function moveTextCalloutAnchor(annotation: PhotoTextAnnotation, deltaX: number, deltaY: number, anchorIndex = 0): PhotoTextAnnotation {
+  if (anchorIndex > 0) {
+    return {
+      ...annotation,
+      additionalAnchors: annotation.additionalAnchors?.map((point, index) => index === anchorIndex - 1
+        ? { x: clamp01(point.x + deltaX), y: clamp01(point.y + deltaY) } : point),
+    };
+  }
   return {
     ...annotation,
     anchorX: clamp01(annotation.anchorX + deltaX),

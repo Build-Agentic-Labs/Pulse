@@ -1,18 +1,26 @@
 "use client";
 
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   ArrowRight,
   ChevronLeft,
   ChevronRight,
   Circle,
+  CopyPlus,
   Download,
   Highlighter,
   Loader2,
+  Minus,
+  MousePointer2,
   PanelTopClose,
   PanelTopOpen,
   Pencil,
+  Plus,
   Printer,
   Square,
+  Split,
   Trash2,
   Type,
   X,
@@ -49,6 +57,7 @@ import {
   textCalloutBoxHeightPx,
   textCalloutMinHeightPx,
   textCalloutLeaderPoint,
+  textCalloutAnchors,
   type PhotoAnnotation,
   type PhotoAnnotationDocument,
   type PhotoAnnotationTool,
@@ -58,6 +67,7 @@ import {
   type PhotoFreehandPoint,
   type PhotoHighlightAnnotation,
   type PhotoTextAnnotation,
+  type PhotoTextAlignment,
 } from "@/domain/photo-annotations";
 import type { StepPhotoAttachment } from "@/domain/step-photos";
 import { useRecoveringPhoto } from "@/lib/use-recovering-photo";
@@ -103,6 +113,7 @@ type DraftFreehand = {
 };
 
 type DragState = {
+  anchorIndex?: number;
   annotationId: string;
   pointerId: number;
   originX: number;
@@ -376,7 +387,7 @@ function drawFreehandOnCanvas(
   context.restore();
 }
 
-function drawTextOnCanvas(
+export function drawTextOnCanvas(
   context: CanvasRenderingContext2D,
   text: PhotoTextAnnotation,
   width: number,
@@ -391,12 +402,13 @@ function drawTextOnCanvas(
   const x = text.x * width;
   const y = text.y * height;
   const padding = 8 * scale;
-  const accentWidth = 3 * scale;
-  const anchorX = text.anchorX * width;
-  const anchorY = text.anchorY * height;
+  const borderWidth = 2 * scale;
+  for (const anchor of textCalloutAnchors(text)) {
+  const anchorX = anchor.x * width;
+  const anchorY = anchor.y * height;
   const leader = textCalloutLeaderPoint(
-    text.anchorX,
-    text.anchorY,
+    anchor.x,
+    anchor.y,
     text.x,
     text.y,
     text.width,
@@ -415,23 +427,29 @@ function drawTextOnCanvas(
   context.beginPath();
   context.arc(anchorX, anchorY, Math.max(3, text.fontSize * 0.22) * scale, 0, Math.PI * 2);
   context.fill();
+  }
 
   context.fillStyle = "#ffffff";
   context.fillRect(x, y, boxWidth, boxHeight);
 
-  context.fillStyle = text.color;
-  context.fillRect(x, y, accentWidth, boxHeight);
+  context.strokeStyle = text.color;
+  context.lineWidth = borderWidth;
+  context.strokeRect(x + borderWidth / 2, y + borderWidth / 2, boxWidth - borderWidth, boxHeight - borderWidth);
 
   context.fillStyle = "#1a1a1a";
   context.font = `500 ${text.fontSize * scale}px ${appFont}`;
   context.textBaseline = "top";
+  context.textAlign = text.textAlign ?? "left";
+  const contentWidth = boxWidth - (padding + borderWidth) * 2;
+  const alignmentOffset = text.textAlign === "center" ? contentWidth / 2 : text.textAlign === "right" ? contentWidth : 0;
   wrapCanvasText(
     context,
     text.text,
-    x + padding + accentWidth,
-    y + padding,
-    boxWidth - padding * 2 - accentWidth,
+    x + padding + borderWidth + alignmentOffset,
+    y + padding + borderWidth,
+    contentWidth,
     text.fontSize * scale * 1.35,
+    boxHeight - (padding + borderWidth) * 2,
   );
 }
 
@@ -442,30 +460,31 @@ function wrapCanvasText(
   y: number,
   maxWidth: number,
   lineHeight: number,
+  availableHeight: number,
 ) {
-  const words = value.split(/\s+/).filter(Boolean);
-  let line = "";
-  let cursorY = y;
-
-  words.forEach((word, index) => {
-    const testLine = line ? `${line} ${word}` : word;
-    if (context.measureText(testLine).width > maxWidth && line) {
-      context.fillText(line, x, cursorY);
-      line = word;
-      cursorY += lineHeight;
-      return;
+  const lines: string[] = [];
+  // Preserve intentional line breaks, including blank lines, when exporting.
+  for (const paragraph of value.split(/\r?\n/)) {
+    let line = "";
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const testLine = line ? `${line} ${word}` : word;
+      if (context.measureText(testLine).width > maxWidth && line) {
+        lines.push(line);
+        line = "";
+      }
+      // Match the editor's wrapping for long part numbers and unbroken text.
+      for (const character of (line ? ` ${word}` : word)) {
+        if (line && context.measureText(line + character).width > maxWidth) {
+          lines.push(line);
+          line = "";
+        }
+        line += character;
+      }
     }
-
-    line = testLine;
-
-    if (index === words.length - 1) {
-      context.fillText(line, x, cursorY);
-    }
-  });
-
-  if (words.length === 0 && value) {
-    context.fillText(value, x, cursorY);
+    lines.push(line);
   }
+  const startY = y + Math.max(0, (availableHeight - lines.length * lineHeight) / 2);
+  lines.forEach((line, index) => context.fillText(line, x, startY + index * lineHeight));
 }
 
 export function StepPhotoViewer({
@@ -494,11 +513,13 @@ export function StepPhotoViewer({
   const onUpdatePhotoRef = useRef(onUpdatePhoto);
   onUpdatePhotoRef.current = onUpdatePhoto;
   const pendingFocusIdRef = useRef<string | null>(null);
+  const copiedAnnotationRef = useRef<PhotoAnnotation | null>(null);
   const selectedPhotoRef = useRef(photo);
   selectedPhotoRef.current = photo;
   const [activeTool, setActiveTool] = useState<PhotoAnnotationTool>("select");
   const [activeColor, setActiveColor] = useState<string>(PHOTO_ANNOTATION_COLORS[0].value);
   const [activeFontSize, setActiveFontSize] = useState<number>(14);
+  const [activeTextAlign, setActiveTextAlign] = useState<PhotoTextAlignment>("left");
   const [annotations, setAnnotations] = useState<PhotoAnnotation[]>(() => annotationDocumentFromPhoto(photo).items);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftArrow, setDraftArrow] = useState<DraftArrow | null>(null);
@@ -526,6 +547,7 @@ export function StepPhotoViewer({
     () => photos.findIndex((candidate) => candidate.id === photo.id),
     [photo.id, photos],
   );
+  const canAlignText = activeTool === "text" || (activeTool === "select" && selectedAnnotation?.type === "text");
 
   const flushPendingAnnotations = useCallback(
     () => {
@@ -673,8 +695,30 @@ export function StepPhotoViewer({
 
   const handleSelectAnnotation = useCallback((annotation: PhotoAnnotation) => {
     selectAnnotation(annotation, setSelectedId, setActiveTool, setActiveColor, setActiveFontSize);
+    setToolbarVisibility("expanded");
+    if (annotation.type === "text") setActiveTextAlign(annotation.textAlign ?? "left");
     setContextMenu(null);
   }, []);
+
+  function applyTextAlignment(textAlign: PhotoTextAlignment) {
+    setActiveTextAlign(textAlign);
+    if (activeTool === "select" && selectedAnnotation?.type === "text") {
+      updateAnnotations((current) => current.map((item) =>
+        item.id === selectedId && item.type === "text" ? { ...item, textAlign } : item,
+      ));
+    }
+  }
+
+  function duplicateAnnotation(annotation: PhotoAnnotation) {
+    const duplicate = {
+      ...movePhotoAnnotation(annotation, 0.025, 0.025),
+      id: createAnnotationId(annotation.type),
+    };
+    updateAnnotations((current) => [...current, duplicate]);
+    if (activeTool === "select") handleSelectAnnotation(duplicate);
+    else setSelectedId(duplicate.id);
+    return duplicate;
+  }
 
   const handleAnnotationContextMenu = useCallback(
     (event: ReactMouseEvent, annotation: PhotoAnnotation) => {
@@ -888,7 +932,7 @@ export function StepPhotoViewer({
           viewerRef.current?.querySelectorAll<HTMLElement>(
             'button:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
           ) ?? [],
-        ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+        ).filter((element) => !element.closest('[inert], [aria-hidden="true"]'));
         if (focusable.length === 0) {
           return;
         }
@@ -912,6 +956,10 @@ export function StepPhotoViewer({
       }
 
       if (event.key === "Escape") {
+        if (activeTool === "pointer") {
+          setActiveTool("select");
+          return;
+        }
         if (contextMenu) {
           setContextMenu(null);
           return;
@@ -972,7 +1020,7 @@ export function StepPhotoViewer({
 
     window.addEventListener("keydown", handlePreviewKeyDown);
     return () => window.removeEventListener("keydown", handlePreviewKeyDown);
-  }, [changePhoto, contextMenu, deleteAnnotation, onClose, photos.length, selectedId]);
+  }, [activeTool, changePhoto, contextMenu, deleteAnnotation, onClose, photos.length, selectedId]);
 
   function pointFromClient(event: { clientX: number; clientY: number }) {
     const bounds = overlayRef.current?.getBoundingClientRect();
@@ -998,10 +1046,10 @@ export function StepPhotoViewer({
     overlayRef.current?.querySelector<HTMLTextAreaElement>(`[data-annotation-id="${annotationId}"]`)?.blur();
   }
 
-  function applyDragDelta(snapshot: PhotoAnnotation, deltaX: number, deltaY: number, mode: DragMode) {
+  function applyDragDelta(snapshot: PhotoAnnotation, deltaX: number, deltaY: number, mode: DragMode, anchorIndex = 0) {
     if (snapshot.type === "text") {
       if (mode === "callout-anchor") {
-        return moveTextCalloutAnchor(snapshot, deltaX, deltaY);
+        return moveTextCalloutAnchor(snapshot, deltaX, deltaY, anchorIndex);
       }
 
       if (mode === "callout-box") {
@@ -1014,7 +1062,7 @@ export function StepPhotoViewer({
     return movePhotoAnnotation(snapshot, deltaX, deltaY);
   }
 
-  function beginAnnotationDrag(event: ReactPointerEvent, annotation: PhotoAnnotation, mode: DragMode = "default") {
+  function beginAnnotationDrag(event: ReactPointerEvent, annotation: PhotoAnnotation, mode: DragMode = "default", anchorIndex = 0) {
     if (activeTool !== "select") {
       return;
     }
@@ -1038,6 +1086,7 @@ export function StepPhotoViewer({
       startClientX: event.clientX,
       startClientY: event.clientY,
       snapshot: annotation,
+      anchorIndex,
       active:
         mode === "arrow-start" ||
         mode === "arrow-end" ||
@@ -1098,6 +1147,7 @@ export function StepPhotoViewer({
       type: "text",
       color: activeColor,
       fontSize: activeFontSize,
+      textAlign: activeTextAlign,
       anchorX,
       anchorY,
       x: placement.x,
@@ -1130,6 +1180,13 @@ export function StepPhotoViewer({
     }
 
     const point = pointFromEvent(event);
+    if (activeTool === "pointer" && selectedAnnotation?.type === "text") {
+      event.preventDefault();
+      updateAnnotations((current) => current.map((item) => item.id === selectedId && item.type === "text"
+        ? { ...item, additionalAnchors: [...(item.additionalAnchors ?? []), point] } : item));
+      setActiveTool("select");
+      return;
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
 
     if (activeTool === "arrow") {
@@ -1255,7 +1312,7 @@ export function StepPhotoViewer({
       updateAnnotations((current) =>
         current.map((item) =>
           item.id === currentDrag.annotationId
-            ? applyDragDelta(currentDrag.snapshot, deltaX, deltaY, currentDrag.mode)
+            ? applyDragDelta(currentDrag.snapshot, deltaX, deltaY, currentDrag.mode, currentDrag.anchorIndex)
             : item,
         ),
       );
@@ -1344,11 +1401,10 @@ export function StepPhotoViewer({
           y2: draftArrow.y2,
         };
         updateAnnotations((current) => [...current, nextArrow]);
-        handleSelectAnnotation(nextArrow);
+        setSelectedId(id);
       }
 
       setDraftArrow(null);
-      setActiveTool("select");
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -1369,11 +1425,10 @@ export function StepPhotoViewer({
             ? ({ ...base, type: "highlight", opacity: 0.26 } satisfies PhotoHighlightAnnotation)
             : { ...base, type: draftShape.tool };
         updateAnnotations((current) => [...current, nextShape]);
-        handleSelectAnnotation(nextShape);
+        setSelectedId(nextShape.id);
       }
 
       setDraftShape(null);
-      setActiveTool("select");
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -1390,11 +1445,10 @@ export function StepPhotoViewer({
           points: draftFreehand.points,
         };
         updateAnnotations((current) => [...current, nextFreehand]);
-        handleSelectAnnotation(nextFreehand);
+        setSelectedId(nextFreehand.id);
       }
 
       setDraftFreehand(null);
-      setActiveTool("select");
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -1744,14 +1798,6 @@ export function StepPhotoViewer({
 
     const boxHeightPx = textCalloutBoxHeightPx(item, overlaySize.height);
     const boxHeightNorm = overlaySize.height > 0 ? boxHeightPx / overlaySize.height : 0;
-    const leader = textCalloutLeaderPoint(
-      item.anchorX,
-      item.anchorY,
-      item.x,
-      item.y,
-      item.width,
-      boxHeightNorm,
-    );
 
     return (
       <g
@@ -1759,10 +1805,13 @@ export function StepPhotoViewer({
         className={`ui-photo-annotation-item ui-photo-annotation-item-text ${selected ? "ui-photo-annotation-item-selected" : ""}`}
         onContextMenu={(event) => handleAnnotationContextMenu(event, item)}
       >
+        {textCalloutAnchors(item).map((anchor, anchorIndex) => {
+          const leader = textCalloutLeaderPoint(anchor.x, anchor.y, item.x, item.y, item.width, boxHeightNorm);
+          return <g key={anchorIndex} data-callout-pointer={anchorIndex}>
         <line
           className="ui-photo-callout-leader-hit"
-          x1={item.anchorX * overlaySize.width}
-          y1={item.anchorY * overlaySize.height}
+          x1={anchor.x * overlaySize.width}
+          y1={anchor.y * overlaySize.height}
           x2={leader.x * overlaySize.width}
           y2={leader.y * overlaySize.height}
           stroke="transparent"
@@ -1773,13 +1822,13 @@ export function StepPhotoViewer({
               return;
             }
 
-            beginAnnotationDrag(event, item, "callout-anchor");
+            beginAnnotationDrag(event, item, "callout-anchor", anchorIndex);
           }}
         />
         <line
           className={selected ? "ui-photo-annotation-stroke-selected" : undefined}
-          x1={item.anchorX * overlaySize.width}
-          y1={item.anchorY * overlaySize.height}
+          x1={anchor.x * overlaySize.width}
+          y1={anchor.y * overlaySize.height}
           x2={leader.x * overlaySize.width}
           y2={leader.y * overlaySize.height}
           stroke={item.color}
@@ -1788,8 +1837,8 @@ export function StepPhotoViewer({
         />
         <circle
           className="ui-photo-callout-anchor"
-          cx={item.anchorX * overlaySize.width}
-          cy={item.anchorY * overlaySize.height}
+          cx={anchor.x * overlaySize.width}
+          cy={anchor.y * overlaySize.height}
           r={Math.max(3, item.fontSize * 0.22)}
           fill={item.color}
           onPointerDown={(event) => {
@@ -1797,9 +1846,11 @@ export function StepPhotoViewer({
               return;
             }
 
-            beginAnnotationDrag(event, item, "callout-anchor");
+            beginAnnotationDrag(event, item, "callout-anchor", anchorIndex);
           }}
         />
+          </g>;
+        })}
         <foreignObject
           x={item.x * overlaySize.width}
           y={item.y * overlaySize.height}
@@ -1808,6 +1859,7 @@ export function StepPhotoViewer({
         >
           <div
             className={`ui-photo-callout ui-photo-callout-move ${selected ? "ui-photo-callout-selected" : ""}`}
+            style={{ borderColor: item.color }}
             onPointerDown={(event) => {
               if (activeTool !== "select") {
                 return;
@@ -1827,15 +1879,15 @@ export function StepPhotoViewer({
                 title="Drag to move callout"
                 onPointerDown={(event) => beginAnnotationDrag(event, item, "callout-box")}
               />
-            ) : (
-              <div className="ui-photo-callout-handle ui-photo-callout-handle-spacer" aria-hidden="true" />
-            )}
+            ) : null}
+            <div className="ui-photo-callout-text-body" style={{ fontSize: `${item.fontSize}px`, textAlign: item.textAlign ?? "left" }}>
+            <div className="ui-photo-callout-text-measure" aria-hidden="true">{item.text + " "}</div>
             <textarea
               data-annotation-id={item.id}
               className={`ui-photo-annotation-text ${selected ? "ui-photo-annotation-text-selected" : ""}`}
               style={{
                 fontSize: `${item.fontSize}px`,
-                borderLeftColor: item.color,
+                textAlign: item.textAlign ?? "left",
               }}
               value={item.text}
               placeholder=""
@@ -1869,6 +1921,7 @@ export function StepPhotoViewer({
               }}
               rows={1}
             />
+            </div>
             {selected ? (
               <div
                 className="ui-photo-callout-resize"
@@ -1988,12 +2041,30 @@ export function StepPhotoViewer({
   return (
     <div
       ref={viewerRef}
-      className="ui-photo-viewer fixed inset-0 z-[95] !m-0 flex items-center justify-center p-4 md:p-8"
+      className="ui-photo-viewer fixed inset-0 z-[95] !m-0 flex flex-col items-center gap-3 p-4"
       role="dialog"
       aria-modal="true"
       aria-label={`Step ${stepSequence} photo preview`}
+      onKeyDownCapture={(event) => {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey || isAnnotationTextInputFocused()) return;
+        const key = event.key.toLowerCase();
+        if (key === "c" && selectedAnnotation) {
+          event.preventDefault();
+          event.stopPropagation();
+          copiedAnnotationRef.current = selectedAnnotation;
+        } else if (key === "v" && copiedAnnotationRef.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          copiedAnnotationRef.current = duplicateAnnotation(copiedAnnotationRef.current);
+        } else if (key === "d" && selectedAnnotation) {
+          event.preventDefault();
+          event.stopPropagation();
+          duplicateAnnotation(selectedAnnotation);
+        }
+      }}
       onClick={onClose}
     >
+      <div className="ui-photo-viewer-stage">
       <div className="ui-photo-viewer-frame" onClick={(event) => event.stopPropagation()}>
         {!media.failed && media.source ? (
           <NextImage
@@ -2070,8 +2141,14 @@ export function StepPhotoViewer({
             </svg>
           ) : null}
         </div>
+      </div>
+      </div>
+      <div className="ui-photo-viewer-toolbar-dock">
         <div
           className={`ui-photo-viewer-toolbar ${toolbarVisibility === "minimized" ? "ui-photo-viewer-toolbar-minimized" : ""}`}
+          onClick={(event) => event.stopPropagation()}
+          role="region"
+          aria-label="Photo annotation tools"
         >
           <button
             ref={initialFocusRef}
@@ -2120,7 +2197,18 @@ export function StepPhotoViewer({
             aria-hidden={toolbarVisibility === "minimized"}
             inert={toolbarVisibility === "minimized"}
           >
-            <div className="ui-photo-viewer-toolbar-tools">
+            <div className="ui-photo-viewer-toolbar-tools" role="group" aria-label="Drawing tools">
+                <button
+                  type="button"
+                  className={`ui-photo-viewer-tool ${activeTool === "select" ? "ui-photo-viewer-tool-active" : ""}`}
+                  onClick={() => setActiveTool("select")}
+                  aria-label="Select annotation"
+                  aria-pressed={activeTool === "select"}
+                  aria-keyshortcuts="V"
+                  title="Select or move an annotation (V)"
+                >
+                  <MousePointer2 size={17} strokeWidth={1.75} />
+                </button>
                 <button
                   type="button"
                   className={`ui-photo-viewer-tool ${activeTool === "arrow" ? "ui-photo-viewer-tool-active" : ""}`}
@@ -2187,7 +2275,14 @@ export function StepPhotoViewer({
                 >
                   <Highlighter size={15} strokeWidth={1.75} />
                 </button>
-                <div className="ui-photo-viewer-toolbar-divider" aria-hidden="true" />
+            </div>
+          </div>
+          <div
+            className="ui-photo-viewer-formatting"
+            aria-hidden={toolbarVisibility === "minimized"}
+            inert={toolbarVisibility === "minimized"}
+          >
+              <div className="ui-photo-viewer-format-group">
                 <label className="ui-photo-viewer-color-select-wrap">
                   <span className="sr-only">Annotation color</span>
                   <span
@@ -2198,11 +2293,14 @@ export function StepPhotoViewer({
                   <ThemedSelect
                     className="ui-photo-viewer-color-select"
                     value={activeColor}
+                    selectedLabel=""
                     onChange={applyColor}
                     options={PHOTO_ANNOTATION_COLORS}
                     ariaLabel="Annotation color"
                   />
                 </label>
+              </div>
+              <div className="ui-photo-viewer-format-group">
                 <div className="ui-photo-viewer-size-stepper" role="group" aria-label="Annotation size">
                   <button
                     type="button"
@@ -2212,7 +2310,7 @@ export function StepPhotoViewer({
                     aria-label="Decrease annotation size"
                     title="Decrease size"
                   >
-                    A-
+                    <Minus size={14} aria-hidden="true" />
                   </button>
                   <span className="ui-photo-viewer-size-value">{activeFontSize}</span>
                   <button
@@ -2223,13 +2321,56 @@ export function StepPhotoViewer({
                     aria-label="Increase annotation size"
                     title="Increase size"
                   >
-                    A+
+                    <Plus size={14} aria-hidden="true" />
                   </button>
                 </div>
-                <div className="ui-photo-viewer-toolbar-divider" aria-hidden="true" />
+              </div>
+              <div className="ui-photo-viewer-format-group">
+                <div className="ui-photo-viewer-alignment" role="group" aria-label="Text alignment"
+                  title={canAlignText ? "Text alignment" : "Select a text box or choose the text tool to align text"}>
+                  {([
+                    ["left", AlignLeft], ["center", AlignCenter], ["right", AlignRight],
+                  ] as const).map(([alignment, Icon]) => (
+                    <button
+                      key={alignment}
+                      type="button"
+                      className={`ui-photo-viewer-tool ${canAlignText && activeTextAlign === alignment ? "ui-photo-viewer-tool-active" : ""}`}
+                      disabled={!canAlignText}
+                      onClick={() => applyTextAlignment(alignment)}
+                      aria-label={`Align text ${alignment}`}
+                      aria-pressed={canAlignText && activeTextAlign === alignment}
+                      title={`Align text ${alignment}`}
+                    >
+                      <Icon size={17} strokeWidth={1.75} />
+                    </button>
+                  ))}
+                </div>
+              </div>
                 <button
                   type="button"
-                  className={`ui-photo-viewer-tool ${selectedAnnotation ? "" : "ui-photo-viewer-tool-disabled"}`}
+                  className="ui-photo-viewer-tool"
+                  disabled={!selectedAnnotation}
+                  onClick={() => { if (selectedAnnotation) duplicateAnnotation(selectedAnnotation); }}
+                  aria-label="Duplicate selected annotation"
+                  aria-keyshortcuts="Control+d Meta+d"
+                  title="Duplicate annotation (Ctrl/Cmd+D)"
+                >
+                  <CopyPlus size={15} strokeWidth={1.75} />
+                </button>
+                <button
+                  type="button"
+                  className={`ui-photo-viewer-tool ${activeTool === "pointer" ? "ui-photo-viewer-tool-active" : ""}`}
+                  disabled={selectedAnnotation?.type !== "text"}
+                  onClick={() => setActiveTool(activeTool === "pointer" ? "select" : "pointer")}
+                  aria-label="Add pointer to selected callout"
+                  aria-pressed={activeTool === "pointer"}
+                  title="Add pointer: select a callout, then click another item in the photo"
+                >
+                  <Split size={15} strokeWidth={1.75} />
+                </button>
+                <button
+                  type="button"
+                  className={`ui-photo-viewer-tool ui-photo-viewer-delete ${selectedAnnotation ? "" : "ui-photo-viewer-tool-disabled"}`}
                   onClick={() => {
                     if (selectedAnnotation) {
                       deleteAnnotation(selectedAnnotation.id);
@@ -2241,7 +2382,6 @@ export function StepPhotoViewer({
                 >
                   <Trash2 size={15} strokeWidth={1.75} />
                 </button>
-            </div>
           </div>
           <div className="ui-photo-viewer-toolbar-actions">
             <button
@@ -2289,12 +2429,12 @@ export function StepPhotoViewer({
             </button>
           </div>
         </div>
+      </div>
         {exportError ? (
           <p className="ui-photo-viewer-export-error" role="alert">
             {exportError}
           </p>
         ) : null}
-      </div>
       {contextMenu ? (
         <div
           className="ui-photo-annotation-context-menu"

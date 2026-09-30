@@ -1,6 +1,7 @@
 import {
   isPhotoBoxAnnotation,
   textCalloutLeaderPoint,
+  textCalloutAnchors,
   type PhotoAnnotation,
   type PhotoTextAnnotation,
 } from "@/domain/photo-annotations";
@@ -109,21 +110,15 @@ function StaticTextCallout({
   calloutClassName: string;
 }) {
   const boxHeightNorm = annotation.height ?? Math.max(0.08, (annotation.fontSize * 3.4 * scale) / height);
-  const leader = textCalloutLeaderPoint(
-    annotation.anchorX,
-    annotation.anchorY,
-    annotation.x,
-    annotation.y,
-    annotation.width,
-    boxHeightNorm,
-  );
-  const accentWidth = 3 * scale;
 
   return (
     <g data-annotation-type="text">
+      {textCalloutAnchors(annotation).map((anchor, index) => {
+        const leader = textCalloutLeaderPoint(anchor.x, anchor.y, annotation.x, annotation.y, annotation.width, boxHeightNorm);
+        return <g key={index} data-callout-pointer={index}>
       <line
-        x1={annotation.anchorX * width}
-        y1={annotation.anchorY * height}
+        x1={anchor.x * width}
+        y1={anchor.y * height}
         x2={leader.x * width}
         y2={leader.y * height}
         stroke={annotation.color}
@@ -131,11 +126,13 @@ function StaticTextCallout({
         strokeLinecap="round"
       />
       <circle
-        cx={annotation.anchorX * width}
-        cy={annotation.anchorY * height}
+        cx={anchor.x * width}
+        cy={anchor.y * height}
         r={3 * scale}
         fill={annotation.color}
       />
+        </g>;
+      })}
       <foreignObject
         x={annotation.x * width}
         y={annotation.y * height}
@@ -149,19 +146,22 @@ function StaticTextCallout({
             width: "100%",
             height: "100%",
             overflow: "hidden",
-            border: "1px solid rgba(0,0,0,0.18)",
-            borderLeft: `${accentWidth}px solid ${annotation.color}`,
+            border: `${2 * scale}px solid ${annotation.color}`,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
             background: "rgba(255,255,255,0.94)",
             color: "#1a1a1a",
             fontSize: `${annotation.fontSize * scale}px`,
-            fontWeight: 600,
-            lineHeight: 1.25,
+            fontWeight: 500,
+            textAlign: annotation.textAlign ?? "left",
+            lineHeight: 1.35,
             padding: `${5 * scale}px ${7 * scale}px`,
             whiteSpace: "pre-wrap",
             overflowWrap: "anywhere",
           }}
         >
-          {annotation.text}
+          <div style={{ width: "100%" }}>{annotation.text}</div>
         </div>
       </foreignObject>
     </g>

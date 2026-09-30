@@ -254,7 +254,6 @@ function StepPhotoThumbnail({
           width={width}
           height={height}
           markerId={markerId}
-          targetSize={compact ? 150 : 220}
           calloutClassName="step-photo-thumbnail-callout"
         />
       ))}

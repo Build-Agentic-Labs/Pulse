@@ -30,7 +30,7 @@ export function letterPageCounts(heights: number[], firstAvailable: number, late
   do {
     const first = counts.length === 0;
     const available = first ? firstAvailable : laterAvailable;
-    const limit = first ? 2 : 3;
+    const limit = 2;
     let used = 0;
     let count = 0;
     while (index + count < heights.length && count < limit && used + heights[index + count] <= available) {

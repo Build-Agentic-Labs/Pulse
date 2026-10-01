@@ -32,14 +32,35 @@
 }
 
 .mobile-photo-portal .ui-photo-mobile-site-header-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+}
+
+.mobile-photo-portal .ui-photo-mobile-site-header-row > .ui-photo-mobile-header-btn {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-nav {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .mobile-photo-portal .ui-photo-mobile-site-header-brand {
   min-width: 0;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  padding-bottom: 0.25rem;
+}
+
+.mobile-photo-portal .ui-photo-mobile-site-header-brand .ui-photo-mobile-page-title {
+  margin-top: 0.25rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 
 .mobile-photo-portal .ui-photo-mobile-site-eyebrow {
@@ -54,7 +75,9 @@
 
 .mobile-photo-portal .ui-photo-mobile-header-actions {
   display: flex;
-  max-width: min(58vw, 14rem);
+  grid-column: 1 / -1;
+  grid-row: 3;
+  max-width: 100%;
   flex-shrink: 0;
   align-items: center;
   justify-content: flex-end;
@@ -62,6 +85,10 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
+}
+
+.mobile-photo-portal .ui-photo-mobile-header-actions:empty {
+  display: none;
 }
 
 .mobile-photo-portal .ui-photo-mobile-header-actions::-webkit-scrollbar {
@@ -373,16 +400,20 @@
 
 .mobile-photo-portal .ui-photo-mobile-tool-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.25rem;
 }
 
 .mobile-photo-portal .ui-photo-mobile-tool-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   min-width: 0;
   border-radius: 0.375rem;
   border: 1px solid var(--color-line);
   background: var(--color-surface);
-  padding: 0.125rem;
+  padding: 0.125rem 0.5rem;
   text-align: left;
   transition: transform 120ms var(--ease-ui);
 }
@@ -392,12 +423,8 @@
 }
 
 .mobile-photo-portal .ui-photo-mobile-tool-name {
-  margin-top: 0.125rem;
-  min-height: 1.125rem;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-family: var(--type-mono);
   font-size: var(--type-label);
   font-weight: 500;
@@ -742,7 +769,7 @@
   font-size: var(--type-label);
   font-weight: 500;
   letter-spacing: 0.03em;
-  color: color-mix(in srgb, var(--color-ink-secondary) 58%, transparent);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-task-name-inline {
@@ -779,17 +806,23 @@
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-header {
-  display: flex;
-  flex-wrap: wrap;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem 0.75rem;
 }
 
-/* Title block takes the full row so the name input is never squeezed by the action cluster. */
 .mobile-photo-portal .ui-photo-mobile-step-header > .min-w-0 {
-  flex: 1 0 100%;
-  order: -1;
+  grid-column: 1;
+  padding-right: 3.5rem;
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-header > .ui-photo-mobile-icon-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-header-title {
@@ -808,7 +841,7 @@
   font-size: var(--type-label);
   font-weight: 500;
   letter-spacing: 0.03em;
-  color: color-mix(in srgb, var(--color-ink-secondary) 58%, transparent);
+  color: var(--color-ink-secondary);
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-title {
@@ -842,6 +875,7 @@
 
 .mobile-photo-portal .ui-photo-mobile-step-header-actions {
   display: flex;
+  grid-column: 1 / -1;
   align-items: center;
   gap: 0.375rem;
   flex-shrink: 0;
@@ -1029,10 +1063,6 @@
 }
 
 @media (max-width: 360px) {
-  .mobile-photo-portal .ui-photo-mobile-header-actions {
-    max-width: min(62vw, 11.5rem);
-  }
-
   .mobile-photo-portal .ui-photo-mobile-header-timer-name {
     max-width: 3.25rem;
   }
@@ -1059,14 +1089,20 @@
    812px phone, so a nine-step task was ~8.7 screens of largely empty form. The summary carries the
    identifiers a capture operator scans for (code, name, duration) plus counts for anything actually
    attached, so a glance answers "does this step have its photos yet?" without expanding it. */
+.mobile-photo-portal .ui-photo-mobile-step-list > article,
+.mobile-photo-portal .ui-photo-mobile-step-list > .ui-photo-mobile-new-step-panel {
+  border-color: var(--color-border-strong);
+}
+
 .mobile-photo-portal .ui-photo-mobile-step-summary {
+  position: relative;
   display: flex;
   width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   min-height: 3.5rem;
-  padding: 0.75rem;
+  padding: 0.75rem 4.25rem 0.75rem 0.75rem;
   border-radius: 0.375rem;
   background: transparent;
   text-align: left;
@@ -1074,7 +1110,23 @@
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-summary:active {
-  background: var(--color-surface-muted);
+  background: transparent;
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-summary,
+.mobile-photo-portal .ui-photo-mobile-step-toggle {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-toggle:active {
+  background: transparent;
+  color: var(--color-ink-secondary);
+}
+
+.mobile-photo-portal .ui-photo-mobile-step-summary:focus-visible,
+.mobile-photo-portal .ui-photo-mobile-step-toggle:focus-visible {
+  outline: 2px solid var(--color-border-strong);
+  outline-offset: 2px;
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-summary-main {
@@ -1112,7 +1164,13 @@
 }
 
 .mobile-photo-portal .ui-photo-mobile-step-summary-chevron {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0.875rem;
+  box-sizing: border-box;
   color: var(--color-ink-secondary);
 }
 
@@ -1123,4 +1181,70 @@
     min-height: 44px;
     min-width: 44px;
   }
+}
+
+/* Phone process authoring uses a readable scale independent of desktop density. */
+.mobile-photo-portal {
+  --type-body: 1rem;
+  --type-subtitle: 1rem;
+  --type-caption: 0.8125rem;
+  --type-label: 0.75rem;
+}
+.mobile-photo-portal .ui-photo-mobile-header-btn,
+.mobile-photo-portal .ui-photo-mobile-header-timer-chip {
+  min-height: 2.75rem;
+  font-size: 0.8125rem;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.mobile-photo-portal .ui-photo-mobile-save-status {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.mobile-photo-portal .ui-photo-mobile-tool-name {
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+.mobile-photo-portal .ui-photo-mobile-step-summary-name {
+  white-space: normal;
+}
+.mobile-photo-portal .ui-photo-mobile-check-editor .ui-procedure-step-check {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.375rem;
+  background: var(--color-canvas);
+}
+.mobile-photo-portal .ui-photo-mobile-check-editor .ui-procedure-step-check:has(input[type="number"]) {
+  grid-column: 1 / -1;
+}
+.mobile-photo-portal .ui-photo-mobile-check-editor .ui-procedure-step-check > span {
+  flex-wrap: wrap;
+}
+.mobile-photo-portal .ui-photo-mobile-check-editor .ui-procedure-step-check label {
+  min-height: 1.75rem;
+}
+.mobile-photo-portal .ui-photo-mobile-check-editor input[type="number"],
+.mobile-photo-portal .ui-photo-mobile-check-editor button {
+  min-height: 2.75rem;
+  font-size: 1rem;
+}
+
+.mobile-photo-portal .ui-photo-mobile-check-summary {
+  min-height: 2.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.375rem;
+  background: var(--color-canvas);
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+.mobile-photo-portal .ui-photo-mobile-check-summary > span {
+  float: right;
+  color: var(--color-ink-secondary);
 }

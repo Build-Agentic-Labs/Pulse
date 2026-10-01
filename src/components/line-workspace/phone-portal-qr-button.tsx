@@ -99,7 +99,12 @@ function PhonePortalQrPopover({ project }: { project?: PlannerProjectContext }) 
         {portalUrl}
       </p>
 
-      <a href={openPortalHref} className="ui-btn-ghost mt-2 inline-flex h-8 w-full justify-center px-3">
+      <a
+        href={openPortalHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="ui-btn-ghost mt-2 inline-flex h-8 w-full justify-center px-3"
+      >
         Open on this device
       </a>
     </div>

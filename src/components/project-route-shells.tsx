@@ -247,10 +247,10 @@ function UniversalPhotoPortal({ groups, requestedProjectId, initialPlannerState 
     }
   }, [selected]);
   if (!selected) return <main className="min-h-dvh bg-canvas px-4 py-8 text-ink"><div className="mx-auto max-w-md space-y-5">
-    <h1 className="text-xl font-medium">Photo Portal</h1>
-    <p className="text-sm text-ink-secondary">Choose a project to capture photos for its tasks and steps.</p>
-    {projects.length ? <div className="space-y-2" role="list" aria-label="Projects">
-      {projects.map(project => <button key={project.projectId} type="button" role="listitem"
+    <h1 className="text-xl font-medium">Process Builder</h1>
+    <p className="text-sm text-ink-secondary">Choose a project to build processes, steps, and work instructions.</p>
+    {projects.length ? <div className="space-y-2" role="group" aria-label="Projects">
+      {projects.map(project => <button key={project.projectId} type="button"
         className="flex min-h-16 w-full items-center justify-between rounded-md border border-line bg-surface px-4 text-left transition-colors active:bg-surface-muted"
         onClick={() => setChosenProjectId(project.projectId)}>
         <span className="min-w-0"><span className="block truncate text-base font-medium">{project.projectName}</span><span className="block truncate text-xs text-ink-secondary">{project.workspaceName}</span></span>

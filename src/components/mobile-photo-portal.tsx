@@ -33,8 +33,10 @@ import { applyCalculatedFields, formatMinutes, getTopLevelTasks } from "@/domain
 import { emptyPlannerState } from "@/domain/empty-planner-state";
 import {
   getManufacturingStepCheckSet,
-  manufacturingStepCheckOptions,
-  serializeManufacturingStepCheckSet,
+  getManufacturingStepCheckDefinitions,
+  getManufacturingStepCheckState,
+  serializeManufacturingStepCheckState,
+  type ManufacturingStepCheckValue,
 } from "@/domain/manufacturing-step-checks";
 import { generateTaskCode, nextTaskNumberForComponent, stepDisplayCode, taskDisplayCode } from "@/domain/nomenclature";
 import {
@@ -50,15 +52,13 @@ import { getTaskVideos } from "@/domain/task-videos";
 import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import {
   addStepToolToSupabase,
+  deletePlannerTask,
   canPatchTaskFromRealtimePayload,
-  loadToolLibraryFromSupabase,
   loadPlannerStateFromSupabase,
   loadTaskFromSupabase,
   removeStepToolFromSupabase,
-  saveManufacturingStepToSupabase,
+  saveMobileStepToSupabase,
   savePlannerStateToSupabase,
-  saveTaskAndManufacturingStepToSupabase,
-  saveTaskRowToSupabase,
   saveTaskToSupabase,
   saveTaskWithManufacturingStepsToSupabase,
   saveTasksToSupabase,
@@ -67,14 +67,16 @@ import {
   subscribePlannerStateChanges,
   taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
-  type ToolLibraryItem,
 } from "@/domain/supabase-planner";
 import type { ManufacturingStep, PlannerProjectContext, PlannerState, Task } from "@/domain/types";
 import { AppLoadingShell } from "@/components/app-flow-panels";
 import { NothingSpinner } from "@/components/nothing-ui";
 import { StepExplodedViewGallery } from "@/components/step-exploded-view-gallery";
 import { TaskVideoGallery } from "@/components/task-video-gallery";
+import { ProcedureToolPicker } from "@/components/procedure-tool-picker";
 import { ThemedSelect } from "@/components/themed-select";
+
+import { ProcedureStepChecksEditor } from "@/components/line-workspace/step-editors";
 
 const MAX_IMAGE_EDGE = 1280;
 const JPEG_QUALITY = 0.72;
@@ -86,11 +88,13 @@ type MobileNewStepDraftRecord = {
   key: string;
   taskId: string;
   stepId: string | null;
+  name?: string;
   instruction: string;
   durationText: string;
   tools: string[];
   photos: StepPhotoAttachment[];
   checks: string[];
+  checkValues?: Record<string, ManufacturingStepCheckValue>;
   updatedAt: string;
 };
 
@@ -159,11 +163,13 @@ type ParkedTaskCaptureState = {
   timer: CaptureTimerState;
   showNewStepForm: boolean;
   newStepId: string | null;
+  draftName?: string;
   draftInstruction: string;
   draftDurationText: string;
   draftTools: string[];
   draftPhotos: StepPhotoAttachment[];
   draftChecks: string[];
+  draftCheckValues?: Record<string, ManufacturingStepCheckValue>;
 };
 
 type MobileCaptureSessionSnapshot = {
@@ -203,6 +209,7 @@ function normalizeParkedTaskCaptureState(value: unknown): ParkedTaskCaptureState
     timer,
     showNewStepForm: Boolean(value.showNewStepForm),
     newStepId: typeof value.newStepId === "string" ? value.newStepId : timer.activeStepId,
+    draftName: typeof value.draftName === "string" ? value.draftName : "",
     draftInstruction: typeof value.draftInstruction === "string" ? value.draftInstruction : "",
     draftDurationText: typeof value.draftDurationText === "string" ? value.draftDurationText : "5",
     draftTools: Array.isArray(value.draftTools)
@@ -211,6 +218,7 @@ function normalizeParkedTaskCaptureState(value: unknown): ParkedTaskCaptureState
     draftPhotos: Array.isArray(value.draftPhotos)
       ? value.draftPhotos.filter((photo): photo is StepPhotoAttachment => isRecord(photo) && typeof photo.id === "string")
       : [],
+    draftCheckValues: getManufacturingStepCheckState(JSON.stringify({ values: value.draftCheckValues })).values,
     draftChecks: Array.isArray(value.draftChecks)
       ? value.draftChecks.filter((check): check is string => typeof check === "string")
       : [],
@@ -830,14 +838,19 @@ export function MobilePhotoPortal({
   const [dragTargetTaskId, setDragTargetTaskId] = useState<string | null>(null);
   const [dragTargetPlacement, setDragTargetPlacement] = useState<"before" | "after">("after");
   const [dragPreview, setDragPreview] = useState<{ x: number; y: number; width: number } | null>(null);
-  const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
-  const [revealedPhotoDeleteId, setRevealedPhotoDeleteId] = useState<string | null>(null);
-  const [revealedToolDeleteKey, setRevealedToolDeleteKey] = useState<string | null>(null);
   const [showNewStepForm, setShowNewStepForm] = useState(false);
   // Steps render collapsed by default: fully expanded, one step runs ~750px on a 812px phone, so a
   // nine-step task was ~8.7 screens of mostly-empty form to scroll past. Expansion is per step and
   // additive -- opening one never closes another, because comparing two steps is a real task here.
+  const [swipedTaskId, setSwipedTaskId] = useState<string | null>(null);
+  const processSwipeRef = useRef<{ x: number; y: number; horizontal: boolean } | null>(null);
+  const suppressProcessClickRef = useRef(false);
   const [expandedStepIds, setExpandedStepIds] = useState<Set<string>>(() => new Set());
+  const [newStepName, setNewStepName] = useState("");
+  const draftBaseStepsRef = useRef(new Map<string, ManufacturingStep>());
+  const failedDraftPatchesRef = useRef(new Map<string, Partial<ManufacturingStep>>());
+  const failedDraftToolSyncRef = useRef(new Set<string>());
+  const closeDraftAfterSaveRef = useRef(false);
   const [newStepInstruction, setNewStepInstruction] = useState("");
   const [newStepDurationText, setNewStepDurationText] = useState("5");
   const [newStepToolName, setNewStepToolName] = useState("");
@@ -845,6 +858,9 @@ export function MobilePhotoPortal({
   const [newStepDraftTools, setNewStepDraftTools] = useState<string[]>([]);
   const [newStepDraftPhotos, setNewStepDraftPhotos] = useState<StepPhotoAttachment[]>([]);
   const [newStepDraftChecks, setNewStepDraftChecks] = useState<Set<string>>(() => new Set());
+  const [newStepDraftCheckValues, setNewStepDraftCheckValues] = useState<Record<string, ManufacturingStepCheckValue>>({});
+  const stepCheckDefinitions = useMemo(() => getManufacturingStepCheckDefinitions(plannerState?.product.customFields), [plannerState?.product.customFields]);
+  const [writesPending, setWritesPending] = useState(false);
   const [newStepPhotoBusyCount, setNewStepPhotoBusyCount] = useState(0);
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [confirmDeleteStepId, setConfirmDeleteStepId] = useState<string | null>(null);
@@ -856,6 +872,9 @@ export function MobilePhotoPortal({
   const captureTimerRef = useRef(captureTimer);
   const parkedCaptureByTaskIdRef = useRef(parkedCaptureByTaskId);
   const [mobileHeaderHeight, setMobileHeaderHeight] = useState(72);
+  const revealNewProcessForm = useCallback((node: HTMLDivElement | null) => {
+    node?.scrollIntoView({ block: "start" });
+  }, []);
   const [newStepMotionPhase, setNewStepMotionPhase] = useState<"idle" | "exit" | "enter">("idle");
   const [recentlyCompletedStepId, setRecentlyCompletedStepId] = useState<string | null>(null);
   const newStepMotionTimersRef = useRef<number[]>([]);
@@ -876,8 +895,6 @@ export function MobilePhotoPortal({
       window.requestAnimationFrame(() => resizeTextareaToContent(node));
     }
   }).current;
-  const photoHoldTimerRef = useRef<number | null>(null);
-  const toolHoldTimerRef = useRef<number | null>(null);
   const draggingTaskIdRef = useRef<string | null>(null);
   const dragTargetTaskIdRef = useRef<string | null>(null);
   const dragTargetPlacementRef = useRef<"before" | "after">("after");
@@ -974,13 +991,6 @@ export function MobilePhotoPortal({
     return steps.reduce((highest, step) => Math.max(highest, step.sequence), 0) + 1;
   }, [newStepId, selectedTask]);
   const activeProjectContext = derivedState?.project ?? projectContext;
-  const toolImageByName = useMemo(() => {
-    const images = new Map<string, ToolLibraryItem>();
-    toolLibraryItems.forEach((tool) => {
-      images.set(tool.toolName.toLocaleLowerCase(), tool);
-    });
-    return images;
-  }, [toolLibraryItems]);
   const captureTimerElapsedMs = getCaptureTimerElapsed(captureTimer, timerNow);
   const captureTimerLapElapsedMs = getCaptureTimerLapElapsed(captureTimer, timerNow);
   const headerCaptureTimers = useMemo(() => {
@@ -1037,25 +1047,6 @@ export function MobilePhotoPortal({
     }
   }, [saveState, onReady]);
 
-  useEffect(() => {
-    let active = true;
-
-    loadToolLibraryFromSupabase(activeProjectContext?.projectId)
-      .then((tools) => {
-        if (active) {
-          setToolLibraryItems(tools);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setToolLibraryItems([]);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [activeProjectContext?.projectId]);
 
   useEffect(() => {
     selectedTaskIdRef.current = selectedTaskId;
@@ -1235,7 +1226,9 @@ export function MobilePhotoPortal({
     html.style.overflow = "auto";
     body.style.height = "auto";
     body.style.minHeight = "100%";
-    body.style.overflow = "auto";
+    // Keep the document as the only scroller; a second body scroller can trap
+    // touch scrolling and report the wrong bottom boundary on mobile browsers.
+    body.style.overflow = "visible";
     body.style.overscrollBehaviorY = "auto";
 
     return () => {
@@ -1337,9 +1330,7 @@ export function MobilePhotoPortal({
 
   useEffect(() => {
     function warnBeforeLeaving(event: BeforeUnloadEvent) {
-      const draft = getNewStepDraftSnapshot();
-
-      if (saveState === "saving" || saveState === "error" || hasDraftStepContent(draft)) {
+      if (saveState === "saving" || saveState === "error" || hasLocalSaveWork()) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -1355,8 +1346,24 @@ export function MobilePhotoPortal({
     };
   }, []);
 
+  useEffect(() => {
+    if (!showNewStepForm || !newStepId || writesPending || saveState === "saving" || saveState === "error" || newStepAutosaveTimerRef.current) return;
+    const task = plannerState?.tasks.find((task) => task.id === selectedTaskId);
+    const step = task?.manufacturingSteps?.find((step) => step.id === newStepId);
+    if (!task || !step) return;
+    draftBaseStepsRef.current.set(step.id, step);
+    setNewStepName(step.name ?? "");
+    setNewStepInstruction(step.instruction ?? "");
+    setNewStepDurationText(String(step.durationMinutes ?? 0));
+    const checks = getManufacturingStepCheckState(step.qualityCheck, stepCheckDefinitions);
+    setNewStepDraftChecks(checks.selected);
+    setNewStepDraftCheckValues(checks.values);
+    setNewStepDraftTools(getStepToolList(task, step.id));
+    setNewStepDraftPhotos(getStepPhotoAttachments(task, step.id));
+  }, [plannerState, selectedTaskId, newStepId, showNewStepForm, writesPending, saveState, stepCheckDefinitions]);
+
   function hasLocalSaveWork() {
-    return saveInFlightRef.current || Boolean(newStepAutosaveTimerRef.current);
+    return saveInFlightRef.current || Boolean(newStepAutosaveTimerRef.current) || failedDraftPatchesRef.current.size > 0 || failedDraftToolSyncRef.current.size > 0;
   }
 
   function refreshPlannerFromSupabase() {
@@ -1640,13 +1647,16 @@ export function MobilePhotoPortal({
             const restoredTask = savedState.tasks.find((task) => task.id === resolvedTaskId);
             const restoredStep = restoredTask?.manufacturingSteps?.find((step) => step.id === restoredStepId);
             if (restoredTask && restoredStep) {
+              setNewStepName(restoredStep.name ?? "");
+              draftBaseStepsRef.current.set(restoredStep.id, restoredStep);
               setNewStepInstruction(restoredStep.instruction ?? "");
               if ((restoredStep.durationMinutes ?? 0) > 0) {
                 setNewStepDurationText(String(restoredStep.durationMinutes));
               }
               setNewStepDraftTools(getStepToolList(restoredTask, restoredStepId));
               setNewStepDraftPhotos(getStepPhotoAttachments(restoredTask, restoredStepId));
-              setNewStepDraftChecks(getManufacturingStepCheckSet(restoredStep.qualityCheck));
+              setNewStepDraftChecks(getManufacturingStepCheckSet(restoredStep.qualityCheck, getManufacturingStepCheckDefinitions(savedState.product.customFields)));
+              setNewStepDraftCheckValues(getManufacturingStepCheckState(restoredStep.qualityCheck, getManufacturingStepCheckDefinitions(savedState.product.customFields)).values);
               newStepTouchedRef.current = true;
             }
           }
@@ -1707,14 +1717,18 @@ export function MobilePhotoPortal({
           return;
         }
 
+        const recoveredStep = plannerState.tasks.find((task) => task.id === draft.taskId)?.manufacturingSteps?.find((step) => step.id === draft.stepId);
+        const recoveredName = draft.name ?? recoveredStep?.name ?? "";
         const checks = new Set(draft.checks);
         const snapshot = {
           stepId: draft.stepId,
+          name: recoveredName,
           instruction: draft.instruction,
           durationText: draft.durationText,
           tools: draft.tools,
           photos: draft.photos,
           checks,
+          checkValues: draft.checkValues ?? {},
         };
 
         if (!hasDraftStepContentRef.current(snapshot)) {
@@ -1727,11 +1741,13 @@ export function MobilePhotoPortal({
         setActiveScreen("detail");
         setShowNewStepForm(true);
         setDraftStepId(draft.stepId);
+        setNewStepName(recoveredName);
         setNewStepInstruction(draft.instruction);
         setNewStepDurationText(draft.durationText || "5");
         setNewStepDraftTools(draft.tools);
         setNewStepDraftPhotos(draft.photos);
         setNewStepDraftChecks(checks);
+        setNewStepDraftCheckValues(draft.checkValues ?? {});
         newStepTouchedRef.current = true;
         setSaveState("saving");
         setErrorMessage("Recovered an unsaved phone draft. Saving it now; do not refresh until it shows Saved.");
@@ -1785,6 +1801,7 @@ export function MobilePhotoPortal({
   function refreshWriteLock() {
     saveInFlightRef.current =
       localWriteCountRef.current > 0 || Object.keys(photoUploadQueuesRef.current).length > 0;
+    setWritesPending(saveInFlightRef.current);
   }
 
   function beginLocalWrite() {
@@ -1874,6 +1891,7 @@ export function MobilePhotoPortal({
 
   function hasDraftStepContent(snapshot: ReturnType<typeof getNewStepDraftSnapshot>) {
     return (
+      snapshot.name.trim().length > 0 ||
       snapshot.instruction.trim().length > 0 ||
       snapshot.tools.length > 0 ||
       snapshot.photos.length > 0 ||
@@ -1883,19 +1901,23 @@ export function MobilePhotoPortal({
 
   function getNewStepDraftSnapshot(overrides: Partial<{
     stepId: string | null;
+    name: string;
     instruction: string;
     durationText: string;
     tools: string[];
     photos: StepPhotoAttachment[];
     checks: Set<string>;
+    checkValues: Record<string, ManufacturingStepCheckValue>;
   }> = {}) {
     return {
       stepId: overrides.stepId ?? newStepIdRef.current ?? newStepId,
+      name: overrides.name ?? newStepName,
       instruction: overrides.instruction ?? newStepInstruction,
       durationText: overrides.durationText ?? newStepDurationText,
       tools: overrides.tools ?? newStepDraftTools,
       photos: overrides.photos ?? newStepDraftPhotos,
       checks: overrides.checks ?? newStepDraftChecks,
+      checkValues: overrides.checkValues ?? newStepDraftCheckValues,
     };
   }
 
@@ -1912,11 +1934,13 @@ export function MobilePhotoPortal({
     void saveMobileNewStepRecoveryDraft({
       taskId,
       stepId: snapshot.stepId,
+      name: snapshot.name,
       instruction: snapshot.instruction,
       durationText: snapshot.durationText,
       tools: snapshot.tools,
       photos: snapshot.photos,
       checks: [...snapshot.checks],
+      checkValues: snapshot.checkValues,
     }).catch(() => {
       setErrorMessage("This browser could not store the local recovery draft. Copy text/photos before refreshing.");
     });
@@ -1924,7 +1948,7 @@ export function MobilePhotoPortal({
 
   function persistNewStepDraft(
     snapshot = getNewStepDraftSnapshot(),
-    options: { saveTask?: boolean; showSaving?: boolean } = {},
+    options: { saveTask?: boolean; showSaving?: boolean; onSaved?: () => void } = {},
   ) {
     clearNewStepAutosaveTimer();
     const currentState = plannerStateRef.current;
@@ -1950,10 +1974,10 @@ export function MobilePhotoPortal({
       ...existingStep,
       id: stepId,
       sequence,
-      name: existingStep?.name ?? "",
+      name: snapshot.name.trim(),
       instruction: snapshot.instruction.trim(),
       durationMinutes,
-      qualityCheck: serializeManufacturingStepCheckSet(snapshot.checks),
+      qualityCheck: serializeManufacturingStepCheckState({ selected: snapshot.checks, values: snapshot.checkValues }, stepCheckDefinitions),
     };
     const nextSteps = existingStep
       ? currentSteps.map((step) => (step.id === stepId ? nextStep : step))
@@ -1972,35 +1996,41 @@ export function MobilePhotoPortal({
       setSaveState("saving");
     }
 
+    const baseStep = draftBaseStepsRef.current.get(stepId) ?? existingStep;
+    const patch: Partial<ManufacturingStep> = { ...failedDraftPatchesRef.current.get(stepId) };
+    for (const key of ["name", "instruction", "durationMinutes", "qualityCheck"] as const) {
+      if (!baseStep || baseStep[key] !== nextStep[key]) Object.assign(patch, { [key]: nextStep[key] });
+    }
+    draftBaseStepsRef.current.set(stepId, nextStep);
+    const syncTools = !baseStep || JSON.stringify(snapshot.tools) !== JSON.stringify(getStepToolList(currentTask, stepId));
     beginLocalWrite();
 
     void enqueueTaskScopedWrite(taskId, async () => {
-      await saveManufacturingStepToSupabase(taskId, nextStep, projectId);
-      await syncStepToolsForStepToSupabase(taskId, stepId, snapshot.tools, projectId);
-
+      Object.assign(patch, { ...failedDraftPatchesRef.current.get(stepId), ...patch });
+      const savedStep = await saveMobileStepToSupabase(currentTask, nextStep, patch, projectId);
+      if (syncTools || failedDraftToolSyncRef.current.has(stepId)) {
+        await syncStepToolsForStepToSupabase(taskId, stepId, snapshot.tools, projectId);
+        failedDraftToolSyncRef.current.delete(stepId);
+      }
       const uploadedPhotos = await Promise.all(
         snapshot.photos.map((photo) => uploadStepPhotoAttachment(taskId, stepId, photo, activeProjectContext)),
       );
-      let persistedTask = withStepDerivedDuration(
-        nextTask,
-        (nextTask.manufacturingSteps ?? []).map((step) => (step.id === stepId ? nextStep : step)),
-      );
-      persistedTask = upsertStepPhotoAttachments(persistedTask, stepId, uploadedPhotos);
-      persistedTask = snapshot.tools.reduce((taskWithTools, tool) => addStepTool(taskWithTools, stepId, tool), persistedTask);
-
-      if (uploadedPhotos.length) {
-        updateLocalTask(taskId, (task) => upsertStepPhotoAttachments(task, stepId, uploadedPhotos));
-      }
-
-      if (options.saveTask) {
-        await saveTaskRowToSupabase(persistedTask, projectId);
-      }
+      updateLocalTask(taskId, (task) => {
+        const steps = (task.manufacturingSteps ?? []).map((step) => step.id === stepId ? { ...step, sequence: savedStep.sequence, version: savedStep.version } : step);
+        return upsertStepPhotoAttachments(withStepDerivedDuration(task, steps), stepId, uploadedPhotos);
+      });
+      failedDraftPatchesRef.current.delete(stepId);
     })
       .then(() => {
-        void clearMobileNewStepRecoveryDraft().catch(() => undefined);
+        if (!newStepAutosaveTimerRef.current && localWriteCountRef.current <= 1) {
+          void clearMobileNewStepRecoveryDraft().catch(() => undefined);
+        }
         setSaveState("saved");
+        if (selectedTaskIdRef.current === taskId && newStepIdRef.current === stepId) options.onSaved?.();
       })
       .catch((error) => {
+        if (syncTools) failedDraftToolSyncRef.current.add(stepId);
+        failedDraftPatchesRef.current.set(stepId, { ...failedDraftPatchesRef.current.get(stepId), ...patch });
         setSaveState("error");
         setErrorMessage(error instanceof Error ? error.message : "Unable to autosave the manufacturing step.");
       })
@@ -2018,6 +2048,7 @@ export function MobilePhotoPortal({
     newStepTouchedRef.current = true;
     const snapshot = getNewStepDraftSnapshot({ ...overrides, stepId });
     saveRecoverableNewStepDraft(snapshot);
+    setSaveState("saving");
     newStepAutosaveTimerRef.current = window.setTimeout(() => {
       newStepAutosaveTimerRef.current = null;
       persistNewStepDraft(snapshot, { saveTask: overrides.durationText !== undefined, showSaving: true });
@@ -2034,9 +2065,11 @@ export function MobilePhotoPortal({
     try {
       await saveOperation();
       setSaveState("saved");
+      return true;
     } catch (error) {
       setSaveState("error");
       setErrorMessage(error instanceof Error ? error.message : "Unable to save step photos.");
+      return false;
     } finally {
       endLocalWrite();
     }
@@ -2091,42 +2124,6 @@ export function MobilePhotoPortal({
     }
   }
 
-  function taskScheduleChanged(previousTask: Task | undefined, nextTask: Task) {
-    return (
-      !previousTask ||
-      previousTask.plannedStart !== nextTask.plannedStart ||
-      previousTask.plannedFinish !== nextTask.plannedFinish ||
-      previousTask.plannedDurationMinutes !== nextTask.plannedDurationMinutes
-    );
-  }
-
-  async function persistTaskWithStepRows(nextTask: Task, changedStepId: string, shouldReschedule = false) {
-    if (!plannerState) {
-      return;
-    }
-
-    const previousTaskById = new Map(plannerState.tasks.map((task) => [task.id, task]));
-    const nextState = withUpdatedTask(plannerState, nextTask, shouldReschedule);
-    const persistedTask = nextState.tasks.find((task) => task.id === nextTask.id) ?? nextTask;
-    const rescheduledTasks = shouldReschedule
-      ? nextState.tasks.filter((task) => task.id !== persistedTask.id && taskScheduleChanged(previousTaskById.get(task.id), task))
-      : [];
-    const persistedStep = persistedTask.manufacturingSteps?.find((step) => step.id === changedStepId);
-
-    if (!persistedStep) {
-      setSaveState("error");
-      setErrorMessage("Unable to save the manufacturing step.");
-      return;
-    }
-
-    await persistTargetedState(nextState, async () => {
-      if (rescheduledTasks.length) {
-        await saveTasksToSupabase(rescheduledTasks, projectId);
-      }
-      await saveTaskAndManufacturingStepToSupabase(persistedTask, persistedStep, projectId);
-    });
-  }
-
   async function updateTask(taskId: string, patch: Partial<Task>, shouldReschedule = false) {
     if (!plannerState) {
       return;
@@ -2149,7 +2146,7 @@ export function MobilePhotoPortal({
 
     const name = newTaskName.trim();
     if (!name) {
-      setErrorMessage("Add a task name before saving.");
+      setErrorMessage("Add a process name before saving.");
       setSaveState("error");
       return;
     }
@@ -2208,7 +2205,12 @@ export function MobilePhotoPortal({
       tasks: [...plannerState.tasks, newTask],
     };
 
-    await persistTargetedState(nextState, () => saveTaskToSupabase(newTask, projectId));
+    const saved = await persistTargetedState(nextState, () => enqueueTaskScopedWrite(newTask.id, () => saveTaskToSupabase(newTask, projectId)));
+    if (!saved) {
+      setPlannerState((state) => state ? { ...state, tasks: state.tasks.filter((task) => task.id !== newTask.id) } : state);
+      return;
+    }
+    selectedTaskIdRef.current = newTask.id;
     setSelectedTaskId(newTask.id);
     setNewTaskName("");
     setNewTaskZoneId("");
@@ -2493,38 +2495,9 @@ export function MobilePhotoPortal({
       confirmLabel: "Delete Photo",
       onConfirm: async () => {
         setConfirmPrompt(null);
-        setRevealedPhotoDeleteId(null);
         await removePhoto(stepId, photo.id);
       },
     });
-  }
-
-  async function addManufacturingStepTool(stepId: string) {
-    if (!plannerState || !selectedTask) {
-      return;
-    }
-
-    const nextTool = (newStepToolNames[stepId] ?? "").trim();
-    if (!nextTool) {
-      return;
-    }
-
-    const taskId = selectedTask.id;
-    updateLocalTask(taskId, (task) => addStepTool(task, stepId, nextTool));
-    setNewStepToolNames((current) => ({ ...current, [stepId]: "" }));
-    beginLocalWrite();
-
-    try {
-      await enqueueTaskScopedWrite(taskId, async () => {
-        await addStepToolToSupabase(taskId, stepId, nextTool, getStepToolList(selectedTask, stepId).length + 1, projectId);
-      });
-      setSaveState("saved");
-    } catch (error) {
-      setSaveState("error");
-      setErrorMessage(error instanceof Error ? error.message : "Unable to add the tool.");
-    } finally {
-      endLocalWrite();
-    }
   }
 
   async function addManufacturingStepToolFromLibrary(stepId: string, toolName: string) {
@@ -2577,6 +2550,35 @@ export function MobilePhotoPortal({
     }
   }
 
+  async function retryFailedStepSaves() {
+    setSaveState("saving");
+    setErrorMessage(null);
+    beginLocalWrite();
+    try {
+      for (const [stepId, patch] of failedDraftPatchesRef.current) {
+        const task = plannerStateRef.current?.tasks.find((task) => task.manufacturingSteps?.some((step) => step.id === stepId));
+        const step = task?.manufacturingSteps?.find((step) => step.id === stepId);
+        if (!task || !step) throw new Error("The process is no longer available. Your draft has been kept.");
+        await enqueueTaskScopedWrite(task.id, async () => {
+          const savedStep = await saveMobileStepToSupabase(task, step, patch, projectId);
+          if (failedDraftToolSyncRef.current.has(stepId)) {
+            await syncStepToolsForStepToSupabase(task.id, stepId, getStepToolList(task, stepId), projectId);
+            failedDraftToolSyncRef.current.delete(stepId);
+          }
+          const photos = await Promise.all(getStepPhotoAttachments(task, stepId).map((photo) => uploadStepPhotoAttachment(task.id, stepId, photo, activeProjectContext)));
+          updateLocalTask(task.id, (current) => upsertStepPhotoAttachments({ ...current, manufacturingSteps: current.manufacturingSteps?.map((local) => local.id === stepId ? { ...local, version: savedStep.version, sequence: savedStep.sequence } : local) }, stepId, photos));
+          failedDraftPatchesRef.current.delete(stepId);
+        });
+      }
+      setSaveState("saved");
+    } catch (error) {
+      setSaveState("error");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save. Your draft has been kept.");
+    } finally {
+      endLocalWrite();
+    }
+  }
+
   async function updateManufacturingStep(stepId: string, patch: Partial<ManufacturingStep>) {
     if (!plannerState || !selectedTask) {
       return;
@@ -2599,7 +2601,20 @@ export function MobilePhotoPortal({
       step.id === stepId ? { ...step, ...patch } : step,
     );
     const nextTask = withStepDerivedDuration(currentTask, nextSteps);
-    await persistTaskWithStepRows(nextTask, stepId, false);
+    const nextStep = nextSteps.find((step) => step.id === stepId);
+    if (!nextStep) return;
+    await persistTargetedState(withUpdatedTask(plannerState, nextTask, false), () =>
+      enqueueTaskScopedWrite(taskId, async () => {
+        const pendingPatch = { ...failedDraftPatchesRef.current.get(stepId), ...patch };
+        try {
+          await saveMobileStepToSupabase(currentTask, nextStep, pendingPatch, projectId);
+          failedDraftPatchesRef.current.delete(stepId);
+        } catch (error) {
+          failedDraftPatchesRef.current.set(stepId, pendingPatch);
+          throw error;
+        }
+      }),
+    );
   }
 
   function applyLapForTimerState(timer: CaptureTimerState, now = Date.now()) {
@@ -2659,11 +2674,13 @@ export function MobilePhotoPortal({
       timer: timer.running ? preserveRunningCaptureTimer(timer, now) : freezeCaptureTimer(timer, now),
       showNewStepForm: true,
       newStepId: snapshot.stepId,
+      draftName: snapshot.name,
       draftInstruction: snapshot.instruction,
       draftDurationText: snapshot.durationText,
       draftTools: snapshot.tools,
       draftPhotos: snapshot.photos,
       draftChecks: [...snapshot.checks],
+      draftCheckValues: snapshot.checkValues,
     };
   }
 
@@ -2689,11 +2706,13 @@ export function MobilePhotoPortal({
   function applyParkedTaskCaptureState(parked: ParkedTaskCaptureState) {
     setDraftStepId(parked.newStepId);
     setShowNewStepForm(parked.showNewStepForm);
+    setNewStepName(parked.draftName ?? "");
     setNewStepInstruction(parked.draftInstruction);
     setNewStepDurationText(parked.draftDurationText || "5");
     setNewStepDraftTools(parked.draftTools);
     setNewStepDraftPhotos(parked.draftPhotos);
     setNewStepDraftChecks(new Set(parked.draftChecks));
+    setNewStepDraftCheckValues(parked.draftCheckValues ?? {});
     newStepTouchedRef.current = true;
   }
 
@@ -2794,13 +2813,16 @@ export function MobilePhotoPortal({
     const step = task?.manufacturingSteps?.find((candidate) => candidate.id === stepId);
 
     if (task && step) {
+      setNewStepName(step.name ?? "");
+      draftBaseStepsRef.current.set(step.id, step);
       setNewStepInstruction(step.instruction ?? "");
       if ((step.durationMinutes ?? 0) > 0) {
         setNewStepDurationText(String(step.durationMinutes));
       }
       setNewStepDraftTools(getStepToolList(task, stepId));
       setNewStepDraftPhotos(getStepPhotoAttachments(task, stepId));
-      setNewStepDraftChecks(getManufacturingStepCheckSet(step.qualityCheck));
+      setNewStepDraftChecks(getManufacturingStepCheckSet(step.qualityCheck, stepCheckDefinitions));
+      setNewStepDraftCheckValues(getManufacturingStepCheckState(step.qualityCheck, stepCheckDefinitions).values);
     }
 
     if (!captureTimerRef.current.running || captureTimerRef.current.taskId !== taskId) {
@@ -2883,12 +2905,14 @@ export function MobilePhotoPortal({
     clearNewStepAutosaveTimer();
     setDraftStepId(stepId);
     newStepTouchedRef.current = false;
+    setNewStepName("");
     setNewStepInstruction("");
     setNewStepDurationText(durationText);
     setNewStepToolName("");
     setNewStepDraftTools([]);
     setNewStepDraftPhotos([]);
     setNewStepDraftChecks(new Set());
+    setNewStepDraftCheckValues({});
     setNewStepPhotoBusyCount(0);
   }
 
@@ -2916,6 +2940,37 @@ export function MobilePhotoPortal({
     // panel and reattaches the ref the scroll depends on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showNewStepForm, newStepId]);
+
+  function requestDeleteProcess(task: Task) {
+    setConfirmPrompt({
+      title: `Delete ${task.name}?`,
+      body: "This deletes the process and its steps, photos, and tools from the shared project.",
+      confirmLabel: "Delete process",
+      onConfirm: async () => {
+        setConfirmPrompt(null);
+        beginLocalWrite();
+        setSaveState("saving");
+        try {
+          await enqueueTaskScopedWrite(task.id, () => deletePlannerTask(task.id, projectId));
+          setPlannerState((current) => {
+            if (!current) return current;
+            const next = { ...current, tasks: current.tasks.filter((item) => item.id !== task.id),
+              dependencies: current.dependencies.filter((item) => item.predecessorTaskId !== task.id && item.successorTaskId !== task.id) };
+            plannerStateRef.current = next;
+            return next;
+          });
+          setSwipedTaskId(null);
+          setSaveState("saved");
+          setErrorMessage(null);
+        } catch (error) {
+          setSaveState("error");
+          setErrorMessage(error instanceof Error ? error.message : "Unable to delete the process.");
+        } finally {
+          endLocalWrite();
+        }
+      },
+    });
+  }
 
   function toggleStepExpanded(stepId: string) {
     setExpandedStepIds((current) => {
@@ -2951,15 +3006,34 @@ export function MobilePhotoPortal({
     }
   }
 
+  function flushPendingNewStepDraft() {
+    if (newStepAutosaveTimerRef.current) {
+      persistNewStepDraft(getNewStepDraftSnapshot(), { saveTask: true, showSaving: true });
+    }
+  }
+
   function closeNewStepForm() {
     if (selectedTask && hasTimedCaptureForTask(selectedTask.id)) {
       return;
     }
 
+    flushPendingNewStepDraft();
+    if (hasLocalSaveWork()) {
+      closeDraftAfterSaveRef.current = true;
+      return;
+    }
     clearNewStepAutosaveTimer();
     setShowNewStepForm(false);
     resetNewStepDraft("5", null);
   }
+
+  useEffect(() => {
+    if (!closeDraftAfterSaveRef.current || writesPending || saveState !== "saved") return;
+    closeDraftAfterSaveRef.current = false;
+    closeNewStepForm();
+    // Close uses the current draft only after the save queue has finished.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [writesPending, saveState]);
 
   function applyLapToActiveStep() {
     return applyLapForTimerState(captureTimerRef.current, Date.now());
@@ -3038,20 +3112,6 @@ export function MobilePhotoPortal({
     }
   }
 
-  function addNewStepDraftTool() {
-    const nextTool = newStepToolName.trim();
-    if (!nextTool) {
-      return;
-    }
-
-    const alreadyExists = newStepDraftTools.some((tool) => tool.toLocaleLowerCase() === nextTool.toLocaleLowerCase());
-    const nextTools = alreadyExists ? newStepDraftTools : [...newStepDraftTools, nextTool];
-    setNewStepDraftTools(nextTools);
-    setNewStepToolName("");
-    newStepTouchedRef.current = true;
-    persistNewStepDraft(getNewStepDraftSnapshot({ tools: nextTools }), { saveTask: true, showSaving: true });
-  }
-
   function addNewStepDraftToolFromLibrary(toolName: string) {
     if (!toolName) {
       return;
@@ -3071,89 +3131,6 @@ export function MobilePhotoPortal({
     persistNewStepDraft(getNewStepDraftSnapshot({ tools: nextTools }), { saveTask: true, showSaving: true });
   }
 
-  function clearPhotoHoldTimer() {
-    if (photoHoldTimerRef.current) {
-      window.clearTimeout(photoHoldTimerRef.current);
-      photoHoldTimerRef.current = null;
-    }
-  }
-
-  function startPhotoHold(photoId: string) {
-    clearPhotoHoldTimer();
-    photoHoldTimerRef.current = window.setTimeout(() => {
-      setRevealedPhotoDeleteId(photoId);
-      photoHoldTimerRef.current = null;
-    }, 450);
-  }
-
-  function cancelPhotoHold() {
-    clearPhotoHoldTimer();
-  }
-
-  function clearToolHoldTimer() {
-    if (toolHoldTimerRef.current) {
-      window.clearTimeout(toolHoldTimerRef.current);
-      toolHoldTimerRef.current = null;
-    }
-  }
-
-  function startToolHold(toolName: string) {
-    clearToolHoldTimer();
-    toolHoldTimerRef.current = window.setTimeout(() => {
-      setRevealedToolDeleteKey(toolName.toLocaleLowerCase());
-      toolHoldTimerRef.current = null;
-    }, 450);
-  }
-
-  function cancelToolHold() {
-    clearToolHoldTimer();
-  }
-
-  function renderToolVisual(toolName: string) {
-    const toolImage = toolImageByName.get(toolName.toLocaleLowerCase());
-
-    if (toolImage?.imageUrl) {
-      return (
-        <div className="relative aspect-[4/3] overflow-hidden rounded bg-surface">
-          <NextImage
-            src={toolImage.imageUrl}
-            alt={toolName}
-            fill
-            sizes="(max-width: 768px) 50vw, 160px"
-            unoptimized
-            className="object-cover"
-          />
-        </div>
-      );
-    }
-
-    const lowerToolName = toolName.toLocaleLowerCase();
-    const toolType = lowerToolName.includes("socket")
-      ? "socket"
-      : lowerToolName.includes("impact")
-        ? "impact"
-        : lowerToolName.includes("torque")
-          ? "torque"
-          : lowerToolName.includes("loctite")
-            ? "loctite"
-            : lowerToolName.includes("ratchet")
-              ? "ratchet"
-              : lowerToolName.includes("wrench")
-                ? "wrench"
-                : "wrench";
-
-    return (
-      <div className="relative aspect-[4/3] overflow-hidden rounded bg-surface">
-        <NextImage
-          src={`/tool-images/${toolType}.png`}
-          alt={toolName}
-          fill
-          sizes="(max-width: 768px) 50vw, 160px"
-          className="object-cover"
-        />
-      </div>
-    );
-  }
 
   function renderToolPicker(
     selectedTools: string[],
@@ -3161,122 +3138,50 @@ export function MobilePhotoPortal({
     onRemoveTool: (toolName: string) => void,
     manualAdd?: {
       value: string;
+      sequence: number;
       onChange: (value: string) => void;
-      onSubmit: () => void;
       disabled?: boolean;
     },
   ) {
     const toolNames = [...new Set(selectedTools)]
       .filter((tool) => tool.trim())
       .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
-    const selectedToolKeys = new Set(toolNames.map((tool) => tool.toLocaleLowerCase()));
-    const libraryTools = [...new Set(toolLibrary)]
-      .filter((tool) => tool.trim())
-      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
-
     return (
       <div className="ui-photo-mobile-tool-picker">
-        {manualAdd || libraryTools.length > 0 ? (
-          <div
-            className={`ui-photo-mobile-tool-add-bar ${
-              manualAdd && libraryTools.length > 0
-                ? "ui-photo-mobile-tool-add-bar-full"
-                : manualAdd
-                  ? "ui-photo-mobile-tool-add-bar-manual"
-                  : "ui-photo-mobile-tool-add-bar-library"
-            }`}
-          >
-            {manualAdd ? (
-              <div className="ui-photo-mobile-tool-manual-shell">
-                <input
-                  className="ui-photo-mobile-tool-manual-input"
-                  value={manualAdd.value}
-                  onFocus={handleMobileFieldFocus}
-                  onChange={(event) => manualAdd.onChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      manualAdd.onSubmit();
-                    }
-                  }}
-                  placeholder="Tool"
-                />
-                <button
-                  type="button"
-                  onClick={manualAdd.onSubmit}
-                  disabled={manualAdd.disabled}
-                  className="ui-photo-mobile-tool-send-btn disabled:opacity-40"
-                  aria-label="Add tool"
-                  title="Add tool"
-                >
-                  Add
-                </button>
-              </div>
-            ) : null}
-            {libraryTools.length > 0 ? (
-              <ThemedSelect
-                className="ui-photo-mobile-tool-library-select"
-                triggerClassName="ui-photo-mobile-field h-11"
-                value=""
-                options={[
-                  { value: "", label: "Library..." },
-                  ...libraryTools.map((tool) => {
-                    const alreadyAdded = selectedToolKeys.has(tool.toLocaleLowerCase());
-                    return {
-                      value: tool,
-                      label: alreadyAdded ? `${tool} - already added` : tool,
-                      disabled: alreadyAdded,
-                    };
-                  }),
-                ]}
-                onChange={(tool) => {
-                  if (tool) {
-                    onAddTool(tool);
-                  }
-                }}
-              />
-            ) : null}
-          </div>
+        {manualAdd ? (
+          <ProcedureToolPicker
+            mobile
+            value={manualAdd.value}
+            toolLibrary={toolLibrary}
+            assignedTools={toolNames}
+            stepSequence={manualAdd.sequence}
+            onValueChange={manualAdd.onChange}
+            onAdd={onAddTool}
+            disabled={manualAdd.disabled}
+          />
         ) : null}
         {toolNames.length > 0 ? (
           <div className="ui-photo-mobile-tool-grid">
             {toolNames.map((tool) => {
-              const toolKey = tool.toLocaleLowerCase();
-
               return (
-                <button
+                <div
                   key={tool}
-                  type="button"
-                  onPointerDown={() => startToolHold(tool)}
-                  onPointerUp={cancelToolHold}
-                  onPointerCancel={cancelToolHold}
-                  onPointerLeave={cancelToolHold}
-                  onContextMenu={(event) => event.preventDefault()}
                   className="ui-photo-mobile-tool-card group"
-                  aria-pressed
                 >
-                  <div className="relative">
-                    {renderToolVisual(tool)}
-                    <span
-                      className={`absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded bg-danger text-canvas transition md:opacity-0 md:group-hover:opacity-100 ${
-                        revealedToolDeleteKey === toolKey ? "opacity-100" : "opacity-0"
-                      }`}
+                  <div className="ui-photo-mobile-tool-name">{tool}</div>
+                    <button
+                      type="button"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-danger"
                       onClick={(event) => {
                         event.stopPropagation();
-                        setRevealedToolDeleteKey(null);
                         onRemoveTool(tool);
                       }}
-                      role="button"
                       aria-label={`Remove ${tool}`}
                       title={`Remove ${tool}`}
                     >
-                      <Trash2 size={11} />
-                    </span>
-                  </div>
-                  <div className="ui-photo-mobile-tool-name">
-                    {tool}
-                  </div>
-                </button>
+                      <Trash2 size={16} />
+                    </button>
+                </div>
               );
             })}
           </div>
@@ -3289,18 +3194,12 @@ export function MobilePhotoPortal({
     );
   }
 
-  function toggleNewStepDraftCheck(checkKey: string, checked: boolean) {
-    const nextChecks = new Set(newStepDraftChecks);
-
-    if (checked) {
-      nextChecks.add(checkKey);
-    } else {
-      nextChecks.delete(checkKey);
-    }
-
-    setNewStepDraftChecks(nextChecks);
+  function updateNewStepDraftChecks(qualityCheck: string) {
+    const { selected: checks, values: checkValues } = getManufacturingStepCheckState(qualityCheck, stepCheckDefinitions);
+    setNewStepDraftChecks(checks);
+    setNewStepDraftCheckValues(checkValues);
     newStepTouchedRef.current = true;
-    persistNewStepDraft(getNewStepDraftSnapshot({ checks: nextChecks }), { showSaving: true });
+    persistNewStepDraft(getNewStepDraftSnapshot({ checks, checkValues }), { showSaving: true });
   }
 
   async function handleNewStepPhotoFiles(files: File[]) {
@@ -3354,29 +3253,26 @@ export function MobilePhotoPortal({
       }
     }
 
-    const durationMinutes = Math.max(Number.parseFloat(snapshot.durationText) || 0, 0);
-    if (newStepTouchedRef.current || hasDraftStepContent(snapshot) || durationMinutes > 0) {
-      persistNewStepDraft(snapshot, { saveTask: true, showSaving: true });
+    if (!hasDraftStepContent(snapshot) && !newStepTouchedRef.current) {
+      setErrorMessage("Add a name, instruction, photo, tool, or check before saving this step.");
+      return;
     }
-
-    const completedStepId =
-      currentStepId &&
-      (newStepTouchedRef.current || hasDraftStepContent(snapshot) || durationMinutes > 0)
-        ? currentStepId
-        : null;
-
-    beginNewStepEnterMotion(completedStepId, () => {
-      const nextStepId = selectedTask ? buildNewStepId(selectedTask.id) : null;
-      resetNewStepDraft("5", nextStepId);
-      setShowNewStepForm(true);
-
-      if (captureTimer.running) {
-        advanceCaptureTimerLap(nextStepId);
-      }
+    const taskId = selectedTaskIdRef.current;
+    persistNewStepDraft(snapshot, {
+      saveTask: true,
+      showSaving: true,
+      onSaved: () => beginNewStepEnterMotion(currentStepId, () => {
+        if (selectedTaskIdRef.current !== taskId) return;
+        const nextStepId = taskId ? buildNewStepId(taskId) : null;
+        resetNewStepDraft("5", nextStepId);
+        setShowNewStepForm(true);
+        if (captureTimer.running) advanceCaptureTimerLap(nextStepId);
+      }),
     });
   }
 
   function selectTask(taskId: string) {
+    flushPendingNewStepDraft();
     const preserveTimedStep = shouldPreserveTimedStepDraft(taskId);
     const leavingTaskId = selectedTaskIdRef.current;
 
@@ -3413,6 +3309,7 @@ export function MobilePhotoPortal({
   }
 
   function showProcessList() {
+    flushPendingNewStepDraft();
     const preserveTimedStep = shouldPreserveTimedStepDraft();
 
     if (preserveTimedStep) {
@@ -3456,14 +3353,14 @@ export function MobilePhotoPortal({
         <div className="mx-auto max-w-xl">
           <div className="ui-photo-mobile-site-header-row">
             {onBackToProjects ? (
-              <button type="button" className="ui-photo-mobile-header-btn shrink-0" onClick={onBackToProjects}>
+              <button type="button" className="ui-photo-mobile-header-btn shrink-0" onClick={() => { flushPendingNewStepDraft(); onBackToProjects(); }}>
                 <ChevronLeft size={14} />
                 Projects
               </button>
             ) : null}
             <div className="ui-photo-mobile-site-header-brand min-w-0 flex-1">
-              <div className="ui-photo-mobile-site-eyebrow">Pulse Capture</div>
-              <h1 className="ui-photo-mobile-page-title truncate">{derivedState?.product.name ?? projectContext?.projectName ?? "Manufacturing Photos"}</h1>
+              <div className="ui-photo-mobile-site-eyebrow">Process builder</div>
+              <h1 className="ui-photo-mobile-page-title">{derivedState?.product.name ?? projectContext?.projectName ?? "Process builder"}</h1>
             </div>
             <div className="ui-photo-mobile-header-actions">
               {headerCaptureTimers.length > 0 ? (
@@ -3541,15 +3438,10 @@ export function MobilePhotoPortal({
               ) : null}
             </div>
             <div className="ui-photo-mobile-header-nav flex shrink-0 items-center gap-1.5">
-              {saveState === "error" ? (
-                <span
-                  className="ui-mono-label whitespace-nowrap text-danger"
-                  role="alert"
-                  title="Changes could not be saved"
-                >
-                  Not saved
-                </span>
-              ) : null}
+              <span className={`ui-photo-mobile-save-status ${saveState === "error" ? "text-danger" : "text-ink-secondary"}`}
+                role="status" aria-live="polite">
+                {saveState === "error" ? "Not saved" : (saveState === "saving" || writesPending) ? "Saving…" : "Saved"}
+              </span>
             </div>
           </div>
         </div>
@@ -3560,17 +3452,12 @@ export function MobilePhotoPortal({
         className="min-h-0"
         style={{
           paddingTop: mobileHeaderHeight,
-          scrollPaddingBottom: showNewStepForm
-            ? "calc(4.5rem + env(safe-area-inset-bottom))"
-            : "calc(2.5rem + env(safe-area-inset-bottom))",
+          scrollPaddingBottom: "calc(6rem + env(safe-area-inset-bottom))",
         }}
       >
       <div
-        className={`mx-auto max-w-xl p-3 ui-photo-mobile-content ${
-          showNewStepForm
-            ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))]"
-            : "pb-[calc(2.5rem+env(safe-area-inset-bottom))]"
-        }`}
+        className="mx-auto max-w-xl p-3 ui-photo-mobile-content"
+        style={{ paddingBottom: "calc(6rem + env(safe-area-inset-bottom))" }}
       >
         {restorePrompt ? (
           <div className="mb-3 rounded-md border border-accent/40 bg-accent-muted p-3">
@@ -3620,116 +3507,11 @@ export function MobilePhotoPortal({
         ) : null}
         {activeScreen === "list" ? (
         <section className="min-w-0 ui-panel">
-          <div className="border-b border-line p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="ui-mono-label">High-Level Processes</div>
-                <div className="ui-photo-mobile-list-stat">
-                  {taskRows.length} {taskRows.length === 1 ? "task" : "tasks"}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewTaskName("");
-                    setNewTaskZoneId(selectedTask?.zoneId ?? taskRows[taskRows.length - 1]?.zoneId ?? "");
-                    setNewTaskComponentId("");
-                    setShowNewTaskForm((current) => !current);
-                  }}
-                  className="ui-photo-mobile-btn-accent h-8 px-2"
-                >
-                  <Plus size={13} />
-                  Task
-                </button>
-              </div>
-            </div>
-            {errorMessage ? (
-              <div className="mt-3 rounded border border-danger/30 bg-danger-muted px-3 py-2 ui-photo-mobile-caption text-danger">
+            {errorMessage && !showNewTaskForm ? (
+              <div className="m-3 rounded border border-danger/30 bg-danger-muted px-3 py-2 ui-photo-mobile-caption text-danger">
                 {errorMessage}
               </div>
             ) : null}
-            {showNewTaskForm ? (
-              <div className="mt-3 rounded border border-accent/35 bg-accent-muted p-2.5">
-                <label className="block">
-                  <span className="ui-field-label text-accent">
-                    New high-level task
-                  </span>
-                  <input
-                    className="ui-photo-mobile-field h-11"
-                    value={newTaskName}
-                    onFocus={handleMobileFieldFocus}
-                    onChange={(event) => setNewTaskName(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void addHighLevelTask();
-                      }
-                    }}
-                    placeholder="Task name"
-                  />
-                </label>
-                <label className="mt-2 block">
-                  <span className="ui-field-label text-accent">
-                    Zone
-                  </span>
-                  <ThemedSelect
-                    className="w-full"
-                    triggerClassName="ui-photo-mobile-field h-11"
-                    value={newTaskZoneId}
-                    options={[
-                      { value: "", label: "No zone" },
-                      ...(derivedState?.zones.map((zone) => ({ value: zone.id, label: zone.name })) ?? []),
-                    ]}
-                    onChange={setNewTaskZoneId}
-                  />
-                </label>
-                <label className="mt-2 block">
-                  <span className="ui-field-label text-accent">
-                    Component
-                  </span>
-                  <ThemedSelect
-                    className="w-full"
-                    triggerClassName="ui-photo-mobile-field h-11"
-                    value={newTaskComponentId}
-                    options={[
-                      { value: "", label: "No component" },
-                      ...(derivedState?.components
-                        .filter((component) => component.active)
-                        .map((component) => ({
-                          value: component.id,
-                          label: `${component.code || "CODE"} - ${component.name || "Unnamed component"}`,
-                        })) ?? []),
-                    ]}
-                    onChange={setNewTaskComponentId}
-                  />
-                </label>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewTaskName("");
-                      setNewTaskZoneId("");
-                      setNewTaskComponentId("");
-                      setShowNewTaskForm(false);
-                    }}
-                    className="ui-photo-mobile-btn-secondary h-10"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void addHighLevelTask()}
-                    disabled={saveState === "saving"}
-                    className="ui-photo-mobile-btn-accent h-10 disabled:opacity-60"
-                  >
-                    {saveState === "saving" ? <NothingSpinner inline /> : <Plus size={14} />}
-                    Add Task
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
 
           <div>
             {taskRows.map((task, index) => {
@@ -3780,7 +3562,29 @@ export function MobilePhotoPortal({
                 >
                   <button
                     type="button"
-                    onClick={() => selectTask(task.id)}
+                    onPointerDown={(event) => {
+                      suppressProcessClickRef.current = false;
+                      processSwipeRef.current = { x: event.clientX, y: event.clientY, horizontal: false };
+                    }}
+                    onPointerMove={(event) => {
+                      const swipe = processSwipeRef.current;
+                      if (!swipe) return;
+                      const dx = event.clientX - swipe.x;
+                      const dy = event.clientY - swipe.y;
+                      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                        swipe.horizontal = true;
+                        suppressProcessClickRef.current = true;
+                        setSwipedTaskId(dx < 0 ? task.id : null);
+                      }
+                    }}
+                    onPointerUp={() => { processSwipeRef.current = null; }}
+                    onPointerCancel={() => { processSwipeRef.current = null; }}
+                    style={{ touchAction: "pan-y" }}
+                    onClick={() => {
+                      if (suppressProcessClickRef.current) { suppressProcessClickRef.current = false; return; }
+                      if (swipedTaskId === task.id) { setSwipedTaskId(null); return; }
+                      selectTask(task.id);
+                    }}
                     className="block min-w-0 flex-1 bg-surface px-3 py-3 text-left transition active:bg-surface-active"
                   >
                     <div className="flex items-start gap-3">
@@ -3788,7 +3592,7 @@ export function MobilePhotoPortal({
                         {taskDisplayCode(task)}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate ui-photo-mobile-body">{task.name}</div>
+                        <div className="ui-photo-mobile-body">{task.name}</div>
                         <div className="ui-photo-mobile-meta mt-1 flex flex-wrap items-center gap-2">
                           <span>
                             {stepCount} {stepCount === 1 ? "step" : "steps"}
@@ -3816,6 +3620,14 @@ export function MobilePhotoPortal({
                   >
                     <Menu size={18} strokeWidth={2.4} />
                   </button>
+                  {swipedTaskId === task.id ? (
+                    <button type="button" className="flex w-20 shrink-0 flex-col items-center justify-center gap-1 bg-danger text-canvas"
+                      aria-label={`Delete ${task.name}`} disabled={writesPending || headerCaptureTimers.some((entry) => entry.taskId === task.id)}
+                      onClick={() => requestDeleteProcess(task)}>
+                      <Trash2 size={18} />
+                      <span className="text-sm">Delete</span>
+                    </button>
+                  ) : null}
                 </div>
                   {showDropAfter ? (
                     <div
@@ -3880,9 +3692,96 @@ export function MobilePhotoPortal({
               );
             })()
           ) : null}
+            {showNewTaskForm ? (
+              <div className="m-3 rounded border border-accent/35 bg-accent-muted p-3"
+                ref={revealNewProcessForm}
+                style={{ scrollMarginTop: mobileHeaderHeight + 12 }}>
+                {errorMessage ? <div role="alert" className="mb-3 ui-photo-mobile-caption text-danger">{errorMessage}</div> : null}
+                <label className="block">
+                  <span className="ui-field-label text-accent">
+                    New process
+                  </span>
+                  <input
+                    className="ui-photo-mobile-field h-11"
+                    value={newTaskName}
+                    onFocus={handleMobileFieldFocus}
+                    onChange={(event) => setNewTaskName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void addHighLevelTask();
+                      }
+                    }}
+                    placeholder="Process name"
+                  />
+                </label>
+                <label className="mt-2 block">
+                  <span className="ui-field-label text-accent">
+                    Zone
+                  </span>
+                  <ThemedSelect
+                    className="w-full"
+                    triggerClassName="ui-photo-mobile-field h-11"
+                    value={newTaskZoneId}
+                    options={[
+                      { value: "", label: "No zone" },
+                      ...(derivedState?.zones.map((zone) => ({ value: zone.id, label: zone.name })) ?? []),
+                    ]}
+                    onChange={setNewTaskZoneId}
+                  />
+                </label>
+                <label className="mt-2 block">
+                  <span className="ui-field-label text-accent">
+                    Component
+                  </span>
+                  <ThemedSelect
+                    className="w-full"
+                    triggerClassName="ui-photo-mobile-field h-11"
+                    value={newTaskComponentId}
+                    options={[
+                      { value: "", label: "No component" },
+                      ...(derivedState?.components
+                        .filter((component) => component.active)
+                        .map((component) => ({
+                          value: component.id,
+                          label: `${component.code || "CODE"} - ${component.name || "Unnamed component"}`,
+                        })) ?? []),
+                    ]}
+                    onChange={setNewTaskComponentId}
+                  />
+                </label>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewTaskName("");
+                      setNewTaskZoneId("");
+                      setNewTaskComponentId("");
+                      setShowNewTaskForm(false);
+                    }}
+                    className="ui-photo-mobile-btn-secondary h-10"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void addHighLevelTask()}
+                    disabled={saveState === "saving"}
+                    className="ui-photo-mobile-btn-accent h-10 disabled:opacity-60"
+                  >
+                    {saveState === "saving" ? <NothingSpinner inline /> : <Plus size={14} />}
+                    Add process
+                  </button>
+                </div>
+              </div>
+            ) : null}
         </section>
         ) : (
         <section className="min-w-0 ui-panel">
+          {errorMessage && !showNewStepForm ? <div role="alert" className="m-3 rounded border border-danger/30 bg-danger-muted px-3 py-2 ui-photo-mobile-caption text-danger">
+            {errorMessage}
+            {failedDraftPatchesRef.current.size > 0 ? <button type="button" className="ui-photo-mobile-btn-secondary mt-2" disabled={writesPending} onClick={() => void retryFailedStepSaves()}>Retry save</button> : null}
+          </div> : null}
           {selectedTask ? (
             <>
               <div className="ui-photo-mobile-task-header">
@@ -3905,7 +3804,7 @@ export function MobilePhotoPortal({
                 <div className="ui-photo-mobile-task-header-main">
                   <input
                     key={selectedTask.id}
-                    aria-label="Task name"
+                    aria-label="Process name"
                     className="ui-photo-mobile-task-name-inline"
                     defaultValue={selectedTask.name}
                     onFocus={handleMobileFieldFocus}
@@ -3934,7 +3833,7 @@ export function MobilePhotoPortal({
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 p-3">
+              <div className="ui-photo-mobile-step-list flex flex-col gap-6 p-3">
                 {showNewStepForm ? (
                   <div
                     ref={newStepFormRef}
@@ -3945,13 +3844,21 @@ export function MobilePhotoPortal({
                     style={{ scrollMarginTop: mobileHeaderHeight + 12 }}
                   >
                     <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-3">
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <div className="ui-photo-mobile-step-kicker">
                           {stepDisplayCode(selectedTask, { sequence: draftStepSequence }) || `Step ${draftStepSequence}`}
                         </div>
-                        <div className="ui-photo-mobile-body">
-                          {`New step ${draftStepSequence}`}
-                        </div>
+                        <input
+                          className="ui-photo-mobile-step-name-inline w-full"
+                          aria-label="New step name"
+                          placeholder={`New step ${draftStepSequence}`}
+                          value={newStepName}
+                          onFocus={handleMobileFieldFocus}
+                          onChange={(event) => {
+                            setNewStepName(event.target.value);
+                            scheduleNewStepAutosave({ name: event.target.value });
+                          }}
+                        />
                       </div>
                       <button
                         type="button"
@@ -3965,94 +3872,10 @@ export function MobilePhotoPortal({
                     {errorMessage ? (
                       <div className="m-3 rounded border border-danger/30 bg-danger-muted px-3 py-2 ui-photo-mobile-caption text-danger">
                         {errorMessage}
+                        {saveState === "error" ? <button type="button" className="ui-photo-mobile-btn-secondary mt-2" disabled={writesPending}
+                          onClick={() => persistNewStepDraft(getNewStepDraftSnapshot(), { showSaving: true })}>Retry save</button> : null}
                       </div>
                     ) : null}
-                    <div className="px-3 py-3">
-                    <label className="block">
-                      <span className="ui-field-label mb-1">Description</span>
-                      <textarea
-                        ref={bindNewStepInstructionRef}
-                        className="ui-photo-mobile-textarea min-h-[104px]"
-                        value={newStepInstruction}
-                        onChange={(event) => {
-                          const instruction = event.target.value;
-                          resizeTextareaToContent(event.currentTarget);
-                          setNewStepInstruction(instruction);
-                          scheduleNewStepAutosave({ instruction });
-                        }}
-                        onFocus={handleStepInstructionFocus}
-                        placeholder="Describe the manufacturing step"
-                      />
-                    </label>
-                    <label className="mt-3 block max-w-[9.5rem]">
-                      <span className="mb-1 block ui-mono-label">Duration</span>
-                      {captureTimer.running && isTimerOnSelectedTask && captureTimer.activeStepId === newStepId ? (
-                        <div className="ui-photo-mobile-caption mb-1">
-                          Step lap {formatElapsedTimer(captureTimerLapElapsedMs)}
-                          <span className="text-ink-tertiary"> · process {formatElapsedTimer(captureTimerElapsedMs)}</span>
-                        </div>
-                      ) : captureTimer.running && isTimerOnSelectedTask ? (
-                        <div className="ui-photo-mobile-caption mb-1">
-                          Process {formatElapsedTimer(captureTimerElapsedMs)}
-                        </div>
-                      ) : null}
-                      <label className="ui-photo-mobile-step-duration">
-                        <input
-                          className="ui-photo-mobile-step-duration-input"
-                          type="text"
-                          inputMode="numeric"
-                          value={newStepDurationText}
-                          onFocus={handleMobileFieldFocus}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            if (/^\d*\.?\d*$/.test(value)) {
-                              setNewStepDurationText(value);
-                              scheduleNewStepAutosave({ durationText: value });
-                            }
-                          }}
-                        />
-                        <span className="ui-photo-mobile-step-duration-suffix">min</span>
-                      </label>
-                    </label>
-                    </div>
-                    <div className="ui-photo-mobile-section ui-photo-mobile-section-compact">
-                      <div className="ui-photo-mobile-section-head">
-                        <div className="ui-mono-label">Checks</div>
-                      </div>
-                      <div className="ui-photo-mobile-check-grid">
-                        {manufacturingStepCheckOptions.map((option) => {
-                          const checked = newStepDraftChecks.has(option.key);
-
-                          return (
-                            <label
-                              key={option.key}
-                              className={`ui-photo-mobile-check ${checked ? "is-active" : ""}`}
-                              title={option.label}
-                            >
-                              <input
-                                type="checkbox"
-                                className="shrink-0 accent-accent"
-                                checked={checked}
-                                onChange={(event) => toggleNewStepDraftCheck(option.key, event.target.checked)}
-                              />
-                              <span>{option.label}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div className="ui-photo-mobile-section">
-                      <div className="ui-photo-mobile-section-head">
-                        <div className="ui-mono-label">
-                          Tools & Parts · {newStepDraftTools.length}
-                        </div>
-                      </div>
-                      {renderToolPicker(newStepDraftTools, addNewStepDraftToolFromLibrary, removeNewStepDraftTool, {
-                        value: newStepToolName,
-                        onChange: setNewStepToolName,
-                        onSubmit: addNewStepDraftTool,
-                      })}
-                    </div>
                     <div className="ui-photo-mobile-section">
                       <div className="ui-photo-mobile-section-head">
                         <div className="ui-mono-label">
@@ -4129,15 +3952,81 @@ export function MobilePhotoPortal({
                         </div>
                       )}
                     </div>
+                    <div className="px-3 py-3">
+                    <label className="block">
+                      <span className="ui-field-label mb-1">Description</span>
+                      <textarea
+                        ref={bindNewStepInstructionRef}
+                        className="ui-photo-mobile-textarea min-h-[104px]"
+                        value={newStepInstruction}
+                        onChange={(event) => {
+                          const instruction = event.target.value;
+                          resizeTextareaToContent(event.currentTarget);
+                          setNewStepInstruction(instruction);
+                          scheduleNewStepAutosave({ instruction });
+                        }}
+                        onFocus={handleStepInstructionFocus}
+                        placeholder="Describe the manufacturing step"
+                      />
+                    </label>
+                    <label className="mt-3 block max-w-[9.5rem]">
+                      <span className="mb-1 block ui-mono-label">Duration</span>
+                      {captureTimer.running && isTimerOnSelectedTask && captureTimer.activeStepId === newStepId ? (
+                        <div className="ui-photo-mobile-caption mb-1">
+                          Step lap {formatElapsedTimer(captureTimerLapElapsedMs)}
+                          <span className="text-ink-tertiary"> · process {formatElapsedTimer(captureTimerElapsedMs)}</span>
+                        </div>
+                      ) : captureTimer.running && isTimerOnSelectedTask ? (
+                        <div className="ui-photo-mobile-caption mb-1">
+                          Process {formatElapsedTimer(captureTimerElapsedMs)}
+                        </div>
+                      ) : null}
+                      <label className="ui-photo-mobile-step-duration">
+                        <input
+                          className="ui-photo-mobile-step-duration-input"
+                          type="text"
+                          inputMode="numeric"
+                          value={newStepDurationText}
+                          onFocus={handleMobileFieldFocus}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (/^\d*\.?\d*$/.test(value)) {
+                              setNewStepDurationText(value);
+                              scheduleNewStepAutosave({ durationText: value });
+                            }
+                          }}
+                        />
+                        <span className="ui-photo-mobile-step-duration-suffix">min</span>
+                      </label>
+                    </label>
+                    </div>
+                    <details className="ui-photo-mobile-section">
+                      <summary className="ui-photo-mobile-check-summary">Tools <span>{newStepDraftTools.length} added</span></summary>
+                      <div className="mt-2">
+                        {renderToolPicker(newStepDraftTools, addNewStepDraftToolFromLibrary, removeNewStepDraftTool, {
+                        value: newStepToolName,
+                        sequence: draftStepSequence,
+                        onChange: setNewStepToolName,
+                      })}
+                      </div>
+                    </details>
+                    <details className="ui-photo-mobile-section ui-photo-mobile-section-compact">
+                      <summary className="ui-photo-mobile-check-summary">Checks <span>{newStepDraftChecks.size} selected</span></summary>
+                      <div className="ui-photo-mobile-check-editor mt-2">
+                        <ProcedureStepChecksEditor ariaLabel="New step checks" compact definitions={stepCheckDefinitions}
+                          qualityCheck={serializeManufacturingStepCheckState({ selected: newStepDraftChecks, values: newStepDraftCheckValues }, stepCheckDefinitions)}
+                          onChange={updateNewStepDraftChecks} />
+                      </div>
+                    </details>
                     <div className="ui-photo-mobile-next-step-bar">
                       <button
                         type="button"
                         onClick={goToNextManufacturingStep}
-                        disabled={newStepPhotoBusyCount > 0}
+                        disabled={newStepPhotoBusyCount > 0 || writesPending || saveState === "saving"}
                         className="ui-photo-mobile-btn-primary inline-flex h-11 w-full disabled:opacity-60"
                       >
                         <Plus size={16} />
-                        {captureTimer.running ? "Next Step (lap)" : "Next Step"}
+                        {captureTimer.running ? "Save & start next lap" : "Save & add next"}
                       </button>
                     </div>
                   </div>
@@ -4148,7 +4037,7 @@ export function MobilePhotoPortal({
                     className="ui-photo-mobile-btn-secondary order-last h-11 w-full"
                   >
                     <Plus size={16} />
-                    Add Manufacturing Step
+                    Add step
                   </button>
                 )}
                 {selectedTaskSteps.length === 0 && !showNewStepForm ? (
@@ -4167,16 +4056,12 @@ export function MobilePhotoPortal({
                 {visibleSelectedTaskSteps.map((step) => {
                   const photos = getStepPhotoAttachments(selectedTask, step.id);
                   const stepTools = getStepToolList(selectedTask, step.id);
-                  const selectedChecks = getManufacturingStepCheckSet(step.qualityCheck);
+                  const selectedChecks = getManufacturingStepCheckSet(step.qualityCheck, stepCheckDefinitions);
                   const uploadCount = photoUploadCounts[step.id] ?? 0;
                   const isUploading = uploadCount > 0;
                   const confirmingDelete = confirmDeleteStepId === step.id;
                   const stepCode = stepDisplayCode(selectedTask, step);
-                  // A step the timer is running on, or one mid-delete-confirm, stays open regardless
-                  // of the collapse state -- collapsing the thing you are actively working on reads
-                  // as the app losing your place.
-                  const isTimedStep = captureTimer.activeStepId === step.id;
-                  const isExpanded = expandedStepIds.has(step.id) || isTimedStep || confirmingDelete;
+                  const isExpanded = expandedStepIds.has(step.id) || confirmingDelete;
 
                   if (!isExpanded) {
                     return (
@@ -4245,6 +4130,16 @@ export function MobilePhotoPortal({
                           />
                           </div>
                         </div>
+                          <button
+                            type="button"
+                            onClick={() => toggleStepExpanded(step.id)}
+                            className="ui-photo-mobile-icon-btn ui-photo-mobile-step-toggle"
+                            aria-expanded
+                            aria-label={`Collapse step ${step.sequence}`}
+                            title={`Collapse step ${step.sequence}`}
+                          >
+                            <ChevronUp size={16} />
+                          </button>
                         <div className="ui-photo-mobile-step-header-actions">
                           <label className="ui-photo-mobile-step-duration">
                             <span className="sr-only">Step {step.sequence} duration minutes</span>
@@ -4286,17 +4181,7 @@ export function MobilePhotoPortal({
                           >
                             <Trash2 size={14} />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleStepExpanded(step.id)}
-                            disabled={isTimedStep}
-                            className="ui-photo-mobile-icon-btn disabled:opacity-40"
-                            aria-expanded
-                            aria-label={`Collapse step ${step.sequence}`}
-                            title={isTimedStep ? "Timer is running on this step" : `Collapse step ${step.sequence}`}
-                          >
-                            <ChevronUp size={14} />
-                          </button>
+
                         </div>
                       </div>
                         {confirmingDelete ? (
@@ -4310,7 +4195,7 @@ export function MobilePhotoPortal({
                                 onClick={() => setConfirmDeleteStepId(null)}
                                 className="ui-photo-mobile-btn-secondary h-9"
                               >
-                                No
+                                Keep step
                               </button>
                               <button
                                 type="button"
@@ -4318,89 +4203,12 @@ export function MobilePhotoPortal({
                                 disabled={saveState === "saving" || isUploading}
                                 className="ui-photo-mobile-btn-danger h-9 disabled:opacity-60"
                               >
-                                Yes
+                                Delete step
                               </button>
                             </div>
                           </div>
                         ) : null}
-                        <label className="mt-3 block">
-                          <span className="ui-field-label mb-1">Description</span>
-                          <textarea
-                            key={step.id}
-                            ref={getStepInstructionRef(step.id)}
-                            aria-label={`Step ${step.sequence} description`}
-                            className="ui-photo-mobile-textarea min-h-[84px]"
-                            defaultValue={step.instruction}
-                            onFocus={handleStepInstructionFocus}
-                            onInput={handleStepInstructionInput}
-                            onBlur={(event) => {
-                              const instruction = event.currentTarget.value;
-                              if (instruction !== step.instruction) {
-                                void updateManufacturingStep(step.id, { instruction });
-                              }
-                            }}
-                            placeholder="Describe the manufacturing step"
-                          />
-                        </label>
-                      </div>
-                      <div className="ui-photo-mobile-section ui-photo-mobile-section-compact">
-                        <div className="ui-photo-mobile-section-head">
-                          <div className="ui-mono-label">
-                            Checks
-                          </div>
-                        </div>
-                        <div className="ui-photo-mobile-check-grid">
-                          {manufacturingStepCheckOptions.map((option) => {
-                            const checked = selectedChecks.has(option.key);
 
-                            return (
-                              <label
-                                key={option.key}
-                                className={`ui-photo-mobile-check ${checked ? "is-active" : ""}`}
-                                title={option.label}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="shrink-0 accent-accent"
-                                  checked={checked}
-                                  onChange={(event) => {
-                                    const nextChecks = new Set(selectedChecks);
-
-                                    if (event.target.checked) {
-                                      nextChecks.add(option.key);
-                                    } else {
-                                      nextChecks.delete(option.key);
-                                    }
-
-                                    void updateManufacturingStep(step.id, {
-                                      qualityCheck: serializeManufacturingStepCheckSet(nextChecks),
-                                    });
-                                  }}
-                                />
-                                <span>{option.label}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div className="ui-photo-mobile-section">
-                        <div className="ui-photo-mobile-section-head">
-                          <div className="ui-mono-label">
-                            Tools & Parts · {stepTools.length}
-                          </div>
-                        </div>
-                        {renderToolPicker(
-                          stepTools,
-                          (toolName) => void addManufacturingStepToolFromLibrary(step.id, toolName),
-                          (toolName) => void removeManufacturingStepTool(step.id, toolName),
-                          {
-                            value: newStepToolNames[step.id] ?? "",
-                            onChange: (value) =>
-                              setNewStepToolNames((current) => ({ ...current, [step.id]: value })),
-                            onSubmit: () => void addManufacturingStepTool(step.id),
-                            disabled: saveState === "saving",
-                          },
-                        )}
                       </div>
                       <div className="ui-photo-mobile-section">
                       <div className="ui-photo-mobile-section-head">
@@ -4448,10 +4256,6 @@ export function MobilePhotoPortal({
                             <div key={photo.id} className="ui-photo-mobile-step-photo-card">
                               <div
                                 className="ui-photo-mobile-step-photo-frame"
-                                onPointerDown={() => startPhotoHold(photo.id)}
-                                onPointerUp={cancelPhotoHold}
-                                onPointerCancel={cancelPhotoHold}
-                                onPointerLeave={cancelPhotoHold}
                                 onContextMenu={(event) => event.preventDefault()}
                               >
                                 <NextImage
@@ -4463,19 +4267,17 @@ export function MobilePhotoPortal({
                                   loading="lazy"
                                   className="ui-photo-mobile-step-photo-image"
                                 />
-                                {revealedPhotoDeleteId === photo.id ? (
                                   <button
                                     type="button"
                                     onClick={() => {
                                       requestRemovePhoto(step.id, photo);
                                     }}
-                                    className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-danger text-canvas"
+                                    className="absolute right-2 top-2 flex h-11 w-11 items-center justify-center bg-transparent text-danger"
                                     aria-label="Remove photo"
                                     title="Remove photo"
                                   >
                                     <Trash2 size={15} />
                                   </button>
-                                ) : null}
                               </div>
                             </div>
                           ))}
@@ -4487,6 +4289,52 @@ export function MobilePhotoPortal({
                         </div>
                       )}
                       </div>
+                      <div className="px-3 py-3">
+                        <label className="block">
+                          <span className="ui-field-label mb-1">Description</span>
+                          <textarea
+                            key={step.id}
+                            ref={getStepInstructionRef(step.id)}
+                            aria-label={`Step ${step.sequence} description`}
+                            className="ui-photo-mobile-textarea min-h-[84px]"
+                            defaultValue={step.instruction}
+                            onFocus={handleStepInstructionFocus}
+                            onInput={handleStepInstructionInput}
+                            onBlur={(event) => {
+                              const instruction = event.currentTarget.value;
+                              if (instruction !== step.instruction) {
+                                void updateManufacturingStep(step.id, { instruction });
+                              }
+                            }}
+                            placeholder="Describe the manufacturing step"
+                          />
+                        </label>
+                      </div>
+                      <details className="ui-photo-mobile-section">
+                        <summary className="ui-photo-mobile-check-summary">Tools <span>{stepTools.length} added</span></summary>
+                        <div className="mt-2">
+                          {renderToolPicker(
+                          stepTools,
+                          (toolName) => void addManufacturingStepToolFromLibrary(step.id, toolName),
+                          (toolName) => void removeManufacturingStepTool(step.id, toolName),
+                          {
+                            value: newStepToolNames[step.id] ?? "",
+                            sequence: step.sequence,
+                            onChange: (value) =>
+                              setNewStepToolNames((current) => ({ ...current, [step.id]: value })),
+                            disabled: saveState === "saving",
+                          },
+                        )}
+                        </div>
+                      </details>
+                      <details className="ui-photo-mobile-section ui-photo-mobile-section-compact">
+                        <summary className="ui-photo-mobile-check-summary">Checks <span>{selectedChecks.size} selected</span></summary>
+                        <div className="ui-photo-mobile-check-editor mt-2">
+                          <ProcedureStepChecksEditor ariaLabel={`Step ${step.sequence} checks`} compact definitions={stepCheckDefinitions}
+                            qualityCheck={step.qualityCheck}
+                            onChange={(qualityCheck) => void updateManufacturingStep(step.id, { qualityCheck })} />
+                        </div>
+                      </details>
                     </article>
                   );
                 })}
@@ -4499,6 +4347,23 @@ export function MobilePhotoPortal({
         )}
       </div>
       </div>
+      {activeScreen === "list" && !showNewTaskForm ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface px-3 pt-3"
+          style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+          <div className="mx-auto max-w-xl">
+            <button type="button" className="ui-photo-mobile-btn-primary min-h-11 w-full"
+              onClick={() => {
+                setNewTaskName("");
+                setNewTaskZoneId(selectedTask?.zoneId ?? taskRows[taskRows.length - 1]?.zoneId ?? "");
+                setNewTaskComponentId("");
+                setShowNewTaskForm(true);
+              }}>
+              <Plus size={16} />
+              Add process
+            </button>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

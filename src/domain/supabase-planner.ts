@@ -3308,6 +3308,60 @@ export async function saveTaskAndManufacturingStepToSupabase(task: Task, step: M
   await throwIfError(supabase.from("manufacturing_steps").upsert(manufacturingStepRow(task.id, step)));
 }
 
+/** Phone edits own individual step fields, never a stale copy of the entire procedure. */
+export async function saveMobileStepToSupabase(
+  task: Task,
+  step: ManufacturingStep,
+  patch: Partial<Pick<ManufacturingStep, "name" | "instruction" | "durationMinutes" | "qualityCheck">>,
+  projectId?: string,
+  providedClient?: ReturnType<typeof plannerClient>,
+): Promise<ManufacturingStep> {
+  const supabase = providedClient ?? plannerClient();
+  await assertTaskRowInProject(supabase, task, projectId);
+  const parent = await throwIfError(supabase.from("tasks").select("id").eq("id", task.id).maybeSingle());
+  if (!parent) {
+    if (task.version !== undefined) {
+      throw new Error("This process is no longer available. Your draft has been kept.");
+    }
+    // A new local process must exist before any child write. Ignore a simultaneous
+    // insert by another save, rather than replacing its metadata with our snapshot.
+    await throwIfError(supabase.from("tasks").upsert(taskRow(task), { onConflict: "id", ignoreDuplicates: true }));
+  }
+  await assertTaskInProject(supabase, task.id, projectId);
+  const fields: { name?: string; instruction?: string; duration_minutes?: number; quality_check?: string } = {};
+  if (patch.name !== undefined) fields.name = patch.name;
+  if (patch.instruction !== undefined) fields.instruction = patch.instruction;
+  if (patch.durationMinutes !== undefined) fields.duration_minutes = patch.durationMinutes;
+  if (patch.qualityCheck !== undefined) fields.quality_check = patch.qualityCheck;
+  let saved: Record<string, unknown> | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const rows = await throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", task.id));
+    const existing = (rows ?? []).find((row) => String(row.id) === step.id);
+    if (existing) {
+      saved = Object.keys(fields).length
+        ? await throwIfError(supabase.from("manufacturing_steps").update(fields).eq("id", step.id).eq("task_id", task.id).select("*").maybeSingle())
+        : existing;
+      break;
+    }
+    if (step.version !== undefined) {
+      throw new Error("This step was deleted on another device. Your draft has been kept.");
+    }
+    const sequence = (rows ?? []).reduce((max, row) => Math.max(max, Number(row.sequence)), 0) + 1;
+    const result = await supabase.from("manufacturing_steps").insert({ ...manufacturingStepRow(task.id, step), sequence }).select("*").maybeSingle();
+    if (result.error?.code === "23505" && attempt < 2) continue;
+    if (result.error) throw result.error;
+    saved = result.data;
+    break;
+  }
+  if (!saved) throw new Error("The step could not be saved. Your draft has been kept.");
+  if (patch.durationMinutes !== undefined) {
+    const rows = await throwIfError(supabase.from("manufacturing_steps").select("duration_minutes").eq("task_id", task.id));
+    const minutes = (rows ?? []).reduce((total, row) => total + Math.max(Number(row.duration_minutes) || 0, 0), 0);
+    await throwIfError(supabase.from("tasks").update({ planned_duration_minutes: minutes }).eq("id", task.id));
+  }
+  return mapManufacturingStepRecord(saved);
+}
+
 export async function saveManufacturingStepToSupabase(taskId: string, step: ManufacturingStep, projectId?: string) {
   // Merge the incoming step into the task's current step set and persist via the version-checked,
   // retry-on-conflict procedure path. The previous standalone read-then-upsert had a lost-update

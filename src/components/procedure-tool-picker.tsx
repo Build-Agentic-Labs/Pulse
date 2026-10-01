@@ -25,6 +25,8 @@ export function ProcedureToolPicker({
   assignedTools,
   stepSequence,
   compact = false,
+  mobile = false,
+  disabled = false,
   onValueChange,
   onAdd,
 }: {
@@ -33,6 +35,8 @@ export function ProcedureToolPicker({
   assignedTools: string[];
   stepSequence: number;
   compact?: boolean;
+  mobile?: boolean;
+  disabled?: boolean;
   onValueChange: (value: string) => void;
   onAdd: (toolName: string) => void;
 }) {
@@ -59,6 +63,7 @@ export function ProcedureToolPicker({
     );
   }, [assignedKeys, toolLibrary]);
   const typedKey = canonicalToolKey(typedTool);
+  const alreadyAssigned = assignedKeys.has(typedKey);
   const matchingTools = useMemo(
     () => (typedKey ? availableTools.filter((tool) => canonicalToolKey(tool).includes(typedKey)) : availableTools),
     [availableTools, typedKey],
@@ -70,9 +75,9 @@ export function ProcedureToolPicker({
   const options = useMemo<ToolOption[]>(
     () => [
       ...matchingTools.map((name) => ({ name, custom: false })),
-      ...(typedTool && !exactMatch ? [{ name: typedTool, custom: true }] : []),
+      ...(typedTool && !exactMatch && !alreadyAssigned ? [{ name: typedTool, custom: true }] : []),
     ],
-    [exactMatch, matchingTools, typedTool],
+    [alreadyAssigned, exactMatch, matchingTools, typedTool],
   );
 
   function updatePosition() {
@@ -139,7 +144,7 @@ export function ProcedureToolPicker({
   }
 
   function commitTypedTool() {
-    if (!typedTool) {
+    if (!typedTool || alreadyAssigned || disabled) {
       return;
     }
     choose({ name: exactMatch ?? typedTool, custom: !exactMatch });
@@ -189,13 +194,13 @@ export function ProcedureToolPicker({
                     type="button"
                     role="option"
                     aria-selected={index === activeIndex}
-                    className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs ${
+                    className={`flex w-full items-center gap-2 px-2.5 text-left ${mobile ? "min-h-11 py-2 text-base" : "py-1.5 text-xs"} ${
                       index === activeIndex ? "bg-surface-raised" : ""
                     }`}
                     onMouseDown={(event) => {
                       event.preventDefault();
-                      choose(option);
                     }}
+                    onClick={() => choose(option)}
                     onMouseEnter={() => setActiveIndex(index)}
                   >
                     {option.custom ? <Plus size={12} className="shrink-0 text-accent" aria-hidden="true" /> : null}
@@ -218,12 +223,13 @@ export function ProcedureToolPicker({
     <div
       ref={wrapRef}
       className={`relative flex min-w-0 flex-1 items-center gap-1.5 border-b border-line focus-within:border-accent ${
-        compact ? "h-7" : "h-8"
+        mobile ? "min-h-11" : compact ? "h-7" : "h-8"
       }`}
     >
       <Search size={compact ? 12 : 13} className="shrink-0 text-ink-tertiary" aria-hidden="true" />
       <input
-        className={`min-w-0 flex-1 bg-transparent font-semibold text-ink outline-none ${compact ? "text-[11px]" : "text-xs"}`}
+        className={`min-w-0 flex-1 bg-transparent font-semibold text-ink outline-none ${mobile ? "text-base" : compact ? "text-[11px]" : "text-xs"}`}
+        disabled={disabled}
         value={value}
         onChange={(event) => {
           onValueChange(event.target.value);
@@ -245,9 +251,9 @@ export function ProcedureToolPicker({
       <button
         type="button"
         onClick={commitTypedTool}
-        disabled={!typedTool}
+        disabled={disabled || !typedTool || alreadyAssigned}
         className={`shrink-0 font-semibold text-ink-secondary hover:text-accent disabled:cursor-default disabled:opacity-35 ${
-          compact ? "px-1 text-[9px]" : "px-2 text-[10px]"
+          mobile ? "min-h-11 px-3 text-sm" : compact ? "px-1 text-[9px]" : "px-2 text-[10px]"
         }`}
       >
         {typedTool && !exactMatch ? "Add new" : "Add"}

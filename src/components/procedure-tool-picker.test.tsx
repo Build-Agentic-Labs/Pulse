@@ -37,7 +37,7 @@ describe("ProcedureToolPicker", () => {
     expect(screen.getByRole("option", { name: /3\/8in Impact Gun/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /13mm Deep Socket/ })).not.toBeInTheDocument();
 
-    fireEvent.mouseDown(screen.getByRole("option", { name: /3\/8in Impact Gun/ }));
+    fireEvent.click(screen.getByRole("option", { name: /3\/8in Impact Gun/ }));
     expect(onAdd).toHaveBeenCalledWith("3/8in Impact Gun");
     expect(input).toHaveValue("");
   });
@@ -61,5 +61,16 @@ describe("ProcedureToolPicker", () => {
 
     expect(screen.queryByRole("option", { name: /Torque Wrench/ })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: /13mm Deep Socket/ })).toBeInTheDocument();
+  });
+
+  it("does not offer an assigned tool as a new tool when typed", () => {
+    const onAdd = vi.fn();
+    render(<PickerHarness onAdd={onAdd} assignedTools={["Torque Wrench"]} />);
+    const input = screen.getByRole("combobox", { name: "Search or add tool for step 1" });
+    fireEvent.change(input, { target: { value: "torque wrench" } });
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add new" })).toBeDisabled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onAdd).not.toHaveBeenCalled();
   });
 });

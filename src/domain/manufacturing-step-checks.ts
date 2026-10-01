@@ -11,6 +11,7 @@ export interface ManufacturingStepCheckDefinition {
 
 export interface ManufacturingStepCheckValue {
   value?: number;
+  maxValue?: number;
   unit?: string;
 }
 
@@ -156,6 +157,9 @@ export function getManufacturingStepCheckState(
               : undefined;
           accumulator[normalizeManufacturingStepCheck(key)] = {
             value: Number.isFinite(numericValue) ? numericValue : undefined,
+            maxValue: rawValue.maxValue !== undefined && rawValue.maxValue !== "" && Number.isFinite(Number(rawValue.maxValue)) && (typeof rawValue.maxValue === "number" || typeof rawValue.maxValue === "string")
+              ? Number(rawValue.maxValue)
+              : undefined,
             unit: typeof rawValue.unit === "string" ? rawValue.unit : undefined,
           };
           return accumulator;

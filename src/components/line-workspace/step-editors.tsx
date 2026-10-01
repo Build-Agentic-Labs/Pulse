@@ -1091,7 +1091,7 @@ export function ProcedureStepChecksEditor({
     commit({ selected, values });
   }
 
-  function updateCheckValue(definition: ManufacturingStepCheckDefinition, patch: Partial<{ value: number; unit: string }>) {
+  function updateCheckValue(definition: ManufacturingStepCheckDefinition, patch: Partial<{ value: number; maxValue: number | undefined; unit: string }>) {
     const selected = new Set(checkState.selected);
     selected.add(definition.key);
     const currentValue = checkState.values[definition.key] ?? {};
@@ -1143,14 +1143,28 @@ export function ProcedureStepChecksEditor({
               {checked ? (
                 <span className="inline-flex min-w-0 items-center gap-1">
                   <ClearableNumberInput
-                    aria-label={`${definition.label} value`}
+                    aria-label={`${definition.label} ${checkValue.maxValue === undefined ? "value" : "minimum"}`}
                     className="number-input h-7 w-16 rounded border border-line bg-surface px-1.5 text-right text-xs outline-none"
                     value={checkValue.value ?? 0}
                     min={0}
                     fallbackValue={checkValue.value ?? 0}
                     precision={2}
-                    onValueChange={(value) => updateCheckValue(definition, { value })}
+                    onValueChange={(value) => updateCheckValue(definition, { value, ...(checkValue.maxValue === undefined ? {} : { maxValue: Math.max(value, checkValue.maxValue) }) })}
                   />
+                  {checkValue.maxValue !== undefined ? (
+                    <>
+                      <span aria-hidden="true">–</span>
+                      <ClearableNumberInput
+                        aria-label={`${definition.label} maximum`}
+                        className="number-input h-7 w-16 rounded border border-line bg-surface px-1.5 text-right text-xs outline-none"
+                        value={checkValue.maxValue}
+                        min={checkValue.value ?? 0}
+                        fallbackValue={checkValue.maxValue}
+                        precision={2}
+                        onValueChange={(maxValue) => updateCheckValue(definition, { maxValue: Math.max(checkValue.value ?? 0, maxValue) })}
+                      />
+                    </>
+                  ) : null}
                   <ThemedSelect
                     aria-label={`${definition.label} unit`}
                     className="w-20"
@@ -1159,6 +1173,15 @@ export function ProcedureStepChecksEditor({
                     options={unitOptions.map((unit) => ({ value: unit, label: unit }))}
                     onChange={(unit) => updateCheckValue(definition, { unit })}
                   />
+                  <label className="inline-flex items-center gap-1 whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      aria-label={`${definition.label} range`}
+                      checked={checkValue.maxValue !== undefined}
+                      onChange={(event) => updateCheckValue(definition, { maxValue: event.target.checked ? checkValue.value ?? 0 : undefined })}
+                    />
+                    Range
+                  </label>
                 </span>
               ) : null}
             </div>

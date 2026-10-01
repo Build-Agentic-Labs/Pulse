@@ -395,3 +395,16 @@ export function mergeProcedureDraftWithServer(serverTask: Task, draftTask: Task)
     serverTask,
   );
 }
+
+/** Carry forward confirmed versions without replacing edits queued during a save. */
+export function rebaseProcedureTaskVersions(pendingTask: Task, savedTask: Task): Task {
+  const savedSteps = new Map((savedTask.manufacturingSteps ?? []).map((step) => [step.id, step]));
+  return {
+    ...pendingTask,
+    version: savedTask.version,
+    manufacturingSteps: pendingTask.manufacturingSteps?.map((step) => ({
+      ...step,
+      version: savedSteps.get(step.id)?.version ?? step.version,
+    })),
+  };
+}

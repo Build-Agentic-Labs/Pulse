@@ -75,7 +75,7 @@ function buildChecks(
     .map((definition) => {
       const stored = state.values[definition.key];
       const unit = stored?.unit ?? definition.defaultUnit ?? "";
-      const spec = stored?.value === undefined ? "" : `${stored.value}${unit ? ` ${unit}` : ""}`;
+      const spec = stored?.value === undefined ? "" : `${stored.value}${stored.maxValue === undefined ? "" : `–${stored.maxValue}`}${unit ? ` ${unit}` : ""}`;
       return { key: definition.key, label: definition.label, spec };
     });
 }

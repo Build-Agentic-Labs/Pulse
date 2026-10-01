@@ -222,6 +222,26 @@ describe("buildWorkInstruction", () => {
     ]);
   });
 
+  it("renders both bounds of a torque range", () => {
+    const task = makeTask({
+      manufacturingSteps: [
+        {
+          id: "step-a",
+          sequence: 1,
+          instruction: "Torque the fasteners",
+          qualityCheck: JSON.stringify({ selected: ["qc", "torque_required"], values: { torque_required: { value: 45, maxValue: 50, unit: "Nm" } } }),
+        },
+      ],
+    });
+
+    const wi = buildWorkInstruction({ task, product: makeProduct(), zone });
+
+    expect(wi.cards[0].checks).toEqual([
+      { key: "qc", label: "QC", spec: "" },
+      { key: "torque_required", label: "Torque Spec", spec: "45–50 Nm" },
+    ]);
+  });
+
   it("keeps a step that fits on a single card", () => {
     const oneBox = "x".repeat(INSTRUCTION_BUDGET.charsPerLine * INSTRUCTION_BUDGET.lines);
     const task = makeTask({ manufacturingSteps: [{ id: "step-a", sequence: 1, instruction: oneBox }] });

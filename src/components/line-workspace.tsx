@@ -215,6 +215,7 @@ import {
   makeProcedureDraftKey,
   mergeProcedureDraftWithServer,
   procedureDraftLog,
+  rebaseProcedureTaskVersions,
   procedureDraftStorageKey,
   readProcedureDraftSnapshot,
   readProjectSwitchTarget,
@@ -788,7 +789,9 @@ export function LineWorkspace({
       setChromeStatus({
         message: bomSaving
           ? "BOM is still saving. Wait for Saved before leaving this page."
-          : "You have unsaved changes still saving. Wait for Saved before leaving this page.",
+          : saveStateRef.current === "error" || saveStateRef.current === "conflict"
+            ? "Your changes have not saved. Resolve the save error before leaving this page."
+            : "Your changes are saving automatically. Wait for Saved before leaving this page.",
         error: true,
       });
     }
@@ -3071,7 +3074,9 @@ export function LineWorkspace({
   }, [plannerState, dirtyVersion]);
 
   useEffect(() => {
-    if (!hasLoadedRemoteState || dirtyVersion === 0) {
+    // Procedure edits have their own queue. Once the shell has saved, later
+    // procedure renders must not restart a competing full planner save.
+    if (!hasLoadedRemoteState || dirtyVersion === 0 || !plannerDirtyRef.current) {
       return;
     }
 
@@ -3898,7 +3903,16 @@ export function LineWorkspace({
 
     const hasNewerPending = !confirmedCurrent || queue.pending || maxProcedureDraftSeq(taskId) > saveSeq;
     if (hasNewerPending) {
-      if (queue.pending && queue.pendingTaskSnapshot && queue.pendingTasksSnapshot) {
+      // Read again after awaiting the save: edits may have filled the queue in flight.
+      const pendingQueue = getProcedureTaskSaveQueue(taskId);
+      if (pendingQueue.pending && pendingQueue.pendingTaskSnapshot && pendingQueue.pendingTasksSnapshot) {
+        if (savedTask) {
+          const rebasedTask = rebaseProcedureTaskVersions(pendingQueue.pendingTaskSnapshot, savedTask);
+          pendingQueue.pendingTaskSnapshot = rebasedTask;
+          pendingQueue.pendingTasksSnapshot = pendingQueue.pendingTasksSnapshot.map((task) =>
+            task.id === taskId ? rebasedTask : task,
+          );
+        }
         queue.state = "saving-with-newer-pending";
         void startProcedureTaskSave(taskId);
         return;
@@ -3906,7 +3920,9 @@ export function LineWorkspace({
 
       const latestTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
       if (latestTask) {
-        const latestTaskSnapshot = applyProcedureDraftsToTask(latestTask);
+        const latestTaskSnapshot = applyProcedureDraftsToTask(
+          savedTask ? rebaseProcedureTaskVersions(latestTask, savedTask) : latestTask,
+        );
         const latestTasksSnapshot = latestDerivedStateRef.current.tasks.map((task) =>
           task.id === taskId ? latestTaskSnapshot : task,
         );

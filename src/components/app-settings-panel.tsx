@@ -24,6 +24,8 @@ import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/type
 
 import type { ThemeMode } from "@/lib/theme-init";
 
+const BackupSettings = dynamic(() => import("@/components/backup-settings").then((module) => module.BackupSettings), { loading: () => <SettingsSectionLoadingContent /> });
+
 const OrganizationSettings = dynamic(
   () => import("@/components/organization-settings").then((module) => module.OrganizationSettings),
   { loading: () => <SettingsSectionLoadingContent /> },
@@ -344,7 +346,10 @@ export function AppSettingsPanel({
 
   const [internalSection, setInternalSection] = useState<SettingsSection>("account");
 
-  const activeSection = section ?? internalSection;
+  const isSuperAdmin = groups.some((group) => group.isSuperAdmin);
+  const allowedSections = sections.filter((item) => item.id !== "backups" || isSuperAdmin);
+  const requestedSection = section ?? internalSection;
+  const activeSection = requestedSection === "backups" && !isSuperAdmin ? "account" : requestedSection;
   const [mountedSections, setMountedSections] = useState<Set<SettingsSection>>(
     () => new Set([activeSection]),
   );
@@ -377,12 +382,13 @@ export function AppSettingsPanel({
     <div className="ui-settings-layout flex h-full min-h-0 flex-col overflow-hidden bg-surface md:flex-row">
 
       {showSubnav ? (
-        <SettingsNavigation activeSection={activeSection} sections={sections} onSelect={setSection} />
+        <SettingsNavigation activeSection={activeSection} sections={allowedSections} onSelect={setSection} />
       ) : null}
 
 
 
       <div className="ui-settings-content">
+        {isSuperAdmin && mountedSections.has("backups") ? <div hidden={activeSection !== "backups"} aria-hidden={activeSection !== "backups"}><SettingsPage title="Backups" description="Preserve your company data with verified, encrypted local exports."><BackupSettings /></SettingsPage></div> : null}
 
         {mountedSections.has("account") ? (
 

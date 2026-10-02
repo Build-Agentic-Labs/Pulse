@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleUserRound, FolderKanban, Palette, Settings, UsersRound } from "lucide-react";
+import { CircleUserRound, HardDrive, FolderKanban, Palette, Settings, UsersRound } from "lucide-react";
 import { NavSelectionTrack } from "@/components/nav-selection-track";
 
 export const settingsSections = [
@@ -9,6 +9,7 @@ export const settingsSections = [
   { id: "organization", label: "Organization", icon: UsersRound },
   { id: "projects", label: "Projects", icon: FolderKanban },
   { id: "planning", label: "Planning", icon: Settings },
+  { id: "backups", label: "Backups", icon: HardDrive },
 ] as const;
 
 export const embeddedSettingsSections = settingsSections.slice(0, 3);
@@ -23,7 +24,7 @@ export type SettingsNavigationItem = (typeof settingsSections)[number];
  */
 export function SettingsNavigation({
   activeSection,
-  sections = settingsSections,
+  sections = settingsSections.filter((item) => item.id !== "backups"),
   onSelect,
 }: {
   activeSection: SettingsSection;

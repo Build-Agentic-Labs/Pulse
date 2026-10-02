@@ -1,0 +1,66 @@
+{
+  "performedAt": "2026-10-02T05:30:44.020Z",
+  "productionConnected": false,
+  "realEmailsSent": false,
+  "environment": "Separate temporary app copy; synthetic source/target Supabase PostgreSQL, Auth, Storage and REST services on localhost",
+  "checks": [
+    {
+      "name": "Author, Quality approver and outsider sign in through real Supabase Auth with preserved fixture UUIDs",
+      "result": "passed"
+    },
+    {
+      "name": "Workspace members can read SOP; outsider cannot read SOP or project",
+      "result": "passed"
+    },
+    {
+      "name": "Only restored Quality approver passes final-approval authorization RPC",
+      "result": "passed"
+    },
+    {
+      "name": "Restored product steps load in correct order through authenticated REST",
+      "result": "passed"
+    },
+    {
+      "name": "Restored private photo is readable through authenticated Storage",
+      "result": "passed"
+    },
+    {
+      "name": "All source rows remain unchanged; target business rows match archive (startup health logs and profile refresh timestamps excluded)",
+      "result": "passed"
+    },
+    {
+      "name": "4 application hooks on Auth/Storage and 19 Storage policies recovered from encrypted metadata",
+      "result": "passed"
+    },
+    {
+      "name": "Browser sign-in opens recovered workspace dashboard",
+      "result": "passed"
+    },
+    {
+      "name": "Recovered SOP opens in editor and Save & close persists edited title",
+      "result": "passed"
+    },
+    {
+      "name": "Recovered mobile process builder shows two ordered steps and private photo",
+      "result": "passed"
+    },
+    {
+      "name": "Mobile step edit persists after page reload",
+      "result": "passed"
+    },
+    {
+      "name": "Synthetic source SOP and step unchanged after browser save tests",
+      "result": "passed"
+    }
+  ],
+  "fullRecoveryValidated": false,
+  "apiRecoveryPassed": true,
+  "browserRecoveryPassed": true,
+  "limitations": [
+    "Synthetic credentials were created separately with preserved UUIDs; production Auth migration is not implemented by this backup.",
+    "Baseline Supabase grants were established before fixture migrations, rather than adding permissions during recovery.",
+    "Notification health logging and profile refresh timestamps can legitimately change after target startup.",
+    "Realtime gateway, SSO/MFA, full review/signature lifecycle, production-scale media and external integration recovery were not exercised.",
+    "Production exports remain locked."
+  ]
+}

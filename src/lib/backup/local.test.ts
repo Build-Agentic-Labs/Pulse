@@ -1,0 +1,20 @@
+import {afterEach,expect,it,vi} from 'vitest';
+import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {readBackup,listBackups} from './local';
+const roots:string[]=[];
+afterEach(async()=>{vi.restoreAllMocks();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
+it('rejects corrupt status identities and timestamps; retains interrupted job information',async()=>{
+ const root=await mkdtemp(path.join(tmpdir(),'pulse-status-fixture-'));roots.push(root);vi.spyOn(process,'cwd').mockReturnValue(root);
+ const directory=path.join(root,'backups/local');await mkdir(directory,{recursive:true});
+ const id=randomUUID(),owner=randomUUID(),file=path.join(directory,`${id}.json`);
+ await writeFile(file,JSON.stringify({id:'../../unexpected',owner,state:'complete',updatedAt:new Date().toISOString()}));
+ expect(await readBackup(id,owner)).toBeNull();
+ await writeFile(file,JSON.stringify({id,owner,state:'running',updatedAt:'invalid'}));expect(await listBackups(owner)).toEqual([]);
+ await writeFile(file,JSON.stringify({id,owner,state:'running',updatedAt:new Date(Date.now()-240000).toISOString()}));
+ expect(await readBackup(id,randomUUID())).toBeNull();
+ expect(await readBackup(id,owner)).toMatchObject({state:'interrupted'});
+ expect(JSON.parse(await import('node:fs/promises').then(fs=>fs.readFile(file,'utf8'))).state).toBe('running');
+});

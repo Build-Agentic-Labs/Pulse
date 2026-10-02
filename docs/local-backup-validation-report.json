@@ -1,0 +1,77 @@
+{
+  "performedAt": "2026-10-02T04:50:24.195Z",
+  "environment": "Two disposable in-memory PGlite PostgreSQL databases plus a temporary file directory",
+  "productionConnected": false,
+  "limitations": [
+    "Real pg_dump/snapshot sharing was substituted with the known fixture schema.",
+    "This is not a full Supabase schema/auth/policy/application recovery rehearsal.",
+    "Production exports remain locked."
+  ],
+  "checks": [
+    {
+      "name": "Read-only role rejects direct updates",
+      "result": "passed"
+    },
+    {
+      "name": "Actual PostgreSQL fixture rows exported in a read-only transaction",
+      "result": "passed"
+    },
+    {
+      "name": "All records, SOP revisions, signatures, comments and work-instruction releases match",
+      "result": "27 rows across 26 tables"
+    },
+    {
+      "name": "Step order and BOM quantities retained",
+      "result": "passed"
+    },
+    {
+      "name": "Restored foreign-key constraints reject broken references",
+      "result": "passed"
+    },
+    {
+      "name": "Original media and thumbnail bytes match",
+      "result": "2 files"
+    },
+    {
+      "name": "Source fixture records unchanged after export and recovery",
+      "result": "passed"
+    },
+    {
+      "name": "Invalid authentication tag causes zero recovery callbacks",
+      "result": "passed"
+    },
+    {
+      "name": "Wrong password rejected",
+      "result": "passed"
+    },
+    {
+      "name": "Truncated export rejected",
+      "result": "passed"
+    },
+    {
+      "name": "Existing verified archive preserved on collision",
+      "result": "passed"
+    },
+    {
+      "name": "unavailable storage export never produces a verified archive",
+      "result": "passed"
+    },
+    {
+      "name": "interrupted storage export never produces a verified archive",
+      "result": "passed"
+    },
+    {
+      "name": "changed storage export never produces a verified archive",
+      "result": "passed"
+    },
+    {
+      "name": "Missing referenced photo refuses completion",
+      "result": "passed"
+    },
+    {
+      "name": "All business fixture rows unchanged after every failure simulation",
+      "result": "passed"
+    }
+  ],
+  "passed": true
+}

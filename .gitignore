@@ -20,7 +20,7 @@ certificates/*.pem
 supabase/.temp/
 
 # generated backup/export data
-backups/
+/backups/
 
 # local tool artifacts
 UFO/.venv/

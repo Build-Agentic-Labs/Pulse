@@ -1,0 +1,29 @@
+{
+  "performedAt": "2026-10-02T05:43:00.641Z",
+  "productionConnected": false,
+  "environment": "Synthetic encrypted files in an owned temporary directory; no database or network",
+  "checks": [
+    {
+      "name": "512 synthetic files, 128 MiB original media, streamed integrity verification",
+      "result": "passed",
+      "originalBytes": 134217728
+    },
+    {
+      "name": "Bounded recovery reader rejects oversized use before exposing any records",
+      "result": "passed"
+    },
+    {
+      "name": "Force-killed writer never publishes a completed archive; encrypted partial cannot verify",
+      "result": "passed"
+    },
+    {
+      "name": "Two-pass authenticated recovery reconstructs 512 actual files totaling 128 MiB; every on-disk hash matches",
+      "result": "passed"
+    },
+    {
+      "name": "Verified larger archive preserved on destination collision",
+      "result": "passed"
+    }
+  ],
+  "passed": true
+}

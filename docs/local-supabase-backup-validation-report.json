@@ -1,0 +1,46 @@
+{
+  "performedAt": "2026-10-02T05:14:44.390Z",
+  "environment": "Disposable local Supabase PostgreSQL 17, Auth and Storage containers",
+  "productionConnected": false,
+  "checks": [
+    {
+      "name": "Synthetic SOP, revision, signature, comment, product, steps, BOM and release created in isolated source",
+      "result": "passed"
+    },
+    {
+      "name": "Real pg_dump shares exported read-only PostgreSQL snapshot; original bytes read through Supabase Storage with SELECT-only JWT role",
+      "result": "passed"
+    },
+    {
+      "name": "Encrypted archive authenticated and manifest verified",
+      "result": "passed"
+    },
+    {
+      "name": "All 69 exported public tables match target and source is unchanged",
+      "result": "passed"
+    },
+    {
+      "name": "Original photo restored through target Supabase Storage and bytes match",
+      "result": "passed"
+    },
+    {
+      "name": "Restored public RLS policy definitions match source",
+      "result": "passed"
+    },
+    {
+      "name": "Every restored public foreign key rescanned successfully against recovered rows",
+      "result": "passed"
+    },
+    {
+      "name": "Dedicated export role rejects attempted fixture mutation",
+      "result": "passed"
+    }
+  ],
+  "limitations": [
+    "No browser/application restart or live-user authentication recovery tested.",
+    "Auth credentials intentionally not exported.",
+    "Database ACLs and sequence state not included by current archive; production exports remain locked."
+  ],
+  "dataRoundTripPassed": true,
+  "fullRecoveryValidated": false
+}

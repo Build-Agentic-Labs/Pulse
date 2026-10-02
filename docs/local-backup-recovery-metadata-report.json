@@ -1,0 +1,16 @@
+{
+  "performedAt": "2026-10-02T12:33:25.399Z",
+  "productionConnected": false,
+  "environment": "New isolated Supabase PostgreSQL 17 container; two synthetic databases; no network or host ports",
+  "checks": [
+    "Owners, enum/domain ownership, disabled/replica hook state, SECURITY DEFINER ownership and exact sequence state match",
+    "Table/sequence ACLs and default privileges match",
+    "Restored authorization allows owner, hides other rows and denies outsider/function access",
+    "Called and unused sequence counters resume correctly above JavaScript safe integer range",
+    "Source counters unchanged; SELECT-only reader cannot advance them",
+    "Read-only audit accepts SELECT-only role and refuses column-only UPDATE grants",
+    "Inherited PUBLIC execution of a privileged writer is refused by catalog audit without invoking it or changing source rows"
+  ],
+  "fullRecoveryValidated": false,
+  "passed": true
+}

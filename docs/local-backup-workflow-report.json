@@ -1,0 +1,58 @@
+{
+  "performedAt": "2026-10-02T12:45:45.889Z",
+  "productionConnected": false,
+  "realEmailsSent": false,
+  "environment": "Owned isolated PostgreSQL/Auth/Storage fixtures; no published ports, no company credentials",
+  "checks": [
+    {
+      "name": "All current application migrations applied to isolated source",
+      "result": "passed",
+      "migrations": 141
+    },
+    {
+      "name": "Encrypted archive restores all public rows, schema, owners, counters and managed hooks before workflow tests",
+      "result": "passed",
+      "tables": 75
+    },
+    {
+      "name": "Proposed routine grant preparation preserves every existing role EXECUTE permission and newly created SELECT-only reader passes audit",
+      "result": "passed"
+    },
+    {
+      "name": "Restored author submission, reviewer no-changes response, signature request, department signature, independent Quality signature and effective release pass",
+      "result": "passed"
+    },
+    {
+      "name": "Outsider hidden, premature approval refused, author cannot sign assigned seat, non-Quality cannot give final approval",
+      "result": "passed"
+    },
+    {
+      "name": "Workflow event outbox remains active after recovery",
+      "result": "passed",
+      "events": [
+        "signature_added",
+        "review_sent",
+        "review_returned",
+        "final_approval_requested",
+        "signature_added",
+        "status_changed",
+        "signature_added",
+        "status_changed"
+      ]
+    },
+    {
+      "name": "Every source public row unchanged after target review/signature/release operations",
+      "result": "passed"
+    },
+    {
+      "name": "Rejected signatures roll back mark updates; repeat signing does not duplicate signature or modify saved mark",
+      "result": "passed"
+    }
+  ],
+  "passed": true,
+  "fullRecoveryValidated": false,
+  "limitations": [
+    "Tests actual restored database workflow; provider notification delivery and browser review transitions are not exercised here.",
+    "Synthetic Auth UUIDs prepared separately; no production Auth credentials copied."
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "performedAt": "2026-10-02T15:03:43.125704+00:00",
+  "productionReady": false,
+  "productionBackupCreated": false,
+  "productionMutationsPerformed": true,
+  "status": "awaiting_file_credential_and_egress_resolution",
+  "requirements": [
+    {
+      "requirement": "Define critical backup scope and explicit exclusions",
+      "status": "documented",
+      "evidence": [
+        "docs/local-backup-foundation.md",
+        "scripts/backup/source.mjs"
+      ]
+    },
+    {
+      "requirement": "Verify larger originals and interrupted writes/recovery",
+      "status": "passed_in_isolated_fixtures",
+      "evidence": [
+        "docs/local-backup-stress-report.json",
+        "src/lib/backup/archive.test.ts"
+      ]
+    },
+    {
+      "requirement": "Verify recovered SOP review/signature/Quality release lifecycle",
+      "status": "passed_in_isolated_fixture_with_prepared_local_fix",
+      "evidence": [
+        "docs/local-backup-workflow-report.json",
+        "supabase/migrations/20261002060000_sop_signature_lock_authorization.sql"
+      ]
+    },
+    {
+      "requirement": "Audit completeness, file references, read-only checks, ownership and permissions",
+      "status": "live_database_credential_audit_passed_file_transport_pending",
+      "evidence": [
+        "docs/local-supabase-backup-validation-report.json",
+        "docs/local-backup-recovery-metadata-report.json",
+        "src/lib/backup/source.test.ts"
+      ]
+    },
+    {
+      "requirement": "Enable and create first real local backup only after all gates pass",
+      "status": "not_enabled_not_achieved",
+      "reason": "File-read credential, egress resolution and reviewed-source/restore enablement remain required."
+    }
+  ],
+  "checks": {
+    "applicationTests": {
+      "files": 216,
+      "tests": 1739,
+      "passed": true
+    },
+    "typecheckPassed": true,
+    "lintPassed": true,
+    "isolatedProductionBuildPassed": true,
+    "backupRouteInBuildManifest": true
+  },
+  "blockers": [
+    "Dedicated file-read credential missing",
+    "M-Tool egress allowance exceeded; live export held",
+    "Company-specific restore rehearsal and reviewed source enablement outstanding"
+  ],
+  "nextAction": "Complete restricted file access, resolve egress warning and validate the first encrypted export and isolated recovery.",
+  "preserved": [
+    "Company database rows; approved ACL/role changes recorded separately",
+    "Company object storage files",
+    "Existing local archives and interrupted archives",
+    "Current running development app"
+  ],
+  "limitations": [
+    "Synthetic recovery evidence does not prove a company-specific restore or provider email delivery.",
+    "The signing migration is prepared locally, not deployed.",
+    "Account credentials, integrations and external remote files are separate recovery prerequisites.",
+    "An interrupted runner lock requires operator review rather than automatic deletion."
+  ],
+  "productionMutationScope": "Approved routine ACL preservation and dedicated backup role activation only; no company records changed"
+}

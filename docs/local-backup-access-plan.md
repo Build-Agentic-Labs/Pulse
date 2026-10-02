@@ -1,6 +1,6 @@
 # Local backup access plan
 
-Current status: dedicated database access and trusted TLS configured; file credential and live export remain gated. Historical preparation notes below precede the explicitly approved production setup.
+Current status: dedicated database, schema and Storage readers configured; Pro quota verified; first encrypted company export and isolated recovery pending. Historical preparation notes below precede the explicitly approved production setup.
 
 ## Source identity
 
@@ -41,3 +41,23 @@ No company records were changed. The earlier plan status above describes the pre
 Downloaded the root CA through the signed-in Pulse Dashboard and configured its local path. A certificate-verified local administrator connection activated the prepared database reader using a locally generated password and SCRAM verifier. An initial permission audit failed resolving an inaccessible extensions schema, after activation had committed; follow-up checks identified this correctly. The audit now checks relation OIDs in pg_class, avoiding schema-name resolution and inspecting all relation privileges. Dedicated login, verified TLS and the corrected effective privilege audit passed. The connection is stored in ignored .env.local; recovery material is in ignored backups/access with restrictive permissions. No password was printed or sent in tool arguments.
 
 The M-Tool Dashboard showed free-plan egress 5.48 / 5 GB and a grace-period-over warning. Do not initiate a company media export while this service availability warning is unresolved. File-read credential provisioning remains outstanding. No real archive or company-data recovery test has run.
+
+## Storage role provisioning (2026-10-02)
+
+Applied migration 20261002182243_backup_storage_reader. The new pulse_backup_storage_reader role is NOLOGIN, NOINHERIT, NOBYPASSRLS, and has no administrative flags. It receives SELECT only on storage.objects and storage.buckets, with SELECT-only policies, and authenticator can assume it for signed requests. No membership in anon/authenticated/application roles was granted. The migration transaction refuses effective writes, schema CREATE, or privileged routine execution. Existing company rows, originals, and existing policies were not changed.
+
+An owned networkless synthetic Supabase PostgreSQL container verified reads and rejected INSERT, UPDATE, DELETE, and TRUNCATE; its original fixture stayed unchanged. The container was removed after testing. Live catalog verification confirmed read grants, denied file writes, and all role flags false.
+
+The existing legacy JWT secret is still accepted by Pulse according to its Dashboard. It has not been revealed, changed, or rotated. The operator must place it into the private ignored file backups/access/storage-signing-secret.txt (mode 600; never chat/Git). Run `node --env-file=.env.local scripts/backup/configure-storage-token.mjs backups/access/storage-signing-secret.txt` to audit the role, mint a 24-hour custom-role token, verify a single original with HEAD only (no file-content download), and append the token to ignored .env.local. Setup refuses an existing token or changed configuration; it does not enable exports. This helper is syntax checked, but live token verification awaits the private signing input.
+### Live credential verification completed
+
+The operator supplied the existing signing secret through the private ignored local file. The helper initially refused .env.local mode 644; permissions were tightened to 600 without changing its contents. It then passed the dedicated role audit and a single authenticated Storage HEAD request and saved the 24-hour token locally. No original file bodies were downloaded, and no company records, files, or application signing keys were changed. Export and restore-validation flags remain disabled. Token renewal is required after expiry; the signing secret and token remain excluded from Git and backup archives.
+## Live preflight corrections (2026-10-02)
+
+Pulse moved to Agentic Labs Pro (org usygmyienkkkcridvbnv). Dashboard showed no quota exceeded and 0.454 / 250 GB egress. No billing settings were changed by this task.
+
+The initial live metadata preflight exposed pg_dump requiring table locks on the six excluded tables. Granting secret-row access to the BYPASSRLS reader was rejected. Migration 20261002184612 instead creates a separate NOBYPASSRLS schema-only reader, with restrictive SELECT false policies on those already RLS-enabled tables. Existing application roles are unaffected. It receives only SELECT and cannot mutate tables or advance sequences. The exporter independently checks all six restrictive policies, RLS and non-ownership before invoking pg_dump. A networkless PostgreSQL fixture verified schema export, denied sensitive reads even with PUBLIC policies and row_security=off, denied writes, and rejected a weakened policy.
+
+The original GRANT USAGE on hosted auth did not take effect: postgres has no grant option on that schema. Existing id/email/created_at column grants are intact. Migration 20261002185028 adds pulse_backup.auth_identities, a SECURITY INVOKER view containing only those three columns, accessible solely to the reader. No SECURITY DEFINER privilege escalation or secret column grants were added. The same isolated fixture verified view access without underlying schema access, with credential columns inaccessible. Live identity count and the reader's effective read-only audit passed. No company rows or originals changed.
+
+Use PULSE_BACKUP_SCHEMA_DATABASE_URL for the independently audited schema connection and /opt/homebrew/opt/libpq/bin/pg_dump for this computer. Local activation material stays in ignored mode-600 files. First-backup encryption uses an operator-authorized generated recovery key in backups/access/first-backup-recovery-key.txt; retain it separately from shared archive copies. UI exports remain disabled until company recovery validation completes.

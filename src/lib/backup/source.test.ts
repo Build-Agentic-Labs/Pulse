@@ -1,15 +1,17 @@
 import { afterEach, expect, it, vi } from "vitest";
-const state = vi.hoisted(() => ({ sql: [] as string[], table: "", fetched: false, missingFile: false, ended: false, sequenceDrift: false, sequenceReads: 0, sequenceWritable: false, privilegedRoutine: false }));
+const state = vi.hoisted(() => ({ sql: [] as string[], table: "", fetched: false, missingFile: false, ended: false, sequenceDrift: false, sequenceReads: 0, sequenceWritable: false, privilegedRoutine: false, schemaBypass:false, missingSchemaProtection:false }));
 vi.mock("node:child_process", () => ({ execFile: (_file: string, _args: string[], _options: unknown, callback: (e: null, out: string, err: string) => void) => callback(null, "-- disposable schema fixture", "") }));
 vi.mock("pg", () => ({ default: { Client: class {
   async connect() {} async end() { state.ended = true; }
   async query(sql: string) {
     state.sql.push(sql);
+    if (sql.includes("pg_get_expr(p.polqual")) return {rows:state.missingSchemaProtection?[]:['workspace_integrations','sop_approver_delivery_payloads','sop_submission_locks','push_subscriptions','transactional_emails','email_deliveries'].map(relname=>({relname}))};
     if (sql.includes("has_function_privilege")) return {rows:state.privilegedRoutine?[{proname:"unsafe_fixture"}]:[]};
     if(sql.includes("has_sequence_privilege")) return {rows:state.sequenceWritable?[{relname:"fixture_counter"}]:[]};
     if(sql.includes("relkind='S'") && sql.includes("order by")) return {rows:[{name:"fixture_counter"}]};
     if(sql.includes("last_value::text")) return {rows:[{value:state.sequenceDrift && state.sequenceReads++>0?"42":"41",is_called:true}]};
-    if (sql.includes("pg_roles")) return { rows: [{ rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false }] };
+    if(sql.startsWith('select rolbypassrls'))return {rows:[{rolbypassrls:state.schemaBypass,rolinherit:false}]};
+    if (sql.includes("pg_roles")) return { rows: [{ rolsuper: false, rolcreaterole: false, rolcreatedb: false }] };
     if (sql.includes("information_schema")) return { rows: [] };
     if (sql.includes("pg_export_snapshot")) return { rows: [{ id: "fixture-snapshot" }] };
     if (sql.includes("pg_tables")) return { rows: CRITICAL.map((tablename) => ({ tablename })) };
@@ -20,13 +22,13 @@ vi.mock("pg", () => ({ default: { Client: class {
     }
     if (sql.includes("storage.objects")) return { rows: state.missingFile ? [] : [{ bucket_id: "step-photos", name: "fixture.jpg", updated_at: "fixture", metadata: { size: 5 } }] };
     if (sql.includes("storage.buckets")) return { rows: [{ id: "step-photos", public: false }] };
-    if (sql.includes("auth.users")) return { rows: [{ id: "user-1", email: "fixture@example.test" }] };
+    if (sql.includes("auth.users") || sql.includes('pulse_backup.auth_identities')) return { rows: [{ id: "user-1", email: "fixture@example.test" }] };
     return { rows: [] };
   }
 } } }));
 import { CRITICAL, productionRecords, assertSourceBinding, rowStorageReferences, verifiedConnection } from "../../../scripts/backup/source.mjs";
-afterEach(() => { vi.unstubAllGlobals(); state.sql = []; state.missingFile = false; state.ended = false; state.sequenceDrift = false; state.sequenceReads = 0; state.sequenceWritable = false; state.privilegedRoutine = false; });
-const config = { databaseUrl: "postgres://fixture:fixture@db.fixture.supabase.co/fixture", storageUrl: "https://fixture.supabase.co", storageReadToken: "fixture-read-token", anonKey: "fixture-anon", pgDump: "fixture-pg-dump" };
+afterEach(() => { vi.unstubAllGlobals(); state.sql = []; state.missingFile = false; state.ended = false; state.sequenceDrift = false; state.sequenceReads = 0; state.sequenceWritable = false; state.privilegedRoutine = false; state.schemaBypass=false;state.missingSchemaProtection=false; });
+const config = { databaseUrl: "postgres://fixture:fixture@db.fixture.supabase.co/fixture", schemaDatabaseUrl:"postgres://schema_fixture:fixture@db.fixture.supabase.co/fixture", storageUrl: "https://fixture.supabase.co", storageReadToken: "fixture-read-token", anonKey: "fixture-anon", pgDump: "fixture-pg-dump" };
 it("exports database and original media using only read SQL and GET", async () => {
   const fetch = vi.fn(async (_input: unknown, _init: unknown) => { expect(state.sql).toContain("COMMIT"); return new Response(new Uint8Array([1, 2, 3, 4, 5])); }); vi.stubGlobal("fetch", fetch);
   const records = []; for await (const record of productionRecords(config, () => {})) records.push(record);
@@ -81,4 +83,16 @@ it("refuses inherited privileged routine access without invoking the routine",as
  await expect((async()=>{for await(const r of productionRecords(config,()=>{})) void r;})()).rejects.toThrow("privileged routines");
  expect(state.sql.some(sql=>sql.includes("unsafe_fixture("))).toBe(false);
  expect(state.ended).toBe(true);
+});
+it("refuses schema credentials that bypass sensitive-row protections",async()=>{
+ state.schemaBypass=true;
+ await expect((async()=>{for await(const r of productionRecords(config,()=>{})) void r;})()).rejects.toThrow("must not bypass");
+});
+it("refuses absent restrictive schema policies before file downloads",async()=>{
+ state.missingSchemaProtection=true;const fetch=vi.fn();vi.stubGlobal("fetch",fetch);
+ await expect((async()=>{for await(const r of productionRecords(config,()=>{})) void r;})()).rejects.toThrow("restrictive sensitive-row protection");
+ expect(fetch).not.toHaveBeenCalled();
+});
+it("requires separate live schema credentials",async()=>{
+ await expect((async()=>{for await(const r of productionRecords({...config,schemaDatabaseUrl:undefined},()=>{})) void r;})()).rejects.toThrow("schema-read connection");
 });

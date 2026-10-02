@@ -21,7 +21,7 @@ function status(state, extra = {}) {
 let password = '';
 for await (const chunk of process.stdin) password += chunk;
 try {
-  const config = { caCertificate: process.env.PULSE_BACKUP_CA_CERT, databaseUrl: process.env.PULSE_BACKUP_DATABASE_URL, pgDump: process.env.PULSE_BACKUP_PG_DUMP || 'pg_dump', storageUrl: process.env.NEXT_PUBLIC_SUPABASE_URL, storageReadToken: process.env.PULSE_BACKUP_STORAGE_READ_TOKEN, anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY };
+  const config = { caCertificate: process.env.PULSE_BACKUP_CA_CERT, databaseUrl: process.env.PULSE_BACKUP_DATABASE_URL, schemaDatabaseUrl: process.env.PULSE_BACKUP_SCHEMA_DATABASE_URL, pgDump: process.env.PULSE_BACKUP_PG_DUMP || 'pg_dump', storageUrl: process.env.NEXT_PUBLIC_SUPABASE_URL, storageReadToken: process.env.PULSE_BACKUP_STORAGE_READ_TOKEN, anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY };
   if (process.env.NODE_ENV === 'production' || process.env.PULSE_LOCAL_BACKUPS !== 'true' || process.env.PULSE_BACKUP_RESTORE_VALIDATED !== 'true' || Object.values(config).some((value) => !value)) throw new Error('Read-only setup and isolated restore validation are required.');
   await status('running');
   async function* records() {

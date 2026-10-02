@@ -11,6 +11,7 @@ export async function backupReadiness() {
   const problems: string[] = [];
   if (process.env.NODE_ENV === "production" || process.env.PULSE_LOCAL_BACKUPS !== "true") problems.push("Local backup runner is not enabled on this computer.");
   if (!process.env.PULSE_BACKUP_DATABASE_URL) problems.push("A dedicated read-only database connection is required.");
+  if (!process.env.PULSE_BACKUP_SCHEMA_DATABASE_URL) problems.push("A dedicated schema-read connection is required.");
   if (!process.env.PULSE_BACKUP_CA_CERT) problems.push("A trusted database CA certificate is required.");
   else try { await readFile(process.env.PULSE_BACKUP_CA_CERT, "utf8"); }
   catch { problems.push("The database CA certificate cannot be read."); }

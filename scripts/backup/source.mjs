@@ -58,6 +58,13 @@ export function verifiedConnection(config) {
   for (const key of [...url.searchParams.keys()]) if (/^ssl/i.test(key)) url.searchParams.delete(key);
   return { connectionString: url.toString(), ssl: { rejectUnauthorized: true, ...(config.caCertificate ? { ca: readFileSync(config.caCertificate, 'utf8') } : {}) } };
 }
+export async function assertSchemaReader(client) {
+  await assertReadOnly(client);
+  const flags=(await client.query('select rolbypassrls,rolinherit from pg_roles where rolname=current_user')).rows[0];
+  if(!flags || flags.rolbypassrls || flags.rolinherit) throw new Error('Schema reader must not bypass row security or inherit roles.');
+  const result=await client.query(`select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname=any($1::text[]) and c.relrowsecurity and c.relowner <> (select oid from pg_roles where rolname=current_user) and exists(select 1 from pg_policy p where p.polrelid=c.oid and not p.polpermissive and p.polcmd='r' and (select oid from pg_roles where rolname=current_user)=any(p.polroles) and pg_get_expr(p.polqual,p.polrelid)='false')`,[[...EXCLUDED]]);
+  if(result.rows.length!==EXCLUDED.size) throw new Error('Schema reader lacks restrictive sensitive-row protection.');
+}
 export async function* productionRecords(config, progress, dependencies = {}) {
   if (!dependencies.syntheticSource) assertSourceBinding(config);
   const Client = dependencies.Client || pg.Client;
@@ -75,7 +82,15 @@ export async function* productionRecords(config, progress, dependencies = {}) {
     const snapshot = (await client.query('select pg_export_snapshot() as id')).rows[0].id;
     const tables = (await client.query(`select tablename from pg_tables where schemaname='public' order by tablename`)).rows.map((row) => row.tablename);
     for (const table of CRITICAL) if (!tables.includes(table)) throw new Error(`Critical table missing: ${table}`);
-    const url = new URL(config.databaseUrl);
+    // Live pg_dump needs a distinct non-bypass role whose sensitive rows are RLS-denied.
+    const schemaUrl=config.schemaDatabaseUrl || (dependencies.syntheticSource ? config.databaseUrl : null);
+    if(!schemaUrl && !dependencies.dumpSchema) throw new Error('Dedicated schema-read connection is required.');
+    if(schemaUrl && !dependencies.syntheticSource) {
+      assertSourceBinding({...config,databaseUrl:schemaUrl});
+      const observer=new Client({...verifiedConnection({...config,databaseUrl:schemaUrl}),connectionTimeoutMillis:15000});
+      try{await observer.connect();await assertSchemaReader(observer);}finally{await observer.end();}
+    }
+    const url = new URL(schemaUrl || config.databaseUrl);
     // No password or connection string appears in process arguments.
     const schema = await (dependencies.dumpSchema || exec)(config.pgDump, ['--schema-only', '--schema=public', '--no-owner', `--snapshot=${snapshot}`, '--host', url.hostname, '--port', url.port || '5432', '--username', decodeURIComponent(url.username), '--dbname', url.pathname.slice(1)], {
       env: { ...process.env, PGPASSWORD: decodeURIComponent(url.password), PGSSLMODE: dependencies.syntheticSource ? (url.searchParams.get('sslmode') || 'require') : 'verify-full', ...(dependencies.syntheticSource ? {} : { PGSSLROOTCERT: config.caCertificate || 'system' }), PGOPTIONS: '-c default_transaction_read_only=on' }, maxBuffer: 32 * 1024 * 1024,
@@ -101,7 +116,7 @@ export async function* productionRecords(config, progress, dependencies = {}) {
       yield { type: 'table', name: table, rows: count };
     }
     // Explicit fields only: auth credentials never enter the archive.
-    const identities = await client.query('select id, email, created_at from auth.users order by id');
+    const identities = await client.query(`select id, email, created_at from ${dependencies.syntheticSource ? 'auth.users' : 'pulse_backup.auth_identities'} order by id`);
     for (const identity of identities.rows) yield { type: 'identity', identity };
     const objects = (await client.query('select bucket_id, name, updated_at, metadata from storage.objects order by bucket_id,name')).rows;
     const available = new Set(objects.map((object) => `${object.bucket_id}/${object.name}`));

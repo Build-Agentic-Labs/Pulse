@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download, HardDrive, Loader2 } from "lucide-react";
 
-type Backup = { id: string; state: string; phase: string; updatedAt: string; integrityVerified?: boolean; error?: string };
+type Backup = { id: string; state: string; phase: string; updatedAt: string; integrityVerified?: boolean; restoreTested?:boolean; error?: string };
 type Overview = { ready: boolean; problems: string[]; backups: Backup[] };
 export function BackupSettings() {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -42,7 +42,7 @@ export function BackupSettings() {
       {overview && !overview.ready ? <div className="mt-4 border-y border-line py-4">
         <p className="text-sm font-medium">Setup required — exports are locked</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-secondary">{overview.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>
-        <p className="mt-3 text-sm text-ink-secondary">No production backup has been run. Read-only access and an isolated restore rehearsal must be verified first.</p>
+        <p className="mt-3 text-sm text-ink-secondary">{overview.backups.length ? 'Existing backup progress is shown below. Setup checks must pass before starting another export.' : 'No production backup has been run. Read-only access and an isolated restore rehearsal must be verified first.'}</p>
       </div> : null}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <label className="text-sm">Backup password<input type="password" autoComplete="new-password" className="ui-input mt-1 w-full" value={password} onChange={(e) => setPassword(e.target.value)} disabled={!overview?.ready || running} /></label>
@@ -54,7 +54,7 @@ export function BackupSettings() {
     <section className="ui-settings-section">
       <h3 className="ui-settings-section-title">Backup history</h3>
       {!overview?.backups.length ? <p className="ui-settings-section-desc">No verified local backups yet.</p> : overview.backups.map((backup) => <div key={backup.id} className="flex items-center justify-between gap-4 border-b border-line py-4">
-        <div><p className="text-sm">{new Date(backup.updatedAt).toLocaleString()}</p><p role="status" className="mt-1 text-xs text-ink-secondary">{backup.state === "complete" ? "Integrity verified · restore not yet tested for this snapshot" : `${backup.state} · ${backup.phase || ""}`}</p>{backup.error ? <p className="mt-1 text-sm text-danger">{backup.error}</p> : null}</div>
+        <div><p className="text-sm">{new Date(backup.updatedAt).toLocaleString()}</p><p role="status" className="mt-1 text-xs text-ink-secondary">{backup.state === "complete" ? backup.restoreTested ? "Integrity verified · isolated restore verified" : "Integrity verified · restore not yet tested for this snapshot" : `${backup.state} · ${backup.phase || ""}`}</p>{backup.error ? <p className="mt-1 text-sm text-danger">{backup.error}</p> : null}</div>
         {backup.state === "complete" && backup.integrityVerified ? <a className="ui-btn-ghost" href={`/api/backups?download=${backup.id}`}><Download size={14} /> Save file</a> : null}
       </div>)}
     </section>

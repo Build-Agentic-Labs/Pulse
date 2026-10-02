@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-const state = vi.hoisted(() => ({ sql: [] as string[], table: "", fetched: false, missingFile: false, ended: false, sequenceDrift: false, sequenceReads: 0, sequenceWritable: false, privilegedRoutine: false, schemaBypass:false, missingSchemaProtection:false }));
+const state = vi.hoisted(() => ({ sql: [] as string[], table: "", fetched: false, missingFile: false, ended: false, sequenceDrift: false, sequenceReads: 0, sequenceWritable: false, privilegedRoutine: false, schemaBypass:false, missingSchemaProtection:false, fileCount:1 }));
 vi.mock("node:child_process", () => ({ execFile: (_file: string, _args: string[], _options: unknown, callback: (e: null, out: string, err: string) => void) => callback(null, "-- disposable schema fixture", "") }));
 vi.mock("pg", () => ({ default: { Client: class {
   async connect() {} async end() { state.ended = true; }
@@ -20,14 +20,14 @@ vi.mock("pg", () => ({ default: { Client: class {
       if (state.fetched) return { rows: [] }; state.fetched = true;
       return { rows: state.table === "step_photos" ? [{ row: { id: "photo-1", step_id: "step-1", storage_path: "fixture.jpg" } }] : state.table === "sops" ? [{ row: { id: "sop-1", title: "SOP fixture" } }] : [] };
     }
-    if (sql.includes("storage.objects")) return { rows: state.missingFile ? [] : [{ bucket_id: "step-photos", name: "fixture.jpg", updated_at: "fixture", metadata: { size: 5 } }] };
+    if (sql.includes("storage.objects")) return { rows: state.missingFile ? [] : Array.from({length:state.fileCount},(_,i)=>({ bucket_id: "step-photos", name:i ? `fixture-${i}.jpg` : "fixture.jpg", updated_at: "fixture", metadata: { size: 5 } })) };
     if (sql.includes("storage.buckets")) return { rows: [{ id: "step-photos", public: false }] };
     if (sql.includes("auth.users") || sql.includes('pulse_backup.auth_identities')) return { rows: [{ id: "user-1", email: "fixture@example.test" }] };
     return { rows: [] };
   }
 } } }));
 import { CRITICAL, productionRecords, assertSourceBinding, rowStorageReferences, verifiedConnection } from "../../../scripts/backup/source.mjs";
-afterEach(() => { vi.unstubAllGlobals(); state.sql = []; state.missingFile = false; state.ended = false; state.sequenceDrift = false; state.sequenceReads = 0; state.sequenceWritable = false; state.privilegedRoutine = false; state.schemaBypass=false;state.missingSchemaProtection=false; });
+afterEach(() => { vi.unstubAllGlobals(); state.sql = []; state.missingFile = false; state.ended = false; state.sequenceDrift = false; state.sequenceReads = 0; state.sequenceWritable = false; state.privilegedRoutine = false; state.schemaBypass=false;state.missingSchemaProtection=false;state.fileCount=1; });
 const config = { databaseUrl: "postgres://fixture:fixture@db.fixture.supabase.co/fixture", schemaDatabaseUrl:"postgres://schema_fixture:fixture@db.fixture.supabase.co/fixture", storageUrl: "https://fixture.supabase.co", storageReadToken: "fixture-read-token", anonKey: "fixture-anon", pgDump: "fixture-pg-dump" };
 it("exports database and original media using only read SQL and GET", async () => {
   const fetch = vi.fn(async (_input: unknown, _init: unknown) => { expect(state.sql).toContain("COMMIT"); return new Response(new Uint8Array([1, 2, 3, 4, 5])); }); vi.stubGlobal("fetch", fetch);
@@ -95,4 +95,14 @@ it("refuses absent restrictive schema policies before file downloads",async()=>{
 });
 it("requires separate live schema credentials",async()=>{
  await expect((async()=>{for await(const r of productionRecords({...config,schemaDatabaseUrl:undefined},()=>{})) void r;})()).rejects.toThrow("schema-read connection");
+});
+it('bounds concurrent originals at four and preserves inventory order',async()=>{
+ state.fileCount=5;let active=0,maximum=0;
+ vi.stubGlobal('fetch',async()=>{active++;maximum=Math.max(maximum,active);await new Promise(r=>setTimeout(r,5));active--;return new Response(new Uint8Array(5));});
+ const files=[];for await(const r of productionRecords(config,()=>{}))if(r.type==='file-start')files.push(r.path);
+ expect(maximum).toBe(4);expect(files).toEqual(['fixture.jpg','fixture-1.jpg','fixture-2.jpg','fixture-3.jpg','fixture-4.jpg']);
+});
+it('refuses oversized response bodies instead of unbounded small-file buffering',async()=>{
+ vi.stubGlobal('fetch',async()=>new Response(new Uint8Array(8*1024*1024+1)));
+ await expect((async()=>{for await(const r of productionRecords(config,()=>{}))void r;})()).rejects.toThrow('bounded download allowance');
 });

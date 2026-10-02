@@ -127,19 +127,45 @@ export async function* productionRecords(config, progress, dependencies = {}) {
     // before potentially slow media reads so backup does not hold back vacuum.
     await client.query('COMMIT');
     progress('files');
-    for (const object of objects) {
+    const bufferLimit=8*1024*1024;
+    const fileUrl=object=>new URL(`/storage/v1/object/authenticated/${encodeURIComponent(object.bucket_id)}/${object.name.split('/').map(encodeURIComponent).join('/')}`,config.storageUrl);
+    async function smallOriginal(object,signal){
+      const response=await (dependencies.fetch || fetch)(fileUrl(object),{method:'GET',redirect:'error',headers:{Authorization:`Bearer ${config.storageReadToken}`,apikey:config.anonKey},signal:AbortSignal.any([signal,AbortSignal.timeout(120000)])});
+      if(!response.ok||!response.body)throw new Error('A storage file could not be read. Backup incomplete.');
+      const chunks=[];let bytes=0;
+      for await(const chunk of response.body){bytes+=chunk.length;if(bytes>bufferLimit)throw new Error('Storage file exceeds its bounded download allowance.');chunks.push(Buffer.from(chunk));}
+      if(bytes!==Number(object.metadata.size))throw new Error('A storage file changed size. Backup incomplete.');
+      return Buffer.concat(chunks);
+    }
+    async function* fileRecords(object,buffered){
       const target = new URL(`/storage/v1/object/authenticated/${encodeURIComponent(object.bucket_id)}/${object.name.split('/').map(encodeURIComponent).join('/')}`, config.storageUrl);
-      const response = await (dependencies.fetch || fetch)(target, { method: 'GET', redirect: 'error', headers: { Authorization: `Bearer ${config.storageReadToken}`, apikey: config.anonKey }, signal: AbortSignal.timeout(120000) });
-      if (!response.ok || !response.body) throw new Error('A storage file could not be read. Backup incomplete.');
+      const response = buffered ? null : await (dependencies.fetch || fetch)(target, { method: 'GET', redirect: 'error', headers: { Authorization: `Bearer ${config.storageReadToken}`, apikey: config.anonKey }, signal: AbortSignal.timeout(120000) });
+      if (!buffered && (!response.ok || !response.body)) throw new Error('A storage file could not be read. Backup incomplete.');
       let bytes = 0, chunk = 0;
       const { createHash } = await import('node:crypto'); const hash = createHash('sha256');
       yield { type: 'file-start', bucket: object.bucket_id, path: object.name, metadata: object.metadata };
-      for await (const data of response.body) {
+      for await (const data of buffered ? [buffered] : response.body) {
         bytes += data.length; hash.update(data);
         yield { type: 'file-chunk', chunk: chunk++, data: Buffer.from(data).toString('base64') };
       }
       if (object.metadata?.size != null && Number(object.metadata.size) !== bytes) throw new Error('A storage file changed size. Backup incomplete.');
       yield { type: 'file-end', bytes, chunks: chunk, sha256: hash.digest('hex') };
+    }
+    // Four bounded small-file reads reduce round trips; larger/unknown files stream singly.
+    // At most 32 MiB of original bytes are buffered, and archive order stays deterministic.
+    for(let index=0;index<objects.length;){
+      const batch=[];
+      for(const object of objects.slice(index,index+4)){
+        const size=object.metadata?.size;
+        if(size==null||!Number.isFinite(Number(size))||Number(size)<0||Number(size)>bufferLimit)break;
+        batch.push(object);
+      }
+      if(!batch.length){yield* fileRecords(objects[index++]);continue;}
+      const controller=new AbortController();let buffers;
+      try{buffers=await Promise.all(batch.map(object=>smallOriginal(object,controller.signal)));}
+      catch(error){controller.abort();throw error;}
+      for(let i=0;i<batch.length;i++)yield* fileRecords(batch[i],buffers[i]);
+      index+=batch.length;
     }
     // Sequences are not MVCC snapshots. Refuse drift rather than claim consistency.
     if (digest(JSON.stringify(await sequenceState(client))) !== digest(JSON.stringify(recovery.sequences))) throw new Error('Sequence counters changed during backup. Retry during a quiet period.');

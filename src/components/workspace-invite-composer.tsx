@@ -25,7 +25,7 @@ const ACCESS_OPTIONS = [
 ] as const;
 const DEPARTMENT_ROLE_OPTIONS = [
   { value: "none", label: "No duty" },
-  ...(["author", "reviewer", "approver"] as const).map((role) => ({
+  ...(["author", "approver"] as const).map((role) => ({
     value: role,
     label: DEPT_ROLE_ACCESS[role].label,
     description: DEPT_ROLE_ACCESS[role].description,
@@ -96,7 +96,7 @@ export function WorkspaceInviteComposer({
     () => new Map(departments.map((department) => [department.id, department.name])),
     [departments],
   );
-  const summary = describeInviteEntitlements(entitlements, projectNames, departmentNames);
+  const summary = describeInviteEntitlements(entitlements, projectNames, departmentNames, new Set(departments.filter((department) => department.isQualityGate).map((department) => department.id)));
 
   function reset() {
     setOpen(false);
@@ -380,7 +380,7 @@ export function WorkspaceInviteComposer({
               <div className="mt-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary">SOP workflow duties</p>
                 <p className="mt-1 text-[11px] text-ink-secondary">
-                  These duties are cumulative: Approve includes Review and Create. Quality-gate approval remains the final release approval.
+                  Department members can author SOPs and approve when assigned. Final Quality approval is available only for Quality members.
                 </p>
                 <div className="mt-2 overflow-hidden rounded-lg border border-line bg-surface">
                   {departments.map((department, index) => (
@@ -398,9 +398,9 @@ export function WorkspaceInviteComposer({
                       <ThemedSelect
                         ariaLabel={`${department.name} SOP duty`}
                         value={
-                          entitlements.departmentAccess.find((grant) => grant.departmentId === department.id)?.role ?? "none"
+                          entitlements.departmentAccess.find((grant) => grant.departmentId === department.id)?.role === "approver" && department.isQualityGate ? "approver" : entitlements.departmentAccess.some((grant) => grant.departmentId === department.id) ? "author" : "none"
                         }
-                        options={DEPARTMENT_ROLE_OPTIONS}
+                        options={DEPARTMENT_ROLE_OPTIONS.filter((option) => department.isQualityGate || option.value !== "approver")}
                         onChange={(value) => setDepartmentRole(department.id, value as DeptRole | "none")}
                         triggerClassName="h-9 px-3"
                       />

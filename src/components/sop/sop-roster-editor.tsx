@@ -1,11 +1,10 @@
 "use client";
 
-import { Check, LockKeyhole, Loader2, MailPlus, Plus, Trash2, X } from "lucide-react";
+import { Check, LockKeyhole, Loader2, Plus, Trash2, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { ThemedSelect } from "@/components/themed-select";
-import { canSignReview, type Department, type DeptRole } from "@/domain/departments";
+import { type Department, type DeptRole } from "@/domain/departments";
 import type { SopApproval } from "@/domain/sop/schema";
-import { signerAfterDepartmentChange } from "@/domain/sop/approval-mapping";
 import { buildApproverOptions } from "@/domain/sop/roster-options";
 import { canNominateIntoDepartment, type NominationResponse } from "@/domain/workspace/reviewer-nomination";
 import { ConvertedApprovalsNotice } from "./converted-approvals-notice";
@@ -15,7 +14,6 @@ import {
   isBlockingSeat,
   listProfileNames,
   removeSeat,
-  moveSeat,
   upsertSeat,
   type SopReviewSeat,
 } from "@/lib/sop/review";
@@ -30,20 +28,22 @@ interface RosterMember {
   positionTitle: string;
   deptRole: DeptRole;
   pendingInviteAt: string | null;
+  departmentIds: string[];
 }
 
 interface RosterEditorProps {
   sopId: string;
+  authorId?: string;
   departments: Department[];
   seats: SopReviewSeat[];
   /**
    * The caller's department roles. A seat whose department appears here (and is not the Quality
-   * gate) offers "Invite a reviewer" — the database re-checks membership on submit.
+   * gate) offers "Invite an approver" — the database re-checks membership on submit.
    */
   myDeptRoles?: ReadonlyMap<string, DeptRole>;
   /**
    * The SOP's owning department. When the caller belongs to it, every non-Quality seat offers
-   * "Invite a reviewer" too — the nominee joins that seat's department, never this one — and the
+   * "Invite an approver" too — the nominee joins that seat's department, never this one — and the
    * database re-checks the seat and the caller's edit access on submit.
    */
   owningDepartmentId?: string;
@@ -72,6 +72,7 @@ interface RosterEditorProps {
  */
 export function SopRosterEditor({
   sopId,
+  authorId,
   departments,
   seats,
   myDeptRoles,
@@ -101,7 +102,7 @@ export function SopRosterEditor({
   // One batched pass for any number of departments: a single department_members
   // query + a single profiles query, instead of 2 round trips per seat (N+1).
   const loadMembersForDepartmentIds = useCallback(async (departmentIds: readonly string[]) => {
-    const ids = [...new Set(departmentIds.filter(Boolean))];
+    const ids = [...new Set([...departmentIds, ...departments.map((department) => department.id)].filter(Boolean))];
     if (ids.length === 0) return;
     try {
       const rows = await listMembersForDepartments(ids);
@@ -112,8 +113,9 @@ export function SopRosterEditor({
           next.set(
             departmentId,
             rows
-              .filter((row) => row.departmentId === departmentId)
+              .filter((row, index, all) => row.userId !== authorId && all.findIndex((candidate) => candidate.userId === row.userId) === index)
               .map((row) => ({
+                departmentIds: rows.filter((membership) => membership.userId === row.userId).map((membership) => membership.departmentId),
                 userId: row.userId,
                 name: names.get(row.userId) || "Unnamed member",
                 positionTitle: row.positionTitle,
@@ -127,12 +129,7 @@ export function SopRosterEditor({
     } catch (caught) {
       setError(getErrorMessage(caught));
     }
-  }, []);
-
-  const loadMembers = useCallback(
-    (departmentId: string) => loadMembersForDepartmentIds([departmentId]),
-    [loadMembersForDepartmentIds],
-  );
+  }, [departments, authorId]);
 
   useEffect(() => {
     void loadMembersForDepartmentIds(workflowSeats.map((seat) => seat.departmentId));
@@ -160,20 +157,6 @@ export function SopRosterEditor({
   }
 
   /**
-   * "Invite a reviewer" from the add-a-department row. The database admits a cross-department
-   * nomination only for a department already seated on this SOP, so seat it first (unstaffed,
-   * exactly as conversion does) and open the invite form on the new seat row.
-   */
-  async function inviteFromDraftRow(departmentId: string) {
-    await guarded("add", async () => {
-      await upsertSeat({ sopId, departmentId, rasic: "responsible", signerId: null });
-      setAdding(false);
-      setDraft({ departmentId: "", signerId: "" });
-      setInvitingFor(departmentId);
-    });
-  }
-
-  /**
    * After a nomination: reload the roster and, when the nominee is selectable, seat them.
    *
    * Deliberately does NOT route through `guarded` (which no-ops while another roster write is
@@ -182,15 +165,19 @@ export function SopRosterEditor({
    * with the roster still unseated and no error shown anywhere.
    */
   async function handleNominated(seat: SopReviewSeat | null, departmentId: string, result: NominationResponse) {
+    if (result.deferred) {
+      await onChanged(); setInvitingFor(null); setAdding(false); setDraft({ departmentId: "", signerId: "" }); return;
+    }
     await loadMembersForDepartmentIds([departmentId]);
     if (!result.seated || !result.userId) return;
-    if (!seat) {
-      setDraft((prev) => ({ ...prev, departmentId, signerId: result.userId ?? "" }));
-      return;
-    }
     try {
-      await upsertSeat({ ...seat, rasic: "responsible", signerId: result.userId });
+      await upsertSeat({ ...(seat ?? { sopId, departmentId }), rasic: "responsible", signerId: result.userId });
       await onChanged();
+      setInvitingFor(null);
+      if (!seat) {
+        setAdding(false);
+        setDraft({ departmentId: "", signerId: "" });
+      }
     } catch (caught) {
       // The invitation went out; only the seat write failed. Surface it where the author is
       // looking (the form) instead of a success line, and keep the roster's error banner in sync.
@@ -198,17 +185,6 @@ export function SopRosterEditor({
       setError(message);
       throw new Error(message);
     }
-  }
-
-  /** Fetch current eligibility and move the seat in one database update. */
-  async function changeSeatDepartment(seat: SopReviewSeat, nextDepartmentId: string) {
-    if (!nextDepartmentId || nextDepartmentId === seat.departmentId) return;
-    await guarded(`department-${seat.departmentId}`, async () => {
-      const nextMembers = await listMembersForDepartments([nextDepartmentId]);
-      const nextMemberIds = nextMembers.filter((member) => canSignReview(member.deptRole)).map((member) => member.userId);
-      await moveSeat(sopId, seat.departmentId, nextDepartmentId,
-        signerAfterDepartmentChange(seat.signerId, nextMemberIds));
-    });
   }
 
   const seatedDepartmentIds = useMemo(
@@ -233,270 +209,116 @@ export function SopRosterEditor({
     });
   }
 
+  const allMembers = members.values().next().value ?? [];
+  const newApproverMembers = allMembers.filter((member) =>
+    !workflowSeats.some((seat) => seat.signerId === member.userId),
+  );
+  const inviteDepartments = available.filter((department) => canNominateInto(department.id));
+  const memberDescription = (member: RosterMember | undefined) => member ? [
+    member.positionTitle,
+    ...member.departmentIds.map((id) => departments.find((department) => department.id === id)?.name),
+  ].filter(Boolean).join(" · ") : "";
+  const personOptions = (people: RosterMember[], signerId: string | null, placeholder: string) =>
+    buildApproverOptions({ members: people.map((member) => ({ ...member, positionTitle: memberDescription(member) })), signerId, placeholder, now: new Date() });
+
   return (
     <div className="space-y-4">
     <section className="ui-data-table-frame">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
-        <h2 className="ui-setup-section-title">Department approvals</h2>
-        {available.length > 0 ? (
-          <button
-            type="button"
-            className="ui-btn-ghost h-8 gap-1.5 px-2"
-            aria-expanded={adding}
-            onClick={() => {
-              setAdding((current) => !current);
-              setDraft({ departmentId: "", signerId: "" });
-              setInvitingFor(null);
-            }}
-          >
-            {adding ? <X size={14} /> : <Plus size={14} />}
-            {adding ? "Cancel" : "Add approver"}
-          </button>
-        ) : null}
+        <h2 className="ui-setup-section-title">Approvers</h2>
+        {available.length > 0 || adding ? <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-2" aria-expanded={adding}
+          onClick={() => { setAdding((current) => !current); setDraft({ departmentId: "", signerId: "" }); setInvitingFor(null); }}>
+          {adding ? <X size={14} /> : <Plus size={14} />}{adding ? "Cancel" : "Add approver"}
+        </button> : null}
       </div>
-
-      {error ? (
-        <div className="border-b border-line px-4 py-3">
-          <p className="ui-section-subtitle text-danger">{error}</p>
-        </div>
-      ) : null}
-
-      <div className="ui-table-scroll">
-        <table className="w-full min-w-[620px] table-fixed border-collapse text-left">
-          <colgroup>
-            <col className="w-[38%]" />
-            <col />
-            <col className="w-14" />
-          </colgroup>
-          <thead>
-            <tr className="border-b border-line">
-              <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Department</th>
-              <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Required approver</th>
-              <th scope="col" className="px-2 py-3"><span className="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {workflowSeats.map((seat) => {
-              const department = departments.find((item) => item.id === seat.departmentId);
-              const isQualityReviewSeat = Boolean(department?.isQualityGate);
-              const approverOptions = buildApproverOptions({
-                members: members.get(seat.departmentId) ?? [],
-                // `members` gets a key for every department the mount effect requests, even one
-                // with no members, so `.has` — not `?? []` on the signer — is the reliable "have
-                // we loaded this department yet" check. Without it, every seated row renders the
-                // disabled "No longer in department" placeholder for the instant between mount
-                // and the members fetch resolving, because an empty and an unloaded Map value are
-                // indistinguishable through `?? []` alone.
-                signerId: members.has(seat.departmentId) ? seat.signerId : null,
-                placeholder: "Choose an approver…",
-                now: new Date(),
-              });
-              const nominatable = canNominateInto(seat.departmentId);
-              return (
-                <Fragment key={seat.departmentId}>
-                <tr className="group border-b border-line/70 transition-colors hover:bg-surface-hover">
-                  <td className="px-5 py-2.5 align-middle">
-                    <ThemedSelect
-                      variant="sop"
-                      className="w-full"
-                      triggerClassName="ui-sop-select-inline"
-                      ariaLabel={`Department for the ${department?.name ?? "unknown"} approval`}
-                      value={seat.departmentId}
-                      disabled={busy !== null}
-                      options={[
-                        ...(department
-                          ? [{
-                              value: department.id,
-                              label: isQualityReviewSeat
-                                ? `${department.name} · Additional reviewer`
-                                : department.name,
-                            }]
-                          : [{ value: seat.departmentId, label: "Unknown" }]),
-                        ...available.map((option) => ({
-                          value: option.id,
-                          label: option.isQualityGate
-                            ? `${option.name} · Additional reviewer`
-                            : option.name,
-                        })),
-                      ]}
-                      onChange={(value) => void changeSeatDepartment(seat, value)}
-                    />
-                  </td>
-                  <td className="px-5 py-2.5 align-middle">
-                    <ThemedSelect
-                      variant="sop"
-                      className="w-full"
-                      triggerClassName="ui-sop-select-inline"
-                      ariaLabel={`Required approver for ${department?.code ?? "department"}`}
-                      value={seat.signerId ?? ""}
-                      options={approverOptions}
-                      disabled={busy !== null}
-                      onChange={(value) =>
-                        void guarded(`approver-${seat.departmentId}`, () =>
-                          upsertSeat({ ...seat, rasic: "responsible", signerId: value || null }),
-                        )
-                      }
-                    />
-                    {nominatable ? (
-                      <button
-                        type="button"
-                        className="ui-btn-ghost mt-1.5 h-7 gap-1 px-1.5 text-[11px]"
-                        aria-label={`Invite a reviewer for ${department?.code ?? "department"}`}
-                        aria-expanded={invitingFor === seat.departmentId}
-                        disabled={busy !== null}
-                        onClick={() => setInvitingFor((current) => (current === seat.departmentId ? null : seat.departmentId))}
-                      >
-                        <MailPlus size={12} />
-                        Invite a reviewer
-                      </button>
-                    ) : null}
-                    {isQualityReviewSeat ? (
-                      <p className="mt-1.5 text-[11px] leading-4 text-ink-tertiary">
-                        Normal review loop. A different Quality approver completes final approval.
-                      </p>
-                    ) : null}
-                  </td>
-                  <td className="px-2 py-2.5 align-middle">
-                    <button
-                      type="button"
-                      aria-label={`Remove ${department?.code ?? "department"} from the roster`}
-                      className="ui-btn-ghost h-8 w-8 p-0 text-ink-tertiary opacity-50 hover:text-danger group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-40"
-                      title="Remove department"
-                      disabled={busy !== null}
-                      onClick={() => void guarded(`remove-${seat.departmentId}`, () => removeSeat(sopId, seat.departmentId))}
-                    >
-                      {busy === `remove-${seat.departmentId}` ? (
-                        <Loader2 size={14} className="mx-auto animate-spin" />
-                      ) : (
-                        <Trash2 size={14} className="mx-auto" />
-                      )}
-                    </button>
-                  </td>
-                </tr>
-                {invitingFor === seat.departmentId ? (
-                  <tr className="border-b border-line/70 bg-canvas/55">
-                    <td colSpan={3} className="px-5 py-2.5">
-                      <ReviewerInviteForm
-                        sopId={sopId}
-                        departmentId={seat.departmentId}
-                        departmentCode={department?.code ?? ""}
-                        onNominated={(result) => handleNominated(seat, seat.departmentId, result)}
-                        onCancel={() => setInvitingFor(null)}
-                      />
-                    </td>
-                  </tr>
-                ) : null}
-                </Fragment>
-              );
-            })}
-
-            <tr className="border-b border-line/70">
-              <td className="px-5 py-3.5 align-middle">
-                <span className={`block truncate text-[13px] font-medium ${
-                  qualityDepartment ? "text-ink" : "text-danger"
-                }`}>
-                  {qualityDepartment?.name ?? "Quality department not assigned"}
-                </span>
-              </td>
-              <td className="px-5 py-3.5 align-middle">
-                <span className="block text-[13px] text-ink-secondary">Quality approvers</span>
-                <span className="mt-0.5 block text-[11px] text-ink-tertiary">Final approver</span>
-              </td>
-              <td className="px-2 py-3.5 align-middle text-center">
-                <LockKeyhole size={14} className="mx-auto text-ink-tertiary" aria-label="Managed automatically" />
-              </td>
-            </tr>
-
-            {adding && available.length > 0 ? (
-              <tr className="bg-canvas/55">
-                <td className="px-5 py-2.5 align-middle">
-                  <ThemedSelect
-                    variant="sop"
-                    ariaLabel="Department to add"
-                    value={draft.departmentId}
-                    disabled={busy !== null}
-                    menuMaxHeight={420}
-                    options={[
-                      { value: "", label: "Add a department…" },
-                      ...available.map((department) => ({
-                        value: department.id,
-                        label: `${department.code} · ${department.name}${
-                          department.isQualityGate ? " · Additional reviewer" : ""
-                        }`,
-                      })),
-                    ]}
-                    onChange={(departmentId) => {
-                      setDraft((prev) => ({ ...prev, departmentId, signerId: "" }));
-                      void loadMembers(departmentId);
-                    }}
-                  />
+      {error ? <div className="border-b border-line px-5 py-3"><p role="alert" className="ui-section-subtitle text-danger">{error}</p></div> : null}
+      <table className="w-full table-fixed border-collapse text-left">
+        <colgroup><col /><col className="w-14" /></colgroup>
+        <thead><tr className="border-b border-line">
+          <th scope="col" className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Required approver</th>
+          <th scope="col" className="px-2 py-3"><span className="sr-only">Actions</span></th>
+        </tr></thead>
+        <tbody>
+          {workflowSeats.filter((seat) => !(adding && draft.departmentId === seat.departmentId)).map((seat) => {
+            const department = departments.find((item) => item.id === seat.departmentId);
+            const people = members.get(seat.departmentId) ?? [];
+            const selected = people.find((member) => member.userId === seat.signerId);
+            const options = personOptions(people, members.has(seat.departmentId) ? seat.signerId : null, "Choose an approver…");
+            const nominatable = canNominateInto(seat.departmentId);
+            return <Fragment key={seat.departmentId}>
+              <tr className="group border-b border-line/70">
+                <td className="px-5 py-3 align-middle">
+                  {seat.signerId || seat.nomination ? <span className="block text-[13px] font-medium text-ink" aria-label={`Saved approver for ${department?.code ?? "department"}`}>
+                    {selected?.name ?? seat.nomination?.email ?? (members.has(seat.departmentId) ? "No longer an SOP member" : "Loading approver…")}
+                  </span> : <ThemedSelect variant="sop" className="w-full" triggerClassName="ui-sop-select-inline"
+                    ariaLabel={`Required approver for ${department?.code ?? "department"}`} searchable searchPlaceholder="Search by name…" value={seat.signerId ?? ""}
+                    selectedLabel={selected?.name} disabled={busy !== null}
+                    options={[...options, ...(nominatable ? [{ value: "__invite__", label: "Add an approver…", alwaysVisible: true, description: "Add someone who is not on the list", group: "New person" }] : [])]}
+                    onChange={(value) => {
+                      if (value === "__invite__") { setInvitingFor(seat.departmentId); return; }
+                      void guarded(`approver-${seat.departmentId}`, () => upsertSeat({ ...seat, rasic: "responsible", signerId: value || null }));
+                    }} />}
+                  {seat.nomination ? <p className="mt-1 text-[11px] text-ink-tertiary">{seat.nomination.positionTitle} · {department?.name}{!seat.nomination.deliveredAt ? " · Invitation pending · sent with review" : selected?.pendingInviteAt ? " · Invited · waiting to join" : ""}</p> : null}
+                  {selected ? <p className="mt-1 text-[11px] leading-4 text-ink-tertiary">{memberDescription(selected)}</p> : null}
+                  {department?.isQualityGate ? <p className="mt-1 text-[11px] leading-4 text-ink-tertiary">Normal review loop. A different Quality approver completes final approval.</p> : null}
                 </td>
-                <td className="px-5 py-2.5 align-middle">
-                  <ThemedSelect
-                    variant="sop"
-                    ariaLabel="Required departmental approver"
-                    value={draft.signerId}
-                    disabled={busy !== null || !draft.departmentId}
-                    options={buildApproverOptions({
-                      members: members.get(draft.departmentId) ?? [],
-                      signerId: null,
-                      placeholder: "Select approver…",
-                      now: new Date(),
-                    })}
-                    onChange={(signerId) => setDraft((prev) => ({ ...prev, signerId }))}
-                  />
-                  {draft.departmentId && canNominateInto(draft.departmentId) ? (
-                    <button
-                      type="button"
-                      className="ui-btn-ghost mt-1.5 h-7 gap-1 px-1.5 text-[11px]"
-                      aria-label={`Invite a reviewer for ${departments.find((item) => item.id === draft.departmentId)?.code ?? "department"}`}
-                      aria-expanded={invitingFor === draft.departmentId}
-                      disabled={busy !== null}
-                      onClick={() => void inviteFromDraftRow(draft.departmentId)}
-                    >
-                      <MailPlus size={12} />
-                      Invite a reviewer
-                    </button>
-                  ) : null}
-                </td>
-                <td className="px-2 py-2.5 align-middle">
-                  <button
-                    type="button"
-                    className="ui-btn-primary h-8 w-8 p-0 disabled:opacity-40"
-                    aria-label="Add departmental approver"
-                    title="Add departmental approver"
-                    disabled={
-                      busy !== null ||
-                      !draft.departmentId ||
-                      !draft.signerId
-                    }
-                    onClick={() =>
-                      void guarded("add", async () => {
-                        await upsertSeat({
-                          sopId,
-                          departmentId: draft.departmentId,
-                          rasic: "responsible",
-                          signerId: draft.signerId,
-                        });
-                        setAdding(false);
-                        setDraft({ departmentId: "", signerId: "" });
-                      })
-                    }
-                  >
-                    {busy === "add" ? (
-                      <Loader2 size={14} className="mx-auto animate-spin" />
-                    ) : (
-                      <Check size={14} className="mx-auto" />
-                    )}
+                <td className="px-2 py-3 align-middle">
+                  <button type="button" aria-label={`Remove ${department?.code ?? "department"} from the roster`} title="Remove approver"
+                    className="ui-btn-ghost h-8 w-8 p-0 text-ink-tertiary hover:text-danger disabled:opacity-40" disabled={busy !== null}
+                    onClick={() => void guarded(`remove-${seat.departmentId}`, () => removeSeat(sopId, seat.departmentId))}>
+                    {busy === `remove-${seat.departmentId}` ? <Loader2 size={14} className="mx-auto animate-spin" /> : <Trash2 size={14} className="mx-auto" />}
                   </button>
                 </td>
               </tr>
-            ) : null}
-
-          </tbody>
-        </table>
-      </div>
-
+              {invitingFor === seat.departmentId ? <tr className="border-b border-line/70"><td colSpan={2} className="px-5 pb-3">
+                <ReviewerInviteForm sopId={sopId} departmentId={seat.departmentId} departmentCode={department?.code ?? ""}
+                  onNominated={(result) => handleNominated(seat, seat.departmentId, result)} onCancel={() => setInvitingFor(null)} />
+              </td></tr> : null}
+            </Fragment>;
+          })}
+          <tr className="border-b border-line/70">
+            <td className="px-5 py-3.5"><span className={`block text-[13px] ${qualityDepartment ? "text-ink" : "text-danger"}`}>
+              {qualityDepartment ? "Quality final approver" : "Quality department not assigned"}</span>
+              <span className="mt-0.5 block text-[11px] text-ink-tertiary">Final approver</span>
+            </td>
+            <td className="px-2 py-3.5"><LockKeyhole size={14} className="mx-auto text-ink-tertiary" aria-label="Managed automatically" /></td>
+          </tr>
+          {adding ? <tr className={invitingFor === "__new__" ? undefined : "bg-canvas/55"}>
+            <td colSpan={invitingFor === "__new__" ? 2 : 1} className="px-5 py-3 align-middle">
+              {invitingFor !== "__new__" ? <ThemedSelect variant="sop" className="w-full" ariaLabel="Required departmental approver" searchable searchPlaceholder="Search by name…" value={draft.signerId}
+                disabled={busy !== null} selectedLabel={allMembers.find((member) => member.userId === draft.signerId)?.name}
+                options={[...personOptions(newApproverMembers, null, "Choose an approver…").map((option) => {
+                  const member = newApproverMembers.find((person) => person.userId === option.value);
+                  return member && !member.departmentIds.some((id) => available.some((department) => department.id === id))
+                    ? { ...option, disabled: true, description: "Their department already has a required approver" }
+                    : option;
+                }),
+                  ...(inviteDepartments.length ? [{ value: "__invite__", label: "Add an approver…", alwaysVisible: true, description: "Add someone who is not on the list", group: "New person" }] : [])]}
+                onChange={(signerId) => {
+                  if (signerId === "__invite__") { setInvitingFor("__new__"); setDraft({ departmentId: "", signerId: "" }); return; }
+                  const member = newApproverMembers.find((person) => person.userId === signerId);
+                  const linkedDepartments = member?.departmentIds.filter((id) => available.some((department) => department.id === id)) ?? [];
+                  const departmentId = linkedDepartments.includes(owningDepartmentId ?? "") ? owningDepartmentId! : linkedDepartments[0] ?? "";
+                  setInvitingFor(null); setDraft({ departmentId, signerId });
+                }} /> : null}
+              {draft.signerId ? <p className="mt-1 text-[11px] text-ink-tertiary">{memberDescription(allMembers.find((member) => member.userId === draft.signerId))}</p> : null}
+              {invitingFor === "__new__" ? <div className="py-2">
+                <ReviewerInviteForm sopId={sopId} departmentId={draft.departmentId}
+                  departmentCode={departments.find((department) => department.id === draft.departmentId)?.code ?? ""}
+                  departments={inviteDepartments} onDepartmentChange={(departmentId) => setDraft({ departmentId, signerId: "" })}
+                  onNominated={(result) => handleNominated(null, draft.departmentId, result)} onCancel={() => setInvitingFor(null)} />
+              </div> : null}
+            </td>
+            {invitingFor !== "__new__" ? <td className="px-2 py-3 align-middle">
+              <button type="button" className="ui-btn-primary h-8 w-8 p-0 disabled:opacity-40" aria-label="Add departmental approver"
+                disabled={busy !== null || !draft.departmentId || !draft.signerId} onClick={() => void guarded("add", async () => {
+                  await upsertSeat({ sopId, departmentId: draft.departmentId, rasic: "responsible", signerId: draft.signerId });
+                  setAdding(false); setDraft({ departmentId: "", signerId: "" }); setInvitingFor(null);
+                })}>{busy === "add" ? <Loader2 size={14} className="mx-auto animate-spin" /> : <Check size={14} className="mx-auto" />}</button>
+            </td> : null}
+          </tr> : null}
+        </tbody>
+      </table>
     </section>
 
     {convertedApprovals?.length ? (

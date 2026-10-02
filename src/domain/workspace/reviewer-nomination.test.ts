@@ -74,7 +74,7 @@ describe("nominationOutcomeMessage", () => {
   const base = { userId: "u-1", emailSent: false, seated: true } as const;
   it("describes each mode", () => {
     expect(nominationOutcomeMessage({ ...base, mode: "added" }, "a@anacorp.com")).toBe("a@anacorp.com can now be selected as the approver.");
-    expect(nominationOutcomeMessage({ ...base, mode: "lifted" }, "a@anacorp.com")).toBe("a@anacorp.com now has Review access and can be selected as the approver.");
+    expect(nominationOutcomeMessage({ ...base, mode: "lifted" }, "a@anacorp.com")).toBe("a@anacorp.com is now an SOP member and can be selected as the approver.");
     expect(nominationOutcomeMessage({ ...base, mode: "already_eligible" }, "a@anacorp.com")).toBe("a@anacorp.com can already be selected as the approver.");
     expect(nominationOutcomeMessage({ ...base, mode: "invite", emailSent: true }, "a@anacorp.com")).toBe(
       "Invitation sent to a@anacorp.com. You can seat them now; the review will be waiting when they join.",

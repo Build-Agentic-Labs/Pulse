@@ -1,5 +1,7 @@
 "use client";
 
+import { SOP_NOTIFICATIONS_REFRESH_EVENT } from "@/lib/sop/notify-kick";
+
 import { Inbox } from "lucide-react";
 import Link from "next/link";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -241,11 +243,14 @@ export function ReviewQueue({
       if (document.visibilityState === "visible") void refreshList({ background: true, coalesce: true });
     };
     const interval = window.setInterval(refreshInBackground, 15_000);
+    const refreshAfterMutation = () => void refreshList({ background: true });
+    window.addEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refreshAfterMutation);
     window.addEventListener("focus", refreshInBackground);
     document.addEventListener("visibilitychange", refreshInBackground);
 
     return () => {
       window.clearInterval(interval);
+      window.removeEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refreshAfterMutation);
       window.removeEventListener("focus", refreshInBackground);
       document.removeEventListener("visibilitychange", refreshInBackground);
     };

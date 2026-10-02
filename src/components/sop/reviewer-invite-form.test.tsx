@@ -22,12 +22,12 @@ describe("ReviewerInviteForm", () => {
 
     render(<ReviewerInviteForm sopId="sop-1" departmentId="dept-prd" departmentCode="PRO" onNominated={onNominated} onCancel={() => {}} />);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Reviewer email" }), { target: { value: "new@anacorp.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send invite" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Approver email" }), { target: { value: "new@anacorp.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
 
     await waitFor(() => expect(onNominated).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/sops/reviewers/nominate",
+      "/api/sops/approvers/stage",
       expect.objectContaining({ method: "POST" }),
     );
     const sent = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as Record<string, string>;
@@ -37,15 +37,27 @@ describe("ReviewerInviteForm", () => {
     expect(screen.getByText(/Invitation sent to new@anacorp.com/)).toBeTruthy();
   });
 
+  it("adds an approver without sending an invitation", async () => {
+    const result = { mode: "invite", userId: null, emailSent: false, seated: true, deferred: true };
+    const fetchMock = vi.fn(() => jsonResponse(200, result)); vi.stubGlobal("fetch", fetchMock);
+    const changed = vi.fn();
+    render(<ReviewerInviteForm sopId="sop-1" departmentId="dept-prd" departmentCode="PRO" onNominated={changed} onCancel={() => {}} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Approver email" }), { target: { value: "new@anacorp.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
+    await waitFor(() => expect(changed).toHaveBeenCalledWith(result, "new@anacorp.com"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/sops/approvers/stage", expect.anything());
+    expect(screen.getByRole("status")).toHaveTextContent("invitation will be sent when you send for review");
+  });
+
   it("shows the server's refusal inline and keeps the typed address", async () => {
     vi.stubGlobal("fetch", vi.fn(() => jsonResponse(400, { error: "Quality approvers are managed by an admin." })));
     render(<ReviewerInviteForm sopId="sop-1" departmentId="dept-qas" departmentCode="QAS" onNominated={() => {}} onCancel={() => {}} />);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Reviewer email" }), { target: { value: "x@anacorp.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send invite" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Approver email" }), { target: { value: "x@anacorp.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
 
     expect(await screen.findByText("Quality approvers are managed by an admin.")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Reviewer email" })).toHaveValue("x@anacorp.com");
+    expect(screen.getByRole("textbox", { name: "Approver email" })).toHaveValue("x@anacorp.com");
   });
 
   it("cancels", () => {

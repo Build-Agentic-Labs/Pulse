@@ -22,6 +22,8 @@ export type ThemedSelectOption = {
   disabled?: boolean;
   /** Optional visual group heading. Consecutive options with the same group share one heading. */
   group?: string;
+  /** Keep an action available when filtering the menu. */
+  alwaysVisible?: boolean;
 };
 
 type ThemedSelectProps = {
@@ -43,6 +45,8 @@ type ThemedSelectProps = {
    * pass it renders and behaves exactly as before.
    */
   allowCustomValue?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string;
   /** Optional compact trigger text when the menu labels need to be more descriptive. */
   selectedLabel?: string;
   triggerClassName?: string;
@@ -56,6 +60,8 @@ export function ThemedSelect({
   onChange,
   ariaLabel,
   allowCustomValue = false,
+  searchable = false,
+  searchPlaceholder,
   autoOpen = false,
   className = "",
   disabled = false,
@@ -85,13 +91,13 @@ export function ThemedSelect({
   // committed cannot disagree about whitespace.
   const typed = query.trim().replace(/\s+/g, " ");
   const visibleOptions = useMemo(() => {
-    if (!allowCustomValue || !typed) return options;
+    if (!(allowCustomValue || searchable) || !typed) return options;
     const needle = typed.toLowerCase();
     return options.filter(
       (option) =>
-        option.label.toLowerCase().includes(needle) || option.value.toLowerCase().includes(needle),
+        option.alwaysVisible || option.label.toLowerCase().includes(needle) || option.value.toLowerCase().includes(needle) || (searchable && option.description?.toLowerCase().includes(needle)),
     );
-  }, [allowCustomValue, options, typed]);
+  }, [allowCustomValue, searchable, options, typed]);
   // A case or spacing variant of something already offered is that option, never a new value.
   const typedMatchesExisting = useMemo(
     () => options.find((option) => option.value.trim().toLowerCase() === typed.toLowerCase()),
@@ -201,7 +207,7 @@ export function ThemedSelect({
   useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => {
-      if (allowCustomValue) {
+      if (allowCustomValue || searchable) {
         searchRef.current?.focus();
         return;
       }
@@ -212,7 +218,7 @@ export function ThemedSelect({
       (availableOptions[selectedIndex >= 0 ? selectedIndex : 0] ?? availableOptions[0])?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [allowCustomValue, open, options, value]);
+  }, [allowCustomValue, searchable, open, options, value]);
 
   function commit(nextValue: string) {
     if (nextValue !== value) onChange(nextValue);
@@ -274,14 +280,14 @@ export function ThemedSelect({
           style={menuStyle ?? undefined}
           onKeyDown={handleMenuKeyDown}
         >
-          {allowCustomValue ? (
+          {allowCustomValue || searchable ? (
             <div className="ui-themed-select-search" role="presentation">
               <input
                 ref={searchRef}
                 type="text"
                 className="ui-themed-select-search-input"
-                aria-label={ariaLabel ? `${ariaLabel} — type to filter or add` : "Type to filter or add"}
-                placeholder="Type to filter or add…"
+                aria-label={searchable && !allowCustomValue ? `${ariaLabel ?? "Options"} — search` : ariaLabel ? `${ariaLabel} — type to filter or add` : "Type to filter or add"}
+                placeholder={searchPlaceholder ?? (allowCustomValue ? "Type to filter or add…" : "Search…")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
@@ -290,6 +296,11 @@ export function ThemedSelect({
                   // An exact match wins so a case variant can never create a duplicate;
                   // otherwise Enter commits what was typed. Filtered options are chosen by
                   // clicking or arrowing to them, which keeps Enter unambiguous.
+                  if (!allowCustomValue) {
+                    const match = visibleOptions.find((option) => !option.disabled && option.value);
+                    if (match) commit(match.value);
+                    return;
+                  }
                   if (typedMatchesExisting) commit(typedMatchesExisting.value);
                   else if (typed.length > 0) commit(typed);
                 }}
@@ -311,7 +322,7 @@ export function ThemedSelect({
                   </span>
                 </button>
               ) : null}
-              {!typed ? (
+              {allowCustomValue && !typed ? (
                 <p className="ui-themed-select-create-hint" role="presentation">
                   <Plus size={12} aria-hidden="true" />
                   Type a name to add a new one

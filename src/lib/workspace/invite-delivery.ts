@@ -88,6 +88,7 @@ export interface DeliveryRecord {
   admin: SupabaseClient<Database>;
   kind: TransactionalEmailKind;
   workspaceId: string;
+  idempotencyKey?: string;
 }
 
 /** Send one email and record the outcome in the transactional ledger, logging (never throwing) on failure. */
@@ -100,7 +101,7 @@ export async function deliverInvitationEmail(
   try {
     // Every click is a deliberate (re)send, so the key is per request: it guards the provider
     // retry inside this call, never a later resend.
-    const result = await send(to, content, { idempotencyKey: `invite:${randomUUID()}` });
+    const result = await send(to, content, { idempotencyKey: record.idempotencyKey ?? `invite:${randomUUID()}` });
     await recordTransactionalEmail(record.admin, {
       kind: record.kind,
       recipientEmail: to,
@@ -137,6 +138,7 @@ export interface ResendInviteInput {
   accessSummary: readonly string[];
   organizationName: string;
   workspaceId: string;
+  idempotencyKey?: string;
 }
 
 /**
@@ -164,7 +166,7 @@ export async function sendInvitationViaResend(
         organizationName: input.organizationName,
         origin,
       }),
-      { admin, kind: "invite", workspaceId: input.workspaceId },
+      { admin, kind: "invite", workspaceId: input.workspaceId, idempotencyKey: input.idempotencyKey },
     );
     return delivered ? { kind: "sent", userId: setupLink.userId } : { kind: "send_failed", userId: setupLink.userId };
   }
@@ -180,7 +182,7 @@ export async function sendInvitationViaResend(
         origin,
         signInLink: new URL("/", origin).toString(),
       }),
-      { admin, kind: "access_granted", workspaceId: input.workspaceId },
+      { admin, kind: "access_granted", workspaceId: input.workspaceId, idempotencyKey: input.idempotencyKey },
     );
     return { kind: "already_registered", delivered, userId: setupLink.userId };
   }

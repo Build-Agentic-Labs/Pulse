@@ -12,15 +12,15 @@ const member = (over: Partial<RosterOptionMember>): RosterOptionMember => ({
 });
 
 describe("buildApproverOptions", () => {
-  it("lists only reviewers and approvers, with position as the description", () => {
+  it("lists every SOP member, with position as the description", () => {
     const options = buildApproverOptions({
       members: [member({ userId: "a", name: "Author", deptRole: "author" }), member({ userId: "r", name: "Rev" }), member({ userId: "p", name: "App", deptRole: "approver" })],
       signerId: null,
       placeholder: "Choose an approver…",
       now: NOW,
     });
-    expect(options.map((option) => option.value)).toEqual(["", "r", "p"]);
-    expect(options[1]).toEqual({ value: "r", label: "Rev", description: "Title" });
+    expect(options.map((option) => option.value)).toEqual(["", "a", "r", "p"]);
+    expect(options[2]).toEqual({ value: "r", label: "Rev", description: "Title" });
   });
 
   it("tags a pending member and keeps them selectable; tags an expired one the same way", () => {
@@ -39,16 +39,16 @@ describe("buildApproverOptions", () => {
     const options = buildApproverOptions({ members: [member({ userId: "r" })], signerId: "gone", placeholder: "Choose an approver…", now: NOW });
     expect(options[1]).toEqual({
       value: "gone",
-      label: "No longer in department",
+      label: "No longer an SOP member",
       description: "Choose another approver, or resend their invitation",
       disabled: true,
     });
   });
 
-  it("keeps the existing ineligible-signer and empty-department rows", () => {
+  it("allows a legacy author assignment and handles an empty member list", () => {
     const ineligible = buildApproverOptions({ members: [member({ userId: "a", deptRole: "author" })], signerId: "a", placeholder: "x", now: NOW });
-    expect(ineligible[1]).toMatchObject({ value: "a", disabled: true, description: "Create access only — choose someone with Review or Approve access" });
+    expect(ineligible[1]).toMatchObject({ value: "a", description: "Title" });
     const empty = buildApproverOptions({ members: [], signerId: null, placeholder: "x", now: NOW });
-    expect(empty[1]).toEqual({ value: NO_ELIGIBLE_APPROVERS_VALUE, label: "No reviewers or approvers assigned", disabled: true });
+    expect(empty[1]).toEqual({ value: NO_ELIGIBLE_APPROVERS_VALUE, label: "No SOP members available", disabled: true });
   });
 });

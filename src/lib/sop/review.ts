@@ -104,6 +104,7 @@ export interface UserSignatureProfile {
 
 /** One responsible department and the single person designated to sign for it. */
 export interface SopReviewSeat {
+  nomination?: { email: string; positionTitle: string; deliveredAt: string | null };
   sopId: string;
   departmentId: string;
   rasic: SopRasic;
@@ -454,11 +455,16 @@ export async function listSeats(
   const rows = await throwIfError(
     supabase.from("sop_review_seats").select("sop_id, department_id, rasic, signer_id").eq("sop_id", sopId),
   );
+  const nominations = await throwIfError(supabase.from("sop_approver_nominations").select("department_id,email,position_title,delivered_at").eq("sop_id", sopId));
   return (rows ?? []).map((row: Record<string, unknown>) => ({
     sopId: String(row.sop_id),
     departmentId: String(row.department_id),
     rasic: row.rasic as SopRasic,
     signerId: (row.signer_id as string | null) ?? null,
+    nomination: (() => {
+      const nomination = nominations?.find((item) => item.department_id === row.department_id);
+      return nomination ? { email: nomination.email, positionTitle: nomination.position_title, deliveredAt: nomination.delivered_at } : undefined;
+    })(),
   }));
 }
 
@@ -719,4 +725,16 @@ export async function signSopWithMark(sopId: string, meaning: "dept_approval" | 
   const id = await throwIfError(createPlannerSupabaseClient().rpc("sign_sop_with_mark", { p_sop: sopId, p_meaning: meaning, p_strokes: strokes as unknown as Json, p_department: department, p_hash: hash, p_cycle: cycle }));
   kickSopNotifications();
   return String(id);
+}
+
+/** Starts the review and delivers only invitations staged on this SOP. Safe to retry after submission. */
+export async function submitSopWithApproverInvitations(sopId: string, expectedUpdatedAt: string): Promise<SopControl> {
+  const response = await fetch("/api/sops/approvers/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sopId, expectedUpdatedAt }) });
+  const result = await response.json();
+  // Review alerts must still run when an invitation fails after the status transition.
+  if (result.submitted) kickSopNotifications();
+  if (!response.ok || result.error) throw new Error(result.error ?? "The SOP could not be sent for review.");
+  const control = await getSopControl(sopId);
+  if (!control) throw new Error("The submitted SOP could not be loaded.");
+  return control;
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { kickSopNotifications } from "./notify-kick";
-import { listMySignaturesFor, moveSeat, reassignSeat } from "./review";
+import { listMySignaturesFor, moveSeat, reassignSeat, submitSopWithApproverInvitations } from "./review";
 vi.mock("@/domain/supabase-planner", () => ({ createPlannerSupabaseClient: vi.fn() }));
 vi.mock("./notify-kick", () => ({ kickSopNotifications: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
@@ -32,5 +32,23 @@ describe("SOP routing store", () => {
   clientWith({ data: null, error: { message: "That seat has already signed" } });
   await expect(reassignSeat("sop", "department", "replacement")).rejects.toThrow("already signed");
   expect(kickSopNotifications).not.toHaveBeenCalled();
+ });
+});
+
+describe("submission notifications", () => {
+ it("kicks review alerts even if invitation delivery fails after review starts", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ submitted:true,error:"Invitation delivery failed" }), {status:200})));
+  await expect(submitSopWithApproverInvitations("sop","version")).rejects.toThrow("Invitation delivery failed");
+  expect(kickSopNotifications).toHaveBeenCalledOnce(); vi.unstubAllGlobals();
+ });
+ it("kicks review alerts after a post-transition server error", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ submitted:true,error:"Ledger unavailable" }), {status:400})));
+  await expect(submitSopWithApproverInvitations("sop","version")).rejects.toThrow("Ledger unavailable");
+  expect(kickSopNotifications).toHaveBeenCalledOnce(); vi.unstubAllGlobals();
+ });
+ it("does not notify when submission never started", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ submitted:false,error:"Roster invalid" }), {status:400})));
+  await expect(submitSopWithApproverInvitations("sop","version")).rejects.toThrow("Roster invalid");
+  expect(kickSopNotifications).not.toHaveBeenCalled(); vi.unstubAllGlobals();
  });
 });

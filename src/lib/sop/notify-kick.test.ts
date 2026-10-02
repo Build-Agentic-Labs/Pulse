@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { kickSopNotifications } from "./notify-kick";
+import { kickSopNotifications, SOP_NOTIFICATIONS_REFRESH_EVENT } from "./notify-kick";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -25,6 +25,15 @@ describe("kickSopNotifications", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/sops/notifications/drain");
     expect(init?.method).toBe("POST");
+  });
+
+  it("refreshes UI immediately and again after delivery finishes", async () => {
+    let finish!: (response: Response) => void;
+    stubFetch(() => new Promise((resolve) => { finish = resolve; }));
+    const refresh = vi.fn(); window.addEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refresh);
+    kickSopNotifications(); expect(refresh).toHaveBeenCalledOnce();
+    finish(new Response(null)); await Promise.resolve();
+    expect(refresh).toHaveBeenCalledTimes(2); window.removeEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refresh);
   });
 
   it("marks the kick keepalive so a navigation right after the mutation cannot abort it", () => {

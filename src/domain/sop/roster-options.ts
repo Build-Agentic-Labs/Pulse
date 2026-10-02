@@ -31,26 +31,15 @@ export function buildApproverOptions(input: {
   now: Date;
 }): RosterOption[] {
   const eligible = input.members.filter((member) => canSignReview(member.deptRole));
-  const ineligibleCurrentSigner = input.members.find(
-    (member) => member.userId === input.signerId && !canSignReview(member.deptRole),
-  );
   const absentSignerId =
     input.signerId && !input.members.some((member) => member.userId === input.signerId) ? input.signerId : null;
 
   return [
     { value: "", label: input.placeholder },
-    ...(ineligibleCurrentSigner
-      ? [{
-          value: ineligibleCurrentSigner.userId,
-          label: ineligibleCurrentSigner.name,
-          description: "Create access only — choose someone with Review or Approve access",
-          disabled: true,
-        }]
-      : []),
     ...(absentSignerId
       ? [{
           value: absentSignerId,
-          label: "No longer in department",
+          label: "No longer an SOP member",
           description: "Choose another approver, or resend their invitation",
           disabled: true,
         }]
@@ -63,8 +52,8 @@ export function buildApproverOptions(input: {
         description: state === "none" ? member.positionTitle || "Position not assigned" : pendingInviteLabel(state),
       };
     }),
-    ...(eligible.length === 0 && !ineligibleCurrentSigner
-      ? [{ value: NO_ELIGIBLE_APPROVERS_VALUE, label: "No reviewers or approvers assigned", disabled: true }]
+    ...(eligible.length === 0
+      ? [{ value: NO_ELIGIBLE_APPROVERS_VALUE, label: "No SOP members available", disabled: true }]
       : []),
   ];
 }

@@ -82,6 +82,18 @@ describe("workspace invitation access", () => {
     ).toEqual(["Organization: Admin", "Modules and projects: Full access"]);
   });
 
+  it("labels legacy approvers as members outside the Quality department", () => {
+    const summary = describeInviteEntitlements({
+      organizationRole: "member", accessPackage: "custom", qualityAccess: "edit", planningAccess: false, projectAccess: [],
+      departmentAccess: [
+        { departmentId: "pro", role: "approver", positionTitle: "Engineer" },
+        { departmentId: "qas", role: "approver", positionTitle: "Quality Manager" },
+      ],
+    }, new Map(), new Map([["pro", "Engineering"], ["qas", "Quality"]]), new Set(["qas"]));
+    expect(summary).toContain("Engineering: Member · Engineer");
+    expect(summary).toContain("Quality: Final Quality approval · Quality Manager");
+  });
+
   it("does not persist hidden project grants beneath the Admin role", () => {
     expect(
       normalizedInviteEntitlements({

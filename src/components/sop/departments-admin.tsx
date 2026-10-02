@@ -6,7 +6,6 @@ import { useConfirm } from "@/components/confirm-provider";
 import { QualitySkeleton } from "./quality-skeleton";
 import { ThemedSelect } from "@/components/themed-select";
 import {
-  DEPT_ROLE_ACCESS,
   jobTitleOptions,
   type Department,
   type DepartmentMember,
@@ -30,13 +29,6 @@ import { addJobTitle, listJobTitles, type JobTitle } from "@/lib/sop/job-titles/
 import { JobTitlesAdmin } from "./job-titles-admin";
 import { RasicRolesAdmin } from "./rasic-roles-admin";
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
-
-const DEPT_ROLES: readonly DeptRole[] = ["author", "reviewer", "approver"];
-const DEPT_ROLE_OPTIONS = DEPT_ROLES.map((deptRole) => ({
-  value: deptRole,
-  label: DEPT_ROLE_ACCESS[deptRole].label,
-  description: DEPT_ROLE_ACCESS[deptRole].description,
-}));
 
 interface DepartmentDraft {
   code: string;
@@ -720,10 +712,9 @@ function MembersPanel({
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col gap-4">
       <div>
-        <h3 className="ui-settings-section-title">Members and SOP access</h3>
+        <h3 className="ui-settings-section-title">Department members</h3>
         <p className="mt-1 text-[11px] leading-4 text-ink-tertiary">
-          Access is cumulative: Review includes Create, and Approve includes Review and Create. A person&apos;s role on
-          each SOP is assigned separately.
+          Every member can author SOPs and approve other SOPs when assigned. Final release requires a designated Quality approver.
         </p>
       </div>
 
@@ -760,7 +751,7 @@ function MembersPanel({
                 ) : null}
               </div>
               {manage ? (
-                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_128px]">
+                <div className="mt-3 grid gap-3">
                   <div className="block min-w-0">
                     <span className="ui-mono-label mb-1 block text-ink-tertiary">Position / job title</span>
                     <ThemedSelect
@@ -782,25 +773,19 @@ function MembersPanel({
                       ]}
                     />
                   </div>
-                  <div className="block">
-                    <span className="ui-mono-label mb-1 block text-ink-tertiary">SOP access</span>
-                    <ThemedSelect
-                      variant="sop"
-                      className="w-full"
-                      triggerClassName="ui-themed-select-trigger-compact px-2.5 text-xs"
-                      ariaLabel="SOP access"
-                      value={member.deptRole}
-                      selectedLabel={DEPT_ROLE_ACCESS[member.deptRole].label}
-                      disabled={busyUserId === member.userId}
-                      onChange={(value) => void handleRoleChange(member.userId, value as DeptRole)}
-                      options={DEPT_ROLE_OPTIONS}
-                    />
-                  </div>
+                  {department.isQualityGate ? (
+                    <label className="flex items-center gap-2 text-xs text-ink-secondary">
+                      <input type="checkbox" aria-label={`Can give final approval: ${labelFor(member.userId)}`}
+                        checked={member.deptRole === "approver"} disabled={busyUserId === member.userId}
+                        onChange={(event) => void handleRoleChange(member.userId, event.target.checked ? "approver" : "author")} />
+                      Can give final approval
+                    </label>
+                  ) : null}
                 </div>
               ) : (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <span className="text-xs text-ink-secondary">{member.positionTitle || "Position not assigned"}</span>
-                  <span className="ui-chip shrink-0">{DEPT_ROLE_ACCESS[member.deptRole].label}</span>
+                  {department.isQualityGate && member.deptRole === "approver" ? <span className="ui-chip shrink-0">Final Quality approver</span> : null}
                 </div>
               )}
             </li>

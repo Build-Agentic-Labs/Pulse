@@ -4,6 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AuthFormPanel, ErrorRecoveryPanel, PasswordUpdatePanel } from "@/components/app-flow-panels";
 import { QualityLoadingState } from "@/components/space-loading-states";
+import { SopRouteLoadingState } from "./sop-route-loading-state";
 import { ThemedSelect } from "@/components/themed-select";
 import { createPlannerSupabaseClient, ensureDefaultWorkspaceMembership, fetchOrgToolAccess } from "@/domain/supabase-planner";
 import { SOP_WORKSPACE_COOKIE, SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
@@ -322,7 +323,7 @@ export function SopWorkspaceProvider({
   }
 
   if ((!sessionReady && !seededFromServer) || (session && status === "loading")) {
-    return <QualityLoadingState />;
+    return <SopRouteLoadingState><QualityLoadingState /></SopRouteLoadingState>;
   }
 
   if (status === "error") {

@@ -55,3 +55,11 @@ it("workflow completion forces a refresh even during an older pending request", 
   await waitFor(() => expect(fetchReviewQueueData).toHaveBeenCalledTimes(2));
   await act(async () => resolveOld(EMPTY_QUEUE));
 });
+
+it("refreshes fresh cached data immediately after a workflow mutation", async () => {
+ vi.mocked(fetchReviewQueueData).mockResolvedValue(EMPTY_QUEUE);
+ render(<ReviewQueue active />);
+ await waitFor(() => expect(fetchReviewQueueData).toHaveBeenCalledOnce());
+ window.dispatchEvent(new Event("pulse:sop-notifications-refresh"));
+ await waitFor(() => expect(fetchReviewQueueData).toHaveBeenCalledTimes(2));
+});

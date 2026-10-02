@@ -1,5 +1,7 @@
 "use client";
 
+import { SOP_NOTIFICATIONS_REFRESH_EVENT } from "@/lib/sop/notify-kick";
+
 import { REVIEWER_STATUS_LABELS, type ReviewerStatus } from "@/domain/sop/reviewer-status";
 import { formatDate, reviewerInitials } from "@/domain/formatting";
 import { FileText, Loader2, Plus, Search, Trash2, Upload, X } from "lucide-react";
@@ -366,11 +368,14 @@ export function SopList({
       if (document.visibilityState === "visible") void refreshList({ background: true });
     };
     const interval = window.setInterval(refreshInBackground, 15_000);
+    const refreshAfterMutation = () => void refreshList({ background: true, force: true });
+    window.addEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refreshAfterMutation);
     window.addEventListener("focus", refreshInBackground);
     document.addEventListener("visibilitychange", refreshInBackground);
 
     return () => {
       window.clearInterval(interval);
+      window.removeEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refreshAfterMutation);
       window.removeEventListener("focus", refreshInBackground);
       document.removeEventListener("visibilitychange", refreshInBackground);
     };

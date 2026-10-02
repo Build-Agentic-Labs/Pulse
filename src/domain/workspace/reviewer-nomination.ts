@@ -20,6 +20,7 @@ export interface NominationRequest {
 }
 
 export interface NominationResponse {
+  deferred?: boolean;
   mode: NominationMode;
   userId: string | null;
   emailSent: boolean;
@@ -102,7 +103,7 @@ export function nominationOutcomeMessage(response: NominationResponse, email: st
     case "added":
       return `${email} can now be selected as the approver.`;
     case "lifted":
-      return `${email} now has Review access and can be selected as the approver.`;
+      return `${email} is now an SOP member and can be selected as the approver.`;
     case "already_eligible":
       return `${email} can already be selected as the approver.`;
     case "invite":

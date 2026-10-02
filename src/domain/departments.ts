@@ -1,9 +1,7 @@
 /**
- * Department domain types and role capabilities. Roles are cumulative:
- * `approver` ⊇ `reviewer` ⊇ `author`. Authoring/submitting a draft is open to any
- * department role; signing a review needs ≥ reviewer; the department-approval step
- * needs approver. The independent Quality sign-off is enforced in the database
- * (has_department_role's is_quality_gate branch), not here.
+ * Legacy role values are retained for existing memberships and invitations.
+ * Every department member can author and sign an assigned SOP approval.
+ * Only Quality membership with the stored approver designation permits final release.
  */
 
 export type DeptRole = "author" | "reviewer" | "approver";
@@ -11,16 +9,16 @@ export type DeptRole = "author" | "reviewer" | "approver";
 /** User-facing access names. Stored role values stay stable for database compatibility. */
 export const DEPT_ROLE_ACCESS: Record<DeptRole, { label: string; description: string }> = {
   author: {
-    label: "Create",
-    description: "Write and edit SOPs",
+    label: "Member",
+    description: "Author SOPs and approve when assigned",
   },
   reviewer: {
-    label: "Review",
-    description: "Includes Create access",
+    label: "Member",
+    description: "Author SOPs and approve when assigned",
   },
   approver: {
-    label: "Approve",
-    description: "Includes Review access",
+    label: "Final Quality approval",
+    description: "Quality members only; includes authoring and assigned approvals",
   },
 };
 
@@ -267,7 +265,7 @@ export function canAuthor(role: DeptRole): boolean {
 }
 
 export function canSignReview(role: DeptRole): boolean {
-  return roleAtLeast(role, "reviewer");
+  return canAuthor(role);
 }
 
 export function canDeptApprove(role: DeptRole): boolean {

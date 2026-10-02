@@ -158,7 +158,7 @@ export async function POST(request: Request) {
       ? supabase.from("projects").select("id,name").eq("workspace_id", workspaceId).in("id", uniqueProjectIds)
       : Promise.resolve({ data: [], error: null }),
     uniqueDepartmentIds.length
-      ? supabase.from("departments").select("id,name").eq("workspace_id", workspaceId).in("id", uniqueDepartmentIds)
+      ? supabase.from("departments").select("id,name,is_quality_gate").eq("workspace_id", workspaceId).in("id", uniqueDepartmentIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
   const lookupError = workspaceResult.error ?? projectsResult.error ?? departmentsResult.error;
@@ -248,7 +248,7 @@ export async function POST(request: Request) {
     const send = createEmailSenderFromEnv().send ?? createResendSender(resendApiKey, resendFrom);
     const projectNames = new Map((projectsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
     const departmentNames = new Map((departmentsResult.data ?? []).map((row) => [String(row.id), String(row.name)]));
-    const accessSummary = describeInviteEntitlements(entitlements, projectNames, departmentNames);
+    const accessSummary = describeInviteEntitlements(entitlements, projectNames, departmentNames, new Set((departmentsResult.data ?? []).filter((row) => row.is_quality_gate).map((row) => String(row.id))));
     const organizationName = workspaceResult.data?.name ?? "your organization";
 
     const outcome = await sendInvitationViaResend(admin, send, {

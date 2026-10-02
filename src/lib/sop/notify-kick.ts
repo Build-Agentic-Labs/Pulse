@@ -13,9 +13,14 @@
  * delivery to the next daily cron, and looking for all the world like
  * notifications that fire "only when they want to".
  */
+export const SOP_NOTIFICATIONS_REFRESH_EVENT = "pulse:sop-notifications-refresh";
+
 export function kickSopNotifications(): void {
   if (typeof window === "undefined") return;
-  void fetch("/api/sops/notifications/drain", { method: "POST", keepalive: true }).catch(() => {
+  window.dispatchEvent(new Event(SOP_NOTIFICATIONS_REFRESH_EVENT));
+  void fetch("/api/sops/notifications/drain", { method: "POST", keepalive: true }).then(() => {
+    window.dispatchEvent(new Event(SOP_NOTIFICATIONS_REFRESH_EVENT));
+  }).catch(() => {
     // Intentionally silent: the daily cron is the delivery guarantee.
   });
 }

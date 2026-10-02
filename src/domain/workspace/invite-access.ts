@@ -158,6 +158,7 @@ export function describeInviteEntitlements(
   entitlements: WorkspaceInviteEntitlements,
   projectNames: ReadonlyMap<string, string> = new Map(),
   departmentNames: ReadonlyMap<string, string> = new Map(),
+  qualityDepartmentIds: ReadonlySet<string> = new Set(),
 ): string[] {
   const summary =
     entitlements.organizationRole === "admin"
@@ -174,7 +175,7 @@ export function describeInviteEntitlements(
     }
   }
   for (const grant of entitlements.departmentAccess) {
-    const role = grant.role === "approver" ? "Approve" : grant.role === "reviewer" ? "Review" : "Create";
+    const role = grant.role === "approver" && qualityDepartmentIds.has(grant.departmentId) ? "Final Quality approval" : "Member";
     summary.push(`${departmentNames.get(grant.departmentId) ?? "Department"}: ${role} · ${grant.positionTitle}`);
   }
   return summary;

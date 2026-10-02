@@ -38,15 +38,15 @@ describe("standardPositionTitlesForDepartment", () => {
 });
 
 describe("dept role capabilities (cumulative)", () => {
-  it("presents the cumulative roles as Create, Review, and Approve access", () => {
-    expect(DEPT_ROLE_ACCESS.author).toEqual({ label: "Create", description: "Write and edit SOPs" });
-    expect(DEPT_ROLE_ACCESS.reviewer).toEqual({ label: "Review", description: "Includes Create access" });
-    expect(DEPT_ROLE_ACCESS.approver).toEqual({ label: "Approve", description: "Includes Review access" });
+  it("presents legacy author and reviewer roles as members", () => {
+    expect(DEPT_ROLE_ACCESS.author).toEqual({ label: "Member", description: "Author SOPs and approve when assigned" });
+    expect(DEPT_ROLE_ACCESS.reviewer).toEqual({ label: "Member", description: "Author SOPs and approve when assigned" });
+    expect(DEPT_ROLE_ACCESS.approver).toEqual({ label: "Final Quality approval", description: "Quality members only; includes authoring and assigned approvals" });
   });
 
-  it("author can author but not sign", () => {
+  it("author can author and sign when assigned", () => {
     expect(canAuthor("author")).toBe(true);
-    expect(canSignReview("author")).toBe(false);
+    expect(canSignReview("author")).toBe(true);
     expect(canDeptApprove("author")).toBe(false);
   });
 

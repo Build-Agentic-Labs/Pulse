@@ -1,5 +1,7 @@
 "use client";
 
+import { SOP_NOTIFICATIONS_REFRESH_EVENT } from "@/lib/sop/notify-kick";
+
 import { Bell, CheckCheck, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -77,13 +79,15 @@ function useNotificationState(): {
 
   useEffect(() => {
     let mounted = true;
+    let refreshVersion = 0;
 
     async function refresh() {
+      const version = ++refreshVersion;
       try {
         const { session } = await resolveSupabaseSession(supabase);
         const user = session?.user;
         if (!user) {
-          if (mounted) {
+          if (mounted && version === refreshVersion) {
             setSummary(null);
             setInbox([]);
             setLoaded(true);
@@ -107,7 +111,7 @@ function useNotificationState(): {
           listInbox(INBOX_LIMIT, supabase),
           workspaceId ? fetchReviewQueueData(workspaceId, user.id) : Promise.resolve(null),
         ]);
-        if (!mounted) return;
+        if (!mounted || version !== refreshVersion) return;
         const dismissedKey = `pulse:notification-dismissed:v1:${user.id}`;
         dismissedKeyRef.current = dismissedKey;
         const dismissed = readAcknowledged(dismissedKey);
@@ -124,7 +128,7 @@ function useNotificationState(): {
         setLoaded(true);
       } catch {
         // Keep the last good state; retry on the next trigger.
-        if (mounted) setLoaded(true);
+        if (mounted && version === refreshVersion) setLoaded(true);
       }
     }
 
@@ -132,10 +136,12 @@ function useNotificationState(): {
     const interval = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
+    window.addEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, onFocus);
     return () => {
       mounted = false;
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, onFocus);
     };
   }, [supabase]);
 

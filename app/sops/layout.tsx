@@ -1,6 +1,7 @@
 import { ProblemPilotAccessProvider } from "@/components/problem-solving/problem-pilot-link";
 import { Suspense, type ReactNode } from "react";
 import { QualityLoadingState } from "@/components/space-loading-states";
+import { SopRouteLoadingState } from "@/components/sop/sop-route-loading-state";
 import { SopWorkspaceProvider } from "@/components/sop/sop-workspace-provider";
 import { fetchInitialSopWorkspaceData } from "@/lib/supabase/server-data";
 
@@ -25,7 +26,7 @@ async function AuthenticatedSopWorkspace({ children }: { children: ReactNode }) 
 
 export default function SopsLayout({ children }: { children: ReactNode }) {
   return (
-    <Suspense fallback={<QualityLoadingState />}>
+    <Suspense fallback={<SopRouteLoadingState><QualityLoadingState /></SopRouteLoadingState>}>
       <AuthenticatedSopWorkspace>{children}</AuthenticatedSopWorkspace>
     </Suspense>
   );

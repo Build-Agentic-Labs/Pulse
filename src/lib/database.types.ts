@@ -1846,6 +1846,24 @@ export type Database = {
           },
         ]
       }
+      sop_approver_delivery_payloads: {
+        Row: { delivery_id: string; content: Json }
+        Insert: { delivery_id: string; content: Json }
+        Update: { content?: Json }
+        Relationships: []
+      }
+      sop_submission_locks: {
+        Row: { sop_id: string; token: string; locked_at: string }
+        Insert: { sop_id: string; token: string; locked_at?: string }
+        Update: { token?: string; locked_at?: string }
+        Relationships: []
+      }
+      sop_approver_nominations: {
+        Row: { sop_id: string; department_id: string; email: string; position_title: string; delivery_id: string; delivered_at: string | null; delivery_started_at: string | null; created_by: string }
+        Insert: { sop_id: string; department_id: string; email: string; position_title: string; delivery_id?: string; delivered_at?: string | null; delivery_started_at?: string | null; created_by?: string }
+        Update: { delivered_at?: string | null; delivery_started_at?: string | null }
+        Relationships: []
+      }
       sop_review_seats: {
         Row: {
           created_by: string | null
@@ -3869,6 +3887,9 @@ export type Database = {
       }
     }
     Functions: {
+      acquire_sop_submission_lock: { Args: { p_sop_id: string }; Returns: string | null }
+      stage_sop_approver: { Args: { p_sop_id: string; p_department_id: string; p_email: string; p_position_title: string }; Returns: undefined }
+
       send_sop_for_signatures: { Args: { p_sop: string; p_expected_hash: string; p_expected_cycle: number }; Returns: undefined };
       sign_sop_with_mark: { Args: { p_sop: string; p_meaning: string; p_strokes: Json; p_department: string | null; p_hash: string; p_cycle: number }; Returns: string };
 

@@ -447,19 +447,24 @@ export function ProcedureWorkspace({
   }
 
   function addManufacturingStep() {
+    insertManufacturingStep(manufacturingSteps.length);
+  }
+
+  function insertManufacturingStep(index: number) {
     if (!task) {
       return;
     }
 
     patchManufacturingSteps([
-      ...manufacturingSteps,
+      ...manufacturingSteps.slice(0, index),
       {
-        id: `step-${task.id}-${Date.now()}`,
-        sequence: manufacturingSteps.length + 1,
+        id: `step-${task.id}-${crypto.randomUUID()}`,
+        sequence: index + 1,
         instruction: "",
         durationMinutes: 0,
         qualityCheck: "",
       },
+      ...manufacturingSteps.slice(index),
     ]);
   }
 
@@ -920,13 +925,26 @@ export function ProcedureWorkspace({
                   Add a blank step to start authoring the procedure for this task.
                 </div>
               ) : (
-                manufacturingSteps.map((step) => {
+                manufacturingSteps.map((step, index) => {
                   const stepPhotos = getStepPhotoAttachments(task, step.id);
                   const stepTools = getStepToolList(task, step.id);
 
                   return (
                     <div key={step.id} data-instruction-step={step.id}
                         className="ui-procedure-step space-y-3">
+                      {index > 0 ? (
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            className="ui-btn-ghost h-7 gap-1.5 text-xs"
+                            aria-label={`Insert step between steps ${index} and ${index + 1}`}
+                            onClick={() => insertManufacturingStep(index)}
+                          >
+                            <Plus size={12} strokeWidth={1.75} />
+                            Insert step
+                          </button>
+                        </div>
+                      ) : null}
                       <div>
                         <div className="ui-procedure-step-header mb-1">
                           <div className="ui-procedure-step-header-fields">

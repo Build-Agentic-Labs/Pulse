@@ -99,7 +99,7 @@ it("requires separate live schema credentials",async()=>{
 it('bounds concurrent originals at four and preserves inventory order',async()=>{
  state.fileCount=5;let active=0,maximum=0;
  vi.stubGlobal('fetch',async()=>{active++;maximum=Math.max(maximum,active);await new Promise(r=>setTimeout(r,5));active--;return new Response(new Uint8Array(5));});
- const files=[];for await(const r of productionRecords(config,()=>{}))if(r.type==='file-start')files.push(r.path);
+ const files=[];for await(const r of productionRecords(config,()=>{}))if(r.type==='file-start' && 'path' in r)files.push(r.path);
  expect(maximum).toBe(4);expect(files).toEqual(['fixture.jpg','fixture-1.jpg','fixture-2.jpg','fixture-3.jpg','fixture-4.jpg']);
 });
 it('refuses oversized response bodies instead of unbounded small-file buffering',async()=>{

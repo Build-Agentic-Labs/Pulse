@@ -1,28 +1,65 @@
--- Local-only bootstrap. Runs after every `supabase db reset`; never applied to the hosted
--- project.
---
--- The hosted project carries platform-level default privileges that grant the PostgREST roles
--- DML on everything in `public`. A local stack built purely from supabase/migrations/ does not:
--- no migration grants table privileges, because on the hosted side they have always just been
--- there. The result is that `authenticated` ends up with only REFERENCES/TRIGGER/TRUNCATE on
--- public tables locally, and every pgTAP suite dies on its first INSERT with
--- "permission denied for table sops" -- which is why `supabase test db` could not be run at all
--- before this file existed.
---
--- Verified against production on 2026-07-25: `authenticated` and `anon` there hold
--- DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on public.sops. This reproduces that.
--- RLS is still the gate -- these are table grants, and every policy applies on top of them
--- exactly as it does in production.
-
+-- Local-only platform compatibility. Never applied to the hosted project.
+-- Older tables relied on hosted default DML grants instead of explicit migrations.
+-- Limit compatibility grants to those legacy tables. New tables and explicit
+-- revokes must retain their migration permissions; a blanket GRANT ALL would
+-- silently re-enable writes to immutable releases and private delivery payloads.
 grant usage on schema public to anon, authenticated, service_role;
-
-grant all on all tables in schema public to anon, authenticated, service_role;
-grant all on all sequences in schema public to anon, authenticated, service_role;
-
-alter default privileges in schema public
-  grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema public
-  grant all on sequences to anon, authenticated, service_role;
+grant all on all tables in schema public to service_role;
+grant all on all sequences in schema public to service_role;
+grant select, insert, update, delete on
+  public.actual_events,
+  public.audit_log,
+  public.custom_columns,
+  public.department_members,
+  public.departments,
+  public.doc_number_counter,
+  public.document_type_codes,
+  public.manufacturing_components,
+  public.manufacturing_steps,
+  public.notification_preferences,
+  public.org_tool_access,
+  public.part_references,
+  public.planning_item_master,
+  public.platform_admins,
+  public.products,
+  public.profiles,
+  public.project_access,
+  public.projects,
+  public.push_subscriptions,
+  public.sales_order_lines,
+  public.sales_orders,
+  public.scenarios,
+  public.schedule_imports,
+  public.sop_job_titles,
+  public.sop_rasic_roles,
+  public.sop_review_annotations,
+  public.sop_review_seats,
+  public.space_access,
+  public.stations,
+  public.step_exploded_views,
+  public.step_photos,
+  public.step_tools,
+  public.task_dependencies,
+  public.task_videos,
+  public.tasks,
+  public.tool_library,
+  public.trailer_configs,
+  public.work_order_lines,
+  public.work_order_template_lines,
+  public.work_order_templates,
+  public.work_orders,
+  public.workspace_access_grants,
+  public.workspace_auto_join_domains,
+  public.workspace_integrations,
+  public.workspace_members,
+  public.workspace_revocations,
+  public.workspaces,
+  public.zones
+to authenticated;
+-- Legacy SOP tables have explicit write revokes but assumed default read/create grants.
+grant select, insert, update on public.sops to authenticated;
+grant select, insert on public.sop_revisions, public.sop_signatures to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
 
 -- ---------------------------------------------------------------------------------------------
 -- Test helper: drive an in_review SOP to the point where its seats may sign.

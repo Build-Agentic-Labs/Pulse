@@ -53,7 +53,7 @@ const securityHeaders = [
 
 /** @type {(phase: string) => import('next').NextConfig} */
 const nextConfig = (phase) => ({
-  distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
+  distDir: process.env.PULSE_BROWSER_TEST === "1" ? ".next-e2e" : phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
   experimental: {
     // Next 16.1 turned nested async chunking OFF in dev, which makes Turbopack's
     // react-loadable-manifest reference chunk hashes that are never emitted — every

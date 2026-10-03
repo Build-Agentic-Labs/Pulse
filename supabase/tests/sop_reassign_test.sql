@@ -4,7 +4,7 @@
 -- seat's signer once review has started. Pins:
 --   * only a workspace owner/admin may call it
 --   * the admin cannot reassign a seat to themselves (self-approval path)
---   * the new signer must be a strict member of the seat's department
+--   * the new signer must be a SOP member of the same workspace
 --   * a seat holding a valid signature for the current (content_hash, review_cycle) is
 --     closed — it cannot be reassigned
 --   * an unsigned seat is reassignable in draft AND in_review
@@ -13,7 +13,7 @@
 -- sign_sop v2 contract: sign_sop(p_sop, p_meaning, p_reason, p_seat_department, p_resolves).
 
 begin;
-select plan(9);
+select plan(12);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -31,7 +31,8 @@ values
   ('80000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'r-resp@test.dev'),
   ('80000000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'r-resp-new@test.dev'),
   ('80000000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'r-acct@test.dev'),
-  ('80000000-0000-0000-0000-000000000006', 'authenticated', 'authenticated', 'r-acct-new@test.dev');
+  ('80000000-0000-0000-0000-000000000006', 'authenticated', 'authenticated', 'r-acct-new@test.dev'),
+  ('80000000-0000-0000-0000-000000000007', 'authenticated', 'authenticated', 'r-no-sop@test.dev');
 
 
 insert into public.workspace_members (workspace_id, user_id, role) values
@@ -40,7 +41,8 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_reassign', '80000000-0000-0000-0000-000000000003', 'editor'),
   ('ws_reassign', '80000000-0000-0000-0000-000000000004', 'editor'),
   ('ws_reassign', '80000000-0000-0000-0000-000000000005', 'editor'),
-  ('ws_reassign', '80000000-0000-0000-0000-000000000006', 'editor');
+  ('ws_reassign', '80000000-0000-0000-0000-000000000006', 'editor'),
+  ('ws_reassign', '80000000-0000-0000-0000-000000000007', 'editor');
 
 insert into public.org_tool_access (workspace_id, user_id, level)
 select 'ws_reassign', u.id, 'edit'::public.access_level from (values
@@ -126,13 +128,27 @@ select throws_ok(
 );
 
 -- ---------------------------------------------------------------------------
--- 6. The new signer must be a strict member of the seat department.
+-- 6. Assignment can name an SOP member in another department in this workspace.
 -- ---------------------------------------------------------------------------
-select throws_ok(
+select lives_ok(
   $$ select public.reassign_sop_seat('sop_r_1', 'dept_r_a',
        '80000000-0000-0000-0000-000000000006'::uuid) $$,
-  null,
-  'reassigning to a non-member of the seat department is refused'
+  'cross-department SOP member can be assigned to the seat'
+);
+reset role;
+select is((select signer_id::text from public.sop_review_seats where sop_id='sop_r_1' and department_id='dept_r_a'),
+  '80000000-0000-0000-0000-000000000006', 'cross-department assignment actually lands');
+select test_as('80000000-0000-0000-0000-000000000001');
+select throws_ok(
+  $$ select public.reassign_sop_seat('sop_r_1', 'dept_r_a',
+       '80000000-0000-0000-0000-000000000007'::uuid) $$,
+  'P0001', 'The new approver must be an SOP member in this workspace',
+  'workspace membership alone does not qualify a non-SOP member'
+);
+select lives_ok(
+  $$ select public.reassign_sop_seat('sop_r_1', 'dept_r_a',
+       '80000000-0000-0000-0000-000000000004'::uuid) $$,
+  'restore the unsigned seat to the intended signer before review'
 );
 
 -- ---------------------------------------------------------------------------
@@ -166,8 +182,8 @@ select lives_ok(
 reset role;
 select is(
   (select count(*) from public.audit_log where target_type = 'sop_review_seat'),
-  2::bigint,
-  'exactly the two successful reassignments were audited'
+  4::bigint,
+  'exactly the four successful reassignments were audited'
 );
 
 select finish();

@@ -2,16 +2,16 @@
 --
 -- Pins the seat invariants:
 --   * at least one required departmental approver; any number of departments may be required
---   * every seat with a signer_id names a strict member of that seat's department
+--   * every seat with a signer_id names an eligible SOP member in the workspace
 --   * the submitter holds no blocking seat (first leg of the three-humans invariant)
 --   * the approval roster refuses legacy Support / Consult / Inform duties
 --   * an authorship signature by the submitter, bound to (content_hash, review_cycle),
 --     is required to submit
 --
--- sign_sop v2 contract: sign_sop(p_sop, p_meaning, p_reason, p_seat_department, p_resolves).
+-- Current assignment-based approval model (October 2026).
 
 begin;
-select plan(11);
+select plan(12);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -82,11 +82,10 @@ insert into public.sop_review_seats (sop_id, department_id, rasic, signer_id) va
   -- sop_seat_3: multiple required departments are allowed.
   ('sop_seat_3', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000002'),
   ('sop_seat_3', 'dept_st_b', 'responsible', 'c0000000-0000-0000-0000-000000000003'),
-  -- sop_seat_4: one signer is NOT a member of dept_st_b.
+  -- sop_seat_4: initially valid; membership is removed below.
   ('sop_seat_4', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000002'),
-  ('sop_seat_4', 'dept_st_b', 'responsible', 'c0000000-0000-0000-0000-000000000005'),
-  -- sop_seat_5: the submitter (u1) holds the responsible seat.
-  ('sop_seat_5', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000001'),
+  ('sop_seat_4', 'dept_st_b', 'responsible', 'c0000000-0000-0000-0000-000000000003'),
+  -- sop_seat_5: the attempted self-assignment is tested below.
   ('sop_seat_5', 'dept_st_b', 'responsible', 'c0000000-0000-0000-0000-000000000003'),
   -- sop_seat_6: fully valid blocking roster.
   ('sop_seat_6', 'dept_st_a', 'responsible', 'c0000000-0000-0000-0000-000000000002'),
@@ -127,24 +126,37 @@ select lives_ok(
 );
 
 -- ---------------------------------------------------------------------------
--- 4. A seat whose signer is not a member of that department cannot pass Gate A.
+-- 4. A previously valid assignment loses eligibility when its SOP membership ends.
 -- ---------------------------------------------------------------------------
+delete from public.department_members where user_id='c0000000-0000-0000-0000-000000000003';
 select test_as('c0000000-0000-0000-0000-000000000001');
 select public.sign_sop('sop_seat_4', 'authorship');
 select throws_ok(
   $$ update public.sops set status = 'in_review' where id = 'sop_seat_4' $$,
   null,
-  'a seat signer who is not a strict member of the seat department blocks submission (Gate A)'
+  'a departed SOP member on the roster blocks submission (Gate A)'
+);
+
+reset role;
+select throws_ok(
+  $$ insert into public.sop_review_seats(sop_id,department_id,rasic,signer_id)
+     values('sop_seat_4','dept_st_d','responsible','c0000000-0000-0000-0000-000000000005') $$,
+  'P0001', 'Choose an SOP member from this workspace',
+  'a workspace member with no SOP membership cannot be assigned in draft'
 );
 
 -- ---------------------------------------------------------------------------
--- 5. The submitter must hold no blocking seat.
+-- 5. The author cannot be assigned to their own approval roster, even in draft.
 -- ---------------------------------------------------------------------------
-select public.sign_sop('sop_seat_5', 'authorship');
+reset role;
+insert into public.department_members(department_id,user_id,dept_role)
+  values('dept_st_b','c0000000-0000-0000-0000-000000000003','approver');
+select test_as('c0000000-0000-0000-0000-000000000001');
 select throws_ok(
-  $$ update public.sops set status = 'in_review' where id = 'sop_seat_5' $$,
-  null,
-  'the submitter holding a blocking seat is refused (Gate A / three-humans invariant)'
+  $$ insert into public.sop_review_seats(sop_id,department_id,rasic,signer_id)
+     values('sop_seat_5','dept_st_a','responsible','c0000000-0000-0000-0000-000000000001') $$,
+  'P0001', 'The author or submitter cannot approve their own SOP',
+  'self-approval assignment is refused before submission'
 );
 
 -- ---------------------------------------------------------------------------

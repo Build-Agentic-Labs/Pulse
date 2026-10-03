@@ -29,6 +29,11 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [initialMasters, workspaceId]);
+  useEffect(() => {
+    // Warm editor code only; opening a hidden builder would fetch unrelated data.
+    const timer = window.setTimeout(() => { void import("./line-workspace").catch(() => undefined); }, 300);
+    return () => window.clearTimeout(timer);
+  }, []);
   async function create(event: FormEvent) {
     event.preventDefault();
     if (!workspaceId || pending || !title.trim()) return;

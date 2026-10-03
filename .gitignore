@@ -34,3 +34,8 @@ UFO/*.zip
 # agent worktrees (isolated checkouts)
 .claude/worktrees/
 scratch/
+
+# Isolated browser regression tests
+.next-e2e/
+playwright-report/
+test-results/

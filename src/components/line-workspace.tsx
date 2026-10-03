@@ -3520,6 +3520,7 @@ export function LineWorkspace({
   const isProcedureModule = activeModule === "procedure";
   const isDashboardModule = activeModule === "dashboard";
   const isSettingsModule = activeModule === "settings";
+  const canDisplayCachedAwi = Boolean(awiMaster && hasLoadedRemoteState && derivedState.product.projectId === projectId);
   const requiresCompletePlannerState = !isDashboardModule && !isSettingsModule;
   const sidebarActiveModule = isProjectSwitching ? "dashboard" : activeModule;
   const plannerChromeContext = awiMaster
@@ -6247,9 +6248,10 @@ export function LineWorkspace({
           </div>
 
           {isProjectSwitching ||
-          (requiresCompletePlannerState && !hasConfirmedRemoteState) ? (
+          (requiresCompletePlannerState && !hasConfirmedRemoteState && !canDisplayCachedAwi) ? (
             <PlannerWorkspaceSkeleton />
           ) : isProcedureModule ? (
+            <div className="contents" inert={Boolean(awiMaster && !hasConfirmedRemoteState)} aria-busy={Boolean(awiMaster && !hasConfirmedRemoteState)}>
             <ProcedureWorkspace
               project={activeProjectContext}
               product={derivedState.product}
@@ -6276,6 +6278,7 @@ export function LineWorkspace({
               toolLibrary={toolLibrary}
               projectToolRegistry={projectToolRegistry}
             />
+            </div>
           ) : isSettingsModule ? (
             <main className="min-h-0 min-w-0 overflow-hidden">
               <AppSettingsPanel

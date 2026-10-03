@@ -70,11 +70,7 @@ insert into public.sop_notifications (sop_id, recipient_id, kind, event_id, remi
 values ('sop_n_1', 'a1000000-0000-0000-0000-000000000003', 'review_requested', null, 1, 0);
 
 select test_as('a1000000-0000-0000-0000-000000000003');
-select is(
-  (select count(*) from public.sop_notifications),
-  0::bigint,
-  'an authenticated user sees zero ledger rows even when rows exist'
-);
+select throws_ok($$ select count(*) from public.sop_notifications $$, '42501', 'permission denied for table sop_notifications', 'an authenticated user sees zero ledger rows even when rows exist');
 select throws_ok(
   $$ insert into public.sop_notifications (sop_id, recipient_id, kind, reminder_index, review_cycle)
      values ('sop_n_1', 'a1000000-0000-0000-0000-000000000003', 'review_requested', 2, 0) $$,
@@ -126,11 +122,7 @@ select lives_ok(
   'a drain run is recorded'
 );
 select test_as('a1000000-0000-0000-0000-000000000001');
-select is(
-  (select count(*) from public.notification_drain_runs),
-  0::bigint,
-  'even an admin cannot read drain runs through PostgREST (service-role only)'
-);
+select throws_ok($$ select count(*) from public.notification_drain_runs $$, '42501', 'permission denied for table notification_drain_runs', 'even an admin cannot read drain runs through PostgREST (service-role only)');
 reset role;
 
 -- ---------------------------------------------------------------------------
@@ -149,11 +141,7 @@ select throws_ok(
   'the same recipient cannot be claimed twice for one period'
 );
 select test_as('a1000000-0000-0000-0000-000000000001');
-select is(
-  (select count(*) from public.notification_digests),
-  0::bigint,
-  'digest claims are invisible to authenticated users'
-);
+select throws_ok($$ select count(*) from public.notification_digests $$, '42501', 'permission denied for table notification_digests', 'digest claims are invisible to authenticated users');
 reset role;
 
 -- ---------------------------------------------------------------------------
@@ -216,12 +204,9 @@ select is(
   1::bigint,
   'a recipient sees only their own inbox rows'
 );
-update public.notifications set title = 'hacked';
-select is(
-  (select count(*) from public.notifications where title = 'hacked'),
-  0::bigint,
-  'a recipient cannot edit inbox content (no update policy)'
-);
+select throws_ok($$ update public.notifications set title='hacked' $$,
+  '42501', 'permission denied for table notifications',
+  'a recipient cannot edit inbox content through direct DML');
 select is(
   public.mark_notifications_read(array(select id from public.notifications)),
   1,
@@ -261,9 +246,9 @@ insert into public.email_suppressions (email, reason) values ('bounced@test.dev'
 insert into public.transactional_emails (kind, recipient_email, status) values ('invite', 'n-reviewer@test.dev', 'sent');
 
 select test_as('a1000000-0000-0000-0000-000000000001');
-select is((select count(*) from public.email_deliveries), 0::bigint, 'deliveries are invisible to authenticated users');
-select is((select count(*) from public.email_suppressions), 0::bigint, 'suppressions are invisible to authenticated users');
-select is((select count(*) from public.transactional_emails), 0::bigint, 'the transactional ledger is invisible to authenticated users');
+select throws_ok($$ select count(*) from public.email_deliveries $$, '42501', 'permission denied for table email_deliveries', 'deliveries are invisible to authenticated users');
+select throws_ok($$ select count(*) from public.email_suppressions $$, '42501', 'permission denied for table email_suppressions', 'suppressions are invisible to authenticated users');
+select throws_ok($$ select count(*) from public.transactional_emails $$, '42501', 'permission denied for table transactional_emails', 'the transactional ledger is invisible to authenticated users');
 reset role;
 
 -- ---------------------------------------------------------------------------

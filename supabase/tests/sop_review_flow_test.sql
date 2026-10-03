@@ -166,7 +166,7 @@ reset role;
 delete from public.department_members where department_id='dept_z_b' and user_id='e0000000-0000-0000-0000-000000000003';
 select test_as('e0000000-0000-0000-0000-000000000003');
 select throws_ok($$select public.submit_sop_review('sop_z2',true)$$,
- 'P0001','Only an assigned reviewer can submit this review','removed department member cannot submit through definer RPC');
+ 'P0001','Only an active assigned reviewer can submit this review','removed department member cannot submit through definer RPC');
 reset role;
 delete from public.workspace_members where workspace_id='ws_authz' and user_id='e0000000-0000-0000-0000-000000000007';
 select test_as('e0000000-0000-0000-0000-000000000007');

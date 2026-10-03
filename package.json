@@ -6,12 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint app src --max-warnings=0",
+    "lint": "eslint app src e2e playwright.config.ts scripts/test-browser.mjs --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:types": "supabase gen types typescript --project-id neaadefipcpxxcqszpud --schema public",
-    "check:bundles": "node scripts/check-client-bundles.mjs"
+    "check:bundles": "node scripts/check-client-bundles.mjs",
+    "test:browser": "node scripts/test-browser.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
@@ -39,8 +40,10 @@
     "ws": "8.21.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@types/pg": "8.23.1",
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.39.5",

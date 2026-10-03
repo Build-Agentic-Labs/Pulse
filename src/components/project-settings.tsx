@@ -22,7 +22,7 @@ function canManage(group?: WorkspaceProjectGroup) {
 }
 
 function projectsFrom(groups: WorkspaceProjectGroup[]) {
-  return groups.flatMap((group) => group.projects).filter((project) => project.status !== "archived");
+  return groups.flatMap((group) => group.projects).filter((project) => project.status !== "archived" && !project.isAwiMaster);
 }
 
 export function ProjectSettings({

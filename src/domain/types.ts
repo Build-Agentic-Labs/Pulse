@@ -166,7 +166,12 @@ export interface WorkspaceAccessGrant {
   updatedAt: string;
 }
 
+export type PortfolioCategory = "generators" | "compressors" | "hybrid" | "power-modules" | "trailers";
+
 export interface Project {
+  isAwiMaster?: boolean;
+  portfolioCategory?: PortfolioCategory;
+  portfolioPosition?: number;
   id: string;
   workspaceId: string;
   name: string;
@@ -180,6 +185,7 @@ export interface Project {
 }
 
 export interface PlannerProjectContext {
+  isAwiMaster?: boolean;
   projectId: string;
   projectName: string;
   workspaceId: string;

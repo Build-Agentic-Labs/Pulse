@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import type { PresencePeer } from "@/lib/use-planner-presence";
 import { NothingStatus } from "./nothing-ui";
@@ -47,11 +48,13 @@ export function TopNav({
   loading = false,
   chromeStatus,
   presence,
+  actions,
 }: {
   context?: ReturnType<typeof buildPlannerChromeContext>;
   loading?: boolean;
   chromeStatus?: { message: string; error?: boolean } | null;
   presence?: PresencePeer[];
+  actions?: ReactNode;
 }) {
   const status = chromeStatus ?? null;
 
@@ -90,6 +93,7 @@ export function TopNav({
             <NothingStatus error={status.error}>{status.message}</NothingStatus>
           </div>
         ) : null}
+        {actions}
         <UserNav />
       </div>
     </header>

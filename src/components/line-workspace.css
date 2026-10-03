@@ -3128,7 +3128,3 @@
 @media (max-width: 1100px) {
     .ui-procedure-step .ui-procedure-card-body .ui-procedure-step-instruction { height: 16rem; }
   }
-
-.ui-setup-accordion { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms ease, opacity 160ms ease; }
-.ui-setup-accordion[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .ui-setup-accordion { transition: none; } }

@@ -170,7 +170,7 @@ export function buildWorkInstruction({
   const definitions = getManufacturingStepCheckDefinitions(product.customFields);
   const toolsByStep = getTaskStepToolListMap(task);
   const photosByStep = getTaskStepPhotoAttachmentMap(task);
-  const documentNumber = documentDisplayCode(task);
+  const documentNumber = typeof task.customFields?.awiDocumentNumber === "string" ? task.customFields.awiDocumentNumber : documentDisplayCode(task);
 
   const steps = [...(task.manufacturingSteps ?? [])].sort((left, right) => left.sequence - right.sequence);
 

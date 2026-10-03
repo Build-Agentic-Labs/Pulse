@@ -85,6 +85,8 @@ export function Sidebar({
   onCollapse: () => void;
   project?: PlannerProjectContext;
 }) {
+  const isAwiMaster = project?.isAwiMaster === true;
+  const visibleModules = isAwiMaster ? mainModules.filter((module) => ["procedure", "work-instructions"].includes(module.id)) : mainModules;
   const isSettingsModule = activeModule === "settings";
   const isSetupModule = activeModule === "setup";
   const [setupExpanded, setSetupExpanded] = useState(isSetupModule);
@@ -141,12 +143,12 @@ export function Sidebar({
           </>
         ) : (
           <>
-            <div className="ui-nav-section">Planner</div>
+            <div className="ui-nav-section">{isAwiMaster ? "AWI Builder" : "Planner"}</div>
             <NavSelectionTrack
-              activeIndex={mainModules.findIndex((module) => module.id === activeModule)}
+              activeIndex={visibleModules.findIndex((module) => module.id === activeModule)}
               className="space-y-0.5"
             >
-              {mainModules.map((module) => {
+              {visibleModules.map((module) => {
                 const Icon = module.icon;
                 const active = activeModule === module.id;
                 return (

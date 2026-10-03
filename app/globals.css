@@ -1913,9 +1913,9 @@ body {
   .ui-nav-selection-track::before {
     position: absolute;
     z-index: 0;
-    top: 0;
+    top: var(--nav-selection-top, 0);
     right: var(--nav-selection-inset, 0);
-    left: var(--nav-selection-inset, 0);
+    left: var(--nav-selection-left, var(--nav-selection-inset, 0));
     height: var(--control-height-compact);
     border-radius: var(--radius-control);
     background: var(--color-accent-muted);
@@ -3831,4 +3831,27 @@ body {
 }
 @media (max-width: 640px) {
   .sop-document-toolbar { padding-inline: 16px; }
+}
+
+/* Shared expandable navigation used by product categories and Setup. */
+.ui-setup-accordion { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms ease, opacity 160ms ease; }
+.ui-setup-accordion[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .ui-setup-accordion { transition: none; } }
+
+/* Nested product rows begin inside the category's guide and top spacing. */
+.ui-portfolio-product-track {
+  --nav-selection-top: 4px;
+  --nav-selection-left: 8px;
+}
+
+.ui-context-menu-comfortable {
+  padding: 4px;
+}
+.ui-context-menu-comfortable .ui-context-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: var(--type-nav);
+  line-height: 20px;
 }

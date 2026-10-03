@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import type { AwiMaster } from "@/lib/awi/store";
 import type { PlannerState, WorkspaceProjectGroup } from "@/domain/types";
 import type { WorkOrderSummary } from "@/lib/planning/store";
 import { WORK_INSTRUCTION_LAYOUTS } from "@/domain/work-instruction/schema";
@@ -145,10 +146,11 @@ export function ProductionRouteShell({ initialGroups }: ShellProps = {}) {
 }
 
 export function PlannerRouteShell({
+  awiMaster,
   projectId,
   initialGroups,
   initialPlannerState,
-}: { projectId?: string; initialPlannerState?: PlannerState } & ShellProps) {
+}: { awiMaster?: AwiMaster; projectId?: string; initialPlannerState?: PlannerState } & ShellProps) {
   const searchParams = useSearchParams();
   const loadingFallback = searchParams.get("view") === "settings" ? <SettingsLoadingState /> : <ProductLoadingState />;
 
@@ -161,6 +163,7 @@ export function PlannerRouteShell({
     >
       {(project, onReady) => (
         <LineWorkspace
+          awiMaster={awiMaster}
           projectContext={project}
           projectId={project?.projectId ?? projectId}
           onReady={onReady}

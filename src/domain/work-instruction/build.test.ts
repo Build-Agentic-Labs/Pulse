@@ -72,6 +72,16 @@ const zone: Zone = {
 };
 
 describe("buildWorkInstruction", () => {
+  it("preserves the master AWI document number in the released document", () => {
+    const instruction = buildWorkInstruction({task: makeTask({customFields: {awiDocumentNumber: "AWI-0042"}}), product: makeProduct(), zone});
+    expect(instruction.meta.documentNumber).toBe("AWI-0042");
+  });
+  it("renders legacy tasks without custom fields", () => {
+    const task = makeTask({ manufacturingCode: "FA-INV-010" });
+    delete (task as Partial<Task>).customFields;
+    expect(buildWorkInstruction({ task, product: makeProduct(), zone }).meta.documentNumber).toBe("FA-INV-010-WI1");
+  });
+
   it("mints the document number from the manufacturing code", () => {
     const task = makeTask({ manufacturingCode: "FA-INV-010" });
 

@@ -501,7 +501,7 @@ function mapProduct(row: Record<string, unknown>): Product {
 // Exact columns consumed by mapWorkspace/mapProject -- avoids select('*') on the hot
 // sidebar load path (audit #9). Keep in sync with the mappers below.
 const WORKSPACE_COLUMNS = "id, name, owner_id, created_at, updated_at";
-const PROJECT_COLUMNS = "id, workspace_id, name, description, status, created_by, created_at, updated_at";
+const PROJECT_COLUMNS = "id, workspace_id, name, description, is_awi_master, portfolio_category, portfolio_position, status, created_by, created_at, updated_at";
 
 function mapWorkspace(row: Record<string, unknown>): Workspace {
   return {
@@ -519,6 +519,9 @@ function mapProject(row: Record<string, unknown>): Project {
     workspaceId: String(row.workspace_id),
     name: String(row.name ?? ""),
     description: maybeText(row.description),
+    isAwiMaster: row.is_awi_master === true,
+    portfolioCategory: maybeText(row.portfolio_category) as Project["portfolioCategory"],
+    portfolioPosition: typeof row.portfolio_position === "number" ? row.portfolio_position : undefined,
     status: String(row.status ?? "active") as Project["status"],
     createdBy: maybeText(row.created_by),
     createdAt: String(row.created_at),
@@ -1725,6 +1728,7 @@ async function loadProjectContext(
   }
 
   return {
+    isAwiMaster: project.is_awi_master,
     projectId: String(project.id),
     projectName: String(project.name ?? ""),
     workspaceId: String(workspace.id),
@@ -2093,6 +2097,8 @@ export async function updateProjectInSupabase(
     name?: string;
     description?: string | null;
     status?: Project["status"];
+    portfolioCategory?: Project["portfolioCategory"] | null;
+    portfolioPosition?: number;
   },
 ) {
   const row: TablesUpdate<"projects"> = {};
@@ -2109,6 +2115,15 @@ export async function updateProjectInSupabase(
     row.description = patch.description?.trim() ? patch.description.trim() : null;
   }
 
+  if (patch.portfolioPosition !== undefined) {
+    if (!Number.isFinite(patch.portfolioPosition)) throw new Error("Invalid product order.");
+    row.portfolio_position = patch.portfolioPosition;
+  }
+
+  if (patch.portfolioCategory !== undefined) {
+    row.portfolio_category = patch.portfolioCategory;
+  }
+
   if (patch.status !== undefined) {
     row.status = patch.status;
   }
@@ -2118,7 +2133,7 @@ export async function updateProjectInSupabase(
   }
 
   const supabase = plannerClient();
-  await throwIfError(supabase.from("projects").update(row).eq("id", projectId));
+  await throwIfError(supabase.from("projects").update(row).eq("id", projectId).select("id").single());
 }
 
 export async function deleteProjectFromSupabase(projectId: string) {

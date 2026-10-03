@@ -1,5 +1,9 @@
 "use client";
 
+import { AwiEditorActions } from "./awi-editor-actions";
+import type { AwiMaster } from "@/lib/awi/store";
+import { buildWorkInstruction } from "@/domain/work-instruction/build";
+import { listWorkInstructionReleases, listWorkInstructionReferences } from "@/lib/work-instruction/store";
 import { acknowledgeAnnotationDrafts, readAnnotationDraft } from "@/lib/photo-annotation-drafts";
 
 // Route-scoped styles: ~37 kB of planner-only rules (procedure, gantt, scenarios,
@@ -521,11 +525,13 @@ function PlaybackPanel({
 }
 
 export function LineWorkspace({
+  awiMaster,
   projectId,
   projectContext,
   onReady,
   initialPlannerState,
 }: {
+  awiMaster?: AwiMaster;
   projectId?: string;
   projectContext?: PlannerProjectContext;
   onReady?: () => void;
@@ -579,7 +585,7 @@ export function LineWorkspace({
   // The active scenario's latest state is mirrored here continuously (see the effect below), so the
   // cache always matches what's saved; switching to a cached scenario is a pure in-memory setState.
   const scenarioCacheRef = useRef<Map<string, PlannerState>>(new Map());
-  const [activeModule, setActiveModule] = useState(() => urlWorkspaceSnapshot.activeModule ?? "dashboard");
+  const [activeModule, setActiveModule] = useState(() => urlWorkspaceSnapshot.activeModule ?? (awiMaster ? "procedure" : "dashboard"));
   const restoringWorkspaceHistoryRef = useRef(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("account");
   const [setupSection, setSetupSection] = useState<SetupSection>("product");
@@ -1032,7 +1038,7 @@ export function LineWorkspace({
     function restoreWorkspaceFromHistory() {
       const snapshot = readWorkspaceUrlSnapshot(window.location.search);
       restoringWorkspaceHistoryRef.current = true;
-      setActiveModule(snapshot.activeModule ?? "dashboard");
+      setActiveModule(snapshot.activeModule ?? (awiMaster ? "procedure" : "dashboard"));
       if (snapshot.selectedTaskId) setSelectedTaskId(snapshot.selectedTaskId);
       if (snapshot.selectedStationId) setSelectedStationId(snapshot.selectedStationId);
       setActiveZoneId(snapshot.activeZoneId);
@@ -1040,7 +1046,7 @@ export function LineWorkspace({
 
     window.addEventListener("popstate", restoreWorkspaceFromHistory);
     return () => window.removeEventListener("popstate", restoreWorkspaceFromHistory);
-  }, []);
+  }, [awiMaster]);
 
   function bumpProcedureDraftVersion() {
     setProcedureDraftVersion((version) => version + 1);
@@ -3516,11 +3522,13 @@ export function LineWorkspace({
   const isSettingsModule = activeModule === "settings";
   const requiresCompletePlannerState = !isDashboardModule && !isSettingsModule;
   const sidebarActiveModule = isProjectSwitching ? "dashboard" : activeModule;
-  const plannerChromeContext = isDashboardModule ? buildPlannerChromeContext(derivedState.product) : undefined;
+  const plannerChromeContext = awiMaster
+    ? { title: awiMaster.title, status: "Draft", statusClass: undefined, detail: awiMaster.document_number }
+    : isDashboardModule ? buildPlannerChromeContext(derivedState.product) : undefined;
   if (!isProjectSwitching && plannerChromeContext) {
     stablePlannerChromeContextRef.current = plannerChromeContext;
   }
-  const displayedPlannerChromeContext = isProjectSwitching
+  const displayedPlannerChromeContext = awiMaster ? plannerChromeContext : isProjectSwitching
     ? projectSwitchTargetContext ?? stablePlannerChromeContextRef.current ?? plannerChromeContext
     : plannerChromeContext;
   const showDetailDrawer = false;
@@ -6170,6 +6178,24 @@ export function LineWorkspace({
         <TopNav
           context={displayedPlannerChromeContext}
           presence={presencePeers}
+          actions={awiMaster ? <AwiEditorActions master={awiMaster} saveState={saveState} readOnly={isViewOnlyAccess}
+            onLeave={async () => {
+              if (await ensureSavedBeforeScenarioAction("AWI is still saving", "Your draft could not be saved to the server yet. Keep this page open and try again.")) router.push(`/awi?workspace=${encodeURIComponent(awiMaster.workspace_id)}`);
+            }}
+            onPrepare={async () => {
+              if (!await ensureSavedBeforeScenarioAction("AWI is still saving", "Resolve the save issue before publishing your AWI.")) return null;
+              const task = latestDerivedStateRef.current.tasks.find((item) => item.id === awiMaster.task_id);
+              if (!task) throw new Error("The AWI draft could not be found.");
+              const [media, releases, references] = await Promise.all([
+                loadTaskPrivateMediaFromSupabase(task.id, awiMaster.project_id),
+                listWorkInstructionReleases(awiMaster.project_id), listWorkInstructionReferences(awiMaster.project_id),
+              ]);
+              if (!media) throw new Error("The AWI media could not be loaded. Try again before publishing.");
+              const instruction = buildWorkInstruction({ task: mergeTaskPrivateMedia(task, media), product: latestDerivedStateRef.current.product,
+                zone: latestDerivedStateRef.current.zones.find((item) => item.id === task.zoneId), references });
+              instruction.meta.documentNumber = awiMaster.document_number;
+              return { instruction, releases, references };
+            }} /> : undefined}
         />
 
         <CommandPalette

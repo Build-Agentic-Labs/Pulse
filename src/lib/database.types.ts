@@ -1189,10 +1189,19 @@ export type Database = {
           },
         ]
       }
+      awi_masters: {
+        Row: { id: string; workspace_id: string; project_id: string; task_id: string; document_number: string; title: string; draft_updated_at: string; published_at: string | null; published_release_id: string | null; created_at: string }
+        Insert: { id?: string; workspace_id: string; project_id: string; task_id: string; document_number: string; title: string; draft_updated_at?: string; published_at?: string | null; published_release_id?: string | null; created_at?: string }
+        Update: { title?: string }
+        Relationships: []
+      }
       projects: {
         Row: {
           created_at: string
           created_by: string | null
+          is_awi_master: boolean
+          portfolio_position: number
+          portfolio_category: string | null
           description: string | null
           id: string
           name: string
@@ -1203,6 +1212,9 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
+          is_awi_master?: boolean
+          portfolio_position?: number
+          portfolio_category?: string | null
           description?: string | null
           id?: string
           name: string
@@ -1213,6 +1225,9 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
+          is_awi_master?: boolean
+          portfolio_position?: number
+          portfolio_category?: string | null
           description?: string | null
           id?: string
           name?: string
@@ -3887,6 +3902,8 @@ export type Database = {
       }
     }
     Functions: {
+      create_awi_master: { Args: { p_workspace_id: string; p_title: string; p_document_number?: string }; Returns: string }
+
       acquire_sop_submission_lock: { Args: { p_sop_id: string }; Returns: string | null }
       stage_sop_approver: { Args: { p_sop_id: string; p_department_id: string; p_email: string; p_position_title: string }; Returns: undefined }
 

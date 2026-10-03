@@ -93,6 +93,7 @@ function buildProjectContext(groups: WorkspaceProjectGroup[], projectId: string)
     const project = group.projects.find((candidate) => candidate.id === projectId);
     if (project) {
       return {
+        isAwiMaster: project.isAwiMaster,
         projectId: project.id,
         projectName: project.name,
         workspaceId: group.workspace.id,
@@ -265,7 +266,7 @@ export function AuthProjectGate({
   const flatProjects = useMemo(
     () => groups.flatMap((group) =>
       group.projects
-        .filter((project) => project.status !== "archived")
+        .filter((project) => project.status !== "archived" && !project.isAwiMaster)
         .map((project) => ({
           project,
           workspace: group.workspace,

@@ -11,14 +11,14 @@ export type ContextMenuItem = {
   onSelect: () => void;
 };
 
-function contextMenuStyle(anchorRect: DOMRect, menuWidth: number): CSSProperties {
+function contextMenuStyle(anchorRect: DOMRect, menuWidth: number, itemCount: number, comfortable: boolean): CSSProperties {
   const padding = 12;
   const left = Math.max(
     padding,
     Math.min(anchorRect.right - menuWidth, window.innerWidth - menuWidth - padding),
   );
   const belowTop = anchorRect.bottom + 4;
-  const estimatedHeight = 88;
+  const estimatedHeight = itemCount * (comfortable ? 32 : 22) + (comfortable ? 10 : 8);
   const top =
     belowTop + estimatedHeight > window.innerHeight - padding
       ? Math.max(padding, anchorRect.top - estimatedHeight - 6)
@@ -36,12 +36,14 @@ export function UiContextMenu({
   items,
   onClose,
   menuWidth = 168,
+  density = "compact",
   ariaLabel = "Project actions",
 }: {
   anchorRect: DOMRect;
   items: ContextMenuItem[];
   onClose: () => void;
   menuWidth?: number;
+  density?: "compact" | "comfortable";
   ariaLabel?: string;
 }) {
   useEffect(() => {
@@ -68,8 +70,8 @@ export function UiContextMenu({
         aria-label="Close menu"
       />
       <div
-        className="ui-context-menu"
-        style={contextMenuStyle(anchorRect, menuWidth)}
+        className={`ui-context-menu ${density === "comfortable" ? "ui-context-menu-comfortable" : ""}`}
+        style={contextMenuStyle(anchorRect, menuWidth, items.length, density === "comfortable")}
         role="menu"
         aria-label={ariaLabel}
       >

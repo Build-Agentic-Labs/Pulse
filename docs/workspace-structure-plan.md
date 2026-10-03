@@ -1,0 +1,210 @@
+# Workspace structural improvements — Astra scope / Sol 6.1 handoff
+
+Status: scoped; structural implementation has not started. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
+
+Application baseline: `edd45a93ee27f061948c9afd407da29075297aa7` (performance/save-recovery update plus cached-reload test-readiness correction). Branch for this work: `codex/workspace-structure`.
+
+## Outcome and limits
+
+Make save ownership, media operations, and data synchronization easier to understand and test while preserving existing behavior. Move persistence into `src/lib/planner` and retain existing public imports through a compatibility facade.
+
+No UI redesign, label/layout changes, schema changes, data cleanup, dependency upgrades, new global state store, or permission changes. The user requires approval before visible UI changes and prohibits deleting data. This scope does not authorize resetting a retained local database.
+
+Line counts are maintainability estimates, not quotas. They include imports, comments, and blank lines. Tests are measured separately. Most existing logic moves intact; total repository LOC may increase because of explicit interfaces and tests. Do not compress formatting or split a coherent invariant merely to reach a number. A cohesive module above its estimate needs an explanation, not arbitrary fragmentation.
+
+Prefer source modules around 500 physical lines or fewer when the responsibility is cohesive. The larger draft, mapping, read, and transaction modules below are intentional exceptions; do not fragment their invariants to meet this preference.
+
+## Baseline and size targets
+
+Measured with `splitlines()` for physical lines and nonempty `strip()` for nonblank lines. Refresh counts and source anchors at execution time.
+
+| Existing file | Physical LOC | Nonblank LOC |
+| --- | ---: | ---: |
+| `src/components/line-workspace.tsx` | 6,655 | 6,119 |
+| `src/domain/supabase-planner.ts` | 4,932 | 4,415 |
+| `line-workspace/procedure.tsx` | 1,303 | 1,195 |
+| `line-workspace/step-editors.tsx` | 1,208 | 1,149 |
+| `line-workspace/pfmea-workspace.tsx` | 1,102 | 1,048 |
+| `line-workspace/setup-panels.tsx` | 1,046 | 996 |
+| `line-workspace/drawer.tsx` | 1,032 | 974 |
+
+The existing procedure, step editor, PFMEA, setup, and drawer UI modules stay intact in the core scope.
+
+| Item | Existing LOC likely moved | Destination targets | Owner after phase |
+| --- | ---: | --- | ---: |
+| 1. Save/retry/draft ownership and development harness | 1,750–2,000 | Four modules, 300–800 each | Workspace: 4,850–5,150 |
+| 2. Media and tool operations | 580–650 | Two modules, 260–450 each | Workspace: 4,300–4,650 |
+| 3. Loading, realtime, scenario lifecycle | 1,050–1,250 | Three hooks, 300–650 each | Workspace: 3,000–3,550 |
+| 4A. Supabase client/mapping foundations | 850–1,000 | Client 160–210; mapping 550–750; helpers 100–180 | Data module: 4,000–4,200 |
+| 4B. Supabase media/tool persistence | 1,450–1,650 | Cohesive modules, 180–550 each | Data module: 2,450–2,800 |
+| 5. Supabase access, reads, granular writes | Remaining implementation | Stores, 65–750 each | Compatibility facade: 80–180 |
+| Optional 6. Palette, optimization, task actions | 1,400–1,700 | Three modules, 350–700 each | Workspace: 1,600–2,200 |
+
+Owner estimates include replacement wiring. Do not subtract every maximum independently. The core scope realistically leaves a 3,000–3,550-line composition component; reaching 1,600–2,200 requires the optional tranche.
+
+## Ownership contract before extraction
+
+Draft merging, queues, deferred remote updates, exact acknowledgments, and version rebasing form one interacting state machine. The loading owner must use its merge API. It must not invent a second merge implementation.
+
+Preserve `WorkspaceWriteTracker`, `workspaceSaveStatus`, `workspaceSaveBarrier`, and `useWriteTracker`. Procedure queues continue contributing to aggregate status. Keep current operation keys and sequence-aware completion semantics.
+
+Create `line-workspace/workspace-controller-types.ts` only if it removes repeated signatures; target 60–120 lines. Prefer narrow capabilities:
+
+- State access: current-state getter and functional React setter.
+- Scope: current project/scenario getters and confirmation predicates.
+- Feedback: existing toast, restore, and confirmation callbacks.
+- Save coordination: tracker, reported status setters, save barrier, pending-work predicates and deferred-refresh callback.
+- Procedure editing: field draft APIs, task merge/acknowledgment, schedule/persist, and reset/restore methods.
+
+Each hook receives only the capabilities it uses. Avoid a single bag of all component variables, circular imports between hooks, or a new context solely to avoid explicit arguments. Initially retaining a few ownership refs in the composition root is acceptable. Use current-value refs/stable delegates where asynchronous callbacks cross ownership boundaries. Hook construction must not start network activity.
+
+## Phase 1 — Save ownership
+
+Perform small extractions and verify each before continuing.
+
+### 1A. `use-procedure-drafts.ts` — 600–800 lines
+
+Move draft refs, sequence counters, render-version state, `LOCAL_EDITED_TASK_TEXT_FIELDS`, draft field activation/update APIs, task-text preservation/merge, draft acknowledgment, deferred procedure update storage/application, and draft snapshot persistence/restoration.
+
+Source anchors: `bumpProcedureDraftVersion` through `updateProcedureStepField` (approximately 1065–1625, excluding queue-only accessors); `confirmProcedureDraftsFromSave` (approximately 3738–3816). Expose explicit initialize/reset methods for load and successful scenario switch.
+
+Inject a current queue-work predicate into local-text preservation. Do not import the queue hook or capture a stale boolean. Loading consumes this owner's merge/defer API.
+
+### 1B. `use-procedure-save-queue.ts` — 350–500 lines
+
+Move queue types, queue/timer refs, accessors and pending predicates, `startProcedureTaskSave`, `persistProcedureTaskUpdate`, `scheduleProcedureTaskSave` (approximately 3817–4029), and existing scope-exit debounce flushing.
+
+Expose scheduling, immediate persistence, flush-on-scope-exit, pending predicates, status snapshots and controlled reset. Preserve:
+
+- 750 ms debounce; 2,500 ms retry delay.
+- Annotation-only coalescing and baseline.
+- Exact save ID, edit sequence, and value acknowledgment.
+- Immediate drain of newer edits with obsolete debounce cancellation.
+- Confirmed version rebasing before the next save.
+- Conflict handling distinct from ordinary retry.
+- Flushing scheduled work during existing cleanup events.
+
+The controller instance must not be recreated for each queue update.
+
+### 1C. `use-workspace-saves.ts` — 300–450 lines
+
+Move reported/aggregate save status wiring, shell save refs and debounce, `flushPendingPlannerSave`, `waitForLocalSavesToSettle`, `persistPlannerState`, `updateMasterBom`, and tightly coupled save/navigation guards. General module/history navigation remains outside.
+
+Preserve `waitForLocalSavesToSettle(12000, "master-bom")`: retry may resolve its own failed operation, while unrelated errors/conflicts still block and active saves still drain. Keep verified BOM merging into current state and queued shell snapshots.
+
+The shell save has destructive diff behavior. Preserve all remote-confirmation/deletion guards, do not expand its callers, and retain granular procedure, media, and BOM writes.
+
+### 1D. `procedure-autosave-harness.ts` — 400–470 lines
+
+Move the embedded development harness (approximately 1626–2023) intact behind an installation/cleanup function. Keep registration small and preserve development-only/URL-parameter activation. Rewriting its test model or removing checks is separate work.
+
+Phase 1 target: workspace 4,850–5,150 lines.
+
+## Phase 2 — Media and tools
+
+### `use-workspace-media.ts` — 390–450 lines
+
+Move `uploadStepPhotos` through `removeStepPhoto` (approximately 4665–5014) with typed wiring. Preserve existing exposed operations: upload, paste/cut, video deletion, exploded-view deletion, photo removal/restore.
+
+Maintain destination-before-source persistence for cut/paste, same-task single-object merging, current-state item-only rollback, storage cleanup after confirmed row deletion, tracked operation keys, and idempotent completion. Preserve the newly added media retry restoration and concurrent instruction edits. Leave the existing clipboard provider boundary intact.
+
+### `use-workspace-tools.ts` — 260–330 lines
+
+Move library state/load effect and `persistAddStepTool` through `deleteCatalogTool` (approximately 4441–4664). Move registry derivation only if it depends exclusively on tasks/library state. Confirm all callers before deciding ownership of `applyProjectTasksUpdate`; pass a shared operation if non-tool callers need it.
+
+Phase 2 target: workspace 4,300–4,650 lines.
+
+## Phase 3 — Loading and synchronization
+
+| Destination | Target LOC | Ownership |
+| --- | ---: | --- |
+| `use-workspace-data.ts` | 500–650 | Server/cache seed selection, project load, confirmation/readiness, project-switch timing, selected-task private-media hydration/retry, load scope refs |
+| `use-workspace-realtime.ts` | 300–400 | Scope checks, task/full refresh, deferred refresh, subscription lifecycle; consume draft merge and queue cleanup APIs |
+| `use-workspace-scenarios.ts` | 300–380 | Scenario list/cache, switch/duplicate/delete/rename/target actions, save-before-switch barrier and controlled draft/queue reset |
+
+Source anchors: scenario actions approximately 2067–2317; realtime refresh 2318–2552 and subscription 2970–3022; project-switch/load 2553–2853; private-media effects 2854–2941; scenario list/cache effects 738–778.
+
+Preserve cache-first display with fresh remote-confirmed editability, per-scenario isolation, media-only merge into current selected task, stale scope rejection, existing shell/loading behavior, and current subscription cleanup timing. Keep project-switch timer cleanup distinct from subscription cleanup. Local module navigation must not start new server/RSC reads or mount hidden panels.
+
+Phase 3 target: workspace 3,000–3,550 lines.
+
+## Phase 4 — Persistence foundations and media
+
+Introduce leaf modules under `src/lib/planner`. Keep the existing `src/domain/supabase-planner.ts` public path as a compatibility facade throughout; do not force unrelated callers to change. Implementation modules import leaves directly, never their own facade.
+
+| Destination | Target LOC | Responsibility |
+| --- | ---: | --- |
+| `client.ts` | 160–210 | Environment, browser client/session helpers; preserve injected server clients and browser trap |
+| `row-mappers.ts` | 550–750 | Scalar conversions and entity row serialization/mapping |
+| `query-helpers.ts` | 100–180 | Error handling, scope filters and task/project assertions |
+| `media-rows.ts` | 250–350 | Media row types, indexes, normalization and mapping |
+| `media-storage.ts` | 350–500 | Signed URLs/cache, storage paths, blob/thumbnail helpers |
+| `media-store.ts` | 450–550 | Photo/exploded/video row and upload/copy/delete persistence |
+| `tool-store.ts` | 350–450 | Tool synchronization, library persistence, supporting ID helpers |
+| `realtime.ts` | 180–230 | Typed realtime payload helpers and subscription |
+
+Approximate source anchors: client 284–407; mappers 408–931 and 954–1071 plus part/event/custom-column mapping; media normalization/signing 1194–1547; tool persistence 3594–3817 and 4415–4499; media operations 3818–3858 and 4500–4877; realtime payload helpers 101–206 and subscription 4878–4932.
+
+Adjust media boundaries 50–100 lines if necessary to avoid cycles. Keep signing and its browser-only cache together. Preserve per-client WeakMap deduplication and optional injected clients. Do not redesign account-switch cache semantics in this scope.
+
+Pure sequence-collision calculation may move to a domain module; database sequence parking belongs in persistence. Database row mapping belongs with persistence even if a mapping function makes no network call.
+
+## Phase 5 — Remaining persistence
+
+| Destination under `src/lib/planner` | Target LOC | Responsibility |
+| --- | ---: | --- |
+| `workspace-store.ts` | 450–650 | Workspace/project/member/grant context APIs, split access below |
+| `access-store.ts` | 250–400 | Permission checks, role/grant helpers, per-client concurrent-read deduplication |
+| `read-store.ts` | 550–700 | Core/full/summary, task/target/private-media reads |
+| `scenario-store.ts` | 130–190 | Scenario queries/actions and related SOP summaries |
+| `shell-store.ts` | 310–380 | Existing guarded shell and legacy full-state saves |
+| `bom-store.ts` | 65–100 | Existing verified granular BOM save |
+| `task-store.ts` | 550–750 | Granular task/step writes, procedure transaction and latest-task merge |
+| `src/domain/supabase-planner.ts` facade | 80–180 | Explicit compatibility exports only |
+
+Keep signatures, exported types, optional injected clients, error behavior, RLS, fresh permission checks, server read-only behavior, and granular save contracts stable. Preserve `assertSaneStateDeletion` and all existing guards. Add no new legacy full-state save caller. Preserve narrow media projections, bounded filters, pagination ordering, and concurrency.
+
+Approximate source anchors: access/workspace 1688–2535; core/full/summary 2536–2854; scenarios 2855–2953; guarded shell saves 2955–3240; BOM 3241–3286; granular writes 3287–3593 and procedure transaction 3886–4088; task/target/media reads 4089–4267. Function names and imports take precedence over stale line numbers.
+
+## Optional phase 6 — Separate approval/scope decision
+
+After the core tranche is stable:
+
+- `use-workspace-command-palette.ts`: 350–450 lines, palette/search/keyboard actions.
+- `use-workspace-optimization.ts`: 600–700 lines, allocation API, reset/copy/optimization.
+- `use-workspace-task-actions.ts`: 550–650 lines, dependencies, zones, grouping, task create/delete/restore.
+
+Target workspace: 1,600–2,200 lines for composition, derived view models, selection/navigation wiring and JSX. Do not split JSX or existing child UI modules solely to lower counts. Disabled simulation or underscore-prefixed paths are not automatically authorized dead-code deletion.
+
+## Commit and verification gates
+
+Use one contained extraction per commit where practical. Phase 1's dependent interfaces can be introduced together if needed to keep commits compiling. Maintain a phase ledger with actual physical/nonblank counts, moved/added/deleted lines, preserved invariants and verification evidence.
+
+1. Run targeted existing suites for each boundary; add behavior tests for ownership/lifecycle seams, not import-shape tests.
+2. Before accepting each phase: full unit suite, lint, typecheck, diff check.
+3. Optimized build, then settled typecheck and bundle budget check. Never build and typecheck concurrently in the same output directory.
+4. Relevant browser cases during a phase; all 18 baseline cases at the integration gate. Test project/module/scenario switching and pending/error navigation for lifecycle phases. Confirm no shell remount, changed UI, or increased network bursts.
+5. Re-run comparable opening/request benchmarks after loading or import-graph changes. Report warm/cold context, fixture size and actual transferred bytes; file length is not a speed metric.
+6. Follow repository branch -> green CI -> merge workflow. Do not publish unreviewed behavior changes as part of extraction.
+
+Baseline verification from the coordinating agent: 1,820 automated tests pass; all 18 browser cases pass in CI; database pgTAP, production build, typecheck, lint and bundle budgets pass. The verified commit was fast-forwarded to main and pushed with local/remote SHA match. Evidence: [green feature-branch CI](https://github.com/Build-Agentic-Labs/Pulse/actions/runs/37161934638). These counts are a coverage baseline, not a substitute for new seam tests. Astra did not rerun tests during read-only scoping.
+
+Required behavior coverage includes overlapping writes in both completion orders; unrelated failed write retention; obsolete timer cancellation; failed BOM retry preserving confirmed data; media retry with concurrent instruction edits; draft recovery; transaction retry/conflict/version rebasing; navigation read counts; private-media hydration; access concurrency; and fresh view-only permission enforcement.
+
+### Local database safety
+
+`scripts/test-browser.mjs` currently resets `scratch/browser-db`. Do not run `npm run test:browser` against retained local data. Reuse a validated retained-DB setup and invoke Playwright without reset, or use a newly created explicitly isolated disposable test environment. The existing CI reset is confined to its fresh ephemeral runner.
+
+Retained local endpoints from this session: API `http://127.0.0.1:56321`, Postgres port `56322`, workdir `scratch/browser-db`, optimized browser build `.next-e2e`, app port `3100`. Verify identity/ports and schema before use; never assume they remain current. Resolve credentials from local status without printing them. Production/dev remains separate at port `3000` with `.next-dev`. Do not copy credentials into this plan. Do not stop test databases with backup deletion.
+
+## Sol 6.1 execution instruction
+
+Verify branch `codex/workspace-structure`, baseline and a clean starting state. Read `CLAUDE.md`, applicable instructions, installed Next.js docs, and Supabase skill before persistence work. Refresh anchors/counts. Execute approved phases sequentially, beginning with save ownership. Move bodies with minimal semantic edits and narrow typed capabilities, preserving async freshness and all listed invariants.
+
+Do not silently include optional phase 6. If an extraction requires a behavior fix, UI change, data/schema change, permission change or widened save path, stop that expansion and describe it separately. If a coherent module exceeds its estimate, explain and revise the estimate; do not fragment it to satisfy a number.
+
+At each gate report source counts and tests, then continue only within the approved scope. At completion report maintained behavior, actual module sizes, benchmark evidence where relevant, and intentional remaining large modules.
+
+## Remaining uncertainty
+
+These are architecture estimates, not compiler-verified import graphs. Draft/queue mutual predicates and initial-load restore/reset ownership are the highest-risk seams. Resolve their interfaces in Phase 1 before committing to exact final counts. No performance gain is promised from file splitting alone.

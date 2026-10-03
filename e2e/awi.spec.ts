@@ -53,7 +53,13 @@ async function edit(page: Page, instruction: string) {
   await saved(page);
 }
 async function releaseReadiness(page: Page) {
+  // Cached AWI content can be visible while fresh core/access confirmation
+  // keeps its ancestor inert. Playwright fill/press does not wait for that gate.
+  await expect.poll(() => page.getByRole('combobox', { name: /tool for step 1/i })
+    .evaluate((element) => element.closest('[inert]') === null)).toBe(true);
+  await saved(page);
   await page.getByRole('combobox', { name: /tool for step 1/i }).fill('Torque wrench');
+  await expect(page.getByRole('combobox', { name: /tool for step 1/i })).toHaveValue('Torque wrench');
   await page.getByRole('combobox', { name: /tool for step 1/i }).press('Enter');
   // The tool write and debounced check save have separate completion paths.
   // Confirm both durable records before closing the authoring browser.
@@ -532,6 +538,12 @@ test('procedure media loads without downloading the task content again', async (
       await expect(reopened.locator('[data-annotation-type="arrow"]')).toHaveCount(1);
       if (run === 4) {
         await edit(reopened, 'Saved after loading the annotated private photo.');
+        // Exercise the cached-but-inert interval after reload deterministically.
+        // This is after the opening measurement and does not affect its samples.
+        await reopened.route('**/rest/v1/manufacturing_steps*', async (route) => {
+          if (route.request().method() === 'GET') await new Promise((resolve) => setTimeout(resolve, 500));
+          await route.continue();
+        });
         await reopened.reload();
         await expect(reopened.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toHaveValue('Saved after loading the annotated private photo.');
         await expect(reopened.getByRole('img', { name: 'Step 1 photo', exact: true })).toBeVisible();

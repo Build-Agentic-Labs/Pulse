@@ -121,3 +121,11 @@ the new BOM test initially omitted the existing replacement-confirmation click.
 After correcting that test, the BOM recovery case passed separately (all 18
 cases verified). Optimized browser build, typecheck, lint, and bundle budgets
 passed. The isolated database was stopped with its fixtures retained.
+
+The first publishing CI run exposed a browser-test readiness race after a cached
+AWI reload: Playwright typed while the displayed editor still had an inert
+ancestor pending fresh core/access confirmation. The trace showed no tool-save
+request. Release preparation now waits for that existing editability gate, and
+the media test adds a 500 ms core-read delay after its measurement samples to
+exercise this interval. Durable row, media, and release assertions remain in
+place. The corrected case passed three consecutive local runs with no retries.

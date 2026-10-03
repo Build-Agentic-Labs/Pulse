@@ -1,9 +1,7 @@
 "use client";
 
-import { AwiEditorActions } from "./awi-editor-actions";
+import { AwiSaveStatus } from "./awi-editor-actions";
 import type { AwiMaster } from "@/lib/awi/store";
-import { buildWorkInstruction } from "@/domain/work-instruction/build";
-import { listWorkInstructionReleases, listWorkInstructionReferences } from "@/lib/work-instruction/store";
 import { acknowledgeAnnotationDrafts, readAnnotationDraft } from "@/lib/photo-annotation-drafts";
 
 // Route-scoped styles: ~37 kB of planner-only rules (procedure, gantt, scenarios,
@@ -3524,7 +3522,7 @@ export function LineWorkspace({
   const requiresCompletePlannerState = !isDashboardModule && !isSettingsModule;
   const sidebarActiveModule = isProjectSwitching ? "dashboard" : activeModule;
   const plannerChromeContext = awiMaster
-    ? { title: awiMaster.title, status: "Draft", statusClass: undefined, detail: awiMaster.document_number }
+    ? { title: derivedState.tasks.find((task) => task.id === awiMaster.task_id)?.name || awiMaster.title, status: "Draft", statusClass: undefined, detail: awiMaster.document_number }
     : isDashboardModule ? buildPlannerChromeContext(derivedState.product) : undefined;
   if (!isProjectSwitching && plannerChromeContext) {
     stablePlannerChromeContextRef.current = plannerChromeContext;
@@ -6179,24 +6177,7 @@ export function LineWorkspace({
         <TopNav
           context={displayedPlannerChromeContext}
           presence={presencePeers}
-          actions={awiMaster ? <AwiEditorActions master={awiMaster} saveState={saveState} readOnly={isViewOnlyAccess}
-            onLeave={async () => {
-              if (await ensureSavedBeforeScenarioAction("AWI is still saving", "Your draft could not be saved to the server yet. Keep this page open and try again.")) router.push(`/awi?workspace=${encodeURIComponent(awiMaster.workspace_id)}`);
-            }}
-            onPrepare={async () => {
-              if (!await ensureSavedBeforeScenarioAction("AWI is still saving", "Resolve the save issue before publishing your AWI.")) return null;
-              const task = latestDerivedStateRef.current.tasks.find((item) => item.id === awiMaster.task_id);
-              if (!task) throw new Error("The AWI draft could not be found.");
-              const [media, releases, references] = await Promise.all([
-                loadTaskPrivateMediaFromSupabase(task.id, awiMaster.project_id),
-                listWorkInstructionReleases(awiMaster.project_id), listWorkInstructionReferences(awiMaster.project_id),
-              ]);
-              if (!media) throw new Error("The AWI media could not be loaded. Try again before publishing.");
-              const instruction = buildWorkInstruction({ task: mergeTaskPrivateMedia(task, media), product: latestDerivedStateRef.current.product,
-                zone: latestDerivedStateRef.current.zones.find((item) => item.id === task.zoneId), references });
-              instruction.meta.documentNumber = awiMaster.document_number;
-              return { instruction, releases, references };
-            }} /> : undefined}
+          actions={awiMaster ? <AwiSaveStatus saveState={saveState} /> : undefined}
         />
 
         <CommandPalette
@@ -6253,6 +6234,8 @@ export function LineWorkspace({
           ) : isProcedureModule ? (
             <div className="contents" inert={Boolean(awiMaster && !hasConfirmedRemoteState)} aria-busy={Boolean(awiMaster && !hasConfirmedRemoteState)}>
             <ProcedureWorkspace
+              isAwiMaster={Boolean(awiMaster)}
+              readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
               project={activeProjectContext}
               product={derivedState.product}
               tasks={derivedState.tasks}
@@ -6380,6 +6363,8 @@ export function LineWorkspace({
                     <ChecklistWorkspace />
                   ) : activeModule === "work-instructions" ? (
                     <WorkInstructionsPanel
+                      onBeforeRelease={awiMaster ? () => ensureSavedBeforeScenarioAction("AWI is still saving", "Resolve the save issue before releasing this AWI.") : undefined}
+                      isAwiMaster={Boolean(awiMaster)}
                       tasks={derivedState.tasks}
                       zones={derivedState.zones}
                       product={derivedState.product}

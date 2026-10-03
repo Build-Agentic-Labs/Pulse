@@ -37,6 +37,11 @@ async function createDraft(page: Page, number = '') {
   await expect(page).toHaveURL(/\/awi\/[a-f0-9-]+\?/);
   await expect(page.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toBeEditable();
   await saved(page);
+  await expect(page.getByRole('button', { name: 'Publish AWI', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'AWI list', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Unzoned', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Zone', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Operators', { exact: true })).toHaveCount(0);
   return page.url();
 }
 async function edit(page: Page, instruction: string) {
@@ -66,10 +71,15 @@ test.afterAll(async () => { await db.end(); });
 
 test('creates a numbered draft and recovers saved content in a fresh browser', async ({ page, browser }) => {
   const url = await createDraft(page);
+  await page.getByRole('button', { name: 'Edit AWI name', exact: true }).click();
+  await page.getByRole('textbox', { name: 'AWI name', exact: true }).fill('Shared mounting instruction');
+  await page.getByRole('textbox', { name: 'AWI name', exact: true }).press('Enter');
+  await expect.poll(async () => (await db.query('select title,document_number from awi_masters where workspace_id=$1', [workspace])).rows[0]).toEqual({ title: 'Shared mounting instruction', document_number: 'AWI-0001' });
+  await expect(page.getByRole('button', { name: 'Edit AWI name', exact: true })).toContainText('Shared mounting instruction');
   const instruction = 'Fit the bracket and secure both mounting bolts.';
   await edit(page, instruction);
-  await page.getByRole('button', { name: 'AWI list', exact: true }).click();
-  const row = page.getByRole('link').filter({ hasText: 'Shared bracket installation' });
+  await page.getByRole('link', { name: 'AWI Master List', exact: true }).click();
+  const row = page.getByRole('link').filter({ hasText: 'Shared mounting instruction' });
   await expect(row).toContainText('AWI-0001');
   await expect(row).toContainText('Draft');
   await row.click();
@@ -83,6 +93,7 @@ test('creates a numbered draft and recovers saved content in a fresh browser', a
     await reopened.goto(url);
     await expect(reopened.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toHaveValue(instruction);
     await expect(reopened.getByRole('textbox', { name: 'Step 1 name', exact: true })).toHaveValue('Install bracket');
+    await expect(reopened.getByRole('button', { name: 'Edit AWI name', exact: true })).toContainText('Shared mounting instruction');
     await saved(reopened);
   } finally { await fresh.close(); }
 });
@@ -96,7 +107,9 @@ test('publishes a fixed revision and keeps later edits as draft changes', async 
   await page.getByRole('combobox', { name: /tool for step 1/i }).press('Enter');
   await page.getByRole('group', { name: 'Step 1 checks', exact: true }).getByRole('checkbox').first().check();
   await saved(page);
-  await page.getByRole('button', { name: 'Publish AWI', exact: true }).click();
+  await page.getByRole('button', { name: 'Work Instructions', exact: true }).click();
+  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: /^3.*Release$/ }).click();
   await page.getByLabel('What changed in this revision').fill('Initial release');
   await page.getByRole('button', { name: 'Release Rev A', exact: true }).click();
   await page.getByRole('dialog', { name: 'Release Rev A?', exact: true }).getByRole('button', { name: 'Release Rev A', exact: true }).click();
@@ -105,12 +118,40 @@ test('publishes a fixed revision and keeps later edits as draft changes', async 
   expect(release).toBeTruthy();
   expect(JSON.stringify(release.content)).toContain(original);
   await page.getByRole('button', { name: 'Close document control' }).click();
+  await page.getByRole('button', { name: 'Procedure', exact: true }).click();
   await edit(page, 'Updated draft: inspect the bracket before installation.');
-  await page.getByRole('button', { name: 'AWI list', exact: true }).click();
+  await page.getByRole('link', { name: 'AWI Master List', exact: true }).click();
   await expect(page.getByRole('link').filter({ hasText: 'Shared bracket installation' })).toContainText('Published · draft changes');
   const frozen = (await db.query('select content,content_hash from work_instruction_releases where id=$1', [release.id])).rows[0];
   expect(frozen.content).toEqual(release.content);
   expect(frozen.content_hash).toBe(release.content_hash);
   await page.goto(url);
   await expect(page.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toHaveValue('Updated draft: inspect the bracket before installation.');
+});
+
+test('failed revision reads block release and allow a safe retry', async ({ page }) => {
+  await createDraft(page);
+  await page.route('**/rest/v1/work_instruction_releases?*', (route) => route.abort());
+  await page.getByRole('button', { name: 'Work Instructions', exact: true }).click();
+  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Unable to load revision history' })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Release', exact: true })).toBeEnabled();
+  await page.unroute('**/rest/v1/work_instruction_releases?*');
+  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('Escape and blank names preserve the existing AWI identity', async ({ page }) => {
+  await createDraft(page);
+  await page.getByRole('button', { name: 'Edit AWI name', exact: true }).click();
+  await page.getByRole('textbox', { name: 'AWI name', exact: true }).fill('Cancelled name');
+  await page.getByRole('textbox', { name: 'AWI name', exact: true }).press('Escape');
+  await expect(page.getByRole('button', { name: 'Edit AWI name', exact: true })).toContainText('Shared bracket installation');
+  await page.getByRole('button', { name: 'Edit AWI name', exact: true }).click();
+  await page.getByRole('textbox', { name: 'AWI name', exact: true }).fill('   ');
+  await page.getByRole('textbox', { name: 'AWI name', exact: true }).press('Enter');
+  await expect(page.getByRole('button', { name: 'Edit AWI name', exact: true })).toContainText('Shared bracket installation');
+  await saved(page);
+  expect((await db.query('select title,document_number from awi_masters where workspace_id=$1', [workspace])).rows[0]).toEqual({ title: 'Shared bracket installation', document_number: 'AWI-0001' });
 });

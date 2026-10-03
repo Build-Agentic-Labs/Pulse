@@ -1017,6 +1017,9 @@ export function procedureTaskUpdateRow(task: Task) {
   // persists, so keeping them in one row prevents a task/step duration mismatch, and unlike
   // the relationship columns a number can never dangle against a foreign key.
   return {
+    // Master AWIs own their title in the Procedure editor; product task names
+    // remain owned by the planner shell. This marker is created with the master.
+    ...(typeof task.customFields?.awiDocumentNumber === "string" ? { name: task.name } : {}),
     description: task.description ?? null,
     safety_notes: task.safetyNotes ?? null,
     planned_duration_minutes: task.plannedDurationMinutes,

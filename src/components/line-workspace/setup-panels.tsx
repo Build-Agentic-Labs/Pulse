@@ -424,6 +424,8 @@ export function WorkInstructionsPanel({
   initialPlannerState,
   hydratedTaskIds,
   readOnly = false,
+  isAwiMaster = false,
+  onBeforeRelease,
   onOpenTask,
 }: {
   tasks: Task[];
@@ -433,6 +435,8 @@ export function WorkInstructionsPanel({
   hydratedTaskIds?: ReadonlySet<string>;
   /** View-only project access: releases and references are visible but cannot be changed. */
   readOnly?: boolean;
+  isAwiMaster?: boolean;
+  onBeforeRelease?: () => Promise<boolean>;
   onOpenTask: (taskId: string) => void;
 }) {
   const parentIds = new Set(tasks.map((task) => task.parentTaskId).filter((id): id is string => Boolean(id)));
@@ -455,16 +459,22 @@ export function WorkInstructionsPanel({
     releases: WorkInstructionReleaseSummary[];
     references: WorkInstructionReferenceRecord[];
   } | null>(null);
+  const [controlError, setControlError] = useState("");
+  const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
   const reloadControl = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId) return false;
     try {
       const [releases, references] = await Promise.all([
         listWorkInstructionReleases(projectId),
         listWorkInstructionReferences(projectId),
       ]);
       setControl({ releases, references });
+      setControlError("");
+      return true;
     } catch {
       setControl(null);
+      setControlError("Unable to load revision history and references. Try Release again.");
+      return false;
     }
   }, [projectId]);
   useEffect(() => {
@@ -520,14 +530,25 @@ export function WorkInstructionsPanel({
   }).length;
   const [previewSelection, setPreviewSelection] = useState<{ taskIds: string[]; scenarioId?: string; releaseId?: string } | null>(null);
 
-  function openControl(task: Task, step?: "readiness" | "references" | "release" | "history") {
-    setControlTarget({ taskId: task.id, step });
-    if (!projectId || hydratedTaskIds?.has(task.id) || photoLoadedTasks.has(task.id)) return;
-    void loadTaskPrivateMediaFromSupabase(task.id, projectId)
-      .then((serverTask) => {
-        if (serverTask) setPhotoLoadedTasks((current) => new Map(current).set(task.id, serverTask));
-      })
-      .catch(() => undefined);
+  async function openControl(task: Task, step?: "readiness" | "references" | "release" | "history") {
+    if (!projectId || preparingTaskId) return;
+    setPreparingTaskId(task.id);
+    setControlError("");
+    try {
+      if (onBeforeRelease && !await onBeforeRelease()) return;
+      // Unknown history must never be treated as an empty revision list.
+      if (!await reloadControl()) return;
+      if (!hydratedTaskIds?.has(task.id) && !photoLoadedTasks.has(task.id)) {
+        const serverTask = await loadTaskPrivateMediaFromSupabase(task.id, projectId);
+        if (!serverTask) throw new Error("Unable to load AWI media.");
+        setPhotoLoadedTasks((current) => new Map(current).set(task.id, serverTask));
+      }
+      setControlTarget({ taskId: task.id, step });
+    } catch {
+      setControlError("Unable to load this instruction's media. Try Release again.");
+    } finally {
+      setPreparingTaskId(null);
+    }
   }
   // The blank fill-in template opens in the same in-page preview as a real work instruction —
   // a quick look, not a trip to a new tab. The print route still serves ?blank=1 for shared links.
@@ -611,6 +632,7 @@ export function WorkInstructionsPanel({
         ) : null}
       </header>
 
+      {controlError ? <p role="alert" className="text-xs text-danger">{controlError}</p> : null}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Needed" value={String(workTasks.length)} meta="one per task" />
         <StatCard label="Released" value={String(releasedCount)} tone={releasedCount > 0 ? "good" : "neutral"} meta="current revision matches" />
@@ -625,12 +647,12 @@ export function WorkInstructionsPanel({
             const zoneTasks = grouped.get(zoneKey) ?? [];
             return (
               <section key={zoneKey} className="space-y-2">
-                <div className="flex items-baseline justify-between">
+                {!isAwiMaster ? <div className="flex items-baseline justify-between">
                   <h3 className="ui-setup-section-title">{zone ? zone.name : "Unzoned"}</h3>
                   <span className="ui-section-subtitle">
                     {zoneTasks.length} task{zoneTasks.length === 1 ? "" : "s"}
                   </span>
-                </div>
+                </div> : null}
                 <div className="overflow-hidden rounded-lg border border-line">
                   {zoneTasks.map((task, index) => {
                     const status = statusOf(task);
@@ -682,13 +704,14 @@ export function WorkInstructionsPanel({
                         {projectId ? (
                           <button
                             type="button"
-                            onClick={() => openControl(task)}
+                            onClick={() => { void openControl(task); }}
+                            disabled={preparingTaskId !== null}
                             className="ui-btn-ghost h-7 shrink-0 gap-1.5 px-2 text-xs"
                             aria-haspopup="dialog"
                             title={`Release and revisions for ${task.name}`}
                           >
                             <FileCheck2 size={13} />
-                            Release
+                            {preparingTaskId === task.id ? "Preparing…" : "Release"}
                           </button>
                         ) : null}
                       </div>
@@ -730,7 +753,7 @@ export function WorkInstructionsPanel({
             readOnly={readOnly}
             suspended={previewSelection !== null}
             initialStep={controlTarget.step}
-            onChanged={reloadControl}
+            onChanged={async () => { await reloadControl(); }}
             onClose={() => setControlTarget(null)}
             onPreview={(options) => setPreviewSelection({ taskIds: [task.id], scenarioId: task.scenarioId, releaseId: options?.releaseId })}
             onEditTask={() => {

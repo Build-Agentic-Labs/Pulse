@@ -7,6 +7,7 @@ import {
   ListChecks,
   Package,
   Plus,
+  Pencil,
   SlidersHorizontal,
   Trash2,
   Wrench,
@@ -178,6 +179,8 @@ export function ProcedureWorkspace({
   tasks,
   zones,
   selectedTask,
+  isAwiMaster = false,
+  readOnly = false,
   isTaskHydrating = false,
   focusedStepId,
   onSelectTask,
@@ -203,6 +206,8 @@ export function ProcedureWorkspace({
   tasks: Task[];
   zones: Zone[];
   selectedTask?: Task;
+  isAwiMaster?: boolean;
+  readOnly?: boolean;
   isTaskHydrating?: boolean;
   focusedStepId?: string;
   onSelectTask: (taskId: string) => void;
@@ -240,6 +245,9 @@ export function ProcedureWorkspace({
   /** Needed only to resolve the phone capture portal's URL for the QR popover. */
   project?: PlannerProjectContext;
 }) {
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const cancelNameEdit = useRef(false);
   const [newStepToolNames, setNewStepToolNames] = useState<Record<string, string>>({});
   const [instructionSelections, setInstructionSelections] = useState<Record<string, InstructionTextSelection>>({});
   const [stepPhotoUploadCounts, setStepPhotoUploadCounts] = useState<Record<string, number>>({});
@@ -758,11 +766,11 @@ export function ProcedureWorkspace({
         <div className="px-2 pb-2">
           {groupedTasks.map((group) => (
             <div key={group.id} className="mb-3 last:mb-0">
-              <div className="ui-nav-section ui-procedure-zone-heading mb-1 flex items-center gap-1.5 px-0 normal-case tracking-[0.08em]">
+              {!isAwiMaster ? <div className="ui-nav-section ui-procedure-zone-heading mb-1 flex items-center gap-1.5 px-0 normal-case tracking-[0.08em]">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />
                 <span className="min-w-0 truncate">{group.name}</span>
                 <span className="ml-auto tabular-nums">{group.tasks.length}</span>
-              </div>
+              </div> : null}
               <div className="space-y-0.5">
                 {group.tasks.map((item) => {
                   const active = item.id === task.id;
@@ -811,7 +819,36 @@ export function ProcedureWorkspace({
         <div className="mx-auto max-w-[1500px] space-y-5">
           <section>
             <div className="flex items-start justify-between gap-3">
-              <h1 className="ui-section-title ui-procedure-title">{task.name || "Untitled task"}</h1>
+              <h1 className="ui-section-title ui-procedure-title min-w-0 flex-1">
+                {isAwiMaster && !readOnly ? editingName ? (
+                  <input
+                    autoFocus
+                    aria-label="AWI name"
+                    className="w-full rounded border border-line bg-transparent px-2 py-1 text-sm font-medium text-ink outline-none focus:border-accent"
+                    value={nameDraft}
+                    maxLength={200}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => setNameDraft(event.target.value)}
+                    onBlur={() => {
+                      const name = nameDraft.trim();
+                      if (!cancelNameEdit.current && name && name !== task.name) onUpdateTask(task.id, { name });
+                      cancelNameEdit.current = false;
+                      setEditingName(false);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+                      if (event.key === "Escape") { cancelNameEdit.current = true; event.currentTarget.blur(); }
+                    }}
+                  />
+                ) : (
+                  <button type="button" aria-label="Edit AWI name" title="Edit AWI name"
+                    className="group inline-flex max-w-full items-center gap-2 rounded px-1 py-1 -ml-1 text-left transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                    onClick={() => { cancelNameEdit.current = false; setNameDraft(task.name); setEditingName(true); }}>
+                    <span className="truncate">{task.name || "Untitled AWI"}</span>
+                    <Pencil size={12} className="shrink-0 text-ink-tertiary opacity-60 group-hover:opacity-100" />
+                  </button>
+                ) : task.name || "Untitled task"}
+              </h1>
               <div className="flex shrink-0 items-center gap-3">
                 {isTaskHydrating ? (
                   <span className="ui-transition-status" role="status" aria-live="polite">
@@ -868,10 +905,10 @@ export function ProcedureWorkspace({
             </div>
             <div className="ui-metric-strip mt-4">
               {[
-                ["Zone", zoneById.get(task.zoneId ?? "")?.name ?? "Unzoned"],
+                ...(!isAwiMaster ? [["Zone", zoneById.get(task.zoneId ?? "")?.name ?? "Unzoned"]] : []),
                 ["Duration", formatMinutes(task.plannedDurationMinutes)],
                 ["Man-Hours", formatManHours(currentManHours)],
-                ["Operators", `${task.plannedOperators}`],
+                ...(!isAwiMaster ? [["Operators", `${task.plannedOperators}`]] : []),
               ].map(([label, value]) => (
                 <StatCard key={label} label={label} value={value} />
               ))}

@@ -40,6 +40,13 @@ function makeTask(): Task {
 }
 
 describe("procedureTaskUpdateRow", () => {
+  it("saves a master AWI title through procedure autosave", () => {
+    const task = makeTask();
+    task.name = "Shared mounting instruction";
+    task.customFields = { ...task.customFields, awiDocumentNumber: "AWI-0001" };
+    expect(procedureTaskUpdateRow(task)).toMatchObject({ name: "Shared mounting instruction" });
+  });
+
   it("persists step part markers while excluding independently normalized assets", () => {
     const row = procedureTaskUpdateRow(makeTask());
 

@@ -233,3 +233,54 @@ test('newer edits queued during a save use its confirmed baseline', async ({ pag
   await page.reload();
   await expect(input).toHaveValue('Newer edit queued while the first save runs.');
 });
+
+test('AWI and product navigation avoids duplicate workspace read bursts', async ({ page }) => {
+  const connection = await db.connect();
+  let productId: string;
+  try {
+    await connection.query('begin');
+    await connection.query("select set_config('request.jwt.claim.sub',$1,true)", [user]);
+    await connection.query('set local role authenticated');
+    productId = (await connection.query('select public.create_project_with_starter_plan($1,$2) id', [workspace, 'Navigation product'])).rows[0].id;
+    await connection.query('commit');
+  } catch (error) { await connection.query('rollback'); throw error; }
+  finally { connection.release(); }
+  await createDraft(page);
+  const workspaceReads: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.origin === api && request.method() === 'GET' &&
+      /^\/rest\/v1\/(workspace_members|project_access|workspaces|projects)$/.test(url.pathname)) {
+      workspaceReads.push(url.pathname);
+    }
+  });
+  const measurements: { path: string; reads: number; milliseconds: number }[] = [];
+  async function measure(path: string, navigate: () => Promise<void>, ready: () => Promise<void>) {
+    workspaceReads.length = 0;
+    const start = Date.now();
+    await navigate();
+    await ready();
+    const milliseconds = Date.now() - start;
+    // Allow background revalidation to settle; count real reads, not only the first paint.
+    await page.waitForTimeout(1500);
+    measurements.push({ path, reads: workspaceReads.length, milliseconds });
+  }
+  const directory = () => expect(page.getByRole('heading', { name: 'AWI Master List', exact: true })).toBeVisible();
+  const editor = async () => { await expect(page.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toBeEditable(); await saved(page); };
+  const toList = () => page.getByRole('link', { name: 'AWI Master List', exact: true }).click();
+  const toAwi = () => page.getByRole('link').filter({ hasText: 'Shared bracket installation' }).click();
+  await measure('AWI → list', toList, directory);
+  await measure('list → product', () => page.getByRole('button', { name: 'Navigation product', exact: true }).click(), async () => {
+    await expect(page).toHaveURL(new RegExp(`/projects/${productId}/planner`));
+    await expect(page.getByRole('button', { name: 'Dashboard', exact: true })).toBeVisible();
+    await expect(page.getByText('Line readiness', { exact: true })).toBeVisible();
+  });
+  await measure('product → list', toList, directory);
+  await measure('list → AWI', toAwi, editor);
+  await measure('AWI → list again', toList, directory);
+  await measure('list → AWI again', toAwi, editor);
+  console.log('Navigation measurements:', JSON.stringify(measurements));
+  // The previous implementation made 92 reads across this path. Allow timing
+  // variation in streamed shells while preventing that repeated-load regression.
+  expect(measurements.reduce((sum, item) => sum + item.reads, 0)).toBeLessThanOrEqual(72);
+});

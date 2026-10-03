@@ -1891,7 +1891,8 @@ export async function ensureDefaultWorkspaceMembership(
       bootstrappedUserIds = new Set<string>();
       bootstrappedMembershipUserIdsByClient.set(supabase, bootstrappedUserIds);
     }
-    if (!bootstrappedUserIds.has(user.id)) {
+    const didBootstrap = !bootstrappedUserIds.has(user.id);
+    if (didBootstrap) {
       // The two writes are independent of each other, but grant redemption must land
       // before memberships are read -- it can mint the membership rows a new user's
       // first load depends on -- so both complete before loadWorkspaceProjectGroups.
@@ -1926,7 +1927,12 @@ export async function ensureDefaultWorkspaceMembership(
       kickSopNotifications();
     }
 
-    return loadWorkspaceProjectGroups(user.id, supabase);
+    // Grant redemption may have added access while a notification read was
+    // already running. The first post-bootstrap read must start after those
+    // writes, rather than join a snapshot captured before the new membership.
+    return didBootstrap
+      ? readWorkspaceProjectGroups(user.id, supabase)
+      : loadWorkspaceProjectGroups(user.id, supabase);
   })();
 
   const tracked = load.finally(() => {
@@ -1936,6 +1942,11 @@ export async function ensureDefaultWorkspaceMembership(
 
   return tracked;
 }
+
+// Navigation mounts the gate, sidebar and notification bell together. Share only
+// concurrent reads, never settled access results. Both client and user scope are
+// required: server clients belong to requests, and browser accounts can change.
+const inflightWorkspaceGroupReads = new WeakMap<SupabaseClient, Map<string, Promise<WorkspaceProjectGroup[]>>>();
 
 export async function loadWorkspaceProjectGroups(
   knownUserId?: string,
@@ -1953,6 +1964,27 @@ export async function loadWorkspaceProjectGroups(
 
     userId = userData.user.id;
   }
+
+  let reads = inflightWorkspaceGroupReads.get(supabase);
+  if (!reads) {
+    reads = new Map();
+    inflightWorkspaceGroupReads.set(supabase, reads);
+  }
+  const pending = reads.get(userId);
+  if (pending) return pending;
+  const userReads = reads;
+  const key = userId;
+  const tracked = readWorkspaceProjectGroups(key, supabase).finally(() => {
+    if (userReads.get(key) === tracked) userReads.delete(key);
+  });
+  userReads.set(key, tracked);
+  return tracked;
+}
+
+async function readWorkspaceProjectGroups(
+  userId: string,
+  supabase: ReturnType<typeof plannerClient>,
+): Promise<WorkspaceProjectGroup[]> {
 
   // The role probe, membership read, and per-project access map only need the user id, so
   // they run together; the extra queries on the (rare) superadmin path are far cheaper

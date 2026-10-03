@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import type { Database } from "@/lib/database.types";
 import { throwIfError } from "@/lib/supabase-errors";
+import { readAllPages } from "@/lib/supabase/read-all-pages";
 
 export type AwiMaster = Database["public"]["Tables"]["awi_masters"]["Row"];
 export function awiDraftStatus(master: AwiMaster) {
@@ -9,8 +10,9 @@ export function awiDraftStatus(master: AwiMaster) {
   return new Date(master.draft_updated_at).getTime() > new Date(master.published_at).getTime() ? "Published · draft changes" : "Published";
 }
 export async function listAwiMasters(workspaceId: string, client?: SupabaseClient<Database>): Promise<AwiMaster[]> {
-  const rows = await throwIfError((client ?? createPlannerSupabaseClient()).from("awi_masters").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }));
-  return rows ?? [];
+  const supabase = client ?? createPlannerSupabaseClient();
+  return readAllPages((from, to) => throwIfError(supabase.from("awi_masters").select("*")
+    .eq("workspace_id", workspaceId).order("created_at", { ascending: false }).order("id").range(from, to)));
 }
 export async function getAwiMaster(id: string, client?: SupabaseClient<Database>): Promise<AwiMaster | null> {
   return await throwIfError((client ?? createPlannerSupabaseClient()).from("awi_masters").select("*").eq("id", id).maybeSingle());

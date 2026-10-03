@@ -155,3 +155,81 @@ test('Escape and blank names preserve the existing AWI identity', async ({ page 
   await saved(page);
   expect((await db.query('select title,document_number from awi_masters where workspace_id=$1', [workspace])).rows[0]).toEqual({ title: 'Shared bracket installation', document_number: 'AWI-0001' });
 });
+
+test('failed saves retain the local draft and retry one complete transaction', async ({ page }) => {
+  await createDraft(page);
+  const before = (await db.query('select s.name,s.instruction,s.version from manufacturing_steps s join awi_masters m on m.task_id=s.task_id where m.workspace_id=$1', [workspace])).rows;
+  let attempts = 0;
+  await page.route('**/rest/v1/rpc/save_awi_procedure', async (route) => {
+    attempts += 1;
+    await route.abort();
+  });
+  const input = page.getByRole('textbox', { name: 'Step 1 instruction', exact: true });
+  await page.getByRole('textbox', { name: 'Step 1 name', exact: true }).fill('Recovered step');
+  await input.fill('Recover this complete instruction after a connection failure.');
+  await input.blur();
+  await expect.poll(() => attempts).toBeGreaterThan(0);
+  await expect(page.getByRole('status').filter({ hasText: /Save pending/ })).toBeVisible();
+  await expect(input).toHaveValue('Recover this complete instruction after a connection failure.');
+  expect((await db.query('select s.name,s.instruction,s.version from manufacturing_steps s join awi_masters m on m.task_id=s.task_id where m.workspace_id=$1', [workspace])).rows).toEqual(before);
+  await page.unroute('**/rest/v1/rpc/save_awi_procedure');
+  await expect.poll(async () => (await db.query('select s.name,s.instruction from manufacturing_steps s join awi_masters m on m.task_id=s.task_id where m.workspace_id=$1', [workspace])).rows[0]).toEqual({
+    name: 'Recovered step', instruction: 'Recover this complete instruction after a connection failure.',
+  });
+  await saved(page);
+  await page.reload();
+  await expect(input).toHaveValue('Recover this complete instruction after a connection failure.');
+});
+
+test('a competing step edit is preserved while the local draft reports a conflict', async ({ page, browser }) => {
+  const url = await createDraft(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let started = false;
+  await page.route('**/rest/v1/rpc/save_awi_procedure', async (route) => {
+    started = true;
+    await held;
+    await route.continue();
+  });
+  const input = page.getByRole('textbox', { name: 'Step 1 instruction', exact: true });
+  await input.fill('Local draft still needs review.');
+  await input.blur();
+  await expect.poll(() => started).toBe(true);
+  await db.query('update manufacturing_steps set instruction=$1 where task_id=(select task_id from awi_masters where workspace_id=$2)', ['Other device saved instruction.', workspace]);
+  release();
+  await expect(page.getByRole('status').filter({ hasText: /Save pending/ })).toBeVisible();
+  await expect(page.getByText(/AWI save conflict\. Your local draft is preserved/).first()).toBeVisible();
+  await expect(input).toHaveValue('Local draft still needs review.');
+  expect((await db.query('select s.instruction from manufacturing_steps s join awi_masters m on m.task_id=s.task_id where m.workspace_id=$1', [workspace])).rows[0]?.instruction).toBe('Other device saved instruction.');
+  const fresh = await browser.newContext();
+  try {
+    await authenticate(fresh);
+    const reopened = await fresh.newPage();
+    await reopened.goto(url);
+    await expect(reopened.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toHaveValue('Other device saved instruction.');
+  } finally { await fresh.close(); }
+});
+
+test('newer edits queued during a save use its confirmed baseline', async ({ page }) => {
+  await createDraft(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let attempts = 0;
+  await page.route('**/rest/v1/rpc/save_awi_procedure', async (route) => {
+    attempts += 1;
+    if (attempts === 1) await held;
+    await route.continue();
+  });
+  const input = page.getByRole('textbox', { name: 'Step 1 instruction', exact: true });
+  await input.fill('First edit sent.');
+  await input.blur();
+  await expect.poll(() => attempts).toBe(1);
+  await input.fill('Newer edit queued while the first save runs.');
+  await input.blur();
+  release();
+  await expect.poll(async () => (await db.query('select s.instruction from manufacturing_steps s join awi_masters m on m.task_id=s.task_id where m.workspace_id=$1', [workspace])).rows[0]?.instruction).toBe('Newer edit queued while the first save runs.');
+  await saved(page);
+  expect(attempts).toBeGreaterThanOrEqual(2);
+  await page.reload();
+  await expect(input).toHaveValue('Newer edit queued while the first save runs.');
+});

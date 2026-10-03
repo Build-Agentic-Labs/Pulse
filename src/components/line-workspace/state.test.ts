@@ -31,6 +31,21 @@ describe("planner workspace URL history", () => {
 
 
 describe("queued procedure save versions", () => {
+  it("rebases the confirmed AWI baseline without bringing back a queued deletion", () => {
+    const pending = {
+      id: "task", version: 2, manufacturingSteps: [], partReferences: [],
+      procedureSaveBaseline: { stepVersions: { deleted: 1 }, partReferences: [] },
+    } as unknown as import("@/domain/types").Task;
+    const saved = {
+      ...pending, version: 3,
+      manufacturingSteps: [{ id: "deleted", sequence: 1, version: 2, instruction: "Saved" }],
+      procedureSaveBaseline: { stepVersions: { deleted: 2 }, partReferences: [{ id: "part", partNumber: "PN" }] },
+    };
+    const rebased = rebaseProcedureTaskVersions(pending, saved);
+    expect(rebased.procedureSaveBaseline).toEqual(saved.procedureSaveBaseline);
+    expect(rebased.manufacturingSteps).toEqual([]);
+    expect(rebased.partReferences).toEqual([]);
+  });
   it("uses the preceding save's versions while preserving newer edits and added steps", () => {
     const pending = {
       id: "task-1", version: 4, description: "newer task text",

@@ -336,6 +336,11 @@ export interface Task {
   partReferences?: PartReference[];
   customFields: Record<string, unknown>;
   version?: number;
+  /** Last complete master-AWI read; carried through local edits for safe removal checks. */
+  procedureSaveBaseline?: {
+    stepVersions: Record<string, number>;
+    partReferences: PartReference[];
+  };
 }
 
 export interface Dependency {

@@ -402,6 +402,7 @@ export function rebaseProcedureTaskVersions(pendingTask: Task, savedTask: Task):
   return {
     ...pendingTask,
     version: savedTask.version,
+    ...(savedTask.procedureSaveBaseline ? { procedureSaveBaseline: savedTask.procedureSaveBaseline } : {}),
     manufacturingSteps: pendingTask.manufacturingSteps?.map((step) => ({
       ...step,
       version: savedSteps.get(step.id)?.version ?? step.version,

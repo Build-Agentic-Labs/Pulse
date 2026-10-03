@@ -1,4 +1,6 @@
 import { mergeTaskPrivateMedia } from "./task-private-media";
+import { awiProcedureSaveBaseline } from "./awi-procedure-save";
+import { saveAwiProcedure } from "@/lib/awi/procedure-store";
 import { mergeAnnotationDocuments } from "@/lib/photo-annotation-drafts";
 import { normalizePhotoAnnotationDocument } from "./photo-annotations";
 import { readAllPages, readRowsByIds } from "@/lib/supabase/read-all-pages";
@@ -698,7 +700,7 @@ function mapPartReferences(value: unknown): PartReference[] {
 }
 
 function mapTask(row: Record<string, unknown>): Task {
-  return {
+  const task: Task = {
     id: String(row.id),
     scenarioId: String(row.scenario_id),
     stationId: String(row.station_id ?? ""),
@@ -750,6 +752,11 @@ function mapTask(row: Record<string, unknown>): Task {
     customFields: jsonObject(row.custom_fields),
     version: maybeNum(row.version),
   };
+  if (typeof task.customFields.awiDocumentNumber === "string" &&
+      Array.isArray(row.manufacturing_steps) && Array.isArray(row.part_references)) {
+    task.procedureSaveBaseline = awiProcedureSaveBaseline(task);
+  }
+  return task;
 }
 
 function mapDependency(row: Record<string, unknown>): Dependency {
@@ -1800,14 +1807,20 @@ async function fetchUserProjectAccessMap(
   supabase: ReturnType<typeof plannerClient>,
   userId: string,
 ): Promise<Map<string, AccessLevel> | undefined> {
-  const { data, error } = await supabase.from("project_access").select("project_id, level").eq("user_id", userId);
-  if (error) {
-    if (isMissingRelationError(error)) {
+  try {
+    const data = await readAllPages(async (from, to) => {
+      const result = await supabase.from("project_access").select("project_id, level")
+        .eq("user_id", userId).order("project_id").range(from, to);
+      if (result.error) throw result.error;
+      return result.data;
+    });
+    return new Map(data.map((row) => [String(row.project_id), normalizeAccessLevel(row.level)]));
+  } catch (error) {
+    if (isMissingRelationError(error as { code?: string })) {
       return undefined;
     }
     throw error;
   }
-  return new Map((data ?? []).map((row) => [String(row.project_id), normalizeAccessLevel(row.level)]));
 }
 
 // The signed-in user's Quality Module access level ("edit" for superadmins).
@@ -1946,13 +1959,13 @@ export async function loadWorkspaceProjectGroups(
   // than serializing every load behind the probe.
   const [isSuperAdmin, memberships, accessMap] = await Promise.all([
     fetchIsSuperAdmin(supabase),
-    throwIfError(
+    readAllPages((from, to) => throwIfError(
       supabase
         .from("workspace_members")
         .select("workspace_id, role")
         .eq("user_id", userId)
-        .order("created_at"),
-    ),
+        .order("created_at").order("workspace_id").range(from, to),
+    )),
     fetchUserProjectAccessMap(supabase, userId),
   ]);
 
@@ -1960,8 +1973,8 @@ export async function loadWorkspaceProjectGroups(
   // owner with no module restrictions, regardless of membership rows.
   if (isSuperAdmin) {
     const [workspaces, projects] = await Promise.all([
-      throwIfError(supabase.from("workspaces").select(WORKSPACE_COLUMNS).order("created_at")),
-      throwIfError(supabase.from("projects").select(PROJECT_COLUMNS).order("created_at")),
+      readAllPages((from, to) => throwIfError(supabase.from("workspaces").select(WORKSPACE_COLUMNS).order("created_at").order("id").range(from, to))),
+      readAllPages((from, to) => throwIfError(supabase.from("projects").select(PROJECT_COLUMNS).order("created_at").order("id").range(from, to))),
     ]);
 
     const projectsByWorkspaceId = new Map<string, Project[]>();
@@ -1991,9 +2004,15 @@ export async function loadWorkspaceProjectGroups(
   }
 
   const [workspaces, projects] = await Promise.all([
-    throwIfError(supabase.from("workspaces").select(WORKSPACE_COLUMNS).in("id", workspaceIds).order("created_at")),
-    throwIfError(supabase.from("projects").select(PROJECT_COLUMNS).in("workspace_id", workspaceIds).order("created_at")),
+    readRowsByIds(workspaceIds, (ids, from, to) => throwIfError(supabase.from("workspaces").select(WORKSPACE_COLUMNS).in("id", ids).order("created_at").order("id").range(from, to))),
+    readRowsByIds(workspaceIds, (ids, from, to) => throwIfError(supabase.from("projects").select(PROJECT_COLUMNS).in("workspace_id", ids).order("created_at").order("id").range(from, to))),
   ]);
+
+  // IN filters are batched, but the directory still follows one global creation order.
+  const creationOrder = (left: { created_at: string; id: string }, right: { created_at: string; id: string }) =>
+    left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id);
+  workspaces.sort(creationOrder);
+  projects.sort(creationOrder);
 
   const membershipByWorkspaceId = new Map(
     (memberships ?? []).map((membership) => [String(membership.workspace_id), membership]),
@@ -3856,12 +3875,41 @@ export async function saveProcedureTaskUpdateToSupabase(
   _scheduledTasks: Task[],
   projectId?: string,
   allowVersionRetry = true,
+  client?: ReturnType<typeof plannerClient>,
 ) {
-  const supabase = plannerClient();
-  await assertTaskInProject(supabase, task.id, projectId);
+  const supabase = client ?? plannerClient();
   const normalizedSteps = normalizeManufacturingStepSequences(task.manufacturingSteps ?? []);
   const taskToSave = { ...task, manufacturingSteps: normalizedSteps };
   const taskProcedurePatch = procedureTaskUpdateRow(taskToSave);
+  if (typeof task.customFields?.awiDocumentNumber === "string") {
+    const baseline = task.procedureSaveBaseline ?? awiProcedureSaveBaseline(task);
+    const awiProjectId = projectId ?? await throwIfError(supabase.rpc("task_project_id", { target_task_id: task.id }));
+    if (!awiProjectId) throw new Error("This AWI does not belong to an active workspace.");
+    const confirmed = jsonObject(await saveAwiProcedure({
+      p_task_id: task.id,
+      p_project_id: awiProjectId,
+      p_expected_version: task.version ?? 0,
+      p_expected_step_versions: baseline.stepVersions,
+      p_expected_parts: partReferenceRows([{ ...task, partReferences: baseline.partReferences }]),
+      p_task_patch: taskProcedurePatch,
+      p_steps: manufacturingStepRows([taskToSave]),
+      p_parts: partReferenceRows([taskToSave]),
+    }, supabase));
+    const confirmedRow = jsonObject(confirmed.task);
+    if (confirmedRow.id !== task.id || typeof confirmedRow.version !== "number" ||
+        !Array.isArray(confirmed.steps) || !Array.isArray(confirmed.parts)) {
+      throw new Error("Unable to confirm the saved AWI. Your local draft is preserved; try saving again.");
+    }
+    const savedTask = mapTask({ ...confirmedRow, manufacturing_steps: confirmed.steps, part_references: confirmed.parts });
+    // Media/tools are independently normalized rows; retain the snapshot's signed assets without
+    // another read that might acknowledge a different edit committed after this transaction.
+    const withMedia = mergeTaskPrivateMedia(savedTask, taskToSave);
+    if (STEP_TOOL_LISTS_FIELD in taskToSave.customFields) {
+      withMedia.customFields[STEP_TOOL_LISTS_FIELD] = taskToSave.customFields[STEP_TOOL_LISTS_FIELD];
+    }
+    return withMedia;
+  }
+  await assertTaskInProject(supabase, task.id, projectId);
   let taskUpdate = supabase.from("tasks").update(taskProcedurePatch).eq("id", task.id);
 
   if (taskToSave.version !== undefined) {
@@ -3878,6 +3926,7 @@ export async function saveProcedureTaskUpdateToSupabase(
           _scheduledTasks,
           projectId,
           false,
+          client,
         );
       }
     }
@@ -3939,6 +3988,7 @@ export async function saveProcedureTaskUpdateToSupabase(
             _scheduledTasks,
             projectId,
             false,
+            client,
           );
         }
       }
@@ -4143,8 +4193,8 @@ export async function loadTaskFromSupabase(taskId: string, projectId?: string): 
 
   const [dependencies, manufacturingSteps, partReferences, stepPhotos, stepTools, explodedViews, taskVideos] = await Promise.all([
     throwIfError(supabase.from("task_dependencies").select("*").eq("successor_task_id", taskId)),
-    throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", taskId).order("sequence")),
-    throwIfError(supabase.from("part_references").select("*").eq("task_id", taskId).order("created_at")),
+    readAllPages((from, to) => throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", taskId).order("sequence").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("part_references").select("*").eq("task_id", taskId).order("created_at").order("id").range(from, to))),
     throwIfError(supabase.from("step_photos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
     throwIfError(supabase.from("step_tools").select("*").eq("task_id", taskId).order("sequence")),
     throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),

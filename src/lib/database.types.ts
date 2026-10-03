@@ -98,6 +98,81 @@ export type Database = {
         }
         Relationships: []
       }
+      awi_masters: {
+        Row: {
+          created_at: string
+          document_number: string
+          draft_updated_at: string
+          id: string
+          project_id: string
+          published_at: string | null
+          published_release_id: string | null
+          task_id: string
+          title: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          document_number: string
+          draft_updated_at?: string
+          id?: string
+          project_id: string
+          published_at?: string | null
+          published_release_id?: string | null
+          task_id: string
+          title: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          document_number?: string
+          draft_updated_at?: string
+          id?: string
+          project_id?: string
+          published_at?: string | null
+          published_release_id?: string | null
+          task_id?: string
+          title?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "awi_masters_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: true
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "awi_masters_published_release_id_fkey"
+            columns: ["published_release_id"]
+            isOneToOne: false
+            referencedRelation: "work_instruction_releases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "awi_masters_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: true
+            referencedRelation: "planner_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "awi_masters_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: true
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "awi_masters_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       custom_columns: {
         Row: {
           applies_to: Database["public"]["Enums"]["custom_column_scope"]
@@ -1189,22 +1264,16 @@ export type Database = {
           },
         ]
       }
-      awi_masters: {
-        Row: { id: string; workspace_id: string; project_id: string; task_id: string; document_number: string; title: string; draft_updated_at: string; published_at: string | null; published_release_id: string | null; created_at: string }
-        Insert: { id?: string; workspace_id: string; project_id: string; task_id: string; document_number: string; title: string; draft_updated_at?: string; published_at?: string | null; published_release_id?: string | null; created_at?: string }
-        Update: { title?: string }
-        Relationships: []
-      }
       projects: {
         Row: {
           created_at: string
           created_by: string | null
-          is_awi_master: boolean
-          portfolio_position: number
-          portfolio_category: string | null
           description: string | null
           id: string
+          is_awi_master: boolean
           name: string
+          portfolio_category: string | null
+          portfolio_position: number
           status: Database["public"]["Enums"]["project_status"]
           updated_at: string
           workspace_id: string
@@ -1212,12 +1281,12 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
-          is_awi_master?: boolean
-          portfolio_position?: number
-          portfolio_category?: string | null
           description?: string | null
           id?: string
+          is_awi_master?: boolean
           name: string
+          portfolio_category?: string | null
+          portfolio_position?: number
           status?: Database["public"]["Enums"]["project_status"]
           updated_at?: string
           workspace_id: string
@@ -1225,12 +1294,12 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
-          is_awi_master?: boolean
-          portfolio_position?: number
-          portfolio_category?: string | null
           description?: string | null
           id?: string
+          is_awi_master?: boolean
           name?: string
+          portfolio_category?: string | null
+          portfolio_position?: number
           status?: Database["public"]["Enums"]["project_status"]
           updated_at?: string
           workspace_id?: string
@@ -1544,6 +1613,70 @@ export type Database = {
           },
         ]
       }
+      sop_approver_delivery_payloads: {
+        Row: {
+          content: Json
+          delivery_id: string
+        }
+        Insert: {
+          content: Json
+          delivery_id: string
+        }
+        Update: {
+          content?: Json
+          delivery_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_approver_delivery_payloads_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: true
+            referencedRelation: "sop_approver_nominations"
+            referencedColumns: ["delivery_id"]
+          },
+        ]
+      }
+      sop_approver_nominations: {
+        Row: {
+          created_by: string
+          delivered_at: string | null
+          delivery_id: string
+          delivery_started_at: string | null
+          department_id: string
+          email: string
+          position_title: string
+          sop_id: string
+        }
+        Insert: {
+          created_by?: string
+          delivered_at?: string | null
+          delivery_id?: string
+          delivery_started_at?: string | null
+          department_id: string
+          email: string
+          position_title: string
+          sop_id: string
+        }
+        Update: {
+          created_by?: string
+          delivered_at?: string | null
+          delivery_id?: string
+          delivery_started_at?: string | null
+          department_id?: string
+          email?: string
+          position_title?: string
+          sop_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_approver_nominations_sop_id_department_id_fkey"
+            columns: ["sop_id", "department_id"]
+            isOneToOne: true
+            referencedRelation: "sop_review_seats"
+            referencedColumns: ["sop_id", "department_id"]
+          },
+        ]
+      }
       sop_change_log: {
         Row: {
           created_at: string
@@ -1594,6 +1727,38 @@ export type Database = {
             columns: ["sop_id"]
             isOneToOne: false
             referencedRelation: "sops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sop_comment_replies: {
+        Row: {
+          annotation_id: string
+          body: string
+          created_at: string
+          created_by: string
+          id: string
+        }
+        Insert: {
+          annotation_id: string
+          body: string
+          created_at?: string
+          created_by?: string
+          id?: string
+        }
+        Update: {
+          annotation_id?: string
+          body?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_comment_replies_annotation_id_fkey"
+            columns: ["annotation_id"]
+            isOneToOne: false
+            referencedRelation: "sop_review_annotations"
             referencedColumns: ["id"]
           },
         ]
@@ -1793,17 +1958,11 @@ export type Database = {
           },
         ]
       }
-      sop_comment_replies: {
-        Row: { id: string; annotation_id: string; created_by: string; body: string; created_at: string }
-        Insert: { id?: string; annotation_id: string; created_by?: string; body: string; created_at?: string }
-        Update: { body?: string }
-        Relationships: []
-      }
       sop_review_annotations: {
         Row: {
-          author_response: string
-          author_responded_at: string | null
           author_name: string
+          author_responded_at: string | null
+          author_response: string
           body: string
           category: string
           created_at: string
@@ -1818,9 +1977,9 @@ export type Database = {
           y_percent: number | null
         }
         Insert: {
-          author_response?: string
-          author_responded_at?: string | null
           author_name?: string
+          author_responded_at?: string | null
+          author_response?: string
           body: string
           category?: string
           created_at?: string
@@ -1835,9 +1994,9 @@ export type Database = {
           y_percent?: number | null
         }
         Update: {
-          author_response?: string
-          author_responded_at?: string | null
           author_name?: string
+          author_responded_at?: string | null
+          author_response?: string
           body?: string
           category?: string
           created_at?: string
@@ -1860,24 +2019,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      sop_approver_delivery_payloads: {
-        Row: { delivery_id: string; content: Json }
-        Insert: { delivery_id: string; content: Json }
-        Update: { content?: Json }
-        Relationships: []
-      }
-      sop_submission_locks: {
-        Row: { sop_id: string; token: string; locked_at: string }
-        Insert: { sop_id: string; token: string; locked_at?: string }
-        Update: { token?: string; locked_at?: string }
-        Relationships: []
-      }
-      sop_approver_nominations: {
-        Row: { sop_id: string; department_id: string; email: string; position_title: string; delivery_id: string; delivered_at: string | null; delivery_started_at: string | null; created_by: string }
-        Insert: { sop_id: string; department_id: string; email: string; position_title: string; delivery_id?: string; delivered_at?: string | null; delivery_started_at?: string | null; created_by?: string }
-        Update: { delivered_at?: string | null; delivery_started_at?: string | null }
-        Relationships: []
       }
       sop_review_seats: {
         Row: {
@@ -2084,6 +2225,32 @@ export type Database = {
             foreignKeyName: "sop_signatures_sop_id_fkey"
             columns: ["sop_id"]
             isOneToOne: false
+            referencedRelation: "sops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sop_submission_locks: {
+        Row: {
+          locked_at: string
+          sop_id: string
+          token: string
+        }
+        Insert: {
+          locked_at?: string
+          sop_id: string
+          token: string
+        }
+        Update: {
+          locked_at?: string
+          sop_id?: string
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_submission_locks_sop_id_fkey"
+            columns: ["sop_id"]
+            isOneToOne: true
             referencedRelation: "sops"
             referencedColumns: ["id"]
           },
@@ -3902,14 +4069,10 @@ export type Database = {
       }
     }
     Functions: {
-      create_awi_master: { Args: { p_workspace_id: string; p_title: string; p_document_number?: string }; Returns: string }
-
-      acquire_sop_submission_lock: { Args: { p_sop_id: string }; Returns: string | null }
-      stage_sop_approver: { Args: { p_sop_id: string; p_department_id: string; p_email: string; p_position_title: string }; Returns: undefined }
-
-      send_sop_for_signatures: { Args: { p_sop: string; p_expected_hash: string; p_expected_cycle: number }; Returns: undefined };
-      sign_sop_with_mark: { Args: { p_sop: string; p_meaning: string; p_strokes: Json; p_department: string | null; p_hash: string; p_cycle: number }; Returns: string };
-
+      acquire_sop_submission_lock: {
+        Args: { p_sop_id: string }
+        Returns: string
+      }
       append_sop_event: {
         Args: { p_details?: Json; p_event_type: string; p_sop: string }
         Returns: undefined
@@ -3934,6 +4097,14 @@ export type Database = {
         Returns: boolean
       }
       close_moot_objections: { Args: { p_sop: string }; Returns: undefined }
+      create_awi_master: {
+        Args: {
+          p_document_number?: string
+          p_title: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
       create_project_with_starter_plan: {
         Args: { p_name: string; p_workspace_id: string }
         Returns: string
@@ -3999,6 +4170,10 @@ export type Database = {
         Args: { p_user?: string; p_workspace: string }
         Returns: boolean
       }
+      is_sop_approver_candidate: {
+        Args: { p_department: string; p_user: string }
+        Returns: boolean
+      }
       is_super_admin: { Args: never; Returns: boolean }
       mark_all_notifications_read: {
         Args: { p_workspace?: string }
@@ -4011,6 +4186,10 @@ export type Database = {
       }
       mint_sop_number_internal: {
         Args: { p_department: string; p_doc_type: string; p_workspace: string }
+        Returns: string
+      }
+      next_awi_document_number: {
+        Args: { p_workspace_id: string }
         Returns: string
       }
       next_sop_number: {
@@ -4077,6 +4256,19 @@ export type Database = {
         Args: { p_annotation: string; p_resolved?: boolean }
         Returns: undefined
       }
+      save_awi_procedure: {
+        Args: {
+          p_expected_parts: Json
+          p_expected_step_versions: Json
+          p_expected_version: number
+          p_parts: Json
+          p_project_id: string
+          p_steps: Json
+          p_task_id: string
+          p_task_patch: Json
+        }
+        Returns: Json
+      }
       scenario_project_id: {
         Args: { target_scenario_id: string }
         Returns: string
@@ -4084,6 +4276,14 @@ export type Database = {
       scenario_workspace_id: {
         Args: { target_scenario_id: string }
         Returns: string
+      }
+      send_sop_for_signatures: {
+        Args: {
+          p_expected_cycle: number
+          p_expected_hash: string
+          p_sop: string
+        }
+        Returns: undefined
       }
       sign_sop: {
         Args: {
@@ -4097,6 +4297,18 @@ export type Database = {
         }
         Returns: string
       }
+      sign_sop_with_mark: {
+        Args: {
+          p_cycle: number
+          // SQL accepts NULL for quality approval; the generator omits argument nullability.
+          p_department: string | null
+          p_hash: string
+          p_meaning: string
+          p_sop: string
+          p_strokes: Json
+        }
+        Returns: string
+      }
       snapshot_sop_revision: {
         Args: { p_document?: Json; p_sop: string }
         Returns: string
@@ -4107,6 +4319,15 @@ export type Database = {
       sop_quorum_met: { Args: { p_sop: string }; Returns: boolean }
       sop_self_review_test_active: { Args: { p_sop: string }; Returns: boolean }
       sop_workspace_id: { Args: { p_sop: string }; Returns: string }
+      stage_sop_approver: {
+        Args: {
+          p_department_id: string
+          p_email: string
+          p_position_title: string
+          p_sop_id: string
+        }
+        Returns: undefined
+      }
       submit_sop_review: {
         Args: { p_no_changes: boolean; p_sop: string }
         Returns: string

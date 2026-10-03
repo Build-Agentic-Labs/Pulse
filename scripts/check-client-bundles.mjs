@@ -20,7 +20,7 @@ for (const file of await readdir(".next/static/chunks")) {
   }
 }
 
-for (const route of ["projects/[projectId]/planner", "sops", "planning/(workspace)", "awi", "awi/[masterId]"]) {
+for (const route of ["projects/[projectId]/planner", "sops", "planning/(workspace)", "awi/(directory)", "awi/[masterId]"]) {
   const source = await readFile(`.next/server/app/${route}/page_client-reference-manifest.js`, "utf8");
   // Parse generated JSON without executing the manifest.
   const assignment = source.indexOf(" = {", source.indexOf('globalThis.__RSC_MANIFEST['));

@@ -1,17 +1,15 @@
 "use client";
 
-import { BookOpen, PanelLeftClose, Plus, ArrowRight, X } from "lucide-react";
-import { useState, useEffect, type CSSProperties, type FormEvent } from "react";
+import { BookOpen, Plus, ArrowRight, X } from "lucide-react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { awiDraftStatus, createAwiMaster, listAwiMasters, type AwiMaster } from "@/lib/awi/store";
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
-import { SpaceTopNav } from "./space-top-nav";
-import { SidebarWorkspacePanel } from "./sidebar-workspace-panel";
-import { SidebarReopenButton } from "./line-workspace/nav";
+import { AwiDirectoryShell } from "./awi-directory-shell";
+import { AwiDirectoryColumns, AwiDirectoryLoadingContent } from "./awi-directory-loading";
 
 export function AwiDirectory({ project, groups, workspaceId, initialMasters }: { project?: PlannerProjectContext; groups?: WorkspaceProjectGroup[]; workspaceId?: string; initialMasters?: AwiMaster[] }) {
-  const [collapsed, setCollapsed] = useState(false);
   const router = useRouter();
   const [masters, setMasters] = useState(initialMasters ?? []);
   const [loading, setLoading] = useState(initialMasters === undefined);
@@ -20,9 +18,21 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
   const [number, setNumber] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const listWorkspaceRef = useRef(workspaceId);
   const canCreate = groups?.some((group) => group.workspace.id === workspaceId && ["owner", "admin", "editor"].includes(group.role));
   useEffect(() => {
-    if (initialMasters !== undefined || !workspaceId) return;
+    const workspaceChanged = listWorkspaceRef.current !== workspaceId;
+    listWorkspaceRef.current = workspaceId;
+    if (initialMasters !== undefined) {
+      setMasters(initialMasters);
+      setLoading(false);
+      setError("");
+      return;
+    }
+    if (workspaceChanged || !workspaceId) setMasters([]);
+    if (!workspaceId) { setLoading(false); return; }
+    setLoading(true);
+    setError("");
     let cancelled = false;
     listAwiMasters(workspaceId).then((rows) => { if (!cancelled) setMasters(rows); })
       .catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : "Unable to load AWIs."); })
@@ -44,30 +54,17 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
       router.push(`/awi/${master.id}?view=procedure&task=${encodeURIComponent(master.task_id)}`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to create AWI."); setPending(false); }
   }
-  return <div className="fixed inset-0 h-[100dvh] overflow-hidden bg-canvas text-ink"
-    style={{ "--workspace-sidebar-width": collapsed ? "0px" : "var(--shell-sidebar)" } as CSSProperties}>
-    <SpaceTopNav context="AWI Master List" />
-    <div className="relative ui-workspace-shell">
-      <SidebarReopenButton collapsed={collapsed} onToggle={() => setCollapsed(false)} />
-      <div className={`ui-workspace-sidebar-slot ${collapsed ? "ui-workspace-sidebar-slot-collapsed" : ""}`}>
-        <aside className="ui-nav-sidebar">
-          <div className="flex h-9 shrink-0 items-center justify-end px-2">
-            <button type="button" className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
-              aria-label="Hide sidebar" title="Hide sidebar" onClick={() => setCollapsed(true)}><PanelLeftClose size={15} strokeWidth={1.75} /></button>
-          </div>
-          <SidebarWorkspacePanel activeProject={project} initialGroups={groups} />
-        </aside>
-      </div>
-      <main className="min-h-0 min-w-0 overflow-auto rounded-l-xl bg-canvas p-6 transition-[border-radius] duration-300 ease-out sm:p-8">
+  return <AwiDirectoryShell project={project} groups={groups} loading={loading}>
+        {loading ? <AwiDirectoryLoadingContent /> : <>
         <div className="flex items-start justify-between gap-4 border-b border-line pb-5">
           <div><h1 className="ui-section-title">AWI Master List</h1>
             <p className="ui-section-subtitle mt-1">Common assembly work instructions across the product portfolio.</p></div>
           {canCreate ? <button type="button" className="ui-btn-ghost h-9 gap-2 px-3" onClick={() => { setAdding(true); setError(""); }}><Plus size={15} />Add AWI</button> : null}
         </div>
         {error ? <p role="alert" className="my-3 text-xs text-danger">{error}</p> : null}
-        {loading ? <p className="py-8 text-xs text-ink-secondary" role="status">Loading AWIs…</p> : masters.length ? (
+        {masters.length ? (
           <div className="mt-5">
-            <div className="grid grid-cols-[minmax(110px,0.5fr)_minmax(0,2fr)_minmax(100px,1fr)_24px] gap-4 border-b border-line px-2 py-3 text-[10px] uppercase tracking-wider text-ink-tertiary"><span>Document number</span><span>Instruction</span><span>Status</span><span /></div>
+            <AwiDirectoryColumns />
             {masters.map((master) => <Link key={master.id} href={`/awi/${master.id}?view=procedure&task=${encodeURIComponent(master.task_id)}`}
               className="grid grid-cols-[minmax(110px,0.5fr)_minmax(0,2fr)_minmax(100px,1fr)_24px] items-center gap-4 border-b border-line px-2 py-4 text-xs transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover">
               <span className="truncate font-mono text-ink-secondary">{master.document_number}</span><span className="truncate font-medium">{master.title}</span>
@@ -89,7 +86,6 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
             <div className="mt-6 flex justify-end gap-2"><button type="button" className="ui-btn-ghost h-9 px-3" disabled={pending} onClick={() => setAdding(false)}>Cancel</button><button type="submit" className="ui-btn-primary h-9 px-4" disabled={pending || !title.trim()}>{pending ? "Creating…" : "Create draft"}</button></div>
           </form>
         </div> : null}
-      </main>
-    </div>
-  </div>;
+        </>}
+  </AwiDirectoryShell>;
 }

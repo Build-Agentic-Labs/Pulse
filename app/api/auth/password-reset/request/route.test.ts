@@ -17,7 +17,8 @@ vi.mock("@/lib/sop/notifications-drain", () => ({
   createResendSender: () => mocks.send,
 }));
 
-import { POST, passwordRecoveryOrigin } from "./route";
+import { POST } from "./route";
+import { passwordRecoveryOrigin } from "@/lib/auth/password-recovery-origin";
 
 const RESET_LINK = "https://pulse.example.com/reset-password#email=person%40example.com&token_hash=hash-1&type=recovery";
 

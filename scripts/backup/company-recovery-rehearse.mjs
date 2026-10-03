@@ -60,7 +60,7 @@ try{
   for(const match of schema.matchAll(/^GRANT [^\n]* TO ([^;\n]+);$/gm))for(const r of match[1].split(','))roles.add(r.trim().replace(/^"|"$/g,''));
   const existing=new Set(json('SELECT rolname FROM pg_roles').map(x=>x.rolname));
   for(const role of roles){if(role==='public'||role==='PUBLIC'||existing.has(role))continue;if(!/^[a-z][a-z0-9_]*$/.test(role))throw Error('Unexpected recovery role');sql(`CREATE ROLE ${identifier(role)} NOLOGIN;`);}
-  sql(schema.replace(/^\\(?:un)?restrict.*$/gm,''));
+  sql(schema.replace(/^\\(?:un)?restrict.*$/gm,'').replace(/^CREATE SCHEMA public;$/gm,''));
   const triggers=json(`SELECT c.relname AS table,t.tgname AS name,t.tgenabled AS enabled FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND NOT t.tgisinternal`);
   const publicTables=json(`SELECT tablename FROM pg_tables WHERE schemaname='public'`);
   sql(publicTables.map(t=>`ALTER TABLE public.${identifier(t.tablename)} DISABLE TRIGGER ALL;`).join('\n'));
@@ -86,7 +86,7 @@ try{
   report.checks.push({name:'Public schema and every included row match authenticated archive',tables:tableCounts.size,rows:[...tableCounts.values()].reduce((a,b)=>a+b,0),identities:identities.length});
   report.checks.push({name:'Foreign keys restored and validated; owners, policies, hooks and counters restored',foreignKeys:fks.length,sequences:sequences.length});
   report.passed=true;console.log('PASS: isolated company schema, records, constraints, metadata and original files recovered.');
-}catch{report.failedPhase=phase;process.exitCode=1;console.error('Recovery validation stopped in phase: '+phase+'. No production connection or changes.');}
+}catch(error){report.failedPhase=phase;report.diagnostic=String(error.stderr||error.message||'Unknown failure').split('\n').filter(line=>/^(ERROR|DETAIL|HINT):/.test(line)).slice(0,3).join('\n').slice(0,1000);process.exitCode=1;console.error('Recovery validation stopped in phase: '+phase+'. No production connection or changes.');}
 finally{
   await fileHandle?.close().catch(()=>{});
   for(const name of created.reverse())try{docker(['rm','-f','-v',name]);}catch{report.cleanupFailure=true;}

@@ -16,6 +16,12 @@ export async function backupReadiness() {
   else try { await readFile(process.env.PULSE_BACKUP_CA_CERT, "utf8"); }
   catch { problems.push("The database CA certificate cannot be read."); }
   if (!process.env.PULSE_BACKUP_STORAGE_READ_TOKEN) problems.push("A dedicated file-read credential is required.");
+  else {
+    try {
+      const payload = JSON.parse(Buffer.from(process.env.PULSE_BACKUP_STORAGE_READ_TOKEN.split(".")[1], "base64url").toString("utf8"));
+      if (typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now()) problems.push("The file-read credential has expired and must be renewed locally.");
+    } catch { problems.push("The file-read credential is invalid and must be renewed locally."); }
+  }
   if (process.env.PULSE_BACKUP_RESTORE_VALIDATED !== "true") problems.push("An isolated restore rehearsal must pass before real exports are enabled.");
   try { await promisify(execFile)(process.env.PULSE_BACKUP_PG_DUMP || "pg_dump", ["--version"], { timeout: 3000 }); }
   catch { problems.push("PostgreSQL pg_dump is not installed or configured."); }

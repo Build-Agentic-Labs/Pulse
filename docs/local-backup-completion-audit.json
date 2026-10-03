@@ -1,9 +1,9 @@
 {
-  "performedAt": "2026-10-02T15:03:43.125704+00:00",
+  "performedAt": "2026-10-03T00:55:13.576805+00:00",
   "productionReady": false,
-  "productionBackupCreated": false,
+  "productionBackupCreated": true,
   "productionMutationsPerformed": true,
-  "status": "awaiting_file_credential_and_egress_resolution",
+  "status": "local_backup_integrity_and_isolated_company_recovery_verified",
   "requirements": [
     {
       "requirement": "Define critical backup scope and explicit exclusions",
@@ -73,5 +73,18 @@
     "Account credentials, integrations and external remote files are separate recovery prerequisites.",
     "An interrupted runner lock requires operator review rather than automatic deletion."
   ],
-  "productionMutationScope": "Approved routine ACL preservation and dedicated backup role activation only; no company records changed"
+  "productionMutationScope": "Approved routine ACL preservation and dedicated backup role activation only; no company records changed",
+  "liveRecovery": {
+    "archiveBytes": 432702838,
+    "files": 2896,
+    "originalFileBytes": 299754424,
+    "tables": 69,
+    "rows": 4917,
+    "identityMappings": 32,
+    "foreignKeys": 150,
+    "sequences": 11,
+    "productionDataChangedByExportOrRecovery": false,
+    "providerEmailsSentByRecovery": false,
+    "fullBrowserRecoveryWorkflowVerified": false
+  }
 }

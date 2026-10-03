@@ -18,10 +18,20 @@ export async function readAllPages<T>(
 export async function readRowsByIds<T>(
   ids: string[],
   fetchPage: (ids: string[], from: number, to: number) => PromiseLike<T[] | null>,
+  maxEncodedFilterLength = Number.POSITIVE_INFINITY,
 ): Promise<T[]> {
   const rows: T[] = [];
-  for (let start = 0; start < ids.length; start += 100) {
-    const batch = ids.slice(start, start + 100);
+  for (let start = 0; start < ids.length;) {
+    const batch: string[] = [];
+    let length = 0;
+    while (start < ids.length && batch.length < 100) {
+      // JSON quoting conservatively covers PostgREST's quoting/escaping; the
+      // byte budget matters for long email addresses as well as UUIDs.
+      const nextLength = encodeURIComponent(JSON.stringify(ids[start])).length + 3;
+      if (batch.length && length + nextLength > maxEncodedFilterLength) break;
+      batch.push(ids[start++]);
+      length += nextLength;
+    }
     rows.push(...await readAllPages((from, to) => fetchPage(batch, from, to)));
   }
   return rows;

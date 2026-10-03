@@ -11,7 +11,7 @@ import {
 import { countTaskStepTools } from "@/domain/step-tools";
 import { normalizeCode } from "@/domain/nomenclature";
 import { loadTaskPrivateMediaFromSupabase } from "@/domain/supabase-planner";
-import { mergeTaskPrivateMedia } from "@/domain/task-private-media";
+import { mergeTaskPrivateMedia, type TaskPrivateMedia } from "@/domain/task-private-media";
 import { buildWorkInstruction } from "@/domain/work-instruction/build";
 import type { WorkInstructionReferenceRecord } from "@/domain/work-instruction/references";
 import {
@@ -483,7 +483,7 @@ export function WorkInstructionsPanel({
 
   // The planner loads a task's photos only once its procedure is opened. Releasing must freeze
   // the photos too, so the dialog fetches them for a task that has not been opened yet.
-  const [photoLoadedTasks, setPhotoLoadedTasks] = useState<ReadonlyMap<string, Task>>(new Map());
+  const [photoLoadedTasks, setPhotoLoadedTasks] = useState<ReadonlyMap<string, TaskPrivateMedia>>(new Map());
   const [controlTarget, setControlTarget] = useState<{ taskId: string; step?: "readiness" | "references" | "release" | "history" } | null>(null);
 
   const zoneLookup = useMemo(() => new Map(zones.map((zone) => [zone.id, zone])), [zones]);

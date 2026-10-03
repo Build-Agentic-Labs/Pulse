@@ -35,6 +35,8 @@ import {
   type DrainStore,
   type RetryItem,
 } from "@/lib/sop/notifications-drain";
+import { readAllPages, readRowsByIds } from "@/lib/supabase/read-all-pages";
+import { throwIfError } from "@/lib/supabase-errors";
 import { stampDeliveredChannel } from "@/lib/sop/notifications-store";
 
 const EVENT_WINDOW_DAYS = 30;
@@ -77,29 +79,38 @@ export function createWorkspaceWelcomeDrainStore(
     const userIds = Array.from(
       new Set(participants.flatMap((entry) => (entry.actorId ? [entry.recipientId, entry.actorId] : [entry.recipientId]))),
     );
-    const [workspaces, members, profiles, redeemedInvites] = await Promise.all([
-      workspaceIds.length
-        ? admin.from("workspaces").select("id, name").in("id", workspaceIds)
-        : Promise.resolve({ data: [], error: null }),
-      workspaceIds.length
-        ? admin.from("workspace_members").select("workspace_id, user_id").in("workspace_id", workspaceIds)
-        : Promise.resolve({ data: [], error: null }),
-      userIds.length
-        ? admin.from("profiles").select("id, full_name, email").in("id", userIds)
-        : Promise.resolve({ data: [], error: null }),
-      workspaceIds.length && recipientIds.length
-        ? admin
-            .from("workspace_access_grants")
-            .select("workspace_id, redeemed_by, redeemed_at")
-            .in("workspace_id", workspaceIds)
-            .in("redeemed_by", recipientIds)
-        : Promise.resolve({ data: [], error: null }),
-    ]);
-    for (const result of [workspaces, members, profiles, redeemedInvites]) {
-      if (result.error) throw new Error(result.error.message);
+    // Batch participant pairs together: two independently chunked global ID
+    // lists would create a workspace × recipient request explosion. Both IN
+    // filters stay small, and repeated grants across batches are deduplicated.
+    async function loadRedeemedInvites() {
+      const pairs = [...new Map(participants.map((entry) => [
+        `${entry.workspaceId}:${entry.recipientId}`, entry,
+      ])).values()];
+      const grants = new Map<string, { workspace_id: string; redeemed_by: string | null; redeemed_at: string | null }>();
+      for (let start = 0; start < pairs.length; start += 50) {
+        const batch = pairs.slice(start, start + 50);
+        const rows = await readAllPages((from, to) => throwIfError(admin
+          .from("workspace_access_grants")
+          .select("workspace_id, email, redeemed_by, redeemed_at")
+          .in("workspace_id", [...new Set(batch.map((entry) => entry.workspaceId))])
+          .in("redeemed_by", [...new Set(batch.map((entry) => entry.recipientId))])
+          .order("workspace_id").order("email").range(from, to)));
+        for (const row of rows) grants.set(`${row.workspace_id}:${row.email}`, row);
+      }
+      return [...grants.values()];
     }
+    const [workspaces, members, profiles, redeemedInvites] = await Promise.all([
+      readRowsByIds(workspaceIds, (ids, from, to) => throwIfError(admin.from("workspaces")
+        .select("id, name").in("id", ids).order("id").range(from, to))),
+      readRowsByIds(workspaceIds, (ids, from, to) => throwIfError(admin.from("workspace_members")
+        .select("workspace_id, user_id").in("workspace_id", ids)
+        .order("workspace_id").order("user_id").range(from, to))),
+      readRowsByIds(userIds, (ids, from, to) => throwIfError(admin.from("profiles")
+        .select("id, full_name, email").in("id", ids).order("id").range(from, to))),
+      loadRedeemedInvites(),
+    ]);
     const redeemedInviteAtByMemberKey = new Map<string, number[]>();
-    for (const row of redeemedInvites.data ?? []) {
+    for (const row of redeemedInvites) {
       if (!row.redeemed_by || !row.redeemed_at) continue;
       const redeemedAt = new Date(row.redeemed_at).getTime();
       if (!Number.isFinite(redeemedAt)) continue;
@@ -107,27 +118,21 @@ export function createWorkspaceWelcomeDrainStore(
       redeemedInviteAtByMemberKey.set(key, [...(redeemedInviteAtByMemberKey.get(key) ?? []), redeemedAt]);
     }
     const profileById = new Map(
-      (profiles.data ?? []).map((row) => [row.id, { fullName: row.full_name, email: row.email }]),
+      profiles.map((row) => [row.id, { fullName: row.full_name, email: row.email }]),
     );
     const recipientEmails = recipientIds
       .map((id) => profileById.get(id)?.email?.toLowerCase())
       .filter((email): email is string => Boolean(email));
     const [prefs, suppressions] = await Promise.all([
-      recipientIds.length
-        ? admin
-            .from("notification_preferences")
-            .select("user_id, workspace_id, kind, channel, mode")
-            .in("user_id", recipientIds)
-            .eq("channel", "email")
-        : Promise.resolve({ data: [], error: null }),
-      recipientEmails.length
-        ? admin.from("email_suppressions").select("email").in("email", recipientEmails)
-        : Promise.resolve({ data: [], error: null }),
+      readRowsByIds(recipientIds, (ids, from, to) => throwIfError(admin
+        .from("notification_preferences").select("user_id, workspace_id, kind, channel, mode")
+        .in("user_id", ids).eq("channel", "email")
+        .order("user_id").order("workspace_id").order("kind").order("channel").range(from, to))),
+      readRowsByIds([...new Set(recipientEmails)], (emails, from, to) => throwIfError(admin
+        .from("email_suppressions").select("email").in("email", emails).order("email").range(from, to)), 3500),
     ]);
-    if (prefs.error) throw new Error(prefs.error.message);
-    if (suppressions.error) throw new Error(suppressions.error.message);
     const prefsByUser = new Map<string, PreferenceRow[]>();
-    for (const row of prefs.data ?? []) {
+    for (const row of prefs) {
       prefsByUser.set(row.user_id, [
         ...(prefsByUser.get(row.user_id) ?? []),
         { workspaceId: row.workspace_id, kind: row.kind, channel: row.channel, mode: row.mode },
@@ -135,9 +140,9 @@ export function createWorkspaceWelcomeDrainStore(
     }
     return {
       prefsByUser,
-      suppressed: new Set((suppressions.data ?? []).map((row) => String(row.email).toLowerCase())),
-      workspaceNameById: new Map((workspaces.data ?? []).map((row) => [row.id, row.name])),
-      memberKeySet: new Set((members.data ?? []).map((row) => `${row.workspace_id}:${row.user_id}`)),
+      suppressed: new Set(suppressions.map((row) => String(row.email).toLowerCase())),
+      workspaceNameById: new Map(workspaces.map((row) => [row.id, row.name])),
+      memberKeySet: new Set(members.map((row) => `${row.workspace_id}:${row.user_id}`)),
       redeemedInviteAtByMemberKey,
       profileById,
     };
@@ -205,13 +210,12 @@ export function createWorkspaceWelcomeDrainStore(
 
     async collect(now, origin): Promise<DrainBatch<WorkspaceNotificationPending>> {
       const windowStart = new Date(now.getTime() - EVENT_WINDOW_DAYS * DAY_MS).toISOString();
-      const { data: rows, error } = await admin
+      const rows = await readAllPages((from, to) => throwIfError(admin
         .from("audit_log")
         .select("id, action, workspace_id, target_id, actor_id, details, created_at")
         .in("action", [...MEMBERSHIP_NOTIFIABLE_ACTIONS])
         .gte("created_at", windowStart)
-        .order("created_at", { ascending: true });
-      if (error) throw new Error(error.message);
+        .order("created_at", { ascending: true }).order("id").range(from, to)));
 
       const welcomes: MemberAddedEvent[] = [];
       const memberships: MembershipEvent[] = [];
@@ -226,10 +230,9 @@ export function createWorkspaceWelcomeDrainStore(
       }
 
       const eventIds = [...welcomes.map((event) => event.id), ...memberships.map((event) => event.id)];
-      const { data: ledgerRows, error: ledgerError } = eventIds.length
-        ? await admin.from("workspace_notifications").select("event_id, recipient_id").in("event_id", eventIds)
-        : { data: [], error: null };
-      if (ledgerError) throw new Error(ledgerError.message);
+      const ledgerRows = await readRowsByIds(eventIds.map(String), (ids, from, to) => throwIfError(admin
+        .from("workspace_notifications").select("event_id, recipient_id")
+        .in("event_id", ids.map(Number)).order("id").range(from, to)));
       const covered = new Set((ledgerRows ?? []).map((row) => `${row.event_id}:${row.recipient_id}`));
 
       const freshWelcomes = welcomes.filter((event) => !covered.has(`${event.id}:${event.recipientId}`));
@@ -270,13 +273,12 @@ export function createWorkspaceWelcomeDrainStore(
     },
 
     async retryItems(now, origin): Promise<RetryItem[]> {
-      const { data, error } = await admin
+      const data = await readAllPages((from, to) => throwIfError(admin
         .from("workspace_notifications")
         .select("id, workspace_id, recipient_id, event_id, kind, attempts, last_attempt_at, created_at, content")
         .is("sent_at", null)
         .is("skipped_reason", null)
-        .lt("attempts", MAX_SEND_ATTEMPTS);
-      if (error) throw new Error(error.message);
+        .lt("attempts", MAX_SEND_ATTEMPTS).order("id").range(from, to)));
       // Attempt-scaled lease off last_attempt_at (created_at for a never-tried
       // row) so one outage can't burn every attempt within minutes.
       const rows = (data ?? []).filter((row) =>

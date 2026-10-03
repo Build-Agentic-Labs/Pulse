@@ -23,6 +23,7 @@ function makeAdmin(results: Record<string, Result>, capture?: { updates: { table
       in: () => builder,
       gte: () => builder,
       order: () => builder,
+      range: () => builder,
       eq: (col: string, val: unknown) => {
         guards[col] = val;
         return builder;
@@ -200,5 +201,128 @@ describe("createWorkspaceWelcomeDrainStore.claimRetry", () => {
     const admin = makeAdmin({ workspace_notifications: { data: [], error: null } });
     const store = createWorkspaceWelcomeDrainStore(admin);
     expect(await store.claimRetry!(42, 1)).toBe(false);
+  });
+});
+
+// Model the REST row cap and actual filters rather than returning an unlimited
+// table. Large fixtures must survive pagination, duplicate IDs and later errors.
+function pagedAdmin(tables: Record<string, Record<string, unknown>[]>, fail?: { table: string; offset: number }) {
+  const reads: { table: string; filters: Record<string, unknown[]>; offset: number }[] = [];
+  const admin = {
+    from(table: string) {
+      const filters: Record<string, unknown[]> = {};
+      const predicates: ((row: Record<string, unknown>) => boolean)[] = [];
+      const orders: string[] = [];
+      let offset = 0; let end = 999;
+      const builder = {
+        select() { return builder; },
+        in(column: string, ids: unknown[]) { filters[column] = ids; predicates.push((row) => ids.includes(row[column])); return builder; },
+        eq(column: string, value: unknown) { predicates.push((row) => row[column] === value); return builder; },
+        is(column: string, value: unknown) { return builder.eq(column, value); },
+        lt(column: string, value: number) { predicates.push((row) => Number(row[column]) < value); return builder; },
+        gte(column: string, value: string) { predicates.push((row) => String(row[column]) >= value); return builder; },
+        order(column: string) { orders.push(column); return builder; },
+        range(from: number, to: number) { offset = from; end = to; return builder; },
+        then(resolve: (result: Result) => void) {
+          reads.push({ table, filters, offset });
+          const data = (tables[table] ?? []).filter((row) => predicates.every((predicate) => predicate(row)))
+            .sort((a, b) => {
+              for (const column of orders) {
+                if (a[column] === b[column]) continue;
+                return typeof a[column] === 'number' && typeof b[column] === 'number'
+                  ? Number(a[column]) - Number(b[column]) : String(a[column]).localeCompare(String(b[column]));
+              }
+              return 0;
+            }).slice(offset, Math.min(end + 1, offset + 1000));
+          resolve({ data, error: fail?.table === table && fail.offset === offset ? { message: 'Later page unavailable' } : null });
+        },
+      };
+      return builder;
+    },
+  } as unknown as SupabaseClient<Database>;
+  return { admin, reads };
+}
+
+const backlogUser = (id: number) => `00000000-0000-0000-0000-${id.toString(16).padStart(12, "0")}`;
+
+function backlogFixture(count: number) {
+  const createdAt = '2026-10-03T12:00:00.000Z';
+  const tables: Record<string, Record<string, unknown>[]> = {
+    audit_log: [], workspace_notifications: [], workspaces: [], workspace_members: [], profiles: [],
+    workspace_access_grants: [], notification_preferences: [], email_suppressions: [],
+  };
+  for (let id = 1; id <= count; id++) {
+    const recipient = backlogUser(id); const workspace = `workspace-${id}`;
+    tables.audit_log.push({ id, action: 'workspace_members.insert', workspace_id: workspace, target_id: recipient, actor_id: null, created_at: createdAt });
+    tables.workspaces.push({ id: workspace, name: `Workspace ${id}` });
+    tables.workspace_members.push({ workspace_id: workspace, user_id: recipient });
+    tables.profiles.push({ id: recipient, full_name: `Member ${id}`, email: `member${id}@example.com` });
+  }
+  return { tables, createdAt };
+}
+
+const BACKLOG_NOW = new Date('2026-10-03T12:01:00.000Z');
+
+describe('workspace notification backlog', () => {
+  it('collects beyond the API cap with bounded lookups and preserves every delivery rule', async () => {
+    const { tables, createdAt } = backlogFixture(2107);
+    // Covered, no longer a member and invited welcomes are still excluded.
+    tables.workspace_notifications.push({ id: 1, event_id: 1, recipient_id: backlogUser(1) });
+    tables.workspace_members = tables.workspace_members.filter((row) => row.user_id !== backlogUser(2));
+    tables.workspace_access_grants.push({ workspace_id: 'workspace-3', email: 'member3@example.com', redeemed_by: backlogUser(3), redeemed_at: createdAt });
+    tables.notification_preferences.push({ user_id: backlogUser(2106), workspace_id: 'workspace-2106', channel: 'email', kind: 'workspace_welcome', mode: 'off' });
+    tables.email_suppressions.push({ email: 'member2107@example.com' });
+    const { admin, reads } = pagedAdmin(tables);
+    const batch = await createWorkspaceWelcomeDrainStore(admin).collect(BACKLOG_NOW, origin);
+    expect(batch.items).toHaveLength(2104);
+    expect(new Set(batch.items.map((item) => item.pending.eventId)).size).toBe(2104);
+    expect(batch.items.find((item) => item.pending.eventId === 2106)?.channels.email).toBe(false);
+    expect(batch.items.find((item) => item.pending.eventId === 2107)?.channels.suppressed).toBe(true);
+    expect(reads.filter((read) => read.table === 'audit_log').map((read) => read.offset)).toEqual([0,500,1000,1500,2000]);
+    expect(Math.max(...reads.flatMap((read) => Object.values(read.filters).map((ids) => ids.length)))).toBeLessThanOrEqual(100);
+  });
+
+  it('reads large child collections completely within one lookup batch', async () => {
+    const { tables, createdAt } = backlogFixture(1);
+    // All these members share one workspace. The relevant member sorts last.
+    tables.workspace_members = Array.from({ length: 1200 }, (_, id) => ({ workspace_id: 'workspace-1', user_id: `a-${id}` }));
+    tables.workspace_members.push({ workspace_id: 'workspace-1', user_id: backlogUser(1) });
+    // Grant matching the membership is on a later page as well.
+    tables.workspace_access_grants = Array.from({ length: 1200 }, (_, id) => ({ workspace_id: 'workspace-1', email: `a${id}@example.com`, redeemed_by: backlogUser(1), redeemed_at: '2026-09-01T00:00:00Z' }));
+    tables.workspace_access_grants.push({ workspace_id: 'workspace-1', email: 'z@example.com', redeemed_by: backlogUser(1), redeemed_at: createdAt });
+    const { admin, reads } = pagedAdmin(tables);
+    expect((await createWorkspaceWelcomeDrainStore(admin).collect(BACKLOG_NOW, origin)).items).toEqual([]);
+    expect(reads.filter((read) => read.table === 'workspace_members').map((read) => read.offset)).toEqual([0,500,1000]);
+    expect(reads.filter((read) => read.table === 'workspace_access_grants').map((read) => read.offset)).toEqual([0,500,1000]);
+  });
+
+  it('includes all due retries after the first page and preserves content and leases', async () => {
+    const { tables } = backlogFixture(1205);
+    const content = { subject: 'Recorded subject', text: 'Recorded text', html: '<p>Recorded text</p>' };
+    tables.workspace_notifications = tables.audit_log.map((event) => ({ id: event.id, workspace_id: event.workspace_id, recipient_id: event.target_id, attempts: 0, last_attempt_at: null, created_at: '2026-10-03T10:00:00Z', sent_at: null, skipped_reason: null, content }));
+    tables.workspace_notifications[0].last_attempt_at = BACKLOG_NOW.toISOString();
+    const { admin } = pagedAdmin(tables);
+    const retries = await createWorkspaceWelcomeDrainStore(admin).retryItems!(BACKLOG_NOW, origin);
+    expect(retries).toHaveLength(1204);
+    expect(new Set(retries.map((item) => item.ledgerId)).size).toBe(1204);
+    expect(retries.find((item) => item.ledgerId === 1205)).toMatchObject({ email: 'member1205@example.com', attempts: 0, content });
+  });
+
+  it('honors preferences and suppressions located beyond the first response page', async () => {
+    const { tables } = backlogFixture(1);
+    const recipient = backlogUser(1);
+    tables.notification_preferences = Array.from({ length: 1200 }, (_, id) => ({ user_id: recipient, workspace_id: `a-${id}`, kind: 'workspace_welcome', channel: 'email', mode: 'immediate' }));
+    tables.notification_preferences.push({ user_id: recipient, workspace_id: 'workspace-1', kind: 'workspace_welcome', channel: 'email', mode: 'off' });
+    tables.email_suppressions.push({ email: 'member1@example.com' });
+    const { admin } = pagedAdmin(tables);
+    const batch = await createWorkspaceWelcomeDrainStore(admin).collect(BACKLOG_NOW, origin);
+    expect(batch.items).toHaveLength(1);
+    expect(batch.items[0].channels).toMatchObject({ email: false, suppressed: true });
+  });
+
+  it('propagates a later page failure instead of using a partial delivery bundle', async () => {
+    const { tables } = backlogFixture(1200);
+    const { admin } = pagedAdmin(tables, { table: 'audit_log', offset: 500 });
+    await expect(createWorkspaceWelcomeDrainStore(admin).collect(BACKLOG_NOW, origin)).rejects.toThrow('Later page unavailable');
   });
 });

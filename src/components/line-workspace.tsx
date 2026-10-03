@@ -1,6 +1,8 @@
 "use client";
 
 import { AwiSaveStatus } from "./awi-editor-actions";
+import { settleWriteBatch, workspaceSaveBarrier, workspaceSaveStatus } from "@/domain/workspace-save-status";
+import { useWriteTracker } from "./line-workspace/use-write-tracker";
 import type { AwiMaster } from "@/lib/awi/store";
 import { acknowledgeAnnotationDrafts, readAnnotationDraft } from "@/lib/photo-annotation-drafts";
 
@@ -89,8 +91,8 @@ import {
 } from "@/components/line-workspace/step-photo-clipboard-provider";
 import type { StepPhotoClipboardEntry } from "@/domain/step-photo-clipboard";
 import { applyPastedPhoto, revertPastedPhoto } from "@/domain/step-photo-paste";
-import { removeTaskExplodedView, type ExplodedView } from "@/domain/step-exploded-views";
-import { removeTaskVideo, type TaskVideo } from "@/domain/task-videos";
+import { removeTaskExplodedView, upsertTaskExplodedViews, type ExplodedView } from "@/domain/step-exploded-views";
+import { removeTaskVideo, upsertTaskVideos, type TaskVideo } from "@/domain/task-videos";
 import { mergeTaskPrivateMedia } from "@/domain/task-private-media";
 import { buildStepToolLibrary, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
 import type { ProjectToolCatalogEntry } from "@/domain/project-catalog";
@@ -193,6 +195,7 @@ import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
 import { TopNav } from "./planner-top-nav";
 import { announceProjectSwitch, projectPlannerHref } from "./sidebar-workspace-panel";
+import { ProcedureWorkspace } from "./line-workspace/procedure";
 import { PlannerWorkspaceSkeleton, ProductLoadingState, SettingsLoadingState } from "./space-loading-states";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
 import { AppSettingsPanel, embeddedSettingsSections, type SettingsSection } from "./app-settings-panel";
@@ -281,7 +284,9 @@ const GanttTimeline = dynamic(() => import("./gantt-timeline").then((module) => 
 const OperatorUtilizationPanel = dynamic(() => import("./operator-utilization-panel").then((module) => module.OperatorUtilizationPanel), { loading: () => <PlannerWorkspaceSkeleton /> });
 const ProjectCatalogSetupPanel = dynamic(() => import("./project-catalog-setup-panel").then((module) => module.ProjectCatalogSetupPanel), { loading: () => <PlannerWorkspaceSkeleton /> });
 const DetailDrawer = dynamic(() => import("./line-workspace/drawer").then((module) => module.DetailDrawer));
-const ProcedureWorkspace = dynamic(() => import("./line-workspace/procedure").then((module) => module.ProcedureWorkspace), { loading: () => <PlannerWorkspaceSkeleton /> });
+// Procedure is a primary Product/AWI surface. Include it in the already
+// deferred workspace chunk to avoid a second nested Suspense code waterfall.
+// Other panels remain lazy, and fresh core confirmation still gates editing.
 const PfmeaWorkspace = dynamic(() => import("./line-workspace/pfmea-workspace").then((module) => module.PfmeaWorkspace), { loading: () => <PlannerWorkspaceSkeleton /> });
 
 // Cap on the planner undo history. Snapshots are structural-shared PlannerState objects,
@@ -599,10 +604,13 @@ export function LineWorkspace({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [detailDrawerWidth, setDetailDrawerWidth] = useState(360);
   const [isResizingDetailDrawer, setIsResizingDetailDrawer] = useState(false);
-  const [saveState, setSaveState] = useState<SaveState>("loading");
+  const [reportedSaveState, setSaveState] = useState<SaveState>("loading");
   // Mirror of saveState readable synchronously inside async flows (e.g. save-before-scenario-switch).
   const saveStateRef = useRef<SaveState>("loading");
-  const [saveError, setSaveError] = useState<string>();
+  const [reportedSaveError, setSaveError] = useState<string>();
+  const reportedSaveStatusRef = useRef({ state: reportedSaveState, error: reportedSaveError });
+  reportedSaveStatusRef.current = { state: reportedSaveState, error: reportedSaveError };
+  const { tracker: writeTracker, snapshot: writeSnapshot } = useWriteTracker(projectId);
   const [hasLoadedRemoteState, setHasLoadedRemoteState] = useState(
     () => hasInitialDisplayablePlannerState || hasRecentProjectSwitchSession(),
   );
@@ -682,6 +690,14 @@ export function LineWorkspace({
   const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
   const chromeStatusTimerRef = useRef<number | null>(null);
   const detailDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const { state: saveState, error: saveError } = workspaceSaveStatus(
+    reportedSaveState,
+    reportedSaveError,
+    writeSnapshot,
+    Object.values(procedureSaveQueuesRef.current),
+    plannerDirtyRef.current || Boolean(plannerSaveTimerRef.current) || Boolean(queuedSaveStateRef.current) ||
+      Object.keys(procedureSaveTimersRef.current).length > 0 || Object.keys(procedureRetryTimersRef.current).length > 0,
+  );
   const workspaceToasts = useMemo<FeedbackToast[]>(
     () => [
       ...(chromeStatus ? [{ id: 0, title: chromeStatus.message, tone: chromeStatus.error ? "danger" as const : "neutral" as const }] : []),
@@ -1186,11 +1202,11 @@ export function LineWorkspace({
   }
 
   function hasPlannerShellSaveWork() {
-    return saveInFlightRef.current || plannerDirtyRef.current || Boolean(plannerSaveTimerRef.current);
+    return saveInFlightRef.current || plannerDirtyRef.current || Boolean(plannerSaveTimerRef.current) || writeTracker.getSnapshot().pending > 0;
   }
 
   function hasLocalSaveWork() {
-    return masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork();
+    return masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork() || writeTracker.getSnapshot().failures.length > 0;
   }
 
   function generateProcedureSaveId() {
@@ -2027,19 +2043,23 @@ export function LineWorkspace({
 
   // Wait for every local save path (planner-shell autosave + per-field procedure saves) to drain.
   // Returns false if a save errored or it didn't settle in time -- the caller must NOT switch then.
-  async function waitForLocalSavesToSettle(timeoutMs = 12000): Promise<boolean> {
+  async function waitForLocalSavesToSettle(timeoutMs = 12000, retryingKey?: string): Promise<boolean> {
     const startedAt = Date.now();
-    while (hasLocalSaveWork()) {
-      if (saveStateRef.current === "error" || saveStateRef.current === "conflict") {
-        return false;
-      }
+    for (;;) {
+      const reported = reportedSaveStatusRef.current;
+      const barrier = workspaceSaveBarrier(
+        reported.state, reported.error, writeTracker.getSnapshot(),
+        Object.values(procedureSaveQueuesRef.current),
+        masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork(),
+        retryingKey,
+      );
+      if (barrier === "blocked") return false;
+      if (barrier === "ready") return true;
       if (Date.now() - startedAt > timeoutMs) {
         return false;
       }
       await new Promise((resolve) => window.setTimeout(resolve, 120));
     }
-    // Settled with no outstanding work; a lingering error/conflict means the last save did not land.
-    return saveStateRef.current !== "error" && saveStateRef.current !== "conflict";
   }
 
   // Apply a freshly-loaded scenario for a switch. We only reach here AFTER a successful save, so any
@@ -3675,6 +3695,7 @@ export function LineWorkspace({
     }
 
     saveInFlightRef.current = true;
+    const finishWrite = writeTracker.begin("planner");
     setSaveError(undefined);
     setSaveState("saving");
 
@@ -3688,6 +3709,7 @@ export function LineWorkspace({
         await savePlannerShellToSupabase(nextState);
         lastPersistedState = nextState;
       } catch (error) {
+        finishWrite(error);
         const message = error instanceof Error ? error.message : "Unable to save planner state.";
         setSaveError(message);
         setSaveState("error");
@@ -3704,6 +3726,7 @@ export function LineWorkspace({
     }
 
     saveInFlightRef.current = false;
+    finishWrite();
     plannerDirtyRef.current = false;
     if (lastPersistedState) {
       void writeCachedPlannerState(projectId, lastPersistedState, mainScenarioIdRef.current).catch(() => undefined);
@@ -3795,6 +3818,14 @@ export function LineWorkspace({
     const queue = getProcedureTaskSaveQueue(taskId);
     if (queue.inFlight || !queue.pendingTaskSnapshot || !queue.pendingTasksSnapshot) {
       return;
+    }
+
+    // A save completion may immediately drain newer edits before their debounce
+    // timer fires. The current queue is being consumed now; that old timer must
+    // not replay its stale snapshot or keep the status pending afterward.
+    if (procedureSaveTimersRef.current[taskId]) {
+      window.clearTimeout(procedureSaveTimersRef.current[taskId]);
+      delete procedureSaveTimersRef.current[taskId];
     }
 
     if (blockViewOnlyWrite()) {
@@ -3945,6 +3976,7 @@ export function LineWorkspace({
     }
 
     queue.state = "idle";
+    queue.lastError = undefined;
     setSaveState("saved");
     applyDeferredProcedureServerUpdate(taskId);
     flushDeferredRemoteRefresh();
@@ -3979,6 +4011,7 @@ export function LineWorkspace({
     queue.state = queue.inFlight ? "saving-with-newer-pending" : "dirty-pending";
     updateProcedureDraftSnapshotStorage();
     procedureDraftLog("save scheduled", { taskId, saveSeq: queue.latestSeq });
+    setSaveState((state) => state === "loading" || state === "saving" ? state : "draft");
 
     if (procedureSaveTimersRef.current[taskId]) {
       window.clearTimeout(procedureSaveTimersRef.current[taskId]);
@@ -4196,11 +4229,12 @@ export function LineWorkspace({
     }
 
     flushPendingPlannerSave();
-    if (hasLocalSaveWork() && !(await waitForLocalSavesToSettle())) {
+    if (!(await waitForLocalSavesToSettle(12000, "master-bom"))) {
       throw new Error("Other changes could not be saved. Resolve the save error before updating the BOM.");
     }
 
     masterBomSaveInFlightRef.current = true;
+    const finishWrite = writeTracker.begin("master-bom");
     setSaveError(undefined);
     saveStateRef.current = "saving";
     setSaveState("saving");
@@ -4230,6 +4264,7 @@ export function LineWorkspace({
       saveStateRef.current = "saved";
       setSaveState("saved");
     } catch (error) {
+      finishWrite(error);
       const message = error instanceof Error ? error.message : "The master BOM could not be saved.";
       setSaveError(message);
       saveStateRef.current = "error";
@@ -4238,6 +4273,7 @@ export function LineWorkspace({
       throw error;
     } finally {
       masterBomSaveInFlightRef.current = false;
+      finishWrite();
       const queuedState = queuedSaveStateRef.current;
       queuedSaveStateRef.current = null;
       if (queuedState) {
@@ -4370,6 +4406,7 @@ export function LineWorkspace({
     }
 
     const previousState = plannerState;
+    const finishWrite = writeTracker.begin(`step-move:${stepId}`);
     setSaveError(undefined);
     setSaveState("saving");
     setPlannerState((current) => ({ ...current, tasks: scheduledTasks }));
@@ -4388,6 +4425,7 @@ export function LineWorkspace({
       })
       .catch((error: unknown) => {
         setPlannerState(previousState);
+        finishWrite(error);
         const message = error instanceof Error ? error.message : "Unable to move the procedure step.";
         setSaveError(message);
         setSaveState("error");
@@ -4396,10 +4434,12 @@ export function LineWorkspace({
           body: message,
           tone: "danger",
         });
-      });
+      })
+      .finally(() => { finishWrite(); flushDeferredRemoteRefresh(); });
   }
 
   async function persistAddStepTool(taskId: string, stepId: string, toolName: string, sequence = 1) {
+    const finishWrite = writeTracker.begin(`tool:${stepId}:${canonicalToolKey(toolName)}`);
     setSaveError(undefined);
     setSaveState("saving");
 
@@ -4407,12 +4447,17 @@ export function LineWorkspace({
       await addStepToolToSupabase(taskId, stepId, toolName, sequence, projectId);
       setSaveState("saved");
     } catch (error) {
+      finishWrite(error);
       setSaveError(error instanceof Error ? error.message : "Unable to add the tool.");
       setSaveState("error");
+    } finally {
+      finishWrite();
+      flushDeferredRemoteRefresh();
     }
   }
 
   async function persistRemoveStepTool(stepId: string, toolName: string) {
+    const finishWrite = writeTracker.begin(`tool:${stepId}:${canonicalToolKey(toolName)}`);
     setSaveError(undefined);
     setSaveState("saving");
 
@@ -4423,8 +4468,12 @@ export function LineWorkspace({
       await removeStepToolFromSupabase(stepId, toolName, taskId, projectId);
       setSaveState("saved");
     } catch (error) {
+      finishWrite(error);
       setSaveError(error instanceof Error ? error.message : "Unable to remove the tool.");
       setSaveState("error");
+    } finally {
+      finishWrite();
+      flushDeferredRemoteRefresh();
     }
   }
 
@@ -4442,6 +4491,7 @@ export function LineWorkspace({
     setSaveError(undefined);
     setSaveState("saving");
 
+    const finishWrite = writeTracker.begin("planner");
     const calculated = applyCalculatedFields(derivedState.product, derivedState.stations, nextTasks);
     const nextState = {
       ...derivedState,
@@ -4463,6 +4513,7 @@ export function LineWorkspace({
         });
       }
     } catch (error) {
+      finishWrite(error);
       const message = error instanceof Error ? error.message : "Unable to save build catalog changes.";
       setSaveError(message);
       setSaveState("error");
@@ -4472,6 +4523,9 @@ export function LineWorkspace({
         tone: "danger",
       });
       throw error;
+    } finally {
+      finishWrite();
+      flushDeferredRemoteRefresh();
     }
   }
 
@@ -4490,36 +4544,45 @@ export function LineWorkspace({
     }
 
     const nameChanged = canonicalToolKey(formattedName) !== entry.key;
+    const finishWrite = writeTracker.begin(`tool-catalog:${entry.key}`);
+    try {
+      if (nameChanged) {
+        // Match the raw stored occurrence by canonical key, rewriting it in place.
+        const nextTasks = renameToolInTasks(derivedState.tasks, entry.rawName, formattedName);
+        await applyProjectTasksUpdate(nextTasks);
+      }
 
-    if (nameChanged) {
-      // Match the raw stored occurrence by canonical key, rewriting it in place.
-      const nextTasks = renameToolInTasks(derivedState.tasks, entry.rawName, formattedName);
-      await applyProjectTasksUpdate(nextTasks);
-    }
+      // Target the real library row by canonical key, so a messy stored name still
+      // migrates (and its category survives — the upsert wipes category otherwise).
+      const existingItem = toolLibraryItems.find(
+        (item) => canonicalToolKey(item.toolName) === entry.key,
+      );
 
-    // Target the real library row by canonical key, so a messy stored name still
-    // migrates (and its category survives — the upsert wipes category otherwise).
-    const existingItem = toolLibraryItems.find(
-      (item) => canonicalToolKey(item.toolName) === entry.key,
-    );
-
-    await upsertToolLibraryMetadata({
-      toolName: formattedName,
-      category: draft.category,
-      projectId,
-      previousToolName:
-        existingItem && existingItem.toolName.trim() !== formattedName ? existingItem.toolName : undefined,
-    });
-
-    const tools = await loadToolLibraryFromSupabase(projectId);
-    setToolLibraryItems(tools);
-
-    if (!nameChanged) {
-      notifyFeedback({
-        title: "Tool updated",
-        body: `${formattedName} type saved.`,
-        tone: "success",
+      await upsertToolLibraryMetadata({
+        toolName: formattedName,
+        category: draft.category,
+        projectId,
+        previousToolName:
+          existingItem && existingItem.toolName.trim() !== formattedName ? existingItem.toolName : undefined,
       });
+
+      const tools = await loadToolLibraryFromSupabase(projectId);
+      setToolLibraryItems(tools);
+      setSaveState("saved");
+
+      if (!nameChanged) {
+        notifyFeedback({
+          title: "Tool updated",
+          body: `${formattedName} type saved.`,
+          tone: "success",
+        });
+      }
+    } catch (error) {
+      finishWrite(error);
+      throw error;
+    } finally {
+      finishWrite();
+      flushDeferredRemoteRefresh();
     }
   }
 
@@ -4579,13 +4642,23 @@ export function LineWorkspace({
   }
 
   async function deleteCatalogTool(entry: ProjectToolCatalogEntry) {
-    const nextTasks = removeToolFromAllTasks(derivedState.tasks, entry.rawName);
-    await applyProjectTasksUpdate(nextTasks);
+    const finishWrite = writeTracker.begin(`tool-catalog:${entry.key}`);
+    try {
+      const nextTasks = removeToolFromAllTasks(derivedState.tasks, entry.rawName);
+      await applyProjectTasksUpdate(nextTasks);
 
-    if (entry.libraryId) {
-      await deleteToolLibraryFromSupabase(entry.libraryId, projectId);
-      const tools = await loadToolLibraryFromSupabase(projectId);
-      setToolLibraryItems(tools);
+      if (entry.libraryId) {
+        await deleteToolLibraryFromSupabase(entry.libraryId, projectId);
+        const tools = await loadToolLibraryFromSupabase(projectId);
+        setToolLibraryItems(tools);
+      }
+      setSaveState("saved");
+    } catch (error) {
+      finishWrite(error);
+      throw error;
+    } finally {
+      finishWrite();
+      flushDeferredRemoteRefresh();
     }
   }
 
@@ -4595,6 +4668,7 @@ export function LineWorkspace({
     }
 
     let localPhotos: StepPhotoAttachment[] = [];
+    const finishWrite = writeTracker.begin(`photo-upload:${taskId}:${stepId}`);
     saveInFlightRef.current = true;
     setSaveError(undefined);
     setSaveState("saving");
@@ -4609,7 +4683,7 @@ export function LineWorkspace({
         ),
       }));
 
-      const uploadedPhotos = await Promise.all(
+      const uploadedPhotos = await settleWriteBatch(
         localPhotos.map((photo) => uploadStepPhotoAttachment(taskId, stepId, photo, activeProjectContext)),
       );
 
@@ -4636,10 +4710,12 @@ export function LineWorkspace({
         }));
       }
 
+      finishWrite(error);
       setSaveError(error instanceof Error ? error.message : "Unable to attach the selected photo.");
       setSaveState("error");
     } finally {
       saveInFlightRef.current = false;
+      finishWrite();
       flushDeferredRemoteRefresh();
     }
   }
@@ -4663,6 +4739,7 @@ export function LineWorkspace({
     const isCut = entry.mode === "cut";
     const sameTask = entry.sourceTaskId === target.taskId;
     const pastedPhoto = duplicateStepPhotoAttachment(entry.photo);
+    const finishWrite = writeTracker.begin(`photo-paste:${target.taskId}:${target.stepId}`);
 
     saveInFlightRef.current = true;
     setSaveError(undefined);
@@ -4792,6 +4869,7 @@ export function LineWorkspace({
         await Promise.all(compensatingSaves);
       }
 
+      finishWrite(error);
       const message = error instanceof Error ? error.message : "Unable to paste this photo.";
       setSaveError(message);
       setSaveState("error");
@@ -4799,28 +4877,41 @@ export function LineWorkspace({
       throw error;
     } finally {
       saveInFlightRef.current = false;
+      finishWrite();
       flushDeferredRemoteRefresh();
     }
   }
 
   async function deleteTaskVideo(taskId: string, video: TaskVideo) {
+    const finishWrite = writeTracker.begin(`video:${video.id}`);
     setPlannerState((current) => ({
       ...current,
       tasks: current.tasks.map((task) => (task.id === taskId ? removeTaskVideo(task, video.id) : task)),
     }));
     try {
       await softDeleteTaskVideoFromSupabase(video.id, taskId, projectId);
+      setSaveState("saved");
       void removeTaskVideoObject(video);
     } catch (error) {
+      // Restore only this item; preserve edits made to the task while deletion ran.
+      setPlannerState((current) => ({
+        ...current,
+        tasks: current.tasks.map((task) => task.id === taskId ? upsertTaskVideos(task, [video]) : task),
+      }));
+      finishWrite(error);
       notifyFeedback({
         title: "Couldn't delete build animation",
         body: error instanceof Error ? error.message : "Please try again.",
         tone: "danger",
       });
+    } finally {
+      finishWrite();
+      flushDeferredRemoteRefresh();
     }
   }
 
   async function deleteExplodedView(taskId: string, view: ExplodedView) {
+    const finishWrite = writeTracker.begin(`exploded-view:${view.id}`);
     // Exploded views live in customFields (not persisted on task save), so the soft-delete on the
     // step_exploded_views row is the source of truth; update local state immediately for responsiveness.
     setPlannerState((current) => ({
@@ -4829,17 +4920,27 @@ export function LineWorkspace({
     }));
     try {
       await softDeleteExplodedViewFromSupabase(view.id, taskId, projectId);
+      setSaveState("saved");
       void removeExplodedViewObject(view);
     } catch (error) {
+      setPlannerState((current) => ({
+        ...current,
+        tasks: current.tasks.map((task) => task.id === taskId ? upsertTaskExplodedViews(task, [view]) : task),
+      }));
+      finishWrite(error);
       notifyFeedback({
         title: "Couldn't delete exploded view",
         body: error instanceof Error ? error.message : "Please try again.",
         tone: "danger",
       });
+    } finally {
+      finishWrite();
+      flushDeferredRemoteRefresh();
     }
   }
 
   async function removeStepPhoto(taskId: string, stepId: string, photoId: string) {
+    const finishWrite = writeTracker.begin(`photo:${photoId}`);
     let removedPhoto: StepPhotoAttachment | undefined;
     saveInFlightRef.current = true;
     setSaveError(undefined);
@@ -4867,6 +4968,7 @@ export function LineWorkspace({
           body: "Removed from this manufacturing step.",
           restoreLabel: "Restore",
           onRestore: () => {
+            const finishRestore = writeTracker.begin(`photo:${photoId}`);
             setSaveError(undefined);
             setSaveState("saving");
             setPlannerState((current) => ({
@@ -4878,11 +4980,13 @@ export function LineWorkspace({
             void uploadStepPhotoAttachment(taskId, stepId, removedPhoto as StepPhotoAttachment, activeProjectContext)
               .then(() => setSaveState("saved"))
               .catch((error: unknown) => {
+                finishRestore(error);
                 const message = error instanceof Error ? error.message : "Unable to restore the selected photo.";
                 setSaveError(message);
                 setSaveState("error");
                 notifyFeedback({ title: "Restore failed", body: message, tone: "danger" });
-              });
+              })
+              .finally(() => { finishRestore(); flushDeferredRemoteRefresh(); });
           },
         });
       }
@@ -4896,12 +5000,14 @@ export function LineWorkspace({
         }));
       }
 
+      finishWrite(error);
       const message = error instanceof Error ? error.message : "Unable to remove the selected photo.";
       setSaveError(message);
       setSaveState("error");
       notifyFeedback({ title: "Delete failed", body: message, tone: "danger" });
     } finally {
       saveInFlightRef.current = false;
+      finishWrite();
       flushDeferredRemoteRefresh();
     }
   }
@@ -5650,13 +5756,18 @@ export function LineWorkspace({
 
     const stepPhotos = getStepPhotoAttachments(taskSnapshot, step.id);
     if (stepPhotos.length > 0) {
+      const finishWrite = writeTracker.begin(`photo-upload:${taskSnapshot.id}:${step.id}`);
       try {
-        await Promise.all(
+        await settleWriteBatch(
           stepPhotos.map((photo) => uploadStepPhotoAttachment(taskSnapshot.id, step.id, photo, activeProjectContext)),
         );
       } catch (error) {
+        finishWrite(error);
         setSaveError(error instanceof Error ? error.message : "Step restored, but one or more photos could not be restored.");
         setSaveState("error");
+      } finally {
+        finishWrite();
+        flushDeferredRemoteRefresh();
       }
     }
   }
@@ -5824,6 +5935,7 @@ export function LineWorkspace({
     setSaveState("saving");
     setPlannerState(nextState);
     setActiveZoneId(targetZoneId);
+    const finishWrite = writeTracker.begin("gantt-order");
 
     void (async () => {
       try {
@@ -5836,6 +5948,7 @@ export function LineWorkspace({
         await writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current);
         setSaveState("saved");
       } catch (error) {
+        finishWrite(error);
         const message = error instanceof Error ? error.message : "Unable to save Gantt order.";
         setSaveError(message);
         setSaveState("error");
@@ -5846,6 +5959,7 @@ export function LineWorkspace({
         });
       } finally {
         saveInFlightRef.current = false;
+        finishWrite();
         flushDeferredRemoteRefresh();
       }
     })();

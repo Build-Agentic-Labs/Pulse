@@ -1,4 +1,4 @@
-import { mergeTaskPrivateMedia } from "./task-private-media";
+import { mergeTaskPrivateMedia, type TaskPrivateMedia } from "./task-private-media";
 import { awiProcedureSaveBaseline } from "./awi-procedure-save";
 import { saveAwiProcedure } from "@/lib/awi/procedure-store";
 import { mergeAnnotationDocuments } from "@/lib/photo-annotation-drafts";
@@ -34,6 +34,7 @@ import type {
 } from "./types";
 import {
   STEP_PHOTO_ATTACHMENTS_FIELD,
+  STEP_PHOTO_ANNOTATIONS_FIELD,
   getTaskStepPhotoAnnotationMap,
   type StepPhotoAttachment,
 } from "./step-photos";
@@ -1430,13 +1431,13 @@ async function withSignedToolLibraryRows(supabase: SupabaseClient, rows: ToolLib
   }));
 }
 
-function withNormalizedStepAssets(
-  task: Task,
+function withNormalizedStepAssets<T extends TaskPrivateMedia>(
+  task: T,
   photosByTaskId: Map<string, Map<string, StepPhotoAttachment[]>>,
   toolsByTaskId: Map<string, Map<string, string[]>>,
   explodedViewsByTaskId: Map<string, ExplodedView[]> = new Map(),
   videosByTaskId: Map<string, TaskVideo[]> = new Map(),
-): Task {
+): T {
   const photoMap = photosByTaskId.get(task.id);
   const toolMap = toolsByTaskId.get(task.id);
   const explodedViews = explodedViewsByTaskId.get(task.id);
@@ -1694,25 +1695,26 @@ async function loadProjectContext(
     throw new Error("Workspace not found or you do not have access to it.");
   }
 
-  const workspace = await throwIfError(supabase.from("workspaces").select("*").eq("id", project.workspace_id).maybeSingle());
+  const { data: userData } = await getUserFromSession(supabase);
+  // All three reads depend on the project identity, but not on each other.
+  // Await them together so a fresh planner load does not pay three consecutive
+  // network round trips before it can confirm its editable graph. Keep the
+  // non-manager project-access check below conditional, as before.
+  const [workspace, member, superAdmin] = await Promise.all([
+    throwIfError(supabase.from("workspaces").select("*").eq("id", project.workspace_id).maybeSingle()),
+    userData.user
+      ? throwIfError(
+          supabase.from("workspace_members").select("role")
+            .eq("workspace_id", project.workspace_id).eq("user_id", userData.user.id).maybeSingle(),
+        )
+      : Promise.resolve(null),
+    fetchIsSuperAdmin(supabase),
+  ]);
 
   if (!workspace) {
     throw new Error("Organization not found or you do not have access to it.");
   }
 
-  const { data: userData } = await getUserFromSession(supabase);
-  const member = userData.user
-    ? await throwIfError(
-        supabase
-          .from("workspace_members")
-          .select("role")
-          .eq("workspace_id", project.workspace_id)
-          .eq("user_id", userData.user.id)
-          .maybeSingle(),
-      )
-    : null;
-
-  const superAdmin = await fetchIsSuperAdmin(supabase);
   const memberRole = member?.role ? (String(member.role) as WorkspaceRole) : undefined;
   // Workspace managers (and superadmins) see/edit every project they manage.
   const isManager = superAdmin || memberRole === "owner" || memberRole === "admin";
@@ -4183,10 +4185,15 @@ export async function loadProjectTaskTargetsFromSupabase(
 /** Refresh private media without re-reading the editable steps, parts, or tools. */
 export async function loadTaskPrivateMediaFromSupabase(
   taskId: string, projectId?: string, client?: ReturnType<typeof plannerClient>,
-): Promise<Task | null> {
+): Promise<TaskPrivateMedia | null> {
   const supabase = client ?? plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
-  const task = await throwIfError(supabase.from("tasks").select("*").eq("id", taskId).maybeSingle());
+  // The editable core already owns task text, planning fields, custom values and
+  // save baselines. Only photo markup is needed to hydrate normalized media.
+  // Select it inside JSONB so legacy embedded photos never cross the network.
+  const task = await throwIfError(supabase.from("tasks")
+    .select("id,photo_annotations:custom_fields->stepPhotoAnnotations")
+    .eq("id", taskId).maybeSingle());
 
   if (!task) {
     return null;
@@ -4197,7 +4204,10 @@ export async function loadTaskPrivateMediaFromSupabase(
     readAllPages((from, to) => throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
     readAllPages((from, to) => throwIfError(supabase.from("task_videos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
   ]);
-  const mappedTask = mapTask({ ...task, custom_fields: customFieldsRow(jsonObject(task.custom_fields)) });
+  const mappedTask: TaskPrivateMedia = {
+    id: String(task.id),
+    customFields: { [STEP_PHOTO_ANNOTATIONS_FIELD]: jsonObject(task.photo_annotations) },
+  };
 
   const [signedStepPhotos, signedExplodedViews, signedTaskVideos] = await Promise.all([
     withSignedStepPhotoRows(supabase, (stepPhotos ?? []) as StepPhotoRow[]),

@@ -24,4 +24,13 @@ describe("bounded collection reads", () => {
     expect(await readRowsByIds(ids, fetch)).toEqual(ids.map((id) => ({ id })));
     expect(fetch.mock.calls.map(([batch]) => batch.length)).toEqual([100, 100, 1]);
   });
+  it("keeps long and escaped filter values within the requested URL budget", async () => {
+    const ids = Array.from({ length: 105 }, (_, id) => `${id},${"long".repeat(50)}@example.com`);
+    const fetch = vi.fn(async (batch: string[]) => batch);
+    expect(await readRowsByIds(ids, fetch, 3500)).toEqual(ids);
+    expect(fetch.mock.calls.length).toBeGreaterThan(2);
+    for (const [batch] of fetch.mock.calls) {
+      expect(encodeURIComponent(batch.map((id) => JSON.stringify(id)).join(",")).length).toBeLessThanOrEqual(3500);
+    }
+  });
 });

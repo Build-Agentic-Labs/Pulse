@@ -9,11 +9,14 @@ const TASK_PRIVATE_MEDIA_FIELDS = [
   TASK_VIDEOS_FIELD,
 ] as const;
 
+/** A media response cannot stand in for a confirmed, editable task snapshot. */
+export type TaskPrivateMedia = Pick<Task, "id" | "customFields">;
+
 /**
  * Applies a task-detail response's private media without replacing procedure
  * text, steps, or other local fields that may have changed while media loaded.
  */
-export function mergeTaskPrivateMedia(localTask: Task, hydratedTask: Task): Task {
+export function mergeTaskPrivateMedia(localTask: Task, hydratedTask: TaskPrivateMedia): Task {
   const customFields = { ...localTask.customFields };
 
   for (const field of TASK_PRIVATE_MEDIA_FIELDS) {

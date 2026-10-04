@@ -407,6 +407,161 @@ Keep signatures, exported types, optional injected clients, error behavior, RLS,
 
 Approximate source anchors: access/workspace 1688–2535; core/full/summary 2536–2854; scenarios 2855–2953; guarded shell saves 2955–3240; BOM 3241–3286; granular writes 3287–3593 and procedure transaction 3886–4088; task/target/media reads 4089–4267. Function names and imports take precedence over stale line numbers.
 
+### Phase 5 execution plan (current code, 2026-10-03; not started)
+
+**Baseline:** the facade `src/domain/supabase-planner.ts` is 2,587 lines and holds 74 top-level declarations: access, workspace, reads, scenarios, saves and granular task writes. Function names are the anchors; line ranges are approximate.
+
+This is a **structural move only.** Public signatures, every existing caller, authorization order, client injection (`client ?? plannerClient()` at call time), module-level state and persistence behaviour stay as they are.
+
+**Out of scope:** catalog redesign, recovery redesign, the isolated experimental functions, UI changes, migrations, merge and push.
+
+#### Boundaries (`src/lib/planner/`), in dependency order
+
+| Module | Moves (current anchors) | Facade exports kept | Est. lines |
+|---|---|---|---:|
+| `access-store.ts` | `loadProjectContext` (263–327); `inflightSuperAdminChecks` + `fetchIsSuperAdmin` (328–360); `fetchProjectAccessLevel`, `fetchUserProjectAccessMap`, `fetchOrgToolAccess` (361–442); `loadMembersAccessForWorkspace`, `AuditLogEntry`, `loadAuditLogFromSupabase`, `setProjectAccessInSupabase`, `setOrgToolAccessInSupabase` (968–1110) | `fetchIsSuperAdmin`, `fetchOrgToolAccess`, `loadMembersAccessForWorkspace`, `AuditLogEntry`, `loadAuditLogFromSupabase`, `setProjectAccessInSupabase`, `setOrgToolAccessInSupabase` | 330–370 |
+| `workspace-store.ts` | `WORKSPACE_COLUMNS`, `PROJECT_COLUMNS` (149–151); `bootstrappedMembershipUserIdsByClient`, `inflightMembershipLoads`, `ensureDefaultWorkspaceMembership` (443–525); `inflightWorkspaceGroupReads`, `loadWorkspaceProjectGroups`, `readWorkspaceProjectGroups` (526–669); project create/update/delete, profile names, workspace update, members, access grants (with expiry and revocations), member role and removal, own profile name (670–967) | the 15 exported functions | 530–580 |
+| `read-store.ts` | `loadPlannerStateWithProjectFromSupabase`, summary rows/columns, `buildPlannerSummaryState`, `loadPlannerSummaryStateFromSupabase`, `loadPlannerStateFromSupabase`, `loadPlannerCoreStateFromSupabase` (1111–1429); `ProjectTaskTarget`, `loadProjectTaskTargetsFromSupabase`, `loadTaskPrivateMediaFromSupabase`, `loadTaskFromSupabase` (2399–2577) | those 8 functions and the type | 500–540 |
+| `scenario-store.ts` | `loadScenariosForProduct`, `SopSummary`, `listSopSummariesFromSupabase`, `duplicateScenario`, `updateScenarioTarget`, `renameScenario`, `deleteScenario` (1430–1537) | all of these | 115–140 |
+| `shell-store.ts` | `SaveState` (145–148); sequence-collision types, `upsertWouldCollideOnSequence`, `parkSequencesIfUpsertWouldCollide` (217–262); `assertSaneStateDeletion`, `savePlannerStateToSupabase`, `savePlannerShellToSupabase` (1538–1815) | `SaveState`, `upsertWouldCollideOnSequence`, `assertSaneStateDeletion`, both saves | 330–360 |
+| `bom-store.ts` | `saveMasterBomToSupabase` (1816–1861) | the same | 55–70 |
+| `task-store.ts` | step-sequence collision helpers `manufacturingStepSaveNeedsCollisionSafeResequence`, `bumpManufacturingStepSequences` (152–216); the granular task and step writes, `taskFieldPatchRow`/`updateTaskFields`, `upsertProcedureStep`, `reorderProcedureSteps`, `deletePlannerTask`, `mergeTaskWithServerVersions`, `saveProcedureTaskUpdateToSupabase`, `moveManufacturingStepToTaskInSupabase` (1862–2398); `mergeLatestTaskToSupabase` (2578–2588) | the 16 exported functions | 620–660 |
+
+**Facade afterwards:** imports and re-exports only, about 100–160 lines. **Moved in total:** about 2,450 lines.
+
+`task-store.ts` is above the original 550–750 midpoint. That is deliberate: it keeps the procedure transaction and every step-sequence write in one module (see the next section).
+
+#### What must stay together (save ordering and failure behaviour)
+
+1. **`shell-store.ts`**, both shell saves, with `assertSaneStateDeletion` and sequence parking. Order:
+   1. the six existence reads, then the deletion tripwire **before any write**;
+   2. products → scenarios → stations (park, then upsert) → zones (park, then upsert) → components → document types → tasks;
+   3. then `replace_task_children` (full save) or the dependency select/upsert/delete (shell save);
+   4. then custom columns;
+   5. then stale deletes in the order tasks → zones → components → document types → stations → custom columns. That order follows the foreign keys: stations are deleted last because task FKs are `ON DELETE SET NULL`.
+
+   These are separate requests, not atomic (as documented in the zero-zone fix). The move must not reorder or merge them.
+2. **The procedure transaction family in `task-store.ts`:**
+   - `saveProcedureTaskUpdateToSupabase`, with its AWI branch to `saveAwiProcedure`, the version check and the single retry with `mergeTaskWithServerVersions`;
+   - the step-sequence collision check and `bumpManufacturingStepSequences`, also used by `saveTaskWithManufacturingStepsToSupabase`;
+   - the other step writes: `saveTaskAndManufacturingStepToSupabase`, `saveManufacturingStepToSupabase`, `upsertProcedureStep`, `reorderProcedureSteps`, `moveManufacturingStepToTaskInSupabase`, `saveMobileStepToSupabase`.
+
+   Splitting them would separate one ordering invariant (`UNIQUE(task_id, sequence)` parking) across modules.
+3. **Task row writes then tool sync:** `saveTasksToSupabase`, `saveTaskToSupabase` and `saveTaskWithManufacturingStepsToSupabase` keep the order assert → upsert → (steps) → tool sync from `tool-store`.
+4. **`deletePlannerTask`:** reads the storage paths **before** the row delete and removes the objects **after** it.
+5. **`saveMasterBomToSupabase`:** a single verified update, with no change to its client-side verification.
+6. **In-flight and dedupe state stays with the function that writes it** (all `WeakMap`s keyed by client, so nothing leaks across users on the server):
+   - `inflightSuperAdminChecks` with `fetchIsSuperAdmin` (`access-store`);
+   - `bootstrappedMembershipUserIdsByClient` and `inflightMembershipLoads` with `ensureDefaultWorkspaceMembership` (`workspace-store`);
+   - `inflightWorkspaceGroupReads` with `loadWorkspaceProjectGroups` (`workspace-store`).
+
+   No state object is exported. Other modules call the functions.
+7. **Load concurrency:** `loadPlannerStateWithProjectFromSupabase` starts the membership and administrator checks while the organization read is still pending, which `core-load.test.ts` pins. Its body moves intact.
+
+#### Avoiding new import cycles
+
+**Leaf dependencies stay acyclic:**
+
+```
+client ← query-helpers ← row-mappers ← media-rows ← media-storage ← (media-store, tool-store)
+access-store ← workspace-store
+read-store → access-store, media-*, row-mappers
+scenario-store → row-mappers
+shell-store → row-mappers
+bom-store → row-mappers
+task-store → read-store, tool-store, media-storage
+```
+
+No leaf imports the facade. The extraction tool from Phase 4 aborts on any reference back to the facade, and the per-commit check re-verifies this.
+
+**The one forced decision (needs your approval):** `task-store.ts` must call `saveAwiProcedure` (`src/lib/awi/procedure-store.ts`), and that module imports `createPlannerSupabaseClient` **from the facade**. That would make a new cycle through a leaf: task-store → procedure-store → facade → task-store.
+
+| Option | What | Cost |
+|---|---|---|
+| **A (recommended)** | Re-point procedure-store's one import to `@/lib/planner/client` (the identical function the facade re-exports). | A one-line importer change. It removes the existing facade ↔ procedure-store cycle entirely. Mock impact checked: `procedure-store.test.ts` passes clients explicitly, and component suites mock `saveProcedureTaskUpdateToSupabase` wholesale, so no test relies on the facade mock reaching procedure-store. |
+| B | Keep `saveProcedureTaskUpdateToSupabase` and its helpers (`mergeTaskWithServerVersions`, and the step-sequence helpers it shares) in the facade. | The cycle stays exactly as today, but the facade keeps about 230 lines of logic, and the step-sequence helpers end up shared between the facade and `task-store`. |
+
+**Phase 5 changes no other importer.** All 98 importers and the 23 path-based mocks stay on the facade.
+
+#### Existing coverage and characterization gaps
+
+**Already real-implementation tested** (must stay green unchanged):
+- `core-load` (core load, access checks and their concurrency, private media), `summary`, `workspace-list` (bootstrap, groups, dedupe);
+- `sequence-collision` (both saves), `planner-save-tripwire`, `master-bom`, `mobile-step`, `photo-annotations`, `awi-save` (AWI branch of the procedure save);
+- `procedure-store.test.ts`, `row-roundtrip` (shell save and task load), `media-tools` / `server-media` (private media), `use-workspace-tools.persistence`.
+
+**Gaps to characterize first,** over the shared in-memory client (extended with per-RPC answers and `or()`/`readRowsByIds` support where needed):
+1. **Access:**
+   - `fetchIsSuperAdmin` shares one in-flight request per client and re-checks after it settles;
+   - `fetchOrgToolAccess`;
+   - `setProjectAccessInSupabase` / `setOrgToolAccessInSupabase` payloads;
+   - `loadMembersAccessForWorkspace`; `loadAuditLogFromSupabase` mapping and paging.
+2. **Workspace:**
+   - project create (RPC, then project context), update, delete (products before projects);
+   - access grant upsert: domain check, expiry, revocation delete before upsert; grant delete;
+   - member role and removal RPC; own profile name validation; profile-name batching; member list.
+3. **Reads:** the full `loadPlannerStateFromSupabase` path (media signing, project rejection) and `loadProjectTaskTargetsFromSupabase`.
+4. **Scenarios:** duplicate, rename, target and delete payloads and errors; `listSopSummariesFromSupabase`.
+5. **Task writes:**
+   - `saveTaskWithManufacturingStepsToSupabase`: bump, upsert, stale delete, tool sync with empty wipe;
+   - `deletePlannerTask`: storage paths before the delete, objects after;
+   - `moveManufacturingStepToTaskInSupabase`: order; `upsertProcedureStep` / `reorderProcedureSteps` RPCs;
+   - `updateTaskFields` patch mapping; `mergeLatestTaskToSupabase`;
+   - the **non-AWI** `saveProcedureTaskUpdateToSupabase` path: version check, one retry, conflict.
+6. **Save ordering:** a recorded request-order golden for **both** shell saves: every request, in order, including the tripwire happening before the first write.
+7. **Signatures:** the Phase 4 checker dump of all 90 facade exports, re-baselined at the start of Phase 5, must stay identical after every commit.
+
+Each new test is mutation-checked against the pre-move code, like Phases 3 and 4.
+
+#### Commit sequence
+
+1. characterization tests
+2. (if option A is approved) re-point procedure-store, its own commit
+3. `access-store.ts`
+4. `workspace-store.ts`
+5. `read-store.ts`
+6. `scenario-store.ts`
+7. `shell-store.ts`
+8. `bom-store.ts`
+9. `task-store.ts`
+10. facade cleanup (re-exports only)
+
+**Every commit must show:**
+- moved statements verbatim (tool self-check);
+- signatures identical; no leaf → facade import; no module directives; acyclic leaves; module-private visibility restored;
+- the relocated mutations still caught;
+- full unit suite, lint and typecheck.
+
+#### Final release validation (fresh disposable database)
+
+Passing on the retained database alone **cannot** prove the isolated experimental functions are unused: that database contains them. So the final gate adds a **fresh, separately identified disposable database that holds only active migrations.**
+
+1. **Identity:**
+   - a new workdir `scratch/release-db`, with `project_id = "pulse-release"` (Supabase keys containers and volumes by project id, so its storage is separate from the retained `pulse-e2e`);
+   - the same ports 56321/56322, because `playwright.config.ts` and the e2e specs require them.
+2. **Isolation from the retained database:**
+   - stop `pulse-e2e` with a plain `stop` (keeps its volumes);
+   - start `pulse-release`;
+   - before any reset, assert with `docker ps` that `supabase_db_pulse-release` is running and nothing from `pulse-e2e` is.
+3. **Fresh contents:**
+   - `db reset --local --workdir scratch/release-db` applies **only** `supabase/migrations` (copied fresh; the isolated folder is not copied) plus `seed.sql`;
+   - assert that the experimental objects are **absent**: `to_regclass('public.deleted_manufacturing_steps')`, and `to_regprocedure(...)` for `delete_manufacturing_step`, `restore_manufacturing_step` and `apply_step_tool_changes`, are all null.
+4. **Run:**
+   - the active pgTAP suite (22 files);
+   - the full browser suite, built against this database;
+   - the request-count scenario. All must pass on the fresh database, with counts identical to Phase 4.
+5. **Static check:** no `src`/`app` code references the experimental RPC or table names.
+6. **Cleanup:**
+   - stop `pulse-release` with `--no-backup` (deletes only that disposable project's volumes);
+   - restart `pulse-e2e` and confirm its migration ledger still lists `20261003210000`, and its row counts match a checksum taken before step 2. The retained database is never reset or removed.
+7. **Script:** this is packaged as `scripts/release-check-fresh-db.mjs`, which refuses to run unless every identity assertion holds. It is a new committed script; its exact behaviour is part of this plan for approval.
+
+**After the local gate:** a future push would also run CI's own fresh-database job. That is not part of this phase (no push).
+
+#### Not included
+
+Catalog redesign, recovery redesign, the experimental database functions, request optimization, UI changes, migrations, merge and push. Stop after Phase 5 for review.
+
 ## Optional phase 6 — Separate approval/scope decision
 
 After the core tranche is stable:

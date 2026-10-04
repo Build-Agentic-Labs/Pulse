@@ -668,6 +668,10 @@ export function LineWorkspace({
 
   // Workspace saves: shown status, write tracker, guarded shell and BOM saves, the save barrier, and the
   // page-exit / in-app link guards (whose effect keeps its original position here).
+  // flushDeferredRemoteRefresh (passed here and to the queue) is the realtime code's hoisted function
+  // declaration, and it reads hasLocalSaveWork from this hook, so the two depend on each other. Moving the
+  // realtime code into a hook (Phase 3) must replace that hoisting with an explicit delegate and choose
+  // its closure semantics on purpose.
   const {
     saveState,
     saveError,
@@ -722,7 +726,8 @@ export function LineWorkspace({
     restoreProcedureDraftFields,
     resetProcedureDrafts,
   } = procedureDrafts;
-  // The [projectId] load effect reads these through refs so a new render never restarts it.
+  // The [projectId] load effect reads restore/apply through refs so a new render never restarts it.
+  // mergeServerTaskIntoLocalTaskRef predates this extraction and currently has no reader.
   const applyProcedureDraftsToTaskRef = useRef(applyProcedureDraftsToTask);
   const mergeServerTaskIntoLocalTaskRef = useRef(mergeServerTaskIntoLocalTask);
   const restoreProcedureDraftFieldsRef = useRef(restoreProcedureDraftFields);
@@ -2017,7 +2022,6 @@ export function LineWorkspace({
     skipHistoryCaptureRef.current = false;
     undoTrackingRef.current = { state: plannerState, dirtyVersion, scenarioId };
   }, [plannerState, dirtyVersion]);
-
 
   usePlannerShellAutosave({
     dirtyVersion,

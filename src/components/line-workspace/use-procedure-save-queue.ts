@@ -18,8 +18,10 @@ import type {
 
 // Per-task procedure save queues: one granular save in flight per task, newer edits queued behind it,
 // debounced scheduling, retry after transient failures, and conflict handling that waits for the user.
+// updateProcedureStepField (the procedure field-edit entry point) lives here because it schedules a save.
 // The queue records are mutated in place and held across awaits, so the store is created once per
-// workspace mount and never recreated per update.
+// workspace mount and never recreated per update. There is deliberately no queue reset: scenario
+// switches drain saves through the save barrier first, as they did before this module existed.
 
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
 
@@ -451,11 +453,8 @@ export function useProcedureSaveQueue({
   }
 
   return {
-    startProcedureTaskSave,
     scheduleProcedureTaskSave,
     updateProcedureStepField,
     flushScheduledProcedureSaves,
   };
 }
-
-export type ProcedureSaveQueue = ReturnType<typeof useProcedureSaveQueue>;

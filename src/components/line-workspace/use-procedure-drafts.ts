@@ -17,7 +17,8 @@ import type { PlannerCacheScope, PlannerStateAccess } from "./workspace-controll
 // Per-field procedure drafts: the local edit layer that survives server echoes, realtime refreshes,
 // reloads (via the localStorage snapshot), and conflicting writes. This owner merges server tasks into
 // local tasks, defers server updates while a field is dirty or focused, and acknowledges a draft only
-// when a save confirms that exact edit. The save queue drives saves; drafts only read it via the probe.
+// when a save confirms that exact edit. The save queue (including the field-edit entry point) drives
+// saves; drafts only read queue state through the probe.
 
 // Top-level free-text task fields a user types into directly (task name, Task Description, Safety
 // Notes, QC checklist, general notes, and the reference-link/material inputs). Unlike

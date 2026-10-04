@@ -20,10 +20,11 @@ import type {
   WorkspaceFeedback,
 } from "./workspace-controller-types";
 
-// Workspace save ownership: the reported save status and the aggregate users see, the write tracker,
-// the guarded planner-shell save (a destructive diff, so it only runs once a remote load confirmed the
-// state), the master BOM save, the save barrier that scenario actions and BOM retries wait on, and the
-// navigation guards that keep unsaved work from being dropped.
+// Workspace save ownership: the status users see (derived from the reported status cells LineWorkspace
+// owns, the write tracker, and procedure queue activity), the guarded planner-shell save (a destructive
+// diff, so it only runs once a remote load confirmed the state), the master BOM save, the save barrier
+// that scenario actions and BOM retries wait on, and the navigation guards that keep unsaved work from
+// being dropped.
 
 type ChromeStatus = { message: string; error?: boolean } | null;
 
@@ -37,7 +38,10 @@ export type UseWorkspaceSavesOptions = PlannerStateAccess &
      */
     reportedSaveState: SaveState;
     reportedSaveError: string | undefined;
-    /** Set by user edits (markDirty); cleared by a successful shell save or a confirmed remote load. */
+    /**
+     * Set by user edits (markDirty). Cleared by a successful or view-only-blocked shell save, a confirmed
+     * remote load, and a scenario switch.
+     */
     plannerDirtyRef: RefObject<boolean>;
     procedureSaveQueues: Pick<
       ProcedureSaveQueueStore,
@@ -46,7 +50,10 @@ export type UseWorkspaceSavesOptions = PlannerStateAccess &
     /** True only once this project's remote load confirmed the edited state. */
     remoteStateConfirmedRef: RefObject<boolean>;
     scenarioCacheRef: RefObject<Map<string, PlannerState>>;
-    /** Runs a realtime refresh that was deferred while local saves were pending. */
+    /**
+     * Runs a realtime refresh that was deferred while local saves were pending. It is owned by the realtime
+     * code, which in turn reads hasLocalSaveWork from this hook; see the note at the call site.
+     */
     flushDeferredRemoteRefresh: () => void;
     /** Workspace chrome status, used for the blocked-navigation message. */
     setChromeStatus: Dispatch<SetStateAction<ChromeStatus>>;
@@ -377,6 +384,8 @@ export function useWorkspaceSaves({
     writeTracker,
     dirtyVersion,
     markDirty,
+    // The shell-save lock. Media and Gantt-order writes in LineWorkspace also take it, so shell saves
+    // queue behind them (queuedSaveStateRef) exactly as before the extraction.
     saveInFlightRef,
     plannerSaveTimerRef,
     hasPlannerShellSaveWork,
@@ -403,9 +412,9 @@ export type UsePlannerShellAutosaveOptions = Pick<
   remoteRefreshAppliedRef: RefObject<boolean>;
 };
 
-// Debounced shell autosave after user edits (markDirty). LineWorkspace calls this after its load and
-// realtime effects so that, within one commit, it observes the confirmation and dirty flags those
-// effects reset on a project or scenario change.
+// Debounced shell autosave after user edits (markDirty). LineWorkspace calls this at the original effect
+// position, after its [projectId] load effect: on a project change that effect synchronously clears
+// remoteStateConfirmedRef, and this effect must observe that within the same commit.
 export function usePlannerShellAutosave({
   dirtyVersion,
   plannerDirtyRef,

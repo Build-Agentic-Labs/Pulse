@@ -7,6 +7,7 @@ import { createProcedureSaveQueueStore, useProcedureSaveQueue } from "./line-wor
 import { usePlannerShellAutosave, useWorkspaceSaves } from "./line-workspace/use-workspace-saves";
 import type { SaveScope } from "./line-workspace/workspace-controller-types";
 import { installProcedureAutosaveHarness } from "./line-workspace/procedure-autosave-harness";
+import { useWorkspaceRealtime } from "./line-workspace/use-workspace-realtime";
 import { useWorkspaceScenarios } from "./line-workspace/use-workspace-scenarios";
 import { useWorkspaceTools } from "./line-workspace/use-workspace-tools";
 import { useWorkspaceMedia } from "./line-workspace/use-workspace-media";
@@ -116,7 +117,6 @@ import {
 } from "@/domain/task-scheduling";
 import { optimizeLine as runLineOptimization } from "@/domain/joint-scheduler";
 import {
-  canPatchTaskFromRealtimePayload,
   createPlannerSupabaseClient,
   duplicateScenario,
   listSopSummariesFromSupabase,
@@ -125,13 +125,10 @@ import {
   loadPlannerStateFromSupabase,
   loadScenariosForProduct,
   loadWorkspaceProjectGroups,
-  loadTaskFromSupabase,
   loadTaskPrivateMediaFromSupabase,
   moveManufacturingStepToTaskInSupabase,
   savePlannerStateToSupabase,
   saveTasksToSupabase,
-  subscribePlannerStateChanges,
-  taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
   type SaveState,
 } from "@/domain/supabase-planner";
@@ -178,7 +175,6 @@ import {
   clearProjectSwitchSession,
   hasRecentProjectSwitchSession,
   mergeProcedureDraftWithServer,
-  procedureDraftLog,
   readProcedureDraftSnapshot,
   readProjectSwitchTarget,
   readWorkspaceSnapshot,
@@ -520,18 +516,11 @@ export function LineWorkspace({
   // One queue store per mount: queue records are mutated in place across awaits, never recreated.
   const [procedureSaveQueues] = useState(createProcedureSaveQueueStore);
   const autosaveHarnessRanRef = useRef(false);
-  const remoteRefreshTimerRef = useRef<number | null>(null);
   const remoteRefreshAppliedRef = useRef(false);
   const pendingRemoteRefreshRef = useRef(false);
-  const remoteTaskRefreshTimerRef = useRef<number | null>(null);
-  const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
   const taskDetailHydrationRequestsRef = useRef<Set<string>>(new Set());
   const fullyHydratedScenarioIdsRef = useRef<Set<string>>(new Set());
-  const requestRemotePlannerRefreshRef = useRef(requestRemotePlannerRefresh);
-  const requestRemoteTaskRefreshRef = useRef(requestRemoteTaskRefresh);
   const urlWorkspaceSnapshotRef = useRef(urlWorkspaceSnapshot);
-  requestRemotePlannerRefreshRef.current = requestRemotePlannerRefresh;
-  requestRemoteTaskRefreshRef.current = requestRemoteTaskRefresh;
   urlWorkspaceSnapshotRef.current = urlWorkspaceSnapshot;
   const loadedProjectIdRef = useRef<string | undefined>(undefined);
   // True only once the REMOTE planner load has applied for the loaded project. A cached IndexedDB
@@ -638,10 +627,16 @@ export function LineWorkspace({
 
   // Workspace saves: shown status, write tracker, guarded shell and BOM saves, the save barrier, and the
   // page-exit / in-app link guards (whose effect keeps its original position here).
-  // flushDeferredRemoteRefresh (passed here and to the queue) is the realtime code's hoisted function
-  // declaration, and it reads hasLocalSaveWork from this hook, so the two depend on each other. Moving the
-  // realtime code into a hook (Phase 3) must replace that hoisting with an explicit delegate and choose
-  // its closure semantics on purpose.
+  // flushDeferredRemoteRefresh (passed here, to the queue, tools and media) forwards to the realtime hook,
+  // which is called later in this render and reads hasLocalSaveWork from this hook. The forwarder closes
+  // over a holder created fresh for THIS render and filled with THIS render's realtime functions, so a save
+  // issued in a render flushes that render's refresh -- the issuing project, tracker and stale-scope checks
+  // -- exactly as the hoisted function declaration did before Phase 3. A ref would redirect it to the
+  // latest render instead (docs/workspace-structure-plan.md, Phase 3).
+  const realtimeOfThisRender: { current?: ReturnType<typeof useWorkspaceRealtime> } = {};
+  function flushDeferredRemoteRefresh() {
+    realtimeOfThisRender.current?.flushDeferredRemoteRefresh();
+  }
   const {
     saveState,
     saveError,
@@ -728,11 +723,9 @@ export function LineWorkspace({
     flushDeferredRemoteRefresh,
     isForegroundSaveScope,
   });
-  // Read by the load effect (recovered drafts) and the realtime cleanup (scope exit).
+  // Read by the load effect (recovered drafts).
   const recoverProcedureDraftSavesRef = useRef(recoverProcedureDraftSaves);
-  const flushProcedureSavesOnScopeExitRef = useRef(flushScheduledProcedureSaves);
   recoverProcedureDraftSavesRef.current = recoverProcedureDraftSaves;
-  flushProcedureSavesOnScopeExitRef.current = flushScheduledProcedureSaves;
 
   const kpis = useMemo(
     () => calculateProductKpis(derivedState.product, derivedState.stations, planningTasks),
@@ -836,15 +829,6 @@ export function LineWorkspace({
   const presencePeers = usePlannerPresence(projectId);
   const presencePeersRef = useRef<PresencePeer[]>([]);
   presencePeersRef.current = presencePeers;
-  const lastConflictNoticeAtRef = useRef(0);
-  const realtimeTaskIdSet = useMemo(
-    () => new Set(derivedState.tasks.map((task) => task.id)),
-    [derivedState.tasks],
-  );
-  // Keep the latest set readable from the (deliberately stable) realtime subscription without making
-  // it a dependency -- otherwise the channel would tear down and re-subscribe on every task add/remove.
-  const realtimeTaskIdSetRef = useRef(realtimeTaskIdSet);
-  realtimeTaskIdSetRef.current = realtimeTaskIdSet;
 
   // Step tools and the project tool catalog (the library load effect keeps its original position here).
   const {
@@ -1024,245 +1008,6 @@ export function LineWorkspace({
     // read mutable procedure refs, while re-registering on every render would reset test state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAutosaveHarnessParam, projectId]);
-
-  // Whether the workspace still shows the project + scenario a refresh was started for. Refreshes
-  // resolve asynchronously; by then the user may have switched, and applying (or caching) the
-  // fetched result would contaminate the newly loaded view. Reads live values from refs so that
-  // in-flight promise callbacks are not fooled by their captured render's scope.
-  function isRefreshTargetCurrent(forProjectId: string, forScenarioId: string) {
-    return (
-      latestDerivedStateRef.current.scenario.id === forScenarioId && loadedProjectIdRef.current === forProjectId
-    );
-  }
-
-  function refreshTasksFromSupabase(taskIds: string[]) {
-    if (hasPlannerShellSaveWork()) {
-      pendingRemoteRefreshRef.current = true;
-      return;
-    }
-
-    const forProjectId = projectId ?? "";
-    const forScenarioId = latestDerivedStateRef.current.scenario.id;
-
-    void Promise.all(taskIds.map((taskId) => loadTaskFromSupabase(taskId, projectId)))
-      .then((latestTasks) => {
-        if (!isRefreshTargetCurrent(forProjectId, forScenarioId)) {
-          return;
-        }
-
-        if (hasPlannerShellSaveWork()) {
-          pendingRemoteRefreshRef.current = true;
-          return;
-        }
-
-        const taskById = new Map(
-          latestTasks
-            .filter((task): task is Task => Boolean(task))
-            .map((task) => [task.id, task]),
-        );
-        if (taskById.size === 0) {
-          return;
-        }
-
-        setTaskDetailHydrationStatus((current) => ({
-          ...current,
-          ...Object.fromEntries([...taskById.keys()].map((taskId) => [taskId, "loaded" as const])),
-        }));
-
-        remoteRefreshAppliedRef.current = true;
-        setPlannerState((current) => {
-          const existingTaskIds = new Set(current.tasks.map((task) => task.id));
-          const insertedTasks = [...taskById.values()].filter((task) => !existingTaskIds.has(task.id));
-          const mergedTasks = current.tasks.map((task) => {
-            const serverTask = taskById.get(task.id);
-            if (!serverTask) {
-              return task;
-            }
-
-            if (hasDirtyOrActiveProcedureDrafts(task.id)) {
-              storeDeferredProcedureServerUpdate({
-                serverTask,
-                serverVersion: serverTask.version,
-                receivedAt: Date.now(),
-                source: "refreshTasks",
-              });
-              return mergeServerTaskIntoLocalTask(task, serverTask, procedureDraftsRef.current, { source: "refreshTasks" });
-            }
-
-            return mergeServerTaskIntoLocalTask(task, serverTask, procedureDraftsRef.current, { source: "refreshTasks" });
-          });
-          const nextState = {
-            ...current,
-            tasks: [...mergedTasks, ...insertedTasks],
-          };
-          void writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
-          return nextState;
-        });
-        setSaveError(undefined);
-        setSaveState("saved");
-      })
-      .catch(() => {
-        if (!isRefreshTargetCurrent(forProjectId, forScenarioId)) {
-          return;
-        }
-        requestRemotePlannerRefresh();
-      });
-  }
-
-  function requestRemoteTaskRefresh(taskId: string) {
-    if (hasPlannerShellSaveWork()) {
-      pendingRemoteRefreshRef.current = true;
-      maybeNotifyConcurrentEdit();
-      return;
-    }
-
-    pendingRemoteTaskIdsRef.current.add(taskId);
-
-    if (remoteTaskRefreshTimerRef.current) {
-      window.clearTimeout(remoteTaskRefreshTimerRef.current);
-    }
-
-    remoteTaskRefreshTimerRef.current = window.setTimeout(() => {
-      remoteTaskRefreshTimerRef.current = null;
-      const taskIds = [...pendingRemoteTaskIdsRef.current];
-      pendingRemoteTaskIdsRef.current.clear();
-      refreshTasksFromSupabase(taskIds);
-    }, 250);
-  }
-
-  function refreshPlannerFromSupabase() {
-    if (hasPlannerShellSaveWork()) {
-      pendingRemoteRefreshRef.current = true;
-      return;
-    }
-
-    // Refresh the ACTIVE scenario, not the product's default. Without the scenario id this reloads the
-    // earliest (Main) scenario and overwrites whichever projection is open -- the "switch bounces back
-    // to Main" bug. The active scenario id is read live from the derived-state ref.
-    const forProjectId = projectId ?? "";
-    const forScenarioId = latestDerivedStateRef.current.scenario.id;
-
-    void loadPlannerStateFromSupabase(projectId, forScenarioId)
-      .then((savedState) => {
-        if (!isRefreshTargetCurrent(forProjectId, forScenarioId)) {
-          return;
-        }
-
-        if (!savedState || hasPlannerShellSaveWork()) {
-          pendingRemoteRefreshRef.current = true;
-          return;
-        }
-
-        pendingRemoteRefreshRef.current = false;
-        remoteRefreshAppliedRef.current = true;
-        fullyHydratedScenarioIdsRef.current.add(savedState.scenario.id);
-        setTaskDetailHydrationStatus(
-          Object.fromEntries(savedState.tasks.map((task) => [task.id, "loaded" as const])),
-        );
-        setPlannerState((current) => {
-          const localTaskById = new Map(current.tasks.map((task) => [task.id, task]));
-          const savedTaskIds = new Set(savedState.tasks.map((task) => task.id));
-          const mergedTasks = savedState.tasks.map((serverTask) => {
-            const localTask = localTaskById.get(serverTask.id);
-            if (!localTask) {
-              return serverTask;
-            }
-
-            if (hasDirtyOrActiveProcedureDrafts(serverTask.id)) {
-              storeDeferredProcedureServerUpdate({
-                serverTask,
-                serverVersion: serverTask.version,
-                receivedAt: Date.now(),
-                source: "refreshPlanner",
-              });
-              procedureDraftLog("full planner refresh protected a field", {
-                taskId: serverTask.id,
-                serverVersion: serverTask.version,
-                source: "refreshPlanner",
-              });
-            }
-
-            return mergeServerTaskIntoLocalTask(localTask, serverTask, procedureDraftsRef.current, {
-              source: "refreshPlanner",
-            });
-          });
-          const nextState = {
-            ...savedState,
-            tasks: [
-              ...mergedTasks,
-              ...current.tasks.filter((task) => !savedTaskIds.has(task.id) && hasDirtyOrActiveProcedureDrafts(task.id)),
-            ],
-          };
-          void writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
-          return nextState;
-        });
-        setSelectedTaskId((currentTaskId) =>
-          savedState.tasks.some((task) => task.id === currentTaskId)
-            ? currentTaskId
-            : savedState.tasks[0]?.id ?? "",
-        );
-        setSelectedStationId((currentStationId) =>
-          savedState.stations.some((station) => station.id === currentStationId)
-            ? currentStationId
-            : savedState.stations[0]?.id ?? savedState.tasks[0]?.stationId ?? "",
-        );
-        setSaveError(undefined);
-        setSaveState("saved");
-      })
-      .catch((error: unknown) => {
-        if (!isRefreshTargetCurrent(forProjectId, forScenarioId)) {
-          return;
-        }
-        setSaveError(error instanceof Error ? error.message : "Unable to refresh database changes.");
-        setSaveState("error");
-      });
-  }
-
-  // A realtime change landed while this user has unsaved local edits. Authorship isn't
-  // in the payload, so gate on presence (someone else is actually in this project) to
-  // avoid firing on the echo of our own saves, and throttle to one notice a minute.
-  function maybeNotifyConcurrentEdit() {
-    const peers = presencePeersRef.current;
-    if (!peers.length || !plannerDirtyRef.current) {
-      return;
-    }
-    const now = Date.now();
-    if (now - lastConflictNoticeAtRef.current < 60_000) {
-      return;
-    }
-    lastConflictNoticeAtRef.current = now;
-    notifyFeedback({
-      title: `Editing alongside ${peers.map((peer) => peer.name).join(", ")}`,
-      body: "This scenario just changed while you have unsaved edits. The latest save wins — coordinate to avoid overwriting each other's work.",
-      tone: "warning",
-    });
-  }
-
-  function requestRemotePlannerRefresh() {
-    if (hasPlannerShellSaveWork()) {
-      pendingRemoteRefreshRef.current = true;
-      maybeNotifyConcurrentEdit();
-      return;
-    }
-
-    if (remoteRefreshTimerRef.current) {
-      window.clearTimeout(remoteRefreshTimerRef.current);
-    }
-
-    remoteRefreshTimerRef.current = window.setTimeout(() => {
-      remoteRefreshTimerRef.current = null;
-      refreshPlannerFromSupabase();
-    }, 350);
-  }
-
-  function flushDeferredRemoteRefresh() {
-    if (!pendingRemoteRefreshRef.current || hasLocalSaveWork()) {
-      return;
-    }
-
-    pendingRemoteRefreshRef.current = false;
-    requestRemotePlannerRefresh();
-  }
 
   function finishProjectSwitch() {
     const startedAt = projectSwitchStartedAtRef.current;
@@ -1669,50 +1414,35 @@ export function LineWorkspace({
     return () => window.removeEventListener(PROJECT_SWITCH_EVENT, handleProjectSwitchStart);
   }, []);
 
-  useEffect(() => {
-    if (!hasLoadedRemoteState) {
-      return undefined;
-    }
-    const pendingRemoteTaskIds = pendingRemoteTaskIdsRef.current;
-
-    const unsubscribe = subscribePlannerStateChanges(
-      (payload) => {
-        const taskId = taskIdFromRealtimePayload(payload);
-        if (taskId && canPatchTaskFromRealtimePayload(payload)) {
-          requestRemoteTaskRefreshRef.current(taskId);
-          return;
-        }
-
-        requestRemotePlannerRefreshRef.current();
-      },
-      {
-        productId: derivedState.product.id,
-        scenarioId: derivedState.scenario.id,
-        isTaskInScope: (taskId) => realtimeTaskIdSetRef.current.has(taskId),
-      },
-    );
-
-    return () => {
-      if (remoteRefreshTimerRef.current) {
-        window.clearTimeout(remoteRefreshTimerRef.current);
-      }
-      if (remoteTaskRefreshTimerRef.current) {
-        window.clearTimeout(remoteTaskRefreshTimerRef.current);
-        remoteTaskRefreshTimerRef.current = null;
-      }
-      // Drop any task ids still queued for the scenario we're leaving -- otherwise a same-project
-      // scenario switch would refresh them into (and contaminate) the next scenario's task list.
-      pendingRemoteTaskIds.clear();
-      // FLUSH -- don't drop -- debounced procedure saves for the scope we're leaving, and cancel
-      // pending retries. (Scenario switches drain saves beforehand, so this mostly fires on unmount.)
-      flushProcedureSavesOnScopeExitRef.current();
-      // NOTE: the project-switch skeleton timer is intentionally NOT cleared here. This cleanup
-      // re-runs on every product/scenario change -- exactly when finishProjectSwitch has just armed
-      // the timer -- and clearing it wedged the workspace on the switch skeleton forever. It is
-      // cleared by a dedicated unmount-only effect below instead.
-      unsubscribe();
-    };
-  }, [derivedState.product.id, derivedState.scenario.id, hasLoadedRemoteState]);
+  // Realtime refresh and subscription. Called here, at the subscription effect's original position, so
+  // effect order is unchanged. This render's functions are stored for the flush forwarder above.
+  realtimeOfThisRender.current = useWorkspaceRealtime({
+    projectId,
+    derivedState,
+    hasLoadedRemoteState,
+    latestDerivedStateRef,
+    setPlannerState,
+    setSaveState,
+    setSaveError,
+    mainScenarioIdRef,
+    loadedProjectIdRef,
+    pendingRemoteRefreshRef,
+    remoteRefreshAppliedRef,
+    plannerDirtyRef,
+    presencePeersRef,
+    fullyHydratedScenarioIdsRef,
+    setTaskDetailHydrationStatus,
+    setSelectedTaskId,
+    setSelectedStationId,
+    notifyFeedback,
+    hasPlannerShellSaveWork,
+    hasLocalSaveWork,
+    procedureDraftsRef,
+    hasDirtyOrActiveProcedureDrafts,
+    storeDeferredProcedureServerUpdate,
+    mergeServerTaskIntoLocalTask,
+    flushScheduledProcedureSaves,
+  });
 
   // Unmount-only cleanup for the project-switch skeleton timer (see note in the effect above).
   useEffect(

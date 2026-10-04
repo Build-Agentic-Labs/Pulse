@@ -267,10 +267,22 @@ Hand-off notes for later phases (recorded, not redesigned in Phase 1):
     - The night scenario's next edit saves only that scenario's task.
 
     New consequence: a recovered draft for a non-Main scenario shows when that scenario opens, but it is saved only with the next edit to that task. Automatic recovery saves run on project load only.
+
+    **Open gap, found by "a recovered non-Main scenario draft stays recoverable…" (committed as `it.fails`). Correction proposed, not applied:**
+    - Opening the scenario shows its recovered draft while the status reads **Saved**, though the content exists only in local draft storage.
+    - Leaving the scenario drops the draft from memory. It no longer shows on return, although storage still holds it and a reload recovers it.
+    - Outside that exact sequence, there is data loss: after leaving the scenario, any edit elsewhere in the project rewrites draft storage from memory and erases the night draft before it ever reached the database. The previous correction moved this window rather than closing it.
+    - Proposed smallest correction: when a scenario switch brings in tasks with recovered dirty drafts, re-save them the way project load already does. That means status "draft", then the same 250 ms delay, then a scheduled save for each task. The status then shows unsaved work until the save succeeds. Leaving the scenario must pass the existing save barrier, so the draft is persisted, or the switch is refused, before it can be dropped. No new UI, and roughly 15 lines in `applyScenarioSwitch`.
   - Same boundary, checked without changes:
     - Pending draft snapshots clone all in-memory drafts, but every consumer filters by task id: marking for save, acknowledgment, sequence, applying drafts, cleanup and the annotation acknowledgment. A queue test pins that another scope's draft in a snapshot is never marked, acknowledged, applied or cleaned.
     - Any scope exit still cancels every pending retry timer, including background retries of other scopes. Their edits stay in the queue snapshot and in their project's draft storage, and are recovered when that scope opens again.
 
-  Unchanged edges: drafts in memory are still shared across an in-place switch, so a project's draft snapshot write can include other projects' dirty drafts. Recovery ignores them because they match no task. A master BOM save in flight still holds the navigation guard briefly after an in-place switch. Media and tool completions (Phase 2 code) still report into the visible status, though the cache guard now protects their cache writes.
+  Remaining architectural limitation: draft storage is mixed-scope. One in-memory draft map serves every product and scenario a mounted workspace has shown, and each project's stored snapshot is rebuilt from that whole map. So a snapshot can carry other scopes' drafts, and a draft that has left memory can be dropped from its own project's storage by the next write. This is not harmless by construction. The tested protections are:
+  - task-scoped acknowledgment, cleanup and pending-snapshot use;
+  - each scope's writes go to its own storage key;
+  - the scenario-switch reset is limited to the scenario being left;
+  - recovery applies only drafts that match a loaded task.
+
+  The non-Main recovery gap above is a case those protections do not cover. A master BOM save in flight still holds the navigation guard briefly after an in-place switch. Media and tool completions (Phase 2 code) still report into the visible status, though the cache guard now protects their cache writes.
 
 Evidence: 1,820 → 1,886 unit tests pass (230 files), including a black-box `LineWorkspace` lifecycle test written and passing against `3d46341` before it ran on the extracted code. Every new seam test was checked against targeted mutations of the behavior it guards. Lint, the optimized build, the settled typecheck and bundle budgets pass (planner entry 275.1 KiB vs 275.2 baseline; largest chunk 124.0 KiB; 0 chunks contain harness code). All 19 browser cases (18 baseline plus the product-switch regression) pass against the retained isolated database (`scratch/browser-db`, ports 563xx, not reset). Its schema already contained `20261003180653` (function bodies identical to the migration file) although the ledger row is absent.

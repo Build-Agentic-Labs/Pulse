@@ -55,8 +55,8 @@ final result: passed
 
 ## Implementation captures
 
-- Final review state at the reference desktop viewport: `.qa/invite-review-final.png`
-- Responsive resources-and-scope state: `.qa/invite-resources-responsive.png`
+- Final review state at the reference desktop viewport: `outputs/qa/invitations/invite-review-final.png`
+- Responsive resources-and-scope state: `outputs/qa/invitations/invite-resources-responsive.png`
 
 ## Visual comparison
 

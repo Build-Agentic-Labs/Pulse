@@ -887,6 +887,82 @@ describe("LineWorkspace procedure save lifecycle", () => {
       expect(storedFields(DRAFT_STORAGE_KEY)).toEqual([]);
     });
 
+    // KNOWN GAP (expected to fail until the proposed correction is approved; flip to `it` with the fix):
+    // opening a non-Main scenario shows its recovered draft but never re-saves it. The status reads Saved
+    // while the content exists only in local draft storage, and leaving the scenario drops the draft
+    // from memory, so it no longer shows on return (a reload recovers it from storage).
+    it.fails("a recovered non-Main scenario draft stays recoverable and never shows Saved until it is persisted", async () => {
+      const NIGHT_TASK_ID = "task-lifecycle-night";
+      const NIGHT_STEP_ID = "step-lifecycle-night";
+      const nightDraft = "Night shift draft from an earlier session";
+      vi.mocked(loadPlannerStateFromSupabase).mockImplementation(async (_projectId, scenarioId) => {
+        const base = buildState(PROJECT_ID);
+        if (scenarioId !== ALT_SCENARIO_ID) {
+          return base;
+        }
+        const nightTask = buildTask(altInstruction, ALT_SCENARIO_ID);
+        return {
+          ...base,
+          scenario: { ...base.scenario, id: ALT_SCENARIO_ID, name: "Night shift projection" },
+          tasks: [{
+            ...nightTask,
+            id: NIGHT_TASK_ID,
+            manufacturingSteps: nightTask.manufacturingSteps?.map((step) => ({ ...step, id: NIGHT_STEP_ID })),
+          }],
+        };
+      });
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
+        version: 2,
+        savedAt: "2026-10-01T12:00:00.000Z",
+        fields: [instructionDraft(NIGHT_TASK_ID, NIGHT_STEP_ID, nightDraft, altInstruction, 5)],
+      }));
+      const nightPersisted = () => saveMock.mock.calls.some((call) =>
+        call[0].id === NIGHT_TASK_ID && call[0].manufacturingSteps?.[0]?.instruction === nightDraft);
+      const nightStored = () => storedFor(DRAFT_STORAGE_KEY, NIGHT_TASK_ID).some((field) => field.value === nightDraft && field.dirty);
+      // Until the draft reaches the database it must stay stored, and the status must not claim Saved.
+      const expectRecoverableUnlessPersisted = (step: string) => {
+        if (nightPersisted()) {
+          return;
+        }
+        expect(nightStored(), `${step}: draft still stored`).toBe(true);
+        expect(saveStatusText(), `${step}: status`).not.toBe("Saved");
+      };
+      const openScenario = async (tab: string) => {
+        fireEvent.click(screen.getByRole("button", { name: "Gantt" }));
+        await flushMicrotasks();
+        fireEvent.click(screen.getByRole("tab", { name: tab }));
+        await flushMicrotasks();
+        fireEvent.click(screen.getByRole("button", { name: "Procedure" }));
+        await flushMicrotasks();
+      };
+
+      // 1. Open the night scenario: its unsaved draft is recovered.
+      const view = await mountWorkspace();
+      await openScenario("Night shift projection");
+      expect(instructionBox().value).toBe(nightDraft);
+      // 2-3. No further edits; check the status (and again after any timers would have fired).
+      expectRecoverableUnlessPersisted("after opening");
+      await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS + RETRY_MS);
+      expectRecoverableUnlessPersisted("after waiting");
+
+      // 4a. Switch away and return.
+      await openScenario("Main Plan");
+      await openScenario("Night shift projection");
+      if (!nightPersisted()) {
+        expect(instructionBox().value, "after returning: draft shown").toBe(nightDraft);
+      }
+      expectRecoverableUnlessPersisted("after returning");
+
+      // 4b. Reload and reopen the scenario.
+      view.unmount();
+      await mountWorkspace();
+      await openScenario("Night shift projection");
+      if (!nightPersisted()) {
+        expect(instructionBox().value, "after reload: draft shown").toBe(nightDraft);
+      }
+      expectRecoverableUnlessPersisted("after reload");
+    });
+
     it("shows the other scenario's server text when the field was blurred before switching", async () => {
       await saveMainDraftWithFocus();
       // A pointer click on a module or tab moves focus first; the blur releases the saved draft.

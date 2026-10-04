@@ -437,6 +437,77 @@ test('newer edits queued during a save use its confirmed baseline', async ({ pag
   await expect(input).toHaveValue('Newer edit queued while the first save runs.');
 });
 
+test('a product save held across a sidebar product switch stays in its product and leaves the next product usable', async ({ page }) => {
+  async function createProduct(name: string, instruction: string) {
+    const connection = await db.connect();
+    let projectId: string;
+    try {
+      await connection.query('begin');
+      await connection.query("select set_config('request.jwt.claim.sub',$1,true)", [user]);
+      await connection.query('set local role authenticated');
+      projectId = (await connection.query('select public.create_project_with_starter_plan($1,$2) id', [workspace, name])).rows[0].id;
+      await connection.query('commit');
+    } catch (error) { await connection.query('rollback'); throw error; }
+    finally { connection.release(); }
+    const scenario = (await db.query('select s.id from scenarios s join products p on p.id=s.product_id where p.project_id=$1', [projectId])).rows[0].id;
+    const taskId = `switch-task-${randomUUID()}`;
+    const stepId = `switch-step-${randomUUID()}`;
+    await db.query(`insert into tasks(id,scenario_id,name,wbs,planned_start,planned_finish,planned_duration_minutes,planned_operators) values($1,$2,$3,'1',now(),now(),0,1)`, [taskId, scenario, `${name} task`]);
+    await db.query(`insert into manufacturing_steps(id,task_id,sequence,name,instruction,duration_minutes) values($1,$2,1,'Install',$3,0)`, [stepId, taskId, instruction]);
+    return { projectId, taskId, stepId };
+  }
+  const instructionOf = async (stepId: string) =>
+    (await db.query('select instruction from manufacturing_steps where id=$1', [stepId])).rows[0]?.instruction;
+  const productA = await createProduct('Switch product A', 'Product A original step.');
+  const productB = await createProduct('Switch product B', 'Product B original step.');
+  const edit = 'Product A edit typed just before switching products.';
+
+  // Hold product A's first procedure write; later attempts (the retry) pass through.
+  let releaseFirst: (outcome: 'fail' | 'continue') => void = () => undefined;
+  let attempts = 0;
+  const firstHeld = new Promise<void>((held) => {
+    void page.route(`${api}/rest/v1/tasks**`, async (route) => {
+      const request = route.request();
+      if (request.method() !== 'PATCH' || !request.url().includes(productA.taskId)) return route.continue();
+      attempts += 1;
+      if (attempts > 1) return route.continue();
+      held();
+      const outcome = await new Promise<'fail' | 'continue'>((resolve) => { releaseFirst = resolve; });
+      return outcome === 'fail' ? route.abort('failed') : route.continue();
+    });
+  });
+
+  try {
+    await page.goto(`/projects/${productA.projectId}/planner?view=procedure&task=${productA.taskId}`);
+    const instruction = page.getByRole('textbox', { name: 'Step 1 instruction', exact: true });
+    await expect.poll(() => instruction.evaluate((element) => element.closest('[inert]') === null)).toBe(true);
+    await expect(instruction).toBeEditable();
+    await instruction.fill(edit);
+    await firstHeld;
+
+    // A real sidebar switch (a button, so the in-app link guard does not apply) while A's save is held.
+    await page.getByRole('button', { name: 'Switch product B', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${productB.projectId}/planner`));
+    await expect(page.getByText('Line readiness', { exact: true })).toBeVisible();
+
+    // A's held save now fails while B is on screen; A retries its own snapshot against A.
+    releaseFirst('fail');
+    await expect.poll(() => instructionOf(productA.stepId), { timeout: 20_000 }).toBe(edit);
+    expect(attempts).toBe(2);
+    expect(await instructionOf(productB.stepId)).toBe('Product B original step.');
+
+    // B is not held by A's queue: an in-app link navigates without the unsaved-changes guard.
+    await expect(page.getByText(/Wait for Saved before leaving|Resolve the save error before leaving/)).toHaveCount(0);
+    await page.getByRole('link', { name: 'AWI Master List', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'AWI Master List', exact: true })).toBeVisible();
+
+    // Back in A, the confirmed edit is what A shows.
+    await page.goto(`/projects/${productA.projectId}/planner?view=procedure&task=${productA.taskId}`);
+    await expect(page.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toHaveValue(edit);
+    expect(attempts).toBe(2);
+  } finally { releaseFirst('continue'); }
+});
+
 test('AWI and product navigation avoids duplicate workspace read bursts', async ({ page }) => {
   const connection = await db.connect();
   let productId: string;

@@ -151,3 +151,53 @@ updated to say so.
 No dependency, no migration, no production-data change. One **APPROVAL** item: the legacy-draft
 Restore/Discard notice (D2). Without it, C1 still ships the scoping, the atomic acknowledgment and the
 preservation rules; legacy records are then left untouched and unrecovered until that UI is approved.
+
+## 8. Final bounded assessment (2026-10-04) — supersedes §1–§7 where narrower
+
+**Scope kept:** scoped keys (user+project+task), revision-checked atomic acknowledgment, legacy records
+left untouched, no cross-user visibility. **Scope dropped from this slice:** legacy Restore/Discard UI,
+any multi-tab reconciliation, listing other tasks' drafts on demand, durability-bound measurement.
+
+**Implementation (bounded):**
+1. `recovery-draft-store.ts`: `scopedRecoveryDraftKey(userId, projectId, taskId)`; v2 record with
+   `schemaVersion: 2, userId, projectId, taskId, draftId, revision`; `saveScopedRecoveryDraft`,
+   `loadScopedRecoveryDraft(key)`, `acknowledgeScopedRecoveryDraft(key, draftId, revision)` (one readwrite
+   transaction: get → delete only on exact `draftId` and `revision <= ack`). Legacy v1 functions kept
+   unchanged for the test double and any later UI; new code never calls `save`/`clear` on the v1 key.
+2. `mobile-photo-portal.tsx`: resolve `userId` via `getUserFromSession` on mount and on auth change;
+   no id → no store access (memory only, existing message); `newStepRevisionRef` incremented per change;
+   save/ack carry captured `{userId, projectId, taskId, draftId, revision}`; restore reads only the key for
+   the selected task (same single-draft behaviour as today, now scoped); the v1 load/restore branch is
+   removed from the automatic path (legacy records are left in place, never auto-submitted).
+3. Tests: unit (double) and component as in §5 minus dropped rows; e2e: cross-project and cross-user on
+   actual IndexedDB; existing spec updated to the v2 key.
+
+**Acceptance tests (all must pass; stored outcomes, not call order):**
+- A1 cross-project: draft in X survives typing in Y; restored on return to X.
+- A2 cross-task: drafts on A and B both stored; A restored after A→B→A.
+- A3 cross-user: U2 sees no U1 record; U1's record unchanged; U1 restored on return (real browser, two
+  sessions in one profile).
+- A4 stale ack: ack of revision 2 after revision 4 was stored leaves the record; ack of 4 removes it.
+- A5 late callback: ack captured for X while Y is open touches only X's key.
+- A6 no identity: no write, save succeeds, message shown; account switch clears timers and reads nothing
+  of the previous user.
+- A7 legacy: a v1 record is never read into the panel, never rewritten, never deleted by new code.
+- A8 malformed: unknown `schemaVersion` or missing `revision` ignored and left in place.
+- A9 storage failure: open/transaction/request errors on save, load and ack never throw past the component.
+- A10 gate: lint, unit suite, build then typecheck, bundle budget, browser suite incl. the updated spec,
+  measurement rerun with unchanged `mobile:open` counts.
+
+**Introduced by this change (new behaviour, by decision):** legacy v1 drafts stop being auto-restored —
+a user with an unsaved pre-C1 draft will not see it again until the Restore/Discard UI is approved
+(records are preserved, so nothing is destroyed). Users without a session id lose local recovery they
+effectively had before (D7). Both are deliberate and documented.
+
+**Pre-existing, unchanged limitations:** same-task concurrent tabs of the same user still last-write-win
+on the one record — **not solved**, only confined to one task and protected against stale deletion; the
+revision/ack is per tab; teardown before the async put commits still loses that change; the "Saved"
+status still means the database write succeeded, not that the local record was cleared; application-level
+isolation only (browser-profile access reads everything); `task-<Date.now()>` ids unchanged.
+
+**Blocking user decision:** none for the bounded scope above. The only decision is whether the
+"legacy drafts are no longer auto-restored" consequence is acceptable without the Restore/Discard UI.
+If it is not, pause C1 (do not expand it): the UI is a separate approval.

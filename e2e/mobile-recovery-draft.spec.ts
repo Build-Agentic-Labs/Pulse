@@ -71,7 +71,8 @@ test('recovery draft: save, overwrite, survive reload, clear once the step is sa
 
   // save
   const first = (await readRecoveryRecord(page))!;
-  expect(first).toMatchObject({ key: KEY, taskId, name: 'Draft one', instruction: '', durationText: '5', tools: [], photos: [], checks: [] });
+  // durationText is derived from the task's planned duration (60 min here), not a fixed default.
+  expect(first).toMatchObject({ key: KEY, taskId, name: 'Draft one', instruction: '', durationText: '60', tools: [], photos: [], checks: [] });
   expect(typeof first.stepId).toBe('string');
   expect(new Date(first.updatedAt as string).toISOString()).toBe(first.updatedAt);
 
@@ -86,6 +87,8 @@ test('recovery draft: save, overwrite, survive reload, clear once the step is sa
   await page.reload();
   await expect(page.getByRole('textbox', { name: 'New step name', exact: true })).toHaveValue('Draft one two');
   await expect(page.getByText(/Recovered an unsaved phone draft/)).toBeVisible();
+  // The recovery re-save (250 ms later) is still blocked, so it fails and the record survives it.
+  await expect(page.getByRole('button', { name: 'Retry save' })).toBeVisible();
   expect((await readRecoveryRecord(page))?.name).toBe('Draft one two');
   expect((await db.query('select count(*)::int n from manufacturing_steps where task_id=$1', [taskId])).rows[0].n).toBe(0);
 

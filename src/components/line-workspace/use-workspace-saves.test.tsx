@@ -44,7 +44,7 @@ function productWithBom(bom: MasterBom): Product {
   };
 }
 
-function renderSaves({ confirmed = true } = {}) {
+function renderSaves({ confirmed = true, initialReported = "loading" as SaveState } = {}) {
   return renderHook(() => {
     const [plannerState, setPlannerState] = useState<PlannerState>(initialState);
     const latestDerivedStateRef = useRef(plannerState);
@@ -54,7 +54,7 @@ function renderSaves({ confirmed = true } = {}) {
     const scenarioCacheRef = useRef(new Map<string, PlannerState>());
     const [procedureSaveQueues] = useState(createProcedureSaveQueueStore);
     const [chromeStatus, setChromeStatus] = useState<{ message: string; error?: boolean } | null>(null);
-    const [reportedSaveState, setSaveState] = useState<SaveState>("loading");
+    const [reportedSaveState, setSaveState] = useState<SaveState>(initialReported);
     const [reportedSaveError, setSaveError] = useState<string>();
     const plannerDirtyRef = useRef(false);
     const saves = useWorkspaceSaves({
@@ -117,8 +117,13 @@ describe("save barrier", () => {
       finishPhoto = result.current.saves.writeTracker.begin("photo-upload:task-1:step-1");
     });
 
-    const settled = result.current.saves.waitForLocalSavesToSettle(1_000, "master-bom");
+    let settledValue: boolean | undefined;
+    const settled = result.current.saves.waitForLocalSavesToSettle(1_000, "master-bom").then((value) => {
+      settledValue = value;
+      return value;
+    });
     await vi.advanceTimersByTimeAsync(360);
+    expect(settledValue).toBeUndefined();
     act(() => finishPhoto());
     await vi.advanceTimersByTimeAsync(120);
     await expect(settled).resolves.toBe(true);
@@ -134,6 +139,39 @@ describe("save barrier", () => {
     const timedOut = result.current.saves.waitForLocalSavesToSettle(500);
     await vi.advanceTimersByTimeAsync(700);
     await expect(timedOut).resolves.toBe(false);
+  });
+
+  it("blocks on a reported error or a failed procedure queue that is not the retrying write", async () => {
+    const { result } = renderSaves({ initialReported: "saved" });
+    act(() => {
+      result.current.setSaveError("The scenario could not be loaded.");
+      result.current.setSaveState("error");
+    });
+    await expect(result.current.saves.waitForLocalSavesToSettle(1_000, "master-bom")).resolves.toBe(false);
+
+    act(() => {
+      result.current.setSaveError(undefined);
+      result.current.setSaveState("saved");
+    });
+    await expect(result.current.saves.waitForLocalSavesToSettle(1_000, "master-bom")).resolves.toBe(true);
+
+    result.current.procedureSaveQueues.getProcedureTaskSaveQueue("task-1").lastError = new Error("Network down");
+    let blocked: boolean | undefined;
+    void result.current.saves.waitForLocalSavesToSettle(10_000, "master-bom").then((value) => {
+      blocked = value;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(blocked).toBe(false);
+  });
+});
+
+describe("aggregate status", () => {
+  it("shows unsaved procedure work that has only been scheduled", () => {
+    const { result, rerender } = renderSaves({ initialReported: "saved" });
+    expect(result.current.saves.saveState).toBe("saved");
+    result.current.procedureSaveQueues.procedureSaveTimersRef.current["task-1"] = 1;
+    rerender();
+    expect(result.current.saves.saveState).toBe("draft");
   });
 });
 
@@ -155,6 +193,8 @@ describe("master BOM", () => {
     expect(getMasterBom(result.current.plannerState.product.customFields)?.fileName).toBe("rev-b.xlsx");
     expect(result.current.saves.saveState).toBe("saved");
     expect(result.current.saves.writeTracker.getSnapshot()).toEqual({ pending: 0, failures: [] });
+    // Both attempts end with no queued shell save, so each replays any deferred realtime refresh.
+    expect(flushDeferredRemoteRefresh).toHaveBeenCalledTimes(2);
     expect(getMasterBom(result.current.scenarioCacheRef.current.get(initialState.scenario.id)?.product.customFields)?.fileName)
       .toBe("rev-b.xlsx");
     expect(writeCachedPlannerState).toHaveBeenCalledWith(PROJECT_ID, expect.anything(), "scenario-main");
@@ -229,7 +269,43 @@ describe("navigation guards", () => {
       window.dispatchEvent(new Event("pagehide"));
     });
     expect(saveShell).toHaveBeenCalledWith(result.current.plannerState);
+    expect(flushDeferredRemoteRefresh).toHaveBeenCalledTimes(1);
     link.remove();
+  });
+
+  it("tells the user to resolve a failed save instead of waiting for it", async () => {
+    saveShell.mockRejectedValueOnce(new Error("Shell save failed"));
+    const { result } = renderSaves({ initialReported: "saved" });
+    const link = document.createElement("a");
+    link.href = "#settings";
+    document.body.append(link);
+
+    act(() => result.current.saves.markDirty());
+    await act(async () => {
+      result.current.saves.flushPendingPlannerSave();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.saves.saveState).toBe("error");
+
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => {
+      link.dispatchEvent(click);
+    });
+    expect(click.defaultPrevented).toBe(true);
+    expect(result.current.chromeStatus?.message).toBe(
+      "Your changes have not saved. Resolve the save error before leaving this page.",
+    );
+    link.remove();
+  });
+
+  it("flushes a dirty shell save when the workspace unmounts", async () => {
+    saveShell.mockResolvedValue(undefined as never);
+    const { result, unmount } = renderSaves({ initialReported: "saved" });
+    act(() => result.current.saves.markDirty());
+    await act(async () => {
+      unmount();
+    });
+    expect(saveShell).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -266,6 +342,18 @@ describe("shell autosave", () => {
     expect(options.plannerSaveTimerRef.current).toBeNull();
   });
 
+  it("does not start a shell save for changes that were not user edits or before the load", async () => {
+    const clean = renderAutosave({ plannerDirtyRef: { current: false } });
+    clean.rerender({ ...clean.options, dirtyVersion: 1, derivedState: { ...initialState } });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(clean.persistPlannerState).not.toHaveBeenCalled();
+
+    const loading = renderAutosave({ hasLoadedRemoteState: false });
+    loading.rerender({ ...loading.options, dirtyVersion: 1, derivedState: { ...initialState } });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(loading.persistPlannerState).not.toHaveBeenCalled();
+  });
+
   it("never saves an unconfirmed snapshot, and skips one server-applied change", async () => {
     const unconfirmed = renderAutosave({ remoteStateConfirmedRef: { current: false } });
     unconfirmed.rerender({ ...unconfirmed.options, dirtyVersion: 1 });
@@ -280,5 +368,69 @@ describe("shell autosave", () => {
     echoed.rerender({ ...echoed.options, dirtyVersion: 2 });
     await vi.advanceTimersByTimeAsync(900);
     expect(echoed.persistPlannerState).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("composed save ownership", () => {
+  it("autosaves a markDirty edit through the shared dirty flag and settles Saved", async () => {
+    saveShell.mockResolvedValue(undefined as never);
+    const { result } = renderHook(() => {
+      const [plannerState, setPlannerState] = useState<PlannerState>(initialState);
+      const latestDerivedStateRef = useRef(plannerState);
+      latestDerivedStateRef.current = plannerState;
+      const mainScenarioIdRef = useRef<string | undefined>("scenario-main");
+      const remoteStateConfirmedRef = useRef(true);
+      const remoteRefreshAppliedRef = useRef(false);
+      const scenarioCacheRef = useRef(new Map<string, PlannerState>());
+      const [procedureSaveQueues] = useState(createProcedureSaveQueueStore);
+      const [, setChromeStatus] = useState<{ message: string; error?: boolean } | null>(null);
+      const [reportedSaveState, setSaveState] = useState<SaveState>("saved");
+      const [reportedSaveError, setSaveError] = useState<string>();
+      const plannerDirtyRef = useRef(false);
+      const saves = useWorkspaceSaves({
+        projectId: PROJECT_ID,
+        mainScenarioIdRef,
+        latestDerivedStateRef,
+        setPlannerState,
+        notifyFeedback,
+        blockViewOnlyWrite: () => false,
+        reportedSaveState,
+        reportedSaveError,
+        setSaveState,
+        setSaveError,
+        plannerDirtyRef,
+        procedureSaveQueues,
+        remoteStateConfirmedRef,
+        scenarioCacheRef,
+        flushDeferredRemoteRefresh,
+        setChromeStatus,
+      });
+      usePlannerShellAutosave({
+        dirtyVersion: saves.dirtyVersion,
+        plannerDirtyRef,
+        plannerSaveTimerRef: saves.plannerSaveTimerRef,
+        persistPlannerState: saves.persistPlannerState,
+        derivedState: plannerState,
+        hasLoadedRemoteState: true,
+        remoteStateConfirmedRef,
+        remoteRefreshAppliedRef,
+      });
+      return { saves, setPlannerState, plannerDirtyRef };
+    });
+
+    act(() => {
+      result.current.saves.markDirty();
+      result.current.setPlannerState((current) => ({
+        ...current,
+        tasks: current.tasks.map((entry) => ({ ...entry, name: "Renamed task" })),
+      }));
+    });
+    expect(result.current.saves.saveState).toBe("draft");
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+    expect(saveShell).toHaveBeenCalledTimes(1);
+    expect(saveShell.mock.calls[0]?.[0].tasks[0]?.name).toBe("Renamed task");
+    expect(result.current.plannerDirtyRef.current).toBe(false);
+    expect(result.current.saves.saveState).toBe("saved");
   });
 });

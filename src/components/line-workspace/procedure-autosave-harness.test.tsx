@@ -37,6 +37,7 @@ it("runs every scenario against isolated state and restores the workspace's draf
   const { drafts, store, autosaveHarnessRanRef } = result.current;
   const liveDrafts = drafts.procedureDraftsRef.current;
   const liveQueues = store.procedureSaveQueuesRef.current;
+  const liveDeferred = drafts.deferredProcedureServerUpdatesRef.current;
   window.localStorage.setItem(procedureDraftStorageKey("project-harness"), "live-snapshot");
 
   const uninstall = installProcedureAutosaveHarness({
@@ -58,6 +59,8 @@ it("runs every scenario against isolated state and restores the workspace's draf
   expect(results.filter((entry) => !entry.pass)).toEqual([]);
   expect(drafts.procedureDraftsRef.current).toBe(liveDrafts);
   expect(store.procedureSaveQueuesRef.current).toBe(liveQueues);
+  expect(drafts.deferredProcedureServerUpdatesRef.current).toBe(liveDeferred);
+  expect(Object.keys(liveDeferred)).toEqual([]);
   expect(window.localStorage.getItem(procedureDraftStorageKey("project-harness"))).toBe("live-snapshot");
 
   uninstall();
@@ -80,11 +83,22 @@ it("runs once on install for ?autosaveHarness=1 and publishes the result", () =>
   act(() => {
     uninstall = installProcedureAutosaveHarness(options);
   });
-  const published = JSON.parse(document.documentElement.dataset.pulseProcedureAutosaveHarnessResult ?? "[]");
-  expect(published.every((entry: { pass: boolean }) => entry.pass)).toBe(true);
+  const raw = document.documentElement.dataset.pulseProcedureAutosaveHarnessResult;
+  expect(raw).toBeDefined();
+  const published: Array<{ pass: boolean }> = JSON.parse(raw ?? "");
+  expect(published).toHaveLength(7);
+  expect(published.every((entry) => entry.pass)).toBe(true);
   expect(autosaveHarnessRanRef.current).toBe(true);
 
   uninstall();
   expect(autosaveHarnessRanRef.current).toBe(false);
   expect(document.documentElement.dataset.pulseProcedureAutosaveHarnessResult).toBeUndefined();
+
+  // A re-install that already ran for this snapshot does not run again.
+  autosaveHarnessRanRef.current = true;
+  act(() => {
+    uninstall = installProcedureAutosaveHarness(options);
+  });
+  expect(document.documentElement.dataset.pulseProcedureAutosaveHarnessResult).toBeUndefined();
+  uninstall();
 });

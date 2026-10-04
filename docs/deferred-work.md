@@ -150,24 +150,29 @@ automatic daily backups. If so, that outranks anything scripted here.
 
 ---
 
-## 6. Planner procedure retry ignores an injected client — recorded 2026-10-03, not fixed
+## 6. Planner procedure retry ignores an injected client — recorded 2026-10-03, FIXED 2026-10-04
 
-**What:** `saveProcedureTaskUpdateToSupabase` (`src/lib/planner/task-store.ts`) accepts an optional
-client and uses it for its writes. On a version conflict, however, its single retry re-reads the task with
-`loadTaskFromSupabase`, which takes no client parameter and always uses the page's shared planner client.
-`saveManufacturingStepToSupabase` and `mergeLatestTaskToSupabase` have the same dependency.
+**What it was:** `saveProcedureTaskUpdateToSupabase` (`src/lib/planner/task-store.ts`) accepted an optional
+client and used it for its writes, but its version-conflict reload and its final confirmation read went
+through `loadTaskFromSupabase`, which had no client parameter and always used the page's shared browser
+client. A server caller injecting a per-request client would have hit the browser-only trap on the first
+conflict instead of getting a rebased retry.
 
-**Impact today:** none observed. The only production caller (the browser procedure save queue) injects no
-client. A future server caller that injects a per-request client and hits a version conflict would get the
-browser-only trap error on the retry read, instead of a rebased save.
+**Fix (branch `codex/procedure-retry-client`):** `loadTaskFromSupabase(taskId, projectId?, client?)` gained an
+optional trailing client (default unchanged: the browser client), and the procedure save passes its issuing
+client to both conflict reloads and the final confirmation read. Six lines of code. Retry limit (one),
+version handling, authorization checks and error messages are unchanged; no caller or signature other than
+that optional parameter changed. The only production caller (the browser save queue) injects no client and
+behaves exactly as before.
 
-**Status:** pre-existing behaviour, moved verbatim in workspace-structure Phase 5. It is pinned by
-`src/domain/supabase-planner.task-writes.test.tsx` ("uses an injected client for its writes but the page
-client for the retry read"), so a fix must change that test on purpose.
+**Regression test:** `src/domain/supabase-planner.task-writes.test.tsx`, "with an injected client" — two
+distinct, fully functional clients (injected vs installed browser client), with the browser client required
+to see zero requests: task-conflict retry, step-conflict retry, a second conflict (one retry, then the
+conflict error), and the no-injection path. The three injected cases failed before the fix and pass after.
 
-**Finishing it:** add an optional client parameter to `loadTaskFromSupabase` (defaulting as today), pass
-the injected client through the retry and the two helpers above, update the pinning test, and run the
-procedure and AWI save suites. This is a behaviour change, so it needs its own review.
+**Not changed (still browser-only, no client parameter):** `saveManufacturingStepToSupabase` and
+`mergeLatestTaskToSupabase` still read through `loadTaskFromSupabase`'s default. They have no production
+caller (see §7a), so threading a client through them was left out of this fix on purpose.
 
 ---
 

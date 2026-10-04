@@ -509,7 +509,7 @@ export async function saveProcedureTaskUpdateToSupabase(
   const savedTask = await throwIfError(taskUpdate.select("id,version").maybeSingle());
   if (!savedTask) {
     if (allowVersionRetry && taskToSave.version !== undefined) {
-      const latestTask = await loadTaskFromSupabase(taskToSave.id, projectId);
+      const latestTask = await loadTaskFromSupabase(taskToSave.id, projectId, supabase);
       if (latestTask) {
         return saveProcedureTaskUpdateToSupabase(
           mergeTaskWithServerVersions(taskToSave, latestTask),
@@ -571,7 +571,7 @@ export async function saveProcedureTaskUpdateToSupabase(
     const savedStep = await throwIfError(stepUpdate.select("id,version").maybeSingle());
     if (!savedStep) {
       if (allowVersionRetry && step.version !== undefined) {
-        const latestTask = await loadTaskFromSupabase(taskToSave.id, projectId);
+        const latestTask = await loadTaskFromSupabase(taskToSave.id, projectId, supabase);
         if (latestTask) {
           return saveProcedureTaskUpdateToSupabase(
             mergeTaskWithServerVersions(taskToSave, latestTask),
@@ -596,7 +596,7 @@ export async function saveProcedureTaskUpdateToSupabase(
     await throwIfError(supabase.from("part_references").delete().in("id", stalePartIds));
   }
 
-  return loadTaskFromSupabase(taskToSave.id, projectId);
+  return loadTaskFromSupabase(taskToSave.id, projectId, supabase);
 }
 
 export async function moveManufacturingStepToTaskInSupabase(

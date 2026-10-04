@@ -284,10 +284,10 @@ describe("single-task read", () => {
 describe("procedure save (non-AWI)", () => {
   type Server = { taskVersion: number; steps: Array<{ id: string; sequence: number; version: number }>; parts: Array<{ id: string }> };
   /** A small stateful server: version-checked task/step updates succeed only on the current version. */
-  function procedureServer(server: Server, options: { conflictTaskUpdates?: number; conflictStepUpdates?: number } = {}) {
+  function procedureReply(server: Server, options: { conflictTaskUpdates?: number; conflictStepUpdates?: number } = {}): Reply {
     let taskConflicts = options.conflictTaskUpdates ?? 0;
     let stepConflicts = options.conflictStepUpdates ?? 0;
-    return install((r) => {
+    return (r) => {
       if (r.target === "tasks" && r.op === "update") {
         if (taskConflicts > 0) { taskConflicts -= 1; return { data: null }; }
         server.taskVersion += 1;
@@ -305,8 +305,10 @@ describe("procedure save (non-AWI)", () => {
       }
       if (r.target === "part_references" && r.op === "select") return { data: server.parts };
       return undefined;
-    });
+    };
   }
+  const procedureServer = (server: Server, options: { conflictTaskUpdates?: number; conflictStepUpdates?: number } = {}) =>
+    install(procedureReply(server, options));
 
   it("version-checks the task, then each existing step, upserts new steps, writes parts, and re-reads", async () => {
     const db = procedureServer({ taskVersion: 4, steps: [{ id: "s1", sequence: 1, version: 2 }, { id: "gone", sequence: 2, version: 1 }], parts: [{ id: "old-part" }] });
@@ -421,18 +423,57 @@ describe("procedure save (non-AWI)", () => {
       .rejects.toThrow("Procedure step save conflict. Reload this task before saving again.");
   });
 
-  it("uses an injected client for its writes but the page client for the retry read (current behaviour)", async () => {
-    const page = procedureServer({ taskVersion: 3, steps: [], parts: [] });
-    const injected = createRecordingSupabase({
-      reply: (r) => (r.target === "task_project_id" ? { data: PROJECT } : r.target === "tasks" && r.op === "update" ? { data: null } : undefined),
+  describe("with an injected client", () => {
+    // Two DISTINCT clients: the injected one (as a server caller would pass) and the page's shared
+    // browser client, installed and fully functional so that any request wrongly routed to it would
+    // succeed silently. The assertions therefore require the browser client to see zero requests.
+    function clients(injectedState: Server, options: { conflictTaskUpdates?: number; conflictStepUpdates?: number } = {}) {
+      const browser = procedureServer({ taskVersion: 99, steps: [], parts: [] });
+      const reply = procedureReply(injectedState, options);
+      const injected = createRecordingSupabase({
+        userId: "user-1",
+        reply: (r) => reply(r) ?? (r.target === "task_project_id" ? { data: PROJECT } : undefined),
+      });
+      return { browser, injected, run: (version: number) => saveProcedureTaskUpdateToSupabase(task({ version, description: "Local edit" }), [], PROJECT, true, injected.client as never) };
+    }
+    const taskReads = (db: ReturnType<typeof createRecordingSupabase>) => db.lines().filter((line) => line === "tasks.select(*) id=task-1 | maybeSingle");
+
+    it("reloads and retries a task version conflict through the issuing client, and confirms through it too", async () => {
+      const { browser, injected, run } = clients({ taskVersion: 7, steps: [], parts: [] }, { conflictTaskUpdates: 1 });
+      const saved = await run(6);
+      expect(saved).toMatchObject({ id: "task-1", version: 8 });
+      expect(injected.lines().filter((line) => line.startsWith("tasks.update"))).toEqual([
+        "tasks.update id=task-1 version=6 | returning(id,version) maybeSingle",
+        "tasks.update id=task-1 version=7 | returning(id,version) maybeSingle",
+      ]);
+      expect(taskReads(injected)).toHaveLength(2); // one conflict reload, one final confirmation read
+      expect(browser.requests).toEqual([]);
     });
-    await expect(saveProcedureTaskUpdateToSupabase(task({ version: 2 }), [], PROJECT, true, injected.client as never))
-      .rejects.toThrow("Task save conflict.");
-    expect(injected.lines().filter((line) => line.startsWith("tasks."))).toEqual([
-      "tasks.update id=task-1 version=2 | returning(id,version) maybeSingle",
-      "tasks.update id=task-1 version=3 | returning(id,version) maybeSingle",
-    ]);
-    expect(page.lines()).toContain("tasks.select(*) id=task-1 | maybeSingle");
+
+    it("retries a step version conflict through the issuing client", async () => {
+      const { browser, injected } = clients({ taskVersion: 2, steps: [{ id: "s1", sequence: 1, version: 5 }], parts: [] }, { conflictStepUpdates: 1 });
+      await saveProcedureTaskUpdateToSupabase(task({ version: 2, manufacturingSteps: [step("s1", 1, 4)] }), [], PROJECT, true, injected.client as never);
+      expect(injected.requests.filter((r) => r.target === "manufacturing_steps" && r.op === "update").map((r) => r.filters))
+        .toEqual([["id=s1", "version=4"], ["id=s1", "version=5"]]);
+      expect(taskReads(injected)).toHaveLength(2);
+      expect(browser.requests).toEqual([]);
+    });
+
+    it("gives up after a second conflict without ever touching the browser client", async () => {
+      const { browser, injected, run } = clients({ taskVersion: 7, steps: [], parts: [] }, { conflictTaskUpdates: 2 });
+      await expect(run(6)).rejects.toThrow("Task save conflict. Reload this task before saving again.");
+      expect(injected.lines().filter((line) => line.startsWith("tasks.update"))).toHaveLength(2); // exactly one retry
+      expect(taskReads(injected)).toHaveLength(1); // the reload before the retry; no confirmation read after the failure
+      expect(browser.requests).toEqual([]);
+    });
+
+    it("without an injected client, everything still goes through the browser client", async () => {
+      const browser = procedureServer({ taskVersion: 7, steps: [], parts: [] }, { conflictTaskUpdates: 1 });
+      const saved = await saveProcedureTaskUpdateToSupabase(task({ version: 6 }), [], PROJECT);
+      expect(saved).toMatchObject({ version: 8 });
+      expect(browser.lines().filter((line) => line.startsWith("tasks.update"))).toHaveLength(2);
+      expect(taskReads(browser)).toHaveLength(2);
+    });
   });
 });
 

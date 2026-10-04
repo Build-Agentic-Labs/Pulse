@@ -514,8 +514,12 @@ export async function loadTaskPrivateMediaFromSupabase(
   );
 }
 
-export async function loadTaskFromSupabase(taskId: string, projectId?: string): Promise<Task | null> {
-  const supabase = plannerClient();
+export async function loadTaskFromSupabase(
+  taskId: string,
+  projectId?: string,
+  client?: ReturnType<typeof plannerClient>,
+): Promise<Task | null> {
+  const supabase = client ?? plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
   const task = await throwIfError(supabase.from("tasks").select("*").eq("id", taskId).maybeSingle());
 

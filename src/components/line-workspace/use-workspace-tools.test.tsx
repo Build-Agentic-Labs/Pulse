@@ -42,7 +42,7 @@ const toolTask = procedureTestTask("Fit the bracket", 1, {
 const stepTools = (task?: PlannerState["tasks"][number]) => (task ? getTaskStepToolListMap(task)["step-1"] ?? [] : []);
 const initialState: PlannerState = { ...emptyPlannerState, tasks: [toolTask] };
 
-function renderTools({ confirmed = true, libraryProjectId = PROJECT_ID } = {}) {
+function renderTools({ confirmed = true, libraryProjectId = PROJECT_ID, viewOnly = false } = {}) {
   const tracker = new WorkspaceWriteTracker(PROJECT_ID);
   const hook = renderHook(({ libraryProjectId: libraryId }: { libraryProjectId: string }) => {
     const [plannerState, setPlannerState] = useState<PlannerState>(initialState);
@@ -59,6 +59,7 @@ function renderTools({ confirmed = true, libraryProjectId = PROJECT_ID } = {}) {
       setSaveState,
       setSaveError,
       notifyFeedback,
+      blockViewOnlyWrite: () => viewOnly,
       flushDeferredRemoteRefresh,
     });
     return { plannerState, saveState, saveError, tools };
@@ -134,17 +135,69 @@ it("renames a catalog tool across tasks with one guarded shell save, keeping the
   expect(result.current.saveState).toBe("saved");
 });
 
-it("refuses catalog rewrites before the remote load confirmed the state", async () => {
-  const { result } = renderTools({ confirmed: false });
-  await flush();
-  const entry = { key: "torque wrench", rawName: "torque  wrench" } as ProjectToolCatalogEntry;
+const renameEntry = { key: "torque wrench", rawName: "torque  wrench", libraryId: "lib-0" } as ProjectToolCatalogEntry;
+const catalogOperations = {
+  rename: (tools: ReturnType<typeof useWorkspaceTools>) =>
+    tools.saveCatalogTool(renameEntry, { name: "Torque Driver", category: "power" as never }),
+  delete: (tools: ReturnType<typeof useWorkspaceTools>) => tools.deleteCatalogTool(renameEntry),
+  tidy: (tools: ReturnType<typeof useWorkspaceTools>) =>
+    tools.tidyCatalogToolNames([{ from: "torque  wrench", to: "Torque Wrench" }]),
+};
 
-  await act(async () => { await result.current.tools.deleteCatalogTool(entry); });
-
+function expectNoCatalogWrites(state: PlannerState) {
   expect(savePlannerShellToSupabase).not.toHaveBeenCalled();
-  expect(notifyFeedback).toHaveBeenCalledWith(expect.objectContaining({ title: "Save blocked" }));
-  expect(stepTools(result.current.plannerState.tasks[0])).toEqual(["torque  wrench"]);
-});
+  expect(upsertToolLibraryMetadata).not.toHaveBeenCalled();
+  expect(deleteToolLibraryFromSupabase).not.toHaveBeenCalled();
+  expect(stepTools(state.tasks[0])).toEqual(["torque  wrench"]);
+  expect(notifyFeedback).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Tool updated" }));
+  expect(notifyFeedback).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Tool names cleaned up" }));
+  expect(notifyFeedback).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Build catalog updated" }));
+}
+
+for (const [name, run] of Object.entries(catalogOperations)) {
+  it(`${name}: makes no task or library writes and never reports Saved before the latest data is confirmed`, async () => {
+    vi.mocked(loadToolLibraryFromSupabase).mockResolvedValue(library(["torque  wrench"]));
+    const { result } = renderTools({ confirmed: false });
+    await flush();
+
+    await act(async () => { await run(result.current.tools); });
+
+    expectNoCatalogWrites(result.current.plannerState);
+    expect(notifyFeedback).toHaveBeenCalledWith(expect.objectContaining({ title: "Save blocked" }));
+    expect(result.current.saveState).toBe("error");
+  });
+
+  it(`${name}: view-only access refuses the task rewrite and every dependent write`, async () => {
+    vi.mocked(loadToolLibraryFromSupabase).mockResolvedValue(library(["torque  wrench"]));
+    const { result } = renderTools({ viewOnly: true });
+    await flush();
+
+    await act(async () => { await run(result.current.tools); });
+
+    expectNoCatalogWrites(result.current.plannerState);
+    expect(result.current.saveState).not.toBe("saving");
+  });
+
+  it(`${name}: a failed task rewrite stops before dependent library writes and success reports`, async () => {
+    vi.mocked(loadToolLibraryFromSupabase).mockResolvedValue(library(["torque  wrench"]));
+    vi.mocked(savePlannerShellToSupabase).mockRejectedValueOnce(new Error("Shell save failed"));
+    const { result } = renderTools();
+    await flush();
+
+    let outcome: unknown;
+    await act(async () => { outcome = await run(result.current.tools).then(() => "resolved", (error: Error) => error.message); });
+
+    expect(savePlannerShellToSupabase).toHaveBeenCalledTimes(1);
+    expect(upsertToolLibraryMetadata).not.toHaveBeenCalled();
+    expect(deleteToolLibraryFromSupabase).not.toHaveBeenCalled();
+    expect(result.current.saveState).toBe("error");
+    expect(notifyFeedback).toHaveBeenCalledWith(expect.objectContaining({ title: "Save failed" }));
+    expect(notifyFeedback).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Tool updated" }));
+    expect(notifyFeedback).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Tool names cleaned up" }));
+    // Rename and delete reject to the catalog panel; tidy absorbs it after the failure toast (unchanged).
+    expect(outcome).toBe(name === "tidy" ? "resolved" : "Shell save failed");
+  });
+}
 
 it("deletes a catalog tool from every task and its library row, then reloads the library", async () => {
   vi.mocked(loadToolLibraryFromSupabase).mockResolvedValueOnce(library(["torque  wrench"])).mockResolvedValueOnce([]);

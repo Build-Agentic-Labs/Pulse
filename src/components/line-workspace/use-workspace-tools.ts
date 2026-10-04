@@ -26,7 +26,7 @@ import type { ReportedSaveStatusSetters, WorkspaceFeedback } from "./workspace-c
 // which stays refused until a remote load confirmed the state being edited.
 
 export type UseWorkspaceToolsOptions = ReportedSaveStatusSetters &
-  Pick<WorkspaceFeedback, "notifyFeedback"> & {
+  WorkspaceFeedback & {
     projectId?: string;
     /** The active project context's id; the tool library loads for it. */
     libraryProjectId?: string;
@@ -51,6 +51,7 @@ export function useWorkspaceTools({
   setSaveState,
   setSaveError,
   notifyFeedback,
+  blockViewOnlyWrite,
   flushDeferredRemoteRefresh,
 }: UseWorkspaceToolsOptions) {
   const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
@@ -137,7 +138,10 @@ export function useWorkspaceTools({
     }
   }
 
-  async function applyProjectTasksUpdate(nextTasks: Task[], options?: { silent?: boolean }) {
+  // Rewrites every task through the guarded shell save. Resolves true once saved, false when the
+  // rewrite is refused (unconfirmed state or view-only access), and rejects when the save fails.
+  // Callers must stop on false or a rejection: their library writes depend on this rewrite.
+  async function applyProjectTasksUpdate(nextTasks: Task[], options?: { silent?: boolean }): Promise<boolean> {
     // This path runs the destructive shell diff-save directly; refuse it until the remote load has
     // confirmed the state being edited (a cached snapshot could delete teammates' newer tasks).
     if (!remoteStateConfirmedRef.current) {
@@ -145,7 +149,11 @@ export function useWorkspaceTools({
       setSaveError(message);
       setSaveState("error");
       notifyFeedback({ title: "Save blocked", body: message, tone: "warning" });
-      return;
+      return false;
+    }
+    // The same view-only gate (and one-time notice) as every other workspace write.
+    if (blockViewOnlyWrite()) {
+      return false;
     }
 
     setSaveError(undefined);
@@ -187,6 +195,7 @@ export function useWorkspaceTools({
       finishWrite();
       flushDeferredRemoteRefresh();
     }
+    return true;
   }
 
   async function saveCatalogTool(
@@ -209,7 +218,10 @@ export function useWorkspaceTools({
       if (nameChanged) {
         // Match the raw stored occurrence by canonical key, rewriting it in place.
         const nextTasks = renameToolInTasks(derivedState.tasks, entry.rawName, formattedName);
-        await applyProjectTasksUpdate(nextTasks);
+        if (!(await applyProjectTasksUpdate(nextTasks))) {
+          // Refused: the library row must not be renamed away from the names the tasks still use.
+          return;
+        }
       }
 
       // Target the real library row by canonical key, so a messy stored name still
@@ -258,7 +270,10 @@ export function useWorkspaceTools({
         (tasks, rename) => renameToolInTasks(tasks, rename.from, rename.to),
         derivedState.tasks,
       );
-      await applyProjectTasksUpdate(nextTasks, { silent: true });
+      if (!(await applyProjectTasksUpdate(nextTasks, { silent: true }))) {
+        // Refused: leave library rows as they are (the reload below still runs).
+        return;
+      }
 
       // 2. Migrate library rows that exist (preserving category); collect failures.
       let metadataFailures = 0;
@@ -305,7 +320,10 @@ export function useWorkspaceTools({
     const finishWrite = writeTracker.begin(`tool-catalog:${entry.key}`);
     try {
       const nextTasks = removeToolFromAllTasks(derivedState.tasks, entry.rawName);
-      await applyProjectTasksUpdate(nextTasks);
+      if (!(await applyProjectTasksUpdate(nextTasks))) {
+        // Refused: keep the library row; tasks still reference the tool.
+        return;
+      }
 
       if (entry.libraryId) {
         await deleteToolLibraryFromSupabase(entry.libraryId, projectId);

@@ -872,6 +872,7 @@ export function LineWorkspace({
     setSaveState,
     setSaveError,
     notifyFeedback,
+    blockViewOnlyWrite,
     flushDeferredRemoteRefresh,
   });
   // Step photos, build animations and exploded views (no effects; hooks above keep their order).

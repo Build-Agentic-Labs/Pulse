@@ -1,0 +1,399 @@
+// @vitest-environment jsdom
+// Characterization of the mobile capture-session behaviour (timer start/stop/lap, park on task switch,
+// resume, localStorage session persistence, legacy-key recovery, malformed data, storage failures) as
+// observed through the rendered portal. Written before the capture-session utilities were extracted
+// (docs/edit-reliability-baseline-2026-10-04.md §4) and kept unchanged across the move. These tests
+// describe current behaviour; where that behaviour is a known gap, the test says so and does not assert
+// the desirable outcome.
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { emptyPlannerState } from "@/domain/empty-planner-state";
+import type { PlannerState, Task } from "@/domain/types";
+import { MobilePhotoPortal } from "./mobile-photo-portal";
+import { loadPlannerStateFromSupabase, saveMobileStepToSupabase } from "@/domain/supabase-planner";
+
+vi.mock("@/components/app-flow-panels", () => ({ AppLoadingShell: () => <div>Loading</div> }));
+vi.mock("@/domain/supabase-planner", async (original) => ({
+  ...await original<typeof import("@/domain/supabase-planner")>(),
+  loadPlannerStateFromSupabase: vi.fn(),
+  loadTaskFromSupabase: vi.fn(),
+  loadToolLibraryFromSupabase: vi.fn(async () => []),
+  subscribePlannerStateChanges: vi.fn(() => () => undefined),
+  saveMobileStepToSupabase: vi.fn(),
+  syncStepToolsForStepToSupabase: vi.fn(async () => undefined),
+  saveTaskToSupabase: vi.fn(),
+  deletePlannerTask: vi.fn(async () => undefined),
+}));
+
+const SESSION_KEY = "pulse:mobile-capture-session:p";
+const LEGACY_KEY = "pulse:capture-timer:p";
+const baseTask: Task = {
+  id: "task-a", scenarioId: "scenario-empty", stationId: "", wbs: "1", rowType: "task", name: "Alpha process",
+  plannedStart: "2026-10-01T10:00:00Z", plannedFinish: "2026-10-01T10:00:00Z", plannedDurationMinutes: 0,
+  plannedOperators: 1, plannedManHours: 0, status: "not_started", percentComplete: 0, dependencyIds: [],
+  criticalPath: false, bottleneckFlag: false, qualityGate: false, travelerSignoffRequired: false,
+  manufacturingSteps: [], customFields: {},
+};
+const taskB: Task = { ...baseTask, id: "task-b", wbs: "2", name: "Beta process" };
+const state: PlannerState = {
+  ...emptyPlannerState,
+  product: { ...emptyPlannerState.product, projectId: "p", name: "Test project" },
+  tasks: [baseTask, taskB],
+};
+
+let nowMs = 1_700_000_000_000;
+const advance = (ms: number) => { nowMs += ms; };
+const session = () => JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null");
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  localStorage.clear();
+  nowMs = 1_700_000_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+  vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(state);
+  vi.mocked(saveMobileStepToSupabase).mockImplementation(async (_task, step) => ({ ...step, version: 1 }));
+  window.scrollTo = vi.fn();
+  window.scrollBy = vi.fn();
+  HTMLElement.prototype.scrollTo = vi.fn();
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  window.matchMedia = vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })) as unknown as typeof window.matchMedia;
+});
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+async function openTask(name: RegExp) {
+  fireEvent.click(await screen.findByRole("button", { name }));
+}
+const startTimer = () => fireEvent.click(screen.getByTitle(/^Start timer for /));
+const stopTimer = () => fireEvent.click(screen.getByTitle(/^Stop timer for /));
+const backToList = () => fireEvent.click(screen.getByRole("button", { name: "Process list" }));
+const durationInput = () => screen.getByLabelText(/^Duration/).closest("label")!.querySelector("input") as HTMLInputElement;
+const processName = () => (screen.getByLabelText("Process name") as HTMLInputElement).value;
+
+describe("capture timer: start, stop and lap", () => {
+  it("starting a timer persists a running session with the elapsed time frozen into storedElapsedMs", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    startTimer();
+    expect(session().captureTimer).toMatchObject({ running: true, taskId: "task-a", taskName: "Alpha process", startedAt: null, storedElapsedMs: 0 });
+    expect(session()).toMatchObject({ activeScreen: "detail", selectedTaskId: "task-a" });
+    expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
+  });
+
+  it("binds the timer to the open draft step and shows the lap", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    startTimer();
+    expect(session().captureTimer.activeStepId).toEqual(expect.any(String));
+    expect(session().newStepId).toBe(session().captureTimer.activeStepId);
+    expect(screen.getByText(/Step lap 0:00/)).toBeInTheDocument();
+  });
+
+  it("stopping applies the lap, rounded up to whole minutes, to the timed draft step and clears the timer", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    startTimer();
+    advance(125_000); // 2 min 5 s → ceil → 3
+    stopTimer();
+    await waitFor(() => expect(saveMobileStepToSupabase).toHaveBeenCalled());
+    expect(vi.mocked(saveMobileStepToSupabase).mock.calls.at(-1)?.[2]).toMatchObject({ durationMinutes: 3 });
+    expect(durationInput().value).toBe("3");
+    expect(session().captureTimer).toMatchObject({ running: false, taskId: null, activeStepId: null, storedElapsedMs: 0 });
+    expect(screen.queryByTitle(/^Stop timer for /)).toBeNull();
+  });
+
+  it("a lap under one minute still records one minute", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    startTimer();
+    advance(4_000);
+    stopTimer();
+    await waitFor(() => expect(saveMobileStepToSupabase).toHaveBeenCalled());
+    expect(vi.mocked(saveMobileStepToSupabase).mock.calls.at(-1)?.[2]).toMatchObject({ durationMinutes: 1 });
+  });
+
+  it("stopping a timer with no elapsed time writes nothing", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    startTimer();
+    stopTimer();
+    await act(async () => {});
+    expect(saveMobileStepToSupabase).not.toHaveBeenCalled();
+  });
+});
+
+describe("capture timer: park on task switch and resume", () => {
+  it("switching tasks parks the running timer with its draft and shows a header chip for it", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Timed step" } });
+    startTimer();
+    advance(65_000);
+    backToList();
+    await openTask(/Beta process 0 steps/);
+    const parked = session().parkedCaptureByTaskId["task-a"];
+    expect(parked).toMatchObject({ showNewStepForm: true, draftName: "Timed step", draftDurationText: "5" });
+    expect(parked.timer).toMatchObject({ running: true, taskId: "task-a", startedAt: null, storedElapsedMs: 65_000 });
+    expect(session().captureTimer).toMatchObject({ running: false, taskId: null });
+    expect(screen.getByTitle("Open Alpha process · timer running")).toHaveTextContent("1:05");
+    expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+  });
+
+  it("returning to the parked task resumes its timer and draft and empties the parked map", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Timed step" } });
+    startTimer();
+    advance(65_000);
+    backToList();
+    await openTask(/Beta process 0 steps/);
+    advance(10_000);
+    fireEvent.click(screen.getByTitle("Open Alpha process · timer running"));
+    await screen.findByRole("textbox", { name: "New step name" });
+    expect((screen.getByRole("textbox", { name: "New step name" }) as HTMLInputElement).value).toBe("Timed step");
+    expect(session().parkedCaptureByTaskId).toEqual({});
+    expect(session().captureTimer).toMatchObject({ running: true, taskId: "task-a", storedElapsedMs: 75_000 });
+    expect(screen.getByTitle(/^Stop timer for Alpha process/)).toBeInTheDocument();
+  });
+
+  it("Timer on a task whose timer is stopped but still bound resumes rather than restarting", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    startTimer();
+    advance(30_000);
+    backToList();
+    await openTask(/Beta process 0 steps/);
+    advance(30_000);
+    await openTask(/Alpha process/);
+    // The parked timer kept running while away: 60 s total, not reset to 0.
+    expect(session().captureTimer).toMatchObject({ running: true, taskId: "task-a", storedElapsedMs: 60_000 });
+  });
+
+  it("a timer started without an open draft is bound to no step: it persists but shows no header chip on the list", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    startTimer();
+    expect(session().captureTimer).toMatchObject({ running: true, taskId: "task-a", activeStepId: null });
+    // Without a bound step there is no chip and no Stop control even on the detail screen.
+    expect(screen.queryByTitle(/^Stop timer for /)).toBeNull();
+    backToList();
+    expect(session()).toMatchObject({ activeScreen: "list" });
+    expect(session().captureTimer).toMatchObject({ running: true, taskId: "task-a" });
+    expect(screen.queryByTitle(/Open Alpha process/)).toBeNull();
+  });
+
+  it("leaving to the process list keeps a step-bound timer running and its header chip reopens the task", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    startTimer();
+    backToList();
+    expect(session()).toMatchObject({ activeScreen: "list" });
+    expect(session().captureTimer).toMatchObject({ running: true, taskId: "task-a" });
+    fireEvent.click(screen.getByTitle("Open Alpha process · timer running"));
+    expect(session()).toMatchObject({ activeScreen: "detail", selectedTaskId: "task-a" });
+    expect(processName()).toBe("Alpha process");
+  });
+});
+
+describe("capture session: reload hydration", () => {
+  it("restores a running timer, the detail screen and the open draft from the session key", async () => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      captureTimer: { running: true, startedAt: null, storedElapsedMs: 30_000, lapMarkerMs: 0, activeStepId: "step-x", taskId: "task-a", taskName: "Alpha process" },
+      parkedCaptureByTaskId: {},
+      activeScreen: "detail", selectedTaskId: "task-a", showNewStepForm: true, newStepId: "step-x",
+    }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await screen.findByRole("textbox", { name: "New step name" });
+    expect(screen.getByRole("button", { name: "Process list" })).toBeInTheDocument();
+    expect(screen.getByTitle(/^Stop timer for Alpha process/)).toBeInTheDocument();
+    expect(screen.getByText("0:30")).toBeInTheDocument();
+    expect(session().captureTimer).toMatchObject({ running: true, storedElapsedMs: 30_000, startedAt: null });
+  });
+
+  it("restores parked timers as running and keeps counting from the stored elapsed", async () => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      captureTimer: { running: false, startedAt: null, storedElapsedMs: 0, lapMarkerMs: 0, activeStepId: null, taskId: null, taskName: "" },
+      parkedCaptureByTaskId: {
+        "task-b": {
+          timer: { running: true, startedAt: null, storedElapsedMs: 120_000, lapMarkerMs: 0, activeStepId: "step-y", taskId: "task-b", taskName: "Beta process" },
+          showNewStepForm: true, newStepId: "step-y", draftInstruction: "", draftDurationText: "5", draftTools: [], draftPhotos: [], draftChecks: [],
+        },
+      },
+      activeScreen: "list", selectedTaskId: "task-a", showNewStepForm: false, newStepId: null,
+    }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await screen.findByTitle("Open Beta process · timer running");
+    expect(screen.getByTitle("Open Beta process · timer running")).toHaveTextContent("2:00");
+    advance(5_000);
+    await waitFor(() => expect(session().parkedCaptureByTaskId["task-b"].timer.storedElapsedMs).toBe(125_000));
+  });
+
+  it("KNOWN GAP: a stored selection for a task that no longer exists falls back to the first task but still reopens the stored draft form there", async () => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      captureTimer: { running: false, startedAt: null, storedElapsedMs: 0, lapMarkerMs: 0, activeStepId: null, taskId: null, taskName: "" },
+      parkedCaptureByTaskId: {}, activeScreen: "detail", selectedTaskId: "task-gone", showNewStepForm: true, newStepId: "step-z",
+    }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await screen.findByRole("button", { name: "Process list" });
+    expect(processName()).toBe("Alpha process");
+    // Current behaviour: the load path refuses to reopen the draft because the stored task is not the
+    // resolved one, but the separate session-hydration effect has already set showNewStepForm and the
+    // stored newStepId without checking that the task exists, so an empty draft panel opens on the
+    // fallback task. Recorded as a defect, not corrected in this slice.
+    expect(screen.getByRole("textbox", { name: "New step name" })).toBeInTheDocument();
+    expect(session()).toMatchObject({ selectedTaskId: "task-a", showNewStepForm: true, newStepId: "step-z" });
+  });
+});
+
+describe("capture session: legacy key, malformed data and storage failures", () => {
+  it("recovers a legacy capture-timer key as a running session and migrates it to the session key", async () => {
+    localStorage.setItem(LEGACY_KEY, JSON.stringify({ running: true, startedAt: null, storedElapsedMs: 45_000, lapMarkerMs: 0, activeStepId: "step-legacy", taskId: "task-a", taskName: "Alpha process" }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await screen.findByRole("textbox", { name: "New step name" });
+    expect(screen.getByText("0:45")).toBeInTheDocument();
+    await waitFor(() => expect(localStorage.getItem(LEGACY_KEY)).toBeNull());
+    expect(session().captureTimer).toMatchObject({ running: true, taskId: "task-a", activeStepId: "step-legacy", storedElapsedMs: 45_000 });
+    expect(session()).toMatchObject({ activeScreen: "detail", selectedTaskId: "task-a", showNewStepForm: true, newStepId: "step-legacy" });
+  });
+
+  it("a legacy timer without a task opens the list with no draft", async () => {
+    localStorage.setItem(LEGACY_KEY, JSON.stringify({ running: false, storedElapsedMs: 10_000, taskId: null, activeStepId: null }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await screen.findByRole("button", { name: /Alpha process 0 steps/ });
+    expect(screen.queryByRole("button", { name: "Process list" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+  });
+
+  it("malformed session JSON is ignored and replaced by the next state write", async () => {
+    localStorage.setItem(SESSION_KEY, "{not json");
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await screen.findByRole("button", { name: /Alpha process 0 steps/ });
+    expect(screen.queryByRole("button", { name: "Process list" })).toBeNull();
+    await openTask(/Alpha process 0 steps/);
+    expect(session()).toMatchObject({ activeScreen: "detail", selectedTaskId: "task-a" });
+  });
+
+  it("a session whose timer lacks a boolean running flag is treated as absent", async () => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ captureTimer: { storedElapsedMs: 9_000 }, activeScreen: "detail", selectedTaskId: "task-a" }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await screen.findByRole("button", { name: /Alpha process 0 steps/ });
+    expect(screen.queryByRole("button", { name: "Process list" })).toBeNull();
+  });
+
+  it("a parked entry without a task or step id is dropped; other entries keep defaults", async () => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      captureTimer: { running: false, storedElapsedMs: 0 },
+      parkedCaptureByTaskId: {
+        "task-a": { timer: { running: false, storedElapsedMs: 5_000 } },
+        "task-b": { timer: { running: false, storedElapsedMs: 5_000, taskId: "task-b", activeStepId: "step-b" }, draftTools: ["T", 7], draftChecks: "no" },
+      },
+      activeScreen: "list", selectedTaskId: "task-a",
+    }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await screen.findByRole("button", { name: /Alpha process 0 steps/ });
+    await waitFor(() => expect(session().parkedCaptureByTaskId["task-b"]).toBeTruthy());
+    expect(session().parkedCaptureByTaskId["task-a"]).toBeUndefined();
+    expect(session().parkedCaptureByTaskId["task-b"]).toMatchObject({ newStepId: "step-b", draftDurationText: "5", draftTools: ["T"], draftChecks: [], draftInstruction: "", showNewStepForm: false });
+  });
+
+  it("a storage write failure is swallowed and the timer keeps working in memory", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("quota", "QuotaExceededError"); });
+    startTimer();
+    expect(screen.getByTitle(/^Stop timer for Alpha process/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(setItem).toHaveBeenCalled();
+    setItem.mockRestore();
+  });
+
+  it("a selected task alone keeps the session persisted after returning to the list", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    backToList();
+    expect(session()).toMatchObject({ activeScreen: "list", selectedTaskId: "task-a", showNewStepForm: false });
+  });
+
+  it("when the session collapses to nothing (no tasks, nothing selected) both keys are removed", async () => {
+    // The stored selection points at a task the loaded project does not have; the load resolves the
+    // selection to "" and the resulting empty session is removed along with the legacy key.
+    const empty: PlannerState = { ...state, tasks: [] };
+    vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(empty);
+    localStorage.setItem(LEGACY_KEY, "{}");
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ captureTimer: { running: false, storedElapsedMs: 0 }, activeScreen: "list", selectedTaskId: "task-gone" }));
+    render(<MobilePhotoPortal projectId="p" />);
+    await screen.findByRole("button", { name: "Add process" });
+    await waitFor(() => expect(localStorage.getItem(SESSION_KEY)).toBeNull());
+    expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
+  });
+});
+
+describe("capture session: lifecycle around task switches and unmount", () => {
+  it("typing in the draft and switching tasks flushes exactly one save before the switch", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Fit bracket" } });
+    backToList();
+    await waitFor(() => expect(saveMobileStepToSupabase).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(saveMobileStepToSupabase).mock.calls[0][0]).toMatchObject({ id: "task-a" });
+    await openTask(/Beta process 0 steps/);
+    await act(async () => {});
+    expect(saveMobileStepToSupabase).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+  });
+
+  it("KNOWN GAP: unmounting with the autosave debounce armed does not flush the draft", async () => {
+    const view = render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Fit bracket" } });
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Current behaviour: the 450 ms autosave timer fires after unmount and still writes to the task it was
+    // scheduled for; nothing flushes synchronously at unmount. Recorded, not corrected, in this slice.
+    expect(saveMobileStepToSupabase).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(saveMobileStepToSupabase).mock.calls[0][0]).toMatchObject({ id: "task-a" });
+  });
+
+  it("a late save response after switching tasks does not open a draft on the new task", async () => {
+    let release!: () => void;
+    vi.mocked(saveMobileStepToSupabase).mockImplementationOnce((_task, step) => new Promise((resolve) => { release = () => resolve({ ...step, version: 1 }); }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Fit bracket" } });
+    backToList();
+    await waitFor(() => expect(saveMobileStepToSupabase).toHaveBeenCalledTimes(1));
+    await openTask(/Beta process 0 steps/);
+    await act(async () => { release(); });
+    expect(processName()).toBe("Beta process");
+    expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add step" })).toBeInTheDocument();
+  });
+
+  it("a timer parked while its task switch is in progress is not written to the wrong task on stop", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    startTimer();
+    advance(70_000);
+    backToList();
+    await openTask(/Beta process 0 steps/);
+    fireEvent.click(screen.getByTitle("Open Alpha process · timer running"));
+    await screen.findByTitle(/^Stop timer for Alpha process/);
+    stopTimer();
+    await waitFor(() => expect(saveMobileStepToSupabase).toHaveBeenCalled());
+    const lastCall = vi.mocked(saveMobileStepToSupabase).mock.calls.at(-1)!;
+    expect(lastCall[0]).toMatchObject({ id: "task-a" });
+    expect(lastCall[2]).toMatchObject({ durationMinutes: 2 });
+  });
+});

@@ -386,3 +386,14 @@ Commit `33b2797`. Found while verifying the catalog proposal on the retained dat
   - 1,927 unit tests (233 files), lint, optimized build, `check:bundles`, typecheck and diff check pass
   - bundles unchanged (planner 275.4 KiB, AWI master 274.3 KiB, largest chunk 124.0 KiB)
   - all 20 browser cases on the retained isolated database (not reset; stopped afterwards with volumes kept)
+
+## Paused for correctness proposals (2026-10-03)
+
+Phase 3 is paused while these are reviewed. Neither is implemented, and no migration has been written or applied.
+- `docs/restore-step-design.md` — **Restore Step data-preservation fix.**
+  - Verified on the retained database: today's mobile Restore deletes every tool assignment and exploded view in the scenario, deletes a teammate's newer step in another task, and reverts sibling edits.
+  - Proposal: server-held deleted-step records with targeted delete and restore RPCs, plus a guard on `replace_task_children`.
+- `docs/tool-catalog-consistency-design.md` §5b — **an enforceable old-client fence.**
+  - All tool writes go through a diff-based RPC, and a `step_tools` trigger refuses divergent direct writes.
+  - Offline drafts are preserved: legacy drafts are add-only, with a notice.
+  - Deployment order is M1 → C1 → M2 → M3/C2, with acceptance criteria per stage.

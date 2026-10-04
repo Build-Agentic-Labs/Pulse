@@ -1,9 +1,11 @@
 import { act, renderHook } from "@testing-library/react";
 import { useRef, useState } from "react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
-import { saveProcedureTaskUpdateToSupabase, type SaveState } from "@/domain/supabase-planner";
+import { saveProcedureTaskUpdateToSupabase, saveTaskPhotoAnnotationsToSupabase, type SaveState } from "@/domain/supabase-planner";
+import type { StepPhotoAnnotationMap } from "@/domain/step-photos";
 import type { PlannerState, Task } from "@/domain/types";
+import { writeCachedPlannerState } from "@/lib/planner-state-cache";
 import { deferredPromise as deferred, procedureTestTask as task } from "./procedure-test-fixtures";
 import { useProcedureDrafts } from "./use-procedure-drafts";
 import { createProcedureSaveQueueStore, useProcedureSaveQueue } from "./use-procedure-save-queue";
@@ -19,6 +21,7 @@ vi.mock("@/lib/planner-state-cache", async (original) => ({
 }));
 
 const save = vi.mocked(saveProcedureTaskUpdateToSupabase);
+const saveAnnotations = vi.mocked(saveTaskPhotoAnnotationsToSupabase);
 
 const notifyFeedback = vi.fn();
 const flushDeferredRemoteRefresh = vi.fn();
@@ -54,7 +57,7 @@ function renderQueue({ viewOnly = false } = {}) {
       remoteRefreshAppliedRef,
       flushDeferredRemoteRefresh,
     });
-    return { plannerState, saveState, saveError, drafts, queue, store };
+    return { plannerState, setPlannerState, saveState, saveError, drafts, queue, store };
   }, { initialProps: { projectId: "project-queue" } });
 }
 
@@ -65,6 +68,8 @@ function savedInstruction(callIndex: number) {
 beforeEach(() => {
   vi.useFakeTimers();
   save.mockReset();
+  saveAnnotations.mockReset();
+  vi.mocked(writeCachedPlannerState).mockClear();
   notifyFeedback.mockClear();
   flushDeferredRemoteRefresh.mockClear();
   window.localStorage.clear();
@@ -250,4 +255,140 @@ it("saves to the project of the render that scheduled the edit after an in-place
 
   expect(save).toHaveBeenCalledTimes(1);
   expect(save.mock.calls[0]?.[2]).toBe("project-queue");
+});
+
+it("merges rapid edits into one save sent 750 ms after the last keystroke", async () => {
+  save.mockResolvedValue(task("ab", 2));
+  const { result } = renderQueue();
+
+  act(() => {
+    result.current.queue.updateProcedureStepField("task-1", "step-1", "instruction", "a");
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+  act(() => {
+    result.current.queue.updateProcedureStepField("task-1", "step-1", "instruction", "ab");
+  });
+  expect(Object.keys(result.current.store.procedureSaveTimersRef.current)).toEqual(["task-1"]);
+  await act(async () => { await vi.advanceTimersByTimeAsync(749); });
+  expect(save).not.toHaveBeenCalled();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(savedInstruction(0)).toBe("ab");
+});
+
+it("retries from the latest task state, not the failed attempt's snapshot", async () => {
+  save.mockRejectedValueOnce(new Error("Network down")).mockResolvedValueOnce(task("typed", 6));
+  const { result } = renderQueue();
+
+  act(() => {
+    result.current.queue.updateProcedureStepField("task-1", "step-1", "instruction", "typed");
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+  // Another device's change lands through a refresh during the retry wait.
+  act(() => {
+    result.current.setPlannerState((current) => ({
+      ...current,
+      tasks: current.tasks.map((entry) => ({ ...entry, version: 5, description: "refreshed elsewhere" })),
+    }));
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(2_500 + 750); });
+
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save.mock.calls[1]?.[0]).toMatchObject({ version: 5, description: "refreshed elsewhere" });
+  expect(savedInstruction(1)).toBe("typed");
+});
+
+it("feeds the live queue state to draft merges through the store probe", async () => {
+  const pendingSave = deferred<Task>();
+  save.mockReturnValueOnce(pendingSave.promise);
+  const { result } = renderQueue();
+  const local = task("server text", 1, { description: "local typing" });
+  const server = task("server text", 1, { description: "server value" });
+
+  act(() => {
+    result.current.queue.updateProcedureStepField("task-1", "step-1", "instruction", "typed");
+  });
+  expect(Object.keys(result.current.store.pendingDraftSnapshot("task-1") ?? {})).toEqual(["task-1:step-1:instruction"]);
+  const merge = () => result.current.drafts.mergeServerTaskIntoLocalTask(local, server, {}, { source: "realtime" });
+  expect(merge().description).toBe("local typing");
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+  expect(merge().description).toBe("local typing");
+
+  await act(async () => { pendingSave.resolve(task("typed", 2)); });
+  expect(result.current.store.hasPendingProcedureSaveWork("task-1")).toBe(false);
+  expect(merge().description).toBe("server value");
+});
+
+describe("annotation-only saves", () => {
+  const firstBase: StepPhotoAnnotationMap = {};
+  const laterBase: StepPhotoAnnotationMap = {};
+
+  it("coalesce into one annotation merge that keeps the first baseline", async () => {
+    saveAnnotations.mockResolvedValue(task("server text", 2));
+    const { result } = renderQueue();
+    const tasks = result.current.plannerState.tasks;
+
+    act(() => {
+      result.current.queue.scheduleProcedureTaskSave(tasks[0]!, tasks, firstBase);
+      result.current.queue.scheduleProcedureTaskSave(tasks[0]!, tasks, laterBase);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+
+    expect(save).not.toHaveBeenCalled();
+    expect(saveAnnotations).toHaveBeenCalledTimes(1);
+    expect(saveAnnotations.mock.calls[0]?.[1]).toBe(firstBase);
+    expect(saveAnnotations.mock.calls[0]?.[2]).toBe("project-queue");
+  });
+
+  it("fall back to the full procedure save when a field edit joins them", async () => {
+    save.mockResolvedValue(task("typed", 2));
+    const { result } = renderQueue();
+    const tasks = result.current.plannerState.tasks;
+
+    act(() => {
+      result.current.queue.scheduleProcedureTaskSave(tasks[0]!, tasks, firstBase);
+      result.current.queue.updateProcedureStepField("task-1", "step-1", "instruction", "typed");
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+
+    expect(saveAnnotations).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("retry with their original baseline after a failure", async () => {
+    saveAnnotations.mockRejectedValueOnce(new Error("Network down")).mockResolvedValueOnce(task("server text", 2));
+    const { result } = renderQueue();
+    const tasks = result.current.plannerState.tasks;
+
+    act(() => {
+      result.current.queue.scheduleProcedureTaskSave(tasks[0]!, tasks, firstBase);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(750 + 2_500 + 750); });
+
+    expect(save).not.toHaveBeenCalled();
+    expect(saveAnnotations).toHaveBeenCalledTimes(2);
+    expect(saveAnnotations.mock.calls[1]?.[1]).toBe(firstBase);
+  });
+});
+
+it("writes the confirmed task to the cache of the project that issued the save", async () => {
+  const pendingSave = deferred<Task>();
+  save.mockReturnValueOnce(pendingSave.promise);
+  const { result, rerender } = renderQueue();
+
+  act(() => {
+    result.current.queue.updateProcedureStepField("task-1", "step-1", "instruction", "typed");
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+  rerender({ projectId: "project-other" });
+  await act(async () => { pendingSave.resolve(task("typed", 2)); });
+
+  const cacheWrites = vi.mocked(writeCachedPlannerState).mock.calls;
+  expect(cacheWrites).toHaveLength(1);
+  expect(cacheWrites[0]?.[0]).toBe("project-queue");
+  expect(cacheWrites[0]?.[1].tasks[0]).toMatchObject({ version: 2 });
+  expect(cacheWrites[0]?.[2]).toBe("scenario-main");
 });

@@ -341,7 +341,14 @@ Ownership and decisions:
   - Deleted tasks, and steps whose tools were cleared meanwhile, are skipped.
   - A scenario switched away from meanwhile is not touched.
 
-  This reverts to what the database holds, because step tools only change through their own per-row writes. Error status, the "Save failed" toast and the stop before library writes are unchanged.
+  This restores the lists the client had before the rewrite, keeping edits made since. That usually matches the database, but **not always**. It does not when another write changed the same steps' `step_tools` rows while the save was pending:
+  - a Gantt reorder issued in that window (see below)
+  - another tab or user
+  - the mobile portal's full-list syncs
+
+  In those cases the screen can disagree with the database until the next reload or realtime refresh. (Corrected 2026-10-03; this entry originally claimed the revert always matched the database.)
+
+  Error status, the "Save failed" toast and the stop before library writes are unchanged.
 
   Tests:
   - rename, delete and tidy, each with an unrelated field edit and a step tool added while the save was pending
@@ -355,7 +362,7 @@ Ownership and decisions:
   - **Rename:** the library row moves to the new name while `step_tools` keep the old one. After a reload the old name returns, as a tool with no library entry.
   - **Delete:** the library row is deleted but the step references remain.
   - **Tidy:** stored spellings stay messy.
-  A characterization test pins this. The fix belongs in a separate, approved change (see the proposal in the hand-off report).
+  A characterization test pins this. Verified on the real retained database on 2026-10-03 with disposable fixtures. The design proposal is in `docs/tool-catalog-consistency-design.md`; it is not implemented and awaits review.
 
 Validation:
 - Seam tests: 6 for tools and 5 for media. Each fails against a targeted mutation of the behavior it guards: lock taken and released, rollback that keeps concurrent edits, destination-first cut with compensation, stale library responses, tracker keys, the confirmation guard, and category migration.

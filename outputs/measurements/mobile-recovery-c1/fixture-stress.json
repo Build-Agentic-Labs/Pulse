@@ -1,0 +1,22 @@
+{
+  "fixture": "stress",
+  "spec": {
+    "zones": 2,
+    "stations": 4,
+    "tasks": 1100,
+    "stepsPerTask": 1,
+    "toolsPerStep": 0,
+    "heavyTaskTools": 1100
+  },
+  "counts": {
+    "zones": 2,
+    "stations": 4,
+    "tasks": 1100,
+    "manufacturing_steps": 1100,
+    "step_tools": 1100
+  },
+  "projectId": "project-a524f84e-239f-430e-bd32-27a1b89da764",
+  "scenarioId": "scenario-a524f84e-239f-430e-bd32-27a1b89da764",
+  "workspace": "ws-measure-stress-88c69922",
+  "seedMs": 179
+}

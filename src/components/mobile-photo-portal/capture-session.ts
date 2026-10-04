@@ -111,7 +111,8 @@ function normalizeParkedCaptureByTaskId(value: unknown): Record<string, ParkedTa
   }, {});
 }
 
-export function mobileCaptureSessionStorageKey(projectId?: string) {
+export function mobileCaptureSessionStorageKey(projectId?: string, userId?: string | null) {
+  if (userId) return `pulse:mobile-capture-session-v2:${encodeURIComponent(userId)}:${encodeURIComponent(projectId ?? "default")}`;
   return projectId ? `pulse:mobile-capture-session:${projectId}` : "pulse:mobile-capture-session:default";
 }
 
@@ -135,13 +136,13 @@ function normalizeCaptureTimerSnapshot(value: Partial<CaptureTimerState> | null 
   };
 }
 
-export function readMobileCaptureSession(projectId?: string): MobileCaptureSessionSnapshot | null {
-  if (typeof window === "undefined") {
+export function readMobileCaptureSession(projectId?: string, userId?: string | null): MobileCaptureSessionSnapshot | null {
+  if (typeof window === "undefined" || userId === null) {
     return null;
   }
 
   try {
-    const raw = window.localStorage.getItem(mobileCaptureSessionStorageKey(projectId));
+    const raw = window.localStorage.getItem(mobileCaptureSessionStorageKey(projectId, userId));
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<MobileCaptureSessionSnapshot>;
       const captureTimer = normalizeCaptureTimerSnapshot(parsed.captureTimer);
@@ -159,6 +160,7 @@ export function readMobileCaptureSession(projectId?: string): MobileCaptureSessi
       };
     }
 
+    if (userId) return null; // Unowned pre-C1 sessions must never hydrate another account.
     const legacyRaw = window.localStorage.getItem(legacyCaptureTimerStorageKey(projectId));
     if (!legacyRaw) {
       return null;
@@ -220,16 +222,17 @@ export function writeMobileCaptureSession(
   projectId: string | undefined,
   session: MobileCaptureSessionSnapshot,
   now: number,
+  userId?: string | null,
 ) {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || userId === null) {
     return;
   }
 
-  const key = mobileCaptureSessionStorageKey(projectId);
+  const key = mobileCaptureSessionStorageKey(projectId, userId);
 
   if (!shouldPersistMobileCaptureSession(session)) {
     window.localStorage.removeItem(key);
-    window.localStorage.removeItem(legacyCaptureTimerStorageKey(projectId));
+    if (!userId) window.localStorage.removeItem(legacyCaptureTimerStorageKey(projectId));
     return;
   }
 
@@ -257,7 +260,7 @@ export function writeMobileCaptureSession(
 
   try {
     window.localStorage.setItem(key, JSON.stringify(payload));
-    window.localStorage.removeItem(legacyCaptureTimerStorageKey(projectId));
+    if (!userId) window.localStorage.removeItem(legacyCaptureTimerStorageKey(projectId));
   } catch {
     // Ignore quota/private-mode failures; in-memory state still works for this session.
   }

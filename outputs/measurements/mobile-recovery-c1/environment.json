@@ -1,0 +1,15 @@
+{
+  "sha": "9dfcbb739a5b0136734bc7f883730ac3a2521ad1",
+  "dirty": true,
+  "node": "v22.16.0",
+  "next": "16.3.0",
+  "playwright": "1.63.0",
+  "os": "Darwin 27.0.0 27.0.1",
+  "cpu": "Apple M4 Pro",
+  "memoryBytes": 25769803776,
+  "docker": "Docker version 29.7.2, build a7dcaa6",
+  "network": "loopback (127.0.0.1), no throttling; Next.js production server (next start) on :3100; Supabase local stack (Kong) on :56321",
+  "database": "retained isolated project pulse-e2e (scratch/browser-db), started from its existing data, never reset",
+  "samplesPerFixture": 1,
+  "startedAt": "2026-10-04T23:40:47.434Z"
+}

@@ -61,7 +61,9 @@ export async function syncStepToolsForStepToSupabase(
   stepId: string,
   toolNames: string[],
   projectId?: string,
+  assertCurrent?: () => void,
 ) {
+  assertCurrent?.();
   const cleanedToolNames = toolNames
     .map((toolName) => toolName.trim())
     .filter(Boolean)
@@ -87,10 +89,12 @@ export async function syncStepToolsForStepToSupabase(
     .filter((toolId) => !nextToolIds.includes(toolId));
 
   if (nextTools.length) {
+    assertCurrent?.();
     await throwIfError(supabase.from("step_tools").upsert(nextTools));
   }
 
   if (staleToolIds.length) {
+    assertCurrent?.();
     await throwIfError(supabase.from("step_tools").delete().in("id", staleToolIds));
   }
 }

@@ -45,6 +45,22 @@ function fixture({ parent = true, project = "p", collision = false, offline = fa
   return { client, rows, writes };
 }
 describe("mobile step persistence", () => {
+  it("does not write after an account changes during the prerequisite reads", async () => {
+    const f = fixture();
+    let checks = 0;
+    await expect(saveMobileStepToSupabase(task, step, { name: step.name }, "p", f.client, () => {
+      if (++checks > 1) throw new Error("account changed");
+    })).rejects.toThrow("account changed");
+    expect(f.writes).toEqual([]);
+  });
+
+  it("retains an already saved step but refuses a later duration update after an account change", async () => {
+    const f = fixture();
+    await expect(saveMobileStepToSupabase(task, step, { name: step.name, durationMinutes: 5 }, "p", f.client, () => {
+      if (f.writes.length) throw new Error("account changed");
+    })).rejects.toThrow("account changed");
+    expect(f.writes).toEqual([{ table: "manufacturing_steps", op: "update", value: { name: step.name, duration_minutes: 5 } }]);
+  });
   it("edits only the phone field, retaining desktop instruction and other steps", async () => {
     const f = fixture();
     const saved = await saveMobileStepToSupabase(task, step, { name: step.name }, "p", f.client);

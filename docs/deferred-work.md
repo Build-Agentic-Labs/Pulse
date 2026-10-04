@@ -312,3 +312,20 @@ data-loss path for phone drafts and the input to the Package C scoping decision;
 
 **d. Trivia, not a defect:** `getCaptureTimerElapsed` treats `startedAt === 0` as "not started" (falsy
 check). Real clocks never produce 0; pinned in `capture-session.test.ts` so a future change is deliberate.
+
+
+### C1 feature-branch update — 2026-10-04
+
+On `codex/mobile-draft-recovery`, §8e is addressed for new New Step drafts by user/product/task
+slots and exact write-token acknowledgment. The legacy IndexedDB record is preserved; only explicit
+user-approved Review → Use copies it into an owned slot. Scoped capture-session keys prevent another
+account from automatically hydrating parked fields. Unowned old localStorage capture sessions remain
+stored and are not auto-restored; the legacy review control handles the IndexedDB record only.
+
+The §8b unsent post-unmount autosave is now cancelled. Already-issued requests cannot be recalled;
+subsequent queued stages check the captured editor/account lifetime. Async local puts can still be lost
+if the document closes before commit. Same-user, same-task concurrent-tab puts remain last-write-win;
+exact tokens protect against stale deletion, not concurrent overwrite. No timer UX change (§8c) is included.
+
+See `docs/mobile-draft-recovery-c1-results.md` for current evidence and limitations. Historical B1/B2
+characterization above describes its frozen baseline, not this branch's changed behavior.

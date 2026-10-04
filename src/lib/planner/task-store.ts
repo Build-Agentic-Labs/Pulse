@@ -207,7 +207,9 @@ export async function saveMobileStepToSupabase(
   patch: Partial<Pick<ManufacturingStep, "name" | "instruction" | "durationMinutes" | "qualityCheck">>,
   projectId?: string,
   providedClient?: ReturnType<typeof plannerClient>,
+  assertCurrent?: () => void,
 ): Promise<ManufacturingStep> {
+  assertCurrent?.();
   const supabase = providedClient ?? plannerClient();
   await assertTaskRowInProject(supabase, task, projectId);
   const parent = await throwIfError(supabase.from("tasks").select("id").eq("id", task.id).maybeSingle());
@@ -217,6 +219,7 @@ export async function saveMobileStepToSupabase(
     }
     // A new local process must exist before any child write. Ignore a simultaneous
     // insert by another save, rather than replacing its metadata with our snapshot.
+    assertCurrent?.();
     await throwIfError(supabase.from("tasks").upsert(taskRow(task), { onConflict: "id", ignoreDuplicates: true }));
   }
   await assertTaskInProject(supabase, task.id, projectId);
@@ -230,6 +233,7 @@ export async function saveMobileStepToSupabase(
     const rows = await throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", task.id));
     const existing = (rows ?? []).find((row) => String(row.id) === step.id);
     if (existing) {
+      assertCurrent?.();
       saved = Object.keys(fields).length
         ? await throwIfError(supabase.from("manufacturing_steps").update(fields).eq("id", step.id).eq("task_id", task.id).select("*").maybeSingle())
         : existing;
@@ -239,6 +243,7 @@ export async function saveMobileStepToSupabase(
       throw new Error("This step was deleted on another device. Your draft has been kept.");
     }
     const sequence = (rows ?? []).reduce((max, row) => Math.max(max, Number(row.sequence)), 0) + 1;
+    assertCurrent?.();
     const result = await supabase.from("manufacturing_steps").insert({ ...manufacturingStepRow(task.id, step), sequence }).select("*").maybeSingle();
     if (result.error?.code === "23505" && attempt < 2) continue;
     if (result.error) throw result.error;
@@ -249,6 +254,7 @@ export async function saveMobileStepToSupabase(
   if (patch.durationMinutes !== undefined) {
     const rows = await throwIfError(supabase.from("manufacturing_steps").select("duration_minutes").eq("task_id", task.id));
     const minutes = (rows ?? []).reduce((total, row) => total + Math.max(Number(row.duration_minutes) || 0, 0), 0);
+    assertCurrent?.();
     await throwIfError(supabase.from("tasks").update({ planned_duration_minutes: minutes }).eq("id", task.id));
   }
   return mapManufacturingStepRecord(saved);

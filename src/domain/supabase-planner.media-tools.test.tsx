@@ -59,6 +59,22 @@ beforeEach(() => {
 });
 
 describe("step photo storage", () => {
+  it("stops before uploading when the account changes during prerequisite reads", async () => {
+    let checks = 0;
+    await expect(uploadStepPhotoAttachment("task-1", "step-1", photo("stopped"), PROJECT, () => {
+      if (++checks > 1) throw new Error("account changed");
+    })).rejects.toThrow("account changed");
+    expect(db.storageCalls.filter((call) => call.method === "upload")).toEqual([]);
+    expect(db.rows("step_photos")).toEqual([]);
+  });
+
+  it("stops metadata writes after an upload if the account changed", async () => {
+    await expect(uploadStepPhotoAttachment("task-1", "step-1", photo("uploaded"), PROJECT, () => {
+      if (db.storageCalls.some((call) => call.method === "upload")) throw new Error("account changed");
+    })).rejects.toThrow("account changed");
+    expect(db.storageCalls.filter((call) => call.method === "upload")).toHaveLength(1);
+    expect(db.rows("step_photos")).toEqual([]);
+  });
   it("uploads a new photo to its project-scoped path, records attribution, and returns the signed URL", async () => {
     const saved = await uploadStepPhotoAttachment("task-1", "step-1", photo("photo-new"), PROJECT);
 

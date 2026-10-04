@@ -125,10 +125,13 @@ async function saveStepPhotoMetadataToSupabase(
   stepId: string,
   photo: StepPhotoAttachment,
   project?: PlannerProjectContext,
+  assertCurrent?: () => void,
 ) {
+  assertCurrent?.();
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, project?.projectId);
   const uploadedBy = await currentUserIdForAttribution(supabase);
+  assertCurrent?.();
   await throwIfError(supabase.from("step_photos").upsert(stepPhotoRow(taskId, stepId, photo, project, uploadedBy)));
 }
 
@@ -137,20 +140,23 @@ export async function uploadStepPhotoAttachment(
   stepId: string,
   photo: StepPhotoAttachment,
   project?: PlannerProjectContext,
+  assertCurrent?: () => void,
 ): Promise<StepPhotoAttachment> {
   if (!photo.dataUrl.startsWith("data:image/")) {
     if (photo.storagePath && /^https?:\/\//.test(photo.dataUrl)) {
-      await saveStepPhotoMetadataToSupabase(taskId, stepId, photo, project);
+      await saveStepPhotoMetadataToSupabase(taskId, stepId, photo, project, assertCurrent);
     }
     return photo;
   }
 
+  assertCurrent?.();
   const supabase = plannerClient();
   await assertTaskInProject(supabase, taskId, project?.projectId);
   const blob = await dataUrlToBlob(photo.dataUrl);
   const extension = photo.contentType?.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
   const storagePath = projectScopedStoragePath(taskId, stepId, photo, project, safeStorageSegment(extension));
 
+  assertCurrent?.();
   await throwIfError(
     supabase.storage.from(stepPhotoBucket).upload(storagePath, blob, {
       cacheControl: "31536000",
@@ -166,6 +172,7 @@ export async function uploadStepPhotoAttachment(
   const thumbnailBlob = await createPhotoThumbnailBlob(blob).catch(() => null);
   if (thumbnailBlob) {
     thumbnailStoragePath = projectScopedThumbnailStoragePath(taskId, stepId, photo, project);
+    assertCurrent?.();
     await throwIfError(
       supabase.storage.from(stepPhotoBucket).upload(thumbnailStoragePath, thumbnailBlob, {
         cacheControl: "31536000",
@@ -186,7 +193,7 @@ export async function uploadStepPhotoAttachment(
     sizeBytes: blob.size,
   };
 
-  await saveStepPhotoMetadataToSupabase(taskId, stepId, uploadedPhoto, project);
+  await saveStepPhotoMetadataToSupabase(taskId, stepId, uploadedPhoto, project, assertCurrent);
 
   // The bucket is private, so the fabricated public URL can never load -- returning it would hand
   // the caller a permanently-broken image. The row is saved (a reload re-signs it), so fail loudly.

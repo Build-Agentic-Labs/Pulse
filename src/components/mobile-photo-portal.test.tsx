@@ -3,12 +3,14 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
 import type { ManufacturingStep, PlannerState, Task } from "@/domain/types";
+import { mobileAuth } from "@/test-support/mobile-auth";
 import { MobilePhotoPortal } from "./mobile-photo-portal";
 import { deletePlannerTask, loadPlannerStateFromSupabase, loadTaskFromSupabase, subscribePlannerStateChanges, saveMobileStepToSupabase, saveTaskToSupabase } from "@/domain/supabase-planner";
 
 vi.mock("@/components/app-flow-panels", () => ({ AppLoadingShell: () => <div>Loading</div> }));
 vi.mock("@/domain/supabase-planner", async (original) => ({
   ...await original<typeof import("@/domain/supabase-planner")>(),
+  createPlannerSupabaseClient: () => mobileAuth.client,
   loadPlannerStateFromSupabase: vi.fn(),
   loadTaskFromSupabase: vi.fn(),
   loadToolLibraryFromSupabase: vi.fn(async () => []),
@@ -27,6 +29,7 @@ const task: Task = {
 };
 const state: PlannerState = { ...emptyPlannerState, product: { ...emptyPlannerState.product, projectId: "p", name: "Test project" }, tasks: [task] };
 beforeEach(() => {
+  mobileAuth.userId = "user-test";
   vi.clearAllMocks(); localStorage.clear();
   vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(state);
   vi.mocked(saveMobileStepToSupabase).mockImplementation(async (_task, step) => ({ ...step, version: 1 }));
@@ -40,6 +43,7 @@ async function openStep() {
   render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
   fireEvent.click(await screen.findByRole("button", { name: /Test process 0 steps/ }));
   fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
 }
 describe("phone step authoring", () => {
   it("reveals process deletion by swiping and keeps the row if deletion fails", async () => {

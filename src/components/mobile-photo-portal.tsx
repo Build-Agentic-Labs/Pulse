@@ -51,6 +51,8 @@ import { compareTasksByWbs } from "@/domain/task-planning";
 import { getTaskVideos } from "@/domain/task-videos";
 import { STEP_TOOL_LISTS_FIELD, addStepTool, buildStepToolLibrary, countTaskStepTools, getStepToolList, removeStepTool } from "@/domain/step-tools";
 import {
+  createPlannerSupabaseClient,
+  getUserFromSession,
   addStepToolToSupabase,
   deletePlannerTask,
   canPatchTaskFromRealtimePayload,
@@ -95,11 +97,16 @@ import {
   type ParkedTaskCaptureState,
 } from "@/components/mobile-photo-portal/capture-session";
 import {
-  clearMobileNewStepRecoveryDraft,
   loadMobileNewStepRecoveryDraft,
+  isMobileRecoveryPayload,
+  type MobileNewStepDraftRecord,
+  createMobileRecoveryDraftStore,
+  type ScopedRecoveryDraft,
   readBlobAsDataUrl,
-  saveMobileNewStepRecoveryDraft,
+  recoveryDraftKey,
 } from "@/components/mobile-photo-portal/recovery-draft-store";
+
+import { LegacyDraftReview } from "./mobile-photo-portal/legacy-draft-review";
 
 const MAX_IMAGE_EDGE = 1280;
 const JPEG_QUALITY = 0.72;
@@ -392,24 +399,48 @@ function withUpdatedTask(state: PlannerState, nextTask: Task, shouldReschedule =
   };
 }
 
-export function MobilePhotoPortal({
-  projectId,
-  projectContext,
-  onBackToProjects,
-  onReady,
-  initialPlannerState,
-}: {
+type MobilePhotoPortalProps = {
   projectId?: string;
   projectContext?: PlannerProjectContext;
   onBackToProjects?: () => void;
   onReady?: () => void;
-  /**
-   * Server-fetched planner state (Stage 5 pattern): the capture list paints from
-   * the document; the client's own load still runs and replaces it, keeping the
-   * remote as the authority. Consumed once per project.
-   */
   initialPlannerState?: PlannerState;
-}) {
+};
+
+// Account changes remount the editor, so old parked fields, retry queues and draft state cannot
+// become the next account's work. Invalidate synchronously in the auth callback before React commits.
+export function MobilePhotoPortal(props: MobilePhotoPortalProps) {
+  const [identity, setIdentity] = useState<{ userId: string | null; generation: number } | null>(null);
+  const identityRef = useRef<{ userId: string | null; generation: number } | null>(null);
+  useEffect(() => {
+    let active = true;
+    let revision = 0;
+    const client = createPlannerSupabaseClient();
+    function accept(userId: string | null) {
+      if (!active || (identityRef.current && identityRef.current.userId === userId)) return;
+      const next = { userId, generation: (identityRef.current?.generation ?? 0) + 1 };
+      identityRef.current = next;
+      setIdentity(next);
+    }
+    const { data } = client.auth.onAuthStateChange((_event, session) => {
+      revision += 1;
+      accept(session?.user.id ?? null);
+    });
+    const initialRevision = revision;
+    void getUserFromSession(client).then(({ data }) => {
+      if (revision === initialRevision) accept(data.user?.id ?? null);
+    }).catch(() => { if (revision === initialRevision) accept(null); });
+    return () => { active = false; identityRef.current = null; data.subscription.unsubscribe(); };
+  }, []);
+  if (!identity) return <AppLoadingShell title="Loading mobile capture…" />;
+  return <AccountMobilePhotoPortal {...props} key={`${props.projectId ?? ""}:${identity.generation}`}
+    initialPlannerState={identity.generation === 1 ? props.initialPlannerState : undefined}
+    userId={identity.userId} isAccountCurrent={() => identityRef.current === identity} />;
+}
+
+function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects, onReady, initialPlannerState,
+  userId, isAccountCurrent,
+}: MobilePhotoPortalProps & { userId: string | null; isAccountCurrent: () => boolean }) {
   const [plannerState, setPlannerState] = useState<PlannerState | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [activeScreen, setActiveScreen] = useState<"list" | "detail">("list");
@@ -484,7 +515,20 @@ export function MobilePhotoPortal({
   const draggingTaskIdRef = useRef<string | null>(null);
   const dragTargetTaskIdRef = useRef<string | null>(null);
   const dragTargetPlacementRef = useRef<"before" | "after">("after");
-  const draftRestoreAttemptedRef = useRef(false);
+  const [legacyDraft, setLegacyDraft] = useState<MobileNewStepDraftRecord | null>(null);
+  const [legacyReviewing, setLegacyReviewing] = useState(false);
+  const [legacyBusy, setLegacyBusy] = useState(false);
+  const legacyDismissedRef = useRef(false);
+  const recoveryStore = useMemo(() => createMobileRecoveryDraftStore(), []);
+  const recoverableSnapshotsRef = useRef(new Map<string, { fingerprint: string; record: ScopedRecoveryDraft; stored: Promise<boolean> }>());
+  const lifetimeRef = useRef(true);
+  const isCurrentRef = useRef(isAccountCurrent);
+  useEffect(() => { isCurrentRef.current = isAccountCurrent; }, [isAccountCurrent]);
+  const isEditorCurrent = () => lifetimeRef.current && isCurrentRef.current();
+  useEffect(() => {
+    lifetimeRef.current = true;
+    return () => { lifetimeRef.current = false; if (newStepAutosaveTimerRef.current) window.clearTimeout(newStepAutosaveTimerRef.current); };
+  }, []);
   const newStepIdRef = useRef<string | null>(null);
   const newStepTouchedRef = useRef(false);
   const plannerStateRef = useRef<PlannerState | null>(null);
@@ -652,12 +696,12 @@ export function MobilePhotoPortal({
 
   useEffect(() => {
     sessionHydratedRef.current = false;
-  }, [projectId]);
+  }, [projectId, userId]);
 
   useEffect(() => {
     if (!sessionHydratedRef.current) {
       sessionHydratedRef.current = true;
-      const session = readMobileCaptureSession(projectId);
+      const session = readMobileCaptureSession(projectId, userId);
       if (!session) {
         return;
       }
@@ -718,8 +762,9 @@ export function MobilePhotoPortal({
         newStepId,
       }),
       Date.now(),
+      userId,
     );
-  }, [captureTimer, parkedCaptureByTaskId, activeScreen, selectedTaskId, showNewStepForm, newStepId, projectId]);
+  }, [captureTimer, parkedCaptureByTaskId, activeScreen, selectedTaskId, showNewStepForm, newStepId, projectId, userId]);
 
   useEffect(() => {
     function flushSessionSnapshot() {
@@ -738,12 +783,13 @@ export function MobilePhotoPortal({
           newStepId: newStepIdRef.current,
         }),
         Date.now(),
+        userId,
       );
     }
 
     window.addEventListener("pagehide", flushSessionSnapshot);
     return () => window.removeEventListener("pagehide", flushSessionSnapshot);
-  }, [activeScreen, showNewStepForm, projectId]);
+  }, [activeScreen, showNewStepForm, projectId, userId]);
 
   useEffect(() => {
     if (!captureTimer.running && !hasRunningParkedTimers) {
@@ -1192,7 +1238,7 @@ export function MobilePhotoPortal({
       const firstTask = getTopLevelTasks(savedState.tasks)
           .filter((task) => task.rowType === "task")
           .sort(compareTasksByWbs)[0];
-        const session = readMobileCaptureSession(projectId);
+        const session = readMobileCaptureSession(projectId, userId);
         const preferredTaskId = session?.selectedTaskId;
         const resolvedTaskId =
           preferredTaskId && savedState.tasks.some((task) => task.id === preferredTaskId)
@@ -1288,63 +1334,70 @@ export function MobilePhotoPortal({
     return () => {
       mounted = false;
     };
-  }, [projectId]);
+  }, [projectId, userId]);
+
+  function restoreOwnedDraft(draft: ScopedRecoveryDraft) {
+    if (!isEditorCurrent() || selectedTaskIdRef.current !== draft.taskId) return false;
+    const snapshot = { stepId: draft.stepId, name: draft.name ?? "", instruction: draft.instruction, durationText: draft.durationText, tools: draft.tools, photos: draft.photos, checks: new Set(draft.checks), checkValues: draft.checkValues ?? {} };
+    if (!hasDraftStepContentRef.current(snapshot)) return false; // Preserve even empty records.
+    recoverableSnapshotsRef.current.set(draft.taskId, { fingerprint: draftFingerprint(snapshot), record: draft, stored: Promise.resolve(true) });
+    setActiveScreen("detail"); setShowNewStepForm(true); setDraftStepId(draft.stepId);
+    setNewStepName(draft.name ?? ""); setNewStepInstruction(draft.instruction);
+    setNewStepDurationText(draft.durationText || "5"); setNewStepDraftTools(draft.tools);
+    setNewStepDraftPhotos(draft.photos); setNewStepDraftChecks(snapshot.checks);
+    setNewStepDraftCheckValues(snapshot.checkValues); newStepTouchedRef.current = true;
+    setSaveState("saving");
+    setErrorMessage("Recovered an unsaved phone draft. Saving it now; do not refresh until it shows Saved.");
+    clearNewStepAutosaveTimer();
+    newStepAutosaveTimerRef.current = window.setTimeout(() => {
+      newStepAutosaveTimerRef.current = null;
+      if (isEditorCurrent() && selectedTaskIdRef.current === draft.taskId)
+        persistNewStepDraftRef.current(snapshot, { saveTask: true, showSaving: true });
+    }, 250);
+    return true;
+  }
+  const restoreOwnedDraftRef = useRef(restoreOwnedDraft);
+  useEffect(() => { restoreOwnedDraftRef.current = restoreOwnedDraft; });
+  const plannerLoaded = Boolean(plannerState);
+  useEffect(() => {
+    if (!plannerLoaded || !userId || !projectId || !selectedTaskId || !plannerStateRef.current?.tasks.some((task) => task.id === selectedTaskId)) return;
+    let active = true;
+    void recoveryStore.load({ userId, projectId, taskId: selectedTaskId }).then((draft) => {
+      if (active && draft && isCurrentRef.current() && !newStepTouchedRef.current) restoreOwnedDraftRef.current(draft);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [plannerLoaded, selectedTaskId, userId, projectId, recoveryStore]);
 
   useEffect(() => {
-    if (!plannerState || draftRestoreAttemptedRef.current) {
-      return;
-    }
+    if (!plannerLoaded || !userId || !projectId || !selectedTaskId || legacyDismissedRef.current) return;
+    let active = true;
+    void loadMobileNewStepRecoveryDraft().then((draft) => {
+      if (!active || !isCurrentRef.current()) return;
+      setLegacyDraft(draft && isMobileRecoveryPayload(draft) && draft.taskId === selectedTaskId
+        && plannerStateRef.current?.tasks.some((task) => task.id === draft.taskId) ? draft : null);
+      setLegacyReviewing(false);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [plannerLoaded, selectedTaskId, userId, projectId]);
 
-    draftRestoreAttemptedRef.current = true;
-
-    void loadMobileNewStepRecoveryDraft()
-      .then((draft) => {
-        if (!draft || !plannerState.tasks.some((task) => task.id === draft.taskId)) {
-          return;
-        }
-
-        const recoveredStep = plannerState.tasks.find((task) => task.id === draft.taskId)?.manufacturingSteps?.find((step) => step.id === draft.stepId);
-        const recoveredName = draft.name ?? recoveredStep?.name ?? "";
-        const checks = new Set(draft.checks);
-        const snapshot = {
-          stepId: draft.stepId,
-          name: recoveredName,
-          instruction: draft.instruction,
-          durationText: draft.durationText,
-          tools: draft.tools,
-          photos: draft.photos,
-          checks,
-          checkValues: draft.checkValues ?? {},
-        };
-
-        if (!hasDraftStepContentRef.current(snapshot)) {
-          void clearMobileNewStepRecoveryDraft().catch(() => undefined);
-          return;
-        }
-
-        selectedTaskIdRef.current = draft.taskId;
-        setSelectedTaskId(draft.taskId);
-        setActiveScreen("detail");
-        setShowNewStepForm(true);
-        setDraftStepId(draft.stepId);
-        setNewStepName(recoveredName);
-        setNewStepInstruction(draft.instruction);
-        setNewStepDurationText(draft.durationText || "5");
-        setNewStepDraftTools(draft.tools);
-        setNewStepDraftPhotos(draft.photos);
-        setNewStepDraftChecks(checks);
-        setNewStepDraftCheckValues(draft.checkValues ?? {});
-        newStepTouchedRef.current = true;
-        setSaveState("saving");
-        setErrorMessage("Recovered an unsaved phone draft. Saving it now; do not refresh until it shows Saved.");
-
-        window.setTimeout(() => {
-          selectedTaskIdRef.current = draft.taskId;
-          persistNewStepDraftRef.current(snapshot, { saveTask: true, showSaving: true });
-        }, 250);
-      })
-      .catch(() => undefined);
-  }, [plannerState]);
+  async function adoptReviewedLegacyDraft() {
+    if (!legacyDraft || !userId || !projectId || legacyBusy || (showNewStepForm && hasDraftStepContent(getNewStepDraftSnapshot()))) return;
+    const taskId = selectedTaskId;
+    const touchedBefore = newStepTouchedRef.current;
+    const snapshotBefore = recoverableSnapshotsRef.current.get(taskId);
+    setLegacyBusy(true);
+    try {
+      const draft = await recoveryStore.adoptLegacy({ userId, projectId, taskId }, legacyDraft);
+      if (!isEditorCurrent() || selectedTaskIdRef.current !== taskId) return;
+      if (newStepTouchedRef.current !== touchedBefore || recoverableSnapshotsRef.current.get(taskId) !== snapshotBefore) {
+        setErrorMessage("The earlier draft is stored safely. Finish your current draft before reopening it."); return;
+      }
+      setLegacyDraft(null); legacyDismissedRef.current = true;
+      restoreOwnedDraft(draft);
+    } catch (error) {
+      if (isEditorCurrent()) setErrorMessage(error instanceof Error ? error.message : "Unable to use the earlier draft.");
+    } finally { if (isEditorCurrent()) setLegacyBusy(false); }
+  }
 
   useEffect(() => {
     if (!plannerState?.scenario.id) {
@@ -1385,6 +1438,7 @@ export function MobilePhotoPortal({
   }, [plannerState?.product.id, plannerState?.scenario.id]);
 
   function refreshWriteLock() {
+    if (!isEditorCurrent()) return;
     saveInFlightRef.current =
       localWriteCountRef.current > 0 || Object.keys(photoUploadQueuesRef.current).length > 0;
     setWritesPending(saveInFlightRef.current);
@@ -1435,7 +1489,10 @@ export function MobilePhotoPortal({
 
   function enqueueTaskScopedWrite(taskId: string, saveOperation: () => Promise<void>) {
     const previousWrite = photoUploadQueuesRef.current[taskId] ?? Promise.resolve();
-    const nextWrite = previousWrite.catch(() => undefined).then(saveOperation);
+    const nextWrite = previousWrite.catch(() => undefined).then(() => {
+      if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
+      return saveOperation();
+    });
     photoUploadQueuesRef.current[taskId] = nextWrite;
     refreshWriteLock();
 
@@ -1507,29 +1564,34 @@ export function MobilePhotoPortal({
     };
   }
 
-  function saveRecoverableNewStepDraft(
-    snapshot = getNewStepDraftSnapshot(),
-    options: { taskId?: string } = {},
-  ) {
+  function assertCaptureCurrent() {
+    if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
+  }
+
+  function draftFingerprint(snapshot: ReturnType<typeof getNewStepDraftSnapshot>) {
+    return JSON.stringify({ stepId: snapshot.stepId, name: snapshot.name, instruction: snapshot.instruction, durationText: snapshot.durationText, tools: snapshot.tools, photos: snapshot.photos, checks: [...snapshot.checks], checkValues: snapshot.checkValues });
+  }
+
+  function saveRecoverableNewStepDraft(snapshot = getNewStepDraftSnapshot(), options: { taskId?: string } = {}) {
     const taskId = options.taskId ?? selectedTaskIdRef.current;
-
-    if (!taskId || !hasDraftStepContent(snapshot)) {
-      return;
-    }
-
-    void saveMobileNewStepRecoveryDraft({
-      taskId,
-      stepId: snapshot.stepId,
-      name: snapshot.name,
-      instruction: snapshot.instruction,
-      durationText: snapshot.durationText,
-      tools: snapshot.tools,
-      photos: snapshot.photos,
-      checks: [...snapshot.checks],
-      checkValues: snapshot.checkValues,
-    }).catch(() => {
+    if (!isEditorCurrent() || !taskId || !snapshot.stepId || !hasDraftStepContent(snapshot)) return null;
+    if (!userId || !projectId) {
       setErrorMessage("This browser could not store the local recovery draft. Copy text/photos before refreshing.");
+      return null;
+    }
+    const fingerprint = draftFingerprint(snapshot);
+    const previous = recoverableSnapshotsRef.current.get(taskId);
+    if (previous?.fingerprint === fingerprint) return previous;
+    const scope = { userId, projectId, taskId };
+    const record: ScopedRecoveryDraft = { ...snapshot, ...scope, key: recoveryDraftKey(scope), schemaVersion: 2,
+      draftId: snapshot.stepId, checks: [...snapshot.checks], writeToken: crypto.randomUUID(), updatedAt: new Date().toISOString() };
+    const stored = recoveryStore.save(record).then(() => true).catch(() => {
+      if (isEditorCurrent()) setErrorMessage("This browser could not store the local recovery draft. Copy text/photos before refreshing.");
+      return false;
     });
+    const pending = { fingerprint, record, stored };
+    recoverableSnapshotsRef.current.set(taskId, pending);
+    return pending;
   }
 
   function persistNewStepDraft(
@@ -1540,7 +1602,7 @@ export function MobilePhotoPortal({
     const currentState = plannerStateRef.current;
     const taskId = selectedTaskIdRef.current;
 
-    if (!currentState || !taskId) {
+    if (!isEditorCurrent() || !currentState || !taskId) {
       return null;
     }
 
@@ -1549,7 +1611,7 @@ export function MobilePhotoPortal({
       return null;
     }
 
-    saveRecoverableNewStepDraft(snapshot, { taskId });
+    const recovery = saveRecoverableNewStepDraft(snapshot, { taskId });
 
     const currentSteps = sortManufacturingSteps(currentTask.manufacturingSteps ?? []);
     const stepId = snapshot.stepId ?? ensureDraftStepId(currentTask.id);
@@ -1593,14 +1655,21 @@ export function MobilePhotoPortal({
 
     void enqueueTaskScopedWrite(taskId, async () => {
       Object.assign(patch, { ...failedDraftPatchesRef.current.get(stepId), ...patch });
-      const savedStep = await saveMobileStepToSupabase(currentTask, nextStep, patch, projectId);
+      if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
+      const savedStep = await saveMobileStepToSupabase(currentTask, nextStep, patch, projectId, undefined, assertCaptureCurrent);
+      if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
       if (syncTools || failedDraftToolSyncRef.current.has(stepId)) {
-        await syncStepToolsForStepToSupabase(taskId, stepId, snapshot.tools, projectId);
+        await syncStepToolsForStepToSupabase(taskId, stepId, snapshot.tools, projectId, assertCaptureCurrent);
+        if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
         failedDraftToolSyncRef.current.delete(stepId);
       }
       const uploadedPhotos = await Promise.all(
-        snapshot.photos.map((photo) => uploadStepPhotoAttachment(taskId, stepId, photo, activeProjectContext)),
+        snapshot.photos.map((photo) => {
+          if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
+          return uploadStepPhotoAttachment(taskId, stepId, photo, activeProjectContext, assertCaptureCurrent);
+        }),
       );
+      if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
       updateLocalTask(taskId, (task) => {
         const steps = (task.manufacturingSteps ?? []).map((step) => step.id === stepId ? { ...step, sequence: savedStep.sequence, version: savedStep.version } : step);
         return upsertStepPhotoAttachments(withStepDerivedDuration(task, steps), stepId, uploadedPhotos);
@@ -1608,26 +1677,29 @@ export function MobilePhotoPortal({
       failedDraftPatchesRef.current.delete(stepId);
     })
       .then(() => {
-        if (!newStepAutosaveTimerRef.current && localWriteCountRef.current <= 1) {
-          void clearMobileNewStepRecoveryDraft().catch(() => undefined);
-        }
+        if (recovery) void recovery.stored.then((stored) => stored ? recoveryStore.acknowledge(recovery.record) : false).then((cleared) => {
+          if (cleared && recoverableSnapshotsRef.current.get(taskId) === recovery) recoverableSnapshotsRef.current.delete(taskId);
+        }).catch(() => undefined);
+        if (!isEditorCurrent()) return;
         setSaveState("saved");
         if (selectedTaskIdRef.current === taskId && newStepIdRef.current === stepId) options.onSaved?.();
       })
       .catch((error) => {
+        if (!isEditorCurrent()) return;
         if (syncTools) failedDraftToolSyncRef.current.add(stepId);
         failedDraftPatchesRef.current.set(stepId, { ...failedDraftPatchesRef.current.get(stepId), ...patch });
         setSaveState("error");
         setErrorMessage(error instanceof Error ? error.message : "Unable to autosave the manufacturing step.");
       })
       .finally(() => {
-        endLocalWrite();
+        if (isEditorCurrent()) endLocalWrite();
       });
 
     return stepId;
   }
 
   function scheduleNewStepAutosave(overrides: Parameters<typeof getNewStepDraftSnapshot>[0] = {}) {
+    if (!isEditorCurrent()) return;
     clearNewStepAutosaveTimer();
     const taskId = selectedTaskIdRef.current;
     const stepId = taskId ? ensureDraftStepId(taskId) : overrides.stepId ?? newStepIdRef.current;
@@ -2146,22 +2218,26 @@ export function MobilePhotoPortal({
         const step = task?.manufacturingSteps?.find((step) => step.id === stepId);
         if (!task || !step) throw new Error("The process is no longer available. Your draft has been kept.");
         await enqueueTaskScopedWrite(task.id, async () => {
-          const savedStep = await saveMobileStepToSupabase(task, step, patch, projectId);
+          const savedStep = await saveMobileStepToSupabase(task, step, patch, projectId, undefined, assertCaptureCurrent);
+          if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
           if (failedDraftToolSyncRef.current.has(stepId)) {
-            await syncStepToolsForStepToSupabase(task.id, stepId, getStepToolList(task, stepId), projectId);
+            await syncStepToolsForStepToSupabase(task.id, stepId, getStepToolList(task, stepId), projectId, assertCaptureCurrent);
+            if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
             failedDraftToolSyncRef.current.delete(stepId);
           }
-          const photos = await Promise.all(getStepPhotoAttachments(task, stepId).map((photo) => uploadStepPhotoAttachment(task.id, stepId, photo, activeProjectContext)));
+          const photos = await Promise.all(getStepPhotoAttachments(task, stepId).map((photo) => uploadStepPhotoAttachment(task.id, stepId, photo, activeProjectContext, assertCaptureCurrent)));
+          if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
           updateLocalTask(task.id, (current) => upsertStepPhotoAttachments({ ...current, manufacturingSteps: current.manufacturingSteps?.map((local) => local.id === stepId ? { ...local, version: savedStep.version, sequence: savedStep.sequence } : local) }, stepId, photos));
           failedDraftPatchesRef.current.delete(stepId);
         });
       }
-      setSaveState("saved");
+      if (isEditorCurrent()) setSaveState("saved");
     } catch (error) {
+      if (!isEditorCurrent()) return;
       setSaveState("error");
       setErrorMessage(error instanceof Error ? error.message : "Unable to save. Your draft has been kept.");
     } finally {
-      endLocalWrite();
+      if (isEditorCurrent()) endLocalWrite();
     }
   }
 
@@ -2571,11 +2647,17 @@ export function MobilePhotoPortal({
     });
   }
 
-  function openNewStepForm() {
+  async function openNewStepForm() {
     if (!selectedTask) {
       return;
     }
 
+    if (userId && projectId) {
+      const taskId = selectedTask.id;
+      const draft = await recoveryStore.load({ userId, projectId, taskId }).catch(() => null);
+      if (!isEditorCurrent() || selectedTaskIdRef.current !== taskId) return;
+      if (draft && restoreOwnedDraft(draft)) return;
+    }
     const stepId = buildNewStepId(selectedTask.id);
     resetNewStepDraft(getNewStepDefaultDurationText(), stepId);
     setShowNewStepForm(true);
@@ -2875,6 +2957,7 @@ export function MobilePhotoPortal({
       resetNewStepDraft("5", null);
     }
 
+    selectedTaskIdRef.current = taskId;
     setSelectedTaskId(taskId);
     setConfirmDeleteStepId(null);
     setShowNewTaskForm(false);
@@ -3420,6 +3503,12 @@ export function MobilePhotoPortal({
               </div>
 
               <div className="ui-photo-mobile-step-list flex flex-col gap-6 p-3">
+                {legacyDraft && legacyDraft.taskId === selectedTask.id ? <LegacyDraftReview
+                  draft={legacyDraft} reviewing={legacyReviewing} busy={legacyBusy}
+                  blocked={showNewStepForm && hasDraftStepContent(getNewStepDraftSnapshot())}
+                  onReview={() => setLegacyReviewing(true)} onBack={() => setLegacyReviewing(false)}
+                  onDismiss={() => { legacyDismissedRef.current = true; setLegacyDraft(null); }}
+                  onUse={() => void adoptReviewedLegacyDraft()} /> : null}
                 {showNewStepForm ? (
                   <div
                     ref={newStepFormRef}

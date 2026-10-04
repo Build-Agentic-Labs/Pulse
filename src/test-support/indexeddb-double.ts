@@ -9,6 +9,7 @@ export type IndexedDbDoubleOptions = {
   openError?: Error;
   transactionError?: Error;
   requestError?: Error;
+  transactionAbort?: boolean;
 };
 
 export type IndexedDbDouble = {
@@ -30,17 +31,6 @@ export function installIndexedDbDouble(options: IndexedDbDoubleOptions = {}): In
     uninstall: () => { delete (globalThis as { indexedDB?: unknown }).indexedDB; },
   };
 
-  function makeRequest<T>(run: () => T) {
-    const request: { result?: T; error: Error | null; onsuccess: null | (() => void); onerror: null | (() => void) } =
-      { error: null, onsuccess: null, onerror: null };
-    later(() => {
-      if (options.requestError) { request.error = options.requestError; request.onerror?.(); return; }
-      request.result = run();
-      request.onsuccess?.();
-    });
-    return request;
-  }
-
   function makeDb(name: string) {
     const db = databases.get(name)!;
     return {
@@ -48,22 +38,46 @@ export function installIndexedDbDouble(options: IndexedDbDoubleOptions = {}): In
       createObjectStore(store: string, params: { keyPath: string }) { db.set(store, { keyPath: params.keyPath, rows: new Map() }); },
       close() { double.closes += 1; },
       transaction(_storeName: string, _mode: string) {
-        const tx: { error: Error | null; oncomplete: null | (() => void); onerror: null | (() => void); objectStore(name: string): unknown } = {
-          error: null, oncomplete: null, onerror: null,
+        let pending = 0;
+        let finished = false;
+        const snapshots = new Map([...db].map(([name, store]) => [name, new Map(store.rows)]));
+        const tx = {
+          error: null as Error | null,
+          oncomplete: null as null | (() => void), onerror: null as null | (() => void), onabort: null as null | (() => void),
+          abort() {
+            if (finished) return;
+            finished = true;
+            for (const [name, rows] of snapshots) db.get(name)!.rows = rows;
+            later(() => tx.onabort?.());
+          },
           objectStore(name: string) {
             const store = db.get(name);
             if (!store) throw new Error(`No store ${name}`);
+            function request<T>(run: () => T) {
+              pending += 1;
+              const req = { result: undefined as T | undefined, error: null as Error | null, transaction: tx,
+                onsuccess: null as null | (() => void), onerror: null as null | (() => void) };
+              later(() => {
+                if (finished) return;
+                if (options.requestError) { req.error = options.requestError; req.onerror?.(); tx.error = req.error; tx.onerror?.(); tx.abort(); return; }
+                req.result = run(); req.onsuccess?.();
+                pending -= 1;
+                if (pending === 0 && !finished) later(() => {
+                  if (pending > 0 || finished) return;
+                  if (options.transactionError) { tx.error = options.transactionError; tx.onerror?.(); tx.abort(); return; }
+                  if (options.transactionAbort) { tx.abort(); return; }
+                  finished = true; tx.oncomplete?.();
+                });
+              });
+              return req;
+            }
             return {
-              put: (record: Record_) => makeRequest(() => { store.rows.set(record[store.keyPath] as IDBValidKey, record); return record[store.keyPath]; }),
-              get: (key: IDBValidKey) => makeRequest(() => store.rows.get(key)),
-              delete: (key: IDBValidKey) => makeRequest(() => { store.rows.delete(key); return undefined; }),
+              put: (record: Record_) => request(() => { store.rows.set(record[store.keyPath] as IDBValidKey, structuredClone(record)); return record[store.keyPath]; }),
+              get: (key: IDBValidKey) => request(() => { const value = store.rows.get(key); return value === undefined ? undefined : structuredClone(value); }),
+              delete: (key: IDBValidKey) => request(() => { store.rows.delete(key); return undefined; }),
             };
           },
         };
-        later(() => later(() => {
-          if (options.transactionError) { tx.error = options.transactionError; tx.onerror?.(); return; }
-          if (!options.requestError) tx.oncomplete?.();
-        }));
         return tx;
       },
     };

@@ -9,12 +9,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
 import type { PlannerState, Task } from "@/domain/types";
+import { mobileAuth } from "@/test-support/mobile-auth";
 import { MobilePhotoPortal } from "./mobile-photo-portal";
 import { loadPlannerStateFromSupabase, saveMobileStepToSupabase } from "@/domain/supabase-planner";
 
 vi.mock("@/components/app-flow-panels", () => ({ AppLoadingShell: () => <div>Loading</div> }));
 vi.mock("@/domain/supabase-planner", async (original) => ({
   ...await original<typeof import("@/domain/supabase-planner")>(),
+  createPlannerSupabaseClient: () => mobileAuth.client,
   loadPlannerStateFromSupabase: vi.fn(),
   loadTaskFromSupabase: vi.fn(),
   loadToolLibraryFromSupabase: vi.fn(async () => []),
@@ -25,7 +27,7 @@ vi.mock("@/domain/supabase-planner", async (original) => ({
   deletePlannerTask: vi.fn(async () => undefined),
 }));
 
-const SESSION_KEY = "pulse:mobile-capture-session:p";
+const SESSION_KEY = "pulse:mobile-capture-session-v2:user-test:p";
 const LEGACY_KEY = "pulse:capture-timer:p";
 const baseTask: Task = {
   id: "task-a", scenarioId: "scenario-empty", stationId: "", wbs: "1", rowType: "task", name: "Alpha process",
@@ -46,6 +48,7 @@ const advance = (ms: number) => { nowMs += ms; };
 const session = () => JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null");
 
 beforeEach(() => {
+  mobileAuth.userId = "user-test";
   vi.clearAllMocks();
   localStorage.clear();
   nowMs = 1_700_000_000_000;
@@ -83,6 +86,7 @@ describe("capture timer: start, stop and lap", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     startTimer();
     expect(session().captureTimer.activeStepId).toEqual(expect.any(String));
     expect(session().newStepId).toBe(session().captureTimer.activeStepId);
@@ -93,6 +97,7 @@ describe("capture timer: start, stop and lap", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     startTimer();
     advance(125_000); // 2 min 5 s → ceil → 3
     stopTimer();
@@ -107,6 +112,7 @@ describe("capture timer: start, stop and lap", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     startTimer();
     advance(4_000);
     stopTimer();
@@ -118,6 +124,7 @@ describe("capture timer: start, stop and lap", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     startTimer();
     stopTimer();
     await act(async () => {});
@@ -130,6 +137,7 @@ describe("capture timer: park on task switch and resume", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Timed step" } });
     startTimer();
     advance(65_000);
@@ -147,6 +155,7 @@ describe("capture timer: park on task switch and resume", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Timed step" } });
     startTimer();
     advance(65_000);
@@ -165,6 +174,7 @@ describe("capture timer: park on task switch and resume", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     startTimer();
     advance(30_000);
     backToList();
@@ -192,6 +202,7 @@ describe("capture timer: park on task switch and resume", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     startTimer();
     backToList();
     expect(session()).toMatchObject({ activeScreen: "list" });
@@ -231,8 +242,11 @@ describe("capture session: reload hydration", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await screen.findByTitle("Open Beta process · timer running");
     expect(screen.getByTitle("Open Beta process · timer running")).toHaveTextContent("2:00");
+    await act(async () => {});
     advance(5_000);
-    await waitFor(() => expect(session().parkedCaptureByTaskId["task-b"].timer.storedElapsedMs).toBe(125_000));
+    await waitFor(() => expect(screen.getByTitle("Open Beta process · timer running")).toHaveTextContent("2:05"), { timeout: 2000 });
+    fireEvent(window, new Event("pagehide"));
+    expect(session().parkedCaptureByTaskId["task-b"].timer.storedElapsedMs).toBe(125_000);
   });
 
   it("KNOWN GAP: a stored selection for a task that no longer exists falls back to the first task but still reopens the stored draft form there", async () => {
@@ -253,14 +267,13 @@ describe("capture session: reload hydration", () => {
 });
 
 describe("capture session: legacy key, malformed data and storage failures", () => {
-  it("recovers a legacy capture-timer key as a running session and migrates it to the session key", async () => {
-    localStorage.setItem(LEGACY_KEY, JSON.stringify({ running: true, startedAt: null, storedElapsedMs: 45_000, lapMarkerMs: 0, activeStepId: "step-legacy", taskId: "task-a", taskName: "Alpha process" }));
+  it("preserves an unowned legacy timer without automatically hydrating it into an account", async () => {
+    const legacy = JSON.stringify({ running: true, startedAt: null, storedElapsedMs: 45_000, lapMarkerMs: 0, activeStepId: "step-legacy", taskId: "task-a", taskName: "Alpha process" });
+    localStorage.setItem(LEGACY_KEY, legacy);
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
-    await screen.findByRole("textbox", { name: "New step name" });
-    expect(screen.getByText("0:45")).toBeInTheDocument();
-    await waitFor(() => expect(localStorage.getItem(LEGACY_KEY)).toBeNull());
-    expect(session().captureTimer).toMatchObject({ running: true, taskId: "task-a", activeStepId: "step-legacy", storedElapsedMs: 45_000 });
-    expect(session()).toMatchObject({ activeScreen: "detail", selectedTaskId: "task-a", showNewStepForm: true, newStepId: "step-legacy" });
+    await screen.findByRole("button", { name: /Alpha process 0 steps/ });
+    expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+    expect(localStorage.getItem(LEGACY_KEY)).toBe(legacy);
   });
 
   it("a legacy timer without a task opens the list with no draft", async () => {
@@ -307,6 +320,7 @@ describe("capture session: legacy key, malformed data and storage failures", () 
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("quota", "QuotaExceededError"); });
     startTimer();
     expect(screen.getByTitle(/^Stop timer for Alpha process/)).toBeInTheDocument();
@@ -322,7 +336,7 @@ describe("capture session: legacy key, malformed data and storage failures", () 
     expect(session()).toMatchObject({ activeScreen: "list", selectedTaskId: "task-a", showNewStepForm: false });
   });
 
-  it("when the session collapses to nothing (no tasks, nothing selected) both keys are removed", async () => {
+  it("an absent task does not delete the previous session or an unowned legacy timer", async () => {
     // The stored selection points at a task the loaded project does not have; the load resolves the
     // selection to "" and the resulting empty session is removed along with the legacy key.
     const empty: PlannerState = { ...state, tasks: [] };
@@ -331,8 +345,8 @@ describe("capture session: legacy key, malformed data and storage failures", () 
     localStorage.setItem(SESSION_KEY, JSON.stringify({ captureTimer: { running: false, storedElapsedMs: 0 }, activeScreen: "list", selectedTaskId: "task-gone" }));
     render(<MobilePhotoPortal projectId="p" />);
     await screen.findByRole("button", { name: "Add process" });
-    await waitFor(() => expect(localStorage.getItem(SESSION_KEY)).toBeNull());
-    expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
+    expect(localStorage.getItem(SESSION_KEY)).not.toBeNull();
+    expect(localStorage.getItem(LEGACY_KEY)).toBe("{}");
   });
 });
 
@@ -341,6 +355,7 @@ describe("capture session: lifecycle around task switches and unmount", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Fit bracket" } });
     backToList();
     await waitFor(() => expect(saveMobileStepToSupabase).toHaveBeenCalledTimes(1));
@@ -351,17 +366,15 @@ describe("capture session: lifecycle around task switches and unmount", () => {
     expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
   });
 
-  it("KNOWN GAP: unmounting with the autosave debounce armed does not flush the draft", async () => {
+  it("unmounting cancels an unsent autosave instead of sending through a changed account", async () => {
     const view = render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Fit bracket" } });
     view.unmount();
     await new Promise((resolve) => setTimeout(resolve, 600));
-    // Current behaviour: the 450 ms autosave timer fires after unmount and still writes to the task it was
-    // scheduled for; nothing flushes synchronously at unmount. Recorded, not corrected, in this slice.
-    expect(saveMobileStepToSupabase).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(saveMobileStepToSupabase).mock.calls[0][0]).toMatchObject({ id: "task-a" });
+    expect(saveMobileStepToSupabase).not.toHaveBeenCalled();
   });
 
   it("a late save response after switching tasks does not open a draft on the new task", async () => {
@@ -370,6 +383,7 @@ describe("capture session: lifecycle around task switches and unmount", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Fit bracket" } });
     backToList();
     await waitFor(() => expect(saveMobileStepToSupabase).toHaveBeenCalledTimes(1));
@@ -384,6 +398,7 @@ describe("capture session: lifecycle around task switches and unmount", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await openTask(/Alpha process 0 steps/);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+  await screen.findByRole("textbox", { name: "New step name" });
     startTimer();
     advance(70_000);
     backToList();

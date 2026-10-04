@@ -1,6 +1,6 @@
 # Workspace structural improvements — Astra scope / Sol 6.1 handoff
 
-Status: scoped; structural implementation has not started. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
+Status: Phase 1 (save ownership) implemented on `codex/workspace-structure`; see the Phase 1 ledger at the end. Phases 2–5 not started. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
 
 Application baseline: `edd45a93ee27f061948c9afd407da29075297aa7` (performance/save-recovery update plus cached-reload test-readiness correction). Branch for this work: `codex/workspace-structure`.
 
@@ -208,3 +208,33 @@ At each gate report source counts and tests, then continue only within the appro
 ## Remaining uncertainty
 
 These are architecture estimates, not compiler-verified import graphs. Draft/queue mutual predicates and initial-load restore/reset ownership are the highest-risk seams. Resolve their interfaces in Phase 1 before committing to exact final counts. No performance gain is promised from file splitting alone.
+
+## Phase 1 ledger — save ownership (2026-10-03)
+
+Commits, all on `codex/workspace-structure` after `3d46341`: `5ea124c` drafts (1A), `8617840` queue (1B), `72b9cfa` workspace saves (1C), `1c1779a` dev harness (1D); `f38a61a` comment/API cleanup with no behavior change; `02cd1e8`, `e323c05`, `7f5d252` tests; `c8ff5b3` bundle guard.
+
+| File | Physical | Nonblank | Plan estimate |
+| --- | ---: | ---: | --- |
+| `line-workspace.tsx` (was 6,655 / 6,119) | 5,099 | 4,733 | 4,850–5,150 |
+| `line-workspace/use-procedure-drafts.ts` | 684 | 602 | 600–800 |
+| `line-workspace/use-procedure-save-queue.ts` | 460 | 412 | 350–500 |
+| `line-workspace/use-workspace-saves.ts` | 473 | 429 | 300–450 → revised 450–480 |
+| `line-workspace/procedure-autosave-harness.ts` | 442 | 405 | 400–470 |
+| `line-workspace/workspace-controller-types.ts` | 31 | 26 | 60–120 (only shared capability types) |
+
+`line-workspace.tsx`: 1,735 lines removed, 179 added. Moved bodies are verbatim. Every non-verbatim line was checked against the original by line accounting and by per-commit adversarial review. New tests add 1,772 physical lines (6 files).
+
+Decisions and deviations:
+- Functions are still re-declared every render, so async continuations (save completion, retry, debounce) keep the `projectId` and callbacks of the render that started them. Stable controllers would read the latest project after an in-place project switch and break cache isolation. Only mutable state is identity-stable: draft refs, and one queue store per mount (`useState(createProcedureSaveQueueStore)`).
+- Drafts read the queue only through an injected probe that is evaluated at call time. `updateProcedureStepField` lives in the queue hook (the plan listed it under drafts) because it schedules saves. This removes the only drafts→queue write edge.
+- `reportedSaveState`/`setSaveState`, `reportedSaveError`/`setSaveError` and `plannerDirtyRef` stay in `LineWorkspace` and are passed in. If they came from a custom hook, `exhaustive-deps` would flag the `[projectId]` load effect and the project-switch listener, forcing dependency-array edits on the load effect.
+- `useWorkspaceSaves` is called at the old page-exit/link-guard effect slot. `usePlannerShellAutosave` is a separate hook called at the old debounce slot, because it must run after the load effect in the same commit. That second hook is the reason `use-workspace-saves.ts` is over its first estimate.
+- The queue has no reset (scenario switches drain through the save barrier, as before). `persistProcedureTaskUpdate` stays private (no outside caller).
+- The harness registration is a positive, constant-folded development branch. `check:bundles` now fails if harness code reaches a client chunk.
+
+Hand-off notes for later phases:
+- `flushDeferredRemoteRefresh` (realtime, still a hoisted declaration in the component) and `hasLocalSaveWork` (saves hook) depend on each other. Phase 3 must replace the hoisting with an explicit delegate and choose its closure semantics deliberately.
+- Loading reaches drafts through `restoreProcedureDraftFieldsRef` and `applyProcedureDraftsToTaskRef`. Realtime should consume `hasDirtyOrActiveProcedureDrafts`, `storeDeferredProcedureServerUpdate`, `mergeServerTaskIntoLocalTask` and `flushScheduledProcedureSaves` (through `flushProcedureSavesOnScopeExitRef`). `mergeServerTaskIntoLocalTaskRef` already had no reader before Phase 1.
+- `saveInFlightRef` is the shell-save lock. Media and Gantt-order writes in the component also take it (Phase 2 inherits this unchanged).
+
+Evidence: 1,820 → 1,868 unit tests pass (230 files), including a black-box `LineWorkspace` lifecycle test written and passing against `3d46341` before it ran on the extracted code. Every new seam test was checked against targeted mutations of the behavior it guards. Lint, the optimized build, the settled typecheck and bundle budgets pass (planner entry 275.1 KiB vs 275.2 baseline; largest chunk 124.0 KiB; 0 chunks contain harness code). All 18 browser cases pass against the retained isolated database (`scratch/browser-db`, ports 563xx, not reset). Its schema already contained `20261003180653` (function bodies identical to the migration file) although the ledger row is absent.

@@ -321,9 +321,43 @@ Ownership and decisions:
   - view-only: no writes
   - failed rewrite: no dependent library writes or success reports
   The refusal cases fail before the fix; the allowed operations are unchanged.
-- **Observed, not changed (would need a rollback design).** When the catalog task rewrite *fails*, its optimistic local update is not reverted. The tasks on screen keep the renamed or removed tool although the database was not updated, and a later shell save after another edit would persist it. Reverting safely without clobbering edits made during the save needs a rollback or transaction design. Recorded for a decision; no library write or success report follows a failure.
+
+  What tidy does when its task rewrite is refused or fails:
+  - It makes no library writes and shows no "Tool names cleaned up".
+  - On failure, `applyProjectTasksUpdate` has already shown "Save failed" and set the error status. Tidy catches the rejection and resolves, because it runs fire-and-forget.
+  - In both cases its `finally` still re-reads the library. That read is the only thing that runs after the stop.
+  Rename and delete reject to the catalog panel instead. (An earlier report said tidy "carries on" after a failure; that was wrong.)
+- **Failed catalog rewrite, fixed in a separate commit (`8b14112`).** A failed rewrite's optimistic change used to stay on screen.
+  - **Correction to the earlier note:** a later *shell* save could not persist it. `savePlannerShellToSupabase` strips step tool lists from the task row and never writes `step_tools`.
+  - **The real persisting path:** any save that rewrites a task's `step_tools` from local state. On the desktop that is the Gantt reorder (`saveTasksToSupabase` → `syncStepToolsForTasks`).
+  - **Reproduced against an in-memory database running the real savers** (`use-workspace-tools.persistence.test.tsx`):
+    - rename stored the new name in `step_tools` while the library kept the old one
+    - delete removed the step's assignment while the library row stayed
+    - tidy changed the stored spelling
+
+  The fix is a targeted revert, never an older snapshot. On failure, `applyProjectTasksUpdate` reverts only the step tool lists its rewrite changed (`diffStepToolLists` / `revertStepToolListChanges` in `domain/step-tools`):
+  - A step untouched since gets its previous list.
+  - A step edited meanwhile keeps that edit (tools added since stay, tools removed since stay removed).
+  - Deleted tasks, and steps whose tools were cleared meanwhile, are skipped.
+  - A scenario switched away from meanwhile is not touched.
+
+  This reverts to what the database holds, because step tools only change through their own per-row writes. Error status, the "Save failed" toast and the stop before library writes are unchanged.
+
+  Tests:
+  - rename, delete and tidy, each with an unrelated field edit and a step tool added while the save was pending
+  - the screen reverting
+  - the scenario guard
+  - six domain cases
+
+  Five targeted mutations are each caught.
+- **Remaining window (not changed).** A Gantt reorder issued *while* a catalog save is still pending writes the optimistic lists of the reordered tasks before the failure is known. The revert then shows the previous lists while those rows hold the new ones, until the next reload. Closing it means the catalog save holding the shared shell-save lock. That is a lifecycle change, not made here.
+- **Reported, not changed: successful catalog rewrites never persist step tool references.** This is pre-existing since the initial import, for the same reason: the shell save does not write `step_tools`.
+  - **Rename:** the library row moves to the new name while `step_tools` keep the old one. After a reload the old name returns, as a tool with no library entry.
+  - **Delete:** the library row is deleted but the step references remain.
+  - **Tidy:** stored spellings stay messy.
+  A characterization test pins this. The fix belongs in a separate, approved change (see the proposal in the hand-off report).
 
 Validation:
 - Seam tests: 6 for tools and 5 for media. Each fails against a targeted mutation of the behavior it guards: lock taken and released, rollback that keeps concurrent edits, destination-first cut with compensation, stale library responses, tracker keys, the confirmation guard, and category migration.
-- Gate: full unit suite 1,904 tests (232 files), 1,912 after the catalog-refusal fix, both with the full browser suite passing; lint; optimized build, then typecheck; `check:bundles`; 0 chunks with harness code; all 19 browser cases against the retained isolated database (not reset).
-- Bundles are unchanged from Phase 1: planner entry 275.1 KiB, AWI master 274.0 KiB, largest chunk 124.0 KiB gzip. No runtime speed claim is made; nothing was measured beyond bundle sizes.
+- Gate: full unit suite 1,904 tests (232 files), 1,912 after the catalog-refusal fix, and 1,923 (233 files) after the failed-rewrite fix, each with the full browser suite passing; lint; optimized build, then typecheck; `check:bundles`; 0 chunks with harness code; all 19 browser cases against the retained isolated database (not reset).
+- Bundles are unchanged from Phase 1: planner entry 275.1 KiB, AWI master 274.0 KiB, largest chunk 124.0 KiB gzip. The failed-rewrite fix adds 0.3 KiB to each (275.4 and 274.3); the largest chunk is unchanged. No runtime speed claim is made; nothing was measured beyond bundle sizes.

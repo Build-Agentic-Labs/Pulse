@@ -266,7 +266,7 @@ After §5b, the remaining interactions are the per-row cases in §5 (a stale add
 1. **Old desktop edits have no durable recovery for most edit types** (inventory below). Refusing an old tab's save loses the edit when the user reloads, and old code cannot be changed to keep it.
 2. **Refusing "at the first write" is not a safe cutover.** An old save is several requests, each its own transaction. If the cutover lands between them, request 1 has already committed and only the rest is refused.
 
-   This was **tested** in `supabase/tests/compat_cutover_test.sql` (16 assertions; prototypes defined inside the test's rolled-back transaction; nothing installed). The old Gantt reorder's first request (temporary WBS values) committed; a refusing guard was activated; the second request was refused, and **the temporary WBS values stayed stored.**
+   This was **tested** in `supabase/isolated/2026-10-03-step-recovery/tests/compat_cutover_test.sql` (16 assertions; prototypes defined inside the test's rolled-back transaction; nothing installed). The old Gantt reorder's first request (temporary WBS values) committed; a refusing guard was activated; the second request was refused, and **the temporary WBS values stayed stored.**
 
    No database rule can tell a request that starts an operation from one that finishes it: requests carry no operation id. Old code cannot be made to send one.
 

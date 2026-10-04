@@ -16,7 +16,7 @@ These change behaviour only where a defect was reproduced. All were run through 
 
 ## 2. Additive database work: isolated and unused
 
-Migration `20261003210000_step_recovery_and_tool_changes.sql` (`2277e69`) is applied **only** to the retained isolated database. It adds:
+Migration `20261003210000_step_recovery_and_tool_changes.sql` (`2277e69`, now under `supabase/isolated/2026-10-03-step-recovery/`) is applied **only** to the retained isolated database. It adds:
 - the `deleted_manufacturing_steps` recovery table
 - `delete_manufacturing_step`, `restore_manufacturing_step` and `apply_step_tool_changes`
 
@@ -25,7 +25,7 @@ No client code calls them. They are not deployed and change no existing object. 
 - pgTAP `step_recovery_test.sql`: 48/48
 - two-session concurrency checks
 
-`supabase/tests/compat_cutover_test.sql` is a design characterization. Its prototypes exist only inside a rolled-back transaction.
+`supabase/isolated/2026-10-03-step-recovery/tests/compat_cutover_test.sql` is a design characterization. Its prototypes exist only inside a rolled-back transaction.
 
 **Before any use:**
 - approval of the user-facing messages (catalog design §5c)
@@ -34,10 +34,19 @@ No client code calls them. They are not deployed and change no existing object. 
 
 ### Keeping the isolated migration out of production
 
-**Branch-only database files**, versus `main`, checked with `git diff --name-status main...HEAD -- supabase/`. These three are the only ones, and `main` has no commits this branch lacks.
-- `supabase/migrations/20261003210000_step_recovery_and_tool_changes.sql`
-- `supabase/tests/step_recovery_test.sql`
-- `supabase/tests/compat_cutover_test.sql` (it calls `apply_step_tool_changes` and `delete_manufacturing_step`, so it depends on the migration)
+**Relocated 2026-10-03** (contents byte-identical, verified by SHA-256) from the active paths to `supabase/isolated/2026-10-03-step-recovery/`, with a "NOT AUTHORIZED FOR PRODUCTION" README:
+- `supabase/isolated/2026-10-03-step-recovery/migrations/20261003210000_step_recovery_and_tool_changes.sql` (was `supabase/migrations/`)
+- `supabase/isolated/2026-10-03-step-recovery/tests/step_recovery_test.sql` (was `supabase/tests/`)
+- `supabase/isolated/2026-10-03-step-recovery/tests/compat_cutover_test.sql` (was `supabase/tests/`; it calls the isolated functions)
+
+No tool discovers the new location:
+- CI's `supabase db reset --local` / `supabase test db --local` read only `supabase/migrations` and `supabase/tests`, and `config.toml` has `schema_paths = []`;
+- `scripts/apply-migration-safely.mjs` and `scripts/repair-migration-ledger.mjs` read only `supabase/migrations`;
+- `scripts/test-browser.mjs` copies only `supabase/migrations`.
+
+**The two pgTAP files are therefore excluded from the normal database suite.** CI no longer runs their 64 assertions. The active suite is smaller **by exclusion, not equivalent coverage.**
+
+The retained isolated database and its migration ledger were **not** modified. The gitignored copy of the migration under `scratch/browser-db/supabase/migrations/` (from earlier isolated runs) also stays as it was. That isolated workdir must still never be reset with `npm run test:browser`, which would re-apply whatever it contains.
 
 **The actual deployment process** (confirmed in the repository):
 - **CI** (`.github/workflows/ci.yml`) runs `supabase db start`, then `supabase db reset --local` (every migration, applied to the runner's throwaway database), then `supabase test db --local`. No step targets a remote project.
@@ -47,8 +56,8 @@ No client code calls them. They are not deployed and change no existing object. 
 
 **Therefore:** nothing deploys `20261003210000` automatically. The risk is human or tooling: once the file sits in `supabase/migrations` on `main`, `supabase migration list` / `db push`, or an operator applying "everything new", would treat it as pending.
 
-**Exclusion procedure.** Proposed only; to be done before any merge or push of this branch, and only with approval:
-1. **Relocate the three files** out of the deploy and CI paths, into `supabase/isolated/2026-10-03-step-recovery/`, with a README stating: "Not authorized for production. Apply only to isolated databases with `scripts/verify-local-migration.mjs`."
+**Exclusion procedure.** Step 1 was approved and done (above); step 2 still applies:
+1. ~~**Relocate the three files** out of the deploy and CI paths~~ (done), into `supabase/isolated/2026-10-03-step-recovery/`, with a README stating: "Not authorized for production. Apply only to isolated databases with `scripts/verify-local-migration.mjs`."
    - That script accepts any path with a valid migration file name.
    - `main`'s `supabase/migrations` and `supabase/tests` then contain nothing unapproved.
    - The pgTAP files would no longer run in CI, but can still be run by hand against an isolated database. Adding a CI job for them would itself need approval.

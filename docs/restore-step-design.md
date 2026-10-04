@@ -1,6 +1,6 @@
 # Restore Step: data-preservation fix (proposal)
 
-Status (2026-10-03): **Stage 1 implemented in the isolated database only** (`2277e69`, migration `20261003210000_step_recovery_and_tool_changes.sql`). It is not deployed to production and no client calls it yet. The client stage waits for approval of the messages in `docs/tool-catalog-consistency-design.md` §5c. No data has been changed or cleaned up.
+Status (2026-10-03): **Stage 1 implemented in the isolated database only** (`2277e69`, migration `20261003210000_step_recovery_and_tool_changes.sql`, now at `supabase/isolated/2026-10-03-step-recovery/migrations/`, outside the active migration path). It is not deployed to production and no client calls it yet. The client stage waits for approval of the messages in `docs/tool-catalog-consistency-design.md` §5c. No data has been changed or cleaned up.
 
 ### Stage 1 as built (differences from the proposal below)
 
@@ -14,7 +14,7 @@ Status (2026-10-03): **Stage 1 implemented in the isolated database only** (`227
 ### Verification of stage 1 (retained isolated database, not reset)
 
 - **Records preserved by the migration:** `scripts/verify-local-migration.mjs` applied the migration with its ledger row in one transaction. 9,588 pre-existing rows in 78 tables were unchanged, including 342 `auth.users` and 72 `storage.objects`. The only new table is the recovery table.
-- **pgTAP `supabase/tests/step_recovery_test.sql`, 48/48:**
+- **pgTAP `supabase/isolated/2026-10-03-step-recovery/tests/step_recovery_test.sql`, 48/48** (excluded from the normal database suite since relocation):
   - authorization on all three functions (anon, viewer, other organization);
   - delete removes exactly the step and its tool, photo and exploded view, and the record holds all four plus part mentions;
   - every other row is unchanged except later steps' positions; stale versions are refused; a delete retry returns the same record;

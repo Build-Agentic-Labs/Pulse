@@ -2,7 +2,8 @@
 // preserved every existing record: each pre-existing table's row count and content checksum
 // (public tables, storage.objects, auth.users) must be identical before and after.
 //
-//   node scripts/verify-local-migration.mjs supabase/migrations/<file>.sql
+//   node scripts/verify-local-migration.mjs <path>/<14-digit version>_<name>.sql
+//   (an active migration, or an isolated one under supabase/isolated/)
 //
 // The migration and its ledger row are applied in one transaction. No reset, no other migration.
 import { readFileSync } from "node:fs";
@@ -12,7 +13,7 @@ import pg from "pg";
 const connectionString = "postgresql://postgres:postgres@127.0.0.1:56322/postgres";
 const file = process.argv[2];
 if (!file || !/^\d{14}_[a-z0-9_]+\.sql$/.test(basename(file))) {
-  throw new Error("Pass one migration file: supabase/migrations/<14-digit version>_<name>.sql");
+  throw new Error("Pass one migration file: <path>/<14-digit version>_<name>.sql");
 }
 const [, version, name] = basename(file).match(/^(\d{14})_(.+)\.sql$/);
 const sql = readFileSync(file, "utf8");

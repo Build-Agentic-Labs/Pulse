@@ -646,7 +646,7 @@ Phase 3 is paused while these are reviewed. Neither is implemented, and no migra
 - **2026-10-03, compatibility rollout revised (proposal only; nothing activated).**
   - The refusing write-protocol gate is withdrawn, for two reasons:
     1. Most desktop edits (shell, Gantt, structure, tools, media) have no durable recovery; only step name/instruction drafts do.
-    2. A refusal that lands between an old save's requests strands a partial write. Tested in `supabase/tests/compat_cutover_test.sql` with prototypes in a rolled-back transaction: a refusal mid-reorder left temporary WBS values stored.
+    2. A refusal that lands between an old save's requests strands a partial write. Tested in `supabase/isolated/2026-10-03-step-recovery/tests/compat_cutover_test.sql` with prototypes in a rolled-back transaction: a refusal mid-reorder left temporary WBS values stored.
   - **The replacement:** never refuse already-deployed clients. Instead:
     - log-only telemetry of header-less writes;
     - a non-destructive `replace_task_children`;

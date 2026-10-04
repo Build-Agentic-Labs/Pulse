@@ -161,10 +161,11 @@ describe("members and the access matrix", () => {
 });
 
 describe("invitations", () => {
-  const entitlements = {
-    organizationRole: "member", qualityAccess: "view", accessPackage: "custom", planningAccess: "none",
-    projectAccess: [{ projectId: "p1", level: "edit" }], departmentAccess: [],
-  } as unknown as Parameters<typeof upsertWorkspaceAccessGrantInSupabase>[2];
+  const entitlements: Parameters<typeof upsertWorkspaceAccessGrantInSupabase>[2] = {
+    organizationRole: "member", qualityAccess: "view", accessPackage: "custom", planningAccess: false,
+    projectAccess: [{ projectId: "p1", level: "edit" }],
+    departmentAccess: [{ departmentId: "dept-qa", role: "reviewer", positionTitle: "Quality Engineer" }],
+  };
 
   it("refuses an address outside the allowed domains before any request", async () => {
     const db = install();
@@ -183,10 +184,21 @@ describe("invitations", () => {
     ]);
     const grant = db.requests[2]!;
     expect(grant.options).toEqual({ onConflict: "workspace_id,email" });
-    expect(grant.payload).toMatchObject({
+    expect(grant.payload).toEqual({
       workspace_id: "ws-1", email: "pat@anacorp.com", granted_by: "manager-1",
-      project_access: [{ project_id: "p1", level: "edit" }], department_access: [],
+      role: "editor", quality_access: "view", access_package: "custom", planning_access: false,
+      project_access: [{ project_id: "p1", level: "edit" }],
+      department_access: [{ department_id: "dept-qa", role: "reviewer", position_title: "Quality Engineer" }],
       expires_at: "2026-11-02T12:00:00.000Z", redeemed_by: null, redeemed_at: null,
+    });
+  });
+
+  it("derives an administrator's access from the role: admin, Quality edit, planning on, no hidden project rows", async () => {
+    const db = install();
+    await upsertWorkspaceAccessGrantInSupabase("ws-1", "lead@anacorp.com", { ...entitlements, organizationRole: "admin" });
+    expect(db.requests.at(-1)!.payload).toMatchObject({
+      role: "admin", quality_access: "edit", access_package: "custom", planning_access: true, project_access: [],
+      department_access: [{ department_id: "dept-qa", role: "reviewer", position_title: "Quality Engineer" }],
     });
   });
 
@@ -239,24 +251,38 @@ describe("own display name", () => {
 });
 
 describe("membership bootstrap", () => {
-  it("runs profile setup and invite redemption once per signed-in user per client", async () => {
-    const { ensureDefaultWorkspaceMembership } = await import("./supabase-planner");
-    let currentUser = { id: "user-a", email: "a@anacorp.com", user_metadata: {} };
-    const db = createRecordingSupabase({ reply: (r) => (r.target === "is_super_admin" ? { data: false } : undefined) });
-    const tab = { ...db.client, auth: { ...db.client.auth, getSession: async () => ({ data: { session: { user: currentUser } }, error: null }) } };
-    const bootstraps = () => db.lines().filter((line) => line === "profiles.upsert" || line === "rpc:redeem_workspace_access_grants").length;
+  it("runs profile setup, invite redemption and one notification kick per signed-in user per client", async () => {
+    // Bootstrap kicks the SOP notification drain, which is a real fetch in the browser; stub it so the
+    // test makes no network request and so the kick can be counted.
+    const fetchMock = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<{ ok: boolean }>>(async () => ({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const { ensureDefaultWorkspaceMembership } = await import("./supabase-planner");
+      let currentUser = { id: "user-a", email: "a@anacorp.com", user_metadata: {} };
+      const db = createRecordingSupabase({ reply: (r) => (r.target === "is_super_admin" ? { data: false } : undefined) });
+      const tab = { ...db.client, auth: { ...db.client.auth, getSession: async () => ({ data: { session: { user: currentUser } }, error: null }) } };
+      const bootstraps = () => db.lines().filter((line) => line === "profiles.upsert" || line === "rpc:redeem_workspace_access_grants").length;
+      const kicks = () => fetchMock.mock.calls.filter(([url]) => String(url) === "/api/sops/notifications/drain").length;
 
-    await ensureDefaultWorkspaceMembership(tab as never);
-    expect(bootstraps()).toBe(2);
-    await ensureDefaultWorkspaceMembership(tab as never);
-    expect(bootstraps()).toBe(2);
-    currentUser = { id: "user-b", email: "b@anacorp.com", user_metadata: {} };
-    await ensureDefaultWorkspaceMembership(tab as never);
-    expect(bootstraps()).toBe(4);
-    expect(db.requests.filter((r) => r.target === "profiles").map((r) => (r.payload as { id: string }).id)).toEqual(["user-a", "user-b"]);
+      await ensureDefaultWorkspaceMembership(tab as never);
+      expect(bootstraps()).toBe(2);
+      expect(kicks()).toBe(1);
+      await ensureDefaultWorkspaceMembership(tab as never);
+      expect(bootstraps()).toBe(2);
+      expect(kicks()).toBe(1);
+      currentUser = { id: "user-b", email: "b@anacorp.com", user_metadata: {} };
+      await ensureDefaultWorkspaceMembership(tab as never);
+      expect(bootstraps()).toBe(4);
+      expect(kicks()).toBe(2);
+      expect(db.requests.filter((r) => r.target === "profiles").map((r) => (r.payload as { id: string }).id)).toEqual(["user-a", "user-b"]);
 
-    const otherClient = createRecordingSupabase({ userId: "user-a", reply: (r) => (r.target === "is_super_admin" ? { data: false } : undefined) });
-    await ensureDefaultWorkspaceMembership(otherClient.client as never);
-    expect(otherClient.lines()).toContain("profiles.upsert");
+      const otherClient = createRecordingSupabase({ userId: "user-a", reply: (r) => (r.target === "is_super_admin" ? { data: false } : undefined) });
+      await ensureDefaultWorkspaceMembership(otherClient.client as never);
+      expect(otherClient.lines()).toContain("profiles.upsert");
+      expect(kicks()).toBe(3);
+      expect(fetchMock.mock.calls.every(([url]) => String(url) === "/api/sops/notifications/drain")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

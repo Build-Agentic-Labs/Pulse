@@ -437,55 +437,49 @@ describe("procedure save (non-AWI)", () => {
 });
 
 describe("composite step operations", () => {
-  it("moves a step: asserts both tasks, parks the target's steps, reparents step rows, then saves both procedures", async () => {
+  it("moves a step: asserts both tasks, parks the target's steps, reparents the step with its tools and photos, then saves both procedures with version checks", async () => {
+    // Server: the target already holds "t-step"; after the reparent it also holds "moved" (sequence 200000).
+    const targetSteps = () => [{ id: "t-step", sequence: 100002, version: 2 }, { id: "moved", sequence: 200000, version: 4 }];
     const db = install((r) => {
-      if (r.target === "manufacturing_steps" && r.op === "select" && r.columns === "id") return { data: [{ id: "t-step" }] };
-      if (r.target === "tasks" && r.op === "update") return { data: { id: "x", version: 1 } };
-      if (r.target === "tasks" && r.op === "select") return { data: { id: "task-1", scenario_id: "scenario-1", custom_fields: {}, version: 1 } };
+      if (r.target === "manufacturing_steps" && r.op === "select") {
+        if (r.filters.includes("task_id=task-2")) return { data: r.columns === "id" ? [{ id: "t-step" }] : targetSteps() };
+        if (r.filters.some((f) => f.startsWith("id in"))) return { data: [{ id: "t-step", sequence: 1 }] };
+        return { data: [] };
+      }
+      if (r.op === "update" && r.modifiers.some((m) => m.startsWith("returning"))) return { data: { id: "x", version: 9 } };
+      if (r.target === "tasks" && r.op === "select") return { data: { id: String(r.filters[0]).slice(3), scenario_id: "scenario-1", custom_fields: {}, version: 1 } };
       return undefined;
     });
     const source = task({ id: "task-1", manufacturingSteps: [] });
-    const target = task({ id: "task-2", manufacturingSteps: [step("moved", 1)] });
+    const target = task({ id: "task-2", manufacturingSteps: [step("t-step", 1, 2), { ...step("moved", 2, 4), instruction: "Moved here" }] });
     await moveManufacturingStepToTaskInSupabase(source, target, "moved", [], PROJECT);
-    expect(db.lines()).toMatchInlineSnapshot(`
-      [
-        "rpc:task_project_id",
-        "rpc:task_project_id",
-        "manufacturing_steps.select(id) task_id=task-2",
-        "manufacturing_steps.select(id,sequence) id in [t-step]",
-        "manufacturing_steps.update id=t-step",
-        "manufacturing_steps.update id=moved",
-        "step_tools.update step_id=moved",
-        "step_photos.update step_id=moved deleted_at is null",
-        "rpc:task_project_id",
-        "tasks.update id=task-1 | returning(id,version) maybeSingle",
-        "manufacturing_steps.select(id,sequence,version) task_id=task-1",
-        "part_references.select(id) task_id=task-1",
-        "rpc:task_project_id",
-        "tasks.select(*) id=task-1 | maybeSingle",
-        "task_dependencies.select(*) successor_task_id=task-1",
-        "manufacturing_steps.select(*) task_id=task-1 | order(sequence) order(id) range(0,499)",
-        "part_references.select(*) task_id=task-1 | order(created_at) order(id) range(0,499)",
-        "step_photos.select(*) task_id=task-1 deleted_at is null | order(captured_at)",
-        "step_tools.select(*) task_id=task-1 | order(sequence)",
-        "step_exploded_views.select(*) task_id=task-1 deleted_at is null | order(captured_at)",
-        "task_videos.select(*) task_id=task-1 deleted_at is null | order(captured_at)",
-        "rpc:task_project_id",
-        "tasks.update id=task-2 | returning(id,version) maybeSingle",
-        "manufacturing_steps.select(id,sequence,version) task_id=task-2",
-        "part_references.select(id) task_id=task-2",
-        "manufacturing_steps.upsert",
-        "rpc:task_project_id",
-        "tasks.select(*) id=task-2 | maybeSingle",
-        "task_dependencies.select(*) successor_task_id=task-2",
-        "manufacturing_steps.select(*) task_id=task-2 | order(sequence) order(id) range(0,499)",
-        "part_references.select(*) task_id=task-2 | order(created_at) order(id) range(0,499)",
-        "step_photos.select(*) task_id=task-2 deleted_at is null | order(captured_at)",
-        "step_tools.select(*) task_id=task-2 | order(sequence)",
-        "step_exploded_views.select(*) task_id=task-2 deleted_at is null | order(captured_at)",
-        "task_videos.select(*) task_id=task-2 deleted_at is null | order(captured_at)",
-      ]
-    `);
+
+    const updates = db.requests.filter((r) => r.op === "update").map((r) => ({ target: r.target, filters: r.filters, payload: r.payload }));
+    expect(updates.slice(0, 4)).toEqual([
+      { target: "manufacturing_steps", filters: ["id=t-step"], payload: { sequence: expect.any(Number) } },      // park the target's steps
+      { target: "manufacturing_steps", filters: ["id=moved"], payload: { task_id: "task-2", sequence: 200000 } }, // reparent
+      { target: "step_tools", filters: ["step_id=moved"], payload: { task_id: "task-2" } },                      // tools follow the step
+      { target: "step_photos", filters: ["step_id=moved", "deleted_at is null"], payload: { task_id: "task-2" } }, // live photos follow the step
+    ]);
+    expect((updates[0]!.payload as { sequence: number }).sequence).toBeGreaterThan(100000); // parked above every real sequence
+    // Both procedures are saved through the version-checked path: the target's existing steps are
+    // updated against their server versions, never blindly upserted.
+    const taskUpdates = updates.filter((u) => u.target === "tasks").map((u) => u.filters);
+    expect(taskUpdates).toEqual([["id=task-1"], ["id=task-2"]]);
+    const stepUpdates = updates.filter((u) => u.target === "manufacturing_steps" && u.filters.some((f) => f.startsWith("version=")));
+    expect(stepUpdates.map((u) => u.filters)).toEqual([["id=t-step", "version=2"], ["id=moved", "version=4"]]);
+    expect(stepUpdates[1]!.payload).toMatchObject({ task_id: "task-2", sequence: 2, instruction: "Moved here" });
+    expect(db.requests.some((r) => r.target === "manufacturing_steps" && r.op === "upsert")).toBe(false);
+    expect(db.lines().slice(0, 8)).toEqual([
+      "rpc:task_project_id",
+      "rpc:task_project_id",
+      "manufacturing_steps.select(id) task_id=task-2",
+      "manufacturing_steps.select(id,sequence) id in [t-step]",
+      "manufacturing_steps.update id=t-step",
+      "manufacturing_steps.update id=moved",
+      "step_tools.update step_id=moved",
+      "step_photos.update step_id=moved deleted_at is null",
+    ]);
     await expect(moveManufacturingStepToTaskInSupabase(source, target, "absent", [], PROJECT)).rejects.toThrow("Unable to find the manufacturing step to move.");
   });
 

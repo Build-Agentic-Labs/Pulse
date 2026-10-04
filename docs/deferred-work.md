@@ -253,3 +253,40 @@ only the added `order(id) range(0,499)`.
 which the type forbids (the test uses `null as never`). Finishing it: widen the patch type to allow `null`
 per clearable column, or add an explicit clear API, and type the test accordingly. Behaviour change for
 callers; `updateTaskFields` currently has none.
+
+---
+
+## 8. Mobile capture-session behaviour pinned by characterization, not corrected — recorded 2026-10-04
+
+Surfaced while extracting the hook-free capture-session utilities out of `src/components/mobile-photo-portal.tsx`
+(edit-reliability Package B, first slice, branch `codex/mobile-capture-session`). Each item is pinned by a
+test that asserts the **current** behaviour, so a future fix must change that test deliberately. Line numbers
+are post-extraction.
+
+**a. A stale stored selection reopens the draft panel on the fallback task.** The session-hydration effect
+(`mobile-photo-portal.tsx:748`) applies `showNewStepForm` and `newStepId` from
+`localStorage["pulse:mobile-capture-session:<projectId>"]` without checking that the stored `selectedTaskId`
+still exists; the load path's `applySavedState` does check (`resolvedTaskId === preferredTaskId`) but runs
+after. Result: when the stored task has been deleted, the first task is selected and an empty New Step panel
+opens on it with the stale step id. Test: `mobile-photo-portal.capture-session.test.tsx`, "KNOWN GAP: a
+stored selection for a task that no longer exists…". Fix belongs with the hydration ownership work, not an
+extraction commit.
+
+**b. Unmount does not flush an armed autosave.** The 450 ms new-step autosave timer
+(`mobile-photo-portal.tsx:1728`) is cleared on task switch and on close, but the unmount cleanup
+(`:1021`) clears only motion timers. The timer then fires after unmount and still writes to the task it was
+scheduled for, so nothing is lost today; the gap is that nothing flushes synchronously and a navigation that
+also tears down the page (reload) between keystroke and timer loses the edit. Already listed in
+`docs/edit-operation-inventory.md` §5.16; now pinned by "KNOWN GAP: unmounting with the autosave debounce
+armed…".
+
+**c. A timer started with no draft open cannot be stopped from the header.** `startCaptureTimerForCurrentTask`
+(`:2733`) binds `activeStepId: null` when the New Step panel is closed. `isActiveHeaderCaptureTimer` requires a
+bound step, so no header chip and no Stop control render (`canStartCaptureTimer`, `:697`, still shows
+"Timer", which is a no-op while that timer runs). The timer is persisted in the session and keeps running
+until a draft is opened (which binds it) or the session is cleared. Pinned by "a timer started without an
+open draft is bound to no step…". UX decision needed (bind to the task and show the chip, or refuse to start
+without a step); not changed here.
+
+**d. Trivia, not a defect:** `getCaptureTimerElapsed` treats `startedAt === 0` as "not started" (falsy
+check). Real clocks never produce 0; pinned in `capture-session.test.ts` so a future change is deliberate.

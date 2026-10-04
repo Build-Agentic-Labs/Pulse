@@ -1,0 +1,22 @@
+{
+  "fixture": "medium",
+  "spec": {
+    "zones": 3,
+    "stations": 6,
+    "tasks": 40,
+    "stepsPerTask": 5,
+    "toolsPerStep": 2,
+    "heavyTaskTools": 0
+  },
+  "counts": {
+    "zones": 3,
+    "stations": 6,
+    "tasks": 40,
+    "manufacturing_steps": 200,
+    "step_tools": 400
+  },
+  "projectId": "project-7b290e4d-ed3d-43d0-bb62-5e9d1e0aabce",
+  "scenarioId": "scenario-7b290e4d-ed3d-43d0-bb62-5e9d1e0aabce",
+  "workspace": "ws-measure-medium-31d930b4",
+  "seedMs": 128
+}

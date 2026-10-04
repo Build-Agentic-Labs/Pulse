@@ -187,6 +187,12 @@ mobile open 126 / 216 / 1,251 ms (small / medium / stress).
 
 ## 4. Recommended first Package B slice — extract the hook-free capture-session utilities
 
+> **Status 2026-10-04:** implemented on `codex/mobile-capture-session` (`eefa142` tests, `4897989`
+> extraction), awaiting review. Actual sizes, evidence and deviations from the proposal below are in the
+> Package B ledger in `docs/edit-reliability-plan.md`. One deviation: `isRecord` is exported (the
+> component's `removeStepScopedCustomFields` uses it); the three `normalize*` helpers stay private as
+> proposed. The inventory's §5 line numbers still refer to `438a6df`.
+
 Full dependency map: 39 `useState`, 43 `useRef`, 23 `useEffect`, 14 `useMemo`, 6 `useCallback` and about
 95 inner functions in `MobilePhotoPortal` (lines 809–3346), followed by one 1,020-line JSX return. State
 clusters: planner core, capture session, new-step draft, write coordination, navigation/ordering,

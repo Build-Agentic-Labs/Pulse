@@ -1123,7 +1123,7 @@ export async function upsertItemMaster(
     // An explicit .order() is required for stable pagination: without one, PostgREST row order
     // can shift between pages, so rows get skipped/duplicated and the added/updated counts come
     // out wrong on item masters larger than one page. (Same idiom as the wbs-ordered paging in
-    // supabase-planner.ts.)
+    // src/lib/planner/read-store.ts.)
     const { data, error } = await supabase
       .from("planning_item_master")
       .select("item_no")
@@ -1172,7 +1172,7 @@ export async function searchItems(
   // `%`, `,`, `(` and `)` are structural in PostgREST's `.or()` filter syntax (wildcard, clause
   // separator, and grouping); strip them from the search term rather than let them alter the
   // query or throw a filter-parse error (real item descriptions contain parens, e.g. "WIDGET (RED)").
-  // Character class mirrors assertSafeOrFilterValue in src/domain/supabase-planner.ts.
+  // Character class mirrors assertSafeOrFilterValue in src/lib/planner/query-helpers.ts.
   const escaped = query.replace(/[%,()]/g, "");
   if (escaped === "") {
     return [];

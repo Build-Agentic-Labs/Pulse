@@ -1,3 +1,8 @@
+// Compatibility facade for the planner's Supabase persistence. Every existing importer (and every test
+// that mocks "@/domain/supabase-planner") keeps using this path; the implementations live in
+// src/lib/planner/ (client, query-helpers, row-mappers, realtime, media-rows, media-storage,
+// media-store, tool-store, access-store, workspace-store, read-store, scenario-store, shell-store,
+// bom-store, task-store). Re-exports only: no logic, no module state. Leaves never import this file.
 
 export { createPlannerSupabaseClient, getUserFromSession } from "@/lib/planner/client";
 export { mapScenarioSummary, procedureTaskUpdateRow } from "@/lib/planner/row-mappers";

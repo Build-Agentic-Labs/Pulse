@@ -5,7 +5,7 @@
 // guards together with it. Moved verbatim from supabase-planner.ts (Phase 4).
 
 import { plannerClient, supabaseUrl } from "./client";
-import {
+import type {
   SignedMediaRow,
   StepExplodedViewRow,
   StepPhotoRow,

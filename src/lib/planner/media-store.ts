@@ -8,9 +8,9 @@ import { plannerClient, supabaseUrl } from "./client";
 import {
   mapStepExplodedViewRecord,
   mapTaskVideoRecord,
-  StepExplodedViewRow,
-  StepPhotoRow,
-  TaskVideoRow,
+  type StepExplodedViewRow,
+  type StepPhotoRow,
+  type TaskVideoRow,
 } from "./media-rows";
 import {
   buildTaskAssetStoragePath,

@@ -623,6 +623,102 @@ describe("LineWorkspace procedure save lifecycle", () => {
       expectBUnaffected();
     });
 
+    function storedFields(key: string): Array<{ taskId: string; value: string; dirty: boolean }> {
+      const raw = localStorage.getItem(key);
+      return raw ? (JSON.parse(raw) as { fields: Array<{ taskId: string; value: string; dirty: boolean }> }).fields : [];
+    }
+    const storedFor = (key: string, taskId: string) => storedFields(key).filter((field) => field.taskId === taskId);
+
+    it("A -> B -> A -> B with unsaved, failed edits in both products recovers each product's edits from its own storage", async () => {
+      const B_EDIT = "Typed in product B";
+      const view = await renderWorkspace();
+      saveMock.mockRejectedValueOnce(new Error("Network down"));
+      typeInstruction(A_EDIT);
+      await advance(DEBOUNCE_MS);
+      expect(storedFor(DRAFT_STORAGE_KEY, TASK_ID)).toEqual([expect.objectContaining({ value: A_EDIT, dirty: true })]);
+
+      await switchTo(view, OTHER_PROJECT_ID);
+      saveMock.mockRejectedValueOnce(new Error("Network down"));
+      typeInstruction(B_EDIT);
+      await advance(DEBOUNCE_MS);
+      expect(saveMock.mock.calls.at(-1)?.[2]).toBe(OTHER_PROJECT_ID);
+      expect(storedFor(OTHER_DRAFT_STORAGE_KEY, OTHER_TASK_ID)).toEqual([expect.objectContaining({ value: B_EDIT, dirty: true })]);
+      // B's typing, failed save and retry bookkeeping never touched A's recoverable draft.
+      expect(storedFor(DRAFT_STORAGE_KEY, TASK_ID)).toEqual([expect.objectContaining({ value: A_EDIT, dirty: true })]);
+
+      // Back in A: A's edit comes back from A's storage and is saved to A; B's edit stays recoverable.
+      await switchTo(view, PROJECT_ID);
+      expect(instructionBox().value).toBe(A_EDIT);
+      await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+      expect(saveMock.mock.calls.at(-1)?.[0].id).toBe(TASK_ID);
+      expect(saveMock.mock.calls.at(-1)?.[2]).toBe(PROJECT_ID);
+      expect(savedInstruction(saveMock.mock.calls.length - 1)).toBe(A_EDIT);
+      expect(saveStatusText()).toBe("Saved");
+      expect(storedFor(DRAFT_STORAGE_KEY, TASK_ID)).toEqual([]);
+      expect(storedFor(OTHER_DRAFT_STORAGE_KEY, OTHER_TASK_ID)).toEqual([expect.objectContaining({ value: B_EDIT, dirty: true })]);
+
+      // Back in B: B's edit comes back from B's storage and is saved to B.
+      await switchTo(view, OTHER_PROJECT_ID);
+      expect(instructionBox().value).toBe(B_EDIT);
+      await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+      const last = saveMock.mock.calls.at(-1);
+      expect(last?.[0].id).toBe(OTHER_TASK_ID);
+      expect(last?.[2]).toBe(OTHER_PROJECT_ID);
+      expect(last?.[0].manufacturingSteps?.[0]?.instruction).toBe(B_EDIT);
+      expect(saveStatusText()).toBe("Saved");
+      expect(storedFor(OTHER_DRAFT_STORAGE_KEY, OTHER_TASK_ID)).toEqual([]);
+    });
+
+    it("B's successful saves and draft cleanup leave A's unsaved draft in A's storage", async () => {
+      const view = await renderWorkspace();
+      saveMock.mockRejectedValueOnce(new Error("Version conflict: the step changed"));
+      typeInstruction(A_EDIT);
+      await advance(DEBOUNCE_MS);
+      await switchTo(view, OTHER_PROJECT_ID);
+
+      typeInstruction("Saved in product B");
+      await advance(DEBOUNCE_MS);
+      act(() => instructionBox().blur());
+      await flushMicrotasks();
+      expect(saveMock.mock.calls.at(-1)?.[2]).toBe(OTHER_PROJECT_ID);
+      expect(saveStatusText()).toBe("Saved");
+      expect(storedFor(OTHER_DRAFT_STORAGE_KEY, OTHER_TASK_ID)).toEqual([]);
+      expect(storedFor(DRAFT_STORAGE_KEY, TASK_ID)).toEqual([expect.objectContaining({ value: A_EDIT, dirty: true })]);
+    });
+
+    it("an older workspace's background retry cannot acknowledge newer edits typed after returning to A", async () => {
+      const settleFirst = holdNextSave();
+      const view = await renderWorkspace();
+      typeInstruction(A_EDIT);
+      await advance(DEBOUNCE_MS);
+      await switchTo(view, OTHER_PROJECT_ID);
+      await settleFirst(new Error("Network down"));
+
+      // The background retry starts while B is on screen and is held in flight.
+      const settleRetry = holdNextSave();
+      await advance(RETRY_MS);
+      expect(saveMock).toHaveBeenCalledTimes(2);
+      expect(savedInstruction(1)).toBe(A_EDIT);
+
+      await switchTo(view, PROJECT_ID);
+      expect(instructionBox().value).toBe(A_EDIT);
+      typeInstruction("Newer edit after returning to A");
+      await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+      expect(saveMock).toHaveBeenCalledTimes(2);
+
+      await settleRetry("resolve");
+      // The old retry's response is not the newer edit: it drains the newer edit, rebased.
+      expect(saveMock).toHaveBeenCalledTimes(3);
+      expect(savedInstruction(2)).toBe("Newer edit after returning to A");
+      expect(saveMock.mock.calls[2][2]).toBe(PROJECT_ID);
+      expect(saveMock.mock.calls[2][0].version).toBe(2);
+      expect(instructionBox().value).toBe("Newer edit after returning to A");
+      expect(saveStatusText()).toBe("Saved");
+      expect(storedFor(DRAFT_STORAGE_KEY, TASK_ID)).toEqual([]);
+      await advance(10_000);
+      expect(saveMock).toHaveBeenCalledTimes(3);
+    });
+
     it("a debounced A edit flushed by the switch is saved to A, not to B", async () => {
       const view = await renderWorkspace();
       typeInstruction(A_EDIT);

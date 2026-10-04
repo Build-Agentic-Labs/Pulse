@@ -130,12 +130,39 @@ export async function readCachedPlannerState(projectId?: string) {
   });
 }
 
+/** Drops a project's snapshot from both cache layers; the next open loads remotely. */
+export async function clearCachedPlannerState(projectId?: string) {
+  if (!projectId) {
+    return;
+  }
+
+  plannerStateMemoryCache.delete(projectId);
+  if (!canUseIndexedDb()) {
+    return;
+  }
+
+  const database = await openPlannerCacheDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).delete(projectId);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("Unable to clear planner cache."));
+  });
+}
+
 export async function writeCachedPlannerState(
   projectId: string | undefined,
   state: PlannerState,
   mainScenarioId?: string,
 ) {
   if (!projectId) {
+    return;
+  }
+
+  // A late completion can run after the workspace switched products. Never store another
+  // project's state under this key; the existing snapshot is stale too, so drop it instead.
+  if (state.product.projectId !== undefined && String(state.product.projectId) !== String(projectId)) {
+    await clearCachedPlannerState(projectId);
     return;
   }
 

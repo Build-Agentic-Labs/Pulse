@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
-import { readCachedMainPlannerStateSync, writeCachedPlannerState } from "./planner-state-cache";
+import { clearCachedPlannerState, readCachedMainPlannerStateSync, writeCachedPlannerState } from "./planner-state-cache";
 
 function plannerState(projectId: string, scenarioId: string, name: string) {
   return {
@@ -45,5 +45,23 @@ describe("planner state memory cache", () => {
 
     expect(readCachedMainPlannerStateSync(projectId)?.state.scenario.id).toBe("scenario-main");
     expect(readCachedMainPlannerStateSync(projectId)?.state.product.name).toBe("Main Product");
+  });
+
+  it("refuses another project's state and invalidates the stale snapshot", async () => {
+    const projectA = "cache-project-a";
+    await writeCachedPlannerState(projectA, plannerState(projectA, "scenario-a", "Product A"), "scenario-a");
+    expect(readCachedMainPlannerStateSync(projectA)?.state.product.name).toBe("Product A");
+
+    await writeCachedPlannerState(projectA, plannerState("cache-project-b", "scenario-b", "Product B"), "scenario-b");
+
+    expect(readCachedMainPlannerStateSync(projectA)).toBeNull();
+    expect(readCachedMainPlannerStateSync("cache-project-b")).toBeNull();
+  });
+
+  it("clears a project's snapshot on request", async () => {
+    const projectId = "cache-project-clear";
+    await writeCachedPlannerState(projectId, plannerState(projectId, "scenario-main", "Clear me"), "scenario-main");
+    await clearCachedPlannerState(projectId);
+    expect(readCachedMainPlannerStateSync(projectId)).toBeNull();
   });
 });

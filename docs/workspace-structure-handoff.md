@@ -25,7 +25,7 @@ Each phase has a ledger in `docs/workspace-structure-plan.md`. Optional Phase 6 
 
 ### Structural moves (29): behaviour-preserving extraction
 
-- **`src/components/line-workspace.tsx`:** 6,655 lines at the merge base, now 3,652, with the rest split into 10 hooks under `src/components/line-workspace/`:
+- **`src/components/line-workspace.tsx`:** 6,655 lines at the merge base, now 3,652, with the rest split into 10 modules under `src/components/line-workspace/` (8 hooks, plus the dev autosave harness and a shared types file):
   - `use-procedure-drafts.ts`
   - `use-procedure-save-queue.ts`
   - `use-workspace-saves.ts`
@@ -121,7 +121,7 @@ Last run on the Phase 5 code, which is unchanged since apart from documentation.
 
 - **Retained isolated database `pulse-e2e`** (started from its existing data, never reset, returned to stopped):
   - 22 active pgTAP files, 398 assertions (`pgtap-retained.log`);
-  - 20/20 browser cases (`browser-retained.log`).
+  - 20 browser cases plus the request-count spec, 21/21 passing (`browser-retained.log`).
 - **Fresh disposable database:** `node scripts/release-check-fresh-db.mjs` passed on `pulse-release-20261004-060459` (`release-check.log`):
   - its identity was verified;
   - only the active migrations were applied;
@@ -129,7 +129,7 @@ Last run on the Phase 5 code, which is unchanged since apart from documentation.
   - pgTAP 22/398 and the browser suite pass;
   - the retained database's ledger and row counts are unchanged afterwards.
 - **Request counts:** identical per endpoint to Phase 4 on both databases: 61 on product open, 5 on the first switch to Procedure (`req-*.json`).
-- **Mutations:** all 41 targeted mutations were caught before and after the Phase 5 moves (`mutations-*.txt`, runner `mutate_p5.py`). The "before" file predates the 2 BOM mutations; `mutations-after-moves.txt` shows all 41.
+- **Mutations** (`mutations-*.txt`, runner `mutate_p5.py`): the first run on the original facade had 39 mutations and **1 survived** (membership bootstrap was not shown to be per user). A test covering it was added before any code moved. Two BOM mutations were added later. After the moves, all 41 were caught (`mutations-after-moves.txt`).
 
 Two tools live outside the repository and are copied into that folder: the retained-database browser runner (`browser-retained.mjs`) and the request-count spec (`zz-request-counts.spec.ts`, copied into `e2e/` only for the run). The reproducible committed path is the release-check script.
 

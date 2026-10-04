@@ -24,7 +24,7 @@ const notifyFeedback = vi.fn();
 const flushDeferredRemoteRefresh = vi.fn();
 
 function renderQueue({ viewOnly = false } = {}) {
-  return renderHook(() => {
+  return renderHook(({ projectId }: { projectId: string }) => {
     const [plannerState, setPlannerState] = useState<PlannerState>({ ...emptyPlannerState, tasks: [task("server text")] });
     const latestDerivedStateRef = useRef(plannerState);
     latestDerivedStateRef.current = plannerState;
@@ -34,7 +34,7 @@ function renderQueue({ viewOnly = false } = {}) {
     const [saveState, setSaveState] = useState<SaveState>("saved");
     const [saveError, setSaveError] = useState<string>();
     const drafts = useProcedureDrafts({
-      projectId: "project-queue",
+      projectId,
       mainScenarioIdRef,
       latestDerivedStateRef,
       setPlannerState,
@@ -43,7 +43,7 @@ function renderQueue({ viewOnly = false } = {}) {
     const queue = useProcedureSaveQueue({
       store,
       drafts,
-      projectId: "project-queue",
+      projectId,
       mainScenarioIdRef,
       latestDerivedStateRef,
       setPlannerState,
@@ -55,7 +55,7 @@ function renderQueue({ viewOnly = false } = {}) {
       flushDeferredRemoteRefresh,
     });
     return { plannerState, saveState, saveError, drafts, queue, store };
-  });
+  }, { initialProps: { projectId: "project-queue" } });
 }
 
 function savedInstruction(callIndex: number) {
@@ -237,4 +237,17 @@ it("drops a queued save without writing when the user only has view access", asy
   expect(save).not.toHaveBeenCalled();
   expect(result.current.saveState).toBe("idle");
   expect(result.current.store.hasProcedureSaveWork()).toBe(false);
+});
+
+it("saves to the project of the render that scheduled the edit after an in-place project switch", async () => {
+  save.mockResolvedValue(task("typed before the switch", 2));
+  const { result, rerender } = renderQueue();
+  act(() => {
+    result.current.queue.updateProcedureStepField("task-1", "step-1", "instruction", "typed before the switch");
+  });
+  rerender({ projectId: "project-other" });
+  await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save.mock.calls[0]?.[2]).toBe("project-queue");
 });

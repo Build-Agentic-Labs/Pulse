@@ -16,20 +16,20 @@ vi.mock("@/lib/planner-state-cache", async (original) => ({
 const PROJECT_ID = "project-drafts";
 
 function renderDrafts(queueProbe: ProcedureQueueProbe, initialTask = task("server text")) {
-  return renderHook(() => {
+  return renderHook(({ projectId }: { projectId: string }) => {
     const [plannerState, setPlannerState] = useState<PlannerState>({ ...emptyPlannerState, tasks: [initialTask] });
     const latestDerivedStateRef = useRef(plannerState);
     latestDerivedStateRef.current = plannerState;
     const mainScenarioIdRef = useRef<string | undefined>("scenario-main");
     const drafts = useProcedureDrafts({
-      projectId: PROJECT_ID,
+      projectId,
       mainScenarioIdRef,
       latestDerivedStateRef,
       setPlannerState,
       queueProbe,
     });
     return { plannerState, drafts };
-  });
+  }, { initialProps: { projectId: PROJECT_ID } });
 }
 
 const idleProbe: ProcedureQueueProbe = {
@@ -53,15 +53,25 @@ it("asks the queue for pending work at merge time instead of trusting a captured
     pendingDraftSnapshot: () => undefined,
   };
   const { result } = renderDrafts(probe);
-  const local = task("server text", 1, { name: "Typed locally" });
-  const server = task("server text", 2, { name: "Older server name" });
+  const local = task("server text", 1, {
+    name: "Typed locally",
+    partReferences: [{ id: "part-1", partNumber: "100-1" }],
+    customFields: { column: "local cell" },
+  });
+  const server = task("server text", 2, { name: "Older server name", partReferences: [], customFields: { column: "server cell" } });
 
   const whilePending = result.current.drafts.mergeServerTaskIntoLocalTask(local, server, {}, { source: "refreshTasks" });
   pending = false;
   const afterSettled = result.current.drafts.mergeServerTaskIntoLocalTask(local, server, {}, { source: "refreshTasks" });
 
-  expect(whilePending.name).toBe("Typed locally");
-  expect(afterSettled.name).toBe("Older server name");
+  expect(whilePending).toMatchObject({
+    name: "Typed locally",
+    partReferences: [{ id: "part-1", partNumber: "100-1" }],
+    customFields: { column: "local cell" },
+  });
+  // Local steps are kept for the queued save but carry the server's optimistic-lock versions.
+  expect(whilePending.manufacturingSteps?.[0]).toMatchObject({ instruction: "server text", version: 2 });
+  expect(afterSettled).toMatchObject({ name: "Older server name", partReferences: [], customFields: { column: "server cell" } });
   expect(probe.hasPendingProcedureSaveWork).toHaveBeenCalledWith("task-1");
   // A save completion echoes what was sent, so newer local text wins even without pending work.
   expect(
@@ -95,7 +105,11 @@ it("keeps typed step text over a server refresh and acknowledges only the exact 
     }));
   });
   expect(confirmed).toBe(false);
-  expect(result.current.drafts.getProcedureFieldValue("task-1", "step-1", "instruction", "fallback")).toBe("typed B");
+  expect(Object.values(result.current.drafts.procedureDraftsRef.current)[0]).toMatchObject({
+    value: "typed B",
+    dirty: true,
+    saveStatus: "dirty",
+  });
 
   const snapshotB = result.current.drafts.cloneProcedureDrafts();
   act(() => {
@@ -226,4 +240,68 @@ it("flags a conflict instead of losing typing when the server deleted the edited
   });
   expect(merged?.manufacturingSteps?.[0]?.instruction).toBe("typed on a deleted step");
   expect(Object.values(result.current.drafts.procedureDraftsRef.current)[0]).toMatchObject({ saveStatus: "conflict" });
+});
+
+it("does not acknowledge a newer edit that happens to match the saved text", () => {
+  const { result } = renderDrafts(idleProbe);
+  act(() => {
+    result.current.drafts.setProcedureFieldDraft("task-1", "step-1", "instruction", "A");
+  });
+  const sent = result.current.drafts.cloneProcedureDrafts();
+  act(() => {
+    result.current.drafts.markProcedureDraftsForSave("task-1", "save-a", sent);
+    result.current.drafts.setProcedureFieldDraft("task-1", "step-1", "instruction", "AB");
+    result.current.drafts.setProcedureFieldDraft("task-1", "step-1", "instruction", "A");
+  });
+
+  let confirmed = true;
+  act(() => {
+    confirmed = result.current.drafts.confirmProcedureDraftsFromSave("task-1", "save-a", 1, sent, task("A", 2));
+  });
+  expect(confirmed).toBe(false);
+  expect(Object.values(result.current.drafts.procedureDraftsRef.current)[0]).toMatchObject({
+    value: "A",
+    localEditSeq: 3,
+    dirty: true,
+  });
+});
+
+it("returns a stale save to dirty instead of leaving it saving", () => {
+  const { result } = renderDrafts(idleProbe);
+  act(() => {
+    result.current.drafts.setProcedureFieldDraft("task-1", "step-1", "instruction", "mine");
+  });
+  const sent = result.current.drafts.cloneProcedureDrafts();
+  act(() => {
+    result.current.drafts.markProcedureDraftsForSave("task-1", "save-a", sent);
+  });
+  expect(Object.values(result.current.drafts.procedureDraftsRef.current)[0]?.saveStatus).toBe("saving");
+
+  let confirmed = true;
+  act(() => {
+    confirmed = result.current.drafts.confirmProcedureDraftsFromSave("task-1", "save-a", 1, sent, task("someone else's text", 2));
+  });
+  expect(confirmed).toBe(false);
+  expect(Object.values(result.current.drafts.procedureDraftsRef.current)[0]).toMatchObject({
+    value: "mine",
+    dirty: true,
+    saveStatus: "dirty",
+  });
+});
+
+it("keeps the projectId of the render that started the work after an in-place project switch", () => {
+  const { result, rerender } = renderDrafts(idleProbe);
+  const setFieldFromFirstProject = result.current.drafts.setProcedureFieldDraft;
+  rerender({ projectId: "project-other" });
+
+  act(() => {
+    setFieldFromFirstProject("task-1", "step-1", "instruction", "typed before the switch");
+  });
+  expect(window.localStorage.getItem(procedureDraftStorageKey(PROJECT_ID))).toContain("typed before the switch");
+  expect(window.localStorage.getItem(procedureDraftStorageKey("project-other"))).toBeNull();
+
+  act(() => {
+    result.current.drafts.setProcedureFieldDraft("task-1", "step-1", "name", "typed after the switch");
+  });
+  expect(window.localStorage.getItem(procedureDraftStorageKey("project-other"))).toContain("typed after the switch");
 });

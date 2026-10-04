@@ -104,6 +104,10 @@ export function useProcedureDrafts({
     return Object.values(drafts).filter((draft) => draft.taskId === taskId);
   }
 
+  function hasDirtyProcedureDrafts(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
+    return getProcedureDraftsForTask(taskId, drafts).some((draft) => draft.dirty);
+  }
+
   function hasDirtyOrActiveProcedureDrafts(taskId: string, drafts: ProcedureDraftMap = procedureDraftsRef.current) {
     return getProcedureDraftsForTask(taskId, drafts).some((draft) => draft.dirty || draft.active);
   }
@@ -650,14 +654,15 @@ export function useProcedureDrafts({
     return recoveredDrafts;
   }
 
-  // A successful scenario switch drops the drafts of the scenario being left; they must never carry
-  // across. Only those tasks' drafts go: a task id belongs to exactly one scenario (tasks.id is the
-  // table's primary key; duplicated scenarios get new ids), so drafts of other scenarios or products
-  // (recovered from storage, or still owned by a background save) stay in memory and in their storage.
+  // A successful scenario switch drops the settled drafts of the scenario being left. A task id belongs
+  // to exactly one scenario (tasks.id is the table's primary key; duplicated scenarios get new ids), so a
+  // kept draft can never apply to another scenario's task. Dirty (unacknowledged) drafts are never
+  // dropped here: they stay in memory, and therefore in their project's draft storage, until a save
+  // confirms them. Other scopes' drafts are untouched.
   function resetProcedureDrafts(leavingTaskIds: Iterable<string>) {
     const leaving = new Set(leavingTaskIds);
     procedureDraftsRef.current = Object.fromEntries(
-      Object.entries(procedureDraftsRef.current).filter(([, draft]) => !leaving.has(draft.taskId)),
+      Object.entries(procedureDraftsRef.current).filter(([, draft]) => draft.dirty || !leaving.has(draft.taskId)),
     );
     setProcedureDraftVersion((version) => version + 1);
   }
@@ -667,6 +672,7 @@ export function useProcedureDrafts({
     deferredProcedureServerUpdatesRef,
     cloneProcedureDrafts,
     getProcedureFieldValue,
+    hasDirtyProcedureDrafts,
     hasDirtyOrActiveProcedureDrafts,
     maxProcedureDraftSeq,
     applyProcedureDraftsToTask,

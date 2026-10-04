@@ -32,6 +32,8 @@ import type {
 // navigation guards only count foreground records.
 
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
+// Recovered drafts are re-saved this long after their tasks open (project load or scenario switch).
+const PROCEDURE_RECOVERY_DELAY_MS = 250;
 
 type ProcedureTaskSaveQueueState =
   | "idle"
@@ -506,6 +508,59 @@ export function useProcedureSaveQueue({
     }, PROCEDURE_SAVE_DEBOUNCE_MS);
   }
 
+  // Re-save drafts recovered from storage for tasks that just opened (project load or scenario switch).
+  // Each task is registered as pending work in the given scope at once, so the visible status, the save
+  // barrier and the navigation guards count it before anything is scheduled. After the recovery delay
+  // the normal debounced save is armed. A task whose save is in flight or debounced is left alone: that
+  // save, or an in-flight save's completion, carries its newer drafts. A failed or conflicted record (its
+  // retry pending or cancelled) is re-registered; scheduling it replaces any pending retry, as an edit does.
+  function recoverProcedureDraftSaves(tasks: Task[], allTasks: Task[], scope: SaveScope) {
+    const registeredTaskIds = tasks
+      .filter((task) => {
+        const queue = getProcedureTaskSaveQueue(task.id);
+        return !queue.inFlight && !procedureSaveTimersRef.current[task.id];
+      })
+      .map((task) => {
+        const queue = getProcedureTaskSaveQueue(task.id);
+        const taskSnapshot = applyProcedureDraftsToTask(task);
+        queue.pending = true;
+        queue.pendingTaskSnapshot = taskSnapshot;
+        queue.pendingTasksSnapshot = allTasks.map((entry) => (entry.id === task.id ? taskSnapshot : entry));
+        queue.pendingDraftSnapshot = cloneProcedureDrafts();
+        queue.latestSeq = maxProcedureDraftSeq(task.id);
+        queue.state = "dirty-pending";
+        queue.scope = scope;
+        queue.startSave = startProcedureTaskSave;
+        procedureDraftLog("recovered draft registered", { taskId: task.id, saveSeq: queue.latestSeq });
+        return task.id;
+      });
+    if (registeredTaskIds.length === 0) {
+      return;
+    }
+    if (isForegroundSaveScope(scope)) {
+      setSaveState((state) => (state === "loading" || state === "saving" ? state : "draft"));
+    }
+
+    window.setTimeout(() => {
+      // Only the scope on screen schedules. Otherwise the registered snapshot stays pending in its own
+      // scope (and its drafts stay stored) until that scope opens again.
+      if (!isForegroundSaveScope(scope) || !isPlannerStateInSaveScope(latestDerivedStateRef.current, scope)) {
+        return;
+      }
+      registeredTaskIds.forEach((taskId) => {
+        const queue = getProcedureTaskSaveQueue(taskId);
+        // Picked up meanwhile (a newer edit's debounce, or a save already started or finished).
+        if (!queue.pending || queue.inFlight || procedureSaveTimersRef.current[taskId]) {
+          return;
+        }
+        const latestTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
+        if (latestTask) {
+          scheduleProcedureTaskSave(latestTask, latestDerivedStateRef.current.tasks);
+        }
+      });
+    }, PROCEDURE_RECOVERY_DELAY_MS);
+  }
+
   // Scope exit (scenario/product change or unmount): FLUSH -- don't drop -- debounced saves for the
   // scope being left; clearing the timers alone would silently discard the user's last keystrokes. Best
   // effort: the queue snapshots were prepared when the save was scheduled, and startProcedureTaskSave
@@ -525,5 +580,6 @@ export function useProcedureSaveQueue({
     scheduleProcedureTaskSave,
     updateProcedureStepField,
     flushScheduledProcedureSaves,
+    recoverProcedureDraftSaves,
   };
 }

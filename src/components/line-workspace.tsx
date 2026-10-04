@@ -727,6 +727,7 @@ export function LineWorkspace({
   const {
     procedureDraftsRef,
     getProcedureFieldValue,
+    hasDirtyProcedureDrafts,
     hasDirtyOrActiveProcedureDrafts,
     applyProcedureDraftsToTask,
     mergeServerTaskIntoLocalTask,
@@ -746,7 +747,12 @@ export function LineWorkspace({
   restoreProcedureDraftFieldsRef.current = restoreProcedureDraftFields;
 
   // Per-task granular procedure saves (debounce, retry, exact acknowledgment, scope-exit flush).
-  const { scheduleProcedureTaskSave, updateProcedureStepField, flushScheduledProcedureSaves } = useProcedureSaveQueue({
+  const {
+    scheduleProcedureTaskSave,
+    updateProcedureStepField,
+    flushScheduledProcedureSaves,
+    recoverProcedureDraftSaves,
+  } = useProcedureSaveQueue({
     store: procedureSaveQueues,
     drafts: procedureDrafts,
     projectId,
@@ -762,9 +768,9 @@ export function LineWorkspace({
     isForegroundSaveScope,
   });
   // Read by the load effect (recovered drafts) and the realtime cleanup (scope exit).
-  const scheduleProcedureTaskSaveRef = useRef(scheduleProcedureTaskSave);
+  const recoverProcedureDraftSavesRef = useRef(recoverProcedureDraftSaves);
   const flushProcedureSavesOnScopeExitRef = useRef(flushScheduledProcedureSaves);
-  scheduleProcedureTaskSaveRef.current = scheduleProcedureTaskSave;
+  recoverProcedureDraftSavesRef.current = recoverProcedureDraftSaves;
   flushProcedureSavesOnScopeExitRef.current = flushScheduledProcedureSaves;
 
   const kpis = useMemo(
@@ -1025,12 +1031,18 @@ export function LineWorkspace({
   function applyScenarioSwitch(loaded: PlannerState) {
     const normalized = ensureNomenclatureCollections(loaded);
     resetProcedureDrafts(latestDerivedStateRef.current.tasks.map((task) => task.id));
+    // Unsaved drafts recovered for this scenario's tasks (from storage at project load, or kept from an
+    // earlier visit) are re-saved the same way project load re-saves them.
+    const recoveredTasks = normalized.tasks.filter((task) => hasDirtyProcedureDrafts(task.id));
     plannerDirtyRef.current = false;
     setPlannerState(normalized);
     setSelectedTaskId(normalized.tasks[0]?.id);
     setSelectedStationId(normalized.stations[0]?.id ?? "");
     setActiveZoneId(undefined);
     setFocusedProcedureStepId(undefined);
+    if (recoveredTasks.length > 0) {
+      recoverProcedureDraftSaves(recoveredTasks, normalized.tasks, { projectId, scenarioId: normalized.scenario.id });
+    }
     setTaskDetailHydrationStatus(
       fullyHydratedScenarioIdsRef.current.has(normalized.scenario.id)
         ? Object.fromEntries(normalized.tasks.map((task) => [task.id, "loaded" as const]))
@@ -1672,20 +1684,14 @@ export function LineWorkspace({
 
       if (recoveredTaskIds.length > 0) {
         setSaveState("draft");
-        window.setTimeout(() => {
-          // If this mounted workspace has since switched to another project in place, the latest render's
-          // scheduler belongs to that project: leave the drafts in this project's storage for its next
-          // open. (A route change unmounts the workspace instead, and this instance still re-saves them.)
-          if (String(foregroundSaveScopeRef.current.projectId ?? "") !== currentProjectId) {
-            return;
-          }
-          recoveredTaskIds.forEach((taskId) => {
-            const taskToSave = hydratedState.tasks.find((task) => task.id === taskId);
-            if (taskToSave) {
-              scheduleProcedureTaskSaveRef.current(taskToSave, hydratedState.tasks);
-            }
-          });
-        }, 250);
+        // Registered as pending work now; re-saved after the recovery delay while this project and
+        // scenario are still on screen. Otherwise (an in-place switch) the drafts stay stored for the next
+        // open; a route change unmounts the workspace, and this instance still re-saves them.
+        recoverProcedureDraftSavesRef.current(
+          hydratedState.tasks.filter((task) => recoveredTaskIds.includes(task.id)),
+          hydratedState.tasks,
+          { projectId, scenarioId: hydratedState.scenario.id },
+        );
         return;
       }
 

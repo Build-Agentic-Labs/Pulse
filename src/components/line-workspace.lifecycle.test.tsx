@@ -891,7 +891,7 @@ describe("LineWorkspace procedure save lifecycle", () => {
     // opening a non-Main scenario shows its recovered draft but never re-saves it. The status reads Saved
     // while the content exists only in local draft storage, and leaving the scenario drops the draft
     // from memory, so it no longer shows on return (a reload recovers it from storage).
-    it.fails("a recovered non-Main scenario draft stays recoverable and never shows Saved until it is persisted", async () => {
+    it("a recovered non-Main scenario draft stays recoverable and never shows Saved until it is persisted", async () => {
       const NIGHT_TASK_ID = "task-lifecycle-night";
       const NIGHT_STEP_ID = "step-lifecycle-night";
       const nightDraft = "Night shift draft from an earlier session";
@@ -961,6 +961,191 @@ describe("LineWorkspace procedure save lifecycle", () => {
         expect(instructionBox().value, "after reload: draft shown").toBe(nightDraft);
       }
       expectRecoverableUnlessPersisted("after reload");
+    });
+
+    describe("recovered drafts of a non-Main scenario", () => {
+      const NIGHT_TASK_ID = "task-lifecycle-night";
+      const NIGHT_STEP_ID = "step-lifecycle-night";
+      const nightDraft = "Night shift draft from an earlier session";
+
+      beforeEach(() => {
+        vi.mocked(loadPlannerStateFromSupabase).mockImplementation(async (_projectId, scenarioId) => {
+          const base = buildState(PROJECT_ID);
+          if (scenarioId !== ALT_SCENARIO_ID) {
+            return base;
+          }
+          const nightTask = buildTask(altInstruction, ALT_SCENARIO_ID);
+          return {
+            ...base,
+            scenario: { ...base.scenario, id: ALT_SCENARIO_ID, name: "Night shift projection" },
+            tasks: [{
+              ...nightTask,
+              id: NIGHT_TASK_ID,
+              manufacturingSteps: nightTask.manufacturingSteps?.map((step) => ({ ...step, id: NIGHT_STEP_ID })),
+            }],
+          };
+        });
+        localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
+          version: 2,
+          savedAt: "2026-10-01T12:00:00.000Z",
+          fields: [instructionDraft(NIGHT_TASK_ID, NIGHT_STEP_ID, nightDraft, altInstruction, 5)],
+        }));
+      });
+
+      async function openScenario(tab: string) {
+        fireEvent.click(screen.getByRole("button", { name: "Gantt" }));
+        await flushMicrotasks();
+        fireEvent.click(screen.getByRole("tab", { name: tab }));
+        await flushMicrotasks();
+        fireEvent.click(screen.getByRole("button", { name: "Procedure" }));
+        await flushMicrotasks();
+      }
+      const nightSaves = () => saveMock.mock.calls.filter((call) => call[0].id === NIGHT_TASK_ID);
+      const nightStored = () => storedFor(DRAFT_STORAGE_KEY, NIGHT_TASK_ID).filter((field) => field.dirty).map((field) => field.value);
+
+      it("shows Saved only after the recovered draft's save is confirmed", async () => {
+        let confirm: (() => void) | undefined;
+        saveMock.mockImplementationOnce((task) => new Promise<Task>((resolve) => {
+          confirm = () => resolve(echoSavedTask(task));
+        }));
+        await mountWorkspace();
+        await openScenario("Night shift projection");
+        expect(instructionBox().value).toBe(nightDraft);
+        // Pending at once: status and the link guard reflect it before any timer runs.
+        expect(saveStatusText()).toBe("Saving…");
+        expect(clickElsewhereLink()).toBe(true);
+
+        await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+        expect(nightSaves()).toHaveLength(1);
+        expect(nightSaves()[0][0].manufacturingSteps?.[0]?.instruction).toBe(nightDraft);
+        expect(nightSaves()[0][2]).toBe(PROJECT_ID);
+        expect(saveStatusText()).toBe("Saving…");
+        expect(nightStored()).toEqual([nightDraft]);
+
+        await act(async () => {
+          confirm?.();
+        });
+        await flushMicrotasks();
+        expect(saveStatusText()).toBe("Saved");
+        expect(nightStored()).toEqual([]);
+        expect(clickElsewhereLink()).toBe(false);
+        await advance(10_000);
+        expect(nightSaves()).toHaveLength(1);
+      });
+
+      it("switching away before the recovery timer fires waits for the save, then leaves", async () => {
+        await mountWorkspace();
+        await openScenario("Night shift projection");
+        expect(saveStatusText()).toBe("Saving…");
+
+        // Immediately (0 ms) ask for Main: the save barrier holds the switch until the draft is persisted.
+        fireEvent.click(screen.getByRole("button", { name: "Gantt" }));
+        await flushMicrotasks();
+        fireEvent.click(screen.getByRole("tab", { name: "Main Plan" }));
+        await flushMicrotasks();
+        // The target tab highlights at once (existing feedback), but the night scenario stays loaded.
+        fireEvent.click(screen.getByRole("button", { name: "Procedure" }));
+        await flushMicrotasks();
+        expect(instructionBox().value).toBe(nightDraft);
+        expect(nightSaves()).toHaveLength(0);
+        expect(nightStored()).toEqual([nightDraft]);
+
+        await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS + 240);
+        expect(nightSaves()).toHaveLength(1);
+        expect(nightSaves()[0][0].manufacturingSteps?.[0]?.instruction).toBe(nightDraft);
+        expect(nightStored()).toEqual([]);
+        expect(instructionBox().value).toBe(ORIGINAL_INSTRUCTION);
+        expect(saveStatusText()).toBe("Saved");
+      });
+
+      it("keeps the draft stored and the scenario held when the recovery save fails, then retries to Saved", async () => {
+        saveMock.mockRejectedValueOnce(new Error("Network down"));
+        await mountWorkspace();
+        await openScenario("Night shift projection");
+        await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+        expect(nightSaves()).toHaveLength(1);
+        expect(saveStatusText()).toBe("Save pending — keep this draft open");
+        expect(nightStored()).toEqual([nightDraft]);
+        expect(instructionBox().value).toBe(nightDraft);
+
+        // Leaving is refused while the save is failing; the draft stays on screen and stored.
+        fireEvent.click(screen.getByRole("button", { name: "Gantt" }));
+        await flushMicrotasks();
+        fireEvent.click(screen.getByRole("tab", { name: "Main Plan" }));
+        await flushMicrotasks();
+        expect(screen.getByText("Can't switch scenarios")).toBeInTheDocument();
+        expect(screen.getByRole("tab", { name: "Night shift projection" })).toHaveAttribute("aria-selected", "true");
+        expect(nightStored()).toEqual([nightDraft]);
+
+        await advance(RETRY_MS + DEBOUNCE_MS);
+        expect(nightSaves()).toHaveLength(2);
+        expect(saveStatusText()).toBe("Saved");
+        expect(nightStored()).toEqual([]);
+      });
+
+      it("keeps a conflicted recovery stored, never shows Saved, and recovers it after a reload", async () => {
+        saveMock.mockRejectedValueOnce(new Error("Version conflict: the step changed"));
+        const view = await mountWorkspace();
+        await openScenario("Night shift projection");
+        await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+        expect(screen.getByText("Save conflict")).toBeInTheDocument();
+        expect(saveStatusText()).not.toBe("Saved");
+        await advance(RETRY_MS + DEBOUNCE_MS + 5_000);
+        expect(nightSaves()).toHaveLength(1);
+        expect(nightStored()).toEqual([nightDraft]);
+        expect(clickElsewhereLink()).toBe(true);
+
+        // Reload: the page's timers die with it; the stored draft is recovered and saved again.
+        view.unmount();
+        vi.clearAllTimers();
+        await mountWorkspace();
+        await openScenario("Night shift projection");
+        expect(instructionBox().value).toBe(nightDraft);
+        await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+        expect(nightSaves()).toHaveLength(2);
+        expect(saveStatusText()).toBe("Saved");
+        expect(nightStored()).toEqual([]);
+      });
+
+      it("reloading before recovery completes keeps the draft recoverable", async () => {
+        const view = await mountWorkspace();
+        await openScenario("Night shift projection");
+        expect(saveStatusText()).toBe("Saving…");
+        await advance(RECOVERY_DELAY_MS - 50);
+
+        view.unmount();
+        vi.clearAllTimers();
+        expect(nightSaves()).toHaveLength(0);
+        expect(nightStored()).toEqual([nightDraft]);
+
+        await mountWorkspace();
+        await openScenario("Night shift projection");
+        expect(instructionBox().value).toBe(nightDraft);
+        expect(saveStatusText()).toBe("Saving…");
+        await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+        expect(nightSaves()).toHaveLength(1);
+        expect(saveStatusText()).toBe("Saved");
+        expect(nightStored()).toEqual([]);
+      });
+
+      it("editing Main never erases another scenario's unsaved draft", async () => {
+        await renderWorkspace();
+        typeInstruction("Main edit while the night draft is unsaved");
+        await advance(DEBOUNCE_MS);
+        expect(saveMock.mock.calls.at(-1)?.[0].id).toBe(TASK_ID);
+        expect(nightStored()).toEqual([nightDraft]);
+        act(() => instructionBox().blur());
+        typeInstruction("A second Main edit");
+        await advance(DEBOUNCE_MS);
+        expect(nightStored()).toEqual([nightDraft]);
+        expect(nightSaves()).toHaveLength(0);
+
+        await openScenario("Night shift projection");
+        expect(instructionBox().value).toBe(nightDraft);
+        await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+        expect(nightSaves()).toHaveLength(1);
+        expect(nightStored()).toEqual([]);
+      });
     });
 
     it("shows the other scenario's server text when the field was blurred before switching", async () => {

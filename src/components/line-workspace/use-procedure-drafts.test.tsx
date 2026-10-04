@@ -218,16 +218,26 @@ it("restores recovered drafts as unfocused edits that later typing outranks, and
   expect(next?.localEditSeq).toBe(42);
   expect(window.localStorage.getItem(procedureDraftStorageKey(PROJECT_ID))).toContain("Renamed");
 
-  // A scenario switch drops only the drafts of the tasks being left; other scopes' drafts stay.
+  // A scenario switch drops only the settled drafts of the tasks being left. Unsaved (dirty) drafts and
+  // other scopes' drafts stay.
   act(() => {
     result.current.drafts.restoreProcedureDraftFields([{ ...recovered, taskId: "task-other-scope", localEditSeq: 43 }]);
+    result.current.drafts.markProcedureFieldActive("task-1", "step-1", "name", "Fit bracket");
+  });
+  const nameKey = "task-1:step-1:name";
+  act(() => {
+    // A clean, focused draft of a leaving task (as after a confirmed save).
+    result.current.drafts.procedureDraftsRef.current = {
+      ...result.current.drafts.procedureDraftsRef.current,
+      [nameKey]: { ...result.current.drafts.procedureDraftsRef.current[nameKey]!, dirty: false, value: "Fit bracket", baseValue: "Fit bracket" },
+    };
     result.current.drafts.resetProcedureDrafts(["task-1"]);
   });
-  expect(Object.values(result.current.drafts.procedureDraftsRef.current).map((draft) => draft.taskId)).toEqual(["task-other-scope"]);
-  act(() => {
-    result.current.drafts.resetProcedureDrafts(["task-other-scope"]);
-  });
-  expect(result.current.drafts.procedureDraftsRef.current).toEqual({});
+  expect(Object.keys(result.current.drafts.procedureDraftsRef.current).sort()).toEqual([
+    "task-1:step-1:instruction",
+    "task-other-scope:step-1:instruction",
+  ]);
+  expect(result.current.drafts.hasDirtyProcedureDrafts("task-1")).toBe(true);
 });
 
 it("flags a conflict instead of losing typing when the server deleted the edited step", () => {

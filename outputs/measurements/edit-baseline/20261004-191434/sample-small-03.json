@@ -1,0 +1,451 @@
+{
+  "fixture": "small",
+  "sample": 3,
+  "cold": false,
+  "startedAt": "2026-10-04T19:15:16.996Z",
+  "browser": "153.0.8010.12",
+  "phases": {
+    "open": {
+      "requests": {
+        "GET /rest/v1/profiles": {
+          "count": 4,
+          "requestBytes": 6612,
+          "responseBytes": 2554,
+          "failed": 0
+        },
+        "POST /rest/v1/rpc/redeem_workspace_access_grants": {
+          "count": 1,
+          "requestBytes": 1734,
+          "responseBytes": 500,
+          "failed": 0
+        },
+        "POST /rest/v1/profiles": {
+          "count": 1,
+          "requestBytes": 1838,
+          "responseBytes": 474,
+          "failed": 0
+        },
+        "GET /rest/v1/tool_library": {
+          "count": 1,
+          "requestBytes": 1657,
+          "responseBytes": 622,
+          "failed": 0
+        },
+        "GET /rest/v1/scenarios": {
+          "count": 2,
+          "requestBytes": 3308,
+          "responseBytes": 1865,
+          "failed": 0
+        },
+        "POST /rest/v1/rpc/is_super_admin": {
+          "count": 3,
+          "requestBytes": 5154,
+          "responseBytes": 1512,
+          "failed": 0
+        },
+        "GET /rest/v1/project_access": {
+          "count": 4,
+          "requestBytes": 6636,
+          "responseBytes": 2854,
+          "failed": 0
+        },
+        "GET /rest/v1/products": {
+          "count": 1,
+          "requestBytes": 1653,
+          "responseBytes": 1507,
+          "failed": 0
+        },
+        "GET /rest/v1/workspace_members": {
+          "count": 4,
+          "requestBytes": 6648,
+          "responseBytes": 2861,
+          "failed": 0
+        },
+        "GET /rest/v1/projects": {
+          "count": 4,
+          "requestBytes": 6612,
+          "responseBytes": 4545,
+          "failed": 0
+        },
+        "GET /rest/v1/workspaces": {
+          "count": 4,
+          "requestBytes": 6620,
+          "responseBytes": 3294,
+          "failed": 0
+        },
+        "GET /rest/v1/departments": {
+          "count": 6,
+          "requestBytes": 9936,
+          "responseBytes": 3948,
+          "failed": 0
+        },
+        "GET /rest/v1/department_members": {
+          "count": 3,
+          "requestBytes": 4989,
+          "responseBytes": 1998,
+          "failed": 0
+        },
+        "GET /rest/v1/notifications": {
+          "count": 3,
+          "requestBytes": 4974,
+          "responseBytes": 1920,
+          "failed": 0
+        },
+        "GET /rest/v1/sops": {
+          "count": 3,
+          "requestBytes": 4947,
+          "responseBytes": 2874,
+          "failed": 0
+        },
+        "GET /rest/v1/sop_review_seats": {
+          "count": 3,
+          "requestBytes": 4983,
+          "responseBytes": 2715,
+          "failed": 0
+        },
+        "GET /rest/v1/zones": {
+          "count": 1,
+          "requestBytes": 1650,
+          "responseBytes": 644,
+          "failed": 0
+        },
+        "GET /rest/v1/stations": {
+          "count": 1,
+          "requestBytes": 1653,
+          "responseBytes": 647,
+          "failed": 0
+        },
+        "GET /rest/v1/manufacturing_components": {
+          "count": 1,
+          "requestBytes": 1669,
+          "responseBytes": 663,
+          "failed": 0
+        },
+        "GET /rest/v1/tasks": {
+          "count": 1,
+          "requestBytes": 1650,
+          "responseBytes": 1813,
+          "failed": 0
+        },
+        "GET /rest/v1/custom_columns": {
+          "count": 1,
+          "requestBytes": 1659,
+          "responseBytes": 725,
+          "failed": 0
+        },
+        "GET /rest/v1/document_type_codes": {
+          "count": 1,
+          "requestBytes": 1664,
+          "responseBytes": 1919,
+          "failed": 0
+        },
+        "GET /rest/v1/sop_review_annotations": {
+          "count": 3,
+          "requestBytes": 5001,
+          "responseBytes": 1995,
+          "failed": 0
+        },
+        "GET /rest/v1/part_references": {
+          "count": 1,
+          "requestBytes": 1660,
+          "responseBytes": 636,
+          "failed": 0
+        },
+        "GET /rest/v1/step_tools": {
+          "count": 1,
+          "requestBytes": 1655,
+          "responseBytes": 629,
+          "failed": 0
+        },
+        "GET /rest/v1/task_dependencies": {
+          "count": 1,
+          "requestBytes": 1662,
+          "responseBytes": 631,
+          "failed": 0
+        },
+        "GET /rest/v1/actual_events": {
+          "count": 1,
+          "requestBytes": 1658,
+          "responseBytes": 633,
+          "failed": 0
+        },
+        "GET /rest/v1/manufacturing_steps": {
+          "count": 1,
+          "requestBytes": 1664,
+          "responseBytes": 974,
+          "failed": 0
+        }
+      },
+      "appRequests": 38,
+      "appResponseBytes": 666906,
+      "durationMs": 378
+    },
+    "switch:Procedure": {
+      "requests": {
+        "POST /rest/v1/rpc/task_project_id": {
+          "count": 1,
+          "requestBytes": 1762,
+          "responseBytes": 546,
+          "failed": 0
+        },
+        "GET /rest/v1/tasks": {
+          "count": 1,
+          "requestBytes": 1650,
+          "responseBytes": 685,
+          "failed": 0
+        },
+        "GET /rest/v1/step_exploded_views": {
+          "count": 1,
+          "requestBytes": 1664,
+          "responseBytes": 654,
+          "failed": 0
+        },
+        "GET /rest/v1/task_videos": {
+          "count": 1,
+          "requestBytes": 1656,
+          "responseBytes": 646,
+          "failed": 0
+        },
+        "GET /rest/v1/step_photos": {
+          "count": 1,
+          "requestBytes": 1656,
+          "responseBytes": 646,
+          "failed": 0
+        }
+      },
+      "appRequests": 2,
+      "appResponseBytes": 2110,
+      "durationMs": 70
+    },
+    "edit:step-instruction": {
+      "requests": {
+        "POST /rest/v1/rpc/task_project_id": {
+          "count": 2,
+          "requestBytes": 3524,
+          "responseBytes": 1092,
+          "failed": 0
+        },
+        "PATCH /rest/v1/tasks": {
+          "count": 1,
+          "requestBytes": 1825,
+          "responseBytes": 589,
+          "failed": 0
+        },
+        "GET /rest/v1/part_references": {
+          "count": 2,
+          "requestBytes": 3320,
+          "responseBytes": 1210,
+          "failed": 0
+        },
+        "GET /rest/v1/manufacturing_steps": {
+          "count": 2,
+          "requestBytes": 3328,
+          "responseBytes": 1632,
+          "failed": 0
+        },
+        "PATCH /rest/v1/manufacturing_steps": {
+          "count": 1,
+          "requestBytes": 1972,
+          "responseBytes": 589,
+          "failed": 0
+        },
+        "GET /rest/v1/tasks": {
+          "count": 1,
+          "requestBytes": 1650,
+          "responseBytes": 1740,
+          "failed": 0
+        },
+        "GET /rest/v1/step_exploded_views": {
+          "count": 1,
+          "requestBytes": 1664,
+          "responseBytes": 654,
+          "failed": 0
+        },
+        "GET /rest/v1/task_videos": {
+          "count": 1,
+          "requestBytes": 1656,
+          "responseBytes": 646,
+          "failed": 0
+        },
+        "GET /rest/v1/step_photos": {
+          "count": 1,
+          "requestBytes": 1656,
+          "responseBytes": 646,
+          "failed": 0
+        },
+        "GET /rest/v1/task_dependencies": {
+          "count": 1,
+          "requestBytes": 1662,
+          "responseBytes": 625,
+          "failed": 0
+        },
+        "GET /rest/v1/step_tools": {
+          "count": 1,
+          "requestBytes": 1655,
+          "responseBytes": 623,
+          "failed": 0
+        }
+      },
+      "appRequests": 0,
+      "appResponseBytes": 0,
+      "durationMs": 801
+    },
+    "mobile:open": {
+      "requests": {
+        "POST /rest/v1/rpc/redeem_workspace_access_grants": {
+          "count": 1,
+          "requestBytes": 1734,
+          "responseBytes": 500,
+          "failed": 0
+        },
+        "GET /rest/v1/profiles": {
+          "count": 2,
+          "requestBytes": 3306,
+          "responseBytes": 1246,
+          "failed": 0
+        },
+        "POST /rest/v1/profiles": {
+          "count": 1,
+          "requestBytes": 1838,
+          "responseBytes": 474,
+          "failed": 0
+        },
+        "GET /rest/v1/products": {
+          "count": 1,
+          "requestBytes": 1653,
+          "responseBytes": 1507,
+          "failed": 0
+        },
+        "GET /rest/v1/workspace_members": {
+          "count": 2,
+          "requestBytes": 3324,
+          "responseBytes": 1393,
+          "failed": 0
+        },
+        "POST /rest/v1/rpc/is_super_admin": {
+          "count": 2,
+          "requestBytes": 3436,
+          "responseBytes": 1008,
+          "failed": 0
+        },
+        "GET /rest/v1/project_access": {
+          "count": 2,
+          "requestBytes": 3318,
+          "responseBytes": 1400,
+          "failed": 0
+        },
+        "GET /rest/v1/workspaces": {
+          "count": 2,
+          "requestBytes": 3310,
+          "responseBytes": 1598,
+          "failed": 0
+        },
+        "GET /rest/v1/projects": {
+          "count": 2,
+          "requestBytes": 3306,
+          "responseBytes": 2179,
+          "failed": 0
+        },
+        "GET /rest/v1/scenarios": {
+          "count": 1,
+          "requestBytes": 1654,
+          "responseBytes": 987,
+          "failed": 0
+        },
+        "GET /rest/v1/zones": {
+          "count": 1,
+          "requestBytes": 1650,
+          "responseBytes": 644,
+          "failed": 0
+        },
+        "GET /rest/v1/manufacturing_components": {
+          "count": 1,
+          "requestBytes": 1669,
+          "responseBytes": 663,
+          "failed": 0
+        },
+        "GET /rest/v1/stations": {
+          "count": 1,
+          "requestBytes": 1653,
+          "responseBytes": 647,
+          "failed": 0
+        },
+        "GET /rest/v1/custom_columns": {
+          "count": 1,
+          "requestBytes": 1659,
+          "responseBytes": 725,
+          "failed": 0
+        },
+        "GET /rest/v1/tasks": {
+          "count": 1,
+          "requestBytes": 1650,
+          "responseBytes": 1813,
+          "failed": 0
+        },
+        "GET /rest/v1/document_type_codes": {
+          "count": 1,
+          "requestBytes": 1664,
+          "responseBytes": 1919,
+          "failed": 0
+        },
+        "GET /rest/v1/task_dependencies": {
+          "count": 1,
+          "requestBytes": 1662,
+          "responseBytes": 631,
+          "failed": 0
+        },
+        "GET /rest/v1/actual_events": {
+          "count": 1,
+          "requestBytes": 1658,
+          "responseBytes": 633,
+          "failed": 0
+        },
+        "GET /rest/v1/part_references": {
+          "count": 1,
+          "requestBytes": 1660,
+          "responseBytes": 636,
+          "failed": 0
+        },
+        "GET /rest/v1/step_exploded_views": {
+          "count": 1,
+          "requestBytes": 1664,
+          "responseBytes": 660,
+          "failed": 0
+        },
+        "GET /rest/v1/step_photos": {
+          "count": 1,
+          "requestBytes": 1656,
+          "responseBytes": 652,
+          "failed": 0
+        },
+        "GET /rest/v1/manufacturing_steps": {
+          "count": 1,
+          "requestBytes": 1664,
+          "responseBytes": 973,
+          "failed": 0
+        },
+        "GET /rest/v1/step_tools": {
+          "count": 1,
+          "requestBytes": 1655,
+          "responseBytes": 629,
+          "failed": 0
+        },
+        "GET /rest/v1/task_videos": {
+          "count": 1,
+          "requestBytes": 1656,
+          "responseBytes": 652,
+          "failed": 0
+        }
+      },
+      "appRequests": 30,
+      "appResponseBytes": 51179,
+      "durationMs": 127
+    }
+  },
+  "persistence": {
+    "fromBlurToDbMs": 786,
+    "pollIntervalMs": 20,
+    "confirmedValue": true
+  },
+  "pageErrors": []
+}

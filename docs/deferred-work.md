@@ -4,7 +4,10 @@ Companion to `nextjs-refactor-plan.md`. These items are **intentionally deferred
 not forgotten and not defects. Each says what it is, why it's parked, and what
 finishing it involves.
 
-Last reviewed: 2026-07-25
+Last reviewed: 2026-07-25. **Reconciled 2026-10-04** (edit-reliability plan, Package A, on `main`
+`438a6df`): every section below now carries a status line — *verified current*, *fixed*, *historical*
+or *not yet verified* — checked against the code on that commit. Older text is kept as incident
+history; where it no longer describes the code, the status line says so.
 
 ---
 
@@ -54,6 +57,12 @@ authenticated user is moot: the RPC now raises for everyone.
 
 ## 2. Unwired modules — decide: finish or delete
 
+> **Status 2026-10-04:** partly historical. `schedule-import.ts` **no longer exists** (decided
+> 2026-07-21: its sheet parsing became `src/domain/planning/schedule-row.ts`, the rest was deleted — see
+> CLAUDE.md "Deliberate decisions"). `version.ts` **is wired**: `src/components/sop/sop-editor.tsx:26`
+> imports `nextVersionLabel`/`versionLabel`, and `src/lib/sop/review.ts:14` its `ChangeSignificance`
+> type. Only `numbering.ts` (26 lines) still has no non-test importer — *verified current*.
+
 Three modules exist, are tested, and are imported by nothing. Git history shows
 each in exactly one commit, never modified — the signature of a domain layer built
 ahead of its UI, **not** abandonment. Do not delete on "no importers" evidence.
@@ -76,6 +85,10 @@ schedule import with its dry-run gate.
 
 ## 3. `canTransitionSop` — the untested-approval-workflow problem
 
+> **Status 2026-10-04:** *verified current* — `canTransitionSop` is still declared only in
+> `src/domain/sop/lifecycle.ts` and called from nothing but its tests. The "must respect solo test
+> mode" note at the end is historical: that mode is retired (§1).
+
 `src/domain/sop/lifecycle.ts:77` has 29 well-written tests and **zero call sites**.
 It is a TypeScript mirror of the Postgres trigger that does the real enforcement.
 The mirror can drift from the trigger indefinitely while the suite stays green.
@@ -94,6 +107,11 @@ interacts with item 1: the pre-check must respect solo test mode.
 ---
 
 ## 4. Complete backup coverage
+
+> **Status 2026-10-04:** *historical, superseded, not re-verified here.* A local backup suite now
+> exists under `scripts/backup/` (archive, verify, recovery and stress rehearsals) with its reports in
+> `docs/local-backup-*.md` / `.json`. Whether the gaps listed below (storage files, tested restore,
+> cadence) are closed by it was not checked in this pass.
 
 **Status: database fully covered as of 2026-07-18 evening; storage partially.**
 
@@ -136,21 +154,32 @@ automatic daily backups. If so, that outranks anything scripted here.
 
 ## 5. Smaller items
 
-- **`/design/nothing` may be broken.** It hung at "LOADING WORKSPACE" when checked.
-  Separately, `src/theme/nothing-design.css` (404 lines) is imported by nothing —
+- **`/design/nothing` may be broken.** *(2026-10-04: the CSS half is fixed —
+  `app/design/nothing/layout.tsx:3` now imports `nothing-design.css`; whether the route still hangs
+  was not re-checked.)* It hung at "LOADING WORKSPACE" when checked.
+  Separately, `src/theme/nothing-design.css` (404 lines) was imported by nothing —
   the only CSS import in the repo is `globals.css` at `app/layout.tsx:7`. Possibly
   related. Decide: delete the file, or wire it into that route.
-- **No CI exists.** No `.github/`. Nothing runs the 336 tests. (This is Stage 0
+- **No CI exists.** *(2026-10-04: historical, fixed — `.github/workflows/ci.yml` runs typecheck,
+  lint, the unit suite, the production build, the bundle budget, pgTAP on a throwaway local database
+  and the AWI browser suite; `relock.yml` regenerates the lockfile.)* No `.github/`. Nothing runs the 336 tests. (This is Stage 0
   work in the main plan, listed here for visibility.)
-- **`org_tool_access` write policy is not workspace-scoped**
+- **`org_tool_access` write policy is not workspace-scoped** *(2026-10-04: historical, fixed —
+  `20260811120000_structured_workspace_invites.sql:86-89` recreates "org_tool_access manager write"
+  with `has_workspace_role(workspace_id, owner|admin)` in both `using` and `with check`.)*
   (`20260601123000:103-115`). Impact is nil today — single workspace — but it
   becomes a real multi-tenancy defect the moment a second workspace exists.
-- **Rate limiting is in-memory and per-instance** (`src/lib/api-auth.ts:72`). On
+- **Rate limiting is in-memory and per-instance** (`src/lib/api-auth.ts:72`; *2026-10-04: verified
+  current*, the bucket map is now at `src/lib/api-auth.ts:108`). On
   serverless, limits multiply by instance count. Affects LLM-spending routes.
 
 ---
 
 ## 6. Planner procedure retry ignores an injected client — recorded 2026-10-03, FIXED 2026-10-04
+
+> **Status 2026-10-04:** *fixed, verified on `main`* at `0b41c81` — `src/lib/planner/task-store.ts`
+> passes the issuing client to `loadTaskFromSupabase` at the conflict reloads (lines 512, 574) and the
+> confirmation read (599). CI on that commit was green.
 
 **What it was:** `saveProcedureTaskUpdateToSupabase` (`src/lib/planner/task-store.ts`) accepted an optional
 client and used it for its writes, but its version-conflict reload and its final confirmation read went
@@ -177,6 +206,12 @@ caller (see §7a), so threading a client through them was left out of this fix o
 ---
 
 ## 7. Planner task-store: unused functions, single-task read ordering, patch typing — recorded 2026-10-04, not changed
+
+> **Status 2026-10-04 (later the same day):** **b is fixed, verified on `main`** at `438a6df` — every
+> child read in `loadTaskFromSupabase` (`src/lib/planner/read-store.ts:534-540`) goes through
+> `readAllPages` with `order(<key>).order("id")`; CI green. **a and c are *verified current*** — the six
+> functions still have no production caller and `TaskFieldPatch` still cannot express a clear. See
+> `docs/edit-operation-inventory.md` for the active-vs-unused writer list.
 
 Surfaced by the final review of the workspace-structure refactor. All three pre-date the branch (verified at
 merge base `edd45a9`); the branch moved them verbatim into `src/lib/planner/task-store.ts` / `read-store.ts`

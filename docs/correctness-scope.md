@@ -2,6 +2,16 @@
 
 Branch `codex/workspace-structure`. Nothing below has been merged, pushed or deployed. No production migration has been applied, and no guard is active.
 
+> **Status 2026-10-04 (edit-reliability plan, Package A):** the branch above **was merged to `main`**
+> (`5526cfe`, 2026-10-04, CI green) and the branch deleted, so the first sentence is historical. What is
+> still true on `main` `438a6df`: the isolated migration is **not** in the active paths
+> (`supabase/migrations` has 151 files and `supabase/tests` 22, none of them `20261003210000`; the
+> files live under `supabase/isolated/2026-10-03-step-recovery/`), no production migration from this
+> work has been applied, **the catalog rollout in §3 remains BLOCKED**, and the release-checklist item
+> in §2 step 2 has **not** been written (no checklist mentions the production ledger). §4's
+> "memory-only edits" claim is re-verified operation by operation in `docs/edit-operation-inventory.md`.
+> "What resumes now" at the end is historical: structural Phases 3–5 completed and merged.
+
 ## 1. Completed, validated fixes (committed locally)
 
 | Fix | Commit | Evidence |

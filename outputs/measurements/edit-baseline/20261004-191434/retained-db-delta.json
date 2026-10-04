@@ -1,0 +1,28 @@
+{
+  "ledgerBefore": 151,
+  "ledgerAfter": 151,
+  "rowDeltas": {
+    "auth.audit_log_entries": 18,
+    "auth.identities": 3,
+    "auth.mfa_amr_claims": 15,
+    "auth.refresh_tokens": 15,
+    "auth.sessions": 15,
+    "auth.users": 3,
+    "public.audit_log": 9,
+    "public.document_type_codes": 12,
+    "public.manufacturing_steps": 1301,
+    "public.notification_drain_runs": 19,
+    "public.products": 3,
+    "public.profiles": 3,
+    "public.project_access": 3,
+    "public.projects": 3,
+    "public.scenarios": 3,
+    "public.stations": 10,
+    "public.step_tools": 1500,
+    "public.tasks": 1141,
+    "public.workspace_auto_join_domains": 3,
+    "public.workspace_members": 3,
+    "public.workspaces": 3,
+    "public.zones": 5
+  }
+}

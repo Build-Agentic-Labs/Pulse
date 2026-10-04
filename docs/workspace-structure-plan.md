@@ -264,6 +264,132 @@ Adjust media boundaries 50–100 lines if necessary to avoid cycles. Keep signin
 
 Pure sequence-collision calculation may move to a domain module; database sequence parking belongs in persistence. Database row mapping belongs with persistence even if a mapping function makes no network call.
 
+### Phase 4 execution plan (current code, 2026-10-03; not started)
+
+**Baseline:** `src/domain/supabase-planner.ts` is 4,932 lines, with no `"use client"` marker. **98 files import it** (components, stores, server data, API routes), and **23 test files mock it by path** (`vi.mock("@/domain/supabase-planner", ...)`).
+
+This is a **structural move only**:
+- no change to queries, request counts, persistence behaviour, authorization, schema or UI;
+- the 61 product-open requests are not optimized;
+- the blocked catalog work is not touched, and the isolated database functions are not called.
+
+#### Rules that make it safe
+
+1. **No importer changes.** Every existing import of `@/domain/supabase-planner` stays, and the facade re-exports each moved export under the same name and signature. An importer switched to a leaf path would silently bypass the 23 path-based test mocks, so Phase 4 switches none.
+2. **Leaves never import the facade.** The facade imports leaves; leaves import only other leaves (in the order below), domain modules and `@/lib/supabase/client`.
+   - Verified: the only existing cycle is facade ↔ `src/lib/awi/procedure-store.ts` (the facade uses `saveAwiProcedure`, and procedure-store uses `createPlannerSupabaseClient`).
+   - It is left as-is. Re-pointing procedure-store at `client.ts` would be an importer change, deferred to Phase 5.
+3. **Leaves are plain modules:** no `"use client"`, no `"server-only"`. The facade is imported by server code (`src/lib/supabase/server-data.ts`, `app/sops/page.tsx`, SolidWorks API routes). A `"use client"` leaf would turn its exports into client-reference proxies on the server (CLAUDE.md rule).
+4. **Client boundary unchanged:**
+   - `plannerClient()` keeps its browser singleton on `globalThis.__buildlogicPlannerSupabaseClient` (tests inject through that key).
+   - It keeps its server trap: construction is allowed, any use throws with guidance.
+   - The env constants are still read at module load.
+   - Every `client?` parameter (29 functions) keeps defaulting **at call time** (`client ?? plannerClient()`), so per-request server clients from `server-data.ts` and the SolidWorks routes behave exactly as now.
+5. **Authorization unchanged:** each check stays in the same function, in the same order:
+   - `assertTaskInProject` / `assertTaskRowInProject` (`task_project_id` / `scenario_project_id` RPCs);
+   - `requireToolLibraryProjectId`;
+   - project-scoped storage paths and project-filtered deletes.
+
+   RLS stays the enforcement layer.
+6. **Module state keeps its guards:**
+   - `signedUrlCache` moves together with its browser-only guard (`typeof window === "undefined"` → no caching), which prevents cross-user URL leaks on the server and must never be relaxed.
+   - The per-client WeakMap and in-flight read maps (super-admin, membership, workspace groups) are Phase 5 and stay put.
+
+#### Boundaries (`src/lib/planner/`), in dependency order
+
+| Module | Moves (current anchors; names win over lines) | Exported via the facade | Est. lines |
+|---|---|---|---:|
+| `client.ts` | env constants (61–62); `PlannerSupabaseGlobal`, `migrateLocalStorageSessionToCookies`, `plannerClient` (284–381); `createPlannerSupabaseClient`, `getUserFromSession` (383–407) | `createPlannerSupabaseClient(): SupabaseClient<Database>`, `getUserFromSession(supabase)` | 150–190 |
+| `query-helpers.ts` | `MISSING_RELATION_CODES`, `isMissingRelationError` (435–440); `assertSafeOrFilterValue`, `buildOrFilter`, `documentTypeScopeFilter`, `customColumnScopeFilter` (932–953); `assertTaskInProject`, `assertTaskRowInProject` (1564–1592); `throwIfError`, `newScopedId` (1671–1687) | none (internal) | 100–150 |
+| `row-mappers.ts` | scalar helpers and all entity mappers (408–931, except the query helpers above); `taskRow`, `customFieldsRow`, `procedureTaskUpdateRow`, `dependencyRow`, `manufacturingStepRows`/`Row`, `normalizeManufacturingStepSequences` (954–1082); `partReferenceRows`, `actualEventRow`, `customColumnRow` (1548–1670). Sequence-collision **DB parking** (1083–1193) stays in the facade for Phase 5 (shell/task stores). | `mapScenarioSummary`, `procedureTaskUpdateRow` | 650–750 |
+| `realtime.ts` | `RealtimePlannerTable`, `PlannerRealtimeScope`, `PlannerRealtimePayload`, `taskIdFromRealtimePayload`, `canPatchTaskFromRealtimePayload`, `isRealtimePayloadInScope` (101–206); `subscribePlannerStateChanges` (4878–4932) | those names, same signatures | 170–220 |
+| `media-rows.ts` | `StepPhotoRow`, `StepExplodedViewRow`, `StepToolRow`, `TaskVideoRow`, `SignedMediaRow`; `mapStepPhotoRecord`, `mapTaskVideoRecord`, `mapStepExplodedViewRecord` (1194–1275); `withNormalizedStepAssets`, `indexStepPhotos`/`ExplodedViews`/`TaskVideos`/`StepTools` (1434–1547) | none | 260–330 |
+| `media-storage.ts` | bucket and signing constants (63–73); `signedUrlCache` with its browser guard (75–100); `signedStorageUrl(s)` and `withSigned*Rows`, including tool-library images (1276–1433); storage-path builders (1593–1637); `storageObjectPaths`, `removeStorageObjects` (3770–3797); `dataUrlToBlob`, `blobToImage`, `createPhotoThumbnailBlob`, `safeStorageSegment`, `stableStoragePublicUrl` (4279–4375); `refreshSignedMediaUrl` (4376–4399) | `refreshSignedMediaUrl` | 380–460 |
+| `media-store.ts` | soft deletes, caption update, `removeExplodedViewObject` (3818–3858); `currentUserIdForAttribution` (4400–4414); `stepPhotoRow`, `saveStepPhotoMetadataToSupabase`, `uploadStepPhotoAttachment`, `removeStepPhotoAttachmentObject`, `copyStepPhotoAttachmentToStep`, `saveExplodedViewToSupabase`, `saveTaskVideoToSupabase`, `softDeleteTaskVideoFromSupabase`, `removeTaskVideoObject` (4500–4877), with their input types | all of these, plus `ExplodedViewUploadInput` and `TaskVideoUploadInput` | 430–520 |
+| `tool-store.ts` | `ToolLibraryRow`, `ToolLibraryItem` (260–281); `addStepToolToSupabase`, `removeStepToolFromSupabase`, `syncStepToolsForStepToSupabase` (3594–3660); `requireToolLibraryProjectId`, `loadToolLibraryFromSupabase`, `uploadToolLibraryImage`, `upsertToolLibraryMetadata`, `deleteToolLibraryFromSupabase` (3661–3817, minus storage helpers); `stepToolId`, `toolLibraryId` (4356–4367); `mapToolLibraryRow`, `stepToolRowsFromTask`, `syncStepToolsForTasks`, `syncStepToolsForTask` (4415–4499) | the six functions and `ToolLibraryItem` | 330–420 |
+
+**Stays in the facade for Phase 5:**
+- reads: core, full and summary loads, task and target reads, `loadTaskPrivateMediaFromSupabase`;
+- the shell and full-state saves, the BOM save, granular task and step writes, the procedure transaction;
+- scenarios, workspace and access, with their in-flight/WeakMap state;
+- `SaveState`, `assertSaneStateDeletion`, `upsertWouldCollideOnSequence` and sequence parking.
+
+**Expected sizes:** the facade drops to about 2,450–2,800 lines (the original target), and about 2,500–2,650 lines move into the leaves. These are estimates. A leaf above its range needs a reason, not fragmentation. Media boundaries may shift 50–100 lines to avoid a cycle; signing always stays with its cache.
+
+**Facade form:**
+
+```ts
+export { uploadStepPhotoAttachment, ... } from "@/lib/planner/media-store";
+export type { ToolLibraryItem, ... } from "@/lib/planner/tool-store";
+```
+
+`vi.mock(path, async (original) => ({ ...await original(), ... }))` still sees every name. Internal calls between moved functions were never mockable through the facade and remain so, so no test depended on that.
+
+#### Tests that establish behaviour before extraction (written against the current file first)
+
+**Existing real-implementation suites that must stay green:**
+- the `supabase-planner.*.test.ts` files: awi-save, core-load, master-bom, mobile-step, photo-annotations, procedure-custom-fields, sequence-collision, step-photo-copy-guard, summary, workspace-list;
+- `planner-realtime.test.ts`, `scenario-loading.test.ts`, `planner-save-tripwire.test.ts`, `project-catalog.test.ts`;
+- `use-workspace-tools.persistence.test.tsx` (real savers over an in-memory database);
+- `use-recovering-photo.test.tsx`;
+- all component suites (mocked facade).
+
+**Gaps to characterize first:**
+1. **Facade export surface:** a sorted list of export names, plus `typeof` for runtime values. It fails if a name disappears or changes kind.
+2. **Client boundary:**
+   - server (node environment): the trap is constructible, any property access throws the guidance message, symbol/`then` probes return `undefined`;
+   - browser (jsdom): one singleton, respecting an injected `globalThis` client;
+   - missing env: the existing error;
+   - `getUserFromSession` returns a null user without a session and never calls `getUser`.
+3. **Signed-URL cache:**
+   - browser: caches and refreshes after the margin;
+   - server: never caches (the leak guard);
+   - `refreshSignedMediaUrl` against a fake storage client.
+4. **Media store over the in-memory database** (moved into a shared test helper):
+   - `uploadStepPhotoAttachment`: data-URL path (upload, thumbnail, metadata row, project assertion) and the signed-https path (metadata only);
+   - copy (the existing guard), soft delete, object removal;
+   - `saveExplodedViewToSupabase` / `saveTaskVideoToSupabase` with an **injected** client, as the SolidWorks routes call them; a failed task-project assertion throws before any upload.
+5. **Tool store:**
+   - per-row add and remove by computed id; per-step sync;
+   - library load, upsert (rename and category carry), delete with its project-scope requirement;
+   - signed library images.
+6. **Realtime:** `subscribePlannerStateChanges` over a fake channel. Tables and filters are registered per product and scenario, only in-scope payloads are emitted, and cleanup removes the channel.
+7. **Row mappers:** golden snapshots of `mapTask`/`mapProduct`/`mapStation`/`mapZone`/step and part mappers, and the matching `*Row` serializers, over representative rows. Any mapping change shows as a diff.
+
+#### Commit sequence (each one compiling, tested and gated)
+
+**4A:**
+1. characterization tests and the shared in-memory test helper
+2. `client.ts`
+3. `query-helpers.ts`
+4. `row-mappers.ts`
+
+**4B:**
+
+5. `realtime.ts`
+6. `media-rows.ts` plus `media-storage.ts` (together: the signing cache and its users)
+7. `media-store.ts`
+8. `tool-store.ts`
+
+**Every commit must show:**
+- a mechanical moved-lines check (each moved body byte-identical apart from imports and exports);
+- the unchanged export-surface test;
+- a script check that no leaf imports the facade and no leaf has a module directive;
+- targeted suites, mutation checks on the new seams, and the full unit suite, lint and typecheck.
+
+**Final tree:**
+- optimized build, then `check:bundles` (sizes and the dev-harness guard), typecheck and diff check, run sequentially;
+- the full browser suite on the retained isolated database (no reset);
+- the product-open and module-switch **request counts identical** to the Phase 3 baseline (61 / 5 / 0) on the same scenario.
+
+Stop after Phase 4 for review.
+
+#### Out of scope
+
+- Behaviour or query changes, request reduction, catalog or restore work, isolated-function activation.
+- Re-pointing any importer (including breaking the procedure-store cycle).
+- Account-switch cache redesign, Phase 5 stores, `database.types.ts` regeneration.
+
 ## Phase 5 — Remaining persistence
 
 | Destination under `src/lib/planner` | Target LOC | Responsibility |

@@ -32,6 +32,31 @@ No client code calls them. They are not deployed and change no existing object. 
 - the client project in section 3
 - a production deployment decision
 
+### Keeping the isolated migration out of production
+
+**Branch-only database files**, versus `main`, checked with `git diff --name-status main...HEAD -- supabase/`. These three are the only ones, and `main` has no commits this branch lacks.
+- `supabase/migrations/20261003210000_step_recovery_and_tool_changes.sql`
+- `supabase/tests/step_recovery_test.sql`
+- `supabase/tests/compat_cutover_test.sql` (it calls `apply_step_tool_changes` and `delete_manufacturing_step`, so it depends on the migration)
+
+**The actual deployment process** (confirmed in the repository):
+- **CI** (`.github/workflows/ci.yml`) runs `supabase db start`, then `supabase db reset --local` (every migration, applied to the runner's throwaway database), then `supabase test db --local`. No step targets a remote project.
+- **Vercel** builds with `next build` (`package.json`); `vercel.json` holds only the notification cron. Deployment applies no migration.
+- **Production migrations are applied by hand.** An operator runs `node --env-file=.env.local scripts/apply-migration-safely.mjs <file>`, one additive migration at a time. That script refuses destructive SQL and checks row counts inside the transaction. `docs/runbooks/notifications.md` says to never use `supabase db push`. Functions that are patched in place are confirmed with `npx supabase db query --linked` (CLAUDE.md). Ledger drift from custom appliers is repaired with `scripts/repair-migration-ledger.mjs` / `supabase migration repair` (`docs/db-audit-2026-06-01.md`).
+- `npm run gen:types` reads the production project's schema, so it would not show isolated objects.
+
+**Therefore:** nothing deploys `20261003210000` automatically. The risk is human or tooling: once the file sits in `supabase/migrations` on `main`, `supabase migration list` / `db push`, or an operator applying "everything new", would treat it as pending.
+
+**Exclusion procedure.** Proposed only; to be done before any merge or push of this branch, and only with approval:
+1. **Relocate the three files** out of the deploy and CI paths, into `supabase/isolated/2026-10-03-step-recovery/`, with a README stating: "Not authorized for production. Apply only to isolated databases with `scripts/verify-local-migration.mjs`."
+   - That script accepts any path with a valid migration file name.
+   - `main`'s `supabase/migrations` and `supabase/tests` then contain nothing unapproved.
+   - The pgTAP files would no longer run in CI, but can still be run by hand against an isolated database. Adding a CI job for them would itself need approval.
+2. **Add a release checklist item:** compare `supabase/migrations` with the production ledger before any apply, and apply only versions explicitly authorized for that release.
+3. **The retained isolated database** (`scratch/browser-db`) already has the migration applied, with its ledger row. That is isolated only, and no production action follows from it.
+
+Until then, the branch stays local (no merge, no push), which is the current state.
+
 ## 3. Separate implementation project: catalog consistency and targeted restore
 
 Designs: `docs/tool-catalog-consistency-design.md`, `docs/restore-step-design.md`.

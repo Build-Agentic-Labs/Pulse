@@ -266,13 +266,24 @@ Hand-off notes for later phases (recorded, not redesigned in Phase 1):
     - The night scenario shows its own draft. Main's draft is removed and never applied there.
     - The night scenario's next edit saves only that scenario's task.
 
-    New consequence: a recovered draft for a non-Main scenario shows when that scenario opens, but it is saved only with the next edit to that task. Automatic recovery saves run on project load only.
+    Follow-up, fixed: recovered drafts of a non-Main scenario. Before this fix:
+    - Opening the scenario showed its recovered draft with the status reading **Saved**, though the draft was never re-saved.
+    - Leaving the scenario dropped the draft from memory.
+    - A later edit anywhere in the project then rewrote draft storage without it. This was the loss window the earlier correction had only moved.
 
-    **Open gap, found by "a recovered non-Main scenario draft stays recoverable…" (committed as `it.fails`). Correction proposed, not applied:**
-    - Opening the scenario shows its recovered draft while the status reads **Saved**, though the content exists only in local draft storage.
-    - Leaving the scenario drops the draft from memory. It no longer shows on return, although storage still holds it and a reload recovers it.
-    - Outside that exact sequence, there is data loss: after leaving the scenario, any edit elsewhere in the project rewrites draft storage from memory and erases the night draft before it ever reached the database. The previous correction moved this window rather than closing it.
-    - Proposed smallest correction: when a scenario switch brings in tasks with recovered dirty drafts, re-save them the way project load already does. That means status "draft", then the same 250 ms delay, then a scheduled save for each task. The status then shows unsaved work until the save succeeds. Leaving the scenario must pass the existing save barrier, so the draft is persisted, or the switch is refused, before it can be dropped. No new UI, and roughly 15 lines in `applyScenarioSwitch`.
+    The fix:
+    - Project load and scenario switch now share one recovery path (`recoverProcedureDraftSaves`). Each task with a recovered unsaved draft becomes a pending queue record in its issuing scope at once, so the status ("Saving…"), the save barrier and the navigation guards count it before any timer runs. After the existing 250 ms delay the normal debounced save is armed.
+    - Tasks whose save is already in flight or debounced are not registered again, so nothing is scheduled twice. A failed or conflicted record is re-registered, and its pending retry is replaced the way an edit replaces it.
+    - The scenario-switch reset never drops a dirty, unacknowledged draft. Leaving the scenario must pass the existing save barrier, so the draft is persisted or the switch is refused. Failures and conflicts keep the draft dirty in memory and in the project's draft storage.
+
+    Lifecycle tests, each failing before this fix:
+    - the exact sequence (open, no edits, check the status, switch away and back, reload)
+    - Saved only after the save is confirmed
+    - switching away before the 250 ms timer (the switch waits for the save)
+    - a failed recovery that blocks leaving, then retries to Saved
+    - a conflicted recovery that stays stored and never shows Saved, then is recovered after a reload
+    - reloading before recovery completes
+    - editing Main never erases another scenario's unsaved draft
   - Same boundary, checked without changes:
     - Pending draft snapshots clone all in-memory drafts, but every consumer filters by task id: marking for save, acknowledgment, sequence, applying drafts, cleanup and the annotation acknowledgment. A queue test pins that another scope's draft in a snapshot is never marked, acknowledged, applied or cleaned.
     - Any scope exit still cancels every pending retry timer, including background retries of other scopes. Their edits stay in the queue snapshot and in their project's draft storage, and are recovered when that scope opens again.
@@ -283,6 +294,6 @@ Hand-off notes for later phases (recorded, not redesigned in Phase 1):
   - the scenario-switch reset is limited to the scenario being left;
   - recovery applies only drafts that match a loaded task.
 
-  The non-Main recovery gap above is a case those protections do not cover. A master BOM save in flight still holds the navigation guard briefly after an in-place switch. Media and tool completions (Phase 2 code) still report into the visible status, though the cache guard now protects their cache writes.
+  Another protection: recovery re-saves recovered unsaved drafts for whichever scope opens, and the reset keeps unacknowledged drafts. These protections are tested, not structural. A future change that rebuilds a project's draft storage from a partial in-memory map would reopen the loss path. A master BOM save in flight still holds the navigation guard briefly after an in-place switch. Media and tool completions (Phase 2 code) still report into the visible status, though the cache guard now protects their cache writes.
 
-Evidence: 1,820 → 1,886 unit tests pass (230 files), including a black-box `LineWorkspace` lifecycle test written and passing against `3d46341` before it ran on the extracted code. Every new seam test was checked against targeted mutations of the behavior it guards. Lint, the optimized build, the settled typecheck and bundle budgets pass (planner entry 275.1 KiB vs 275.2 baseline; largest chunk 124.0 KiB; 0 chunks contain harness code). All 19 browser cases (18 baseline plus the product-switch regression) pass against the retained isolated database (`scratch/browser-db`, ports 563xx, not reset). Its schema already contained `20261003180653` (function bodies identical to the migration file) although the ledger row is absent.
+Evidence: 1,820 → 1,893 unit tests pass (230 files), including a black-box `LineWorkspace` lifecycle test written and passing against `3d46341` before it ran on the extracted code. Every new seam test was checked against targeted mutations of the behavior it guards. Lint, the optimized build, the settled typecheck and bundle budgets pass (planner entry 275.1 KiB vs 275.2 baseline; largest chunk 124.0 KiB; 0 chunks contain harness code). All 19 browser cases (18 baseline plus the product-switch regression) pass against the retained isolated database (`scratch/browser-db`, ports 563xx, not reset). Its schema already contained `20261003180653` (function bodies identical to the migration file) although the ledger row is absent.

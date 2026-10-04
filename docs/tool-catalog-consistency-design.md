@@ -249,89 +249,105 @@ After §5b, the remaining interactions are the per-row cases in §5 (a stale add
 
 **Separate decision:** the reorder's lock handling should check and queue (or use its own key) rather than clobber `saveInFlightRef`. This is independent of the catalog and is reported here only.
 
-## 5b. Old-client compatibility (revised 2026-10-03, proposal; needs approval)
-
-Decisions confirmed on 2026-10-03: project-wide scope; current permissions kept, with clear refusal errors; unsafe competing writers removed before catalog operations are enabled. Additive database work is approved for the isolated environment; production deployment is not.
+## 5b. Old-client compatibility: rollout (revised again 2026-10-03, proposal; needs approval)
 
 **Status:**
-- Implemented in the isolated database (`2277e69`, not deployed): the recovery table, `delete_manufacturing_step`, `restore_manufacturing_step` and `apply_step_tool_changes`.
-- **Not implemented:** any compatibility guard. The step_tools-only fence first proposed here is withdrawn. As the next part explains, it cannot meet the "no partial changes" requirement; what replaces it is broader, so it is presented for approval instead of being enabled.
+- Implemented in the isolated database only: the Stage 1 recovery and tool-change functions (`2277e69`).
+- **Nothing else is implemented, activated or deployed.** The write-protocol *gate* proposed in the previous revision is **withdrawn**, for the two reasons below. The atomic reorder and the targeted delete/restore designs are kept.
 
-### Why a step_tools fence alone is incomplete
+### Two facts that rule out refusing old clients
 
-Old clients run multi-request operations. A fence on `step_tools` refuses only the *later* request, after earlier requests (separate transactions) have committed:
+1. **Old desktop edits have no durable recovery for most edit types** (inventory below). Refusing an old tab's save loses the edit when the user reloads, and old code cannot be changed to keep it.
+2. **Refusing "at the first write" is not a safe cutover.** An old save is several requests, each its own transaction. If the cutover lands between them, request 1 has already committed and only the rest is refused.
 
-| Old operation | Committed before the tool write is refused |
-|---|---|
-| Desktop and mobile Gantt reorder | the first task upsert, with temporary `tmp-…` WBS values (the real values are written by a second request that never runs) |
-| Mobile task rename / add process | the task row |
-| Mobile step delete | the task row and the rewritten steps (including stale sibling text) |
-| Mobile draft autosave | the step text |
-| Mobile Restore Step | products, scenario, stations, zones, components and task rows from the stale snapshot; then `replace_task_children` |
+   This was **tested** in `supabase/tests/compat_cutover_test.sql` (16 assertions; prototypes defined inside the test's rolled-back transaction; nothing installed). The old Gantt reorder's first request (temporary WBS values) committed; a refusing guard was activated; the second request was refused, and **the temporary WBS values stayed stored.**
 
-Guarding `replace_task_children` alone has the same flaw: the old Restore has already upserted stale task rows before it is called. **Refusing cleanly means refusing at the operation's first write.** That needs the database to know a request comes from an old client.
+   No database rule can tell a request that starts an operation from one that finishes it: requests carry no operation id. Old code cannot be made to send one.
 
-### Proposal: a write-protocol gate
+**Consequence:** for clients already in the field ("v1"), **no rollout step may refuse a write.** Every step must be safe when activated at any instant, including between the requests of an old save.
 
-**Verified in the isolated environment:** a function reached through the REST API sees request headers in `request.headers`. With `x-pulse-write-protocol: 2` it read `"2"`; without the header it read `null`.
+### The protocol header identifies; it never authorizes
 
-1. **New clients send `x-pulse-write-protocol: <n>` on every request.**
-   - It is set as a global header in every client constructor that can write planner tables with a user's token:
-     - `src/lib/supabase/client.ts` (browser)
-     - `src/lib/supabase/server.ts` (per-request server)
-     - `src/lib/api-auth.ts` (bearer clients, including the SolidWorks plugin's routes)
+New clients send `x-pulse-write-protocol: 2`. The database reads it from `request.headers` (verified over the real REST API).
+- It is **only an identifier**, used to count old-client writes and to decide when to enable features.
+- It never grants or widens anything: RLS, `has_project_access` checks inside functions, constraints, triggers and tripwires apply exactly as without it.
+- Anyone can send it, and sending it gains nothing.
+- **Tested:** a viewer with the header is still refused by `apply_step_tool_changes` and by row-level security on a direct write; another organization with the header is still refused by `delete_manufacturing_step`.
 
-     Other `createClient` sites under `app/api/` use the service role or write non-planner tables; C1 must confirm each one.
-   - The value lives in a plain shared module (`src/lib/write-protocol.ts`), following the CLAUDE.md rule on values shared across the server/client boundary.
-2. **`private.require_write_protocol()` trigger** (BEFORE INSERT, UPDATE or DELETE; statement-level where possible) on the planner tables a client writes:
-   - `products`, `scenarios`, `stations`, `zones`, `manufacturing_components`, `document_type_codes`, `custom_columns`
-   - `tasks`, `task_dependencies`, `manufacturing_steps`, `part_references`, `actual_events`
-   - `step_tools`, `step_photos`, `step_exploded_views`, `task_videos`, `tool_library`
+### Writer inventory (who writes planner tables, as which role)
 
-   For roles `authenticated` and `anon`, it raises `42501`, "This page is out of date. Reload to keep editing.", hint `pulse:client-outdated`, when the header is missing or below `private.min_write_protocol()`. Other roles (service role, migrations, SECURITY DEFINER functions running as the owner) are unaffected.
-   - Every old-client operation in the table above is refused at its **first** write. Each request is its own transaction, so nothing is written.
-   - Old tabs and phones become **read-only for planner data** until they reload.
-3. **The reorder becomes one transaction for new clients: `reorder_scenario_tasks(scenario, rows[{id, wbs, zone_id, station_id}])`.**
-   - It checks access as INVOKER and assigns WBS values inside the transaction, so `UNIQUE (scenario_id, wbs)` never needs a temporary value.
-   - The same gate trigger also refuses any direct write of a `wbs` starting `tmp-`. A temporary value can then never be stored by any client, even a new one whose second request fails today.
-4. **Strengthen `replace_task_children`** (it has one definition and no in-place patches; the migration verifies the live body before replacing it):
-   - Every existing child row of the given tasks (steps, parts, events, dependencies) must appear in the payload identically. Otherwise it raises the outdated message: no existing step can be deleted and no newer edit overwritten, whether or not the step has media.
-   - Identical rows are left in place (not deleted and re-inserted), so nothing cascades. Only rows that are genuinely new are inserted.
-   - The desktop optimizer is its one remaining caller. It writes a freshly duplicated scenario whose copied dependencies are identical, so it keeps working.
+| Writer | Tables | Role | Header source |
+|---|---|---|---|
+| Browser desktop workspace (shell save, procedure queue, per-row tool add/remove, Gantt reorder, media, catalog, scenarios, projects) | all planner tables | `authenticated` (anon key + session cookie) | browser client `src/lib/supabase/client.ts` |
+| Browser mobile photo portal (step drafts, tool syncs, task saves, reorder, step delete, Restore = full-state save) | all planner tables | `authenticated` | same browser client |
+| Browser AWI editor (`save_awi_procedure`, `create_awi_master`) | tasks, manufacturing_steps, part_references, projects, stations, awi_masters | `authenticated` | same browser client |
+| **Server routes for the SolidWorks plugin**: `app/api/solidworks/exploded-view`, `app/api/solidworks/build-animation` | step_exploded_views, task_videos (plus storage) | `authenticated` via `requireApiUser` (`src/lib/api-auth.ts`: bearer or cookie) | the server builds the client, so the header is added server-side; **the plugin needs no update** |
+| Other API routes (invites, SOP approver/reviewer/extract) | non-planner tables | `authenticated` and service role | not planner writers |
+| Background: `/api/sops/notifications/drain` (Vercel cron, daily), Resend webhook, password reset, notifications admin | non-planner tables | service role | out of scope (not `authenticated`) |
+| Database triggers (`awi_mark_draft`, audit, notification triggers) | awi_masters, audit and notification tables | SECURITY DEFINER | not client writers |
+| Operator scripts (`scripts/*.mjs`, backfills, restore-from-backup) | various planner tables | service role or `postgres` | out of scope (not `authenticated`); never run without separate approval |
 
-### What users experience
+There are no server actions, no writes during server rendering, no Supabase edge functions and no pg_cron jobs.
 
-- **Old desktop tab:** every save shows "Save failed" with the outdated message; nothing is written. After a reload:
-  - procedure drafts are recovered as today;
-  - the one Gantt or field edit that was refused must be re-entered (it was never persisted).
-- **Old phone:**
-  - **Drafts:** a refused draft save keeps the IndexedDB recovery draft (it is cleared only after success, `mobile-photo-portal.tsx:2021-2034`). After a reload the new client replays it: text, checks and photos as today; tools add-only for legacy drafts (no base list), with the notice below if the server has tools the draft lacks.
-  - **Other edits:** refused with the outdated message.
-  - **Restore:** refused at its first write.
-- **AWI pages:** `save_awi_procedure` already keeps the local draft on refusal.
+### Edit recovery inventory
 
-### Deployment order and acceptance criteria
+Checked on 2026-10-03 against the code. Only two kinds of unsaved edit survive a reload today.
+- **Procedure step name/instruction text** is stored in localStorage (`ProcedureDraftFieldName = "instruction" | "name"`, `shared.tsx:7`) and re-saved after reload.
+- **Photo annotations** are stored too, but re-applied only when that photo's viewer is opened again.
 
-| Stage | Contents | Acceptance (all database-backed, retained isolated database) |
-|---|---|---|
-| **S1** ✅ isolated only | recovery table, delete/restore, `apply_step_tool_changes` (`2277e69`) | done: pgTAP 48/48, 7 mutations caught, migration record check, two-session concurrency checks |
-| **S2** migration | `reorder_scenario_tasks`; `private.min_write_protocol()` returning 2; gate trigger function **created but not attached** | pgTAP: reorder atomicity (forced failure leaves no row changed), access checks; the migration record check |
-| **C1** client (after message approval) | header on all clients; reorder via RPC; desktop and mobile tool writes via `apply_step_tool_changes`; mobile delete/restore via the S1 RPCs; draft v2 plus legacy draft handling; message mapping | vitest; e2e: delete/restore leaves unrelated rows unchanged; a legacy draft is recoverable after a refusal and reload |
-| **S3** migration | attach the gate triggers; strengthen `replace_task_children` | an inventory check that every user-token client constructor sends the header; pgTAP and e2e old-client simulation (requests without the header, replaying each old operation's request sequence): **every one refused at its first request, and a full-table checksum is unchanged**; new clients unaffected; the full browser suite green |
-| **S4 + C2** | catalog RPCs and client | §9 |
+The IndexedDB planner cache does **not** recover edits: a cache-sourced load cannot save, and the confirmed remote load replaces it wholesale (`line-workspace.tsx:1620-1630`).
 
-- **Ordering rule:** S3 only after C1 is live everywhere new code runs (server clients included). Otherwise new code without the header would be refused.
-- **Rollback:** drop the gate triggers; the old permissive behavior returns at once.
+| Surface | Edit type | Save path (requests) | Durable recovery today |
+|---|---|---|---|
+| Desktop | Product fields, demand/takt, procedure-check setup, PFMEA | shell save (about 11–19 separate requests) | **no** |
+| Desktop | Zones, components, document types; task→zone moves | shell save | **no** |
+| Desktop | Gantt: durations, bar drags, names, operators, code mapping, dependencies, smart-allocation apply, undo/redo | shell save | **no** |
+| Desktop | Add or delete task | shell save (deletes cascade) | **no** |
+| Desktop | Drag-reorder Gantt groups | two task upserts (temporary, then real WBS), each with a full-list tool sync | **no** |
+| Desktop | Procedure step **name and instruction** | procedure queue | **yes** (localStorage; re-saved on reload) |
+| Desktop | Procedure structure: add, insert, delete or reorder steps; parts and BOM links; quantities; part mentions; description; safety notes | procedure queue | **no** (only name/instruction text is stored) |
+| Desktop | Move a step to another task | about 8 requests, not transactional | **no** |
+| Desktop | Add or remove a tool on a step | one row write | **no** |
+| Desktop | Upload photos | storage upload, then a metadata row | **no** (the file is lost) |
+| Desktop | Photo annotations | procedure queue (annotation-only) | **partial** (re-saved only when the viewer reopens) |
+| Desktop | Catalog rename, delete, tidy | shell save, then library writes | **no** |
+| Desktop | Master BOM upload | one product update | **no** (held in memory for Retry) |
+| Desktop | Scenario rename or target | one update | **no** |
+| Desktop | Scenario duplicate, delete, optimize | RPCs (optimize then does a full-state save) | n/a (no typed edit) |
+| AWI editor | Step name and instruction | `save_awi_procedure` (one transaction) | **yes** (same localStorage drafts) |
+| AWI editor | Structural edits | `save_awi_procedure` | **no** (memory only, despite "Your local draft is preserved") |
+| Mobile | New-step / timed-capture form (name, instruction, duration, tools, photos, checks) | step save, tool sync, photo uploads | **yes** (IndexedDB `mobile-new-step-draft-v1`, single key, re-saved on load) |
+| Mobile | Inline edits to existing steps; photo upload or delete on existing steps; tool add/remove; add, reorder or delete process; delete step; Restore | various | **no** (memory only; some have an in-session Retry button) |
+
+**For the rollout:** most desktop edits, and every structural edit, would be lost if a v1 save were refused and the user reloaded. Hence no refusals for v1. C1 must add durable recovery for every **no** row before any future refusal-based cutover is allowed.
+
+### Revised rollout: no refusals for v1; enforcement only for clients that can recover
+
+| Stage | What | Safe if activated mid-save? | Acceptance (database-backed, retained isolated database) |
+|---|---|---|---|
+| **S1** ✅ isolated | recovery table, targeted delete/restore, `apply_step_tool_changes` (`2277e69`) | yes (new functions; no v1 client calls them) | done |
+| **S2** migration (needs approval) | (a) **telemetry**: an additive table plus log-only statement triggers on the planner tables, recording writes from `authenticated`/`anon` *without* the header (table, operation, user, day); never refuses. (b) **non-destructive `replace_task_children`**: never deletes or overwrites an existing child row (so nothing cascades), only inserts missing rows, appending a step whose position is taken. (c) `reorder_scenario_tasks` (atomic reorder, for v2 only). | **Yes, tested:** telemetry activated between an old reorder's requests lets it finish with real WBS values. The non-destructive function, activated between an old Restore's task upsert and its child call, removes no tool, view or step (the teammate's new step and edit survive) and brings the deleted step back as a row. | pgTAP for each; the migration record check; the existing browser suite green |
+| **C1** client v2 (after message approval) | header on the browser client and in `api-auth.ts`; reorder via the RPC; tool writes via `apply_step_tool_changes`; mobile delete/restore via the S1 functions; **durable write-ahead recovery for every edit type the inventory marks "no"**; draft v2 with legacy-draft handling | yes (v1 behaviour is unchanged) | vitest plus e2e: refuse every v2 request type in turn, reload, and the edit is recovered and saved exactly once |
+| **Observe** | telemetry runs; announced maintenance window: everyone asked to reload open tabs and phones | yes | zero v1 writes for an agreed period (proposed: 7 days, plus 24 h after the window) |
+| **C2 + S4** catalog | catalog RPCs and client behind a flag, enabled only after Observe | yes | §9 |
+| **Future** v2 → v3 | a refusing guard becomes safe *only* for clients that (1) journal every edit durably and (2) make every multi-request operation idempotent or atomic, so a refused or interrupted operation is completed by replay after reload | — | the C1 refusal and replay e2e, plus a pgTAP cutover test like `compat_cutover_test.sql` that expects completion instead of a stranded partial |
+
+### Limitations that remain (cannot be eliminated for v1 clients without a coordinated maintenance window, and not fully even with one)
+
+A v1 tab or phone that stays open past the window keeps today's behaviour. Telemetry records it (alerting on any v1 write after enablement is proposed), but cannot stop it:
+1. **Tool lists.** Its full-list tool syncs (desktop Gantt reorder; mobile task saves, drafts, retries, step delete) can overwrite concurrent tool changes, including a catalog rename or delete made after its last refresh. (Pre-existing behaviour; catalog operations widen what can be overwritten, which is why they wait for Observe.)
+2. **Restore.** Its full-state save still writes the phone's snapshot of shell rows (task names, durations and so on) and deletes tasks, zones and stations missing from that snapshot. With S2(b) it can no longer wipe tool assignments, exploded views or other steps. (Pre-existing; fixing the shell-row part needs versioned shell saves, a broader redesign outside this proposal.)
+3. **Mobile step delete.** It rewrites sibling steps from the phone's copy. (Pre-existing; v2 replaces it with `delete_manufacturing_step`.)
+4. **Network failures.** An old reorder interrupted by a network failure (not by any rollout step) can still leave temporary WBS values. (Pre-existing.)
+
+None of these is introduced by the rollout. They end only when the last v1 client reloads. The window and the telemetry make that observable rather than assumed.
 
 ### Needs approval
 
-- The gate itself (database triggers on existing planner tables).
-- Header handling in the client factories.
-- The reorder RPC.
-- Strengthening `replace_task_children`.
-- The visible effects above (old tabs read-only until reload; one refused edit to re-enter), and the messages in §5c.
-
-Permission semantics do not change.
+- S2 (a), (b) and (c): database changes. (a) adds triggers to existing planner tables (log-only). (b) changes the body of an existing function.
+- C1's header and durable recovery: client work.
+- The Observe criteria and the maintenance-window announcement.
+- The §5c messages (still pending UI approval).
 
 ## 5c. User-facing messages for approval (exact text)
 
@@ -355,7 +371,7 @@ Messages raised by the S1 functions are implemented in the isolated database onl
 | Tools: name too long | Tool names must be 200 characters or fewer. | in S1 |
 | Tools: emoji in name | Tool names cannot contain emoji or other rare symbols. | in S1 |
 | Recovery record edited directly (no app path) | Deleted-step recovery records are kept and cannot be changed or removed directly. | in S1 |
-| Old client refused by the gate | This page is out of date. Reload to keep editing. | proposed (S3) |
+| Old client refused by a gate | This page is out of date. Reload to keep editing. | withdrawn with the gate (kept for a future v2→v3 cutover) |
 | Legacy offline draft with server-only tools | Tools removed in your offline draft were kept. Review this step. | proposed (C1) |
 | Restore Step prompt (existing text) | Restore will bring this manufacturing step back with its saved tools, part links, and available photos. → proposed: **Restore will bring this manufacturing step back with its saved tools, part links, photos, and exploded views.** | proposed (C1) |
 | Catalog delete confirmation (existing title "Remove {tool}?") | Body: This removes the tool from {N} step assignment(s) across {M} task(s). → proposed: **This removes the tool from {N} step assignment(s) across {M} task(s) in every scenario of this product.** (counts become project-wide) | proposed (C2) |
@@ -449,5 +465,10 @@ The optional reload banner is omitted, as instructed.
 1. ~~Scope~~ **Confirmed 2026-10-03:** project-wide across scenarios.
 2. ~~Permissions~~ **Confirmed:** current rules preserved, with clear refusal errors.
 3. ~~Rollout~~ **Confirmed:** remove unsafe competing writers before enabling catalog operations. The order is now M1 → C1 → M2 → M3/C2 (§5b), with Restore Step as a separate fix (`docs/restore-step-design.md`) that ships in M1/C1.
-5. **Open:** approve the §5b write-protocol gate (it replaces the withdrawn step_tools fence), the reorder RPC, the strengthened `replace_task_children`, and the §5c messages. The optional reload banner is omitted.
+5. **Open:** approve the revised §5b rollout:
+   - S2: telemetry, the non-destructive `replace_task_children`, and the reorder RPC
+   - C1: the header and durable recovery
+   - the Observe criteria and the maintenance window
+
+   The refusing gate is withdrawn. The §5c messages are still pending UI approval; the reload banner is omitted.
 4. ~~Separately: approve a focused fix for the zero-zone duplicate "Unzoned" station (§1.3).~~ Done in `33b2797`.

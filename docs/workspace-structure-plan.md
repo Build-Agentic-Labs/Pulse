@@ -402,3 +402,16 @@ Phase 3 is paused while these are reviewed. Neither is implemented, and no migra
   - Verification: pgTAP 48/48 (all 23 files, 446 assertions); every pre-existing record unchanged by the migration; two-session concurrency checks.
   - No client uses them yet, and nothing is deployed.
   - The step_tools-only compatibility fence is withdrawn: it would leave partial writes from old clients' multi-request operations. A write-protocol gate (header-identified clients, refused at the first write) is proposed instead, in the catalog design §5b. The exact user-facing messages awaiting approval are in §5c.
+- **2026-10-03, compatibility rollout revised (proposal only; nothing activated).**
+  - The refusing write-protocol gate is withdrawn, for two reasons:
+    1. Most desktop edits (shell, Gantt, structure, tools, media) have no durable recovery; only step name/instruction drafts do.
+    2. A refusal that lands between an old save's requests strands a partial write. Tested in `supabase/tests/compat_cutover_test.sql` with prototypes in a rolled-back transaction: a refusal mid-reorder left temporary WBS values stored.
+  - **The replacement:** never refuse already-deployed clients. Instead:
+    - log-only telemetry of header-less writes;
+    - a non-destructive `replace_task_children`;
+    - the atomic reorder;
+    - durable recovery in v2;
+    - catalog operations enabled only after an observed zero-old-client period around a maintenance window.
+  - Residual risks from tabs that stay open are listed in the catalog design §5b.
+  - The header is an identifier only. Tests show it never bypasses permissions.
+  - Writer and edit-recovery inventories are in the catalog design §5b.

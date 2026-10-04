@@ -9,7 +9,7 @@ Status (2026-10-03): **Stage 1 implemented in the isolated database only** (`227
   - clients can read them (project view access) and cannot change them (RLS, revoked grants, guard triggers for insert, update, delete and truncate);
   - only the two SECURITY DEFINER functions write them.
 - **Part mentions are captured, and merged back on restore only if missing.** Delete does not edit the task row (unchanged from today's mobile behavior).
-- **Deferred to the write-protocol proposal (§5b of the catalog design), not enabled:** the guard on `replace_task_children`. Guarding it alone would still let old phones write stale task rows before the refusal.
+- **Changed in the revised rollout (catalog design §5b, stage S2b), not enabled:** the refusing guard on `replace_task_children` is replaced by a **non-destructive** body. It never deletes or overwrites existing child rows (so nothing cascades) and only inserts missing ones. A refusal would strand old phones mid-save; the non-destructive body is safe to activate at any moment. This was tested with a prototype in `supabase/tests/compat_cutover_test.sql`.
 
 ### Verification of stage 1 (retained isolated database, not reset)
 

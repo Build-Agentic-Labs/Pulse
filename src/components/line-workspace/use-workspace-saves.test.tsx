@@ -5,7 +5,7 @@ import { emptyPlannerState } from "@/domain/empty-planner-state";
 import { PRODUCT_MASTER_BOM_FIELD, getMasterBom, type MasterBom } from "@/domain/master-bom";
 import { saveMasterBomToSupabase, savePlannerShellToSupabase, type SaveState } from "@/domain/supabase-planner";
 import type { PlannerState, Product } from "@/domain/types";
-import { writeCachedPlannerState } from "@/lib/planner-state-cache";
+import { clearCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import { deferredPromise as deferred, procedureTestTask } from "./procedure-test-fixtures";
 import { createProcedureSaveQueueStore } from "./use-procedure-save-queue";
 import { usePlannerShellAutosave, useWorkspaceSaves, type UsePlannerShellAutosaveOptions } from "./use-workspace-saves";
@@ -18,9 +18,11 @@ vi.mock("@/domain/supabase-planner", async (original) => ({
 vi.mock("@/lib/planner-state-cache", async (original) => ({
   ...await original<typeof import("@/lib/planner-state-cache")>(),
   writeCachedPlannerState: vi.fn(async () => undefined),
+  clearCachedPlannerState: vi.fn(async () => undefined),
 }));
 
 const PROJECT_ID = "project-saves";
+type SaveScopeArg = { projectId?: string; scenarioId: string };
 const saveBom = vi.mocked(saveMasterBomToSupabase);
 const saveShell = vi.mocked(savePlannerShellToSupabase);
 const notifyFeedback = vi.fn();
@@ -44,8 +46,12 @@ function productWithBom(bom: MasterBom): Product {
   };
 }
 
-function renderSaves({ confirmed = true, initialReported = "loading" as SaveState } = {}) {
-  return renderHook(() => {
+function renderSaves({
+  confirmed = true,
+  initialReported = "loading" as SaveState,
+  isForegroundSaveScope = ((_scope: SaveScopeArg) => true) as (scope: SaveScopeArg) => boolean,
+} = {}) {
+  return renderHook(({ projectId }: { projectId: string }) => {
     const [plannerState, setPlannerState] = useState<PlannerState>(initialState);
     const latestDerivedStateRef = useRef(plannerState);
     latestDerivedStateRef.current = plannerState;
@@ -58,7 +64,7 @@ function renderSaves({ confirmed = true, initialReported = "loading" as SaveStat
     const [reportedSaveError, setSaveError] = useState<string>();
     const plannerDirtyRef = useRef(false);
     const saves = useWorkspaceSaves({
-      projectId: PROJECT_ID,
+      projectId,
       mainScenarioIdRef,
       latestDerivedStateRef,
       setPlannerState,
@@ -74,9 +80,10 @@ function renderSaves({ confirmed = true, initialReported = "loading" as SaveStat
       scenarioCacheRef,
       flushDeferredRemoteRefresh,
       setChromeStatus,
+      isForegroundSaveScope,
     });
-    return { plannerState, saves, procedureSaveQueues, chromeStatus, scenarioCacheRef, setSaveState, setSaveError };
-  });
+    return { plannerState, setPlannerState, saves, procedureSaveQueues, chromeStatus, scenarioCacheRef, setSaveState, setSaveError };
+  }, { initialProps: { projectId: PROJECT_ID } });
 }
 
 beforeEach(() => {
@@ -170,7 +177,7 @@ describe("aggregate status", () => {
     const { result, rerender } = renderSaves({ initialReported: "saved" });
     expect(result.current.saves.saveState).toBe("saved");
     result.current.procedureSaveQueues.procedureSaveTimersRef.current["task-1"] = 1;
-    rerender();
+    rerender({ projectId: PROJECT_ID });
     expect(result.current.saves.saveState).toBe("draft");
   });
 });
@@ -404,6 +411,7 @@ describe("composed save ownership", () => {
         scenarioCacheRef,
         flushDeferredRemoteRefresh,
         setChromeStatus,
+        isForegroundSaveScope: () => true,
       });
       usePlannerShellAutosave({
         dirtyVersion: saves.dirtyVersion,
@@ -432,5 +440,106 @@ describe("composed save ownership", () => {
     expect(saveShell.mock.calls[0]?.[0].tasks[0]?.name).toBe("Renamed task");
     expect(result.current.plannerDirtyRef.current).toBe(false);
     expect(result.current.saves.saveState).toBe("saved");
+  });
+});
+
+describe("product switch boundary", () => {
+  const productB: PlannerState = {
+    ...initialState,
+    product: {
+      ...initialState.product,
+      id: "product-b",
+      projectId: "project-b",
+      customFields: { [PRODUCT_MASTER_BOM_FIELD]: { fileName: "b-own.xlsx", columns: ["Part"], rows: [{ Part: "900-9" }] } },
+    },
+    scenario: { ...initialState.scenario, id: "scenario-b" },
+    tasks: [procedureTestTask("Product B text", 1, { id: "task-b", name: "Product B task" })],
+  };
+
+  it("keeps a BOM that finishes after the switch out of the other product and its queued shell save", async () => {
+    const bomSave = deferred<Product>();
+    saveBom.mockReturnValueOnce(bomSave.promise);
+    saveShell.mockResolvedValue(undefined as never);
+    const { result, rerender } = renderSaves({ initialReported: "saved" });
+
+    let bomDone!: Promise<void>;
+    await act(async () => {
+      bomDone = result.current.saves.updateMasterBom(replacementBom);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    rerender({ projectId: "project-b" });
+    act(() => result.current.setPlannerState(productB));
+    const productBEdit = { ...productB, tasks: [{ ...productB.tasks[0]!, name: "Product B task, edited" }] };
+    await act(async () => {
+      await result.current.saves.persistPlannerState(productBEdit);
+    });
+    vi.mocked(writeCachedPlannerState).mockClear();
+
+    await act(async () => {
+      bomSave.resolve(productWithBom(replacementBom));
+      await bomDone;
+    });
+
+    expect(getMasterBom(result.current.plannerState.product.customFields)?.fileName).toBe("b-own.xlsx");
+    expect(saveShell).toHaveBeenCalledTimes(1);
+    expect(saveShell.mock.calls[0]?.[0].product.id).toBe("product-b");
+    expect(getMasterBom(saveShell.mock.calls[0]?.[0].product.customFields)?.fileName).toBe("b-own.xlsx");
+    expect(saveShell.mock.calls[0]?.[0].tasks[0]?.name).toBe("Product B task, edited");
+    expect(vi.mocked(clearCachedPlannerState)).toHaveBeenCalledWith(PROJECT_ID);
+    // Product B's persisted shell state is cached under B, never under A.
+    expect(vi.mocked(writeCachedPlannerState).mock.calls.map(([projectId, state]) => [projectId, state.product.projectId]))
+      .toEqual([["project-b", "project-b"]]);
+    expect(result.current.saves.saveState).not.toBe("error");
+  });
+
+  it("does not report a BOM failure from the previous product into the next one", async () => {
+    const bomSave = deferred<Product>();
+    saveBom.mockReturnValueOnce(bomSave.promise.then(() => { throw new Error("Storage offline"); }));
+    const { result, rerender } = renderSaves({ initialReported: "saved" });
+
+    let bomDone!: Promise<void>;
+    await act(async () => {
+      bomDone = result.current.saves.updateMasterBom(replacementBom).catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    rerender({ projectId: "project-b" });
+    // Product B's load replaces the planner state and settles the reported status, as in LineWorkspace.
+    act(() => {
+      result.current.setPlannerState(productB);
+      result.current.setSaveState("saved");
+    });
+    await act(async () => {
+      bomSave.resolve(productWithBom(replacementBom));
+      await bomDone;
+    });
+
+    expect(notifyFeedback).toHaveBeenCalledWith(expect.objectContaining({ title: "BOM save failed" }));
+    expect(result.current.saves.saveState).toBe("saved");
+    expect(getMasterBom(result.current.plannerState.product.customFields)?.fileName).toBe("b-own.xlsx");
+  });
+
+  it("ignores another scope's procedure queue for status, the barrier and navigation guards", async () => {
+    const { result, rerender } = renderSaves({
+      initialReported: "saved",
+      isForegroundSaveScope: (scope) => scope.projectId === PROJECT_ID,
+    });
+    const background = result.current.procedureSaveQueues.getProcedureTaskSaveQueue("task-from-a");
+    background.scope = { projectId: "project-a", scenarioId: "scenario-a" };
+    background.pending = true;
+    background.state = "retrying";
+    background.lastError = new Error("Network down");
+    result.current.procedureSaveQueues.procedureRetryTimersRef.current["task-from-a"] = 1;
+    rerender({ projectId: PROJECT_ID });
+
+    expect(result.current.saves.saveState).toBe("saved");
+    expect(result.current.saves.hasLocalSaveWork()).toBe(false);
+    await expect(result.current.saves.waitForLocalSavesToSettle(1_000)).resolves.toBe(true);
+
+    // The same record in the foreground scope still holds everything, as before.
+    background.scope = { projectId: PROJECT_ID, scenarioId: "scenario-a" };
+    rerender({ projectId: PROJECT_ID });
+    expect(result.current.saves.saveState).toBe("retrying");
+    expect(result.current.saves.hasLocalSaveWork()).toBe(true);
+    await expect(result.current.saves.waitForLocalSavesToSettle(1_000)).resolves.toBe(false);
   });
 });

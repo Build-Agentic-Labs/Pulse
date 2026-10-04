@@ -26,9 +26,26 @@ const saveAnnotations = vi.mocked(saveTaskPhotoAnnotationsToSupabase);
 const notifyFeedback = vi.fn();
 const flushDeferredRemoteRefresh = vi.fn();
 
+const PROJECT_ID = "project-queue";
+
+// A loaded planner state belongs to a project and scenario, as in the workspace.
+function plannerStateFor(projectId: string, tasks: Task[]): PlannerState {
+  return {
+    ...emptyPlannerState,
+    product: { ...emptyPlannerState.product, id: `product-${projectId}`, projectId },
+    scenario: { ...emptyPlannerState.scenario, id: `scenario-${projectId}` },
+    tasks,
+  };
+}
+
 function renderQueue({ viewOnly = false } = {}) {
   return renderHook(({ projectId }: { projectId: string }) => {
-    const [plannerState, setPlannerState] = useState<PlannerState>({ ...emptyPlannerState, tasks: [task("server text")] });
+    const [plannerState, setPlannerState] = useState<PlannerState>(() => plannerStateFor(PROJECT_ID, [task("server text")]));
+    // Same contract as LineWorkspace: the scope on screen is the current project prop and scenario.
+    const foregroundRef = useRef({ projectId, scenarioId: plannerState.scenario.id });
+    foregroundRef.current = { projectId, scenarioId: plannerState.scenario.id };
+    const [isForegroundSaveScope] = useState(() => (scope: { projectId?: string; scenarioId: string }) =>
+      scope.projectId === foregroundRef.current.projectId && scope.scenarioId === foregroundRef.current.scenarioId);
     const latestDerivedStateRef = useRef(plannerState);
     latestDerivedStateRef.current = plannerState;
     const mainScenarioIdRef = useRef<string | undefined>("scenario-main");
@@ -56,9 +73,10 @@ function renderQueue({ viewOnly = false } = {}) {
       blockViewOnlyWrite: () => viewOnly,
       remoteRefreshAppliedRef,
       flushDeferredRemoteRefresh,
+      isForegroundSaveScope,
     });
-    return { plannerState, setPlannerState, saveState, saveError, drafts, queue, store };
-  }, { initialProps: { projectId: "project-queue" } });
+    return { plannerState, setPlannerState, saveState, saveError, drafts, queue, store, remoteRefreshAppliedRef };
+  }, { initialProps: { projectId: PROJECT_ID } });
 }
 
 function savedInstruction(callIndex: number) {

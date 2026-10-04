@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { workspaceSaveBarrier, workspaceSaveStatus } from "@/domain/workspace-save-status";
-import { writeCachedPlannerState } from "@/lib/planner-state-cache";
+import { clearCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import {
   PRODUCT_MASTER_BOM_FIELD,
   getMasterBom,
@@ -14,6 +14,7 @@ import type { PlannerState, Product } from "@/domain/types";
 import { useWriteTracker } from "./use-write-tracker";
 import type { ProcedureSaveQueueStore } from "./use-procedure-save-queue";
 import type {
+  ForegroundSaveScope,
   PlannerCacheScope,
   PlannerStateAccess,
   ReportedSaveStatusSetters,
@@ -31,7 +32,8 @@ type ChromeStatus = { message: string; error?: boolean } | null;
 export type UseWorkspaceSavesOptions = PlannerStateAccess &
   PlannerCacheScope &
   ReportedSaveStatusSetters &
-  WorkspaceFeedback & {
+  WorkspaceFeedback &
+  ForegroundSaveScope & {
     /**
      * The status the save paths report. LineWorkspace keeps these cells (and plannerDirtyRef) itself
      * because its load and project-switch effects write them and must keep stable dependencies.
@@ -78,6 +80,7 @@ export function useWorkspaceSaves({
   scenarioCacheRef,
   flushDeferredRemoteRefresh,
   setChromeStatus,
+  isForegroundSaveScope,
 }: UseWorkspaceSavesOptions) {
   const { hasProcedureSaveWork, procedureSaveActivity, hasScheduledProcedureSaves } = procedureSaveQueues;
 
@@ -95,9 +98,11 @@ export function useWorkspaceSaves({
     reportedSaveState,
     reportedSaveError,
     writeSnapshot,
-    procedureSaveActivity(),
+    // Procedure saves issued for another product or scenario finish in the background and never hold
+    // the visible status, the save barrier or the navigation guards.
+    procedureSaveActivity(isForegroundSaveScope),
     plannerDirtyRef.current || Boolean(plannerSaveTimerRef.current) || Boolean(queuedSaveStateRef.current) ||
-      hasScheduledProcedureSaves(),
+      hasScheduledProcedureSaves(isForegroundSaveScope),
   );
 
   useEffect(() => {
@@ -109,7 +114,7 @@ export function useWorkspaceSaves({
   }
 
   function hasLocalSaveWork() {
-    return masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork() || writeTracker.getSnapshot().failures.length > 0;
+    return masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork(isForegroundSaveScope) || writeTracker.getSnapshot().failures.length > 0;
   }
 
   function markDirty() {
@@ -146,8 +151,8 @@ export function useWorkspaceSaves({
       const reported = reportedSaveStatusRef.current;
       const barrier = workspaceSaveBarrier(
         reported.state, reported.error, writeTracker.getSnapshot(),
-        procedureSaveActivity(),
-        masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork(),
+        procedureSaveActivity(isForegroundSaveScope),
+        masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork(isForegroundSaveScope),
         retryingKey,
       );
       if (barrier === "blocked") return false;
@@ -219,7 +224,10 @@ export function useWorkspaceSaves({
     finishWrite();
     plannerDirtyRef.current = false;
     if (lastPersistedState) {
-      void writeCachedPlannerState(projectId, lastPersistedState, mainScenarioIdRef.current).catch(() => undefined);
+      // Cache the persisted state under its own project: a queued snapshot can belong to the product the
+      // workspace switched to while an earlier save held the lock.
+      void writeCachedPlannerState(lastPersistedState.product.projectId ?? projectId, lastPersistedState, mainScenarioIdRef.current)
+        .catch(() => undefined);
     }
     setSaveState("saved");
     flushDeferredRemoteRefresh();
@@ -242,6 +250,10 @@ export function useWorkspaceSaves({
     }
 
     masterBomSaveInFlightRef.current = true;
+    // The BOM belongs to this product. If the workspace switches products before the save returns,
+    // the verified BOM must not be merged into, reported by, or persisted with the other product.
+    const issuingProductId = latestDerivedStateRef.current.product.id;
+    const isIssuingProduct = (product: Product) => product.id === issuingProductId;
     const finishWrite = writeTracker.begin("master-bom");
     setSaveError(undefined);
     saveStateRef.current = "saving";
@@ -261,22 +273,29 @@ export function useWorkspaceSaves({
         return { ...localProduct, customFields, updatedAt: verifiedProduct?.updatedAt ?? localProduct.updatedAt };
       };
 
-      const confirmedState = {
-        ...latestDerivedStateRef.current,
-        product: mergeVerifiedBom(latestDerivedStateRef.current.product),
-      };
-      latestDerivedStateRef.current = confirmedState;
-      setPlannerState((current) => ({ ...current, product: mergeVerifiedBom(current.product) }));
-      scenarioCacheRef.current.set(confirmedState.scenario.id, confirmedState);
-      void writeCachedPlannerState(projectId, confirmedState, mainScenarioIdRef.current).catch(() => undefined);
-      saveStateRef.current = "saved";
-      setSaveState("saved");
+      if (isIssuingProduct(latestDerivedStateRef.current.product)) {
+        const confirmedState = {
+          ...latestDerivedStateRef.current,
+          product: mergeVerifiedBom(latestDerivedStateRef.current.product),
+        };
+        latestDerivedStateRef.current = confirmedState;
+        setPlannerState((current) => (isIssuingProduct(current.product) ? { ...current, product: mergeVerifiedBom(current.product) } : current));
+        scenarioCacheRef.current.set(confirmedState.scenario.id, confirmedState);
+        void writeCachedPlannerState(projectId, confirmedState, mainScenarioIdRef.current).catch(() => undefined);
+        saveStateRef.current = "saved";
+        setSaveState("saved");
+      } else {
+        // This project's cached snapshot no longer matches the database; the next open loads it fresh.
+        void clearCachedPlannerState(projectId).catch(() => undefined);
+      }
     } catch (error) {
       finishWrite(error);
       const message = error instanceof Error ? error.message : "The master BOM could not be saved.";
-      setSaveError(message);
-      saveStateRef.current = "error";
-      setSaveState("error");
+      if (isIssuingProduct(latestDerivedStateRef.current.product)) {
+        setSaveError(message);
+        saveStateRef.current = "error";
+        setSaveState("error");
+      }
       notifyFeedback({ title: "BOM save failed", body: message, tone: "danger" });
       throw error;
     } finally {
@@ -286,7 +305,8 @@ export function useWorkspaceSaves({
       queuedSaveStateRef.current = null;
       if (queuedState) {
         let nextQueuedState = queuedState;
-        if (verifiedProduct) {
+        // A queued shell snapshot from another product is persisted as it is, never with this BOM.
+        if (verifiedProduct && isIssuingProduct(queuedState.product)) {
           const confirmedBom = getMasterBom(verifiedProduct.customFields);
           const customFields = { ...(queuedState.product.customFields ?? {}) };
           if (confirmedBom) {
@@ -300,7 +320,7 @@ export function useWorkspaceSaves({
           };
         }
         void persistPlannerState(nextQueuedState);
-      } else {
+      } else if (isIssuingProduct(latestDerivedStateRef.current.product)) {
         flushDeferredRemoteRefresh();
       }
     }

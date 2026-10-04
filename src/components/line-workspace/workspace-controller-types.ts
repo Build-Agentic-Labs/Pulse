@@ -29,3 +29,14 @@ export type WorkspaceFeedback = {
   notifyFeedback: (message: Omit<FeedbackToast, "id">) => void;
   blockViewOnlyWrite: () => boolean;
 };
+
+/** The project and scenario a save was issued for. Completion, retries and cache writes stay in it. */
+export type SaveScope = {
+  projectId?: string;
+  scenarioId: string;
+};
+
+/** True when a save scope is the one the workspace shows now; only that work drives status and guards. */
+export type ForegroundSaveScope = {
+  isForegroundSaveScope: (scope: SaveScope) => boolean;
+};

@@ -2,17 +2,19 @@
 
 import type { RefObject } from "react";
 import { acknowledgeAnnotationDrafts } from "@/lib/photo-annotation-drafts";
-import { writeCachedPlannerState } from "@/lib/planner-state-cache";
+import { clearCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import { getTaskStepPhotoAnnotationMap } from "@/domain/step-photos";
 import { saveProcedureTaskUpdateToSupabase, saveTaskPhotoAnnotationsToSupabase } from "@/domain/supabase-planner";
-import type { Task } from "@/domain/types";
+import type { PlannerState, Task } from "@/domain/types";
 import { procedureDraftLog, rebaseProcedureTaskVersions, type ProcedureDraftMap } from "./state";
 import type { ProcedureDraftFieldName } from "./shared";
 import type { ProcedureDrafts } from "./use-procedure-drafts";
 import type {
+  ForegroundSaveScope,
   PlannerCacheScope,
   PlannerStateAccess,
   ReportedSaveStatusSetters,
+  SaveScope,
   WorkspaceFeedback,
 } from "./workspace-controller-types";
 
@@ -22,6 +24,12 @@ import type {
 // The queue records are mutated in place and held across awaits, so the store is created once per
 // workspace mount and never recreated per update. There is deliberately no queue reset: scenario
 // switches drain saves through the save barrier first, as they did before this module existed.
+//
+// Each record keeps the scope (project + scenario) it was scheduled in and the scheduling render's
+// start function. A save that finishes, fails or retries after the workspace moved to another product
+// or scenario stays in that scope: it never merges into or caches another scope's planner state, never
+// reports into the visible status, and keeps retrying its own snapshot. Status, the save barrier and
+// navigation guards only count foreground records.
 
 const PROCEDURE_SAVE_DEBOUNCE_MS = 750;
 
@@ -47,7 +55,16 @@ export type ProcedureTaskSaveQueue = {
   pendingDraftSnapshot?: ProcedureDraftMap;
   latestSeq: number;
   lastError?: unknown;
+  /** Where this task's saves belong, recorded when the save is scheduled. */
+  scope?: SaveScope;
+  /** The scheduling render's start, so a scope-exit flush issues the save in its own scope. */
+  startSave?: (taskId: string) => Promise<void>;
 };
+
+/** Whether a planner state is the one a save scope refers to (same project and scenario). */
+export function isPlannerStateInSaveScope(state: PlannerState, scope: SaveScope) {
+  return String(state.product.projectId ?? "") === String(scope.projectId ?? "") && state.scenario.id === scope.scenarioId;
+}
 
 function generateProcedureSaveId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -81,11 +98,19 @@ export function createProcedureSaveQueueStore() {
     return queue;
   }
 
-  function hasProcedureSaveWork() {
+  // Optional filter: only records whose scope passes count. Records without a scope always count.
+  function isTaskInScope(taskId: string, inScope?: (scope: SaveScope) => boolean) {
+    const scope = procedureSaveQueuesRef.current[taskId]?.scope;
+    return !inScope || !scope || inScope(scope);
+  }
+
+  function hasProcedureSaveWork(inScope?: (scope: SaveScope) => boolean) {
     return (
-      Object.keys(procedureSaveTimersRef.current).length > 0 ||
-      Object.keys(procedureRetryTimersRef.current).length > 0 ||
-      Object.values(procedureSaveQueuesRef.current).some((queue) => queue.inFlight || queue.pending)
+      Object.keys(procedureSaveTimersRef.current).some((taskId) => isTaskInScope(taskId, inScope)) ||
+      Object.keys(procedureRetryTimersRef.current).some((taskId) => isTaskInScope(taskId, inScope)) ||
+      Object.entries(procedureSaveQueuesRef.current).some(
+        ([taskId, queue]) => isTaskInScope(taskId, inScope) && (queue.inFlight || queue.pending),
+      )
     );
   }
 
@@ -106,13 +131,18 @@ export function createProcedureSaveQueueStore() {
   }
 
   // Activity records for the aggregate save status and the save barrier.
-  function procedureSaveActivity() {
-    return Object.values(procedureSaveQueuesRef.current);
+  function procedureSaveActivity(inScope?: (scope: SaveScope) => boolean) {
+    return Object.entries(procedureSaveQueuesRef.current)
+      .filter(([taskId]) => isTaskInScope(taskId, inScope))
+      .map(([, queue]) => queue);
   }
 
   // Debounced or retrying work that has not started yet still counts as unsaved.
-  function hasScheduledProcedureSaves() {
-    return Object.keys(procedureSaveTimersRef.current).length > 0 || Object.keys(procedureRetryTimersRef.current).length > 0;
+  function hasScheduledProcedureSaves(inScope?: (scope: SaveScope) => boolean) {
+    return (
+      Object.keys(procedureSaveTimersRef.current).some((taskId) => isTaskInScope(taskId, inScope)) ||
+      Object.keys(procedureRetryTimersRef.current).some((taskId) => isTaskInScope(taskId, inScope))
+    );
   }
 
   return {
@@ -147,7 +177,8 @@ export type ProcedureDraftsForQueue = Pick<
 export type UseProcedureSaveQueueOptions = PlannerStateAccess &
   PlannerCacheScope &
   ReportedSaveStatusSetters &
-  WorkspaceFeedback & {
+  WorkspaceFeedback &
+  ForegroundSaveScope & {
     store: ProcedureSaveQueueStore;
     drafts: ProcedureDraftsForQueue;
     /** Marks the next planner-state change as a server echo so the shell autosave skips it. */
@@ -171,6 +202,7 @@ export function useProcedureSaveQueue({
   blockViewOnlyWrite,
   remoteRefreshAppliedRef,
   flushDeferredRemoteRefresh,
+  isForegroundSaveScope,
 }: UseProcedureSaveQueueOptions) {
   const { procedureSaveTimersRef, procedureRetryTimersRef, getProcedureTaskSaveQueue } = store;
   const {
@@ -224,11 +256,19 @@ export function useProcedureSaveQueue({
     });
   }
 
+  // The scope the workspace shows when a save is scheduled.
+  function currentSaveScope(): SaveScope {
+    return { projectId, scenarioId: latestDerivedStateRef.current.scenario.id };
+  }
+
   async function startProcedureTaskSave(taskId: string) {
     const queue = getProcedureTaskSaveQueue(taskId);
     if (queue.inFlight || !queue.pendingTaskSnapshot || !queue.pendingTasksSnapshot) {
       return;
     }
+    // Fixed for this save; whether it is on screen is asked fresh each time it reports.
+    const scope = queue.scope ?? currentSaveScope();
+    const reportsStatus = () => isForegroundSaveScope(scope);
 
     // A save completion may immediately drain newer edits before their debounce
     // timer fires. The current queue is being consumed now; that old timer must
@@ -243,7 +283,7 @@ export function useProcedureSaveQueue({
       queue.pendingTaskSnapshot = undefined;
       queue.pendingTasksSnapshot = undefined;
       queue.pendingDraftSnapshot = undefined;
-      setSaveState("idle");
+      if (reportsStatus()) setSaveState("idle");
       return;
     }
 
@@ -265,8 +305,10 @@ export function useProcedureSaveQueue({
     queue.pendingTaskSnapshot = undefined;
     queue.pendingTasksSnapshot = undefined;
     queue.pendingDraftSnapshot = undefined;
-    setSaveError(undefined);
-    setSaveState("saving");
+    if (reportsStatus()) {
+      setSaveError(undefined);
+      setSaveState("saving");
+    }
     markProcedureDraftsForSave(taskId, saveId, draftSnapshot);
     procedureDraftLog("save started", { taskId, saveId, saveSeq });
 
@@ -274,11 +316,12 @@ export function useProcedureSaveQueue({
 
     try {
       savedTask = annotationOnly
-        ? await saveTaskPhotoAnnotationsToSupabase(taskSnapshot, annotationBase ?? {}, projectId)
-        : await saveProcedureTaskUpdateToSupabase(taskSnapshot, tasksSnapshot, projectId);
+        ? await saveTaskPhotoAnnotationsToSupabase(taskSnapshot, annotationBase ?? {}, scope.projectId)
+        : await saveProcedureTaskUpdateToSupabase(taskSnapshot, tasksSnapshot, scope.projectId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to save procedure task.";
       const isConflict = message.toLowerCase().includes("conflict");
+      const firstFailure = queue.lastError === undefined;
       queue.inFlight = false;
       if (!queue.pending) {
         queue.pending = true;
@@ -295,18 +338,29 @@ export function useProcedureSaveQueue({
         error: message,
       });
       updateProcedureDraftSnapshotStorage();
-      setSaveError(message);
-      setSaveState(isConflict ? "error" : "retrying");
-      notifyFeedback({
-        title: isConflict ? "Save conflict" : "Save failed - retrying",
-        body: message,
-        tone: isConflict ? "danger" : "warning",
-      });
-      flushDeferredRemoteRefresh();
+      if (reportsStatus()) {
+        setSaveError(message);
+        setSaveState(isConflict ? "error" : "retrying");
+      }
+      // A save from a product or scenario no longer on screen notifies once, not on every retry.
+      if (reportsStatus() || firstFailure) {
+        notifyFeedback({
+          title: isConflict ? "Save conflict" : "Save failed - retrying",
+          body: message,
+          tone: isConflict ? "danger" : "warning",
+        });
+      }
+      if (reportsStatus()) flushDeferredRemoteRefresh();
 
       if (!isConflict && !procedureRetryTimersRef.current[taskId]) {
         procedureRetryTimersRef.current[taskId] = window.setTimeout(() => {
           delete procedureRetryTimersRef.current[taskId];
+          if (!isPlannerStateInSaveScope(latestDerivedStateRef.current, scope)) {
+            // The workspace now shows another product or scenario: retry this scope's own snapshot
+            // (kept on the queue above) against its own project.
+            void startProcedureTaskSave(taskId);
+            return;
+          }
           const latestTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
           if (!latestTask) {
             return;
@@ -330,8 +384,18 @@ export function useProcedureSaveQueue({
     if (savedTask) {
       acknowledgeAnnotationDrafts(taskId, getTaskStepPhotoAnnotationMap(savedTask));
       confirmedCurrent = confirmProcedureDraftsFromSave(taskId, saveId, saveSeq, draftSnapshot, savedTask);
-      remoteRefreshAppliedRef.current = true;
+      if (isPlannerStateInSaveScope(latestDerivedStateRef.current, scope)) {
+        remoteRefreshAppliedRef.current = true;
+      }
       setPlannerState((current) => {
+        if (!isPlannerStateInSaveScope(current, scope)) {
+          // The workspace moved to another scope: leave its state alone. If it is another product, this
+          // save's project snapshot no longer matches the database, so drop it rather than write it.
+          if (String(current.product.projectId ?? "") !== String(scope.projectId ?? "")) {
+            void clearCachedPlannerState(scope.projectId).catch(() => undefined);
+          }
+          return current;
+        }
         const nextState = {
           ...current,
           tasks: current.tasks.map((task) =>
@@ -340,7 +404,7 @@ export function useProcedureSaveQueue({
               : task,
           ),
         };
-        void writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
+        void writeCachedPlannerState(scope.projectId, nextState, mainScenarioIdRef.current).catch(() => undefined);
         return nextState;
       });
 
@@ -366,7 +430,9 @@ export function useProcedureSaveQueue({
         return;
       }
 
-      const latestTask = latestDerivedStateRef.current.tasks.find((task) => task.id === taskId);
+      const latestTask = isPlannerStateInSaveScope(latestDerivedStateRef.current, scope)
+        ? latestDerivedStateRef.current.tasks.find((task) => task.id === taskId)
+        : undefined;
       if (latestTask) {
         const latestTaskSnapshot = applyProcedureDraftsToTask(
           savedTask ? rebaseProcedureTaskVersions(latestTask, savedTask) : latestTask,
@@ -387,9 +453,9 @@ export function useProcedureSaveQueue({
 
     queue.state = "idle";
     queue.lastError = undefined;
-    setSaveState("saved");
+    if (reportsStatus()) setSaveState("saved");
     applyDeferredProcedureServerUpdate(taskId);
-    flushDeferredRemoteRefresh();
+    if (reportsStatus()) flushDeferredRemoteRefresh();
   }
 
   async function persistProcedureTaskUpdate(taskToSave: Task, tasksToSave: Task[]) {
@@ -419,6 +485,8 @@ export function useProcedureSaveQueue({
     queue.pendingDraftSnapshot = cloneProcedureDrafts();
     queue.latestSeq = maxProcedureDraftSeq(taskId);
     queue.state = queue.inFlight ? "saving-with-newer-pending" : "dirty-pending";
+    queue.scope = currentSaveScope();
+    queue.startSave = startProcedureTaskSave;
     updateProcedureDraftSnapshotStorage();
     procedureDraftLog("save scheduled", { taskId, saveSeq: queue.latestSeq });
     setSaveState((state) => state === "loading" || state === "saving" ? state : "draft");
@@ -441,11 +509,12 @@ export function useProcedureSaveQueue({
   // Scope exit (scenario/product change or unmount): FLUSH -- don't drop -- debounced saves for the
   // scope being left; clearing the timers alone would silently discard the user's last keystrokes. Best
   // effort: the queue snapshots were prepared when the save was scheduled, and startProcedureTaskSave
-  // no-ops if they are gone. Pending retries are cancelled.
+  // no-ops if they are gone. Each save starts through the render that scheduled it, so it is issued
+  // to its own project even though this runs from the next scope's render. Pending retries are cancelled.
   function flushScheduledProcedureSaves() {
     Object.entries(procedureSaveTimersRef.current).forEach(([taskId, timerId]) => {
       window.clearTimeout(timerId);
-      void startProcedureTaskSave(taskId);
+      void (getProcedureTaskSaveQueue(taskId).startSave ?? startProcedureTaskSave)(taskId);
     });
     procedureSaveTimersRef.current = {};
     Object.values(procedureRetryTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));

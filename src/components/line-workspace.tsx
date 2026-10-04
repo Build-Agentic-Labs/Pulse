@@ -5,6 +5,7 @@ import { settleWriteBatch } from "@/domain/workspace-save-status";
 import { useProcedureDrafts } from "./line-workspace/use-procedure-drafts";
 import { createProcedureSaveQueueStore, useProcedureSaveQueue } from "./line-workspace/use-procedure-save-queue";
 import { usePlannerShellAutosave, useWorkspaceSaves } from "./line-workspace/use-workspace-saves";
+import type { SaveScope } from "./line-workspace/workspace-controller-types";
 import { installProcedureAutosaveHarness } from "./line-workspace/procedure-autosave-harness";
 import type { AwiMaster } from "@/lib/awi/store";
 import { readAnnotationDraft } from "@/lib/photo-annotation-drafts";
@@ -666,6 +667,14 @@ export function LineWorkspace({
     }
   }, [scenarios]);
 
+  // The project and scenario on screen, refreshed every render. Saves keep the scope they were issued in;
+  // only work in this scope drives the visible save status, the save barrier and the navigation guards.
+  const foregroundSaveScopeRef = useRef<SaveScope>({ projectId, scenarioId: derivedState.scenario.id });
+  foregroundSaveScopeRef.current = { projectId, scenarioId: derivedState.scenario.id };
+  const [isForegroundSaveScope] = useState(() => (scope: SaveScope) =>
+    String(scope.projectId ?? "") === String(foregroundSaveScopeRef.current.projectId ?? "") &&
+    scope.scenarioId === foregroundSaveScopeRef.current.scenarioId);
+
   // Workspace saves: shown status, write tracker, guarded shell and BOM saves, the save barrier, and the
   // page-exit / in-app link guards (whose effect keeps its original position here).
   // flushDeferredRemoteRefresh (passed here and to the queue) is the realtime code's hoisted function
@@ -704,6 +713,7 @@ export function LineWorkspace({
     scenarioCacheRef,
     flushDeferredRemoteRefresh,
     setChromeStatus,
+    isForegroundSaveScope,
   });
 
   // Per-field procedure drafts: merge/defer/acknowledge server tasks against local typing.
@@ -749,6 +759,7 @@ export function LineWorkspace({
     blockViewOnlyWrite,
     remoteRefreshAppliedRef,
     flushDeferredRemoteRefresh,
+    isForegroundSaveScope,
   });
   // Read by the load effect (recovered drafts) and the realtime cleanup (scope exit).
   const scheduleProcedureTaskSaveRef = useRef(scheduleProcedureTaskSave);
@@ -1662,6 +1673,12 @@ export function LineWorkspace({
       if (recoveredTaskIds.length > 0) {
         setSaveState("draft");
         window.setTimeout(() => {
+          // If this mounted workspace has since switched to another project in place, the latest render's
+          // scheduler belongs to that project: leave the drafts in this project's storage for its next
+          // open. (A route change unmounts the workspace instead, and this instance still re-saves them.)
+          if (String(foregroundSaveScopeRef.current.projectId ?? "") !== currentProjectId) {
+            return;
+          }
           recoveredTaskIds.forEach((taskId) => {
             const taskToSave = hydratedState.tasks.find((task) => task.id === taskId);
             if (taskToSave) {

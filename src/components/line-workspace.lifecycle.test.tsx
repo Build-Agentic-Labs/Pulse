@@ -16,7 +16,7 @@ import {
   loadTaskPrivateMediaFromSupabase,
   saveProcedureTaskUpdateToSupabase,
 } from "@/domain/supabase-planner";
-import { writeCachedPlannerState } from "@/lib/planner-state-cache";
+import { clearCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import { LineWorkspace } from "./line-workspace";
 
 const { router, fakeSupabaseClient } = vi.hoisted(() => {
@@ -54,6 +54,7 @@ vi.mock("@/lib/planner-state-cache", async (original) => ({
   readCachedMainPlannerStateSync: vi.fn(() => undefined),
   readCachedPlannerState: vi.fn(async () => undefined),
   writeCachedPlannerState: vi.fn(async () => undefined),
+  clearCachedPlannerState: vi.fn(async () => undefined),
 }));
 vi.mock("@/domain/supabase-planner", async (original) => ({
   ...await original<typeof import("@/domain/supabase-planner")>(),
@@ -453,78 +454,186 @@ describe("LineWorkspace procedure save lifecycle", () => {
   });
 
   describe("a procedure save that starts in product A and finishes after switching to product B", () => {
-    async function startSaveThenSwitch(settle: (task: Task) => Promise<Task>) {
-      let finish: (() => void) | undefined;
-      saveMock.mockImplementationOnce((task) => new Promise<Task>((resolve, reject) => {
-        finish = () => { void settle(task).then(resolve, reject); };
-      }));
-      const view = await renderWorkspace();
-      typeInstruction("Typed in product A");
-      await advance(DEBOUNCE_MS);
-      expect(saveMock).toHaveBeenCalledTimes(1);
-      expect(saveMock.mock.calls[0][2]).toBe(PROJECT_ID);
+    const A_EDIT = "Typed in product A";
 
-      // The sidebar and command palette switch with router.push, which the in-app link guard does not
-      // intercept, so the A save can still be in flight when B's workspace loads.
-      view.rerender(<LineWorkspace projectId={OTHER_PROJECT_ID} awiMaster={buildAwiMaster(OTHER_PROJECT_ID, OTHER_TASK_ID)} />);
+    // Holds the next save until the test settles it, so it can finish after the product switch.
+    function holdNextSave() {
+      let settle: ((outcome: "resolve" | Error) => void) | undefined;
+      saveMock.mockImplementationOnce((task) => new Promise<Task>((resolve, reject) => {
+        settle = (outcome) => (outcome === "resolve" ? resolve(echoSavedTask(task)) : reject(outcome));
+      }));
+      return async (outcome: "resolve" | Error) => {
+        await act(async () => {
+          settle?.(outcome);
+        });
+        await flushMicrotasks();
+      };
+    }
+
+    // The sidebar and command palette switch with router.push, which the in-app link guard does not
+    // intercept, so an A save can still be pending or in flight when B's workspace loads.
+    async function switchTo(view: ReturnType<typeof render>, projectId: string) {
+      const taskId = projectId === OTHER_PROJECT_ID ? OTHER_TASK_ID : TASK_ID;
+      view.rerender(<LineWorkspace projectId={projectId} awiMaster={buildAwiMaster(projectId, taskId)} />);
       await flushMicrotasks();
       await advance(1_000);
+    }
+
+    async function typeInAAndSwitchMidSave() {
+      const settle = holdNextSave();
+      const view = await renderWorkspace();
+      typeInstruction(A_EDIT);
+      await advance(DEBOUNCE_MS);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+      await switchTo(view, OTHER_PROJECT_ID);
       expect(instructionBox().value).toBe(OTHER_INSTRUCTION);
       vi.mocked(writeCachedPlannerState).mockClear();
-
-      await act(async () => {
-        finish?.();
-      });
-      await flushMicrotasks();
-      return view;
+      return { view, settle };
     }
 
-    function cacheWritesFor(projectId: string) {
-      return vi.mocked(writeCachedPlannerState).mock.calls.filter((call) => call[0] === projectId);
+    function expectEverySaveScopedToA() {
+      for (const [task, , projectId] of saveMock.mock.calls) {
+        expect(task.id).toBe(TASK_ID);
+        expect(projectId).toBe(PROJECT_ID);
+      }
     }
 
-    it("on success: writes to A, leaves B's planner state untouched, clears A's stored draft, and settles", async () => {
-      await startSaveThenSwitch(async (task) => echoSavedTask(task));
-
-      expect(saveMock).toHaveBeenCalledTimes(1);
-      expect(savedInstruction(0)).toBe("Typed in product A");
+    function expectBUnaffected() {
       expect(instructionBox().value).toBe(OTHER_INSTRUCTION);
       expect(saveStatusText()).toBe("Saved");
       expect(clickElsewhereLink()).toBe(false);
-      expect(storedDraftFields()).toEqual([]);
       expect(localStorage.getItem(OTHER_DRAFT_STORAGE_KEY)).toBeNull();
-      // Pre-existing (identical at 3d46341): the completion writes the CURRENT planner state, which is
-      // now product B's, under product A's cache key. Recorded as a later-phase concern; change deliberately.
-      const completionWrites = cacheWritesFor(PROJECT_ID);
-      expect(completionWrites).toHaveLength(1);
-      expect(completionWrites[0][1].product.projectId).toBe(OTHER_PROJECT_ID);
-      expect(cacheWritesFor(OTHER_PROJECT_ID)).toHaveLength(0);
+      expectEverySaveScopedToA();
+      // No cache key ever receives another product's state.
+      for (const [projectId, state] of vi.mocked(writeCachedPlannerState).mock.calls) {
+        expect(state.product.projectId).toBe(projectId);
+      }
+    }
+
+    it("on success: saves to A, drops A's now-stale cache, and leaves B untouched", async () => {
+      const { settle } = await typeInAAndSwitchMidSave();
+      await settle("resolve");
+
+      expect(saveMock).toHaveBeenCalledTimes(1);
+      expect(savedInstruction(0)).toBe(A_EDIT);
+      expect(vi.mocked(writeCachedPlannerState).mock.calls.filter((call) => call[0] === PROJECT_ID)).toHaveLength(0);
+      expect(vi.mocked(clearCachedPlannerState)).toHaveBeenCalledWith(PROJECT_ID);
+      expect(storedDraftFields()).toEqual([]);
+      expectBUnaffected();
 
       await advance(10_000);
       expect(saveMock).toHaveBeenCalledTimes(1);
     });
 
-    it("on failure: keeps A's draft for recovery in A, but B stays pending because A's retry finds no task", async () => {
-      await startSaveThenSwitch(async () => {
-        throw new Error("Network down");
-      });
+    it("on failure: keeps A's draft, retries it against A in the background, and never blocks B", async () => {
+      const { settle } = await typeInAAndSwitchMidSave();
+      saveMock.mockRejectedValueOnce(new Error("Network down"));
+      await settle(new Error("Network down"));
 
-      expect(screen.getByText("Save failed - retrying")).toBeInTheDocument();
-      expect(instructionBox().value).toBe(OTHER_INSTRUCTION);
-      expect(storedDraftFields()).toEqual([expect.objectContaining({
-        taskId: TASK_ID,
-        value: "Typed in product A",
-        dirty: true,
-      })]);
-      expect(localStorage.getItem(OTHER_DRAFT_STORAGE_KEY)).toBeNull();
-      expect(cacheWritesFor(PROJECT_ID)).toHaveLength(0);
+      expect(screen.getAllByText("Save failed - retrying")).toHaveLength(1);
+      expect(storedDraftFields()).toEqual([expect.objectContaining({ taskId: TASK_ID, value: A_EDIT, dirty: true })]);
+      expectBUnaffected();
 
-      // Pre-existing (identical at 3d46341): the retry reads B's planner state, finds no A task and stops,
-      // but A's queue record keeps its error, so B's status and navigation guard stay pending until reload.
-      await advance(RETRY_MS + DEBOUNCE_MS + 10_000);
+      // First background retry fails again: still quiet in B, draft still recoverable.
+      await advance(RETRY_MS);
+      expect(saveMock).toHaveBeenCalledTimes(2);
+      expect(screen.getAllByText("Save failed - retrying")).toHaveLength(1);
+      expect(storedDraftFields()).toEqual([expect.objectContaining({ taskId: TASK_ID, value: A_EDIT, dirty: true })]);
+      expectBUnaffected();
+
+      // The next retry succeeds: A's edit lands in A and its stored draft clears.
+      await advance(RETRY_MS);
+      expect(saveMock).toHaveBeenCalledTimes(3);
+      expect(savedInstruction(2)).toBe(A_EDIT);
+      expect(storedDraftFields()).toEqual([]);
+      expect(vi.mocked(clearCachedPlannerState)).toHaveBeenCalledWith(PROJECT_ID);
+      expectBUnaffected();
+
+      await advance(10_000);
+      expect(saveMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("after a conflict in the background, returning to A recovers the edit and saves it there", async () => {
+      const { view, settle } = await typeInAAndSwitchMidSave();
+      await settle(new Error("Version conflict: the step changed"));
+
+      expect(screen.getByText("Save conflict")).toBeInTheDocument();
+      await advance(RETRY_MS + DEBOUNCE_MS + 5_000);
       expect(saveMock).toHaveBeenCalledTimes(1);
-      expect(saveStatusText()).toBe("Save pending — keep this draft open");
-      expect(clickElsewhereLink()).toBe(true);
+      expectBUnaffected();
+
+      await switchTo(view, PROJECT_ID);
+      expect(instructionBox().value).toBe(A_EDIT);
+      await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+      expect(saveMock).toHaveBeenCalledTimes(2);
+      expect(savedInstruction(1)).toBe(A_EDIT);
+      expect(saveStatusText()).toBe("Saved");
+      expect(storedDraftFields()).toEqual([]);
+      expectEverySaveScopedToA();
+    });
+
+    it("a late completion after A -> B -> A does not acknowledge newer edits and drains them in A", async () => {
+      const { view, settle } = await typeInAAndSwitchMidSave();
+      await switchTo(view, PROJECT_ID);
+      expect(instructionBox().value).toBe(A_EDIT);
+
+      typeInstruction("Newer edit typed after returning to A");
+      await advance(DEBOUNCE_MS + RECOVERY_DELAY_MS);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+
+      await settle("resolve");
+      expect(saveMock).toHaveBeenCalledTimes(2);
+      expect(savedInstruction(1)).toBe("Newer edit typed after returning to A");
+      // Rebased on the late completion's confirmed versions.
+      expect(saveMock.mock.calls[1][0].version).toBe(2);
+      expect(instructionBox().value).toBe("Newer edit typed after returning to A");
+      expect(saveStatusText()).toBe("Saved");
+      expect(storedDraftFields()).toEqual([]);
+      expectEverySaveScopedToA();
+      for (const [projectId, state] of vi.mocked(writeCachedPlannerState).mock.calls) {
+        expect(state.product.projectId).toBe(projectId);
+      }
+
+      await advance(10_000);
+      expect(saveMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("route switch (the product route remounts the workspace): A's held save still lands in A and B starts clean", async () => {
+      const settle = holdNextSave();
+      const viewA = await renderWorkspace();
+      typeInstruction(A_EDIT);
+      await advance(DEBOUNCE_MS);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+
+      viewA.unmount();
+      render(<LineWorkspace projectId={OTHER_PROJECT_ID} awiMaster={buildAwiMaster(OTHER_PROJECT_ID, OTHER_TASK_ID)} />);
+      await flushMicrotasks();
+      await advance(1_000);
+      expect(instructionBox().value).toBe(OTHER_INSTRUCTION);
+
+      await settle(new Error("Network down"));
+      expect(storedDraftFields()).toEqual([expect.objectContaining({ taskId: TASK_ID, value: A_EDIT, dirty: true })]);
+      expectBUnaffected();
+
+      // The unmounted A workspace retries its own task against A (retry delay, then the debounce).
+      await advance(RETRY_MS + DEBOUNCE_MS);
+      expect(saveMock).toHaveBeenCalledTimes(2);
+      expect(savedInstruction(1)).toBe(A_EDIT);
+      expect(storedDraftFields()).toEqual([]);
+      expectBUnaffected();
+    });
+
+    it("a debounced A edit flushed by the switch is saved to A, not to B", async () => {
+      const view = await renderWorkspace();
+      typeInstruction(A_EDIT);
+      await advance(DEBOUNCE_MS - 250);
+      expect(saveMock).not.toHaveBeenCalled();
+
+      await switchTo(view, OTHER_PROJECT_ID);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+      expect(savedInstruction(0)).toBe(A_EDIT);
+      expect(storedDraftFields()).toEqual([]);
+      expectBUnaffected();
     });
   });
 

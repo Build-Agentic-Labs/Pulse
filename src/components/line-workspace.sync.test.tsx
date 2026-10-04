@@ -329,6 +329,11 @@ describe("scenario switching", () => {
     expect(subscriptions).toHaveLength(2);
     expect(subscriptions[0]!.unsubscribed).toBe(true);
     expect(subscriptions[1]!.scope?.scenarioId).toBe(NIGHT_SCENARIO);
+
+    // The old scenario's queued task id is gone too: the next refresh loads only the new scenario's task.
+    emit(taskPayload("task-sync-night"));
+    await advance(REALTIME_TASK_DEBOUNCE_MS);
+    expect(vi.mocked(loadTaskFromSupabase).mock.calls).toEqual([["task-sync-night", PROJECT_A]]);
   });
 
   it("flushes a pending shell edit and saves it before loading the target scenario", async () => {

@@ -147,3 +147,24 @@ automatic daily backups. If so, that outranks anything scripted here.
   becomes a real multi-tenancy defect the moment a second workspace exists.
 - **Rate limiting is in-memory and per-instance** (`src/lib/api-auth.ts:72`). On
   serverless, limits multiply by instance count. Affects LLM-spending routes.
+
+---
+
+## 6. Planner procedure retry ignores an injected client — recorded 2026-10-03, not fixed
+
+**What:** `saveProcedureTaskUpdateToSupabase` (`src/lib/planner/task-store.ts`) accepts an optional
+client and uses it for its writes. On a version conflict, however, its single retry re-reads the task with
+`loadTaskFromSupabase`, which takes no client parameter and always uses the page's shared planner client.
+`saveManufacturingStepToSupabase` and `mergeLatestTaskToSupabase` have the same dependency.
+
+**Impact today:** none observed. The only production caller (the browser procedure save queue) injects no
+client. A future server caller that injects a per-request client and hits a version conflict would get the
+browser-only trap error on the retry read, instead of a rebased save.
+
+**Status:** pre-existing behaviour, moved verbatim in workspace-structure Phase 5. It is pinned by
+`src/domain/supabase-planner.task-writes.test.tsx` ("uses an injected client for its writes but the page
+client for the retry read"), so a fix must change that test on purpose.
+
+**Finishing it:** add an optional client parameter to `loadTaskFromSupabase` (defaulting as today), pass
+the injected client through the retry and the two helpers above, update the pinning test, and run the
+procedure and AWI save suites. This is a behaviour change, so it needs its own review.

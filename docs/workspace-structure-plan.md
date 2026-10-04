@@ -297,3 +297,26 @@ Hand-off notes for later phases (recorded, not redesigned in Phase 1):
   Another protection: recovery re-saves recovered unsaved drafts for whichever scope opens, and the reset keeps unacknowledged drafts. These protections are tested, not structural. A future change that rebuilds a project's draft storage from a partial in-memory map would reopen the loss path. A master BOM save in flight still holds the navigation guard briefly after an in-place switch. Media and tool completions (Phase 2 code) still report into the visible status, though the cache guard now protects their cache writes.
 
 Evidence: 1,820 → 1,893 unit tests pass (230 files), including a black-box `LineWorkspace` lifecycle test written and passing against `3d46341` before it ran on the extracted code. Every new seam test was checked against targeted mutations of the behavior it guards. Lint, the optimized build, the settled typecheck and bundle budgets pass (planner entry 275.1 KiB vs 275.2 baseline; largest chunk 124.0 KiB; 0 chunks contain harness code). All 19 browser cases (18 baseline plus the product-switch regression) pass against the retained isolated database (`scratch/browser-db`, ports 563xx, not reset). Its schema already contained `20261003180653` (function bodies identical to the migration file) although the ledger row is absent.
+
+## Phase 2 ledger — media and tools (2026-10-03)
+
+Commits on `codex/workspace-structure` after `370ae18`: `0b0db70` (tools) and `d9c6e26` (media). Baseline is the committed code after the Phase 1 recovery fixes (`line-workspace.tsx` 5,122 physical / 4,755 nonblank), not the original plan estimate.
+
+| File | Physical | Nonblank | Plan estimate |
+| --- | ---: | ---: | --- |
+| `line-workspace.tsx` | 4,510 | 4,197 | — (652 lines removed, 40 added) |
+| `line-workspace/use-workspace-tools.ts` | 335 | 305 | 260–330 |
+| `line-workspace/use-workspace-media.ts` | 431 | 395 | 390–450 |
+
+Tools is 5 lines over its estimate. It holds the library state, its load effect, both derived values, the step-tool writes and the catalog operations, plus option documentation. It is kept whole rather than trimmed.
+
+Ownership and decisions:
+- **Tools.** The library state and its per-project load effect, the derived `toolLibrary` and `projectToolRegistry` (both depend only on tasks and library state, so they moved per the plan), the step-tool writes, and catalog rename/tidy/delete. `applyProjectTasksUpdate` moved with tools because every caller is a catalog operation; no shared operation was needed. The hook is called at the old load-effect position, so effect order is unchanged.
+- **Media.** Upload, clipboard paste and cut, video and exploded-view deletes, and photo delete with Restore. The functions were moved verbatim. The shared shell-save lock is passed in unchanged: photo uploads, pastes and photo deletes still hold it, so shell saves requested meanwhile queue behind them. Video and exploded-view deletes still never touch it.
+- **Unchanged edges.** Functions are still re-declared per render, as in Phase 1. Media and tools completions still report into the visible status unconditionally, a pre-existing behavior; the Phase 1 cache guard still protects any cache writes. Nothing from the Phase 1 scope or recovery fixes changed. `restoreTaskProcedureSnapshot`, which re-uploads a deleted step's photos, stays in the component as a task action.
+- **Observed pre-existing behavior, not changed.** When a catalog rename or delete's task rewrite is refused before the remote load confirmed the state, the operation still continues afterwards. It sets the status to "saved", and a delete with a library row still deletes that row; a rename still renames it. Task content is not lost, but library metadata can diverge from the tasks. Recorded for a later decision; out of scope for a structural extraction.
+
+Validation:
+- Seam tests: 6 for tools and 5 for media. Each fails against a targeted mutation of the behavior it guards: lock taken and released, rollback that keeps concurrent edits, destination-first cut with compensation, stale library responses, tracker keys, the confirmation guard, and category migration.
+- Gate: full unit suite 1,904 tests (232 files); lint; optimized build, then typecheck; `check:bundles`; 0 chunks with harness code; all 19 browser cases against the retained isolated database (not reset).
+- Bundles are unchanged from Phase 1: planner entry 275.1 KiB, AWI master 274.0 KiB, largest chunk 124.0 KiB gzip. No runtime speed claim is made; nothing was measured beyond bundle sizes.

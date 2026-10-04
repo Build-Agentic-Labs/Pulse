@@ -222,6 +222,12 @@ Do not replay entire stale planner snapshots. Replay after revalidation; preserv
 
 Exit: successful persistence and recovery demonstrated against a real isolated database; zero wrong-owner replay and zero lost acknowledged edits in the specified test matrix. A count of passing tests alone is insufficient.
 
+> **Status 2026-10-04:** C1 (scoped phone recovery drafts) was designed on `codex/mobile-capture-session`
+> (`docs/mobile-draft-recovery-c1-design.md`) and **paused as deferred, not completed**, with two release
+> conditions recorded there (user-approved legacy recovery path before auto-restore is removed; exact
+> write-token acknowledgment rather than `<=` revision counters). The Gantt duration pilot remains the
+> later candidate. No Package C code exists.
+
 ## Package D atomic reorder pilot
 
 Specify one reorder operation containing scope, intended ordering, expected versions, and an idempotency key. Authorization and version validation occur in the database operation. Temporary numbering, if needed internally, must not be committed independently. The operation must not rewrite step tools, media, or unrelated task fields.

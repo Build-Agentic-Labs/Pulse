@@ -201,3 +201,19 @@ isolation only (browser-profile access reads everything); `task-<Date.now()>` id
 **Blocking user decision:** none for the bounded scope above. The only decision is whether the
 "legacy drafts are no longer auto-restored" consequence is acceptable without the Restore/Discard UI.
 If it is not, pause C1 (do not expand it): the UI is a separate approval.
+
+## 9. Status: PAUSED — deferred, not completed (2026-10-04)
+
+No implementation was started. Two release conditions must be met before C1 resumes:
+
+1. **Legacy recovery path.** Legacy v1 drafts must retain a user-approved recovery path (the
+   Restore/Discard decision, or an approved equivalent) **before** automatic recovery of them is removed.
+   §8's "drop auto-restore now" option is withdrawn.
+2. **Exact acknowledgment.** Acknowledgment must match the exact stored write, using a unique write
+   token (or equivalent) carried from the write to the acknowledgment. Independent per-tab revision
+   counters compared with `<=` do **not** establish that guarantee (two tabs can each reach revision 4
+   with different content); §3/§8's revision scheme is therefore insufficient as specified.
+
+Kept separate and unchanged: the pre-existing same-task concurrent-tab overwrite limitation
+(`docs/deferred-work.md` §8e and §8 of this document). It is not in scope for C1 and no multi-tab conflict
+resolution is proposed.

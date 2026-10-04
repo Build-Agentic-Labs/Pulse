@@ -1,6 +1,6 @@
 # Workspace structural improvements — Astra scope / Sol 6.1 handoff
 
-Status: Phase 1 (save ownership) implemented on `codex/workspace-structure`; see the Phase 1 ledger at the end. Phases 2–5 not started. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
+Status: Phases 1–2 implemented on `codex/workspace-structure` (ledgers at the end). Phase 3 execution plan prepared (see Phase 3), not started. The correctness investigation is closed in `docs/correctness-scope.md`. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
 
 Application baseline: `edd45a93ee27f061948c9afd407da29075297aa7` (performance/save-recovery update plus cached-reload test-readiness correction). Branch for this work: `codex/workspace-structure`.
 
@@ -127,6 +127,121 @@ Source anchors: scenario actions approximately 2067–2317; realtime refresh 231
 Preserve cache-first display with fresh remote-confirmed editability, per-scenario isolation, media-only merge into current selected task, stale scope rejection, existing shell/loading behavior, and current subscription cleanup timing. Keep project-switch timer cleanup distinct from subscription cleanup. Local module navigation must not start new server/RSC reads or mount hidden panels.
 
 Phase 3 target: workspace 3,000–3,550 lines.
+
+### Phase 3 execution plan (current code, 2026-10-03; not started)
+
+**Baseline:** `src/components/line-workspace.tsx` is 4,511 lines after Phases 1–2 and the correctness fixes. Function names below are the anchors; line numbers are approximate. This is a **behaviour-preserving extraction**. It does not take on persistence redesign, catalog work, the targeted restore client, durable edit recovery, or optimizer extraction (see `docs/correctness-scope.md`).
+
+#### Boundaries
+
+| Hook | Moves | Stays in `LineWorkspace` (shared cells passed in) | Est. lines |
+|---|---|---|---:|
+| `use-workspace-scenarios.ts` | `switchTargetId` and `isSwitchingScenario` state; `applyScenarioSwitch`, `ensureSavedBeforeScenarioAction`, `loadScenarioIntoView`, `refreshScenarioList`, `switchScenario`, `renameScenarioById`, `requestDeleteScenario`, `deleteScenarioById`, `duplicateActiveScenario`, `editScenarioTarget` | `scenarios` state, `scenarioCacheRef` and `mainScenarioIdRef` (read by the saves hook, created earlier); **the four scenario effects stay at their current slot** (see order constraints) | 280–330 |
+| `use-workspace-realtime.ts` | `isRefreshTargetCurrent`, `refreshTasksFromSupabase`, `requestRemoteTaskRefresh`, `refreshPlannerFromSupabase`, `maybeNotifyConcurrentEdit`, `requestRemotePlannerRefresh`, `flushDeferredRemoteRefresh`; the refresh timers, pending task ids, conflict-notice throttle, `realtimeTaskIdSet` and its ref; the subscription effect | `pendingRemoteRefreshRef` and `remoteRefreshAppliedRef` (read and written by the saves hook, procedure queue and shell autosave) | 290–340 |
+| `use-workspace-data.ts` | `finishProjectSwitch`; the seed and consumed-seed refs; the `[projectId]` load effect (cache/server seed, remote confirmation, draft recovery); the media-retry listeners; selected-task private-media hydration; `onReady`; the project-switch-start listener; the unmount-only skeleton-timer cleanup; `taskDetailHydrationStatus` and its request/fully-hydrated refs | `hasLoadedRemoteState`, `hasConfirmedRemoteState`, `isProjectSwitching`, `remoteStateConfirmedRef`, `loadedProjectIdRef`, `plannerDirtyRef`, `setSaveState`/`setSaveError`, selection and view state. These are read earlier in render by the scenario effects, URL effects and saves/queue/tools hooks, so they cannot move into a hook called later. | 420–480 |
+
+Expected workspace after Phase 3: about 3,550–3,700 lines. This is an estimate, not a quota. Keeping the scenario effects and shared cells in place costs about 80 lines over the original 3,000–3,550 target. That is deliberate, to avoid reordering effects.
+
+#### The deferred-refresh dependency (must be decided, not inherited)
+
+`flushDeferredRemoteRefresh` is a hoisted function declaration in `LineWorkspace`. It is passed to `useWorkspaceSaves`, `useProcedureSaveQueue`, `useWorkspaceTools` and `useWorkspaceMedia`, all called **before** the realtime code. It reads `hasLocalSaveWork` from `useWorkspaceSaves`, so the dependency is circular, resolved today only by hoisting.
+
+Each caller receives the function from the render that issued its save. That copy's `requestRemotePlannerRefresh` → `refreshPlannerFromSupabase` closes over **that render's `projectId`** and reads the scenario live from a ref.
+
+**Plan:**
+- `LineWorkspace` keeps a one-line hoisted `flushDeferredRemoteRefresh()` that forwards to `realtimeDelegateRef.current`.
+- `useWorkspaceRealtime` sets `realtimeDelegateRef.current` every render.
+- **This changes closure semantics from issuing-render to latest-render.** The one observable difference: after an **in-place** project change (route navigation remounts, so it cannot happen there), a deferred refresh flushed by a save issued under the old project now refreshes the project on screen. Today the request is made with the old project and then discarded by `isRefreshTargetCurrent`.
+- Both outcomes leave state correct. The new one costs one extra read.
+- Pin it with a lifecycle test before choosing. If exact preservation is required instead, the alternative is for the realtime hook to read `projectId` from `loadedProjectIdRef`; decide before implementation.
+
+Realtime-triggered refreshes already use latest-render semantics (`requestRemotePlannerRefreshRef` and `requestRemoteTaskRefreshRef`) and keep them.
+
+#### Effect-order constraints
+
+Current order, top to bottom:
+1. `latestDerivedStateRef` sync
+2. Scenario effects:
+   1. cache clear on `[projectId]`
+   2. cache mirror
+   3. scenario-list load
+   4. main id
+3. Saves hook (guard effects)
+4. Drafts and queue hooks
+5. Tools hook (library load)
+6. Media hook (no effects)
+7. Workspace snapshot write
+8. URL sync
+9. `popstate`
+10. Development harness
+11. **Load `[projectId]`**
+12. Media-retry listeners
+13. Private-media hydration
+14. `onReady`
+15. Project-switch-start listener
+16. **Realtime subscription**
+17. Unmount-only skeleton timer
+18. Simulation, pointer
+19. Undo tracking
+20. **`usePlannerShellAutosave`**
+21. Chrome and resize, keyboard, command palette
+
+Rules:
+- **The shell autosave must run after the load effect in the same commit** (Phase 1 invariant). `useWorkspaceData` is called at the load effect's slot, `useWorkspaceRealtime` right after it, both before `usePlannerShellAutosave`.
+- **The scenario effects stay before the saves hook.** Moving them into a hook called later would reorder them past the saves, queue and tools effects. They are probably independent, but nothing proves it, so Phase 3 leaves them in place.
+- **Inside `useWorkspaceData`,** keep the order load → media retry → hydration → `onReady` → switch-start listener → unmount timer cleanup.
+  - Calling realtime after data moves the subscription after the unmount-only timer effect, so the two unmount cleanups swap order. They are independent: the subscription cleanup deliberately does **not** clear the skeleton timer, because clearing it on scenario change once wedged the switch skeleton. Pin that with the existing note and a test.
+- **The `[projectId]` load effect must keep `[projectId]` as its only dependency.**
+  - Setters and functions it uses from outside the hook (`setSaveState`, selection setters, draft recovery) go through one port ref updated every render, matching the existing `restoreProcedureDraftFieldsRef` pattern.
+  - `react-hooks/refs` is off and `exhaustive-deps` is on, so adding them as dependencies would restart the load on every render.
+- **Subscription stability:**
+  - dependencies stay `[product.id, scenario.id, hasLoadedRemoteState]`;
+  - the task set stays behind `realtimeTaskIdSetRef`, so adding a task never re-subscribes;
+  - cleanup still clears both timers, drops pending task ids, and flushes (never drops) scope-exit procedure saves.
+
+#### Behaviour and fixes that must be preserved (each needs a passing test before and after)
+
+- Cache-first paint, but **remote-confirmed editability**: a cache- or server-seeded state never autosaves. A failed remote load stays unconfirmed with an error status.
+- Server seed outranks cache; a stale-scenario cache is skipped; a load resolving after unmount or a project change is ignored.
+- Procedure draft recovery on load: recovered drafts are registered as pending at once. Drafts for tasks not in this load are kept.
+- Scenario switch:
+  - save-before-switch barrier, aborting on failure;
+  - instant cached switch;
+  - drafts reset only for the scenario being left (`resetProcedureDrafts(leavingTaskIds)`);
+  - incoming dirty drafts re-saved;
+  - per-scenario hydration status.
+- Realtime:
+  - task refresh debounced 250 ms, full refresh 350 ms;
+  - deferred while shell save work is pending and flushed after (`flushDeferredRemoteRefresh`);
+  - stale-scope results discarded;
+  - procedure-draft protection on merge;
+  - concurrent-edit notice throttled to one per minute.
+- Private media hydrated one task at a time; only media merged; stale scope discarded; failure retried on online/focus/visibility.
+- Project-switch skeleton timing, and timer cleanup kept separate from subscription cleanup.
+- The validated fixes:
+  - cross-product save scope;
+  - scoped draft reset and recovery;
+  - catalog refusal and failed-rewrite revert;
+  - zero-zone derivation (`e2e/zero-zone-save.spec.ts`).
+
+#### Validation criteria
+
+1. **Before moving any code:**
+   - Audit `line-workspace.lifecycle.test.tsx` (20 cases) against the list above.
+   - Add characterization tests, written against the current code, for every item not yet covered. Expected gaps:
+     - realtime deferral and flush ordering;
+     - subscription not recreated on task add;
+     - cleanup flushing saves without clearing the skeleton timer;
+     - hydration scope discard and retry;
+     - rename/target revert;
+     - the deferred-refresh closure decision.
+2. **One contained commit per hook** (scenarios, then realtime with the delegate, then data). Each commit:
+   - leaves those tests green unchanged;
+   - has mutation checks on its seams;
+   - passes the full gate: unit, lint, optimized build then typecheck (never concurrently), bundle budgets, diff check;
+   - passes the full browser suite on the retained isolated database without a reset (`browser-retained.mjs`), including the sidebar product switch and the zero-zone save.
+3. **No added reads on product open or module navigation.** Compare request counts (core load, media hydration, scenario list, realtime subscribe) before and after on the same fixture. Report counts, not speed.
+4. **Ledger:** actual line counts per module, the closure decision taken, effect-order evidence, and any deviation. Stop after Phase 3 for review.
 
 ## Phase 4 — Persistence foundations and media
 
@@ -415,3 +530,7 @@ Phase 3 is paused while these are reviewed. Neither is implemented, and no migra
   - Residual risks from tabs that stay open are listed in the catalog design §5b.
   - The header is an identifier only. Tests show it never bypasses permissions.
   - Writer and edit-recovery inventories are in the catalog design §5b.
+- **2026-10-03, investigation closed.**
+  - The closing scope is in `docs/correctness-scope.md`: completed fixes; isolated, unused additive database work; the blocked catalog and restore project; durable edit recovery as a future project.
+  - The catalog rollout stays blocked: old clients can return after any observation period, and add-only whole-task replacement silently ignores intended changes.
+  - The Phase 3 execution plan is ready above (not started).

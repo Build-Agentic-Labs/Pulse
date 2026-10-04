@@ -251,6 +251,12 @@ After §5b, the remaining interactions are the per-row cases in §5 (a stale add
 
 ## 5b. Old-client compatibility: rollout (revised again 2026-10-03, proposal; needs approval)
 
+> **The catalog rollout is BLOCKED (2026-10-03).** Nothing in this section is to be implemented as-is. Two points are unresolved:
+> 1. **Old clients can return.** A client running pre-rollout code can come back at any time, for example after being offline. The Observe period below is evidence, not a guarantee, and no step here closes that boundary.
+> 2. **Add-only `replace_task_children` is a damage limiter, not a correct replacement.** It silently ignores the reorders, edits and deletions that callers intend (see `docs/correctness-scope.md` §3).
+>
+> The closing scope is in `docs/correctness-scope.md`. Wherever the tables below say "safe", they mean only that the stage can be **activated** mid-save without stranding a partial write. They make no claim that the catalog rollout is safe.
+
 **Status:**
 - Implemented in the isolated database only: the Stage 1 recovery and tool-change functions (`2277e69`).
 - **Nothing else is implemented, activated or deployed.** The write-protocol *gate* proposed in the previous revision is **withdrawn**, for the two reasons below. The atomic reorder and the targeted delete/restore designs are kept.
@@ -326,10 +332,10 @@ The IndexedDB planner cache does **not** recover edits: a cache-sourced load can
 | Stage | What | Safe if activated mid-save? | Acceptance (database-backed, retained isolated database) |
 |---|---|---|---|
 | **S1** ✅ isolated | recovery table, targeted delete/restore, `apply_step_tool_changes` (`2277e69`) | yes (new functions; no v1 client calls them) | done |
-| **S2** migration (needs approval) | (a) **telemetry**: an additive table plus log-only statement triggers on the planner tables, recording writes from `authenticated`/`anon` *without* the header (table, operation, user, day); never refuses. (b) **non-destructive `replace_task_children`**: never deletes or overwrites an existing child row (so nothing cascades), only inserts missing rows, appending a step whose position is taken. (c) `reorder_scenario_tasks` (atomic reorder, for v2 only). | **Yes, tested:** telemetry activated between an old reorder's requests lets it finish with real WBS values. The non-destructive function, activated between an old Restore's task upsert and its child call, removes no tool, view or step (the teammate's new step and edit survive) and brings the deleted step back as a row. | pgTAP for each; the migration record check; the existing browser suite green |
+| **S2** migration (needs approval) | (a) **telemetry**: an additive table plus log-only statement triggers on the planner tables, recording writes from `authenticated`/`anon` *without* the header (table, operation, user, day); never refuses. (b) **non-destructive `replace_task_children`**: never deletes or overwrites an existing child row (so nothing cascades), only inserts missing rows, appending a step whose position is taken. (c) `reorder_scenario_tasks` (atomic reorder, for v2 only). | **Activation is safe mid-save (tested):** telemetry activated between an old reorder's requests lets it finish with real WBS values. The add-only function, activated mid-Restore, removes no tool, view or step. **Semantics are not preserved:** add-only silently ignores intended reorders, edits and deletions, and places a restored step at the end (`docs/correctness-scope.md` §3). | pgTAP for each; the migration record check; the existing browser suite green |
 | **C1** client v2 (after message approval) | header on the browser client and in `api-auth.ts`; reorder via the RPC; tool writes via `apply_step_tool_changes`; mobile delete/restore via the S1 functions; **durable write-ahead recovery for every edit type the inventory marks "no"**; draft v2 with legacy-draft handling | yes (v1 behaviour is unchanged) | vitest plus e2e: refuse every v2 request type in turn, reload, and the edit is recovered and saved exactly once |
-| **Observe** | telemetry runs; announced maintenance window: everyone asked to reload open tabs and phones | yes | zero v1 writes for an agreed period (proposed: 7 days, plus 24 h after the window) |
-| **C2 + S4** catalog | catalog RPCs and client behind a flag, enabled only after Observe | yes | §9 |
+| **Observe** | telemetry runs; announced maintenance window: everyone asked to reload open tabs and phones | yes | zero v1 writes for an agreed period. **This is evidence only:** a v1 client that is offline or idle can reappear afterwards |
+| **C2 + S4** catalog | catalog RPCs and client behind a flag | — | **Blocked:** no accepted policy yet for a v1 client that returns after Observe |
 | **Future** v2 → v3 | a refusing guard becomes safe *only* for clients that (1) journal every edit durably and (2) make every multi-request operation idempotent or atomic, so a refused or interrupted operation is completed by replay after reload | — | the C1 refusal and replay e2e, plus a pgTAP cutover test like `compat_cutover_test.sql` that expects completion instead of a stranded partial |
 
 ### Limitations that remain (cannot be eliminated for v1 clients without a coordinated maintenance window, and not fully even with one)

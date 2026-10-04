@@ -155,8 +155,18 @@ export function normalizeTaskPlanningContext(tasks: Task[], zones: Zone[], stati
     });
   }
 
+  // A zero-zone product passes its in-use stations through. The Unzoned station is generated above
+  // and is in use once saved, so skip every generated id (and repeats): a duplicate id fails the
+  // stations upsert, and with it every later shell save of the product.
+  const emittedStationIds = new Set(generatedStations.map((station) => station.id));
   const passthroughStations = zones.length === 0
-    ? stations.filter((station) => stationIdsInUse.has(station.id))
+    ? stations.filter((station) => {
+      if (!stationIdsInUse.has(station.id) || emittedStationIds.has(station.id)) {
+        return false;
+      }
+      emittedStationIds.add(station.id);
+      return true;
+    })
     : [];
 
   return {

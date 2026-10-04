@@ -20,6 +20,27 @@ function fixture(): PlannerState {
 }
 
 describe("planner derivation", () => {
+  it("does not duplicate an existing Unzoned station when a derived state is derived again", () => {
+    // What the workspace does on every edit: derive, then store the derived state (catalog writes,
+    // optimistic updates), then derive that again.
+    const unzoned = "station-scenario-empty-unzoned";
+    const loaded = fixture();
+    const saved: PlannerState = {
+      ...loaded,
+      stations: [{
+        id: unzoned, scenarioId: "scenario-empty", sequence: 1, name: "Unzoned", ownerName: "",
+        plannedCycleMinutes: 0, plannedOperators: 1, plannedManHours: 0, taktStatus: "missing", bottleneckFlag: false,
+      }],
+      tasks: loaded.tasks.map((task) => ({ ...task, stationId: unzoned })),
+    };
+    let state = saved;
+    for (let round = 0; round < 3; round += 1) {
+      state = createPlannerDerivation()(state).state;
+      expect(state.stations.map((station) => station.id)).toEqual([unzoned]);
+      expect(state.tasks.map((task) => task.stationId)).toEqual([unzoned, unzoned]);
+    }
+  });
+
   it("keeps planning calculations and unchanged rows stable while exposing fresh instruction text", () => {
     const derive = createPlannerDerivation();
     const initial = fixture();

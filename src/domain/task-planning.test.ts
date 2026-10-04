@@ -101,6 +101,71 @@ describe("normalizeTaskPlanningContext", () => {
     expect(result.tasks[0].stationId).toBe("station-sc1-unzoned");
     expect(result.stations.some((station) => station.name === "Unzoned")).toBe(true);
   });
+
+  // Regression (2026-10-03): with no zones, an Unzoned station that was already saved came back
+  // twice (once generated, once passed through as an in-use station), and the stations upsert failed
+  // with 21000. Every later shell save of a zero-zone product failed after a partial write.
+  function makeStation(overrides: Partial<Station> = {}): Station {
+    return {
+      id: "s1",
+      scenarioId: "sc1",
+      sequence: 1,
+      name: "Station",
+      ownerName: "",
+      plannedCycleMinutes: 0,
+      plannedOperators: 1,
+      plannedManHours: 0,
+      taktStatus: "missing",
+      bottleneckFlag: false,
+      ...overrides,
+    };
+  }
+  const unzonedId = stationIdForUnzoned("sc1");
+  const savedUnzoned = makeStation({ id: unzonedId, name: "Unzoned", area: "Unzoned", description: "Kept" });
+
+  it("keeps one Unzoned station when it already exists, deriving repeatedly", () => {
+    const tasks = [
+      makeTask({ id: "A", wbs: "1", stationId: unzonedId }),
+      makeTask({ id: "B", wbs: "2", stationId: unzonedId }),
+    ];
+    const first = normalizeTaskPlanningContext(tasks, [], [savedUnzoned], "sc1");
+    const second = normalizeTaskPlanningContext(first.tasks, [], first.stations, "sc1");
+    const third = normalizeTaskPlanningContext(second.tasks, [], second.stations, "sc1");
+
+    for (const result of [first, second, third]) {
+      expect(result.stations.map((station) => station.id)).toEqual([unzonedId]);
+      expect(result.tasks.map((task) => task.stationId)).toEqual([unzonedId, unzonedId]);
+    }
+    // The generated Unzoned station still carries the saved description.
+    expect(third.stations[0]?.description).toBe("Kept");
+  });
+
+  it("still passes through other in-use stations of a zero-zone product, each once", () => {
+    const legacy = makeStation({ id: "legacy-station", name: "Legacy" });
+    const tasks = [
+      makeTask({ id: "A", wbs: "1", stationId: unzonedId }),
+      makeTask({ id: "B", wbs: "2", stationId: "legacy-station" }),
+    ];
+    // A state that already holds a duplicate (from before this fix) is collapsed too.
+    const result = normalizeTaskPlanningContext(tasks, [], [savedUnzoned, legacy, savedUnzoned, legacy], "sc1");
+
+    expect(result.stations.map((station) => station.id)).toEqual([unzonedId, "legacy-station"]);
+    expect(result.stations[1]).toBe(legacy);
+    expect(result.tasks.map((task) => task.stationId)).toEqual([unzonedId, "legacy-station"]);
+  });
+
+  it("leaves a zoned product's stations unchanged", () => {
+    const zones = [makeZone({ id: "z1", name: "Welding" })];
+    const tasks = [
+      makeTask({ id: "A", wbs: "1", zoneId: "z1", stationId: "station-z1" }),
+      makeTask({ id: "B", wbs: "2", stationId: unzonedId }),
+    ];
+    const stations = [makeStation({ id: "station-z1", name: "Welding" }), savedUnzoned, makeStation({ id: "orphan" })];
+    const result = normalizeTaskPlanningContext(tasks, zones, stations, "sc1");
+
+    expect(result.stations.map((station) => station.id)).toEqual(["station-z1", unzonedId]);
+    expect(result.tasks.map((task) => task.stationId)).toEqual(["station-z1", unzonedId]);
+  });
 });
 
 describe("buildProcessStationForTask", () => {

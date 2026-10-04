@@ -527,14 +527,17 @@ export async function loadTaskFromSupabase(
     return null;
   }
 
+  // Every child collection is paged and ordered with an `id` tiebreaker, the same shape the full planner
+  // load and the private-media hydrate use for these tables: a collection above the API row cap is read
+  // completely, and rows sharing a sort key (photos captured in one batch) come back in one stable order.
   const [dependencies, manufacturingSteps, partReferences, stepPhotos, stepTools, explodedViews, taskVideos] = await Promise.all([
-    throwIfError(supabase.from("task_dependencies").select("*").eq("successor_task_id", taskId)),
+    readAllPages((from, to) => throwIfError(supabase.from("task_dependencies").select("*").eq("successor_task_id", taskId).order("id").range(from, to))),
     readAllPages((from, to) => throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", taskId).order("sequence").order("id").range(from, to))),
     readAllPages((from, to) => throwIfError(supabase.from("part_references").select("*").eq("task_id", taskId).order("created_at").order("id").range(from, to))),
-    throwIfError(supabase.from("step_photos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
-    throwIfError(supabase.from("step_tools").select("*").eq("task_id", taskId).order("sequence")),
-    throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
-    throwIfError(supabase.from("task_videos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at")),
+    readAllPages((from, to) => throwIfError(supabase.from("step_photos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("step_tools").select("*").eq("task_id", taskId).order("sequence").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
+    readAllPages((from, to) => throwIfError(supabase.from("task_videos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
   ]);
 
   const mappedTask = mapTask({

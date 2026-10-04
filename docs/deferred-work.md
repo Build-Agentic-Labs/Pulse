@@ -188,12 +188,30 @@ tests): `updateTaskFields`, `upsertProcedureStep`, `reorderProcedureSteps`,
 They are pre-built, not dead by accident (same status as `sop/numbering.ts`, §2). Decide: wire them up or
 delete them together with their characterization tests. Do not garbage-collect casually.
 
-**b. The single-task read is less defensive than the full load.** `loadTaskFromSupabase` orders
-`step_photos`, `step_tools`, `step_exploded_views` and `task_videos` by one column only (no `id` tiebreaker)
-and does not page them or `task_dependencies`, while the full planner load uses `order(...).order(id)` and
-500-row pages for the same tables. Probably harmless at current task sizes; a task with more than the API
-row cap of media rows would silently truncate. Finishing it: mirror the full load's ordering and paging, and
-update the request-order snapshots that record the current shape.
+**b. The single-task read is less defensive than the full load — FIXED 2026-10-04 (branch
+`codex/single-task-read-paging`).** `loadTaskFromSupabase` ordered `step_photos`, `step_tools`,
+`step_exploded_views` and `task_videos` by one column only (no `id` tiebreaker) and did not page them or
+`task_dependencies`, while the full planner load and the private-media hydrate use `order(...).order(id)` and
+500-row pages for the same tables.
+
+*Investigation before changing anything (read-only against production):* the hosted API cap is effectively
+1,000 rows (an unranged request returned 1,000 of 1,312 `step_photos`). The largest task has 199 photos, 39
+tools, 6 exploded views, 2 dependencies, so **nothing was being truncated**. Ties in the single sort key are
+real: 27 live photos in 6 groups on 5 tasks share an identical `captured_at` within one step (largest group
+11, a batch upload), nothing downstream re-sorts, and the realtime/mobile refetch paths replace local photo
+order with the refetched order. So a reorder of tied photos was *possible* on those tasks after a refetch;
+**no visible reorder was observed**. This closes a latent limit and a nondeterministic ordering, not a
+reproduced defect.
+
+*Fix:* all seven child reads go through `readAllPages` with the hydrate's filters and `order(<key>, id)`.
+Injected client, authorization order, return shape and callers are unchanged; collections of today's sizes
+issue exactly the same number of requests as before. Tests (`src/domain/supabase-planner.task-read.test.ts`,
+over a scripted client that honours order/range and caps unranged reads at 1,000): tied timestamps order by
+id identically to the hydrate; 1,200 rows return every row exactly once in order; exact page boundaries
+(500, 1,000) terminate after one empty page; a later-page failure rejects the whole read; today's sizes add
+no request; project and soft-delete filters intact. On the previous loader the ordering, shape, paging,
+boundary and failure tests fail. Six request-order snapshots in `task-writes.test.tsx` were updated and show
+only the added `order(id) range(0,499)`.
 
 **c. `TaskFieldPatch` has no typed way to clear a column.** Every field is `Partial<Pick<Task, …>>`, and
 `taskFieldPatchRow` skips `undefined` and maps `null` to SQL NULL, so clearing a value requires `null`,

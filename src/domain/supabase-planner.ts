@@ -5,15 +5,9 @@ import { mergeAnnotationDocuments } from "@/lib/photo-annotation-drafts";
 import { normalizePhotoAnnotationDocument } from "./photo-annotations";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Json, TablesUpdate } from "@/lib/database.types";
-import type { ManufacturingStep, Product, Task } from "./types";
+import type { ManufacturingStep, Task } from "./types";
 import { getTaskStepPhotoAnnotationMap } from "./step-photos";
 import { STEP_TOOL_LISTS_FIELD } from "./step-tools";
-import {
-  PRODUCT_MASTER_BOM_FIELD,
-  getMasterBom,
-  serializeMasterBom,
-  type MasterBom,
-} from "./master-bom";
 import { plannerClient } from "@/lib/planner/client";
 export { createPlannerSupabaseClient, getUserFromSession } from "@/lib/planner/client";
 import { assertTaskInProject, assertTaskRowInProject, throwIfError } from "@/lib/planner/query-helpers";
@@ -23,7 +17,6 @@ import {
   manufacturingStepRow,
   manufacturingStepRows,
   mapManufacturingStepRecord,
-  mapProduct,
   mapTask,
   normalizeManufacturingStepSequences,
   num,
@@ -125,6 +118,7 @@ export {
   savePlannerShellToSupabase,
 } from "@/lib/planner/shell-store";
 export type { SaveState } from "@/lib/planner/shell-store";
+export { saveMasterBomToSupabase } from "@/lib/planner/bom-store";
 
 function manufacturingStepSaveNeedsCollisionSafeResequence(
   nextSteps: ManufacturingStep[],
@@ -189,58 +183,6 @@ async function bumpManufacturingStepSequences(supabase: SupabaseClient, stepIds:
       throwIfError(supabase.from("manufacturing_steps").update({ sequence: temporaryBaseSequence + index }).eq("id", stepId)),
     ),
   );
-}
-
-/**
- * Persist only the product-level master BOM and verify the exact value returned
- * by the database before the UI reports success. This intentionally bypasses
- * the broader planner-shell autosave so an upload cannot be lost to debounce or
- * page-unload timing.
- */
-export async function saveMasterBomToSupabase(
-  product: Product,
-  bom: MasterBom | undefined,
-  projectId: string,
-  client?: ReturnType<typeof plannerClient>,
-): Promise<Product> {
-  if (!product.projectId || String(product.projectId) !== String(projectId)) {
-    throw new Error("The master BOM does not belong to the active project.");
-  }
-
-  const expectedBom = bom ? serializeMasterBom(bom) : undefined;
-  const customFields = { ...(product.customFields ?? {}) };
-  if (expectedBom) {
-    customFields[PRODUCT_MASTER_BOM_FIELD] = expectedBom;
-  } else {
-    delete customFields[PRODUCT_MASTER_BOM_FIELD];
-  }
-
-  const supabase = client ?? plannerClient();
-  const savedRow = await throwIfError(
-    supabase
-      .from("products")
-      .update({ custom_fields: customFields as Json })
-      .eq("id", product.id)
-      .eq("project_id", projectId)
-      .select("*")
-      .maybeSingle(),
-  );
-
-  if (!savedRow) {
-    throw new Error("The master BOM could not be saved. Check your project edit access and retry.");
-  }
-
-  const savedProduct = mapProduct(savedRow);
-  const verifiedBom = getMasterBom(savedProduct.customFields);
-  const didVerify = expectedBom
-    ? JSON.stringify(verifiedBom) === JSON.stringify(expectedBom)
-    : !Object.prototype.hasOwnProperty.call(savedProduct.customFields ?? {}, PRODUCT_MASTER_BOM_FIELD);
-
-  if (!didVerify) {
-    throw new Error("The master BOM save could not be verified. Retry before leaving this page.");
-  }
-
-  return savedProduct;
 }
 
 export async function saveTasksToSupabase(tasks: Task[], projectId?: string) {

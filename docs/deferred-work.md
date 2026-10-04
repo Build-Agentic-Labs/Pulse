@@ -168,3 +168,30 @@ client for the retry read"), so a fix must change that test on purpose.
 **Finishing it:** add an optional client parameter to `loadTaskFromSupabase` (defaulting as today), pass
 the injected client through the retry and the two helpers above, update the pinning test, and run the
 procedure and AWI save suites. This is a behaviour change, so it needs its own review.
+
+---
+
+## 7. Planner task-store: unused functions, single-task read ordering, patch typing — recorded 2026-10-04, not changed
+
+Surfaced by the final review of the workspace-structure refactor. All three pre-date the branch (verified at
+merge base `edd45a9`); the branch moved them verbatim into `src/lib/planner/task-store.ts` / `read-store.ts`
+and pinned their current behaviour in `src/domain/supabase-planner.task-writes.test.tsx`.
+
+**a. Six exported task-write functions have no production caller** (only the facade re-export and their
+tests): `updateTaskFields`, `upsertProcedureStep`, `reorderProcedureSteps`,
+`saveTaskAndManufacturingStepToSupabase`, `saveManufacturingStepToSupabase`, `mergeLatestTaskToSupabase`.
+They are pre-built, not dead by accident (same status as `sop/numbering.ts`, §2). Decide: wire them up or
+delete them together with their characterization tests. Do not garbage-collect casually.
+
+**b. The single-task read is less defensive than the full load.** `loadTaskFromSupabase` orders
+`step_photos`, `step_tools`, `step_exploded_views` and `task_videos` by one column only (no `id` tiebreaker)
+and does not page them or `task_dependencies`, while the full planner load uses `order(...).order(id)` and
+500-row pages for the same tables. Probably harmless at current task sizes; a task with more than the API
+row cap of media rows would silently truncate. Finishing it: mirror the full load's ordering and paging, and
+update the request-order snapshots that record the current shape.
+
+**c. `TaskFieldPatch` has no typed way to clear a column.** Every field is `Partial<Pick<Task, …>>`, and
+`taskFieldPatchRow` skips `undefined` and maps `null` to SQL NULL, so clearing a value requires `null`,
+which the type forbids (the test uses `null as never`). Finishing it: widen the patch type to allow `null`
+per clearable column, or add an explicit clear API, and type the test accordingly. Behaviour change for
+callers; `updateTaskFields` currently has none.

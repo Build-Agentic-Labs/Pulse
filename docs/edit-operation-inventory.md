@@ -410,9 +410,13 @@ exported symbol `MobilePhotoPortal`, line 809).
   `step_tools` (`20260601124000_per_project_rls_isolation.sql:267-370`), storage path policy
   (`20260701120000_media_storage_project_scoped.sql:27-37`). Client-side `assertTaskInProject` /
   `assertTaskRowInProject` (`query-helpers.ts:45-67`) are advisory.
-- **The portal has no UI access-level gate** (zero references to `accessLevel` or `role`; the shell computes
-  `accessLevel` at `project-route-shells.tsx:244` but does not pass it). Viewers see every control and
-  learn they are read-only from a failed write ("Not saved").
+- **UI observation, separate from authorization:** the portal has no UI access-level gate (zero
+  references to `accessLevel` or `role`; the shell computes `accessLevel` at
+  `project-route-shells.tsx:244` but does not pass it), so the controls render the same for every access
+  level. Whether a read-only user's write is refused is decided by the RLS policies above, which this
+  pass did **not** exercise against a database; the inventory therefore makes no claim that an
+  unauthorized write is or is not possible. What the code shows is only the UX consequence: a refused
+  write surfaces as the "Not saved" status rather than as a disabled control.
 - Every full `taskRow` upsert from the phone (`row-mappers.ts:544-595`) omits `version`, so the
   `bump_row_version` trigger increments it and forces later desktop version-checked saves into their
   merge-retry.
@@ -1171,10 +1175,27 @@ and `auth-project-gate.tsx`. `src/lib/awi/*` has no unused exports.
 
 ## 11. Cross-cutting findings
 
-1. **Three persistence regimes coexist.** AWI procedure saves and SOP lifecycle actions are single RPC
-   transactions with version/token checks. The desktop non-AWI procedure save is multi-request with
-   optimistic versions and one merge-retry. Everything else (shell saves, both reorders, mobile task
-   writes, step delete, Restore, media, tools, catalog) is multi-request, unversioned, last-write-wins.
+1. **Several persistence regimes coexist.** Summarized from the rows above, by operation class:
+   - *Single transaction with a version or token check:* AWI procedure save (`save_awi_procedure`, §6.2),
+     SOP document save (`updated_at` token, §7.1), SOP lifecycle RPCs and guarded transitions (§7.7–§7.14),
+     work-order approval (`approve_work_order_set`, §8.3), the SOP approver staging RPC (§8 W7).
+   - *Multi-request with optimistic versions and one merge-retry:* the desktop non-AWI procedure save
+     (§3.1–§3.2) and the step move's two embedded procedure saves (§4.2).
+   - *Single-row compare-and-set without a version column:* photo annotations (3-attempt CAS on
+     `tasks.version`, §3.4), master BOM (read-back equality, §4.7), `markLineConverted` (§8.3).
+   - *Single transaction, no version check:* `duplicate_scenario` / `delete_scenario` RPCs (§4.8),
+     `replace_task_children` inside the full-state save (§2.4, §5.13), `create_awi_master` (§6.1).
+   - *Multi-request, unversioned, last-write-wins:* the shell save (§2.1–§2.3), both reorders (§4.1,
+     §5.10), mobile full-row task upserts and step delete (§5.9, §5.12), mobile Restore's parent upserts
+     (§5.13), media uploads/pastes/deletes (§4.4–§4.6, §5.5–§5.6), step-tool add/remove and the full-list
+     tool syncs (§4.3, §5.7), catalog operations (§2.3), scenario rename/target (§4.8), SOP annex rows
+     (§7.2–§7.4), SOP roster seats (§7.5), SolidWorks media ingest (§8 W5/W6).
+   - *Exceptions inside that last class:* the mobile step field patch writes only changed fields
+     (field-level, not whole-row, LWW — §5.1, §5.4); `step_tools` rows and SOP comment replies use
+     deterministic or client-generated ids, so a retry is idempotent even without a version (§4.3,
+     §7.13); the shell save's deletions are bounded by the `assertSaneStateDeletion` tripwire (§2.1); the
+     shell save and master BOM refuse to run before the remote load is confirmed (§2.1, §4.7).
+   Operations not listed here were not classified.
 2. **The two reorders and the mobile Restore are the three paths where an interrupted sequence leaves
    visibly wrong data** (`tmp-` WBS; children or tools gone). None has a stored-outcome test.
 3. **Two writers for one tool change** (`step_tools` row and `customFields.stepToolLists`, desktop and
@@ -1186,8 +1207,11 @@ and `auth-project-gate.tsx`. `src/lib/awi/*` has no unused exports.
 5. **"Saved" means different things:** server-confirmed field values (procedure queue, AWI), a
    PostgREST 2xx on the last request (shell, tools, media, mobile), read-back equality (master BOM), or
    simply "nothing has failed yet" (mobile `idle`).
-6. **View-only gating is advisory and uneven**: present on the shell/procedure/catalog paths, absent on
-   media, tools, step move, scenario actions and the whole mobile portal; RLS is the real gate.
+6. **Client-side view-only gating is advisory and uneven**: present on the shell/procedure/catalog
+   paths, absent on media, tools, step move, scenario actions and the whole mobile portal (§1, §5.0).
+   This is a UI observation. Database authorization is the RLS and trigger layer cited in §1 and §5.0;
+   this pass read those policies but did not test them against a database, so it does not claim that any
+   unauthorized write is possible or impossible.
 7. **Test character:** request-order assertions on mocked or scripted clients dominate. Stored-outcome
    coverage exists for the AWI RPC (pgTAP + browser), the shell save (`zero-zone-save.spec.ts`), the
    catalog rewrite (in-memory tables) and the master BOM read-back. No pgTAP covers

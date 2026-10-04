@@ -199,8 +199,8 @@ When Claude finishes: record its final SHA, inspect its diff, refresh this basel
 
 Approve one work package at a time. Each report includes: exact baseline/final SHA, changed ownership, behavior changes, data touched, tests, measured deltas, unresolved risks, and rollback limitations. Separate extraction commits from fixes. No automatic merge, push, production migration, UI change, or follow-on package is authorized by this plan.
 
-Recommended first authorization: ~~Package A, then~~ a small slice of B — specifically the pure
-capture-session module extraction proposed in `docs/edit-reliability-baseline-2026-10-04.md` §4, with its
+Recommended first authorization: ~~Package A, then~~ a small slice of B — specifically the hook-free
+capture-session utilities extraction (pure calculations plus the `localStorage` session functions) proposed in `docs/edit-reliability-baseline-2026-10-04.md` §4, with its
 eleven characterization tests written first. Scope C and D after A; do not wait for every editor to be
 split before addressing concrete reliability risks. Package A's inventory suggests C's candidate (a Gantt
 duration edit) rides the unversioned shell save, and that the two-request reorders (desktop and mobile)

@@ -142,9 +142,13 @@ mobile open 126 / 216 / 1,251 ms (small / medium / stress).
    `step_tools` in 3 requests (500 + 500 + 100) where the pre-fix loader would have received a silently
    capped 1,000 rows.
 3. **The mobile portal loads media tables for every task on open** (`step_photos`, `step_exploded_views`,
-   `task_videos`: 11 batched requests each on 1,100 tasks), which the desktop open does not; the portal's
-   open cost on a large project is therefore about 3.8× the request count of the desktop open, and the
-   mobile page bytes exceed the desktop's.
+   `task_videos`: 11 batched requests each on 1,100 tasks), which the desktop open does not. Browser-issued
+   requests on the stress fixture: desktop open 124, mobile open 114; the mobile open is smaller in count
+   because it omits 43 of the desktop's requests (29 SOP, notification, department and tool-library
+   reads, plus 14 fewer access-bootstrap duplicates) while adding 33 media reads. Mobile response bytes (2,277 KiB) slightly exceed the desktop's (2,195 KiB). These are
+   browser-only counts: both pages also server-render their first paint, and that server-side work is
+   not measured here, so neither figure is the page's total cost. (An earlier draft of this document
+   compared mobile stress with mobile small, 114 vs 30, and called it a desktop ratio; that was wrong.)
 4. **Request counts are deterministic on the planner-data endpoints** across all 15 samples; only the
    access-bootstrap duplicates vary.
 
@@ -181,19 +185,23 @@ mobile open 126 / 216 / 1,251 ms (small / medium / stress).
 - Catalog rollout and experimental database deployment stay **blocked**. No isolated function was
   activated or referenced.
 
-## 4. Recommended first Package B slice — extract the pure capture-session module
+## 4. Recommended first Package B slice — extract the hook-free capture-session utilities
 
 Full dependency map: 39 `useState`, 43 `useRef`, 23 `useEffect`, 14 `useMemo`, 6 `useCallback` and about
 95 inner functions in `MobilePhotoPortal` (lines 809–3346), followed by one 1,020-line JSX return. State
 clusters: planner core, capture session, new-step draft, write coordination, navigation/ordering,
 layout. Candidate boundary sizes today (estimates from declaration ranges): capture session ~815 lines
-(of which ~337 are pure, hook-free functions at lines 137–148 and 152–476), new-step drafts ~650–700,
+(of which ~337 are hook-free functions at lines 137–148 and 152–476), new-step drafts ~650–700,
 write coordination ~240, media actions ~275, navigation/ordering ~350, view JSX ~1,080.
 
 **Recommendation:** move lines 137–148 and 152–476 of `mobile-photo-portal.tsx` verbatim into a new
-plain module. This is the only boundary with **zero** cross-boundary setter or ref edges: it consists of
-types, constants and pure functions over the capture-session data model, timer arithmetic and the
-localStorage serialization. No hook, effect or JSX moves.
+plain module. This is the only boundary with **zero** cross-boundary setter or ref edges. It is hook-free
+but **not entirely pure**: it contains pure calculations (types, constants, timer arithmetic, snapshot
+building and normalization, header-chip derivation) **and** `localStorage` functions
+(`readMobileCaptureSession`, `writeMobileCaptureSession`, which read, write and remove the
+`pulse:mobile-capture-session:*` and legacy `pulse:capture-timer:*` keys and swallow quota errors). No
+hook, effect or JSX moves. The storage functions are why the characterization tests below run under
+jsdom with a real `localStorage`.
 
 - **New file:** `src/components/mobile-photo-portal/capture-session.ts` (touches `window.localStorage`,
   so not `src/domain/`). Plain module, no `"use client"` directive (CLAUDE.md: values shared across the

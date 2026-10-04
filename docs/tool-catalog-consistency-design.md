@@ -1,6 +1,8 @@
 # Tool catalog consistency: design proposal
 
-Status: **proposal for review, 2026-10-03. Nothing here is implemented or applied.** No migration has been written, and no schema, permission or data change has been made.
+Status: **proposal for review, 2026-10-03; amended the same day (§5a). Nothing here is implemented or applied.** No migration has been written, and no schema, permission or data change has been made.
+
+The zero-zone save defect in §1.3 was fixed separately in `33b2797`.
 
 Goal: make catalog **rename**, **delete** and **tidy** change the tool library and every step reference together, atomically, and keep them consistent afterwards.
 
@@ -43,7 +45,7 @@ The spec was temporary and is not committed.
 
    **This is not catalog-specific.** On the reloaded zero-zone product, a plain product-name edit's normal autosave failed the same way. That write was *partial*: `products` was stored, and everything after `stations` (task rows included) was not.
 
-   It is a data-loss risk for zero-zone products: Gantt edits fail to save after the first reload. It is reported for a **separate, approved fix** and is out of scope here.
+   It is a data-loss risk for zero-zone products: Gantt edits fail to save after the first reload. **Fixed separately in `33b2797`** (see the ledger in `docs/workspace-structure-plan.md`). The shell save itself is still a non-atomic sequence of requests.
 
    The catalog design below removes the catalog's dependence on the shell save, so catalog operations would no longer hit it.
 
@@ -201,7 +203,50 @@ No. `saveInFlightRef` would not close this race:
    - Add a `tool_library` subscription. Today it is in the type union but never subscribed, so other desktops keep a stale catalog until reload.
 4. **Leave the old-name re-add as a visible outcome.** The server cannot tell intent. A per-row add of the old name after a rename creates a separate catalog entry that can be merged again. I propose documenting this rather than adding an alias table.
 
-With (1)+(3) in phase A, the remaining window is a phone that edited tools on a stale copy, which phase B closes.
+~~With (1)+(3) in phase A, the remaining window is a phone that edited tools on a stale copy, which phase B closes.~~ Superseded by §5a.
+
+## 5a. Amendment: Phase A alone is not enough
+
+**Phase A, as first proposed, remains vulnerable.** A committed catalog operation can be silently undone while *any* desktop or mobile path can write a step's tool list from stale state. The same is true of any path that wipes tool rows and does not restore them. The atomic RPC guarantees only that a catalog operation lands whole; it cannot protect that result from a later stale write.
+
+Phase A covered the desktop Gantt reorder and the mobile task-row saves. It left these overwriting paths in place:
+- mobile draft autosave and its IndexedDB replay
+- mobile failed-save retry
+- mobile step delete
+- mobile Restore Step
+
+So shipping Phase A by itself would ship a catalog that a phone can revert.
+
+### Minimum complete rollout
+
+Every path that currently writes a whole tool list, or wipes tool rows, must stop before catalog operations ship. Call sites were checked on 2026-10-03.
+
+**Step 1: no stale list writers.** Client only; no schema change. Ship this first; it is useful on its own.
+
+| Path | Today | Required change |
+|---|---|---|
+| Desktop Gantt reorder (`line-workspace.tsx:3811-3815`) | `saveTasksToSupabase` → `syncStepToolsForTasks`: full lists from local state | Task-row-only save (`saveTaskRowsToSupabase`); never touches `step_tools` |
+| Mobile reorder (`mobile-photo-portal.tsx:2322-2323`) | same | Task-row-only save |
+| Mobile task rename (`:2139`, `saveTaskToSupabase`) | full-task tool sync | Task-row-only save |
+| Mobile add process (`:2208`, `saveTaskToSupabase`) | full-task tool sync | Task-row-only save, plus per-row inserts for any tools the new task is created with |
+| Mobile step delete (`:2891`, `saveTaskWithManufacturingStepsToSupabase` → `syncStepToolsForTask(allowEmptyWipe)`) | rewrites every remaining step's tools; an empty list wipes the task | Write the steps without a tool sync. The deleted step's tools go by FK cascade; the other steps' tools are untouched. |
+| Mobile draft autosave (`:2012`) and failed-save retry (`:2565`), both `syncStepToolsForStepToSupabase`, including drafts replayed from IndexedDB | makes the stored list equal the draft's list | **Diff-based.** Record the tool list when the draft starts, and send only the adds and removes since then as per-row writes (both idempotent). A replayed draft carries those operations, not a list. |
+| **Mobile Restore Step** (`:2089`, `savePlannerStateToSupabase(snapshot)`) | the `replace_task_children` RPC deletes every step of every task in the scenario (cascade-deleting **all** their `step_tools`) and never rewrites tools; also a full-state save, which CLAUDE.md forbids for new work | **Targeted restore:** re-insert only the deleted step (step row, then its tools and photos as per-row inserts) into its task. No full-state save. This also fixes today's data loss: Restore currently erases every tool assignment in the scenario. |
+| Desktop optimizer (`line-workspace.tsx:3019`, `savePlannerStateToSupabase`) | writes only into a freshly duplicated scenario; `duplicate_scenario` copies no tools, so there is nothing to overwrite | Unchanged; recorded so the inventory is complete |
+| Per-row add/remove (desktop `use-workspace-tools.ts:114/135`, mobile `:2519/:2542`) | single rows by computed id | Unchanged. These are already diff-shaped (the residual old-name re-add is documented in §5). |
+
+**Step 2: atomic catalog operations.**
+- The migration from §3 (additive).
+- `gen:types`.
+- The desktop catalog client from §6.
+- A `tool_library` realtime subscription.
+
+**Step 3: guard the rollout window.**
+- Pre-rollout clients keep their full-list writers until they reload. That includes open desktop tabs, and phones with a draft queued in IndexedDB.
+- The rollout is complete only when no such client is running. Either confirm a build-version check forces a reload after deploy (I have not verified one exists), or ship Step 1 at least one deploy cycle before Step 2 and accept the window until then.
+- A server-side block on list-style writes would need a schema or permission change. It is not proposed without approval.
+
+After Steps 1–3, the remaining interactions are the per-row cases in §5 (a stale add of the old name re-creates it as a separate, visible tool). No path can silently undo a committed rename or delete.
 
 **Separate decision:** the reorder's lock handling should check and queue (or use its own key) rather than clobber `saveInFlightRef`. This is independent of the catalog and is reported here only.
 
@@ -248,7 +293,7 @@ With (1)+(3) in phase A, the remaining window is a phone that edited tools on a 
 | `src/components/project-catalog-setup-panel.tsx` | delete confirmation counts become project-wide |
 | `src/components/line-workspace.tsx` | Gantt reorder uses `saveTaskRowsToSupabase` |
 | `src/lib/…` realtime | subscribe to `tool_library` → reload the library |
-| `src/components/mobile-photo-portal.tsx` | phase A: task-row-only saves for rename, add and reorder; phase B: diff-based tool syncs |
+| `src/components/mobile-photo-portal.tsx` | Step 1 (§5a): task-row-only saves for rename, add and reorder; step delete without a tool sync; diff-based draft and retry tool writes (including IndexedDB replay); targeted Restore Step |
 | `e2e/catalog.spec.ts` | the verification above as a committed regression |
 
 ## 9. Tests
@@ -289,5 +334,5 @@ With (1)+(3) in phase A, the remaining window is a phone that edited tools on a 
 
 1. Scope: project-wide (recommended) or active scenario only.
 2. Permissions: keep current rules with explicit errors (recommended), or approve aligning `tool_library` policies to per-project `edit`.
-3. Approve phase A (RPCs, desktop client, task-row-only saves, library realtime) now and phase B (mobile diff-based tool syncs) after.
-4. Separately: approve a focused fix for the zero-zone duplicate "Unzoned" station (§1.3). It blocks shell saves for affected products today.
+3. Approve the rollout in §5a: Step 1 (no stale list writers, including Restore Step) first, then Step 2 (RPCs and catalog client), with the Step 3 window guard. This replaces the earlier phase A / phase B split.
+4. ~~Separately: approve a focused fix for the zero-zone duplicate "Unzoned" station (§1.3).~~ Done in `33b2797`.

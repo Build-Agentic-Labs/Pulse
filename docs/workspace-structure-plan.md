@@ -368,3 +368,21 @@ Validation:
 - Seam tests: 6 for tools and 5 for media. Each fails against a targeted mutation of the behavior it guards: lock taken and released, rollback that keeps concurrent edits, destination-first cut with compensation, stale library responses, tracker keys, the confirmation guard, and category migration.
 - Gate: full unit suite 1,904 tests (232 files), 1,912 after the catalog-refusal fix, and 1,923 (233 files) after the failed-rewrite fix, each with the full browser suite passing; lint; optimized build, then typecheck; `check:bundles`; 0 chunks with harness code; all 19 browser cases against the retained isolated database (not reset).
 - Bundles are unchanged from Phase 1: planner entry 275.1 KiB, AWI master 274.0 KiB, largest chunk 124.0 KiB gzip. The failed-rewrite fix adds 0.3 KiB to each (275.4 and 274.3); the largest chunk is unchanged. No runtime speed claim is made; nothing was measured beyond bundle sizes.
+
+## Zero-zone save fix (2026-10-03, separate from the phases)
+
+Commit `33b2797`. Found while verifying the catalog proposal on the retained database; fixed on its own before Phase 3 or any catalog work.
+
+- **Defect.** On a product with no zones, `normalizeTaskPlanningContext` generated the Unzoned station and also passed through every in-use input station. Once the Unzoned station had been saved, tasks pointed to it, so it came back twice. Every later shell save (Gantt edits, product fields, catalog rewrites) sent the duplicate id and failed with Postgres `21000`. The bug had been on `main` since `8b32966` (2026-05-28). The desktop optimizer derives stations through the same function before its scenario save.
+- **Partial writes.** `savePlannerShellToSupabase` had already upserted `products` and `scenarios` before `stations` failed. So product fields were stored while task rows and later writes were not.
+- **Fix.** Pass-through skips station ids the derivation already generated, and repeats. Station ids, task assignments, zoned products and other pass-through stations are unchanged. A state that already holds duplicates collapses to one of each. No data was deleted and no migration was added.
+- **Tests:**
+  - normalizer: an existing Unzoned station stays single across repeated derivation; other in-use stations pass through once; zoned behavior is pinned
+  - repeated `createPlannerDerivation`
+  - `e2e/zero-zone-save.spec.ts` on the retained database with a disposable workspace and product: a Gantt duration edit, a reload, another Gantt edit and a product rename, each checked as **stored rows**, with exactly one Unzoned station and unchanged task assignments
+  - Against the unfixed build, the e2e case failed at its first Gantt edit (`POST stations 500`, duration still 60 min). The repeat guard was mutation-checked.
+- **Not changed: the shell save is still not atomic.** It is still a sequence of separate requests. Any other failure part-way (network, RLS, another constraint) can still leave the earlier tables written and the later ones not. This fix removes only this particular cause.
+- **Gate:**
+  - 1,927 unit tests (233 files), lint, optimized build, `check:bundles`, typecheck and diff check pass
+  - bundles unchanged (planner 275.4 KiB, AWI master 274.3 KiB, largest chunk 124.0 KiB)
+  - all 20 browser cases on the retained isolated database (not reset; stopped afterwards with volumes kept)

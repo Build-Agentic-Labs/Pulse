@@ -249,13 +249,28 @@ Hand-off notes for later phases (recorded, not redesigned in Phase 1):
     - B's typing, saves, failures, cleanup and recovery write only B's draft key.
     - A→B→A→B with failed unsaved edits in both products recovers each product's edit from its own storage and saves it to its own project.
     - An older workspace's background retry that is still in flight cannot acknowledge an edit typed after returning to A; it drains that edit, rebased.
-  - **Open gap, introduced by the hardening, correction proposed and not applied:**
+  - **Gap introduced by the hardening, now fixed:**
     1. A's save is in flight across an in-place switch to B.
-    2. A scenario switch in B is now allowed, because B's barrier ignores A's background work. `resetProcedureDrafts()` then clears every in-memory draft, A's included.
-    3. If A's save then fails, its failure path rewrites A's draft storage from memory and erases A's stored draft.
-    4. Returning to A cancels A's retry and shows the server text.
-    Proposed smallest correction: the scenario-switch reset drops only drafts for tasks in the scenario being left (the outgoing planner state's task ids), so other products' unsaved drafts stay in memory and in their own storage. Roughly 10 lines in `resetProcedureDrafts`/`applyScenarioSwitch`, plus the reproduction as a lifecycle test.
+    2. A scenario switch in B (allowed, because B's barrier ignores A's background work) used to clear every in-memory draft, A's included.
+    3. If A's save then failed, its failure path rewrote A's draft storage from memory and erased the edit.
+
+    The scenario-switch reset now removes only the drafts of the tasks in the planner state being left. A task id identifies exactly one scenario, which I checked rather than assumed:
+    - `tasks.id` is the table-wide primary key, and the isolated DB has no duplicates.
+    - The live `duplicate_scenario` assigns copies `id || '-' || suffix` and copies no procedure steps.
+    - Client-created tasks use `task-${Date.now()}`, which the same key protects once saved.
+
+    Regression test: "a scenario switch in B keeps A's unsaved draft…". It fails before the correction, with A's stored draft erased, and passes after it. A's draft stays stored through the failed save and the background retry, then is recovered and saved to A on return.
+
+    Same product: "keeps another scenario's recoverable draft…" fails before the correction and passes after it.
+    - A recovered draft for the night scenario now survives a Main→night switch, where it used to be dropped from memory and later from storage.
+    - The night scenario shows its own draft. Main's draft is removed and never applied there.
+    - The night scenario's next edit saves only that scenario's task.
+
+    New consequence: a recovered draft for a non-Main scenario shows when that scenario opens, but it is saved only with the next edit to that task. Automatic recovery saves run on project load only.
+  - Same boundary, checked without changes:
+    - Pending draft snapshots clone all in-memory drafts, but every consumer filters by task id: marking for save, acknowledgment, sequence, applying drafts, cleanup and the annotation acknowledgment. A queue test pins that another scope's draft in a snapshot is never marked, acknowledged, applied or cleaned.
+    - Any scope exit still cancels every pending retry timer, including background retries of other scopes. Their edits stay in the queue snapshot and in their project's draft storage, and are recovered when that scope opens again.
 
   Unchanged edges: drafts in memory are still shared across an in-place switch, so a project's draft snapshot write can include other projects' dirty drafts. Recovery ignores them because they match no task. A master BOM save in flight still holds the navigation guard briefly after an in-place switch. Media and tool completions (Phase 2 code) still report into the visible status, though the cache guard now protects their cache writes.
 
-Evidence: 1,820 → 1,883 unit tests pass (230 files), including a black-box `LineWorkspace` lifecycle test written and passing against `3d46341` before it ran on the extracted code. Every new seam test was checked against targeted mutations of the behavior it guards. Lint, the optimized build, the settled typecheck and bundle budgets pass (planner entry 275.1 KiB vs 275.2 baseline; largest chunk 124.0 KiB; 0 chunks contain harness code). All 19 browser cases (18 baseline plus the product-switch regression) pass against the retained isolated database (`scratch/browser-db`, ports 563xx, not reset). Its schema already contained `20261003180653` (function bodies identical to the migration file) although the ledger row is absent.
+Evidence: 1,820 → 1,886 unit tests pass (230 files), including a black-box `LineWorkspace` lifecycle test written and passing against `3d46341` before it ran on the extracted code. Every new seam test was checked against targeted mutations of the behavior it guards. Lint, the optimized build, the settled typecheck and bundle budgets pass (planner entry 275.1 KiB vs 275.2 baseline; largest chunk 124.0 KiB; 0 chunks contain harness code). All 19 browser cases (18 baseline plus the product-switch regression) pass against the retained isolated database (`scratch/browser-db`, ports 563xx, not reset). Its schema already contained `20261003180653` (function bodies identical to the migration file) although the ledger row is absent.

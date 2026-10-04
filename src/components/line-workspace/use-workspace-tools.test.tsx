@@ -62,7 +62,7 @@ function renderTools({ confirmed = true, libraryProjectId = PROJECT_ID, viewOnly
       blockViewOnlyWrite: () => viewOnly,
       flushDeferredRemoteRefresh,
     });
-    return { plannerState, saveState, saveError, tools };
+    return { plannerState, setPlannerState, saveState, saveError, tools };
   }, { initialProps: { libraryProjectId } });
   return { ...hook, tracker };
 }
@@ -191,6 +191,8 @@ for (const [name, run] of Object.entries(catalogOperations)) {
     expect(upsertToolLibraryMetadata).not.toHaveBeenCalled();
     expect(deleteToolLibraryFromSupabase).not.toHaveBeenCalled();
     expect(result.current.saveState).toBe("error");
+    // The unsaved rewrite does not stay on screen.
+    expect(stepTools(result.current.plannerState.tasks[0])).toEqual(["torque  wrench"]);
     expect(notifyFeedback).toHaveBeenCalledWith(expect.objectContaining({ title: "Save failed" }));
     expect(notifyFeedback).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Tool updated" }));
     expect(notifyFeedback).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Tool names cleaned up" }));
@@ -198,6 +200,26 @@ for (const [name, run] of Object.entries(catalogOperations)) {
     expect(outcome).toBe(name === "tidy" ? "resolved" : "Shell save failed");
   });
 }
+
+it("leaves another scenario's state alone when a failed rewrite's scenario was switched away from meanwhile", async () => {
+  vi.mocked(loadToolLibraryFromSupabase).mockResolvedValue(library(["torque  wrench"]));
+  const save = deferred<void>();
+  vi.mocked(savePlannerShellToSupabase).mockReturnValueOnce(save.promise);
+  const { result } = renderTools();
+  await flush();
+
+  let outcome: Promise<unknown> | undefined;
+  await act(async () => { outcome = catalogOperations.rename(result.current.tools).catch(() => undefined); });
+  // The other scenario happens to show the renamed list for a task with the same id.
+  const otherScenario: PlannerState = {
+    ...result.current.plannerState,
+    scenario: { ...result.current.plannerState.scenario, id: "scenario-other" },
+  };
+  await act(async () => { result.current.setPlannerState(otherScenario); });
+  await act(async () => { save.reject(new Error("Shell save failed")); await outcome; });
+
+  expect(result.current.plannerState).toBe(otherScenario);
+});
 
 it("deletes a catalog tool from every task and its library row, then reloads the library", async () => {
   vi.mocked(loadToolLibraryFromSupabase).mockResolvedValueOnce(library(["torque  wrench"])).mockResolvedValueOnce([]);

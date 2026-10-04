@@ -113,6 +113,67 @@ export function removeStepTool(task: Task, stepId: string, toolName: string): Ta
   });
 }
 
+/** One step whose tool list a whole-project rewrite changed, with the list on either side. */
+export type StepToolListChange = { taskId: string; stepId: string; before: string[]; after: string[] };
+
+function sameToolList(left: string[], right: string[]) {
+  return left.length === right.length && left.every((tool, index) => tool === right[index]);
+}
+
+export function diffStepToolLists(beforeTasks: Task[], afterTasks: Task[]): StepToolListChange[] {
+  const beforeById = new Map(beforeTasks.map((task) => [task.id, getTaskStepToolListMap(task)]));
+  return afterTasks.flatMap((task) => {
+    const beforeMap = beforeById.get(task.id) ?? {};
+    const afterMap = getTaskStepToolListMap(task);
+    const stepIds = new Set([...Object.keys(beforeMap), ...Object.keys(afterMap)]);
+    return [...stepIds].flatMap((stepId) => {
+      const before = beforeMap[stepId] ?? [];
+      const after = afterMap[stepId] ?? [];
+      return sameToolList(before, after) ? [] : [{ taskId: task.id, stepId, before, after }];
+    });
+  });
+}
+
+// Undoes a rewrite's step tool changes without discarding edits made since it was applied. A step
+// still showing the rewrite gets its previous list back. A step edited meanwhile keeps that edit:
+// tools added since are kept and tools removed since stay removed, applied to the previous list.
+// Tasks deleted meanwhile, and steps whose tools were all cleared meanwhile, are left alone.
+export function revertStepToolListChanges(tasks: Task[], changes: StepToolListChange[]): Task[] {
+  const changesByTask = new Map<string, StepToolListChange[]>();
+  changes.forEach((change) => {
+    changesByTask.set(change.taskId, [...(changesByTask.get(change.taskId) ?? []), change]);
+  });
+
+  return tasks.map((task) => {
+    const taskChanges = changesByTask.get(task.id);
+    if (!taskChanges) {
+      return task;
+    }
+
+    const map = getTaskStepToolListMap(task);
+    const nextMap = { ...map };
+    taskChanges.forEach(({ stepId, before, after }) => {
+      const current = map[stepId] ?? [];
+      if (sameToolList(current, after)) {
+        nextMap[stepId] = before;
+        return;
+      }
+      if (current.length === 0) {
+        return;
+      }
+      const afterKeys = new Set(after.map(canonicalToolKey));
+      const currentKeys = new Set(current.map(canonicalToolKey));
+      const removedSince = new Set(after.map(canonicalToolKey).filter((key) => !currentKeys.has(key)));
+      const addedSince = current.filter((tool) => !afterKeys.has(canonicalToolKey(tool)));
+      nextMap[stepId] = dedupeToolNames([
+        ...before.filter((tool) => !removedSince.has(canonicalToolKey(tool))),
+        ...addedSince,
+      ]);
+    });
+    return writeStepToolListMap(task, nextMap);
+  });
+}
+
 function dedupeToolNames(tools: string[]) {
   return tools
     .map(cleanToolName)

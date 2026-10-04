@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { applyCalculatedFields } from "@/domain/calculations";
 import type { ProjectToolCatalogEntry } from "@/domain/project-catalog";
-import { buildStepToolLibrary, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
+import {
+  buildStepToolLibrary,
+  diffStepToolLists,
+  removeToolFromAllTasks,
+  renameToolInTasks,
+  revertStepToolListChanges,
+} from "@/domain/step-tools";
 import {
   addStepToolToSupabase,
   deleteToolLibraryFromSupabase,
@@ -139,8 +145,9 @@ export function useWorkspaceTools({
   }
 
   // Rewrites every task through the guarded shell save. Resolves true once saved, false when the
-  // rewrite is refused (unconfirmed state or view-only access), and rejects when the save fails.
-  // Callers must stop on false or a rejection: their library writes depend on this rewrite.
+  // rewrite is refused (unconfirmed state or view-only access), and rejects when the save fails, after
+  // undoing the rewrite's step tool changes on screen (see below). Callers must stop on false or a
+  // rejection: their library writes depend on this rewrite.
   async function applyProjectTasksUpdate(nextTasks: Task[], options?: { silent?: boolean }): Promise<boolean> {
     // This path runs the destructive shell diff-save directly; refuse it until the remote load has
     // confirmed the state being edited (a cached snapshot could delete teammates' newer tasks).
@@ -168,6 +175,8 @@ export function useWorkspaceTools({
       tasks: calculated.tasks,
     };
 
+    // Shown immediately; undone on failure below, and only where it changed step tool lists.
+    const stepToolChanges = diffStepToolLists(derivedState.tasks, calculated.tasks);
     setPlannerState(nextState);
 
     try {
@@ -182,6 +191,15 @@ export function useWorkspaceTools({
       }
     } catch (error) {
       finishWrite(error);
+      // Step tool lists are saved as their own rows, never by the shell save, so after a failure the
+      // database still holds the previous lists. Leaving the rewrite on screen would show a change that
+      // was not saved, and a later save that writes a task's step tools (a Gantt reorder) would store
+      // it. Undo just those references; edits made while the save was pending are kept.
+      setPlannerState((current) =>
+        current.scenario.id === nextState.scenario.id
+          ? { ...current, tasks: revertStepToolListChanges(current.tasks, stepToolChanges) }
+          : current,
+      );
       const message = error instanceof Error ? error.message : "Unable to save build catalog changes.";
       setSaveError(message);
       setSaveState("error");

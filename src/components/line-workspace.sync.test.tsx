@@ -6,7 +6,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
-import type { PlannerRealtimePayload, PlannerRealtimeScope } from "@/domain/supabase-planner";
+import type { PlannerRealtimePayload } from "@/domain/supabase-planner";
 import type { PlannerState, ScenarioSummary, Task } from "@/domain/types";
 import type { AwiMaster } from "@/lib/awi/store";
 import {
@@ -20,6 +20,8 @@ import {
   subscribePlannerStateChanges,
 } from "@/domain/supabase-planner";
 import { LineWorkspace } from "./line-workspace";
+
+type PlannerRealtimeScope = NonNullable<Parameters<typeof subscribePlannerStateChanges>[1]>;
 import { PROJECT_SWITCH_EVENT, PROJECT_SWITCH_SESSION_KEY } from "./line-workspace/state";
 
 const { router, fakeSupabaseClient } = vi.hoisted(() => {
@@ -293,8 +295,8 @@ describe("realtime subscription", () => {
 
     expect(subscriptions).toHaveLength(1);
     expect(subscriptions[0]!.unsubscribed).toBe(false);
-    expect(subscriptions[0]!.scope?.isTaskInScope(addedTask!.id)).toBe(true);
-    expect(subscriptions[0]!.scope?.isTaskInScope("some-other-task")).toBe(false);
+    expect(subscriptions[0]!.scope?.isTaskInScope?.(addedTask!.id)).toBe(true);
+    expect(subscriptions[0]!.scope?.isTaskInScope?.("some-other-task")).toBe(false);
   });
 });
 
@@ -401,8 +403,8 @@ describe("delayed responses across an in-place product switch", () => {
     expect(screen.queryAllByText("Late task from A")).toHaveLength(0);
     expect(screen.queryAllByText(`Task ${TASK_B}`).length).toBeGreaterThan(0);
     // B's task set (what B's realtime scope and saves see) never gains A's task.
-    expect(liveSubscription()[0]!.scope?.isTaskInScope(TASK_A)).toBe(false);
-    expect(liveSubscription()[0]!.scope?.isTaskInScope(TASK_B)).toBe(true);
+    expect(liveSubscription()[0]!.scope?.isTaskInScope?.(TASK_A)).toBe(false);
+    expect(liveSubscription()[0]!.scope?.isTaskInScope?.(TASK_B)).toBe(true);
   });
 });
 

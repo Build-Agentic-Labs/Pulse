@@ -40,3 +40,6 @@ export type SaveScope = {
 export type ForegroundSaveScope = {
   isForegroundSaveScope: (scope: SaveScope) => boolean;
 };
+
+/** Per-task private-media hydration status for the scenario on screen. */
+export type TaskDetailHydrationStatus = Record<string, "loading" | "loaded" | "error">;

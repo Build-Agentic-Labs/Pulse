@@ -651,7 +651,7 @@ rendered text. **No tests** exist for 5.5–5.7, 5.9, 5.10, 5.12, 5.13, 5.14, th
 the IndexedDB draft (no test under `src/**/*.test.*` or `e2e/` mentions `Restore Step`, `tmp-`,
 `mobile-capture-session`, `buildlogic-mobile-drafts` or `Start timer`). Saver tests are scripted-client
 (`mobile-step.test.ts`, `media-tools.test.tsx`, `task-writes.test.tsx`, `photo-annotations.test.ts`);
-none hits a real database and no browser test covers a mobile route.
+none hits a real database. **Updated after B2 (2026-10-04):** one browser test now covers a mobile route — `e2e/mobile-recovery-draft.spec.ts` drives the New Step draft (save, overwrite, reload recovery, clear of the IndexedDB record) on the isolated database; it does not cover 5.5–5.7, 5.9, 5.10, 5.12, 5.13 or 5.14.
 
 ---
 

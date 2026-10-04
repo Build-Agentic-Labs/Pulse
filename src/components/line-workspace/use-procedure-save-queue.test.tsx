@@ -410,3 +410,34 @@ it("writes the confirmed task to the cache of the project that issued the save",
   expect(cacheWrites[0]?.[1].tasks[0]).toMatchObject({ version: 2 });
   expect(cacheWrites[0]?.[2]).toBe("scenario-main");
 });
+
+it("never marks, acknowledges, applies or cleans another scope's draft carried in a pending snapshot", async () => {
+  save.mockResolvedValue(task("mine", 2));
+  const { result } = renderQueue();
+  const otherScopeDraft = {
+    taskId: "task-other-scope",
+    stepId: "step-1",
+    fieldName: "instruction" as const,
+    value: "another product's unsaved text",
+    baseValue: "",
+    dirty: true,
+    active: false,
+    localEditSeq: 7,
+    lastEditedAt: 1,
+    saveStatus: "dirty" as const,
+  };
+  act(() => {
+    result.current.drafts.restoreProcedureDraftFields([otherScopeDraft]);
+    result.current.queue.updateProcedureStepField("task-1", "step-1", "instruction", "mine");
+  });
+  // The queued snapshot clones every draft in memory, including the other scope's.
+  expect(Object.keys(result.current.store.pendingDraftSnapshot("task-1") ?? {})).toContain("task-other-scope:step-1:instruction");
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save.mock.calls[0]?.[0].id).toBe("task-1");
+  expect(save.mock.calls[0]?.[1].find((entry) => entry.id === "task-other-scope")).toBeUndefined();
+  const other = result.current.drafts.procedureDraftsRef.current["task-other-scope:step-1:instruction"];
+  expect(other).toMatchObject({ value: otherScopeDraft.value, dirty: true, saveStatus: "dirty", localEditSeq: 7 });
+  expect(other?.latestSaveId).toBeUndefined();
+});

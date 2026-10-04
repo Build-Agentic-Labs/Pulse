@@ -650,9 +650,15 @@ export function useProcedureDrafts({
     return recoveredDrafts;
   }
 
-  // A successful scenario switch drops the previous scenario's drafts; they must never carry across.
-  function resetProcedureDrafts() {
-    procedureDraftsRef.current = {};
+  // A successful scenario switch drops the drafts of the scenario being left; they must never carry
+  // across. Only those tasks' drafts go: a task id belongs to exactly one scenario (tasks.id is the
+  // table's primary key; duplicated scenarios get new ids), so drafts of other scenarios or products
+  // (recovered from storage, or still owned by a background save) stay in memory and in their storage.
+  function resetProcedureDrafts(leavingTaskIds: Iterable<string>) {
+    const leaving = new Set(leavingTaskIds);
+    procedureDraftsRef.current = Object.fromEntries(
+      Object.entries(procedureDraftsRef.current).filter(([, draft]) => !leaving.has(draft.taskId)),
+    );
     setProcedureDraftVersion((version) => version + 1);
   }
 

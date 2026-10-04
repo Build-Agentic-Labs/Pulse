@@ -218,8 +218,14 @@ it("restores recovered drafts as unfocused edits that later typing outranks, and
   expect(next?.localEditSeq).toBe(42);
   expect(window.localStorage.getItem(procedureDraftStorageKey(PROJECT_ID))).toContain("Renamed");
 
+  // A scenario switch drops only the drafts of the tasks being left; other scopes' drafts stay.
   act(() => {
-    result.current.drafts.resetProcedureDrafts();
+    result.current.drafts.restoreProcedureDraftFields([{ ...recovered, taskId: "task-other-scope", localEditSeq: 43 }]);
+    result.current.drafts.resetProcedureDrafts(["task-1"]);
+  });
+  expect(Object.values(result.current.drafts.procedureDraftsRef.current).map((draft) => draft.taskId)).toEqual(["task-other-scope"]);
+  act(() => {
+    result.current.drafts.resetProcedureDrafts(["task-other-scope"]);
   });
   expect(result.current.drafts.procedureDraftsRef.current).toEqual({});
 });

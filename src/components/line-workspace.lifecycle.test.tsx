@@ -233,6 +233,12 @@ function storedDraftFields(): Array<ReturnType<typeof instructionDraft>> {
   return raw ? (JSON.parse(raw) as { fields: Array<ReturnType<typeof instructionDraft>> }).fields : [];
 }
 
+function storedFields(key: string): Array<{ taskId: string; value: string; dirty: boolean }> {
+  const raw = localStorage.getItem(key);
+  return raw ? (JSON.parse(raw) as { fields: Array<{ taskId: string; value: string; dirty: boolean }> }).fields : [];
+}
+const storedFor = (key: string, taskId: string) => storedFields(key).filter((field) => field.taskId === taskId);
+
 function scenarioSummary(id: string, name: string, createdAt: string): ScenarioSummary {
   return { id, name, targetOutput: 1, targetOutputPeriod: "day", createdAt };
 }
@@ -623,12 +629,6 @@ describe("LineWorkspace procedure save lifecycle", () => {
       expectBUnaffected();
     });
 
-    function storedFields(key: string): Array<{ taskId: string; value: string; dirty: boolean }> {
-      const raw = localStorage.getItem(key);
-      return raw ? (JSON.parse(raw) as { fields: Array<{ taskId: string; value: string; dirty: boolean }> }).fields : [];
-    }
-    const storedFor = (key: string, taskId: string) => storedFields(key).filter((field) => field.taskId === taskId);
-
     it("A -> B -> A -> B with unsaved, failed edits in both products recovers each product's edits from its own storage", async () => {
       const B_EDIT = "Typed in product B";
       const view = await renderWorkspace();
@@ -719,6 +719,53 @@ describe("LineWorkspace procedure save lifecycle", () => {
       expect(saveMock).toHaveBeenCalledTimes(3);
     });
 
+    it("a scenario switch in B keeps A's unsaved draft, so A's in-flight save failing later cannot erase it", async () => {
+      vi.mocked(loadScenariosForProduct).mockImplementation(async (productId) => productId === `product-${OTHER_PROJECT_ID}`
+        ? [
+          scenarioSummary("scenario-lifecycle-other", "Main", "2026-09-01T00:00:00.000Z"),
+          scenarioSummary("scenario-b-night", "B night", "2026-09-02T00:00:00.000Z"),
+        ]
+        : []);
+      vi.mocked(loadPlannerStateFromSupabase).mockImplementation(async () => {
+        const base = buildOtherProjectState();
+        return { ...base, scenario: { ...base.scenario, id: "scenario-b-night", name: "B night" } };
+      });
+      const settleFirst = holdNextSave();
+      const view = await renderWorkspace();
+      typeInstruction(A_EDIT);
+      await advance(DEBOUNCE_MS);
+      await switchTo(view, OTHER_PROJECT_ID);
+
+      // B is not held by A's in-flight save: its scenario switch goes ahead.
+      fireEvent.click(screen.getByRole("button", { name: "Gantt" }));
+      await flushMicrotasks();
+      fireEvent.click(screen.getByRole("tab", { name: "B night" }));
+      await flushMicrotasks();
+      expect(screen.getByRole("tab", { name: "B night" })).toHaveAttribute("aria-selected", "true");
+
+      saveMock.mockRejectedValue(new Error("Network down"));
+      await settleFirst(new Error("Network down"));
+      expect(storedFor(DRAFT_STORAGE_KEY, TASK_ID)).toEqual([expect.objectContaining({ value: A_EDIT, dirty: true })]);
+      await advance(RETRY_MS + DEBOUNCE_MS);
+      expect(storedFor(DRAFT_STORAGE_KEY, TASK_ID)).toEqual([expect.objectContaining({ value: A_EDIT, dirty: true })]);
+      expect(localStorage.getItem(OTHER_DRAFT_STORAGE_KEY)).toBeNull();
+
+      // Back in A, the edit is recovered from A's storage and saved to A.
+      saveMock.mockImplementation(async (task) => echoSavedTask(task));
+      const savesBeforeReturn = saveMock.mock.calls.length;
+      await switchTo(view, PROJECT_ID);
+      fireEvent.click(screen.getByRole("button", { name: "Procedure" }));
+      await flushMicrotasks();
+      expect(instructionBox().value).toBe(A_EDIT);
+      await advance(RECOVERY_DELAY_MS + DEBOUNCE_MS);
+      const recoverySaves = saveMock.mock.calls.slice(savesBeforeReturn);
+      expect(recoverySaves.map((call) => [call[0].id, call[2], call[0].manufacturingSteps?.[0]?.instruction]))
+        .toContainEqual([TASK_ID, PROJECT_ID, A_EDIT]);
+      expect(saveStatusText()).toBe("Saved");
+      expect(storedFor(DRAFT_STORAGE_KEY, TASK_ID)).toEqual([]);
+      expectEverySaveScopedToA();
+    });
+
     it("a debounced A edit flushed by the switch is saved to A, not to B", async () => {
       const view = await renderWorkspace();
       typeInstruction(A_EDIT);
@@ -796,6 +843,49 @@ describe("LineWorkspace procedure save lifecycle", () => {
       expect(savedInstruction(1)).toBe("Night shift: torque after pre-kit");
       expect(saveMock.mock.calls[1][0].scenarioId).toBe(ALT_SCENARIO_ID);
     }
+
+    it("keeps another scenario's recoverable draft and never applies either scenario's edits to the other", async () => {
+      const NIGHT_TASK_ID = "task-lifecycle-night";
+      const NIGHT_STEP_ID = "step-lifecycle-night";
+      const nightDraft = "Night shift draft from an earlier session";
+      vi.mocked(loadPlannerStateFromSupabase).mockImplementation(async () => {
+        const base = buildState(PROJECT_ID);
+        const nightTask = buildTask(altInstruction, ALT_SCENARIO_ID);
+        return {
+          ...base,
+          scenario: { ...base.scenario, id: ALT_SCENARIO_ID, name: "Night shift projection" },
+          tasks: [{
+            ...nightTask,
+            id: NIGHT_TASK_ID,
+            manufacturingSteps: nightTask.manufacturingSteps?.map((step) => ({ ...step, id: NIGHT_STEP_ID })),
+          }],
+        };
+      });
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
+        version: 2,
+        savedAt: "2026-10-01T12:00:00.000Z",
+        fields: [instructionDraft(NIGHT_TASK_ID, NIGHT_STEP_ID, nightDraft, altInstruction, 5)],
+      }));
+
+      await saveMainDraftWithFocus();
+      // The night draft matches no Main task: it stays stored for its own scenario.
+      expect(storedFields(DRAFT_STORAGE_KEY).map((field) => [field.taskId, field.value])).toEqual([[NIGHT_TASK_ID, nightDraft]]);
+
+      await switchToNightShiftAndBack();
+      // Main's live draft was dropped; the night scenario shows its own recoverable draft, never Main's.
+      expect(instructionBox().value).toBe(nightDraft);
+      expect(storedFields(DRAFT_STORAGE_KEY).map((field) => [field.taskId, field.value])).toEqual([[NIGHT_TASK_ID, nightDraft]]);
+      expect(saveMock.mock.calls.map((call) => call[0].manufacturingSteps?.[0]?.instruction)).toEqual([mainDraft]);
+
+      // An edit in the night scenario saves the night task with its own text; Main's draft never joins it.
+      typeInstruction("Night shift: final wording");
+      await advance(DEBOUNCE_MS);
+      expect(saveMock).toHaveBeenCalledTimes(2);
+      expect(saveMock.mock.calls[1][0].id).toBe(NIGHT_TASK_ID);
+      expect(savedInstruction(1)).toBe(undefined);
+      expect(saveMock.mock.calls[1][0].manufacturingSteps?.[0]?.instruction).toBe("Night shift: final wording");
+      expect(storedFields(DRAFT_STORAGE_KEY)).toEqual([]);
+    });
 
     it("shows the other scenario's server text when the field was blurred before switching", async () => {
       await saveMainDraftWithFocus();

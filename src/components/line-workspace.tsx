@@ -1024,7 +1024,7 @@ export function LineWorkspace({
   // procedure drafts from the previous scenario are stale and must be dropped (never carried across).
   function applyScenarioSwitch(loaded: PlannerState) {
     const normalized = ensureNomenclatureCollections(loaded);
-    resetProcedureDrafts();
+    resetProcedureDrafts(latestDerivedStateRef.current.tasks.map((task) => task.id));
     plannerDirtyRef.current = false;
     setPlannerState(normalized);
     setSelectedTaskId(normalized.tasks[0]?.id);

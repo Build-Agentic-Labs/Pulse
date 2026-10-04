@@ -407,7 +407,7 @@ Keep signatures, exported types, optional injected clients, error behavior, RLS,
 
 Approximate source anchors: access/workspace 1688–2535; core/full/summary 2536–2854; scenarios 2855–2953; guarded shell saves 2955–3240; BOM 3241–3286; granular writes 3287–3593 and procedure transaction 3886–4088; task/target/media reads 4089–4267. Function names and imports take precedence over stale line numbers.
 
-### Phase 5 execution plan (current code, 2026-10-03; not started)
+### Phase 5 execution plan (current code, 2026-10-03; executed — see the Phase 5 ledger)
 
 **Baseline:** the facade `src/domain/supabase-planner.ts` is 2,587 lines and holds 74 top-level declarations: access, workspace, reads, scenarios, saves and granular task writes. Function names are the anchors; line ranges are approximate.
 
@@ -561,6 +561,138 @@ Passing on the retained database alone **cannot** prove the isolated experimenta
 #### Not included
 
 Catalog redesign, recovery redesign, the experimental database functions, request optimization, UI changes, migrations, merge and push. Stop after Phase 5 for review.
+
+## Phase 5 ledger — reads, saves, scenarios and access (2026-10-03)
+
+Phase 5 is a structural move. It made no UI, schema, permission or persistence change, applied no migration, and was not merged or pushed. The catalog rollout and the isolated database functions remain blocked and untouched.
+
+### Commits
+
+| Commit | Change |
+|---|---|
+| `a795047` | Option A: `src/lib/awi/procedure-store.ts` imports `createPlannerSupabaseClient` from `@/lib/planner/client` (one line), plus a default-client test |
+| `377a2ae` | Characterization: shared recording client and 85 tests, before any code moved |
+| `7e7771c` | `access-store.ts` |
+| `26d39c7` | `workspace-store.ts` |
+| `d94c072` | `read-store.ts` |
+| `82b6d29` | `scenario-store.ts` |
+| `284050c` | `shell-store.ts` |
+| `57b5731` | `bom-store.ts` |
+| `4809c42` | `task-store.ts` |
+| `d73b0a9` | Facade header; two stale comments in `src/lib/planning/store.ts` |
+| `522a39b` | `scripts/release-check-fresh-db.mjs` |
+
+### Actual sizes
+
+| Module | Planned | Actual |
+|---|---:|---:|
+| `access-store.ts` | 330–370 | 266 |
+| `workspace-store.ts` | 530–580 | 635 |
+| `read-store.ts` | 500–540 | 556 |
+| `scenario-store.ts` | 115–140 | 106 |
+| `shell-store.ts` | 330–360 | 358 |
+| `bom-store.ts` | 55–70 | 68 |
+| `task-store.ts` | 620–660 | 654 |
+| `supabase-planner.ts` (facade) | 100–160 | **111** (from 2,587; re-exports only) |
+
+**One deviation from the plan:** `loadMembersAccessForWorkspace` is in `workspace-store`, not `access-store`.
+- It builds on `loadWorkspaceMembersFromSupabase`, and `workspace-store` depends on `access-store`, so the planned placement would have made the two leaves import each other.
+- This accounts for most of the size difference between those two modules.
+
+### Option A verification
+
+1. **Same implementation.** A test asserts that the facade's `createPlannerSupabaseClient` is the very function exported by `@/lib/planner/client`.
+2. **Injection preserved.** Tests cover three cases:
+   - an injected client wins over the shared one;
+   - without injection, the page's shared client is used;
+   - on the server, without injection, the call hits the browser-only trap.
+
+   Mutating the default is caught.
+3. **Cycle removed.** The only import cycle reachable from the facade (facade ↔ procedure-store) is gone, counting value imports alone and type imports too.
+4. **No behaviour change.** No test mocks the facade in a way that reaches procedure-store. The 23 facade mocks replace the module wholesale, and the one partial mock (`notification-bell`) has nothing to do with AWI.
+
+### Compatibility checks
+
+**After every commit:**
+- **Signatures:** all 90 facade export signatures are identical (TypeScript checker dump).
+- **Leaf rules:**
+  - no leaf imports the facade;
+  - no `"use client"` or `server-only` directive in a leaf;
+  - module-private visibility is restored for anything not shared.
+- **Cycles:** none.
+
+**Whole phase:**
+- **Verbatim move:** each of the 80 non-import top-level statements of the pre-Phase-5 facade appears byte-identical in exactly one leaf.
+- **Importers:** none changed, apart from the approved procedure-store line and two comments. The 23 path-based facade mocks are untouched.
+- **Module state:** the four per-client `WeakMap`s live in the module that uses them, unexported:
+  - `inflightSuperAdminChecks` in `access-store`;
+  - `bootstrappedMembershipUserIdsByClient`, `inflightMembershipLoads` and `inflightWorkspaceGroupReads` in `workspace-store`.
+
+  The browser-only `signedUrlCache` is unchanged.
+- **Kept together:**
+  - the two whole-plan saves, with their tripwire and sequence parking (`shell-store`);
+  - the procedure save family and every step-sequence write (`task-store`).
+
+### Characterization and mutation evidence
+
+`src/test-support/recording-supabase.ts` records every request in send order (table or RPC, columns, filters, modifiers, payload). Unsupported query methods fail loudly.
+
+The new suites pin:
+- request order, scoping and failure paths for access, workspace administration, reads, scenarios and every granular write;
+- the non-AWI procedure retry (exactly once, on the merged server version);
+- task deletion's storage snapshot;
+- the full request order of both whole-plan saves, including the tripwire before the first write and stale deletes in foreign-key order.
+
+**Mutations:** 41 targeted mutations, all caught on the original facade and again after every move. Each was re-located into its new module.
+- One initially survived: membership bootstrap must be tracked per user. A test was added before any code moved.
+- The Phase 4 set (9) is still caught.
+
+### Final gate
+
+**Application** (run sequentially):
+- lint;
+- 2,051 unit tests (245 files), up from 1,962 (238);
+- optimized build, then `check:bundles`;
+- typecheck;
+- diff check.
+
+**Retained isolated database** (`pulse-e2e`): started from its existing volume, never reset, returned to stopped.
+- Active pgTAP: 22 files / 398 assertions pass. The two isolated test files present in the scratch copy were not run.
+- 20/20 browser cases pass.
+
+**Request counts:** the Phase 3/4 scenario, two runs on the retained database plus one on the fresh database. Every run is identical per endpoint to Phase 4: 61 requests on product open, 5 on the first switch to Procedure.
+
+**Fresh-database release check** (`node scripts/release-check-fresh-db.mjs`) passed on `pulse-release-20261004-060459`:
+- **Identity:** proven by the project label, the data volume `supabase_db_pulse-release-20261004-060459`, and the containers publishing ports 56321/56322.
+- **Fresh contents:**
+  - initialized only from the 151 active migrations plus seed, with no reset;
+  - ledger equal to `supabase/migrations`;
+  - all four isolated objects absent (the retained database has all four: 1 table, 3 functions).
+- **Code check:** no application code references the isolated objects.
+- **Suites:** active pgTAP 22/398 and the browser suite (20 cases plus the request-count spec) pass.
+- **Afterwards:**
+  - the disposable project is stopped with its volumes kept;
+  - the retained database is back to stopped, with its migration ledger (151) and exact row counts (116 tables) unchanged.
+
+### Limitations and notes
+
+- **Bundles grew 1.0 KiB gzip per entry** (seven more module wrappers):
+
+  | Entry | Phase 4 (KiB) | Phase 5 (KiB) |
+  |---|---:|---:|
+  | Planner | 276.0 | 277.0 |
+  | AWI master | 274.9 | 275.9 |
+  | SOPs | 280.8 | 281.8 |
+  | Planning | 283.0 | 284.0 |
+  | AWI directory | 285.2 | 286.2 |
+
+  The largest chunk is unchanged at 124.0 KiB. No runtime effect is claimed or measured.
+- **Pre-existing, now pinned, not changed:** when `saveProcedureTaskUpdateToSupabase` receives an injected client, its writes use it but its retry read goes through the page client, because `loadTaskFromSupabase` has no client parameter. The only caller (the browser save queue) injects none, so nothing is affected today. A server caller that injects a client and hits a version conflict would reach the server trap on retry.
+- **Browser-only functions unchanged:** many workspace, scenario and task-write functions still take no client parameter, so they remain browser-only, as before.
+- **Disposable data is kept, not deleted:** each run of the release check creates a new `pulse-release-<timestamp>` project in `scratch/release-db/` and leaves its volumes behind on purpose. Removing one is a manual decision: `npx --yes supabase@2.119.0 stop --workdir scratch/release-db/<id> --no-backup` affects only that project.
+- **Not in CI:** the release check needs Docker and about five minutes. It is outside the lint target list (linted manually; lint configuration unchanged).
+- **Snapshots start Postgres alone:** to snapshot a stopped retained database, the script starts Postgres only (no auth, storage or API services), then stops it again.
+- **Retained ledger:** the isolated migration is not in its ledger (151 entries, the same count as the active files) even though its objects exist, as noted for that database in earlier phases. The release check verifies the retained ledger is unchanged; it does not assert its contents.
 
 ## Optional phase 6 — Separate approval/scope decision
 

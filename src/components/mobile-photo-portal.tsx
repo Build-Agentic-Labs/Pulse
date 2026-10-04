@@ -94,26 +94,15 @@ import {
   type CaptureTimerState,
   type ParkedTaskCaptureState,
 } from "@/components/mobile-photo-portal/capture-session";
+import {
+  clearMobileNewStepRecoveryDraft,
+  loadMobileNewStepRecoveryDraft,
+  readBlobAsDataUrl,
+  saveMobileNewStepRecoveryDraft,
+} from "@/components/mobile-photo-portal/recovery-draft-store";
 
 const MAX_IMAGE_EDGE = 1280;
 const JPEG_QUALITY = 0.72;
-const MOBILE_DRAFT_DB_NAME = "buildlogic-mobile-drafts";
-const MOBILE_DRAFT_STORE_NAME = "drafts";
-const MOBILE_NEW_STEP_DRAFT_KEY = "mobile-new-step-draft-v1";
-
-type MobileNewStepDraftRecord = {
-  key: string;
-  taskId: string;
-  stepId: string | null;
-  name?: string;
-  instruction: string;
-  durationText: string;
-  tools: string[];
-  photos: StepPhotoAttachment[];
-  checks: string[];
-  checkValues?: Record<string, ManufacturingStepCheckValue>;
-  updatedAt: string;
-};
 
 type RestorePrompt = {
   title: string;
@@ -231,85 +220,6 @@ function getNextTopLevelWbs(tasks: Task[]) {
         .filter(Number.isFinite),
     ) + 1,
   );
-}
-
-function readBlobAsDataUrl(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("Unable to read compressed photo."));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function openMobileDraftDb() {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    if (typeof indexedDB === "undefined") {
-      reject(new Error("Local draft storage is not available in this browser."));
-      return;
-    }
-
-    const request = indexedDB.open(MOBILE_DRAFT_DB_NAME, 1);
-
-    request.onupgradeneeded = () => {
-      const database = request.result;
-
-      if (!database.objectStoreNames.contains(MOBILE_DRAFT_STORE_NAME)) {
-        database.createObjectStore(MOBILE_DRAFT_STORE_NAME, { keyPath: "key" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("Unable to open local draft storage."));
-  });
-}
-
-async function saveMobileNewStepRecoveryDraft(draft: Omit<MobileNewStepDraftRecord, "key" | "updatedAt">) {
-  const database = await openMobileDraftDb();
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(MOBILE_DRAFT_STORE_NAME, "readwrite");
-      transaction.objectStore(MOBILE_DRAFT_STORE_NAME).put({
-        ...draft,
-        key: MOBILE_NEW_STEP_DRAFT_KEY,
-        updatedAt: new Date().toISOString(),
-      } satisfies MobileNewStepDraftRecord);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error("Unable to save the local recovery draft."));
-    });
-  } finally {
-    database.close();
-  }
-}
-
-async function loadMobileNewStepRecoveryDraft() {
-  const database = await openMobileDraftDb();
-
-  try {
-    return await new Promise<MobileNewStepDraftRecord | null>((resolve, reject) => {
-      const transaction = database.transaction(MOBILE_DRAFT_STORE_NAME, "readonly");
-      const request = transaction.objectStore(MOBILE_DRAFT_STORE_NAME).get(MOBILE_NEW_STEP_DRAFT_KEY);
-      request.onsuccess = () => resolve((request.result as MobileNewStepDraftRecord | undefined) ?? null);
-      request.onerror = () => reject(request.error ?? new Error("Unable to load the local recovery draft."));
-    });
-  } finally {
-    database.close();
-  }
-}
-
-async function clearMobileNewStepRecoveryDraft() {
-  const database = await openMobileDraftDb();
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(MOBILE_DRAFT_STORE_NAME, "readwrite");
-      transaction.objectStore(MOBILE_DRAFT_STORE_NAME).delete(MOBILE_NEW_STEP_DRAFT_KEY);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error("Unable to clear the local recovery draft."));
-    });
-  } finally {
-    database.close();
-  }
 }
 
 function loadImageFromFile(file: File) {

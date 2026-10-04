@@ -6,14 +6,24 @@ import path from "node:path";
 // individually; entry budgets include shared runtime + referenced client code.
 const MAX_CHUNK_KIB = 160;
 const MAX_ENTRY_KIB = 350;
+// Development-only code that must never reach production chunks (the procedure
+// autosave harness swaps live editor state when invoked).
+const DEV_ONLY_MARKERS = ["__PULSE_PROCEDURE_AUTOSAVE_HARNESS__"];
 const build = JSON.parse(await readFile(".next/build-manifest.json", "utf8"));
 const sizes = new Map();
 let failed = false;
 for (const file of await readdir(".next/static/chunks")) {
   if (!file.endsWith(".js")) continue;
   const name = `static/chunks/${file}`;
-  const size = gzipSync(await readFile(path.join(".next", name))).length / 1024;
+  const source = await readFile(path.join(".next", name));
+  const size = gzipSync(source).length / 1024;
   sizes.set(name, size);
+  for (const marker of DEV_ONLY_MARKERS) {
+    if (source.includes(marker)) {
+      console.error(`${file}: contains development-only code (${marker})`);
+      failed = true;
+    }
+  }
   if (size > MAX_CHUNK_KIB) {
     console.error(`${file}: ${size.toFixed(1)} KiB gzip exceeds ${MAX_CHUNK_KIB} KiB`);
     failed = true;

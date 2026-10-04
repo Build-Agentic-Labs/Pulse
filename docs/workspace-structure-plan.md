@@ -1,6 +1,6 @@
 # Workspace structural improvements — Astra scope / Sol 6.1 handoff
 
-Status: Phases 1–2 implemented on `codex/workspace-structure` (ledgers at the end). Phase 3 execution plan prepared (see Phase 3), not started. The correctness investigation is closed in `docs/correctness-scope.md`. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
+Status: Phases 1–3 implemented on `codex/workspace-structure` (ledgers at the end). Phase 4 not started. The correctness investigation is closed in `docs/correctness-scope.md`. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
 
 Application baseline: `edd45a93ee27f061948c9afd407da29075297aa7` (performance/save-recovery update plus cached-reload test-readiness correction). Branch for this work: `codex/workspace-structure`.
 
@@ -534,3 +534,85 @@ Phase 3 is paused while these are reviewed. Neither is implemented, and no migra
   - The closing scope is in `docs/correctness-scope.md`: completed fixes; isolated, unused additive database work; the blocked catalog and restore project; durable edit recovery as a future project.
   - The catalog rollout stays blocked: old clients can return after any observation period, and add-only whole-task replacement silently ignores intended changes.
   - The Phase 3 execution plan is ready above (not started).
+
+## Phase 3 ledger — loading, realtime, scenarios (2026-10-03)
+
+**Status:** complete on `codex/workspace-structure`, local commits only. Not merged or pushed. Phase 4 not started. Behaviour-preserving: no UI, data-contract, permission or database change. The isolated database functions are untouched and unused, and the catalog rollout stays blocked.
+
+**Commits:**
+
+| Commit | Purpose |
+|---|---|
+| `2dc709e` | 13 characterization tests (`line-workspace.sync.test.tsx`), written against the pre-extraction code |
+| `fa22ea2` | Type-only test fix (the realtime scope type is derived from the subscribe signature) |
+| `3ddc034` | Scenarios extraction |
+| `f51e9d5` | Strengthens one test (the old scenario's queued task ids are dropped). Verified green on the pre-extraction realtime code before committing. |
+| `37411de` | Realtime extraction |
+| `d6f19d6` | Data-loading extraction |
+
+**Sizes** (physical / nonblank lines):
+
+| File | Before | After |
+|---|---:|---:|
+| `line-workspace.tsx` | 4,511 / 4,198 | **3,652 / 3,414** |
+| `use-workspace-scenarios.ts` | — | 354 / 335 |
+| `use-workspace-realtime.ts` | — | 393 / 355 |
+| `use-workspace-data.ts` | — | 498 / 460 |
+| `line-workspace.sync.test.tsx` (test) | — | 545 / 495 |
+
+`use-workspace-realtime.ts` (393) and `use-workspace-data.ts` (498) are above the plan's ranges. The data hook carries an explicit options type for every outside setter and ref. The workspace landed inside the expected 3,550–3,700 range.
+
+**Decisions taken:**
+- **Deferred refresh keeps issuing-render semantics, exactly as before** (user decision).
+  - `LineWorkspace` keeps a hoisted `flushDeferredRemoteRefresh()` that forwards to a holder **created fresh each render** and filled with **that render's** `useWorkspaceRealtime` functions.
+  - A save issued in a render therefore flushes that render's refresh: its `projectId`, write tracker and stale-scope checks, even after an in-place project switch. That refresh is then discarded by `isRefreshTargetCurrent`.
+  - Replacing the holder with a persistent object (`useRef({}).current`, i.e. latest-render semantics) fails the characterization test.
+- **Kept in `LineWorkspace`** to avoid reordering effects or changing dependencies:
+  - the four scenario effects, the scenario list, cache and Main id;
+  - `pendingRemoteRefreshRef` and `remoteRefreshAppliedRef`;
+  - the loaded and confirmed flags, project switching, hydration status and its refs, and the switch timer refs;
+  - the unmount-only skeleton-timer cleanup, after the realtime call, so the two unmount cleanups keep their order.
+- **Data hook dependencies.** The moved effects keep **byte-identical dependency arrays** in the same order. This was checked mechanically against `37411de`.
+  - Values an effect lists come from parameters.
+  - Other outside setters and refs are read from an options ref when the effect runs, the values the effect captured in `LineWorkspace`.
+  - The load effect calls the `finishProjectSwitch` of the render it runs in.
+- **Call positions:**
+  - `useWorkspaceScenarios` has no effects, so its position is irrelevant.
+  - `useWorkspaceData` is at the load effect's slot.
+  - `useWorkspaceRealtime` is at the subscription's slot.
+  - `usePlannerShellAutosave` still runs after the load effect (Phase 1 invariant).
+
+**Pre-existing behaviour, pinned and not changed:** during an in-place product switch, the media-hydration effect runs in the same commit as the load effect, with the previous selection still current. It reads the previous task under the new product once (`[task-a, project-b]`), and that result is discarded by the scenario check. The test pins the exact sequence because it depends on effect order.
+
+**Evidence:**
+- **Characterization tests** (13), unchanged through all three moves, cover:
+  - deferral and flush ordering; issuing scope after an in-place switch;
+  - subscription stability on task add; re-subscription on scenario switch; queued-id drop;
+  - save before switch: flush order, and a failed save blocking the switch;
+  - delayed full, task and media responses discarded across scenario/product switches;
+  - media loaded once with media-only merge, retried only on focus/online/visibility;
+  - the switching state holding its 320 ms minimum while the subscription is re-created;
+  - unmount cancelling the switch timer and queued refreshes;
+  - read counts.
+
+  Existing lifecycle tests (26) also stay green.
+- **Mutations:**
+  - 7 against the pre-extraction code (one initially survived; its test was strengthened);
+  - 3 on the scenarios hook;
+  - 6 on realtime, including the latest-render forwarder;
+  - 5 on the data hook.
+
+  All are caught.
+- **Request counts on the retained isolated database,** same disposable scenario, before (`7761f33` build) and after (`d6f19d6` build), two runs each:
+
+  | Phase | REST requests |
+  |---|---:|
+  | Product open | 61 |
+  | First switch to Procedure | 5 (that task's media reads) |
+  | Each other switch (Gantt, Setup, Dashboard, Procedure again, Gantt) | 0 |
+
+  **Identical per endpoint, before and after; no increase.** No speed claim is made.
+- **Final-tree gate:**
+  - 1,940 unit tests (234 files), lint, optimized build, then `check:bundles`, typecheck and diff check, run sequentially;
+  - bundles unchanged: planner 275.4 KiB, AWI master 274.3 KiB, largest chunk 124.0 KiB;
+  - **20/20 browser cases** on the retained isolated database (not reset).

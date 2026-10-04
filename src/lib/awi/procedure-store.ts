@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { createPlannerSupabaseClient } from "@/lib/planner/client";
 import type { Database } from "@/lib/database.types";
 
 export type AwiProcedureSave = Database["public"]["Functions"]["save_awi_procedure"]["Args"];

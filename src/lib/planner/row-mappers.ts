@@ -50,7 +50,7 @@ export function maybeText(value: unknown) {
   return typeof value === "string" && value.length ? value : undefined;
 }
 
-export function textArray(value: unknown) {
+function textArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
@@ -62,7 +62,7 @@ export function jsonObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-export function mapInviteProjectAccess(value: unknown): WorkspaceAccessGrant["projectAccess"] {
+function mapInviteProjectAccess(value: unknown): WorkspaceAccessGrant["projectAccess"] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     const row = jsonObject(item);
@@ -72,7 +72,7 @@ export function mapInviteProjectAccess(value: unknown): WorkspaceAccessGrant["pr
   });
 }
 
-export function mapInviteDepartmentAccess(value: unknown): WorkspaceAccessGrant["departmentAccess"] {
+function mapInviteDepartmentAccess(value: unknown): WorkspaceAccessGrant["departmentAccess"] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     const row = jsonObject(item);
@@ -293,7 +293,7 @@ export function mapManufacturingStepRecord(row: Record<string, unknown>): Manufa
   };
 }
 
-export function mapManufacturingSteps(value: unknown): ManufacturingStep[] {
+function mapManufacturingSteps(value: unknown): ManufacturingStep[] {
   return Array.isArray(value)
     ? value.map((item) => mapManufacturingStepRecord(jsonObject(item)))
     : [];
@@ -309,7 +309,7 @@ export function mapPartReferenceRecord(row: Record<string, unknown>): PartRefere
   };
 }
 
-export function mapPartReferences(value: unknown): PartReference[] {
+function mapPartReferences(value: unknown): PartReference[] {
   return Array.isArray(value)
     ? value.map((item) => mapPartReferenceRecord(jsonObject(item)))
     : [];

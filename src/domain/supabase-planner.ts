@@ -23,13 +23,12 @@ import type {
   WorkspaceRole,
 } from "./types";
 import {
-  STEP_PHOTO_ATTACHMENTS_FIELD,
   STEP_PHOTO_ANNOTATIONS_FIELD,
   getTaskStepPhotoAnnotationMap,
   type StepPhotoAttachment,
 } from "./step-photos";
-import { EXPLODED_VIEWS_FIELD, normalizeComponents, type ExplodedView } from "./step-exploded-views";
-import { TASK_VIDEOS_FIELD, type TaskVideo } from "./task-videos";
+import { normalizeComponents, type ExplodedView } from "./step-exploded-views";
+import { type TaskVideo } from "./task-videos";
 import { STEP_TOOL_LISTS_FIELD, getTaskStepToolListMap } from "./step-tools";
 import { isAllowedSignupEmail, SIGNUP_DOMAIN_MESSAGE } from "@/lib/allowed-signup-domain";
 import { displayNameValidationMessage, normalizeDisplayName } from "@/lib/profile-name";
@@ -82,7 +81,6 @@ import {
   mapWorkspace,
   mapWorkspaceAccessGrant,
   mapZone,
-  maybeNum,
   maybeText,
   normalizeAccessLevel,
   normalizeManufacturingStepSequences,
@@ -103,108 +101,41 @@ export {
   subscribePlannerStateChanges,
 } from "@/lib/planner/realtime";
 export type { PlannerRealtimePayload } from "@/lib/planner/realtime";
-const stepPhotoBucket = "step-photos";
-const taskVideoBucket = "task-videos";
-const STEP_PHOTO_THUMBNAIL_EDGE = 320;
-const STORAGE_SIGNED_URL_SECONDS = 60 * 60;
-// Reuse a signed URL across loads until it's within this margin of expiry. The step-photos bucket is
-// private, so every image needs a signed URL -- but objects are immutable (paths embed a unique photo
-// id), so the only reason to re-sign is token expiry. Re-signing on every planner load (egress audit)
-// changed the `?token=` each time, which is the browser's HTTP cache key, so the 1-year cacheControl
-// on the objects never took effect and every realtime-triggered reload re-downloaded every photo.
-// Caching keeps the URL stable, so each image downloads ~once per token lifetime per browser instead.
-const STORAGE_SIGNED_URL_REFRESH_MARGIN_MS = 10 * 60 * 1000;
-
-type CachedSignedUrl = { url: string; expiresAt: number };
-// Keyed by storage path; only ever holds immutable paths (callers opt in via `cache: true` -- see
-// signedStorageUrl). Module-scoped so it survives the planner reloads a single page session triggers
-// (where the repeated re-signing happened); a hard refresh starts cold, which is fine.
-const signedUrlCache = new Map<string, CachedSignedUrl>();
-
-// Only the browser caches: each user's tab is its own process, so a cached URL can never reach a
-// different user. On the server the module is a shared process, so we always sign fresh there -- a
-// shared cache could otherwise hand one user a URL signed under another user's RLS check.
-function cachedSignedUrl(storagePath: string): string | undefined {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-  const entry = signedUrlCache.get(storagePath);
-  if (entry && entry.expiresAt - Date.now() > STORAGE_SIGNED_URL_REFRESH_MARGIN_MS) {
-    return entry.url;
-  }
-  return undefined;
-}
-
-function rememberSignedUrl(storagePath: string, url: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  signedUrlCache.set(storagePath, { url, expiresAt: Date.now() + STORAGE_SIGNED_URL_SECONDS * 1000 });
-}
-
-type StepPhotoRow = {
-  id: string;
-  task_id: string;
-  step_id: string;
-  storage_path: string;
-  public_url: string;
-  thumbnail_url?: string | null;
-  thumbnail_storage_path?: string | null;
-  file_name: string;
-  mime_type?: string | null;
-  size_bytes?: number | null;
-  width?: number | null;
-  height?: number | null;
-  caption?: string | null;
-  // NOT NULL with defaults in the schema: may be omitted, but never written as null.
-  captured_at?: string;
-  uploaded_by?: string | null;
-  deleted_at?: string | null;
-  created_at?: string;
-};
-
-type StepExplodedViewRow = {
-  id: string;
-  task_id: string;
-  step_id?: string | null;
-  storage_path: string;
-  public_url: string;
-  thumbnail_url?: string | null;
-  thumbnail_storage_path?: string | null;
-  file_name: string;
-  mime_type?: string | null;
-  size_bytes?: number | null;
-  width?: number | null;
-  height?: number | null;
-  caption?: string | null;
-  solidworks_file_path?: string | null;
-  config_name?: string | null;
-  frame_number?: number | null;
-  components?: string[] | null;
-  captured_at?: string | null;
-  uploaded_by?: string | null;
-  deleted_at?: string | null;
-  created_at?: string | null;
-};
-
-type StepToolRow = {
-  id: string;
-  task_id: string;
-  step_id: string;
-  tool_name: string;
-  sequence: number;
-};
-
-type ToolLibraryRow = {
-  id: string;
-  project_id?: string | null;
-  tool_name: string;
-  image_url?: string | null;
-  storage_path?: string | null;
-  category?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
+import {
+  StepExplodedViewRow,
+  StepPhotoRow,
+  StepToolRow,
+  TaskVideoRow,
+  ToolLibraryRow,
+  indexExplodedViews,
+  indexStepPhotos,
+  indexStepTools,
+  indexTaskVideos,
+  mapStepExplodedViewRecord,
+  mapTaskVideoRecord,
+  withNormalizedStepAssets,
+} from "@/lib/planner/media-rows";
+import {
+  STORAGE_SIGNED_URL_SECONDS,
+  StorageObjectPathRow,
+  buildTaskAssetStoragePath,
+  createPhotoThumbnailBlob,
+  dataUrlToBlob,
+  projectScopedStoragePath,
+  projectScopedThumbnailStoragePath,
+  removeStorageObjects,
+  safeStorageSegment,
+  signedStorageUrl,
+  stableStoragePublicUrl,
+  stepPhotoBucket,
+  storageObjectPaths,
+  taskVideoBucket,
+  withSignedExplodedViewRows,
+  withSignedStepPhotoRows,
+  withSignedTaskVideoRows,
+  withSignedToolLibraryRows,
+} from "@/lib/planner/media-storage";
+export { refreshSignedMediaUrl } from "@/lib/planner/media-storage";
 
 export type ToolLibraryItem = {
   id: string;
@@ -333,408 +264,6 @@ async function parkSequencesIfUpsertWouldCollide(
       ),
     ),
   );
-}
-
-function mapStepPhotoRecord(row: Record<string, unknown>): StepPhotoAttachment {
-  return {
-    id: String(row.id),
-    name: String(row.file_name ?? "Step photo"),
-    dataUrl: String(row.public_url ?? ""),
-    capturedAt: String(row.captured_at ?? row.created_at ?? new Date().toISOString()),
-    contentType: maybeText(row.mime_type),
-    sizeBytes: maybeNum(row.size_bytes),
-    width: maybeNum(row.width),
-    height: maybeNum(row.height),
-    storagePath: maybeText(row.storage_path),
-    thumbnailUrl: maybeText(row.thumbnail_url),
-    thumbnailStoragePath: maybeText(row.thumbnail_storage_path),
-    caption: maybeText(row.caption),
-  };
-}
-
-type TaskVideoRow = {
-  id: string;
-  task_id: string;
-  storage_path: string;
-  public_url: string;
-  thumbnail_url?: string | null;
-  thumbnail_storage_path?: string | null;
-  file_name: string;
-  mime_type?: string | null;
-  size_bytes?: number | null;
-  duration_seconds?: number | null;
-  width?: number | null;
-  height?: number | null;
-  caption?: string | null;
-  solidworks_file_path?: string | null;
-  captured_at?: string | null;
-  uploaded_by?: string | null;
-  deleted_at?: string | null;
-  created_at?: string | null;
-};
-
-function mapTaskVideoRecord(row: Record<string, unknown>): TaskVideo {
-  return {
-    id: String(row.id),
-    name: String(row.file_name ?? "Build animation"),
-    videoUrl: String(row.public_url ?? ""),
-    capturedAt: String(row.captured_at ?? row.created_at ?? new Date().toISOString()),
-    contentType: maybeText(row.mime_type),
-    sizeBytes: maybeNum(row.size_bytes),
-    durationSeconds: maybeNum(row.duration_seconds),
-    width: maybeNum(row.width),
-    height: maybeNum(row.height),
-    storagePath: maybeText(row.storage_path),
-    thumbnailUrl: maybeText(row.thumbnail_url),
-    thumbnailStoragePath: maybeText(row.thumbnail_storage_path),
-    caption: maybeText(row.caption),
-    solidworksFilePath: maybeText(row.solidworks_file_path),
-  };
-}
-
-function mapStepExplodedViewRecord(row: Record<string, unknown>): ExplodedView {
-  return {
-    id: String(row.id),
-    name: String(row.file_name ?? "Exploded view"),
-    dataUrl: String(row.public_url ?? ""),
-    capturedAt: String(row.captured_at ?? row.created_at ?? new Date().toISOString()),
-    contentType: maybeText(row.mime_type),
-    sizeBytes: maybeNum(row.size_bytes),
-    width: maybeNum(row.width),
-    height: maybeNum(row.height),
-    storagePath: maybeText(row.storage_path),
-    thumbnailUrl: maybeText(row.thumbnail_url),
-    thumbnailStoragePath: maybeText(row.thumbnail_storage_path),
-    caption: maybeText(row.caption),
-    solidworksFilePath: maybeText(row.solidworks_file_path),
-    explodeConfigName: maybeText(row.config_name),
-    frameNumber: maybeNum(row.frame_number),
-    components: normalizeComponents(row.components),
-  };
-}
-
-// Pass `cache: true` ONLY for immutable storage paths -- step-photo paths embed a unique photo id, so
-// the bytes at a path never change and a reused signed URL is always correct. Tool-library images are
-// keyed by tool name and re-uploaded with upsert (same path, new bytes), so caching their URL would
-// serve the stale image after a replace; they must use the default (uncached) path.
-async function signedStorageUrl(
-  supabase: SupabaseClient,
-  storagePath?: string | null,
-  { cache = false }: { cache?: boolean } = {},
-) {
-  if (!storagePath) {
-    return undefined;
-  }
-
-  if (cache) {
-    const hit = cachedSignedUrl(storagePath);
-    if (hit) {
-      return hit;
-    }
-  }
-
-  const { data, error } = await supabase.storage
-    .from(stepPhotoBucket)
-    .createSignedUrl(storagePath, STORAGE_SIGNED_URL_SECONDS);
-
-  if (error || !data?.signedUrl) {
-    return undefined;
-  }
-
-  if (cache) {
-    rememberSignedUrl(storagePath, data.signedUrl);
-  }
-  return data.signedUrl;
-}
-
-async function signedStorageUrls(
-  supabase: SupabaseClient,
-  storagePaths: string[],
-  { cache = false }: { cache?: boolean } = {},
-) {
-  const uniquePaths = [...new Set(storagePaths.filter(Boolean))];
-  const resolved = new Map<string, string>();
-  const missing: string[] = [];
-
-  for (const path of uniquePaths) {
-    const hit = cache ? cachedSignedUrl(path) : undefined;
-    if (hit) {
-      resolved.set(path, hit);
-    } else {
-      missing.push(path);
-    }
-  }
-
-  if (missing.length === 0) {
-    return resolved;
-  }
-
-  const { data, error } = await supabase.storage
-    .from(stepPhotoBucket)
-    .createSignedUrls(missing, STORAGE_SIGNED_URL_SECONDS);
-
-  if (error || !data) {
-    return resolved;
-  }
-
-  for (const entry of data) {
-    if (entry.path && entry.signedUrl) {
-      const path = String(entry.path);
-      const url = String(entry.signedUrl);
-      if (cache) {
-        rememberSignedUrl(path, url);
-      }
-      resolved.set(path, url);
-    }
-  }
-
-  return resolved;
-}
-
-// A media row prepared for rendering: its URL columns are replaced by signed URLs, or left absent
-// when signing failed. The buckets are PRIVATE, so the stored public_url/thumbnail_url values (kept
-// only because the columns are NOT NULL) can never load -- falling back to them would render a
-// permanently-broken image, while an absent URL lets components show a placeholder and retry.
-type SignedMediaRow<T> = Omit<T, "public_url" | "thumbnail_url"> & {
-  public_url?: string;
-  thumbnail_url?: string | null;
-};
-
-async function withSignedStepPhotoRows(
-  supabase: SupabaseClient,
-  rows: StepPhotoRow[] = [],
-): Promise<SignedMediaRow<StepPhotoRow>[]> {
-  const signedUrls = await signedStorageUrls(
-    supabase,
-    rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
-    { cache: true },
-  );
-
-  return rows.map((row) => ({
-    ...row,
-    public_url: row.storage_path ? signedUrls.get(row.storage_path) : undefined,
-    thumbnail_url: (row.thumbnail_storage_path ? signedUrls.get(row.thumbnail_storage_path) : undefined) ?? null,
-  }));
-}
-
-async function withSignedExplodedViewRows(
-  supabase: SupabaseClient,
-  rows: StepExplodedViewRow[] = [],
-): Promise<SignedMediaRow<StepExplodedViewRow>[]> {
-  const signedUrls = await signedStorageUrls(
-    supabase,
-    rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
-    { cache: true },
-  );
-
-  return rows.map((row) => ({
-    ...row,
-    public_url: row.storage_path ? signedUrls.get(row.storage_path) : undefined,
-    thumbnail_url: (row.thumbnail_storage_path ? signedUrls.get(row.thumbnail_storage_path) : undefined) ?? null,
-  }));
-}
-
-// Videos live in their own bucket, so sign against it directly (the shared helpers target step-photos).
-async function withSignedTaskVideoRows(
-  supabase: SupabaseClient,
-  rows: TaskVideoRow[] = [],
-): Promise<SignedMediaRow<TaskVideoRow>[]> {
-  const paths = [
-    ...new Set(
-      rows.flatMap((row) => [row.storage_path, row.thumbnail_storage_path].filter((value): value is string => Boolean(value))),
-    ),
-  ];
-  const signed = new Map<string, string>();
-  if (paths.length > 0) {
-    const { data } = await supabase.storage.from(taskVideoBucket).createSignedUrls(paths, STORAGE_SIGNED_URL_SECONDS);
-    (data ?? []).forEach((entry) => {
-      if (entry.path && entry.signedUrl) {
-        signed.set(String(entry.path), String(entry.signedUrl));
-      }
-    });
-  }
-
-  return rows.map((row) => ({
-    ...row,
-    public_url: row.storage_path ? signed.get(row.storage_path) : undefined,
-    thumbnail_url: (row.thumbnail_storage_path ? signed.get(row.thumbnail_storage_path) : undefined) ?? null,
-  }));
-}
-
-async function withSignedToolLibraryRows(supabase: SupabaseClient, rows: ToolLibraryRow[] = []) {
-  const signedUrls = await signedStorageUrls(
-    supabase,
-    rows.map((row) => row.storage_path).filter((value): value is string => Boolean(value)),
-  );
-
-  // Same private-bucket rule as the step assets: the stored image_url is a fabricated public URL
-  // that can never load, so an unsigned path yields an absent image, not a broken one.
-  return rows.map((row) => ({
-    ...row,
-    image_url: (row.storage_path ? signedUrls.get(row.storage_path) : undefined) ?? null,
-  }));
-}
-
-function withNormalizedStepAssets<T extends TaskPrivateMedia>(
-  task: T,
-  photosByTaskId: Map<string, Map<string, StepPhotoAttachment[]>>,
-  toolsByTaskId: Map<string, Map<string, string[]>>,
-  explodedViewsByTaskId: Map<string, ExplodedView[]> = new Map(),
-  videosByTaskId: Map<string, TaskVideo[]> = new Map(),
-): T {
-  const photoMap = photosByTaskId.get(task.id);
-  const toolMap = toolsByTaskId.get(task.id);
-  const explodedViews = explodedViewsByTaskId.get(task.id);
-  const videos = videosByTaskId.get(task.id);
-
-  if (!photoMap && !toolMap && !explodedViews && !videos) {
-    return task;
-  }
-
-  const customFields = { ...task.customFields };
-
-  if (photoMap) {
-    const annotationMap = getTaskStepPhotoAnnotationMap(task);
-    customFields[STEP_PHOTO_ATTACHMENTS_FIELD] = Object.fromEntries(
-      [...photoMap.entries()].map(([stepId, photos]) => [
-        stepId,
-        photos.map((photo) => {
-          const annotations = annotationMap[photo.id];
-          return annotations ? { ...photo, annotations } : photo;
-        }),
-      ]),
-    );
-  }
-
-  if (toolMap) {
-    customFields[STEP_TOOL_LISTS_FIELD] = Object.fromEntries(toolMap);
-  }
-
-  if (explodedViews) {
-    customFields[EXPLODED_VIEWS_FIELD] = explodedViews;
-  }
-
-  if (videos) {
-    customFields[TASK_VIDEOS_FIELD] = videos;
-  }
-
-  return {
-    ...task,
-    customFields,
-  };
-}
-
-function indexStepPhotos(rows: SignedMediaRow<StepPhotoRow>[] = []) {
-  const photosByTaskId = new Map<string, Map<string, StepPhotoAttachment[]>>();
-
-  rows
-    .filter((row) => !row.deleted_at)
-    .forEach((row) => {
-      const taskId = String(row.task_id);
-      const stepId = String(row.step_id);
-      const stepMap = photosByTaskId.get(taskId) ?? new Map<string, StepPhotoAttachment[]>();
-      stepMap.set(stepId, [...(stepMap.get(stepId) ?? []), mapStepPhotoRecord(row as unknown as Record<string, unknown>)]);
-      photosByTaskId.set(taskId, stepMap);
-    });
-
-  return photosByTaskId;
-}
-
-// Task-level: collect every exploded view for a task into one flat list (step_id is unused).
-function indexExplodedViews(rows: SignedMediaRow<StepExplodedViewRow>[] = []) {
-  const explodedViewsByTaskId = new Map<string, ExplodedView[]>();
-
-  rows
-    .filter((row) => !row.deleted_at)
-    .forEach((row) => {
-      const taskId = String(row.task_id);
-      explodedViewsByTaskId.set(taskId, [
-        ...(explodedViewsByTaskId.get(taskId) ?? []),
-        mapStepExplodedViewRecord(row as unknown as Record<string, unknown>),
-      ]);
-    });
-
-  return explodedViewsByTaskId;
-}
-
-function indexTaskVideos(rows: SignedMediaRow<TaskVideoRow>[] = []) {
-  const videosByTaskId = new Map<string, TaskVideo[]>();
-
-  rows
-    .filter((row) => !row.deleted_at)
-    .forEach((row) => {
-      const taskId = String(row.task_id);
-      videosByTaskId.set(taskId, [
-        ...(videosByTaskId.get(taskId) ?? []),
-        mapTaskVideoRecord(row as unknown as Record<string, unknown>),
-      ]);
-    });
-
-  return videosByTaskId;
-}
-
-function indexStepTools(rows: StepToolRow[] = []) {
-  const toolsByTaskId = new Map<string, Map<string, string[]>>();
-
-  [...rows]
-    .sort((left, right) => left.sequence - right.sequence || left.tool_name.localeCompare(right.tool_name))
-    .forEach((row) => {
-      const taskId = String(row.task_id);
-      const stepId = String(row.step_id);
-      const stepMap = toolsByTaskId.get(taskId) ?? new Map<string, string[]>();
-      stepMap.set(stepId, [...(stepMap.get(stepId) ?? []), String(row.tool_name)]);
-      toolsByTaskId.set(taskId, stepMap);
-    });
-
-  return toolsByTaskId;
-}
-
-// Shared layout for every step-scoped storage asset (photos, thumbnails, exploded views). When a
-// project context is present the path is workspace/project scoped; otherwise it falls back to a flat
-// task/step path. `subdir` inserts an extra segment (e.g. "thumbnails", "exploded") before the file.
-function buildStepAssetStoragePath(
-  taskId: string,
-  stepId: string,
-  fileName: string,
-  project?: PlannerProjectContext,
-  subdir?: string,
-) {
-  const tail = subdir ? [subdir, fileName] : [fileName];
-  const pathSegments = project
-    ? ["workspaces", project.workspaceId, "projects", project.projectId, "tasks", taskId, "steps", stepId, ...tail]
-    : [taskId, stepId, ...tail];
-
-  return pathSegments.map(safeStorageSegment).join("/");
-}
-
-// Task-scoped variant (no step segment) for task-level assets like exploded views. Still produces a
-// `workspaces/<ws>/projects/<proj>/tasks/<task>/…` path that satisfies the step-photos storage policy.
-function buildTaskAssetStoragePath(taskId: string, fileName: string, project?: PlannerProjectContext, subdir?: string) {
-  const tail = subdir ? [subdir, fileName] : [fileName];
-  const pathSegments = project
-    ? ["workspaces", project.workspaceId, "projects", project.projectId, "tasks", taskId, ...tail]
-    : [taskId, ...tail];
-
-  return pathSegments.map(safeStorageSegment).join("/");
-}
-
-function projectScopedStoragePath(
-  taskId: string,
-  stepId: string,
-  photo: StepPhotoAttachment,
-  project?: PlannerProjectContext,
-  extension = "jpg",
-) {
-  return buildStepAssetStoragePath(taskId, stepId, `${photo.id}.${extension}`, project);
-}
-
-function projectScopedThumbnailStoragePath(
-  taskId: string,
-  stepId: string,
-  photo: StepPhotoAttachment,
-  project?: PlannerProjectContext,
-) {
-  return buildStepAssetStoragePath(taskId, stepId, `${photo.id}.webp`, project, "thumbnails");
 }
 
 async function loadProjectContext(
@@ -2819,34 +2348,6 @@ export async function upsertToolLibraryMetadata(input: {
   return mapToolLibraryRow(signedSaved);
 }
 
-type StorageObjectPathRow = { storage_path?: string | null; thumbnail_storage_path?: string | null };
-
-function storageObjectPaths(rows: StorageObjectPathRow[]): string[] {
-  return [
-    ...new Set(
-      rows
-        .flatMap((row) => [row.storage_path, row.thumbnail_storage_path])
-        .filter((value): value is string => Boolean(value)),
-    ),
-  ];
-}
-
-// Best-effort Storage object removal. The bucket DELETE policies allow anyone with per-project
-// 'edit' access, so this normally succeeds; failures are logged (never thrown) so storage cleanup
-// can never block or roll back the row-level operation it accompanies.
-async function removeStorageObjects(supabase: SupabaseClient, bucket: string, paths: string[]) {
-  if (paths.length === 0) {
-    return;
-  }
-
-  try {
-    await throwIfError(supabase.storage.from(bucket).remove(paths));
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    console.warn(`Failed to remove ${paths.length} object(s) from the ${bucket} bucket: ${detail}`);
-  }
-}
-
 export async function deleteToolLibraryFromSupabase(id: string, projectId?: string) {
   const ensuredProjectId = requireToolLibraryProjectId(projectId, "removing tools from");
   const supabase = plannerClient();
@@ -3328,83 +2829,6 @@ export async function mergeLatestTaskToSupabase(taskId: string, updateTask: (tas
   return nextTask;
 }
 
-function dataUrlToBlob(dataUrl: string) {
-  const commaIndex = dataUrl.indexOf(",");
-  if (!dataUrl.startsWith("data:") || commaIndex < 0) {
-    throw new Error("Unable to prepare photo for upload.");
-  }
-
-  const metadata = dataUrl.slice("data:".length, commaIndex);
-  const payload = dataUrl.slice(commaIndex + 1);
-  const metadataParts = metadata.split(";");
-  const contentType = metadataParts[0] || "application/octet-stream";
-  const isBase64 = metadataParts.includes("base64");
-  const binary = isBase64 ? atob(payload) : decodeURIComponent(payload);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return new Blob([bytes], { type: contentType });
-}
-
-function blobToImage(blob: Blob) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    if (typeof Image === "undefined" || typeof URL === "undefined") {
-      reject(new Error("Photo thumbnails can only be generated in the browser."));
-      return;
-    }
-
-    const image = new Image();
-    const objectUrl = URL.createObjectURL(blob);
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Unable to generate photo thumbnail."));
-    };
-    image.src = objectUrl;
-  });
-}
-
-async function createPhotoThumbnailBlob(blob: Blob) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  const image = await blobToImage(blob);
-  const sourceWidth = image.naturalWidth || image.width;
-  const sourceHeight = image.naturalHeight || image.height;
-  if (!sourceWidth || !sourceHeight) {
-    return null;
-  }
-
-  const scale = Math.min(1, STEP_PHOTO_THUMBNAIL_EDGE / Math.max(sourceWidth, sourceHeight));
-  const width = Math.max(1, Math.round(sourceWidth * scale));
-  const height = Math.max(1, Math.round(sourceHeight * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return null;
-  }
-
-  context.drawImage(image, 0, 0, width, height);
-
-  return new Promise<Blob | null>((resolve) => {
-    canvas.toBlob((thumbnailBlob) => resolve(thumbnailBlob), "image/webp", 0.78);
-  });
-}
-
-function safeStorageSegment(value: string) {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "-");
-}
-
 function stepToolId(stepId: string, toolName: string) {
   return `tool-${safeStorageSegment(stepId)}-${safeStorageSegment(toolName.trim().toLocaleLowerCase())}`;
 }
@@ -3412,39 +2836,6 @@ function stepToolId(stepId: string, toolName: string) {
 function toolLibraryId(toolName: string, projectId?: string) {
   const scope = projectId ? safeStorageSegment(projectId) : "global";
   return `tool-library-${scope}-${safeStorageSegment(toolName.trim().toLocaleLowerCase())}`;
-}
-
-// The value stored in the NOT NULL public_url/thumbnail_url/image_url columns. The buckets are
-// PRIVATE, so this URL can never actually load -- it is written only to satisfy the schema and is
-// never trusted on the read path (rendering always uses signed URLs; see SignedMediaRow).
-function stableStoragePublicUrl(storagePath: string) {
-  return `${supabaseUrl}/storage/v1/object/public/${stepPhotoBucket}/${storagePath}`;
-}
-
-// Re-sign a storage object URL after the browser reports a load failure -- typically an expired
-// signed URL in a tab that sat idle past STORAGE_SIGNED_URL_SECONDS. Replaces the cached entry for
-// photo paths (videos are never cached; see withSignedTaskVideoRows) so subsequent renders reuse
-// the fresh URL. Returns undefined when re-signing fails, letting callers fall back to a placeholder.
-export async function refreshSignedMediaUrl(storagePath: string, kind: "photo" | "video"): Promise<string | undefined> {
-  if (!storagePath) {
-    return undefined;
-  }
-
-  const supabase = plannerClient();
-  const bucket = kind === "video" ? taskVideoBucket : stepPhotoBucket;
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(storagePath, STORAGE_SIGNED_URL_SECONDS);
-
-  if (error || !data?.signedUrl) {
-    console.warn(
-      `Failed to refresh the signed URL for ${bucket}/${storagePath}: ${error?.message ?? "no URL returned"}`,
-    );
-    return undefined;
-  }
-
-  if (kind === "photo") {
-    rememberSignedUrl(storagePath, data.signedUrl);
-  }
-  return data.signedUrl;
 }
 
 // Best-effort current-user lookup for attribution columns (uploaded_by). Reads the locally cached

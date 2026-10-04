@@ -5,7 +5,7 @@
 
 import { plannerClient } from "./client";
 
-export type RealtimePlannerTable =
+type RealtimePlannerTable =
   | "products"
   | "scenarios"
   | "stations"
@@ -24,7 +24,7 @@ export type RealtimePlannerTable =
   | "step_tools"
   | "tool_library";
 
-export type PlannerRealtimeScope = {
+type PlannerRealtimeScope = {
   productId?: string;
   scenarioId?: string;
   // Membership test for "does this task belong to the scenario I'm showing". Read live at event time

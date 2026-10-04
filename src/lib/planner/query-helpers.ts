@@ -8,7 +8,7 @@ import type { Product, Task } from "@/domain/types";
 
 // PostgREST/Postgres error codes meaning "this table or function isn't in the schema yet"
 // (i.e. a migration hasn't been applied). Callers use this to degrade gracefully.
-export const MISSING_RELATION_CODES = ["42P01", "PGRST205", "PGRST202"];
+const MISSING_RELATION_CODES = ["42P01", "PGRST205", "PGRST202"];
 
 export function isMissingRelationError(error: { code?: string } | null): boolean {
   return Boolean(error && error.code && MISSING_RELATION_CODES.includes(error.code));
@@ -17,7 +17,7 @@ export function isMissingRelationError(error: { code?: string } | null): boolean
 // PostgREST `.or()` filters are raw strings where comma, parens, and whitespace are
 // structural. App IDs are UUIDs / safeStorageSegment output and never contain these, so any
 // occurrence means a malformed or hostile value -- reject it rather than let it alter the query.
-export function assertSafeOrFilterValue(value: string): string {
+function assertSafeOrFilterValue(value: string): string {
   if (!value || /[(),\s]/.test(value)) {
     throw new Error(`Unsafe identifier in query filter: ${JSON.stringify(value)}`);
   }
@@ -25,7 +25,7 @@ export function assertSafeOrFilterValue(value: string): string {
 }
 
 // Build a PostgREST `.or()` disjunction from column/value pairs, validating every value.
-export function buildOrFilter(...pairs: ReadonlyArray<readonly [column: string, value: string]>): string {
+function buildOrFilter(...pairs: ReadonlyArray<readonly [column: string, value: string]>): string {
   return pairs.map(([column, value]) => `${column}.eq.${assertSafeOrFilterValue(value)}`).join(",");
 }
 

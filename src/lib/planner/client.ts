@@ -8,9 +8,9 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 export const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-export const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export type PlannerSupabaseGlobal = typeof globalThis & {
+type PlannerSupabaseGlobal = typeof globalThis & {
   __buildlogicPlannerSupabaseClient?: SupabaseClient<Database>;
 };
 
@@ -22,7 +22,7 @@ export type PlannerSupabaseGlobal = typeof globalThis & {
  * cookie session already exists (never overwrite a newer session with an older
  * token). Failure mode is benign: the user signs in once, fresh.
  */
-export function migrateLocalStorageSessionToCookies(client: SupabaseClient<Database>) {
+function migrateLocalStorageSessionToCookies(client: SupabaseClient<Database>) {
   try {
     const hasCookieSession = document.cookie
       .split(";")

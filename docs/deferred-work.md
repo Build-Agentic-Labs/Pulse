@@ -282,10 +282,13 @@ away) the database write is lost, but the keystrokes usually are not: `scheduleN
 IndexedDB recovery record **immediately on each change** (`mobile-photo-portal.tsx`, the
 `saveRecoverableNewStepDraft(snapshot)` call before the timer is armed), and the real-browser spec
 `e2e/mobile-recovery-draft.spec.ts` confirms the record is readable right after typing and restores the
-draft after a reload. What a teardown can lose is bounded: any change whose asynchronous IndexedDB put
-had not completed, and any draft that the recovery path later refuses or overwrites (§8e). Full page
-teardown before persistence is the loss path only within those bounds; post-unmount execution itself
-is not a loss. (This paragraph previously said the record was written on the timer's schedule; that was
+draft after a reload. Starting that asynchronous write immediately does **not** guarantee it completes before a page
+teardown, and the real-browser spec does not measure that: it waits for the blocked database save to
+fail before reading the record, so it shows the record is readable once the write completed, not that a
+change is durable at the moment of typing. What a teardown can lose is therefore any change whose
+asynchronous put had not committed (a window this evidence does not size), plus any draft the recovery
+path later refuses or overwrites (§8e). The earlier "450 ms local-recovery loss window" claim is
+withdrawn. Post-unmount execution itself is not a loss. (This paragraph previously said the record was written on the timer's schedule; that was
 wrong.) Already listed in `docs/edit-operation-inventory.md`
 §5.16; case (1) is pinned by "KNOWN GAP: unmounting with the autosave debounce armed…"; case (2) is not
 testable in jsdom without a page lifecycle and remains a code-derived statement.

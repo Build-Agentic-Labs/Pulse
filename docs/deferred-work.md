@@ -278,9 +278,15 @@ timer (`mobile-photo-portal.tsx:1728`) is cleared on task switch and on close, b
 distinct consequences: (1) when the component unmounts but the page survives (in-app navigation), the
 timer still fires and writes to the task it was scheduled for — the edit persists, from a component that no
 longer exists; (2) when the whole page is torn down before the timer fires (reload, tab close, navigation
-away) the pending keystrokes are lost, because the only durable copy is the IndexedDB recovery draft,
-which is written on the same schedule. Full page teardown before persistence is therefore the potential
-loss path; post-unmount execution itself is not a loss. Already listed in `docs/edit-operation-inventory.md`
+away) the database write is lost, but the keystrokes usually are not: `scheduleNewStepAutosave` writes the
+IndexedDB recovery record **immediately on each change** (`mobile-photo-portal.tsx`, the
+`saveRecoverableNewStepDraft(snapshot)` call before the timer is armed), and the real-browser spec
+`e2e/mobile-recovery-draft.spec.ts` confirms the record is readable right after typing and restores the
+draft after a reload. What a teardown can lose is bounded: any change whose asynchronous IndexedDB put
+had not completed, and any draft that the recovery path later refuses or overwrites (§8e). Full page
+teardown before persistence is the loss path only within those bounds; post-unmount execution itself
+is not a loss. (This paragraph previously said the record was written on the timer's schedule; that was
+wrong.) Already listed in `docs/edit-operation-inventory.md`
 §5.16; case (1) is pinned by "KNOWN GAP: unmounting with the autosave debounce armed…"; case (2) is not
 testable in jsdom without a page lifecycle and remains a code-derived statement.
 
@@ -291,6 +297,15 @@ bound step, so no header chip and no Stop control render (`canStartCaptureTimer`
 until a draft is opened (which binds it) or the session is cleared. Pinned by "a timer started without an
 open draft is bound to no step…". UX decision needed (bind to the task and show the chip, or refuse to start
 without a step); not changed here.
+
+**e. The recovery draft is scoped by neither user nor project.** One IndexedDB record under the fixed key
+`mobile-new-step-draft-v1` serves every project and every signed-in user of the browser
+(`src/components/mobile-photo-portal/recovery-draft-store.ts`). Consequences pinned by tests: a draft left
+in project X is overwritten by the next draft typed in project Y (`mobile-photo-portal.recovery-draft.test.tsx`,
+"KNOWN SCOPING…"); a draft whose task is not in the currently opened project is neither restored nor
+cleared, so it waits to be overwritten; nothing checks which user wrote it. Confirmed against actual
+Chromium IndexedDB by `e2e/mobile-recovery-draft.spec.ts` (key and record shape). This is the demonstrated
+data-loss path for phone drafts and the input to the Package C scoping decision; not changed by B2.
 
 **d. Trivia, not a defect:** `getCaptureTimerElapsed` treats `startedAt === 0` as "not started" (falsy
 check). Real clocks never produce 0; pinned in `capture-session.test.ts` so a future change is deliberate.

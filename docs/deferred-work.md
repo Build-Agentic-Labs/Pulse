@@ -272,13 +272,17 @@ opens on it with the stale step id. Test: `mobile-photo-portal.capture-session.t
 stored selection for a task that no longer exists…". Fix belongs with the hydration ownership work, not an
 extraction commit.
 
-**b. Unmount does not flush an armed autosave.** The 450 ms new-step autosave timer
-(`mobile-photo-portal.tsx:1728`) is cleared on task switch and on close, but the unmount cleanup
-(`:1021`) clears only motion timers. The timer then fires after unmount and still writes to the task it was
-scheduled for, so nothing is lost today; the gap is that nothing flushes synchronously and a navigation that
-also tears down the page (reload) between keystroke and timer loses the edit. Already listed in
-`docs/edit-operation-inventory.md` §5.16; now pinned by "KNOWN GAP: unmounting with the autosave debounce
-armed…".
+**b. A delayed draft save can run after the component has unmounted.** The 450 ms new-step autosave
+timer (`mobile-photo-portal.tsx:1728`) is cleared on task switch and on close, but the unmount cleanup
+(`:1021`) clears only motion timers, and nothing flushes the pending draft synchronously at unmount. Two
+distinct consequences: (1) when the component unmounts but the page survives (in-app navigation), the
+timer still fires and writes to the task it was scheduled for — the edit persists, from a component that no
+longer exists; (2) when the whole page is torn down before the timer fires (reload, tab close, navigation
+away) the pending keystrokes are lost, because the only durable copy is the IndexedDB recovery draft,
+which is written on the same schedule. Full page teardown before persistence is therefore the potential
+loss path; post-unmount execution itself is not a loss. Already listed in `docs/edit-operation-inventory.md`
+§5.16; case (1) is pinned by "KNOWN GAP: unmounting with the autosave debounce armed…"; case (2) is not
+testable in jsdom without a page lifecycle and remains a code-derived statement.
 
 **c. A timer started with no draft open cannot be stopped from the header.** `startCaptureTimerForCurrentTask`
 (`:2733`) binds `activeStepId: null` when the New Step panel is closed. `isActiveHeaderCaptureTimer` requires a

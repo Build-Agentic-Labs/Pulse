@@ -1,0 +1,22 @@
+{
+  "fixture": "small",
+  "spec": {
+    "zones": 0,
+    "stations": 0,
+    "tasks": 1,
+    "stepsPerTask": 1,
+    "toolsPerStep": 0,
+    "heavyTaskTools": 0
+  },
+  "counts": {
+    "zones": 0,
+    "stations": 0,
+    "tasks": 1,
+    "manufacturing_steps": 1,
+    "step_tools": 0
+  },
+  "projectId": "project-8fad2544-af1d-4276-89ed-7dd2f5dc28d1",
+  "scenarioId": "scenario-8fad2544-af1d-4276-89ed-7dd2f5dc28d1",
+  "workspace": "ws-measure-small-56d49b43",
+  "seedMs": 124
+}

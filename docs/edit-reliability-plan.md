@@ -151,7 +151,61 @@ Exit: all moved-path tests pass before and after; no newly introduced production
   `getCaptureTimerElapsed` → 14 fail (7 unit, 7 component); parked map dropped on write → 5 fail (2 unit,
   3 component). Every intended test failed in each case.
 
-| **B2 — IndexedDB recovery-draft store** (proposed 2026-10-04, approved for implementation; in progress on the same branch) | `codex/mobile-capture-session`, on top of B1 (`eefa142`, `4897989`, `2ad6420`, `d626ca3`) | Constants `MOBILE_DRAFT_DB_NAME` (`buildlogic-mobile-drafts`), `MOBILE_DRAFT_STORE_NAME` (`drafts`), `MOBILE_NEW_STEP_DRAFT_KEY` (`mobile-new-step-draft-v1`), type `MobileNewStepDraftRecord`, and `readBlobAsDataUrl`, `openMobileDraftDb`, `saveMobileNewStepRecoveryDraft`, `loadMobileNewStepRecoveryDraft`, `clearMobileNewStepRecoveryDraft` → `src/components/mobile-photo-portal/recovery-draft-store.ts`. The component keeps when to save, load and clear, the 250 ms recovery timer, the task-exists check, the `hasDraftStepContent` gate and the user-facing error message. | Estimate ~95 lines moved; actuals recorded on completion. | Ownership: the module owns the database/store names, the single fixed key (its lack of project/user scoping is a Package C design input and is **not** changed here), the record shape, the `updatedAt` stamp, and the open/put/get/delete lifecycle with `database.close()` in every `finally`. Exports: the three verbs, the record type, and `readBlobAsDataUrl` (production caller `buildPhotoAttachment`); `openMobileDraftDb` and the constants stay private. Tests before moving: unit tests over a minimal IndexedDB double (save writes one record under the fixed key with an ISO `updatedAt` and closes; load returns it or null; clear deletes; second save overwrites; missing `indexedDB` rejects with the exact message; open/transaction/request errors reject with their own messages and still close), a real `FileReader` test for `readBlobAsDataUrl`, component tests over the double (record written on typing, overwritten on further typing, cleared after a successful save with no timer armed, retained after a failed save, recovery on mount only when the task exists, empty-content record cleared, unavailable storage surfaces the recovery-draft error message), and a real-browser Playwright test on the isolated database using actual IndexedDB in an isolated context: save, overwrite, reload/read with the save blocked, then clear after the save succeeds. Acceptance as B1: deletion-plus-import diff, identical bodies apart from `export`, tests pass before and after, sequential gate, browser suite, measurement rerun with identical `mobile:open` counts, bundle comparison explained. |
+| **B2 — IndexedDB recovery-draft store** (done 2026-10-04, awaiting review; not merged) | `codex/mobile-capture-session`, on top of B1 (`eefa142`, `4897989`, `2ad6420`, `d626ca3`) | Constants `MOBILE_DRAFT_DB_NAME` (`buildlogic-mobile-drafts`), `MOBILE_DRAFT_STORE_NAME` (`drafts`), `MOBILE_NEW_STEP_DRAFT_KEY` (`mobile-new-step-draft-v1`), type `MobileNewStepDraftRecord`, and `readBlobAsDataUrl`, `openMobileDraftDb`, `saveMobileNewStepRecoveryDraft`, `loadMobileNewStepRecoveryDraft`, `clearMobileNewStepRecoveryDraft` → `src/components/mobile-photo-portal/recovery-draft-store.ts`. The component keeps when to save, load and clear, the 250 ms recovery timer, the task-exists check, the `hasDraftStepContent` gate and the user-facing error message. | **Actual:** component 4,045 → **3,955** (96 lines removed incl. blanks, 6 import lines added); module **105** (5 exports: the three verbs, the record type, `readBlobAsDataUrl`; the three constants and `openMobileDraftDb` private). Tests: `recovery-draft-store.test.ts` 11 cases; `mobile-photo-portal.recovery-draft.test.tsx` 12 cases; `e2e/mobile-recovery-draft.spec.ts` 1 real-browser case; double in `src/test-support/indexeddb-double.ts`. | Ownership: the module owns the database/store names, the single fixed key (its lack of project/user scoping is a Package C design input and is **not** changed here), the record shape, the `updatedAt` stamp, and the open/put/get/delete lifecycle with `database.close()` in every `finally`. Exports: the three verbs, the record type, and `readBlobAsDataUrl` (production caller `buildPhotoAttachment`); `openMobileDraftDb` and the constants stay private. Tests before moving: unit tests over a minimal IndexedDB double (save writes one record under the fixed key with an ISO `updatedAt` and closes; load returns it or null; clear deletes; second save overwrites; missing `indexedDB` rejects with the exact message; open/transaction/request errors reject with their own messages and still close), a real `FileReader` test for `readBlobAsDataUrl`, component tests over the double (record written on typing, overwritten on further typing, cleared after a successful save with no timer armed, retained after a failed save, recovery on mount only when the task exists, empty-content record cleared, unavailable storage surfaces the recovery-draft error message), and a real-browser Playwright test on the isolated database using actual IndexedDB in an isolated context: save, overwrite, reload/read with the save blocked, then clear after the save succeeds. Acceptance as B1: deletion-plus-import diff, identical bodies apart from `export`, tests pass before and after, sequential gate, browser suite, measurement rerun with identical `mobile:open` counts, bundle comparison explained. |
+
+
+**B2 commits:** `769eee9` tests first (component characterization over the double, the double itself, the
+real-browser spec), `edf6112` extraction, `110dce6` spec fix (derived default duration; wait for the blocked
+recovery re-save), then the docs/evidence commit.
+
+**B2 evidence**
+- *Bodies:* the constants (lines 100–102), the type (104–116) and the functions (236–313) of `769eee9`'s
+  component diffed against the module minus its header and `export ` prefixes — **identical**.
+- *Characterization before/after:* the 12 component tests pass against the pre-move code (12/12, run
+  twice) and after the move (12/12) without modification. The 11 unit tests failed red before the move
+  (module absent) and pass after. One component test is labelled KNOWN SCOPING (a foreign project's
+  record is overwritten by the next local write — the single-key behaviour Package C will redesign).
+- *Real browser:* `e2e/mobile-recovery-draft.spec.ts` on the retained `pulse-e2e` database, actual
+  Chromium IndexedDB in a fresh Playwright context (no real user's storage): save (record under
+  `mobile-new-step-draft-v1` in `buildlogic-mobile-drafts`/`drafts` with the draft fields and an ISO
+  `updatedAt`), overwrite (same step id, newer timestamp, one record), reload/read (draft restored into
+  the form, "Recovered an unsaved phone draft" shown, record still present after the blocked re-save
+  fails, zero rows in the database), clear (after the step saves the row exists and the record is null).
+  1/1 passing (1.9 s). The spec lives in `e2e/`, so CI's browser job now runs it too.
+- *Application gate (sequential):* `npm run lint` pass; `npx vitest run` **2,150 tests / 251 files** (B1:
+  2,127 / 249; +23 = 11 unit + 12 component); `npm run build` pass, then `npm run typecheck` pass;
+  `npm run check:bundles` pass; browser suite 20/20 existing cases + the new spec 1/1 on the post-move
+  build.
+- *Bundles vs B1's final build (same toolchain, production env):* entries planner 277.0 → 277.0, sops
+  281.8 → 281.8, planning 284.0 → 284.0, awi directory 286.2 → 286.2, awi master 275.9 → **275.8** (back
+  to Package A's number, confirming B1's +0.1 was rounding churn); largest chunk 124.0 both; 112 chunks
+  both. The chunk holding the portal and the new module: **70,851 → 70,836 B raw (−15), 18,862 → 18,870 B
+  gzip (+8)** — the module boundary changes the minifier's scope and name mangling by a handful of bytes;
+  far below the 2 KiB trigger, and not byte-equal by design.
+- *Measurements* (run `20261004-221223/` vs B1's `20261004-195326/`, same fixture sizes): per-endpoint
+  request counts identical on every phase and fixture; `mobile:open` 30 / 30 / 114 (one small sample at
+  29, the known access-bootstrap duplicate variance); response bytes identical to ±0.4 KiB;
+  **mobile-open app-origin bytes identical** (50.0 / 53.8 / 88.6 KiB). The planner-open app-origin bytes are
+  1.3 KiB lower on medium and 2.7 KiB lower on stress (small identical); client chunk weights are
+  identical to 0.1 KiB, so the difference lies in the server-rendered document of those samples, not in
+  anything this change touches — recorded, not attributed further. Warm-median timings (ms, B1 → B2):
+  mobile open 134 → 129 / 221 → 210 / 1,395 → 1,379; stress planner open 732 → 653 (back inside Package
+  A's band, supporting the earlier reading of that shift as run-to-run variance); everything else within
+  ±5 ms. Blur → row 797 / 797 / 761 → 798 / 797 / 763.
+- *Isolated infrastructure:* `pulse-e2e` stopped before and after each of the three starts (measurement +
+  full browser run; two single-spec reruns), never reset; ledger 151 throughout; row deltas are the
+  fixtures and the browser suites' own rows (`retained-db-delta.json` in the run folder). `pulse` dev
+  database untouched; no volume removed; no experimental function activated; no dependency added (the
+  IndexedDB double is hand-written test support).
+- *Preserved by design:* database/store names, fixed key, record format and `updatedAt`, error messages,
+  `database.close()` in every `finally`, FileReader behaviour, the component's 450 ms autosave and 250 ms
+  recovery re-save, its task-exists and content checks, storage scoping, hydration behaviour, UI.
+- *Newly observed, not changed:* the recovery draft's `durationText` for a task with no steps is the
+  task's planned duration ("60" for the fixture), not the "5" default used once steps exist — pinned by
+  the real-browser spec; and in jsdom (no `indexedDB`) every draft keystroke surfaces the
+  "could not store the local recovery draft" message, which the existing component tests had been
+  tolerating silently (now pinned as the unavailable-storage path).
+- *Not done:* no further slice, no merge, no push, no Package C work.
 
 ## Package C one durable recovery pilot
 

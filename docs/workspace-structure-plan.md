@@ -1,6 +1,6 @@
 # Workspace structural improvements — Astra scope / Sol 6.1 handoff
 
-Status: Phases 1–3 implemented on `codex/workspace-structure` (ledgers at the end). Phase 4 not started. The correctness investigation is closed in `docs/correctness-scope.md`. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
+Status: Phases 1–4 implemented on `codex/workspace-structure` (ledgers at the end). Phase 5 not started. The correctness investigation is closed in `docs/correctness-scope.md`. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
 
 Application baseline: `edd45a93ee27f061948c9afd407da29075297aa7` (performance/save-recovery update plus cached-reload test-readiness correction). Branch for this work: `codex/workspace-structure`.
 
@@ -742,3 +742,104 @@ Phase 3 is paused while these are reviewed. Neither is implemented, and no migra
   - 1,940 unit tests (234 files), lint, optimized build, then `check:bundles`, typecheck and diff check, run sequentially;
   - bundles unchanged: planner 275.4 KiB, AWI master 274.3 KiB, largest chunk 124.0 KiB;
   - **20/20 browser cases** on the retained isolated database (not reset).
+
+## Phase 4 ledger — persistence foundations and media (2026-10-03)
+
+**Status:** complete on `codex/workspace-structure`, local commits only. Not merged or pushed. Phase 5 not started. Structural move only:
+- no change to queries, request counts, persistence behaviour, authorization, schema or UI;
+- no catalog work; the isolated database functions are not activated.
+
+### Isolated migration relocation (`773ae2a`, separate commit, before any extraction)
+
+- **Moved** to `supabase/isolated/2026-10-03-step-recovery/`, contents byte-identical (SHA-256 checked), with a "NOT AUTHORIZED FOR PRODUCTION" README:
+  - `20261003210000_step_recovery_and_tool_changes.sql` (from `supabase/migrations/`)
+  - `step_recovery_test.sql` (from `supabase/tests/`)
+  - `compat_cutover_test.sql` (from `supabase/tests/`)
+- **Not discovered** by CI (`db reset` / `test db` read only `supabase/migrations` and `supabase/tests`; `schema_paths = []`), by `apply-migration-safely.mjs`, by `repair-migration-ledger.mjs`, or by `test-browser.mjs` (which copies only `supabase/migrations`).
+- **Coverage:** their 64 pgTAP assertions are **excluded** from the normal database suite. The active suite is now 22 files / 398 assertions, against 24 / 462 before. That is a coverage exclusion, **not equivalent coverage**.
+- **Untouched:** the retained isolated database, its migration ledger, and the gitignored copy under `scratch/browser-db/supabase/migrations/`.
+
+### Commits
+
+| Commit | Purpose |
+|---|---|
+| `9c3c41f` | characterization tests and `src/test-support/in-memory-supabase.ts` |
+| `f36f2f3` | `client.ts` |
+| `509ebb6` | `query-helpers.ts` |
+| `f47cf7d` | `row-mappers.ts` |
+| `040cd22` | `realtime.ts` |
+| `2736a43` | `media-rows.ts` + `media-storage.ts` |
+| `d919031` | `media-store.ts` |
+| `a20d719` | `tool-store.ts` |
+
+### Sizes (physical / nonblank lines)
+
+| File | Lines |
+|---|---:|
+| `src/domain/supabase-planner.ts` (facade) | **2,587 / 2,319** (was 4,932 / 4,415) |
+| `client.ts` | 135 / 121 |
+| `query-helpers.ts` | 86 / 72 |
+| `row-mappers.ts` | 717 / 672 |
+| `realtime.ts` | 168 / 153 |
+| `media-rows.ts` | 280 / 250 |
+| `media-storage.ts` | 396 / 343 |
+| `media-store.ts` | 470 / 421 |
+| `tool-store.ts` | 320 / 281 |
+
+- All leaves are within or near their estimates.
+- The facade is slightly above the 2,450–2,800 range on physical lines, but within it on nonblank lines.
+- Tests: the in-memory client is 165 lines; the four new test files total 503.
+
+### How the move was done
+
+- A TypeScript-parser tool moved named top-level declarations **verbatim**, with their leading comments and in original order. It derived each leaf's imports from what the moved code references, and **aborted if moved code referenced anything still in the facade**. The facade kept importing what it still uses and re-exported exactly its previously exported names. Each move was self-checked: every moved statement appears byte-identical in its leaf, ignoring only an added `export`.
+- **Visibility:** declarations nothing outside their leaf imports are module-private again, as they were inside the facade. That includes the signed-URL cache map, its record type and its read/write guards.
+- **Type-only imports:** imports of leaf-declared types are marked `import type`.
+
+### Compatibility evidence
+
+- **No importer changed.** Since `773ae2a`, only the facade and the new leaves changed among non-test files. All 98 importers and the 23 path-based `vi.mock` users run unchanged, and their suites pass.
+- **Signatures:** a TypeScript-checker dump of every facade export (call signatures, expanded type aliases and properties) is **identical to the pre-Phase-4 baseline** for all 90 exports after every commit. The only normalized difference is the checker's internal symbol counter in `__@iterator@N`. Typecheck of every caller also passes.
+- **Leaf rules, checked after every commit:**
+  - no leaf imports the facade;
+  - no module directive in any leaf (they stay plain modules, imported by server code);
+  - leaf dependencies are acyclic (`tool-store` / `media-store` → `media-storage` → `media-rows` → `row-mappers`; all → `query-helpers` → `client`);
+  - the only cycle touching the facade or leaves is the pre-existing facade ↔ `src/lib/awi/procedure-store.ts`, left unchanged.
+- **Client boundary unchanged:** the browser singleton on `globalThis.__buildlogicPlannerSupabaseClient`, the server trap, env read at load, and `client ?? plannerClient()` at call time. Authorization checks stay in the same functions, in the same order.
+
+### Behaviour tests (written against the pre-move code)
+
+- **Browser path (`media-tools`):**
+  - photo upload path, attribution, signed URL; project check before storage;
+  - metadata-only re-save; unsignable upload keeps its row and throws;
+  - copy and its same-path guard; removal, soft deletes, captions;
+  - signing cache and refresh;
+  - step tools and library project scoping;
+  - subscription listeners, scope filtering, cleanup.
+- **Server path (`server-media`):**
+  - SolidWorks exploded-view and video ingest with an injected client, project check before upload;
+  - the server never caching signatures, **guard by guard** (the read guard and the write guard independently).
+- **Client boundary:** singleton reuse, session bridge only without a cookie session, session user without `getUser`, missing-configuration error. The server trap stays covered by `server-guard.test.ts`.
+- **Row round trip:** every planning field of a task survives the real shell save and task loader; stripped media and tool maps are rebuilt from their rows.
+- **Mutations:** 12 targeted mutations, re-located automatically to whichever file held the code at each step, were caught at every stage:
+  - both signing-cache guards and browser caching
+  - photo, exploded-view and assertion project checks
+  - the task-row serializer
+  - subscription scope filtering
+  - client singleton and session bridge
+  - the tool-library project requirement
+
+  One initially survived (the cache's two redundant guards masked each other). A guard-by-guard test was added before any code moved.
+
+### Final-tree gate
+
+- 1,962 unit tests (238 files), lint, optimized build, then `check:bundles`, typecheck and diff check, run sequentially.
+- **Active** pgTAP: 22 files / 398 assertions, passing on the retained isolated database. The isolated files are excluded, as above.
+- **20/20 browser cases** on the retained isolated database (not reset).
+- **Request counts:** same scenario as Phase 3, two runs, **identical per endpoint** (61 on product open, 5 on the first switch to Procedure, 0 on other switches).
+
+### Limitations and notes
+
+- **Bundles grew 0.6 KiB gzip per entry** (planner 275.4 → 276.0, AWI master 274.3 → 274.9, sops 280.2 → 280.8, planning 282.4 → 283.0, AWI directory 284.6 → 285.2). The largest chunk is unchanged at 124.0 KiB, and every budget has ample room. This is consistent with eight additional module wrappers; no runtime cost is claimed or measured.
+- **Duplicate test helper:** `use-workspace-tools.persistence.test.tsx` keeps its own in-memory client, left unchanged to avoid modifying a passing test. The new tests use `src/test-support/in-memory-supabase.ts`.
+- **Facade still holds:** reads, shell and full-state saves, BOM, granular task writes, the procedure transaction, scenarios, workspace and access, and sequence parking (Phase 5). The facade ↔ procedure-store cycle remains; re-pointing that importer is a Phase 5 decision.

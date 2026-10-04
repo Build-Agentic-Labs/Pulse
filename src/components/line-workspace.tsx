@@ -1,10 +1,10 @@
 "use client";
 
 import { AwiSaveStatus } from "./awi-editor-actions";
-import { settleWriteBatch, workspaceSaveBarrier, workspaceSaveStatus } from "@/domain/workspace-save-status";
-import { useWriteTracker } from "./line-workspace/use-write-tracker";
+import { settleWriteBatch } from "@/domain/workspace-save-status";
 import { useProcedureDrafts } from "./line-workspace/use-procedure-drafts";
 import { createProcedureSaveQueueStore, useProcedureSaveQueue } from "./line-workspace/use-procedure-save-queue";
+import { usePlannerShellAutosave, useWorkspaceSaves } from "./line-workspace/use-workspace-saves";
 import type { AwiMaster } from "@/lib/awi/store";
 import { readAnnotationDraft } from "@/lib/photo-annotation-drafts";
 
@@ -106,12 +106,7 @@ import {
   serializeManufacturingStepCheckDefinitions,
   type ManufacturingStepCheckDefinition,
 } from "@/domain/manufacturing-step-checks";
-import {
-  PRODUCT_MASTER_BOM_FIELD,
-  getMasterBom,
-  serializeMasterBom,
-  type MasterBom,
-} from "@/domain/master-bom";
+import { getMasterBom } from "@/domain/master-bom";
 import {
   PRODUCT_PFMEA_DOCUMENT_FIELD,
   serializePfmeaDocument,
@@ -156,7 +151,6 @@ import {
   loadToolLibraryFromSupabase,
   moveManufacturingStepToTaskInSupabase,
   removeStepToolFromSupabase,
-  saveMasterBomToSupabase,
   upsertToolLibraryMetadata,
   savePlannerShellToSupabase,
   savePlannerStateToSupabase,
@@ -179,7 +173,6 @@ import type {
   ManufacturingComponent,
   PlannerProjectContext,
   PlannerState,
-  Product,
   Project,
   ScenarioSummary,
   Station,
@@ -543,13 +536,10 @@ export function LineWorkspace({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [detailDrawerWidth, setDetailDrawerWidth] = useState(360);
   const [isResizingDetailDrawer, setIsResizingDetailDrawer] = useState(false);
+  // Reported save status. Save paths and the load/project-switch effects below write it; it stays in
+  // this component so those effects keep stable dependencies. useWorkspaceSaves derives what is shown.
   const [reportedSaveState, setSaveState] = useState<SaveState>("loading");
-  // Mirror of saveState readable synchronously inside async flows (e.g. save-before-scenario-switch).
-  const saveStateRef = useRef<SaveState>("loading");
   const [reportedSaveError, setSaveError] = useState<string>();
-  const reportedSaveStatusRef = useRef({ state: reportedSaveState, error: reportedSaveError });
-  reportedSaveStatusRef.current = { state: reportedSaveState, error: reportedSaveError };
-  const { tracker: writeTracker, snapshot: writeSnapshot } = useWriteTracker(projectId);
   const [hasLoadedRemoteState, setHasLoadedRemoteState] = useState(
     () => hasInitialDisplayablePlannerState || hasRecentProjectSwitchSession(),
   );
@@ -563,19 +553,13 @@ export function LineWorkspace({
   const [isProjectSwitching, setIsProjectSwitching] = useState(
     () => hasRecentProjectSwitchSession() && !hasInitialDisplayablePlannerState,
   );
-  const [dirtyVersion, setDirtyVersion] = useState(0);
   const [smartAllocationPending, setSmartAllocationPending] = useState(false);
   const [dismissedPlanningRecommendationKey, setDismissedPlanningRecommendationKey] = useState("");
-  const saveInFlightRef = useRef(false);
-  const masterBomSaveInFlightRef = useRef(false);
-  const queuedSaveStateRef = useRef<PlannerState | null>(null);
   const plannerDirtyRef = useRef(false);
-  const plannerSaveTimerRef = useRef<number | null>(null);
   const latestDerivedStateRef = useRef<PlannerState>(plannerState);
   // One queue store per mount: queue records are mutated in place across awaits, never recreated.
   const [procedureSaveQueues] = useState(createProcedureSaveQueueStore);
-  const { procedureSaveQueuesRef, procedureSaveTimersRef, procedureRetryTimersRef, hasProcedureSaveWork } =
-    procedureSaveQueues;
+  const { procedureSaveQueuesRef } = procedureSaveQueues;
   const autosaveHarnessRanRef = useRef(false);
   const remoteRefreshTimerRef = useRef<number | null>(null);
   const remoteRefreshAppliedRef = useRef(false);
@@ -584,17 +568,11 @@ export function LineWorkspace({
   const pendingRemoteTaskIdsRef = useRef<Set<string>>(new Set());
   const taskDetailHydrationRequestsRef = useRef<Set<string>>(new Set());
   const fullyHydratedScenarioIdsRef = useRef<Set<string>>(new Set());
-  const hasLocalSaveWorkRef = useRef(hasLocalSaveWork);
-  hasLocalSaveWorkRef.current = hasLocalSaveWork;
-  const flushPendingPlannerSaveRef = useRef(flushPendingPlannerSave);
   const requestRemotePlannerRefreshRef = useRef(requestRemotePlannerRefresh);
   const requestRemoteTaskRefreshRef = useRef(requestRemoteTaskRefresh);
-  const persistPlannerStateRef = useRef(persistPlannerState);
   const urlWorkspaceSnapshotRef = useRef(urlWorkspaceSnapshot);
-  flushPendingPlannerSaveRef.current = flushPendingPlannerSave;
   requestRemotePlannerRefreshRef.current = requestRemotePlannerRefresh;
   requestRemoteTaskRefreshRef.current = requestRemoteTaskRefresh;
-  persistPlannerStateRef.current = persistPlannerState;
   urlWorkspaceSnapshotRef.current = urlWorkspaceSnapshot;
   const loadedProjectIdRef = useRef<string | undefined>(undefined);
   // True only once the REMOTE planner load has applied for the loaded project. A cached IndexedDB
@@ -618,14 +596,6 @@ export function LineWorkspace({
   const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
   const chromeStatusTimerRef = useRef<number | null>(null);
   const detailDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const { state: saveState, error: saveError } = workspaceSaveStatus(
-    reportedSaveState,
-    reportedSaveError,
-    writeSnapshot,
-    Object.values(procedureSaveQueuesRef.current),
-    plannerDirtyRef.current || Boolean(plannerSaveTimerRef.current) || Boolean(queuedSaveStateRef.current) ||
-      Object.keys(procedureSaveTimersRef.current).length > 0 || Object.keys(procedureRetryTimersRef.current).length > 0,
-  );
   const workspaceToasts = useMemo<FeedbackToast[]>(
     () => [
       ...(chromeStatus ? [{ id: 0, title: chromeStatus.message, tone: chromeStatus.error ? "danger" as const : "neutral" as const }] : []),
@@ -657,10 +627,6 @@ export function LineWorkspace({
   useEffect(() => {
     latestDerivedStateRef.current = derivedState;
   }, [derivedState]);
-
-  useEffect(() => {
-    saveStateRef.current = saveState;
-  }, [saveState]);
 
   // Drop the scenario cache when the project changes (a different project = different scenarios).
   useEffect(() => {
@@ -703,6 +669,42 @@ export function LineWorkspace({
       mainScenarioIdRef.current = scenarios[0].id;
     }
   }, [scenarios]);
+
+  // Workspace saves: shown status, write tracker, guarded shell and BOM saves, the save barrier, and the
+  // page-exit / in-app link guards (whose effect keeps its original position here).
+  const {
+    saveState,
+    saveError,
+    writeTracker,
+    dirtyVersion,
+    markDirty,
+    saveInFlightRef,
+    plannerSaveTimerRef,
+    hasPlannerShellSaveWork,
+    hasLocalSaveWork,
+    flushPendingPlannerSave,
+    waitForLocalSavesToSettle,
+    persistPlannerState,
+    updateMasterBom,
+    blockMasterBomNavigation,
+  } = useWorkspaceSaves({
+    projectId,
+    mainScenarioIdRef,
+    latestDerivedStateRef,
+    setPlannerState,
+    notifyFeedback,
+    blockViewOnlyWrite,
+    reportedSaveState,
+    reportedSaveError,
+    setSaveState,
+    setSaveError,
+    plannerDirtyRef,
+    procedureSaveQueues,
+    remoteStateConfirmedRef,
+    scenarioCacheRef,
+    flushDeferredRemoteRefresh,
+    setChromeStatus,
+  });
 
   // Per-field procedure drafts: merge/defer/acknowledge server tasks against local typing.
   const procedureDrafts = useProcedureDrafts({
@@ -758,57 +760,6 @@ export function LineWorkspace({
   const flushProcedureSavesOnScopeExitRef = useRef(flushScheduledProcedureSaves);
   scheduleProcedureTaskSaveRef.current = scheduleProcedureTaskSave;
   flushProcedureSavesOnScopeExitRef.current = flushScheduledProcedureSaves;
-
-  useEffect(() => {
-    function handlePageHide() {
-      flushPendingPlannerSaveRef.current();
-    }
-
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      if (!hasLocalSaveWorkRef.current()) {
-        return;
-      }
-      event.preventDefault();
-      event.returnValue = "";
-    }
-
-    function handleLinkNavigation(event: MouseEvent) {
-      // Client-side navigation (Settings, the dashboard link) does not fire beforeunload, so
-      // without this guard clicking one while a save is pending or failing tears the workspace
-      // down and drops the in-memory edits -- the browser cache is not a safe harbour, because
-      // the next remote load overwrites it. beforeunload already covers full reloads/tab close;
-      // this mirrors that same hasLocalSaveWork predicate for in-app links.
-      const bomSaving = masterBomSaveInFlightRef.current;
-      if (!bomSaving && !hasLocalSaveWorkRef.current()) {
-        return;
-      }
-      const eventTarget = event.target;
-      const anchor = eventTarget instanceof Element ? eventTarget.closest<HTMLAnchorElement>("a[href]") : null;
-      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      setChromeStatus({
-        message: bomSaving
-          ? "BOM is still saving. Wait for Saved before leaving this page."
-          : saveStateRef.current === "error" || saveStateRef.current === "conflict"
-            ? "Your changes have not saved. Resolve the save error before leaving this page."
-            : "Your changes are saving automatically. Wait for Saved before leaving this page.",
-        error: true,
-      });
-    }
-
-    window.addEventListener("pagehide", handlePageHide);
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    document.addEventListener("click", handleLinkNavigation, true);
-    return () => {
-      window.removeEventListener("pagehide", handlePageHide);
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      document.removeEventListener("click", handleLinkNavigation, true);
-      flushPendingPlannerSaveRef.current();
-    };
-  }, []);
 
   const kpis = useMemo(
     () => calculateProductKpis(derivedState.product, derivedState.stations, planningTasks),
@@ -1044,14 +995,6 @@ export function LineWorkspace({
     window.addEventListener("popstate", restoreWorkspaceFromHistory);
     return () => window.removeEventListener("popstate", restoreWorkspaceFromHistory);
   }, [awiMaster]);
-
-  function hasPlannerShellSaveWork() {
-    return saveInFlightRef.current || plannerDirtyRef.current || Boolean(plannerSaveTimerRef.current) || writeTracker.getSnapshot().pending > 0;
-  }
-
-  function hasLocalSaveWork() {
-    return masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork() || writeTracker.getSnapshot().failures.length > 0;
-  }
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development" || typeof window === "undefined") {
@@ -1451,46 +1394,6 @@ export function LineWorkspace({
     // read mutable procedure refs, while re-registering on every render would reset test state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAutosaveHarnessParam, projectId]);
-
-  function flushPendingPlannerSave() {
-    // Until the remote load has confirmed the state we're editing, the shell diff-save must never
-    // run: flushing a cache-era snapshot would delete rows added remotely since it was written.
-    if (!remoteStateConfirmedRef.current) {
-      return;
-    }
-
-    if (!plannerDirtyRef.current && !plannerSaveTimerRef.current) {
-      return;
-    }
-
-    if (plannerSaveTimerRef.current) {
-      window.clearTimeout(plannerSaveTimerRef.current);
-      plannerSaveTimerRef.current = null;
-    }
-
-    void persistPlannerState(latestDerivedStateRef.current);
-  }
-
-  // Wait for every local save path (planner-shell autosave + per-field procedure saves) to drain.
-  // Returns false if a save errored or it didn't settle in time -- the caller must NOT switch then.
-  async function waitForLocalSavesToSettle(timeoutMs = 12000, retryingKey?: string): Promise<boolean> {
-    const startedAt = Date.now();
-    for (;;) {
-      const reported = reportedSaveStatusRef.current;
-      const barrier = workspaceSaveBarrier(
-        reported.state, reported.error, writeTracker.getSnapshot(),
-        Object.values(procedureSaveQueuesRef.current),
-        masterBomSaveInFlightRef.current || hasPlannerShellSaveWork() || hasProcedureSaveWork(),
-        retryingKey,
-      );
-      if (barrier === "blocked") return false;
-      if (barrier === "ready") return true;
-      if (Date.now() - startedAt > timeoutMs) {
-        return false;
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 120));
-    }
-  }
 
   // Apply a freshly-loaded scenario for a switch. We only reach here AFTER a successful save, so any
   // procedure drafts from the previous scenario are stale and must be dropped (never carried across).
@@ -2506,40 +2409,17 @@ export function LineWorkspace({
     undoTrackingRef.current = { state: plannerState, dirtyVersion, scenarioId };
   }, [plannerState, dirtyVersion]);
 
-  useEffect(() => {
-    // Procedure edits have their own queue. Once the shell has saved, later
-    // procedure renders must not restart a competing full planner save.
-    if (!hasLoadedRemoteState || dirtyVersion === 0 || !plannerDirtyRef.current) {
-      return;
-    }
 
-    // A cached snapshot may be editable before the remote load lands, but it must never autosave:
-    // the shell save is a destructive diff, and persisting stale state would delete teammates'
-    // newer tasks. The remote apply replaces local state wholesale, so nothing is lost by waiting.
-    if (!remoteStateConfirmedRef.current) {
-      return;
-    }
-
-    if (remoteRefreshAppliedRef.current) {
-      remoteRefreshAppliedRef.current = false;
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      if (plannerSaveTimerRef.current === timeout) {
-        plannerSaveTimerRef.current = null;
-      }
-      void persistPlannerStateRef.current(derivedState);
-    }, 900);
-    plannerSaveTimerRef.current = timeout;
-
-    return () => {
-      window.clearTimeout(timeout);
-      if (plannerSaveTimerRef.current === timeout) {
-        plannerSaveTimerRef.current = null;
-      }
-    };
-  }, [dirtyVersion, derivedState, hasLoadedRemoteState]);
+  usePlannerShellAutosave({
+    dirtyVersion,
+    plannerDirtyRef,
+    plannerSaveTimerRef,
+    persistPlannerState,
+    derivedState,
+    hasLoadedRemoteState,
+    remoteStateConfirmedRef,
+    remoteRefreshAppliedRef,
+  });
 
   useEffect(() => () => clearChromeStatusTimer(), []);
 
@@ -3022,13 +2902,6 @@ export function LineWorkspace({
     );
   }
 
-  function markDirty() {
-    plannerDirtyRef.current = true;
-    setSaveError(undefined);
-    setDirtyVersion((version) => version + 1);
-    setSaveState((state) => (state === "loading" || state === "saving" ? state : "idle"));
-  }
-
   // True (and shows a one-time notice) when the signed-in user only has view access to
   // this project — callers should skip the write entirely.
   function blockViewOnlyWrite(): boolean {
@@ -3076,72 +2949,6 @@ export function LineWorkspace({
     setPlannerState(next);
     markDirty();
     notifyFeedback({ title: "Redid change", tone: "neutral" });
-  }
-
-  async function persistPlannerState(stateToSave: PlannerState) {
-    if (blockViewOnlyWrite()) {
-      plannerDirtyRef.current = false;
-      setSaveState("idle");
-      return;
-    }
-
-    if (stateToSave.tasks.length === 0) {
-      const message = "Refusing to save an empty Gantt. Add at least one task before saving.";
-      setSaveError(message);
-      setSaveState("error");
-      notifyFeedback({
-        title: "Save blocked",
-        body: message,
-        tone: "warning",
-      });
-      return;
-    }
-
-    if (masterBomSaveInFlightRef.current || saveInFlightRef.current) {
-      queuedSaveStateRef.current = stateToSave;
-      setSaveState("saving");
-      return;
-    }
-
-    saveInFlightRef.current = true;
-    const finishWrite = writeTracker.begin("planner");
-    setSaveError(undefined);
-    setSaveState("saving");
-
-    let nextState: PlannerState | null = stateToSave;
-    let lastPersistedState: PlannerState | null = null;
-
-    while (nextState) {
-      queuedSaveStateRef.current = null;
-
-      try {
-        await savePlannerShellToSupabase(nextState);
-        lastPersistedState = nextState;
-      } catch (error) {
-        finishWrite(error);
-        const message = error instanceof Error ? error.message : "Unable to save planner state.";
-        setSaveError(message);
-        setSaveState("error");
-        notifyFeedback({
-          title: "Save failed",
-          body: message,
-          tone: "danger",
-        });
-        saveInFlightRef.current = false;
-        return;
-      }
-
-      nextState = queuedSaveStateRef.current;
-    }
-
-    saveInFlightRef.current = false;
-    finishWrite();
-    plannerDirtyRef.current = false;
-    if (lastPersistedState) {
-      void writeCachedPlannerState(projectId, lastPersistedState, mainScenarioIdRef.current).catch(() => undefined);
-    }
-    setSaveState("saved");
-    flushDeferredRemoteRefresh();
   }
 
   function updateProductNumber(field: ProductNumberField, value: number) {
@@ -3332,87 +3139,6 @@ export function LineWorkspace({
         },
       },
     }));
-  }
-
-  async function updateMasterBom(bom: MasterBom | undefined): Promise<void> {
-    if (blockViewOnlyWrite()) {
-      throw new Error("You have view-only access to this project.");
-    }
-    if (!remoteStateConfirmedRef.current) {
-      throw new Error("The latest database state is still loading. Wait a moment, then retry the BOM upload.");
-    }
-    if (!projectId) {
-      throw new Error("Select a project before updating the master BOM.");
-    }
-
-    flushPendingPlannerSave();
-    if (!(await waitForLocalSavesToSettle(12000, "master-bom"))) {
-      throw new Error("Other changes could not be saved. Resolve the save error before updating the BOM.");
-    }
-
-    masterBomSaveInFlightRef.current = true;
-    const finishWrite = writeTracker.begin("master-bom");
-    setSaveError(undefined);
-    saveStateRef.current = "saving";
-    setSaveState("saving");
-
-    let verifiedProduct: Product | undefined;
-    try {
-      verifiedProduct = await saveMasterBomToSupabase(latestDerivedStateRef.current.product, bom, projectId);
-      const verifiedBom = getMasterBom(verifiedProduct.customFields);
-      const mergeVerifiedBom = (localProduct: Product): Product => {
-        const customFields = { ...(localProduct.customFields ?? {}) };
-        if (verifiedBom) {
-          customFields[PRODUCT_MASTER_BOM_FIELD] = serializeMasterBom(verifiedBom);
-        } else {
-          delete customFields[PRODUCT_MASTER_BOM_FIELD];
-        }
-        return { ...localProduct, customFields, updatedAt: verifiedProduct?.updatedAt ?? localProduct.updatedAt };
-      };
-
-      const confirmedState = {
-        ...latestDerivedStateRef.current,
-        product: mergeVerifiedBom(latestDerivedStateRef.current.product),
-      };
-      latestDerivedStateRef.current = confirmedState;
-      setPlannerState((current) => ({ ...current, product: mergeVerifiedBom(current.product) }));
-      scenarioCacheRef.current.set(confirmedState.scenario.id, confirmedState);
-      void writeCachedPlannerState(projectId, confirmedState, mainScenarioIdRef.current).catch(() => undefined);
-      saveStateRef.current = "saved";
-      setSaveState("saved");
-    } catch (error) {
-      finishWrite(error);
-      const message = error instanceof Error ? error.message : "The master BOM could not be saved.";
-      setSaveError(message);
-      saveStateRef.current = "error";
-      setSaveState("error");
-      notifyFeedback({ title: "BOM save failed", body: message, tone: "danger" });
-      throw error;
-    } finally {
-      masterBomSaveInFlightRef.current = false;
-      finishWrite();
-      const queuedState = queuedSaveStateRef.current;
-      queuedSaveStateRef.current = null;
-      if (queuedState) {
-        let nextQueuedState = queuedState;
-        if (verifiedProduct) {
-          const confirmedBom = getMasterBom(verifiedProduct.customFields);
-          const customFields = { ...(queuedState.product.customFields ?? {}) };
-          if (confirmedBom) {
-            customFields[PRODUCT_MASTER_BOM_FIELD] = serializeMasterBom(confirmedBom);
-          } else {
-            delete customFields[PRODUCT_MASTER_BOM_FIELD];
-          }
-          nextQueuedState = {
-            ...queuedState,
-            product: { ...queuedState.product, customFields, updatedAt: verifiedProduct.updatedAt },
-          };
-        }
-        void persistPlannerState(nextQueuedState);
-      } else {
-        flushDeferredRemoteRefresh();
-      }
-    }
   }
 
   function updateTask(taskId: string, patch: Partial<Task>) {
@@ -5301,18 +5027,6 @@ export function LineWorkspace({
     if (firstStationTask) {
       setSelectedTaskId(firstStationTask.id);
     }
-  }
-
-  function blockMasterBomNavigation(): boolean {
-    if (!masterBomSaveInFlightRef.current) {
-      return false;
-    }
-    notifyFeedback({
-      title: "BOM is still saving",
-      body: "Wait for Saved before leaving this page.",
-      tone: "warning",
-    });
-    return true;
   }
 
   function pushWorkspaceModuleHistory(moduleId: string) {

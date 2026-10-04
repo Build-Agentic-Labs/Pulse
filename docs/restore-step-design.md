@@ -1,6 +1,37 @@
 # Restore Step: data-preservation fix (proposal)
 
-Status: **proposal for review, 2026-10-03. Not implemented.** No migration has been written or applied, and no data has been changed or cleaned up.
+Status (2026-10-03): **Stage 1 implemented in the isolated database only** (`2277e69`, migration `20261003210000_step_recovery_and_tool_changes.sql`). It is not deployed to production and no client calls it yet. The client stage waits for approval of the messages in `docs/tool-catalog-consistency-design.md` §5c. No data has been changed or cleaned up.
+
+### Stage 1 as built (differences from the proposal below)
+
+- **Renumbering is kept.** Steps are labelled `Step {sequence}` in the portal, so a gap would be visible. Delete moves later steps up one and restore moves them back. Their content is untouched; their `version` changes with the position, as it always has on delete.
+- **No foreign keys on the recovery table,** so a record outlives the step, task or project it describes. Nothing deletes or expires records:
+  - clients can read them (project view access) and cannot change them (RLS, revoked grants, guard triggers for insert, update, delete and truncate);
+  - only the two SECURITY DEFINER functions write them.
+- **Part mentions are captured, and merged back on restore only if missing.** Delete does not edit the task row (unchanged from today's mobile behavior).
+- **Deferred to the write-protocol proposal (§5b of the catalog design), not enabled:** the guard on `replace_task_children`. Guarding it alone would still let old phones write stale task rows before the refusal.
+
+### Verification of stage 1 (retained isolated database, not reset)
+
+- **Records preserved by the migration:** `scripts/verify-local-migration.mjs` applied the migration with its ledger row in one transaction. 9,588 pre-existing rows in 78 tables were unchanged, including 342 `auth.users` and 72 `storage.objects`. The only new table is the recovery table.
+- **pgTAP `supabase/tests/step_recovery_test.sql`, 48/48:**
+  - authorization on all three functions (anon, viewer, other organization);
+  - delete removes exactly the step and its tool, photo and exploded view, and the record holds all four plus part mentions;
+  - every other row is unchanged except later steps' positions; stale versions are refused; a delete retry returns the same record;
+  - clients cannot alter records;
+  - a teammate's interleaved edits, new step and tools survive a restore; the restored rows are identical to the originals;
+  - a second restore changes nothing; restoring into a deleted process is refused and the record is kept;
+  - tool diff semantics and ids.
+
+  Seven targeted mutations are each caught. All 23 pgTAP files pass (446 assertions).
+- **Two real sessions** (disposable fixtures):
+  - a teammate's edit waits for a running delete, then lands on the moved step;
+  - a restore and a teammate's appended step both survive;
+  - a teammate who picks the position a restore just took gets a duplicate-position error (`23505`), with nothing partial;
+  - two simultaneous restores of one record give one restore and one "already restored".
+- **App gate:** 1,927 unit tests, lint, build, typecheck, and 20/20 browser cases.
+
+### Original proposal (for reference)
 
 This is a separate, focused fix, independent of the tool catalog work. The catalog rollout (`docs/tool-catalog-consistency-design.md` §5b) depends on it, because the old Restore path is one of the writers that wipes tool assignments.
 

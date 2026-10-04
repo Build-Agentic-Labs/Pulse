@@ -397,3 +397,8 @@ Phase 3 is paused while these are reviewed. Neither is implemented, and no migra
   - All tool writes go through a diff-based RPC, and a `step_tools` trigger refuses divergent direct writes.
   - Offline drafts are preserved: legacy drafts are add-only, with a notice.
   - Deployment order is M1 → C1 → M2 → M3/C2, with acceptance criteria per stage.
+- **2026-10-03, Restore Step stage 1 implemented (isolated database only), `2277e69`.**
+  - Added the recovery table and the `delete_manufacturing_step`, `restore_manufacturing_step` and `apply_step_tool_changes` functions.
+  - Verification: pgTAP 48/48 (all 23 files, 446 assertions); every pre-existing record unchanged by the migration; two-session concurrency checks.
+  - No client uses them yet, and nothing is deployed.
+  - The step_tools-only compatibility fence is withdrawn: it would leave partial writes from old clients' multi-request operations. A write-protocol gate (header-identified clients, refused at the first write) is proposed instead, in the catalog design §5b. The exact user-facing messages awaiting approval are in §5c.

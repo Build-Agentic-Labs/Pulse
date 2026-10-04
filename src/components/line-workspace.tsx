@@ -7,6 +7,7 @@ import { createProcedureSaveQueueStore, useProcedureSaveQueue } from "./line-wor
 import { usePlannerShellAutosave, useWorkspaceSaves } from "./line-workspace/use-workspace-saves";
 import type { SaveScope } from "./line-workspace/workspace-controller-types";
 import { installProcedureAutosaveHarness } from "./line-workspace/procedure-autosave-harness";
+import { useWorkspaceTools } from "./line-workspace/use-workspace-tools";
 import type { AwiMaster } from "@/lib/awi/store";
 import { readAnnotationDraft } from "@/lib/photo-annotation-drafts";
 
@@ -98,11 +99,6 @@ import { applyPastedPhoto, revertPastedPhoto } from "@/domain/step-photo-paste";
 import { removeTaskExplodedView, upsertTaskExplodedViews, type ExplodedView } from "@/domain/step-exploded-views";
 import { removeTaskVideo, upsertTaskVideos, type TaskVideo } from "@/domain/task-videos";
 import { mergeTaskPrivateMedia } from "@/domain/task-private-media";
-import { buildStepToolLibrary, removeToolFromAllTasks, renameToolInTasks } from "@/domain/step-tools";
-import type { ProjectToolCatalogEntry } from "@/domain/project-catalog";
-import { buildProjectToolRegistry } from "@/domain/tool-registry";
-import { canonicalToolKey, formatToolName } from "@/domain/tool-name-format";
-import type { ToolTypeValue } from "@/domain/tool-types";
 import {
   PRODUCT_STEP_CHECK_CONFIG_FIELD,
   serializeManufacturingStepCheckDefinitions,
@@ -133,11 +129,9 @@ import {
 } from "@/domain/task-scheduling";
 import { optimizeLine as runLineOptimization } from "@/domain/joint-scheduler";
 import {
-  addStepToolToSupabase,
   canPatchTaskFromRealtimePayload,
   copyStepPhotoAttachmentToStep,
   createPlannerSupabaseClient,
-  deleteToolLibraryFromSupabase,
   deleteScenario,
   duplicateScenario,
   listSopSummariesFromSupabase,
@@ -150,11 +144,7 @@ import {
   loadTaskPrivateMediaFromSupabase,
   renameScenario,
   updateScenarioTarget,
-  loadToolLibraryFromSupabase,
   moveManufacturingStepToTaskInSupabase,
-  removeStepToolFromSupabase,
-  upsertToolLibraryMetadata,
-  savePlannerShellToSupabase,
   savePlannerStateToSupabase,
   saveTaskCustomFieldsToSupabase,
   saveTasksToSupabase,
@@ -167,7 +157,6 @@ import {
   taskIdFromRealtimePayload,
   uploadStepPhotoAttachment,
   type SaveState,
-  type ToolLibraryItem,
 } from "@/domain/supabase-planner";
 import type {
   DocumentTypeCode,
@@ -590,7 +579,6 @@ export function LineWorkspace({
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
   const [chromeStatus, setChromeStatus] = useState<{ message: string; error?: boolean } | null>(null);
   const [workspaceNotice, setWorkspaceNotice] = useState<Omit<FeedbackToast, "id"> | null>(null);
-  const [toolLibraryItems, setToolLibraryItems] = useState<ToolLibraryItem[]>([]);
   const chromeStatusTimerRef = useRef<number | null>(null);
   const detailDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const workspaceToasts = useMemo<FeedbackToast[]>(
@@ -808,22 +796,6 @@ export function LineWorkspace({
     () => calculateAvailabilityMinutesForDemandPeriod(derivedState.product),
     [derivedState.product],
   );
-  const toolLibrary = useMemo(() => {
-    const toolsByKey = new Map<string, string>();
-    buildStepToolLibrary(derivedState.tasks).forEach((tool) => {
-      toolsByKey.set(canonicalToolKey(tool), tool);
-    });
-    toolLibraryItems.forEach((item) => {
-      const toolName = formatToolName(item.toolName);
-      const key = canonicalToolKey(toolName);
-      if (key && !toolsByKey.has(key)) {
-        toolsByKey.set(key, toolName);
-      }
-    });
-    return [...toolsByKey.values()].sort((left, right) =>
-      left.localeCompare(right, undefined, { sensitivity: "base" }),
-    );
-  }, [derivedState.tasks, toolLibraryItems]);
   const currentOperatorAllocation = useMemo(() => buildOperatorAssignmentsFromIePlan({
     assignments: planningTasks.map((task) => ({
       taskId: task.id,
@@ -892,10 +864,6 @@ export function LineWorkspace({
   const presencePeersRef = useRef<PresencePeer[]>([]);
   presencePeersRef.current = presencePeers;
   const lastConflictNoticeAtRef = useRef(0);
-  const projectToolRegistry = useMemo(
-    () => buildProjectToolRegistry(derivedState.tasks, toolLibraryItems),
-    [derivedState.tasks, toolLibraryItems],
-  );
   const realtimeTaskIdSet = useMemo(
     () => new Set(derivedState.tasks.map((task) => task.id)),
     [derivedState.tasks],
@@ -905,28 +873,29 @@ export function LineWorkspace({
   const realtimeTaskIdSetRef = useRef(realtimeTaskIdSet);
   realtimeTaskIdSetRef.current = realtimeTaskIdSet;
 
-  useEffect(() => {
-    let active = true;
+  // Step tools and the project tool catalog (the library load effect keeps its original position here).
+  const {
+    toolLibraryItems,
+    toolLibrary,
+    projectToolRegistry,
+    persistAddStepTool,
+    persistRemoveStepTool,
+    saveCatalogTool,
+    tidyCatalogToolNames,
+    deleteCatalogTool,
+  } = useWorkspaceTools({
+    projectId,
+    libraryProjectId: activeProjectContext?.projectId,
+    derivedState,
+    setPlannerState,
+    writeTracker,
+    remoteStateConfirmedRef,
+    setSaveState,
+    setSaveError,
+    notifyFeedback,
+    flushDeferredRemoteRefresh,
+  });
 
-    loadToolLibraryFromSupabase(activeProjectContext?.projectId)
-      .then((tools) => {
-        if (active) {
-          setToolLibraryItems(tools);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setToolLibraryItems([]);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [activeProjectContext?.projectId]);
-
-  // Tool-name cleanup is user-triggered from the Tools catalog ("Tidy names"),
-  // not automatic on load — see tidyCatalogToolNames / ProjectCatalogSetupPanel.
 
   useEffect(() => {
     if (!hasLoadedRemoteState || isProjectSwitching) {
@@ -2915,230 +2884,6 @@ export function LineWorkspace({
         });
       })
       .finally(() => { finishWrite(); flushDeferredRemoteRefresh(); });
-  }
-
-  async function persistAddStepTool(taskId: string, stepId: string, toolName: string, sequence = 1) {
-    const finishWrite = writeTracker.begin(`tool:${stepId}:${canonicalToolKey(toolName)}`);
-    setSaveError(undefined);
-    setSaveState("saving");
-
-    try {
-      await addStepToolToSupabase(taskId, stepId, toolName, sequence, projectId);
-      setSaveState("saved");
-    } catch (error) {
-      finishWrite(error);
-      setSaveError(error instanceof Error ? error.message : "Unable to add the tool.");
-      setSaveState("error");
-    } finally {
-      finishWrite();
-      flushDeferredRemoteRefresh();
-    }
-  }
-
-  async function persistRemoveStepTool(stepId: string, toolName: string) {
-    const finishWrite = writeTracker.begin(`tool:${stepId}:${canonicalToolKey(toolName)}`);
-    setSaveError(undefined);
-    setSaveState("saving");
-
-    try {
-      const taskId = derivedState.tasks.find((task) =>
-        (task.manufacturingSteps ?? []).some((step) => step.id === stepId),
-      )?.id;
-      await removeStepToolFromSupabase(stepId, toolName, taskId, projectId);
-      setSaveState("saved");
-    } catch (error) {
-      finishWrite(error);
-      setSaveError(error instanceof Error ? error.message : "Unable to remove the tool.");
-      setSaveState("error");
-    } finally {
-      finishWrite();
-      flushDeferredRemoteRefresh();
-    }
-  }
-
-  async function applyProjectTasksUpdate(nextTasks: Task[], options?: { silent?: boolean }) {
-    // This path runs the destructive shell diff-save directly; refuse it until the remote load has
-    // confirmed the state being edited (a cached snapshot could delete teammates' newer tasks).
-    if (!remoteStateConfirmedRef.current) {
-      const message = "The latest database state hasn't finished loading yet. Try again in a moment.";
-      setSaveError(message);
-      setSaveState("error");
-      notifyFeedback({ title: "Save blocked", body: message, tone: "warning" });
-      return;
-    }
-
-    setSaveError(undefined);
-    setSaveState("saving");
-
-    const finishWrite = writeTracker.begin("planner");
-    const calculated = applyCalculatedFields(derivedState.product, derivedState.stations, nextTasks);
-    const nextState = {
-      ...derivedState,
-      product: calculated.product,
-      stations: calculated.stations,
-      tasks: calculated.tasks,
-    };
-
-    setPlannerState(nextState);
-
-    try {
-      await savePlannerShellToSupabase(nextState);
-      setSaveState("saved");
-      if (!options?.silent) {
-        notifyFeedback({
-          title: "Build catalog updated",
-          body: "Tool assignments were saved across the workspace.",
-          tone: "success",
-        });
-      }
-    } catch (error) {
-      finishWrite(error);
-      const message = error instanceof Error ? error.message : "Unable to save build catalog changes.";
-      setSaveError(message);
-      setSaveState("error");
-      notifyFeedback({
-        title: "Save failed",
-        body: message,
-        tone: "danger",
-      });
-      throw error;
-    } finally {
-      finishWrite();
-      flushDeferredRemoteRefresh();
-    }
-  }
-
-  async function saveCatalogTool(
-    entry: ProjectToolCatalogEntry,
-    draft: { name: string; category: ToolTypeValue },
-  ) {
-    const formattedName = formatToolName(draft.name);
-    if (!formattedName) {
-      notifyFeedback({
-        title: "Tool name required",
-        body: "Enter a tool name before saving.",
-        tone: "danger",
-      });
-      return;
-    }
-
-    const nameChanged = canonicalToolKey(formattedName) !== entry.key;
-    const finishWrite = writeTracker.begin(`tool-catalog:${entry.key}`);
-    try {
-      if (nameChanged) {
-        // Match the raw stored occurrence by canonical key, rewriting it in place.
-        const nextTasks = renameToolInTasks(derivedState.tasks, entry.rawName, formattedName);
-        await applyProjectTasksUpdate(nextTasks);
-      }
-
-      // Target the real library row by canonical key, so a messy stored name still
-      // migrates (and its category survives — the upsert wipes category otherwise).
-      const existingItem = toolLibraryItems.find(
-        (item) => canonicalToolKey(item.toolName) === entry.key,
-      );
-
-      await upsertToolLibraryMetadata({
-        toolName: formattedName,
-        category: draft.category,
-        projectId,
-        previousToolName:
-          existingItem && existingItem.toolName.trim() !== formattedName ? existingItem.toolName : undefined,
-      });
-
-      const tools = await loadToolLibraryFromSupabase(projectId);
-      setToolLibraryItems(tools);
-      setSaveState("saved");
-
-      if (!nameChanged) {
-        notifyFeedback({
-          title: "Tool updated",
-          body: `${formattedName} type saved.`,
-          tone: "success",
-        });
-      }
-    } catch (error) {
-      finishWrite(error);
-      throw error;
-    } finally {
-      finishWrite();
-      flushDeferredRemoteRefresh();
-    }
-  }
-
-  async function tidyCatalogToolNames(plan: Array<{ from: string; to: string }>) {
-    if (plan.length === 0) {
-      return;
-    }
-
-    try {
-      // 1. Rewrite every stored occurrence in one project write. Silent: the
-      //    "Tool names cleaned up" toast below is the user-facing signal.
-      const nextTasks = plan.reduce(
-        (tasks, rename) => renameToolInTasks(tasks, rename.from, rename.to),
-        derivedState.tasks,
-      );
-      await applyProjectTasksUpdate(nextTasks, { silent: true });
-
-      // 2. Migrate library rows that exist (preserving category); collect failures.
-      let metadataFailures = 0;
-      for (const rename of plan) {
-        const key = canonicalToolKey(rename.from);
-        const existingItem = toolLibraryItems.find((item) => canonicalToolKey(item.toolName) === key);
-        if (!existingItem || existingItem.toolName.trim() === rename.to) {
-          continue;
-        }
-        try {
-          await upsertToolLibraryMetadata({
-            toolName: rename.to,
-            category: existingItem.category,
-            projectId,
-            previousToolName: existingItem.toolName,
-          });
-        } catch {
-          metadataFailures += 1;
-        }
-      }
-
-      const failureNote = metadataFailures > 0 ? `, ${metadataFailures} could not be saved` : "";
-      notifyFeedback({
-        title: "Tool names cleaned up",
-        body: `Cleaned up ${plan.length} tool name${plan.length === 1 ? "" : "s"}${failureNote}.`,
-        tone: metadataFailures > 0 ? "warning" : "neutral",
-      });
-    } catch {
-      // applyProjectTasksUpdate already surfaced an error toast; abandon the
-      // tidy (no partial task write — the shell save is atomic) without
-      // rejecting, since this runs fire-and-forget from the load effect.
-    } finally {
-      // Always reflect whatever persisted, even on partial failure.
-      try {
-        const tools = await loadToolLibraryFromSupabase(projectId);
-        setToolLibraryItems(tools);
-      } catch {
-        // Reload failure is non-fatal; the next load will reconcile.
-      }
-    }
-  }
-
-  async function deleteCatalogTool(entry: ProjectToolCatalogEntry) {
-    const finishWrite = writeTracker.begin(`tool-catalog:${entry.key}`);
-    try {
-      const nextTasks = removeToolFromAllTasks(derivedState.tasks, entry.rawName);
-      await applyProjectTasksUpdate(nextTasks);
-
-      if (entry.libraryId) {
-        await deleteToolLibraryFromSupabase(entry.libraryId, projectId);
-        const tools = await loadToolLibraryFromSupabase(projectId);
-        setToolLibraryItems(tools);
-      }
-      setSaveState("saved");
-    } catch (error) {
-      finishWrite(error);
-      throw error;
-    } finally {
-      finishWrite();
-      flushDeferredRemoteRefresh();
-    }
   }
 
   async function uploadStepPhotos(taskId: string, stepId: string, files: File[]) {

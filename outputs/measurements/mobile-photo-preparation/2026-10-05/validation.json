@@ -1,0 +1,21 @@
+{
+  "baselineCommit": "999c1a6",
+  "date": "2026-10-05",
+  "componentLinesBefore": 4068,
+  "componentLinesAfter": 3998,
+  "newModuleLines": 73,
+  "functionBodiesIdentical": true,
+  "functionBodiesSha256": "6b6b4745c2b20c06cb19efd09cd4094fe4f1dee9a2b979dbe7824c9b5926e9d2",
+  "characterizationTestsBefore": 13,
+  "characterizationTestsAfter": 13,
+  "targetedComponentAndPhotoTests": 66,
+  "fullAppTests": 2221,
+  "fullAppTestFiles": 256,
+  "lint": "pass",
+  "productionBuild": "pass",
+  "settledTypecheck": "pass",
+  "bundleBudgets": "pass",
+  "databaseAccessed": false,
+  "published": false,
+  "comparisonNormalization": "Export modifier and trailing inter-function-block separator excluded; function bodies unchanged"
+}

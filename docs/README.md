@@ -79,3 +79,10 @@ typecheck and bundle budgets pass. Seven recovery browser cases pass, including 
 case. The isolated SQL pilot's 33 assertions are separate from the active SQL suite and were rolled
 back with all pilot objects and fixtures. The user approved branch publication and merging after green
 CI on 2026-10-05. Production database activation remains unapproved and is excluded from this release.
+
+## Bounded mobile structure follow-up — 2026-10-05
+
+[Photo preparation extraction](mobile-photo-preparation-extraction.md) is locally validated on
+`codex/mobile-photo-preparation`: component 4,068 → 3,998 lines, byte-identical moved functions,
+2,221 passing app tests and identical browser-generated JPEG outputs. It does not change persistence,
+Delete/Restore or the UI; publication has not been requested for this slice.

@@ -1,7 +1,8 @@
 # Mobile photo preparation extraction — 2026-10-05
 
 Baseline: published main `999c1a6`. Bounded implementation on `codex/mobile-photo-preparation`.
-Local validation completed; this document does not claim publication or GitHub CI.
+Local validation completed. User approved publication on 2026-10-05; merge is gated on green GitHub
+CI. This is a code extraction release with no database activation.
 
 ## Change and ownership
 

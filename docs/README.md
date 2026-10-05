@@ -85,4 +85,4 @@ CI on 2026-10-05. Production database activation remains unapproved and is exclu
 [Photo preparation extraction](mobile-photo-preparation-extraction.md) is locally validated on
 `codex/mobile-photo-preparation`: component 4,068 → 3,998 lines, byte-identical moved functions,
 2,221 passing app tests and identical browser-generated JPEG outputs. It does not change persistence,
-Delete/Restore or the UI; publication has not been requested for this slice.
+Delete/Restore or the UI. Publication approved 2026-10-05, subject to green branch CI before merge.

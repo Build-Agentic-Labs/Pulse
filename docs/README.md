@@ -66,9 +66,9 @@ backup reports and measurement artifacts; completion alone does not make that ev
 
 Atomic task reorder: [Package D results and deployment](atomic-task-reorder-results.md). Active SQL/browser CI coverage and production record-preservation evidence are included. The measured reorder uses 2 requests instead of 10; large-scenario version payloads are larger.
 
-## Local edit-safety follow-up (not published)
+## Edit-safety follow-up — release scope approved 2026-10-05
 
-Branch `codex/edit-safety-followups`, based on `f3f3ac5`: fixes the missing-task draft-panel
+Implementation `2371b10`, based on `f3f3ac5`: fixes the missing-task draft-panel
 selection and preserves competing local draft snapshots in separate slots. The existing UI controls
 are unchanged. Remote same-step edits and old clients remain separate compatibility limitations.
 The [targeted step recovery pilot](../supabase/isolated/2026-10-04-targeted-step-recovery/README.md)
@@ -77,4 +77,5 @@ is isolated, tested with rollback, and not wired into the production mobile clie
 Local validation for this follow-up: 2,208 app tests / 255 files; lint, production build, settled
 typecheck and bundle budgets pass. Seven recovery browser cases pass, including the new competing-tab
 case. The isolated SQL pilot's 33 assertions are separate from the active SQL suite and were rolled
-back with all pilot objects and fixtures. Nothing from this follow-up has been pushed or deployed.
+back with all pilot objects and fixtures. The user approved branch publication and merging after green
+CI on 2026-10-05. Production database activation remains unapproved and is excluded from this release.

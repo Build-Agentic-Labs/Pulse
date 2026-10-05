@@ -262,10 +262,10 @@ Status verified against published main `1147c7d` on 2026-10-04. C1 is shipped, n
 Full implementation contract, tests and limits: [C1 results](mobile-draft-recovery-c1-results.md).
 The B1/B2 extraction ledgers retain the historical behavior and original incident evidence.
 
-**a. Fixed locally on `codex/edit-safety-followups`: a stale selection no longer opens a draft
+**a. Fixed in `2371b10`: a stale selection no longer opens a draft
 on the fallback task.** Draft-panel hydration now goes through `applySavedState`, after task membership
 is known. The regression test fails before the correction and passes afterward. No draft record is
-removed and no visible control changes. Publication has not occurred.
+removed and no visible control changes. Release approved 2026-10-05, subject to green GitHub CI.
 
 **b. Fixed: unsent autosave after unmount. Remaining: commit timing at document teardown.** C1 cancels
 unsent New Step autosaves on editor cleanup and guards subsequent mutation stages against old account/
@@ -288,7 +288,7 @@ preserved and can be reviewed/adopted only through the approved explicit flow; r
 the original step id. Invalid or absent-task records stay stored. Scope protection is tested in real
 Chromium across products, tasks and accounts.
 
-**Local follow-up, not yet published:** stale-base writes and blind writes to an occupied draft slot
+**Follow-up `2371b10`, release approved 2026-10-05:** stale-base writes and blind writes to an occupied draft slot
 now retain a separate fork instead of overwriting another recoverable draft. Tab-local selection keeps
 each editor's fork available after reload; acknowledgment targets the exact stored fork/token. The real
 browser regression covers two different failed drafts, reload of both, and acknowledgment of one while

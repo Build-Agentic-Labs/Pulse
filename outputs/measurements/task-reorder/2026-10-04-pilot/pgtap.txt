@@ -1,0 +1,42 @@
+1..41
+ok 1 - viewer cannot use edit-only baseline
+ok 2 - viewer cannot reorder
+ok 3 - baseline is actor-bound
+ok 4 - baseline refuses project mismatch
+ok 5 - baseline returns the complete ordered narrow row set
+ok 6 - captured actor must match the authenticated account
+ok 7 - client cannot forge receipt
+ok 8 - project mismatch refuses
+ok 9 - unrelated fields refuse
+ok 10 - duplicate WBS refuses
+ok 11 - cross-scenario zone refuses
+ok 12 - cross-scenario station refuses
+ok 13 - missing version is not fabricated
+ok 14 - mid-operation fault rejects
+ok 15 - every task field/version restored after fault
+ok 16 - failed operation creates no receipt
+ok 17 - swap commits
+ok 18 - complete final ordering
+ok 19 - all unrelated task columns untouched
+ok 20 - steps tools and photos byte-identical
+ok 21 - unchanged task version unchanged
+ok 22 - lost-response retry succeeds
+ok 23 - duplicate retry does not update any row
+ok 24 - operation token cannot be repurposed
+ok 25 - second user stale reorder refuses
+ok 26 - teammate cannot read another actor receipt
+ok 27 - concurrent field edit refuses stale reorder
+ok 28 - field edit preserved
+ok 29 - added task invalidates baseline
+ok 30 - deleted task invalidates baseline
+ok 31 - late duplicate never replays old order
+ok 32 - client cannot rewrite receipt
+ok 33 - client cannot delete receipt
+ok 34 - valid placement commits atomically
+ok 35 - intended zone applied
+ok 36 - intended station applied
+ok 37 - revoked permission blocks even duplicate acknowledgment
+ok 38 - no temporary numbering visible after any call
+ok 39 - only successful distinct operations recorded
+ok 40 - anonymous callers cannot execute the RPC
+ok 41 - anonymous callers cannot execute baseline read

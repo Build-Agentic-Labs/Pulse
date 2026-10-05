@@ -1,0 +1,4 @@
+Applied 20261005010000_atomic_task_reorder. Tables checked: 79. New tables: public.task_reorder_receipts.
+  auth.users: 657 rows, unchanged=true
+  storage.objects: 102 rows, unchanged=true
+Every pre-existing record is unchanged (32389 rows).

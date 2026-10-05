@@ -3,7 +3,8 @@
 Status reconciled 2026-10-04 against published main `1147c7d`, with all three CI jobs green.
 The five-phase workspace restructure is complete. Package A and mobile slices B1/B2 are published;
 C1 scoped mobile recovery is published with the approved legacy-review flow and exact write tokens.
-The rest of Package B, the broader Package C recovery pilot, and Packages D–G have not started.
+The rest of Package B and the broader Package C recovery pilot have not started.
+Package D is implemented as an isolated pilot pending production approval; Packages E–G have not started.
 Catalog rollout and experimental database deployment remain blocked. This document is the active
 roadmap; [docs/README.md](README.md) is the current status and documentation index.
 
@@ -85,7 +86,7 @@ confirmation read paged `step_tools` across three requests). This prerequisite i
 | A | Baseline and edit-operation inventory | Complete | Published with B1/B2 at `9dfcbb7`; historical measurements retained |
 | B | Mobile responsibility extraction | Partial | B1/B2 published; further extraction not started |
 | C | Narrow edit recovery pilots | Partial | C1 phone draft scoping published at `1147c7d`; broader durable-recovery pilot not started |
-| D | Atomic task reorder | Not started | Proposed next implementation pilot; design, failure matrix and any database change need review |
+| D | Atomic task reorder | Isolated pilot complete; deployment pending | [Results and production gate](atomic-task-reorder-results.md); no production migration applied |
 | E | Targeted step delete/restore | Not started | Depends on approved database design and client compatibility |
 | F | Catalog consistency and writer compatibility | Blocked | Existing client compatibility risks unresolved |
 | G | Further editor/controller decomposition | Not started | Choose boundaries using measured need, not line quotas |
@@ -229,6 +230,9 @@ Exit: successful persistence and recovery demonstrated against a real isolated d
 > teardown before local commit remain limitations. The Gantt duration pilot has not started.
 
 ## Package D atomic reorder pilot
+
+Implementation: [results, measurements and release gate](atomic-task-reorder-results.md). Desktop/mobile
+client changes are on the feature branch; the database candidate remains isolated pending approval.
 
 Specify one reorder operation containing scope, intended ordering, expected versions, and an idempotency key. Authorization and version validation occur in the database operation. Temporary numbering, if needed internally, must not be committed independently. The operation must not rewrite step tools, media, or unrelated task fields.
 

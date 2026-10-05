@@ -1,0 +1,380 @@
+{
+  "fixture": {
+    "tasks": 3,
+    "steps": 3,
+    "tools": 3,
+    "changedTasks": 2
+  },
+  "samples": [
+    {
+      "path": "old",
+      "iteration": 0,
+      "ms": 39.72204199999999,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2395
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2301
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        }
+      ]
+    },
+    {
+      "path": "old",
+      "iteration": 1,
+      "ms": 22.385958000000016,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2395
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2301
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        }
+      ]
+    },
+    {
+      "path": "old",
+      "iteration": 2,
+      "ms": 21.696542000000022,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2395
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2301
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        }
+      ]
+    },
+    {
+      "path": "old",
+      "iteration": 3,
+      "ms": 20.43662500000005,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2395
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2301
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        }
+      ]
+    },
+    {
+      "path": "old",
+      "iteration": 4,
+      "ms": 20.82954200000006,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2395
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/scenario_project_id",
+          "bytes": 70
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/tasks",
+          "bytes": 2301
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/step_tools",
+          "bytes": 0
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/step_tools",
+          "bytes": 443
+        }
+      ]
+    },
+    {
+      "path": "new",
+      "iteration": 0,
+      "ms": 6.219832999999994,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/load_task_reorder_baseline",
+          "bytes": 179
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/reorder_scenario_tasks",
+          "bytes": 727
+        }
+      ]
+    },
+    {
+      "path": "new",
+      "iteration": 1,
+      "ms": 4.358375000000024,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/load_task_reorder_baseline",
+          "bytes": 179
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/reorder_scenario_tasks",
+          "bytes": 727
+        }
+      ]
+    },
+    {
+      "path": "new",
+      "iteration": 2,
+      "ms": 4.995040999999901,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/load_task_reorder_baseline",
+          "bytes": 179
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/reorder_scenario_tasks",
+          "bytes": 727
+        }
+      ]
+    },
+    {
+      "path": "new",
+      "iteration": 3,
+      "ms": 5.178083000000015,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/load_task_reorder_baseline",
+          "bytes": 179
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/reorder_scenario_tasks",
+          "bytes": 727
+        }
+      ]
+    },
+    {
+      "path": "new",
+      "iteration": 4,
+      "ms": 4.60129100000006,
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/load_task_reorder_baseline",
+          "bytes": 179
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/reorder_scenario_tasks",
+          "bytes": 727
+        }
+      ]
+    }
+  ]
+}

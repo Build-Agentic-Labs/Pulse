@@ -1,0 +1,7 @@
+{
+  "supabase/isolated/2026-10-04-task-reorder/20261005022000_atomic_task_reorder.sql": "2c353b2e837cf8e2e44a22196f642b2cc32bbf9c6112b792872144195793e908",
+  "src/domain/task-reorder.ts": "1ac73ea49bc7c514c0177bb0b73b48a82ca0c6c29ce7cca460ed8fa8197fbc03",
+  "src/lib/planner/task-order-store.ts": "b0aab0b78532043091216303cdad285150490b16dddeebde7a6d6fb24cbf8032",
+  "src/components/line-workspace.tsx": "76ef50026ea1b1ec66b16cb221ea30fe217fbc2cbd72aa3b60105e4396df0003",
+  "src/components/mobile-photo-portal.tsx": "be3905a481f27b5972c9d245adf9c1361bd8a18338dba8bd5a639697c405f92b"
+}

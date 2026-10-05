@@ -56,3 +56,5 @@ revision-counter/Discard design is archived explicitly as superseded and must no
 Dated audits under `audits/`, reviews under `reviews/`, and plans/specifications under `superpowers/`
 remain evidence for their stated feature and date. They are not a combined current task list. Keep
 backup reports and measurement artifacts; completion alone does not make that evidence redundant.
+
+Atomic task reorder: [Package D results and production gate](atomic-task-reorder-results.md). Implemented and tested on the feature branch; production application and client publication are pending approval.

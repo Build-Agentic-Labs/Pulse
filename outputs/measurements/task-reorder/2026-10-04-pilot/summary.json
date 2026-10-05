@@ -1,0 +1,106 @@
+{
+  "request-measurements": {
+    "old": {
+      "requests": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "request_body_bytes": [
+        5862,
+        5862,
+        5862,
+        5862,
+        5862
+      ],
+      "warm_median_ms": 21.26304200000004,
+      "warm_samples_ms": [
+        22.385958000000016,
+        21.696542000000022,
+        20.43662500000005,
+        20.82954200000006
+      ]
+    },
+    "new": {
+      "requests": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "request_body_bytes": [
+        906,
+        906,
+        906,
+        906,
+        906
+      ],
+      "warm_median_ms": 4.798165999999981,
+      "warm_samples_ms": [
+        4.358375000000024,
+        4.995040999999901,
+        5.178083000000015,
+        4.60129100000006
+      ]
+    }
+  },
+  "stress-measurements": {
+    "old": {
+      "requests": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "request_body_bytes": [
+        5864,
+        5864,
+        5864,
+        5864,
+        5864
+      ],
+      "warm_median_ms": 23.341333000000077,
+      "warm_samples_ms": [
+        23.356333000000063,
+        24.600416999999993,
+        22.722499999999968,
+        23.32633300000009
+      ]
+    },
+    "new": {
+      "requests": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "request_body_bytes": [
+        60143,
+        60143,
+        60143,
+        60143,
+        60143
+      ],
+      "warm_median_ms": 15.101708499999972,
+      "warm_samples_ms": [
+        14.890374999999949,
+        15.434624999999869,
+        14.93991700000015,
+        15.263499999999794
+      ]
+    }
+  },
+  "qualifications": [
+    "Loopback local Supabase; fixtures have 3 or 1100 tasks, 3 steps/tools, 2 changed tasks.",
+    "Five sequential samples per path; first excluded from warm latency median.",
+    "API operation latency only, not drag-to-paint or production latency.",
+    "Body bytes exclude headers, query strings, responses, auth and realtime.",
+    "Final path: one authorized scalar-JSON baseline RPC plus one changed-placement atomic RPC.",
+    "Complete expected versions intentionally cost O(N) bytes, even for a small move."
+  ]
+}

@@ -12,6 +12,8 @@ import { useWorkspaceRealtime } from "./line-workspace/use-workspace-realtime";
 import { useWorkspaceScenarios } from "./line-workspace/use-workspace-scenarios";
 import { useWorkspaceTools } from "./line-workspace/use-workspace-tools";
 import { useWorkspaceMedia } from "./line-workspace/use-workspace-media";
+import { reorderTasksInSupabase } from "@/lib/planner/task-order-store";
+import { mergeTaskOrder, rollbackTaskOrder } from "@/domain/task-reorder";
 import type { AwiMaster } from "@/lib/awi/store";
 import { readAnnotationDraft } from "@/lib/photo-annotation-drafts";
 
@@ -125,7 +127,6 @@ import {
   loadWorkspaceProjectGroups,
   moveManufacturingStepToTaskInSupabase,
   savePlannerStateToSupabase,
-  saveTasksToSupabase,
   uploadStepPhotoAttachment,
   type SaveState,
 } from "@/domain/supabase-planner";
@@ -501,6 +502,13 @@ export function LineWorkspace({
   const [smartAllocationPending, setSmartAllocationPending] = useState(false);
   const [dismissedPlanningRecommendationKey, setDismissedPlanningRecommendationKey] = useState("");
   const plannerDirtyRef = useRef(false);
+  const taskReorderInFlightRef = useRef(false);
+  const taskReorderLifetimeRef = useRef(true);
+  useEffect(() => {
+    taskReorderLifetimeRef.current = true;
+    return () => { taskReorderLifetimeRef.current = false; };
+  }, []);
+
   const latestDerivedStateRef = useRef<PlannerState>(plannerState);
   // One queue store per mount: queue records are mutated in place across awaits, never recreated.
   const [procedureSaveQueues] = useState(createProcedureSaveQueueStore);
@@ -2848,12 +2856,24 @@ export function LineWorkspace({
     setActiveZoneId(zoneId);
   }
 
-  function reorderTaskGroups(
+  async function reorderTaskGroups(
     sourceTaskIds: string[],
     targetTaskIds: string[],
     targetZoneId: string | undefined,
     placement: "before" | "after",
   ) {
+    if (blockViewOnlyWrite() || !hasConfirmedRemoteState || taskReorderInFlightRef.current) return;
+    const scope = { projectId, scenarioId: plannerState.scenario.id };
+    const isCurrent = () => taskReorderLifetimeRef.current && isForegroundSaveScope(scope);
+    const assertCurrent = () => { if (!isCurrent()) throw new Error("Task reorder scope changed."); };
+    taskReorderInFlightRef.current = true;
+    flushPendingPlannerSave();
+    flushScheduledProcedureSaves();
+    if (!(await waitForLocalSavesToSettle(12000, "gantt-order")) || !isCurrent()) {
+      taskReorderInFlightRef.current = false;
+      return;
+    }
+    const beforeState = latestDerivedStateRef.current;
     const sourceTaskIdSet = new Set(sourceTaskIds);
     const targetTaskIdSet = new Set(targetTaskIds);
 
@@ -2911,13 +2931,14 @@ export function LineWorkspace({
       });
     }
 
-    const reorderedTasks = buildReorderedTasks(plannerState.tasks);
+    const reorderedTasks = buildReorderedTasks(beforeState.tasks);
     if (!reorderedTasks) {
+      taskReorderInFlightRef.current = false;
       return;
     }
 
     const changedTasks = reorderedTasks.filter((task) => {
-      const currentTask = plannerState.tasks.find((candidate) => candidate.id === task.id);
+      const currentTask = beforeState.tasks.find((candidate) => candidate.id === task.id);
       return (
         !currentTask ||
         currentTask.wbs !== task.wbs ||
@@ -2927,17 +2948,14 @@ export function LineWorkspace({
     });
 
     if (changedTasks.length === 0) {
+      taskReorderInFlightRef.current = false;
       return;
     }
 
     const nextState: PlannerState = {
-      ...plannerState,
+      ...beforeState,
       tasks: reorderedTasks,
     };
-
-    if (blockViewOnlyWrite()) {
-      return;
-    }
 
     saveInFlightRef.current = true;
     setSaveError(undefined);
@@ -2948,16 +2966,16 @@ export function LineWorkspace({
 
     void (async () => {
       try {
-        const token = Date.now().toString(36);
-        await saveTasksToSupabase(
-          changedTasks.map((task, index) => ({ ...task, wbs: `tmp-${token}-${index + 1}` })),
-          projectId,
+        const order = await reorderTasksInSupabase(
+          String(projectId ?? ""), scope.scenarioId, beforeState.tasks, reorderedTasks, undefined, assertCurrent,
         );
-        await saveTasksToSupabase(changedTasks, projectId);
-        await writeCachedPlannerState(projectId, nextState, mainScenarioIdRef.current);
+        if (!isCurrent()) return;
+        setPlannerState((current) => ({ ...current, tasks: mergeTaskOrder(current.tasks, order) }));
         setSaveState("saved");
       } catch (error) {
         finishWrite(error);
+        if (!isCurrent()) return;
+        setPlannerState((current) => ({ ...current, tasks: rollbackTaskOrder(current.tasks, beforeState.tasks, reorderedTasks) }));
         const message = error instanceof Error ? error.message : "Unable to save Gantt order.";
         setSaveError(message);
         setSaveState("error");
@@ -2967,9 +2985,10 @@ export function LineWorkspace({
           tone: "danger",
         });
       } finally {
-        saveInFlightRef.current = false;
+        taskReorderInFlightRef.current = false;
+        if (isCurrent()) saveInFlightRef.current = false;
         finishWrite();
-        flushDeferredRemoteRefresh();
+        if (isCurrent()) flushDeferredRemoteRefresh();
       }
     })();
   }

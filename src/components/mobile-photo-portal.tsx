@@ -1,5 +1,8 @@
 "use client";
 
+import { reorderTasksInSupabase } from "@/lib/planner/task-order-store";
+import { mergeTaskOrder, rollbackTaskOrder } from "@/domain/task-reorder";
+
 // Route-scoped styles: ~24 kB of .mobile-photo-* / .ui-photo-mobile-* rules that
 // previously shipped to every route via globals.css. Loading them with this
 // dynamically-imported component keeps them off every other page.
@@ -63,7 +66,6 @@ import {
   savePlannerStateToSupabase,
   saveTaskToSupabase,
   saveTaskWithManufacturingStepsToSupabase,
-  saveTasksToSupabase,
   syncStepToolsForStepToSupabase,
   softDeleteStepPhotoAttachmentFromSupabase,
   subscribePlannerStateChanges,
@@ -1974,12 +1976,41 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
       tasks: plannerState.tasks.map((task) => reorderedTasks.find((candidate) => candidate.id === task.id) ?? task),
     };
 
+    if (!isEditorCurrent() || hasLocalSaveWork()) return;
+    const beforeState = plannerState;
+    const assertCurrent = () => {
+      if (!isEditorCurrent() || plannerStateRef.current?.scenario.id !== beforeState.scenario.id)
+        throw new Error("Task reorder scope changed.");
+    };
     setSelectedTaskId(taskId);
-    await persistTargetedState(nextState, async () => {
-      const token = Date.now().toString(36);
-      await saveTasksToSupabase(changedTasks.map((task, index) => ({ ...task, wbs: `tmp-${token}-${index + 1}` })), projectId);
-      await saveTasksToSupabase(changedTasks, projectId);
-    });
+    plannerStateRef.current = nextState;
+    setPlannerState(nextState);
+    setSaveState("saving");
+    setErrorMessage(null);
+    beginLocalWrite();
+    try {
+      const order = await reorderTasksInSupabase(
+        String(projectId ?? ""), beforeState.scenario.id, beforeState.tasks, reorderedTasks, undefined, assertCurrent,
+      );
+      assertCurrent();
+      setPlannerState((current) => {
+        if (!current) return current;
+        const confirmed = { ...current, tasks: mergeTaskOrder(current.tasks, order) };
+        plannerStateRef.current = confirmed;
+        return confirmed;
+      });
+      setSaveState("saved");
+    } catch (error) {
+      if (!isEditorCurrent() || plannerStateRef.current?.scenario.id !== beforeState.scenario.id) return;
+      setPlannerState((current) => {
+        if (!current) return current;
+        const restored = { ...current, tasks: rollbackTaskOrder(current.tasks, beforeState.tasks, reorderedTasks) };
+        plannerStateRef.current = restored;
+        return restored;
+      });
+      setSaveState("error");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save task order.");
+    } finally { if (isEditorCurrent()) endLocalWrite(); }
   }
 
   function clearTaskDragState() {

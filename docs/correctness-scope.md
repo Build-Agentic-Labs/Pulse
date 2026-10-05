@@ -6,7 +6,8 @@ retains the correctness investigation and the unresolved catalog/restore deploym
 
 The experimental SQL remains under `supabase/isolated/2026-10-03-step-recovery/`, outside active migration
 and CI paths. No production migration from that experiment has been applied by this work. Catalog rollout
-remains **BLOCKED**. The production-ledger comparison checklist item below remains unwritten.
+remains **BLOCKED**. Package D compared the live ledger before applying only its approved migration; historical drift was
+recorded without replay or repair. See [Package D deployment evidence](atomic-task-reorder-results.md).
 The blanket “memory-only edits” statement was superseded by the operation inventory and C1 results.
 See [the active roadmap](edit-reliability-plan.md) for next work.
 
@@ -117,6 +118,7 @@ or durably recoverable is justified.
 
 ## Next work
 
-The structural phases are complete. Atomic reorder, targeted restore, catalog consistency and broader
+The structural phases are complete, and the separate Package D atomic reorder release is approved
+with its additive production migration deployed. Targeted restore, catalog consistency and broader
 edit recovery remain separate pilots in [the active roadmap](edit-reliability-plan.md). The isolated
-migration is a candidate design, not authorized production implementation.
+step-recovery/catalog migration remains a candidate design, not authorized production implementation.

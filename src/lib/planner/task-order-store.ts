@@ -1,29 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Json } from "@/lib/database.types";
+import type { Database } from "@/lib/database.types";
 import type { Task } from "@/domain/types";
 import { confirmedTaskOrder, taskReorderRequest, type TaskOrderRow } from "@/domain/task-reorder";
 import { getUserFromSession, plannerClient } from "./client";
-
-// Isolated pilot contract. Promote to generated Database types only after release approval.
-type ReorderDatabase = Omit<Database, "public"> & {
-  public: Omit<Database["public"], "Functions"> & {
-    Functions: Database["public"]["Functions"] & {
-      load_task_reorder_baseline: { Args: { p_project_id: string; p_scenario_id: string; p_actor_id: string }; Returns: Json };
-      reorder_scenario_tasks: {
-        Args: { p_project_id: string; p_scenario_id: string; p_operation_id: string;
-          p_expected_versions: Json; p_order: Json; p_actor_id: string };
-        Returns: Json;
-      };
-    };
-  };
-};
 
 /** One authorized complete baseline read + one atomic write. No full rows/tools or unsafe fallback. */
 export async function reorderTasksInSupabase(
   projectId: string, scenarioId: string, before: Task[], after: Task[],
   client?: SupabaseClient<Database>, assertCurrent: () => void = () => undefined,
 ): Promise<TaskOrderRow[]> {
-  const supabase = (client ?? plannerClient()) as unknown as SupabaseClient<ReorderDatabase>;
+  const supabase = client ?? plannerClient();
   const { data: { user } } = await getUserFromSession(supabase);
   if (!user) throw new Error("Sign in to reorder tasks.");
   const assertAccount = async () => {

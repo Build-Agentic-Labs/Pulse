@@ -1,9 +1,10 @@
 # Package D: atomic task reorder pilot
 
-Status: implemented and tested on `codex/atomic-task-reorder`, based on published main `8f97b8a`.
-**Production deployment is pending approval.** No production database, UI markup, style, dependency,
-permission policy on existing tables, or other save path was changed. Do not merge the client before
-the new database entry points are deployed. Catalog and delete/restore rollout remain blocked.
+Status: approved release of Package D, based on published main `8f97b8a`.
+The production migration `20261005012055_atomic_task_reorder.sql` was applied on 2026-10-05 UTC
+(2026-10-04 local). Desktop/mobile use the atomic entry points; generated production schema types
+replace the pilot-only type extension. UI markup, styles, dependencies, existing table permissions
+and other save paths are unchanged. Catalog and delete/restore rollout remain blocked.
 
 ## Problem and bounded correction
 
@@ -77,7 +78,7 @@ Raw samples and summary: `outputs/measurements/task-reorder/2026-10-04-pilot/`.
 ## Validation
 
 - 2,204 unit/component tests in 255 files; 31 new cases across the domain/store files.
-- 41 isolated pgTAP assertions: authorization, actor mismatch, forbidden receipt writes/deletes,
+- 41 new active pgTAP assertions: authorization, actor mismatch, forbidden receipt writes/deletes,
   project/placement mismatch, stale field edit, task additions/deletions, exact duplicate replay,
   token reuse, later-order protection, valid placement and mid-operation rollback.
 - Five real-DB/API cases: measured small/stress request paths; old-path interruption reproduction; two actors'
@@ -95,19 +96,35 @@ Raw samples and summary: `outputs/measurements/task-reorder/2026-10-04-pilot/`.
 
 ## Concrete production change for review
 
-Candidate: `supabase/isolated/2026-10-04-task-reorder/20261005022000_atomic_task_reorder.sql`.
+Active migration: `supabase/migrations/20261005012055_atomic_task_reorder.sql`.
 It creates one receipt table, one six-argument write RPC and one three-argument narrow read RPC.
-The receipt table is append-only through the
-RPC, contains scope/version/order evidence rather than task content, enables RLS, and grants users
-only SELECT of their own receipts while they retain project access. No cleanup/expiry is introduced.
-Both RPCs are SECURITY DEFINER with an empty search path and explicit authorization matching existing
-project edit rules; PUBLIC/anon execution is revoked. Existing table policies/constraints remain intact.
+The receipt table is append-only through the RPC, contains scope/version/order evidence rather than
+task content, enables RLS, and grants users only SELECT of their own receipts while they retain
+project access. Both RPCs are SECURITY DEFINER with an empty search path and explicit authorization
+matching existing project edit rules; PUBLIC/anon execution is revoked.
 
-Before deployment: confirm these object names are absent on production; promote this exact candidate
-and its SQL tests to the active migration/test paths; regenerate schema types and remove the temporary
-pilot-only client type extension; verify clean-migration CI; then apply the single migration using the
-existing safe application procedure, verify row preservation and permissions, and publish the client
-only after branch CI passes. Production application is a separate decision per the approved roadmap.
+The CLI created the migration filename. Fresh-database CI replay and the active SQL tests passed
+before deployment. The exact reviewed bodies were applied directly in a repeatable-read transaction,
+with existing-content checksums, function-body/RLS/grant assertions and the migration ledger entry
+checked before commit. A dry run of the same transaction rolled back successfully first.
+**All 8,227 existing records across 78 tables remained byte-equivalent as JSON**, including
+`auth.users` and `storage.objects`; no existing table policy, constraint or function was rewritten.
+Evidence: `outputs/measurements/task-reorder/2026-10-04-pilot/production-release.json`.
+The isolated prototype's earlier 32,389-row check is separate evidence, not the live record count.
+
+Production has historical migration-ledger drift (10 repo-only and 3 live-only versions before this
+release), consistent with the documented manual application process. No unrelated migration was
+replayed or repaired. This release registered only its own version, atomically with its DDL.
+Generated live types were refreshed; the pre-existing nullable `sign_sop_with_mark.p_department`
+annotation was retained because the generator omits SQL argument nullability.
+
+Security advisors add two authenticated SECURITY DEFINER notices for these deliberately exposed
+RPCs. Their actor/project edit gates and anon revocation were verified; other security-notice counts
+are unchanged. See the [Supabase advisor explanation](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable).
+This is not a broader security audit or authorization to change existing RPC permissions.
+
+Active CI now includes `supabase/tests/task_reorder_test.sql` (41 assertions) and
+`e2e/task-reorder.spec.ts` (two rendered drag cases), rather than relying only on isolated manual runs.
 
 Rollback means reverting the client implementation while leaving additive objects and receipts in
 place. It restores the old reorder risks; there is no authorized DROP, purge, reset or record deletion.

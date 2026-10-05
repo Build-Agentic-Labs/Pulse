@@ -12,7 +12,10 @@ C1 changes the §5 New Step recovery, capture-session ownership, unmount and lat
 owned slots are user/product/task scoped, cleanup uses exact tokens, unsent autosaves are cancelled,
 and legacy adoption is explicit and preserves its source. See [C1 results](mobile-draft-recovery-c1-results.md)
 and [current mobile follow-ups](deferred-work.md#8-mobile-capture-follow-ups-and-resolved-recovery-issues).
-The general journal, atomic reorder and targeted restore/catalog pilots remain unimplemented. Historical
+Package D replaces the task reorder paths in §4.1 and §5.10 with an authorized baseline read and
+one atomic placement write. Its approved migration is deployed; tools/media/unrelated fields are not
+rewritten. See [Package D results](atomic-task-reorder-results.md) for stored-outcome tests and measurements.
+The general journal and targeted restore/catalog pilots remain unimplemented. Historical
 line numbers and pinned baseline behaviors below must not be copied as current implementation claims.
 
 Field key used in every row: **(1)** user action · **(2)** owning component / handler · **(3)** scope

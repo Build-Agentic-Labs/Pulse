@@ -4,8 +4,8 @@ Status reconciled 2026-10-04 against published main `1147c7d`, with all three CI
 The five-phase workspace restructure is complete. Package A and mobile slices B1/B2 are published;
 C1 scoped mobile recovery is published with the approved legacy-review flow and exact write tokens.
 The rest of Package B and the broader Package C recovery pilot have not started.
-Package D is implemented as an isolated pilot pending production approval; Packages E–G have not started.
-Catalog rollout and experimental database deployment remain blocked. This document is the active
+Package D atomic reorder is implemented and its approved additive production migration is deployed; Packages E–G have not started.
+Catalog rollout and other experimental database deployments remain blocked. This document is the active
 roadmap; [docs/README.md](README.md) is the current status and documentation index.
 
 The next investment should improve edit ownership, recoverability, and persistence boundaries. Smaller editor modules support that work; line reduction alone is not the goal. Keep the current UI unless the user approves a concrete visible change. Preserve existing data and retain all test database volumes.
@@ -39,7 +39,7 @@ rates have still not been measured; latency was measured only on loopback with 5
 ### Verified source boundaries
 
 - Mobile `restoreDeletedSnapshot` calls `savePlannerStateToSupabase(snapshot)` and then restores photos using `Promise.allSettled`. This is scenario-snapshot work behind a one-step restore action. The earlier investigation reports real-database data-loss reproduction; this planning pass only rechecked the code.
-- Desktop Gantt reorder and mobile `persistHighLevelTaskReorder` both save temporary WBS values and final values in separate awaited operations. Network interruption between them is a design risk, not a new reproduction from this pass.
+- Historical baseline: desktop Gantt and mobile reorder saved temporary and final WBS values separately. Package D reproduced interruption and replaced both paths with an atomic operation; old open clients and other whole-row writers remain a compatibility limitation.
 - `shell-store.ts` explicitly contains multi-request saves. Its deletion tripwire protects against some mass deletions, not every stale overwrite or child replacement.
 - ~~`loadTaskFromSupabase` still reads some media/tool/dependency collections without the full loader's paging and deterministic tie-breaking.~~ **Fixed on `main` at `438a6df`** and verified live (Package A).
 - SOP `persist` already serializes saves and uses a persisted version token. Preserve its document-control rules rather than replacing it with a generic planner saver.
@@ -86,7 +86,7 @@ confirmation read paged `step_tools` across three requests). This prerequisite i
 | A | Baseline and edit-operation inventory | Complete | Published with B1/B2 at `9dfcbb7`; historical measurements retained |
 | B | Mobile responsibility extraction | Partial | B1/B2 published; further extraction not started |
 | C | Narrow edit recovery pilots | Partial | C1 phone draft scoping published at `1147c7d`; broader durable-recovery pilot not started |
-| D | Atomic task reorder | Isolated pilot complete; deployment pending | [Results and production gate](atomic-task-reorder-results.md); no production migration applied |
+| D | Atomic task reorder | Approved production release | [Results, deployment and measurements](atomic-task-reorder-results.md); active migration and CI coverage |
 | E | Targeted step delete/restore | Not started | Depends on approved database design and client compatibility |
 | F | Catalog consistency and writer compatibility | Blocked | Existing client compatibility risks unresolved |
 | G | Further editor/controller decomposition | Not started | Choose boundaries using measured need, not line quotas |
@@ -232,7 +232,7 @@ Exit: successful persistence and recovery demonstrated against a real isolated d
 ## Package D atomic reorder pilot
 
 Implementation: [results, measurements and release gate](atomic-task-reorder-results.md). Desktop/mobile
-client changes are on the feature branch; the database candidate remains isolated pending approval.
+clients use the atomic functions; the approved additive migration is deployed and tests are in active CI.
 
 Specify one reorder operation containing scope, intended ordering, expected versions, and an idempotency key. Authorization and version validation occur in the database operation. Temporary numbering, if needed internally, must not be committed independently. The operation must not rewrite step tools, media, or unrelated task fields.
 

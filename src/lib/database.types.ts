@@ -2810,6 +2810,33 @@ export type Database = {
           },
         ]
       }
+      task_reorder_receipts: {
+        Row: {
+          actor_id: string
+          created_at: string
+          operation_id: string
+          project_id: string
+          request: Json
+          scenario_id: string
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          operation_id: string
+          project_id: string
+          request: Json
+          scenario_id: string
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          operation_id?: string
+          project_id?: string
+          request?: Json
+          scenario_id?: string
+        }
+        Relationships: []
+      }
       task_videos: {
         Row: {
           caption: string | null
@@ -4175,6 +4202,14 @@ export type Database = {
         Returns: boolean
       }
       is_super_admin: { Args: never; Returns: boolean }
+      load_task_reorder_baseline: {
+        Args: {
+          p_actor_id: string
+          p_project_id: string
+          p_scenario_id: string
+        }
+        Returns: Json
+      }
       mark_all_notifications_read: {
         Args: { p_workspace?: string }
         Returns: number
@@ -4237,6 +4272,17 @@ export type Database = {
       reorder_manufacturing_steps: {
         Args: { p_step_ids: string[]; p_task_id: string }
         Returns: undefined
+      }
+      reorder_scenario_tasks: {
+        Args: {
+          p_actor_id: string
+          p_expected_versions: Json
+          p_operation_id: string
+          p_order: Json
+          p_project_id: string
+          p_scenario_id: string
+        }
+        Returns: Json
       }
       replace_task_children: {
         Args: {

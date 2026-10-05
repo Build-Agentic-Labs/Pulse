@@ -1,10 +1,11 @@
-# Atomic task reorder pilot — NOT AUTHORIZED FOR PRODUCTION
+# Atomic task reorder — historical isolated pilot
 
 Implementation and release gate: [results](../../../docs/atomic-task-reorder-results.md).
-SQL is outside `supabase/migrations`; the normal CI database/browser jobs do not provision or exercise
-this pilot automatically. Client changes must stay unmerged until the reviewed RPCs are deployed.
+The final approved migration is now `supabase/migrations/20261005012055_atomic_task_reorder.sql`;
+active CI exercises its SQL tests and desktop/mobile browser cases. Files here preserve isolated
+pilot evidence; do not reapply the historical candidate into production or the retained database.
 
-- `20261005022000_atomic_task_reorder.sql`: additive production candidate, not applied remotely.
+- `20261005022000_atomic_task_reorder.sql`: historical candidate; approved bodies promoted to the active migration.
 - `task-reorder.test.sql`: 41 pgTAP assertions, synthetic fixtures in a rolled-back transaction.
 - `verify-sql.mjs`: verifies installed RPC body matches candidate and runs pgTAP on port 56322 only.
 - `verify.mjs`: reads isolated local credentials internally and runs the five DB/API cases. Never prints keys.

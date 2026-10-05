@@ -1,0 +1,663 @@
+{
+  "project": "neaadefipcpxxcqszpud",
+  "migration": "20261005012055_atomic_task_reorder.sql",
+  "appliedAt": "2026-10-05T01:25:05.771Z",
+  "tablesChecked": 78,
+  "existingRows": 8227,
+  "allExistingContentUnchanged": true,
+  "security": {
+    "rls": true,
+    "can_read": true,
+    "can_insert": false,
+    "can_update": false,
+    "can_delete": false,
+    "policies": 1
+  },
+  "historyDifference": {
+    "repoOnly": [
+      "20260921230000",
+      "20260923120000",
+      "20260926160000",
+      "20260928183123",
+      "20260928183522",
+      "20260928200509",
+      "20261002010000",
+      "20261002025835",
+      "20261002033058",
+      "20261002060000"
+    ],
+    "liveOnly": [
+      "20261002012803",
+      "20261002030328",
+      "20261002033152"
+    ]
+  },
+  "before": {
+    "auth.users": {
+      "n": 32,
+      "checksum": "4f8bcb0a943d7b6eb6f544551c40e523"
+    },
+    "public.actual_events": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.audit_log": {
+      "n": 190,
+      "checksum": "8cd2bcce7aecffe9be2814ec6085a5fa"
+    },
+    "public.awi_masters": {
+      "n": 1,
+      "checksum": "76f45f2c37597719404ee347e12522b7"
+    },
+    "public.custom_columns": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.department_members": {
+      "n": 23,
+      "checksum": "5ad286e8a72fad61919834178dd20d50"
+    },
+    "public.departments": {
+      "n": 10,
+      "checksum": "0e003cbc660f33e403525d48be39bb0d"
+    },
+    "public.doc_number_counter": {
+      "n": 3,
+      "checksum": "12f3c47899102f71ea642416f3e9f9fb"
+    },
+    "public.document_type_codes": {
+      "n": 32,
+      "checksum": "53b5b822e76a3b9991bbe79f47412710"
+    },
+    "public.email_deliveries": {
+      "n": 215,
+      "checksum": "9264690c7a365912a41151376ac650df"
+    },
+    "public.email_suppressions": {
+      "n": 2,
+      "checksum": "f2751f609a7032edcb9d83659d3c04f2"
+    },
+    "public.manufacturing_components": {
+      "n": 44,
+      "checksum": "f8acb428a030fc6d4f3d160affc2b71b"
+    },
+    "public.manufacturing_steps": {
+      "n": 582,
+      "checksum": "6a1c90a581efa11b952fe3280581eff7"
+    },
+    "public.notification_digests": {
+      "n": 12,
+      "checksum": "e4f84dd6877c269f812420910d5dfb8e"
+    },
+    "public.notification_drain_runs": {
+      "n": 1293,
+      "checksum": "efb1c1500d937149a0cf240a30842708"
+    },
+    "public.notification_preferences": {
+      "n": 6,
+      "checksum": "f83bb34befd7254d9251966f480adf16"
+    },
+    "public.notifications": {
+      "n": 68,
+      "checksum": "f4ce2d4f624fc806b2346d9203595565"
+    },
+    "public.org_tool_access": {
+      "n": 19,
+      "checksum": "4a98bb9117772c1b16ec2a4a5f2b33d1"
+    },
+    "public.part_references": {
+      "n": 106,
+      "checksum": "4d07eb9f3b8772d53ff4eb9eda549fce"
+    },
+    "public.planning_item_master": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.platform_admins": {
+      "n": 1,
+      "checksum": "5ab3c073c47c1c655cd1304eecb4f5f9"
+    },
+    "public.problem_actions": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.problem_cases": {
+      "n": 1,
+      "checksum": "3526417928efa5cf9a88b673a865f723"
+    },
+    "public.problem_evidence": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.problem_history": {
+      "n": 1,
+      "checksum": "6707ca9eda5d60ad922bd7932240828a"
+    },
+    "public.products": {
+      "n": 9,
+      "checksum": "afb7c194287f417a1d2f9ee404824360"
+    },
+    "public.profiles": {
+      "n": 32,
+      "checksum": "68afcc0be3a16b4b8f608d7e5dc97f33"
+    },
+    "public.project_access": {
+      "n": 18,
+      "checksum": "a015c8e60079ffc3df79d7e3782bcb3e"
+    },
+    "public.projects": {
+      "n": 8,
+      "checksum": "b0d9815847fd2746560b22ece10bf65c"
+    },
+    "public.push_subscriptions": {
+      "n": 2,
+      "checksum": "5e409b080a2e5916f0aee600862e1b08"
+    },
+    "public.sales_order_lines": {
+      "n": 222,
+      "checksum": "60234dabc5d2e88f69b9bbe38eb86578"
+    },
+    "public.sales_orders": {
+      "n": 142,
+      "checksum": "b368b21b287aa4210df172c58cc1396b"
+    },
+    "public.scenarios": {
+      "n": 11,
+      "checksum": "c852d42212e37c531b5d43156abfddb8"
+    },
+    "public.schedule_imports": {
+      "n": 2,
+      "checksum": "a0ad633cd5d1f7dce2bf014e02f96a71"
+    },
+    "public.sop_annex_files": {
+      "n": 10,
+      "checksum": "9de76b229ce9d3515ef5930723f0d4f6"
+    },
+    "public.sop_approver_delivery_payloads": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.sop_approver_nominations": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.sop_change_log": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.sop_comment_replies": {
+      "n": 1,
+      "checksum": "d5260eac2975a4dc350590a3d7598013"
+    },
+    "public.sop_event_log": {
+      "n": 58,
+      "checksum": "357a69a3c59baa8fe18cd6092fe16963"
+    },
+    "public.sop_extraction_requests": {
+      "n": 1,
+      "checksum": "ffc76ba36a20c2133cec4f448534ce34"
+    },
+    "public.sop_job_titles": {
+      "n": 2,
+      "checksum": "720c261d043fdc3333d61cc99d615bb0"
+    },
+    "public.sop_notifications": {
+      "n": 30,
+      "checksum": "a42722ef3743701b8494646a037fb5ca"
+    },
+    "public.sop_rasic_roles": {
+      "n": 4,
+      "checksum": "4aeea940c098ff7af801a75fe61dc271"
+    },
+    "public.sop_review_annotations": {
+      "n": 5,
+      "checksum": "efeabc98c3e06cc4852c655578319a86"
+    },
+    "public.sop_review_seats": {
+      "n": 17,
+      "checksum": "fc1a789e18500228aa869cfb580b08f9"
+    },
+    "public.sop_review_submissions": {
+      "n": 4,
+      "checksum": "58f2a836c4998bf7f1582673e7ed0da0"
+    },
+    "public.sop_revisions": {
+      "n": 1,
+      "checksum": "6c2d188d6f3c3fdba4c8d82a851e6a3a"
+    },
+    "public.sop_signatures": {
+      "n": 9,
+      "checksum": "37d9e078257f88b2b0baf9ab182d41c0"
+    },
+    "public.sop_submission_locks": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.sops": {
+      "n": 55,
+      "checksum": "c1f5b74b6568199b4fac59d8d2d410f7"
+    },
+    "public.space_access": {
+      "n": 2,
+      "checksum": "f3f76a30365ca82996c0f449d4fa9394"
+    },
+    "public.stations": {
+      "n": 16,
+      "checksum": "1f35caa1e8cb4848905a192f2062560b"
+    },
+    "public.step_exploded_views": {
+      "n": 7,
+      "checksum": "6116e84da75859c016a6ed6abfa3de47"
+    },
+    "public.step_photos": {
+      "n": 1312,
+      "checksum": "3401f128fca7568a7bcd97c40e6bc894"
+    },
+    "public.step_tools": {
+      "n": 387,
+      "checksum": "2f3f40c5040db9850156b6ab3cefe387"
+    },
+    "public.task_dependencies": {
+      "n": 70,
+      "checksum": "d836512af64f9f45b5156ae8dbbe4143"
+    },
+    "public.task_videos": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.tasks": {
+      "n": 104,
+      "checksum": "0d3b489cc7a02bc5c0d606c5236019e4"
+    },
+    "public.tool_library": {
+      "n": 1,
+      "checksum": "785574500b11a40e2edf9ad5c018dbcd"
+    },
+    "public.trailer_configs": {
+      "n": 2,
+      "checksum": "44f8316615580ca59ef30cd5635fbcb5"
+    },
+    "public.transactional_emails": {
+      "n": 20,
+      "checksum": "6bb8faf7dd1c04aeb463809a387363f4"
+    },
+    "public.user_signature_profiles": {
+      "n": 3,
+      "checksum": "e559647ae8bb727105d0b2bd741b592a"
+    },
+    "public.work_instruction_references": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.work_instruction_releases": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.work_order_lines": {
+      "n": 14,
+      "checksum": "441475861df70e3c842848b67b208386"
+    },
+    "public.work_order_template_lines": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.work_order_templates": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.work_orders": {
+      "n": 2,
+      "checksum": "f33408b3c19f19a9ff0faf55fa3b1ca8"
+    },
+    "public.workspace_access_grants": {
+      "n": 26,
+      "checksum": "b9ec50d66a7b57c429989bd89191a176"
+    },
+    "public.workspace_auto_join_domains": {
+      "n": 1,
+      "checksum": "06852615cdaedb59e2bfd0aeaf34050b"
+    },
+    "public.workspace_integrations": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.workspace_members": {
+      "n": 21,
+      "checksum": "936153e4c7e8589ffe086983c81035f8"
+    },
+    "public.workspace_notifications": {
+      "n": 20,
+      "checksum": "56a452af307c1a6741acd7a2cbab144e"
+    },
+    "public.workspace_revocations": {
+      "n": 2,
+      "checksum": "b935c3fc4b0f6fe178c6505bff538b6b"
+    },
+    "public.workspaces": {
+      "n": 1,
+      "checksum": "e2a85c932437189a8b015d7dba8a33c5"
+    },
+    "public.zones": {
+      "n": 16,
+      "checksum": "ad401f8f40197b9f398d118bdc159713"
+    },
+    "storage.objects": {
+      "n": 2916,
+      "checksum": "d25921ad96e4f95df822bf5e112bacc4"
+    }
+  },
+  "after": {
+    "auth.users": {
+      "n": 32,
+      "checksum": "4f8bcb0a943d7b6eb6f544551c40e523"
+    },
+    "public.actual_events": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.audit_log": {
+      "n": 190,
+      "checksum": "8cd2bcce7aecffe9be2814ec6085a5fa"
+    },
+    "public.awi_masters": {
+      "n": 1,
+      "checksum": "76f45f2c37597719404ee347e12522b7"
+    },
+    "public.custom_columns": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.department_members": {
+      "n": 23,
+      "checksum": "5ad286e8a72fad61919834178dd20d50"
+    },
+    "public.departments": {
+      "n": 10,
+      "checksum": "0e003cbc660f33e403525d48be39bb0d"
+    },
+    "public.doc_number_counter": {
+      "n": 3,
+      "checksum": "12f3c47899102f71ea642416f3e9f9fb"
+    },
+    "public.document_type_codes": {
+      "n": 32,
+      "checksum": "53b5b822e76a3b9991bbe79f47412710"
+    },
+    "public.email_deliveries": {
+      "n": 215,
+      "checksum": "9264690c7a365912a41151376ac650df"
+    },
+    "public.email_suppressions": {
+      "n": 2,
+      "checksum": "f2751f609a7032edcb9d83659d3c04f2"
+    },
+    "public.manufacturing_components": {
+      "n": 44,
+      "checksum": "f8acb428a030fc6d4f3d160affc2b71b"
+    },
+    "public.manufacturing_steps": {
+      "n": 582,
+      "checksum": "6a1c90a581efa11b952fe3280581eff7"
+    },
+    "public.notification_digests": {
+      "n": 12,
+      "checksum": "e4f84dd6877c269f812420910d5dfb8e"
+    },
+    "public.notification_drain_runs": {
+      "n": 1293,
+      "checksum": "efb1c1500d937149a0cf240a30842708"
+    },
+    "public.notification_preferences": {
+      "n": 6,
+      "checksum": "f83bb34befd7254d9251966f480adf16"
+    },
+    "public.notifications": {
+      "n": 68,
+      "checksum": "f4ce2d4f624fc806b2346d9203595565"
+    },
+    "public.org_tool_access": {
+      "n": 19,
+      "checksum": "4a98bb9117772c1b16ec2a4a5f2b33d1"
+    },
+    "public.part_references": {
+      "n": 106,
+      "checksum": "4d07eb9f3b8772d53ff4eb9eda549fce"
+    },
+    "public.planning_item_master": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.platform_admins": {
+      "n": 1,
+      "checksum": "5ab3c073c47c1c655cd1304eecb4f5f9"
+    },
+    "public.problem_actions": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.problem_cases": {
+      "n": 1,
+      "checksum": "3526417928efa5cf9a88b673a865f723"
+    },
+    "public.problem_evidence": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.problem_history": {
+      "n": 1,
+      "checksum": "6707ca9eda5d60ad922bd7932240828a"
+    },
+    "public.products": {
+      "n": 9,
+      "checksum": "afb7c194287f417a1d2f9ee404824360"
+    },
+    "public.profiles": {
+      "n": 32,
+      "checksum": "68afcc0be3a16b4b8f608d7e5dc97f33"
+    },
+    "public.project_access": {
+      "n": 18,
+      "checksum": "a015c8e60079ffc3df79d7e3782bcb3e"
+    },
+    "public.projects": {
+      "n": 8,
+      "checksum": "b0d9815847fd2746560b22ece10bf65c"
+    },
+    "public.push_subscriptions": {
+      "n": 2,
+      "checksum": "5e409b080a2e5916f0aee600862e1b08"
+    },
+    "public.sales_order_lines": {
+      "n": 222,
+      "checksum": "60234dabc5d2e88f69b9bbe38eb86578"
+    },
+    "public.sales_orders": {
+      "n": 142,
+      "checksum": "b368b21b287aa4210df172c58cc1396b"
+    },
+    "public.scenarios": {
+      "n": 11,
+      "checksum": "c852d42212e37c531b5d43156abfddb8"
+    },
+    "public.schedule_imports": {
+      "n": 2,
+      "checksum": "a0ad633cd5d1f7dce2bf014e02f96a71"
+    },
+    "public.sop_annex_files": {
+      "n": 10,
+      "checksum": "9de76b229ce9d3515ef5930723f0d4f6"
+    },
+    "public.sop_approver_delivery_payloads": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.sop_approver_nominations": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.sop_change_log": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.sop_comment_replies": {
+      "n": 1,
+      "checksum": "d5260eac2975a4dc350590a3d7598013"
+    },
+    "public.sop_event_log": {
+      "n": 58,
+      "checksum": "357a69a3c59baa8fe18cd6092fe16963"
+    },
+    "public.sop_extraction_requests": {
+      "n": 1,
+      "checksum": "ffc76ba36a20c2133cec4f448534ce34"
+    },
+    "public.sop_job_titles": {
+      "n": 2,
+      "checksum": "720c261d043fdc3333d61cc99d615bb0"
+    },
+    "public.sop_notifications": {
+      "n": 30,
+      "checksum": "a42722ef3743701b8494646a037fb5ca"
+    },
+    "public.sop_rasic_roles": {
+      "n": 4,
+      "checksum": "4aeea940c098ff7af801a75fe61dc271"
+    },
+    "public.sop_review_annotations": {
+      "n": 5,
+      "checksum": "efeabc98c3e06cc4852c655578319a86"
+    },
+    "public.sop_review_seats": {
+      "n": 17,
+      "checksum": "fc1a789e18500228aa869cfb580b08f9"
+    },
+    "public.sop_review_submissions": {
+      "n": 4,
+      "checksum": "58f2a836c4998bf7f1582673e7ed0da0"
+    },
+    "public.sop_revisions": {
+      "n": 1,
+      "checksum": "6c2d188d6f3c3fdba4c8d82a851e6a3a"
+    },
+    "public.sop_signatures": {
+      "n": 9,
+      "checksum": "37d9e078257f88b2b0baf9ab182d41c0"
+    },
+    "public.sop_submission_locks": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.sops": {
+      "n": 55,
+      "checksum": "c1f5b74b6568199b4fac59d8d2d410f7"
+    },
+    "public.space_access": {
+      "n": 2,
+      "checksum": "f3f76a30365ca82996c0f449d4fa9394"
+    },
+    "public.stations": {
+      "n": 16,
+      "checksum": "1f35caa1e8cb4848905a192f2062560b"
+    },
+    "public.step_exploded_views": {
+      "n": 7,
+      "checksum": "6116e84da75859c016a6ed6abfa3de47"
+    },
+    "public.step_photos": {
+      "n": 1312,
+      "checksum": "3401f128fca7568a7bcd97c40e6bc894"
+    },
+    "public.step_tools": {
+      "n": 387,
+      "checksum": "2f3f40c5040db9850156b6ab3cefe387"
+    },
+    "public.task_dependencies": {
+      "n": 70,
+      "checksum": "d836512af64f9f45b5156ae8dbbe4143"
+    },
+    "public.task_videos": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.tasks": {
+      "n": 104,
+      "checksum": "0d3b489cc7a02bc5c0d606c5236019e4"
+    },
+    "public.tool_library": {
+      "n": 1,
+      "checksum": "785574500b11a40e2edf9ad5c018dbcd"
+    },
+    "public.trailer_configs": {
+      "n": 2,
+      "checksum": "44f8316615580ca59ef30cd5635fbcb5"
+    },
+    "public.transactional_emails": {
+      "n": 20,
+      "checksum": "6bb8faf7dd1c04aeb463809a387363f4"
+    },
+    "public.user_signature_profiles": {
+      "n": 3,
+      "checksum": "e559647ae8bb727105d0b2bd741b592a"
+    },
+    "public.work_instruction_references": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.work_instruction_releases": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.work_order_lines": {
+      "n": 14,
+      "checksum": "441475861df70e3c842848b67b208386"
+    },
+    "public.work_order_template_lines": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.work_order_templates": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.work_orders": {
+      "n": 2,
+      "checksum": "f33408b3c19f19a9ff0faf55fa3b1ca8"
+    },
+    "public.workspace_access_grants": {
+      "n": 26,
+      "checksum": "b9ec50d66a7b57c429989bd89191a176"
+    },
+    "public.workspace_auto_join_domains": {
+      "n": 1,
+      "checksum": "06852615cdaedb59e2bfd0aeaf34050b"
+    },
+    "public.workspace_integrations": {
+      "n": 0,
+      "checksum": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "public.workspace_members": {
+      "n": 21,
+      "checksum": "936153e4c7e8589ffe086983c81035f8"
+    },
+    "public.workspace_notifications": {
+      "n": 20,
+      "checksum": "56a452af307c1a6741acd7a2cbab144e"
+    },
+    "public.workspace_revocations": {
+      "n": 2,
+      "checksum": "b935c3fc4b0f6fe178c6505bff538b6b"
+    },
+    "public.workspaces": {
+      "n": 1,
+      "checksum": "e2a85c932437189a8b015d7dba8a33c5"
+    },
+    "public.zones": {
+      "n": 16,
+      "checksum": "ad401f8f40197b9f398d118bdc159713"
+    },
+    "storage.objects": {
+      "n": 2916,
+      "checksum": "d25921ad96e4f95df822bf5e112bacc4"
+    }
+  }
+}

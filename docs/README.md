@@ -15,7 +15,8 @@ ledgers describe their stated snapshots; their old branch status is not the acti
 | Edit reliability Package A | Published | [Baseline](edit-reliability-baseline-2026-10-04.md), [operation inventory](edit-operation-inventory.md) |
 | Mobile extraction B1/B2 | Published at `9dfcbb7` | [Historical extraction ledger](edit-reliability-plan.md#historical-package-b-extraction-ledger) |
 | C1 scoped mobile recovery | Published at `1147c7d` | [Shipped contract, tests and limits](mobile-draft-recovery-c1-results.md) |
-| Further mobile extraction, broader durable recovery and atomic reorder | Not started | [Active roadmap](edit-reliability-plan.md) |
+| Further mobile extraction and broader durable recovery | Not started | [Active roadmap](edit-reliability-plan.md) |
+| Atomic task reorder (Package D) | Approved release; production migration applied | [Results and measured tradeoffs](atomic-task-reorder-results.md) |
 | Targeted delete/restore | Proposed; no production implementation | [Design](restore-step-design.md), [deployment constraints](correctness-scope.md) |
 | Catalog consistency rollout | Blocked on writer compatibility | [Design](tool-catalog-consistency-design.md), [correctness scope](correctness-scope.md) |
 
@@ -25,6 +26,12 @@ being deleted. The mobile component is now 4,044 lines (4,369 before B1/B2; 3,95
 then C1 added ownership/recovery behavior). Automated tests are 1,820 → 2,173 and browser cases 18 → 26;
 these are test counts, not coverage percentages. Active pgTAP is 22 files / 398 assertions. The 64
 experimental assertions excluded from that active suite are not claimed as equivalent coverage.
+
+Package D adds 31 unit/component cases (2,204 total / 255 files), two rendered browser cases
+(28 total), and 41 active SQL assertions (439 total / 23 files). Its approved migration preserved
+all 8,227 pre-existing production records across the 78 checked tables. Reorder requests fall from
+10 to 2 in both measured fixtures; the 1,100-task version payload is larger. These are local API
+measurements, not a production-wide speed claim. See [Package D results](atomic-task-reorder-results.md).
 
 C1's one-sample mobile request check reproduced the prior medians of 30 / 30 / 114 on small/medium/stress
 fixtures. Its final portal gzip increase is 2.54 KiB. No speedup or universal offline-safety claim is made.
@@ -41,7 +48,7 @@ Same-task concurrent puts and document teardown before local commit remain limit
 - Local backup scope and evidence: [foundation](local-backup-foundation.md), [access plan](local-backup-access-plan.md), and the `local-backup-*.json` reports.
 - Architecture rationale used by repository conventions: [historical Next.js plan](nextjs-refactor-plan.md).
 
-Atomic reorder is the recommended next pilot, not authorization to implement or deploy it. Further editor
+Atomic reorder now has an approved additive production release. Further editor
 extraction should follow a cohesive ownership boundary, not a line quota. Targeted restore and catalog
 rollout require separate database/client compatibility decisions. No experimental SQL is authorized for
 production by this cleanup.
@@ -57,4 +64,4 @@ Dated audits under `audits/`, reviews under `reviews/`, and plans/specifications
 remain evidence for their stated feature and date. They are not a combined current task list. Keep
 backup reports and measurement artifacts; completion alone does not make that evidence redundant.
 
-Atomic task reorder: [Package D results and production gate](atomic-task-reorder-results.md). Implemented and tested on the feature branch; production application and client publication are pending approval.
+Atomic task reorder: [Package D results and deployment](atomic-task-reorder-results.md). Active SQL/browser CI coverage and production record-preservation evidence are included. The measured reorder uses 2 requests instead of 10; large-scenario version payloads are larger.

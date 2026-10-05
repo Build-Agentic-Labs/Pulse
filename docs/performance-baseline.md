@@ -2,6 +2,9 @@
 
 Measured on 2026-07-18 with Next.js 15.5.20 using `npm run build`.
 
+> Historical July 2026 measurements, not a current Next.js/version or route-size audit. See
+> [current documentation status](README.md) and the [October baseline](edit-reliability-baseline-2026-10-04.md).
+
 ## Route output
 
 - 17 page routes are statically prerendered. API routes and parameterized project, SOP, and work-order routes remain dynamic.
@@ -10,7 +13,7 @@ Measured on 2026-07-18 with Next.js 15.5.20 using `npm run build`.
 
 ## Initial JavaScript
 
-| Route family | Before | Current |
+| Route family | Before July 2026 work | After July 2026 work |
 | --- | ---: | ---: |
 | Home, planner, planning, production, mobile capture | 339 kB | 196 kB |
 | SOP workspace | 247 kB | 205 kB |

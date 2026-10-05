@@ -1,6 +1,9 @@
 # C1 — scoped phone recovery drafts: design for approval (planning only)
 
-Prepared 2026-10-04 on `codex/mobile-capture-session` after B2. Nothing here is implemented. No UI change,
+> Historical document, archived 2026-10-04. This preserves the original scope, evidence and decisions; intermediate branch states and proposed algorithms below are not current instructions. See [current documentation status](../README.md).
+> Superseded by [the shipped C1 contract and results](../mobile-draft-recovery-c1-results.md). In particular, the revision-counter acknowledgment and legacy Discard proposal were not shipped.
+
+Prepared 2026-10-04 on `codex/mobile-capture-session` after B2. This was an unimplemented proposal at that time. No UI change,
 dependency, migration, merge or push is proposed by this document; where a user decision or a visible
 control is required, it is marked **APPROVAL**.
 

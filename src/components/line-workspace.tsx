@@ -621,7 +621,7 @@ export function LineWorkspace({
   // over a holder created fresh for THIS render and filled with THIS render's realtime functions, so a save
   // issued in a render flushes that render's refresh -- the issuing project, tracker and stale-scope checks
   // -- exactly as the hoisted function declaration did before Phase 3. A ref would redirect it to the
-  // latest render instead (docs/workspace-structure-plan.md, Phase 3).
+  // latest render instead (docs/history/workspace-structure-plan.md, Phase 3).
   const realtimeOfThisRender: { current?: ReturnType<typeof useWorkspaceRealtime> } = {};
   function flushDeferredRemoteRefresh() {
     realtimeOfThisRender.current?.flushDeferredRemoteRefresh();

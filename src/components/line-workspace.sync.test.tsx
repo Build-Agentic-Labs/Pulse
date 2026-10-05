@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Black-box characterization of LineWorkspace's loading, realtime and scenario lifecycle, written against
-// the implementation BEFORE the Phase 3 extraction (docs/workspace-structure-plan.md) and kept unchanged
+// the implementation BEFORE the Phase 3 extraction (docs/history/workspace-structure-plan.md) and kept unchanged
 // through it: deferred refresh and its issuing scope, subscription stability, delayed-response isolation,
 // selected-task media loading and retries, save-before-switch, unmount cleanup, and read counts.
 import { act, fireEvent, render, screen } from "@testing-library/react";

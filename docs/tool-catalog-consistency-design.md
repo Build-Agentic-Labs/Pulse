@@ -45,7 +45,7 @@ The spec was temporary and is not committed.
 
    **This is not catalog-specific.** On the reloaded zero-zone product, a plain product-name edit's normal autosave failed the same way. That write was *partial*: `products` was stored, and everything after `stations` (task rows included) was not.
 
-   It is a data-loss risk for zero-zone products: Gantt edits fail to save after the first reload. **Fixed separately in `33b2797`** (see the ledger in `docs/workspace-structure-plan.md`). The shell save itself is still a non-atomic sequence of requests.
+   It is a data-loss risk for zero-zone products: Gantt edits fail to save after the first reload. **Fixed separately in `33b2797`** (see the ledger in `docs/history/workspace-structure-plan.md`). The shell save itself is still a non-atomic sequence of requests.
 
    The catalog design below removes the catalog's dependence on the shell save, so catalog operations would no longer hit it.
 

@@ -1,6 +1,11 @@
 # Workspace structural improvements — Astra scope / Sol 6.1 handoff
 
-Status: Phases 1–4 implemented on `codex/workspace-structure` (ledgers at the end). Phase 5 not started. The correctness investigation is closed in `docs/correctness-scope.md`. Prepared by GPT-6 Astra through read-only source inspection, reviewed by the coordinating agent. Execution model: GPT-6.1 Sol, after the user reviews this scope.
+> Historical document, archived 2026-10-04. This preserves the original scope, evidence and decisions; intermediate branch states and proposed algorithms below are not current instructions. See [current documentation status](../README.md).
+> Structural Phases 1–5 were published on main at `5526cfe`; the current main also includes follow-up fixes and C1 at `1147c7d`. Optional Phase 6 has not started.
+
+Published status: Phases 1–5 complete on main at `5526cfe`; Optional Phase 6 has not started.
+The scope and intermediate ledgers below are historical. They were prepared by GPT-6 Astra and executed
+on the structural branch; current follow-up status is in `docs/README.md` and `docs/edit-reliability-plan.md`.
 
 Application baseline: `edd45a93ee27f061948c9afd407da29075297aa7` (performance/save-recovery update plus cached-reload test-readiness correction). Branch for this work: `codex/workspace-structure`.
 

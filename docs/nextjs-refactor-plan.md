@@ -1,5 +1,9 @@
 # Pulse — Next.js architecture refactor plan
 
+> Historical architecture scope from July 2026. Audit facts and stage instructions below describe that
+> baseline, not today's app. Retained because repository conventions refer to its architectural decisions.
+> See [current status](README.md) and the [completed workspace ledger](history/workspace-structure-plan.md).
+
 Audit date: 2026-07-18 · Baseline commit: `9ec966e`
 
 Goal: restructure the app to use App Router as intended — server-first rendering,
@@ -42,7 +46,7 @@ Sessions live in `localStorage`. The server therefore cannot identify the user,
 so no page can fetch data server-side, so every data-touching component must be
 a client component. The 74% figure is a *consequence*, not a style choice.
 
-Prior optimization work (documented in `nextjs-optimization-status.md`) split and
+Prior optimization work (documented in `docs/history/nextjs-optimization-status.md`) split and
 deferred code, which is why route payloads fell 42% while **shared JS stayed at
 103 kB**. Deferring is the cheap half.
 

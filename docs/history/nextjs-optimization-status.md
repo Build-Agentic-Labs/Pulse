@@ -1,5 +1,7 @@
 # SOP and Next.js optimization status
 
+> Historical document, archived 2026-10-04. This preserves the original scope, evidence and decisions; intermediate branch states and proposed algorithms below are not current instructions. See [current documentation status](../README.md).
+
 Last updated: 2026-07-18
 
 ## Completed work

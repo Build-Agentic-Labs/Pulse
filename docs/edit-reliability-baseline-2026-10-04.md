@@ -1,5 +1,10 @@
 # Edit reliability — Package A baseline (2026-10-04)
 
+**Historical measurement baseline:** captured before B1/B2 and C1 on `438a6df`. Keep all measurements
+and qualifications below as recorded; they are not current test totals or a production speed claim.
+B1/B2 and C1 are now published. Current status: [documentation index](README.md);
+latest scoped-recovery evidence: [C1 results](mobile-draft-recovery-c1-results.md).
+
 Deliverable of Package A in `docs/edit-reliability-plan.md`. Branch `codex/edit-reliability-baseline`,
 created from `main` at **`438a6df`** (`fix: page and deterministically order every child read of the
 single-task loader`). Everything below was measured or verified on that commit. Nothing in this package
@@ -43,7 +48,7 @@ Package A.
 | `npm test` | **2,080 tests / 247 files pass** (plan's last reported figure: 2,072) |
 | `npm run build` | pass (run by the measurement tool with the isolated API inlined) |
 | `npm run check:bundles` | planner entry **276.9 KiB gzip** (plan: 277.0), largest chunk 124.0 KiB; sops 281.7, planning 283.9, awi directory 286.1, awi master 275.8 |
-| pgTAP (22 files) | **not rerun** in this pass; last reported 398 assertions on the retained database (`workspace-structure-handoff.md`) |
+| pgTAP (22 files) | **not rerun** in this pass; last reported 398 assertions on the retained database (`docs/history/workspace-structure-handoff.md`) |
 | Browser suite (`e2e/`, 20 cases) | **not rerun** in this pass; it is CI's browser job and was green on `438a6df` |
 
 ## 2. Measurements
@@ -179,16 +184,16 @@ mobile open 126 / 216 / 1,251 ms (small / medium / stress).
   history retained verbatim.
 - `docs/edit-reliability-plan.md`: baseline table refreshed, the single-task prerequisite marked
   complete, Package A marked delivered.
-- Not reconciled (out of scope, noted for later): `docs/workspace-structure-handoff.md` items 7 and 9
-  are stale since the two fixes; `docs/restore-step-design.md` cites line numbers that have drifted by
-  up to two lines.
+- At this baseline capture, the structural handoff contained stale follow-up status. It is now archived
+  as a frozen review snapshot; current classifications live in `docs/deferred-work.md`. Restore design
+  source anchors are historical and require a fresh code trace before implementation.
 - Catalog rollout and experimental database deployment stay **blocked**. No isolated function was
   activated or referenced.
 
 ## 4. Recommended first Package B slice — extract the hook-free capture-session utilities
 
 > **Status 2026-10-04:** implemented on `codex/mobile-capture-session` (`eefa142` tests, `4897989`
-> extraction), awaiting review. Actual sizes, evidence and deviations from the proposal below are in the
+> extraction), subsequently published with B2 at `9dfcbb7`. Actual sizes, evidence and deviations from the proposal below are in the
 > Package B ledger in `docs/edit-reliability-plan.md`. One deviation: `isRecord` is exported (the
 > component's `removeStepScopedCustomFields` uses it); the three `normalize*` helpers stay private as
 > proposed. The inventory's §5 line numbers still refer to `438a6df`.

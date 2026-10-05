@@ -205,7 +205,7 @@ caller (see §7a), so threading a client through them was left out of this fix o
 
 ---
 
-## 7. Planner task-store: unused functions, single-task read ordering, patch typing — recorded 2026-10-04, not changed
+## 7. Planner task-store follow-ups — recorded 2026-10-04; paging fixed, other items deferred
 
 > **Status 2026-10-04 (later the same day):** **b is fixed, verified on `main`** at `438a6df` — every
 > child read in `loadTaskFromSupabase` (`src/lib/planner/read-store.ts:534-540`) goes through
@@ -256,76 +256,42 @@ callers; `updateTaskFields` currently has none.
 
 ---
 
-## 8. Mobile capture-session behaviour pinned by characterization, not corrected — recorded 2026-10-04
+## 8. Mobile capture follow-ups and resolved recovery issues
 
-Surfaced while extracting the hook-free capture-session utilities out of `src/components/mobile-photo-portal.tsx`
-(edit-reliability Package B, first slice, branch `codex/mobile-capture-session`). Each item is pinned by a
-test that asserts the **current** behaviour, so a future fix must change that test deliberately. Line numbers
-are post-extraction.
+Status verified against published main `1147c7d` on 2026-10-04. C1 is shipped, not deferred.
+Full implementation contract, tests and limits: [C1 results](mobile-draft-recovery-c1-results.md).
+The B1/B2 extraction ledgers retain the historical behavior and original incident evidence.
 
-**a. A stale stored selection reopens the draft panel on the fallback task.** The session-hydration effect
-(`mobile-photo-portal.tsx:748`) applies `showNewStepForm` and `newStepId` from
-`localStorage["pulse:mobile-capture-session:<projectId>"]` without checking that the stored `selectedTaskId`
-still exists; the load path's `applySavedState` does check (`resolvedTaskId === preferredTaskId`) but runs
-after. Result: when the stored task has been deleted, the first task is selected and an empty New Step panel
-opens on it with the stale step id. Test: `mobile-photo-portal.capture-session.test.tsx`, "KNOWN GAP: a
-stored selection for a task that no longer exists…". Fix belongs with the hydration ownership work, not an
-extraction commit.
+**a. Open: stale stored selection can reopen a draft panel on the fallback task.** The scoped
+capture-session hydration still has a characterized path where a missing selected task falls back to
+the first task but retains the draft-panel state. C1 adds account isolation; it does not fix this
+same-account selection behavior. See `mobile-photo-portal.capture-session.test.tsx`, “KNOWN GAP: a
+stored selection for a task that no longer exists…”. Verify the ownership of the stale step id before
+changing this path. Historical line numbers no longer apply.
 
-**b. A delayed draft save can run after the component has unmounted.** The 450 ms new-step autosave
-timer (`mobile-photo-portal.tsx:1728`) is cleared on task switch and on close, but the unmount cleanup
-(`:1021`) clears only motion timers, and nothing flushes the pending draft synchronously at unmount. Two
-distinct consequences: (1) when the component unmounts but the page survives (in-app navigation), the
-timer still fires and writes to the task it was scheduled for — the edit persists, from a component that no
-longer exists; (2) when the whole page is torn down before the timer fires (reload, tab close, navigation
-away) the database write is lost, but the keystrokes usually are not: `scheduleNewStepAutosave` writes the
-IndexedDB recovery record **immediately on each change** (`mobile-photo-portal.tsx`, the
-`saveRecoverableNewStepDraft(snapshot)` call before the timer is armed), and the real-browser spec
-`e2e/mobile-recovery-draft.spec.ts` confirms the record is readable right after typing and restores the
-draft after a reload. Starting that asynchronous write immediately does **not** guarantee it completes before a page
-teardown, and the real-browser spec does not measure that: it waits for the blocked database save to
-fail before reading the record, so it shows the record is readable once the write completed, not that a
-change is durable at the moment of typing. What a teardown can lose is therefore any change whose
-asynchronous put had not committed (a window this evidence does not size), plus any draft the recovery
-path later refuses or overwrites (§8e). The earlier "450 ms local-recovery loss window" claim is
-withdrawn. Post-unmount execution itself is not a loss. (This paragraph previously said the record was written on the timer's schedule; that was
-wrong.) Already listed in `docs/edit-operation-inventory.md`
-§5.16; case (1) is pinned by "KNOWN GAP: unmounting with the autosave debounce armed…"; case (2) is not
-testable in jsdom without a page lifecycle and remains a code-derived statement.
+**b. Fixed: unsent autosave after unmount. Remaining: commit timing at document teardown.** C1 cancels
+unsent New Step autosaves on editor cleanup and guards subsequent mutation stages against old account/
+editor lifetime. Already-issued requests cannot be recalled. Local writes begin immediately, but a
+reload or close before the asynchronous transaction commits can still lose that change. The browser
+characterization recovered 3/3 immediate reloads on the measured machine without waiting for storage;
+this is not a universal durability bound or a fixed 450 ms loss-window measurement.
 
-**c. A timer started with no draft open cannot be stopped from the header.** `startCaptureTimerForCurrentTask`
-(`:2733`) binds `activeStepId: null` when the New Step panel is closed. `isActiveHeaderCaptureTimer` requires a
-bound step, so no header chip and no Stop control render (`canStartCaptureTimer`, `:697`, still shows
-"Timer", which is a no-op while that timer runs). The timer is persisted in the session and keeps running
-until a draft is opened (which binds it) or the session is cleared. Pinned by "a timer started without an
-open draft is bound to no step…". UX decision needed (bind to the task and show the chip, or refuse to start
-without a step); not changed here.
+**c. Open: timer started without a draft has no header Stop control.** A timer with no active step
+is excluded from the active header chips until a draft binds it. The existing component test pins this
+behavior. Showing a task-level Stop control or refusing a step-less start is a UI decision requiring
+approval; C1 did not change timer arithmetic or this interaction.
 
-**e. The recovery draft is scoped by neither user nor project.** One IndexedDB record under the fixed key
-`mobile-new-step-draft-v1` serves every project and every signed-in user of the browser
-(`src/components/mobile-photo-portal/recovery-draft-store.ts`). Consequences pinned by tests: a draft left
-in project X is overwritten by the next draft typed in project Y (`mobile-photo-portal.recovery-draft.test.tsx`,
-"KNOWN SCOPING…"); a draft whose task is not in the currently opened project is neither restored nor
-cleared, so it waits to be overwritten; nothing checks which user wrote it. Confirmed against actual
-Chromium IndexedDB by `e2e/mobile-recovery-draft.spec.ts` (key and record shape). This is the demonstrated
-data-loss path for phone drafts and the input to the Package C scoping decision; not changed by B2.
+**d. Historical trivia, not a defect:** `getCaptureTimerElapsed` treats `startedAt === 0` as “not
+started”. The unit test retains this contract; it is not a backlog item.
 
-**d. Trivia, not a defect:** `getCaptureTimerElapsed` treats `startedAt === 0` as "not started" (falsy
-check). Real clocks never produce 0; pinned in `capture-session.test.ts` so a future change is deliberate.
+**e. Fixed: shared unowned IndexedDB slot for new drafts.** New drafts use user/product/task-scoped
+v2 slots. Exact-token acknowledgment cannot clear another stored snapshot. The legacy v1 record is
+preserved and can be reviewed/adopted only through the approved explicit flow; repeat adoption retains
+the original step id. Invalid or absent-task records stay stored. Scope protection is tested in real
+Chromium across products, tasks and accounts.
 
-
-### C1 feature-branch update — 2026-10-04
-
-On `codex/mobile-draft-recovery`, §8e is addressed for new New Step drafts by user/product/task
-slots and exact write-token acknowledgment. The legacy IndexedDB record is preserved; only explicit
-user-approved Review → Use copies it into an owned slot. Scoped capture-session keys prevent another
-account from automatically hydrating parked fields. Unowned old localStorage capture sessions remain
-stored and are not auto-restored; the legacy review control handles the IndexedDB record only.
-
-The §8b unsent post-unmount autosave is now cancelled. Already-issued requests cannot be recalled;
-subsequent queued stages check the captured editor/account lifetime. Async local puts can still be lost
-if the document closes before commit. Same-user, same-task concurrent-tab puts remain last-write-win;
-exact tokens protect against stale deletion, not concurrent overwrite. No timer UX change (§8c) is included.
-
-See `docs/mobile-draft-recovery-c1-results.md` for current evidence and limitations. Historical B1/B2
-characterization above describes its frozen baseline, not this branch's changed behavior.
+**Remaining C1 limits:** same-user/same-task concurrent puts are last-write-win; old unowned
+localStorage parked fields are preserved but not exposed by the IndexedDB legacy review; unknown or
+empty occupied slots are not overwritten by legacy adoption. A failed local put warns and does not
+block remote saving; a fresh edit is needed to attempt another local put for an otherwise unchanged
+snapshot. See the C1 results for rollback behavior. Do not describe this as full offline recovery.

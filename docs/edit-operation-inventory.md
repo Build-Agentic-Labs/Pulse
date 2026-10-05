@@ -6,6 +6,15 @@ established from code alone; a claim marked **code-derived** follows from the co
 reproduced against a database in this pass. Historical documents were treated as claims to check, not
 as facts; §9 records which held.
 
+**Current-status overlay, 2026-10-04:** this inventory remains the measured `438a6df` source snapshot,
+not a re-audit of every current operation. B1/B2 extraction and C1 are now published at `1147c7d`.
+C1 changes the §5 New Step recovery, capture-session ownership, unmount and late-account callback paths:
+owned slots are user/product/task scoped, cleanup uses exact tokens, unsent autosaves are cancelled,
+and legacy adoption is explicit and preserves its source. See [C1 results](mobile-draft-recovery-c1-results.md)
+and [current mobile follow-ups](deferred-work.md#8-mobile-capture-follow-ups-and-resolved-recovery-issues).
+The general journal, atomic reorder and targeted restore/catalog pilots remain unimplemented. Historical
+line numbers and pinned baseline behaviors below must not be copied as current implementation claims.
+
 Field key used in every row: **(1)** user action · **(2)** owning component / handler · **(3)** scope
 and how ids are obtained · **(4)** saver and tables / RPCs / storage touched · **(5)** request ordering
 and transaction boundary, and what remains if request *N* fails · **(6)** authorization and version
@@ -602,7 +611,7 @@ exported symbol `MobilePhotoPortal`, line 809).
 7. Optimistic whole-state replacement, no rollback, no retry. 8. Memory only.
 9. **Scenario-wide LWW**: reverts every teammate edit since the phone's last refetch and wipes all step
    tools and exploded views in the scenario. Confirms `docs/restore-step-design.md` §1,
-   `docs/workspace-structure-handoff.md` item 2 and `docs/correctness-scope.md` §3 item 3. The isolated
+   `docs/history/workspace-structure-handoff.md` item 2 and `docs/correctness-scope.md` §3 item 3. The isolated
    `delete_manufacturing_step` / `restore_manufacturing_step` RPCs are referenced nowhere in `src/`.
 10. `supabase-planner.save-order.test.ts:85-96` pins request order (mocked). Nothing tests
     `restoreDeletedSnapshot` or its stored outcome.
@@ -1146,7 +1155,7 @@ and `auth-project-gate.tsx`. `src/lib/awi/*` has no unused exports.
 
 | Claim | Source | Verdict |
 |---|---|---|
-| Injected-client retry "is not fixed" | `workspace-structure-handoff.md` item 7 | **Stale** — fixed at `0b41c81` (`task-store.ts:512, 574, 599`) |
+| Injected-client retry "is not fixed" | `docs/history/workspace-structure-handoff.md` item 7 | **Stale** — fixed at `0b41c81` (`task-store.ts:512, 574, 599`) |
 | Single-task read lacks id tiebreaker and paging | handoff item 9, `deferred-work.md` §7b | **Stale** — fixed at `438a6df` (`read-store.ts:534-540`); confirmed live by the stress fixture's 3-page `step_tools` confirmation read |
 | Six task-write functions have no production caller | handoff item 9, §7a | **Confirmed and incomplete** — §9 lists nine more unused exports |
 | Catalog rename/delete/tidy never persist step-tool references | handoff item 1, `correctness-scope.md` §3 | **Confirmed** (`shell-store.ts:230-358` writes no `step_tools`) |

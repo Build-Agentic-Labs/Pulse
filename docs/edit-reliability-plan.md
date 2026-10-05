@@ -1,15 +1,15 @@
 # Edit reliability and editor structure plan
 
-Prepared October 4, 2026. Planning baseline: `0b41c81` on `main`. **Rebased 2026-10-04 on `438a6df`**
-(Claude's single-task paging fix, merged with CI green); see `docs/edit-reliability-baseline-2026-10-04.md`.
-
-Status: **Package A delivered** on branch `codex/edit-reliability-baseline` (documentation and measurement
-tooling only; nothing merged or pushed). Packages B–G remain proposed and not authorized for
-implementation or database deployment. This document does not reopen the completed five-phase structural plan.
+Status reconciled 2026-10-04 against published main `1147c7d`, with all three CI jobs green.
+The five-phase workspace restructure is complete. Package A and mobile slices B1/B2 are published;
+C1 scoped mobile recovery is published with the approved legacy-review flow and exact write tokens.
+The rest of Package B, the broader Package C recovery pilot, and Packages D–G have not started.
+Catalog rollout and experimental database deployment remain blocked. This document is the active
+roadmap; [docs/README.md](README.md) is the current status and documentation index.
 
 The next investment should improve edit ownership, recoverability, and persistence boundaries. Smaller editor modules support that work; line reduction alone is not the goal. Keep the current UI unless the user approves a concrete visible change. Preserve existing data and retain all test database volumes.
 
-## Evidence and confidence
+## Historical Package A baseline and confidence
 
 The source measurements below were taken directly from the working tree. **Refreshed 2026-10-04 on
 `438a6df`:** the "Verified" column records what Package A re-measured; the historical request figures
@@ -80,15 +80,15 @@ confirmation read paged `step_tools` across three requests). This prerequisite i
 
 ## Work packages and order
 
-| Package | Scope | Dependency | Completion evidence |
+| Package | Scope | Status | Evidence and next gate |
 |---|---|---|---|
-| A | Refresh evidence and map edit operations | Claude finishes | **Delivered 2026-10-04**: `docs/edit-reliability-baseline-2026-10-04.md`, `docs/edit-operation-inventory.md`, `scripts/measure-edit-baseline.mjs` |
-| B | Extract mobile responsibilities without behavior changes | A | Same outcomes, requests, and lifecycle timing under characterization tests |
-| C | Prove durable recovery for one narrow edit operation | A; coordinate with B | Edit survives interruption; no wrong-scope replay or duplicate effect |
-| D | Prove atomic task reorder for updated clients | A and operation contract | All-or-nothing database tests; no tool/media side effects |
-| E | Targeted step delete/restore | C and approved DB design | Exact associated-record preservation and concurrent-edit isolation |
-| F | Catalog consistency and remaining operation migration | C–E; compatibility gate | All participating writers and deployment policy validated |
-| G | Further editor and controller decomposition | Measured need | Narrower ownership without lifecycle or performance regressions |
+| A | Baseline and edit-operation inventory | Complete | Published with B1/B2 at `9dfcbb7`; historical measurements retained |
+| B | Mobile responsibility extraction | Partial | B1/B2 published; further extraction not started |
+| C | Narrow edit recovery pilots | Partial | C1 phone draft scoping published at `1147c7d`; broader durable-recovery pilot not started |
+| D | Atomic task reorder | Not started | Proposed next implementation pilot; design, failure matrix and any database change need review |
+| E | Targeted step delete/restore | Not started | Depends on approved database design and client compatibility |
+| F | Catalog consistency and writer compatibility | Blocked | Existing client compatibility risks unresolved |
+| G | Further editor/controller decomposition | Not started | Choose boundaries using measured need, not line quotas |
 
 Packages C and D are small vertical pilots, not permission to journal every edit or replace every saver at once. E and F cannot be declared globally safe while incompatible deployed clients remain able to overwrite their results.
 
@@ -129,11 +129,11 @@ Characterize: pending edits during selection and unmount, timer park/resume, new
 
 Exit: all moved-path tests pass before and after; no newly introduced production write path; no unexplained request or payload increase on identical fixtures; no UI changes.
 
-### Package B ledger
+### Historical Package B extraction ledger
 
 | Slice | Branch / commits | Moved | Sizes (physical lines) | Evidence |
 |---|---|---|---|---|
-| **B1 — hook-free capture-session utilities** (done 2026-10-04, awaiting review; not merged) | `codex/mobile-capture-session` from `af54721`: `eefa142` tests first, `4897989` extraction, then the docs commit | Lines 137–476 of `mobile-photo-portal.tsx` → `src/components/mobile-photo-portal/capture-session.ts`: timer data model and constants, timer arithmetic, header-chip derivation, `localStorage` session read/write with legacy-key fallback. No hook, effect, handler or JSX moved. | Component 4,369 → **4,045** (341 lines removed incl. blanks, 17 import lines added). Module **348** (21 exports; `normalizeParkedTaskCaptureState`, `normalizeParkedCaptureByTaskId`, `normalizeCaptureTimerSnapshot` stay private; `isRecord` is exported because `removeStepScopedCustomFields` in the component still calls it — a production use, not a test convenience). Tests: `capture-session.test.ts` 233 lines / 22 cases; `mobile-photo-portal.capture-session.test.tsx` 399 lines / 25 cases. | See rows below |
+| **B1 — hook-free capture-session utilities** (published 2026-10-04 at `9dfcbb7`) | `codex/mobile-capture-session` from `af54721`: `eefa142` tests first, `4897989` extraction, then the docs commit | Lines 137–476 of `mobile-photo-portal.tsx` → `src/components/mobile-photo-portal/capture-session.ts`: timer data model and constants, timer arithmetic, header-chip derivation, `localStorage` session read/write with legacy-key fallback. No hook, effect, handler or JSX moved. | Component 4,369 → **4,045** (341 lines removed incl. blanks, 17 import lines added). Module **348** (21 exports; `normalizeParkedTaskCaptureState`, `normalizeParkedCaptureByTaskId`, `normalizeCaptureTimerSnapshot` stay private; `isRecord` is exported because `removeStepScopedCustomFields` in the component still calls it — a production use, not a test convenience). Tests: `capture-session.test.ts` 233 lines / 22 cases; `mobile-photo-portal.capture-session.test.tsx` 399 lines / 25 cases. | See rows below |
 
 **B1 evidence**
 - *Bodies:* lines 137–476 of `af54721` diffed against the module minus its header and `export ` prefixes — **identical**.
@@ -144,14 +144,14 @@ Exit: all moved-path tests pass before and after; no newly introduced production
 - *Measurements* (`scripts/measure-edit-baseline.mjs --samples 5`, run `outputs/measurements/edit-baseline/20261004-195326/`, compared with Package A's `20261004-191434/`, same fixture sizes, fresh seeds): **per-endpoint request counts identical on every phase and fixture**, including `mobile:open` 30 / 30 / 114 (small / medium / stress); response bytes identical (stress planner open 2,194.7 vs 2,195.0 KiB, the known access-bootstrap duplicate variance: 123/124/124/123/119 vs 124/124/124/124/119 requests); app-origin bytes identical (mobile open 50.0 / 53.8 / 88.6 KiB both runs). Warm-median timings (ms, A → B): small open 379 → 381, Procedure 70 → 71, edit 818 → 812, mobile open 126 → 134; medium 378 → 381, 76 → 75, 820 → 817, 217 → 221; stress 641 → **732**, 214 → 215, 890 → 890, 1,314 → 1,395; blur → row 805/798/766 → 797/797/761. The stress planner-open shift (per sample 662, 627, 634, 641, 704 → 759, 716, 732, 649, 739) has no mechanism in this change — the portal chunk is not loaded on the planner route and its bytes are identical — so it is reported as unexplained run-to-run variance at n = 4, consistent with Package A's caution that these samples are not a regression basis; the mobile-open stress shift (+6 %) sits inside the same band.
 - *Isolated infrastructure:* `pulse-e2e` was stopped before and is stopped after (started once from its data, never reset); ledger 151 before and after; row deltas are the three seeded fixtures plus the browser suite's own rows (`retained-db-delta.json` in the run folder). The development project `pulse` was never touched; no volume removed; no experimental function activated.
 - *Behaviour:* none changed by design; the gaps surfaced by characterization are recorded in `docs/deferred-work.md` §8 and left for a separate, approved change.
-- *Not done:* no second slice, no merge, no push.
+- *B1 verification snapshot:* B2 and publication followed later; both slices are now published.
 - *Post-review verification (2026-10-04):* three compiling behavioural mutations were applied in turn to
   `capture-session.ts` and the code restored to HEAD afterwards (verified identical): project id dropped
   from the session key → 21 tests fail (5 unit, 16 component); running time ignored in
   `getCaptureTimerElapsed` → 14 fail (7 unit, 7 component); parked map dropped on write → 5 fail (2 unit,
   3 component). Every intended test failed in each case.
 
-| **B2 — IndexedDB recovery-draft store** (done 2026-10-04, awaiting review; not merged) | `codex/mobile-capture-session`, on top of B1 (`eefa142`, `4897989`, `2ad6420`, `d626ca3`) | Constants `MOBILE_DRAFT_DB_NAME` (`buildlogic-mobile-drafts`), `MOBILE_DRAFT_STORE_NAME` (`drafts`), `MOBILE_NEW_STEP_DRAFT_KEY` (`mobile-new-step-draft-v1`), type `MobileNewStepDraftRecord`, and `readBlobAsDataUrl`, `openMobileDraftDb`, `saveMobileNewStepRecoveryDraft`, `loadMobileNewStepRecoveryDraft`, `clearMobileNewStepRecoveryDraft` → `src/components/mobile-photo-portal/recovery-draft-store.ts`. The component keeps when to save, load and clear, the 250 ms recovery timer, the task-exists check, the `hasDraftStepContent` gate and the user-facing error message. | **Actual:** component 4,045 → **3,955** (96 lines removed incl. blanks, 6 import lines added); module **105** (5 exports: the three verbs, the record type, `readBlobAsDataUrl`; the three constants and `openMobileDraftDb` private). Tests: `recovery-draft-store.test.ts` 11 cases; `mobile-photo-portal.recovery-draft.test.tsx` 12 cases; `e2e/mobile-recovery-draft.spec.ts` 1 real-browser case; double in `src/test-support/indexeddb-double.ts`. | Ownership: the module owns the database/store names, the single fixed key (its lack of project/user scoping is a Package C design input and is **not** changed here), the record shape, the `updatedAt` stamp, and the open/put/get/delete lifecycle with `database.close()` in every `finally`. Exports: the three verbs, the record type, and `readBlobAsDataUrl` (production caller `buildPhotoAttachment`); `openMobileDraftDb` and the constants stay private. Tests before moving: unit tests over a minimal IndexedDB double (save writes one record under the fixed key with an ISO `updatedAt` and closes; load returns it or null; clear deletes; second save overwrites; missing `indexedDB` rejects with the exact message; open/transaction/request errors reject with their own messages and still close), a real `FileReader` test for `readBlobAsDataUrl`, component tests over the double (record written on typing, overwritten on further typing, cleared after a successful save with no timer armed, retained after a failed save, recovery on mount only when the task exists, empty-content record cleared, unavailable storage surfaces the recovery-draft error message), and a real-browser Playwright test on the isolated database using actual IndexedDB in an isolated context: save, overwrite, reload/read with the save blocked, then clear after the save succeeds. Acceptance as B1: deletion-plus-import diff, identical bodies apart from `export`, tests pass before and after, sequential gate, browser suite, measurement rerun with identical `mobile:open` counts, bundle comparison explained. |
+| **B2 — IndexedDB recovery-draft store** (published 2026-10-04 at `9dfcbb7`) | `codex/mobile-capture-session`, on top of B1 (`eefa142`, `4897989`, `2ad6420`, `d626ca3`) | Constants `MOBILE_DRAFT_DB_NAME` (`buildlogic-mobile-drafts`), `MOBILE_DRAFT_STORE_NAME` (`drafts`), `MOBILE_NEW_STEP_DRAFT_KEY` (`mobile-new-step-draft-v1`), type `MobileNewStepDraftRecord`, and `readBlobAsDataUrl`, `openMobileDraftDb`, `saveMobileNewStepRecoveryDraft`, `loadMobileNewStepRecoveryDraft`, `clearMobileNewStepRecoveryDraft` → `src/components/mobile-photo-portal/recovery-draft-store.ts`. The component keeps when to save, load and clear, the 250 ms recovery timer, the task-exists check, the `hasDraftStepContent` gate and the user-facing error message. | **Actual:** component 4,045 → **3,955** (96 lines removed incl. blanks, 6 import lines added); module **105** (5 exports: the three verbs, the record type, `readBlobAsDataUrl`; the three constants and `openMobileDraftDb` private). Tests: `recovery-draft-store.test.ts` 11 cases; `mobile-photo-portal.recovery-draft.test.tsx` 12 cases; `e2e/mobile-recovery-draft.spec.ts` 1 real-browser case; double in `src/test-support/indexeddb-double.ts`. | Ownership: the module owns the database/store names, the single fixed key (its lack of project/user scoping is a Package C design input and is **not** changed here), the record shape, the `updatedAt` stamp, and the open/put/get/delete lifecycle with `database.close()` in every `finally`. Exports: the three verbs, the record type, and `readBlobAsDataUrl` (production caller `buildPhotoAttachment`); `openMobileDraftDb` and the constants stay private. Tests before moving: unit tests over a minimal IndexedDB double (save writes one record under the fixed key with an ISO `updatedAt` and closes; load returns it or null; clear deletes; second save overwrites; missing `indexedDB` rejects with the exact message; open/transaction/request errors reject with their own messages and still close), a real `FileReader` test for `readBlobAsDataUrl`, component tests over the double (record written on typing, overwritten on further typing, cleared after a successful save with no timer armed, retained after a failed save, recovery on mount only when the task exists, empty-content record cleared, unavailable storage surfaces the recovery-draft error message), and a real-browser Playwright test on the isolated database using actual IndexedDB in an isolated context: save, overwrite, reload/read with the save blocked, then clear after the save succeeds. Acceptance as B1: deletion-plus-import diff, identical bodies apart from `export`, tests pass before and after, sequential gate, browser suite, measurement rerun with identical `mobile:open` counts, bundle comparison explained. |
 
 
 **B2 commits:** `769eee9` tests first (component characterization over the double, the double itself, the
@@ -208,7 +208,7 @@ recovery re-save), then the docs/evidence commit.
   the real-browser spec; and in jsdom (no `indexedDB`) every draft keystroke surfaces the
   "could not store the local recovery draft" message, which the existing component tests had been
   tolerating silently (now pinned as the unavailable-storage path).
-- *Not done:* no further slice, no merge, no push, no Package C work.
+- *B2 verification snapshot:* no further extraction was done at that point. B1/B2 were subsequently published, and C1 followed at `1147c7d`.
 
 ## Package C one durable recovery pilot
 
@@ -222,11 +222,11 @@ Do not replay entire stale planner snapshots. Replay after revalidation; preserv
 
 Exit: successful persistence and recovery demonstrated against a real isolated database; zero wrong-owner replay and zero lost acknowledged edits in the specified test matrix. A count of passing tests alone is insufficient.
 
-> **Status 2026-10-04:** C1 (scoped phone recovery drafts) was designed on `codex/mobile-capture-session`
-> (`docs/mobile-draft-recovery-c1-design.md`) and **paused as deferred, not completed**, with two release
-> conditions recorded there (user-approved legacy recovery path before auto-restore is removed; exact
-> write-token acknowledgment rather than `<=` revision counters). The Gantt duration pilot remains the
-> later candidate. No Package C code exists.
+> **C1 shipped 2026-10-04 at `1147c7d`:** scoped phone New Step recovery, exact write-token
+> acknowledgment, account lifecycle checks, and the approved non-destructive legacy-review flow.
+> See [C1 contract and results](mobile-draft-recovery-c1-results.md). This is a bounded recovery
+> improvement, not the general write-ahead journal described above. Same-task concurrent puts and
+> teardown before local commit remain limitations. The Gantt duration pilot has not started.
 
 ## Package D atomic reorder pilot
 
@@ -280,15 +280,13 @@ For each contained change: targeted tests, lint and typecheck as appropriate. At
 
 Keep failures at every important request boundary, cross-scope completion, multi-tab concurrency, reload before send/after commit, and offline replay in the test matrix. Inject failures in disposable fixtures only. Tests must prove stored outcomes, not merely optimistic UI or mocked call order.
 
-## Handoff and stop points
+## Execution boundaries
 
-When Claude finishes: record its final SHA, inspect its diff, refresh this baseline, and remove any already-completed work from A. Do not start a branch or alter Claude's checkout while it is active.
+Before any next package, branch from current published main, inspect the relevant current call paths,
+and define a bounded stored-outcome test matrix. Reuse the operation inventory as historical evidence;
+refresh only paths touched by the next change. Do not repeat the completed restructure.
 
-Approve one work package at a time. Each report includes: exact baseline/final SHA, changed ownership, behavior changes, data touched, tests, measured deltas, unresolved risks, and rollback limitations. Separate extraction commits from fixes. No automatic merge, push, production migration, UI change, or follow-on package is authorized by this plan.
-
-Recommended first authorization: ~~Package A, then~~ a small slice of B — specifically the hook-free
-capture-session utilities extraction (pure calculations plus the `localStorage` session functions) proposed in `docs/edit-reliability-baseline-2026-10-04.md` §4, with its
-eleven characterization tests written first. Scope C and D after A; do not wait for every editor to be
-split before addressing concrete reliability risks. Package A's inventory suggests C's candidate (a Gantt
-duration edit) rides the unversioned shell save, and that the two-request reorders (desktop and mobile)
-and the mobile Restore are the three paths where an interruption leaves visibly wrong data.
+Preserve user data and retained database volumes. Any visible UI change needs prior approval.
+Database designs and migrations are separate release decisions; the isolated experimental SQL remains
+outside production paths. Follow the repository's branch → green CI → main workflow when publication
+is authorized. Do not start D, E, F or broader C solely because this roadmap describes them.

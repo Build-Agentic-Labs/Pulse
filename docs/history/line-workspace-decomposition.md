@@ -1,5 +1,7 @@
 # line-workspace.tsx decomposition — execution plan
 
+> Historical document, archived 2026-10-04. This preserves the original scope, evidence and decisions; intermediate branch states and proposed algorithms below are not current instructions. See [current documentation status](../README.md).
+
 Status: COMPLETE (2026-07-19, branch line-workspace-decomposition). All six
 families extracted as pure moves, one commit each, typecheck/lint/tests green
 per commit and every affected view live-verified against the prod build.

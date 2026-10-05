@@ -1,7 +1,11 @@
 # C1 implementation results — 2026-10-04
 
-Feature branch: `codex/mobile-draft-recovery`. Confirmed merged baseline: local and fetched
-origin/main both `9dfcbb739a5b0136734bc7f883730ac3a2521ad1`. The user subsequently authorized merging when complete; repository policy requires feature-branch CI before publication.
+**Published:** main `1147c7d` (2026-10-04), fast-forwarded from `9dfcbb7`. Local and origin/main are synchronized; the feature branch was removed after its commit was confirmed on origin/main.
+
+All three jobs passed in [feature CI](https://github.com/Build-Agentic-Labs/Pulse/actions/runs/37245651707)
+and [main CI](https://github.com/Build-Agentic-Labs/Pulse/actions/runs/37246120976).
+This is the canonical C1 contract, verification and limitations document. The completed implementation
+handoff was consolidated here; the superseded initial design is kept under `docs/history/`.
 
 ## Delivered contract
 
@@ -23,6 +27,42 @@ Not now/Use flow. User approved the concrete preview in this conversation on 202
 Review never saves. Use atomically verifies the reviewed source and absence of an occupied owned slot,
 copies into a new owned record, then opens the usual autosaving editor. The source remains unchanged;
 repeat adoption retains the same step identity. No discard or migration is included.
+
+## Shipped storage and adoption rules
+
+- Key: `mobile-new-step-draft-v2:<encoded userId>:<encoded projectId>:<encoded taskId>`.
+- Record: `schemaVersion: 2`, repeated scope, `draftId` equal to the valid step id, unique `writeToken`,
+  `updatedAt`, and the full name/instruction/duration/tools/photos/checks/checkValues payload.
+- Immediate local write, debounce, retry and acknowledgment reuse the same unchanged snapshot/token.
+  A changed snapshot gets a fresh token. No revision or timestamp inequality authorizes deletion.
+- Save/load/acknowledge/adopt use captured scope and per-key same-instance ordering. Local operations
+  settle on transaction completion; transaction errors and aborts reject, and opened connections close.
+- Acknowledgment uses atomic get/conditional delete with matching schema, scope, draft id and exact token.
+  The complete remote step/tools/photos chain must succeed first; a failed local put never permits cleanup.
+- Recovery checks only the selected loaded task. Missing-task, empty and malformed records are retained;
+  recovery does not automatically switch tasks or create a draft directory.
+- Identity is a local ownership label; existing server permissions authorize remote writes. There is no
+  anonymous/shared key and no network identity lookup per keystroke. Account changes detach old state,
+  cancel unsent work and prevent subsequent queued mutation stages from starting in the new account.
+- Legacy Review/Back/Not now do not write. Use revalidates the reviewed legacy snapshot and destination
+  slot in one transaction, persists the owned copy before opening the editor, and retains the legacy
+  source unchanged. An occupied owned slot is refused. Repeat adoption retains the original step id.
+- No expiry, bulk clearing, new IndexedDB version, production migration, dependency or permission change.
+
+## Acceptance evidence by boundary
+
+| Boundary | Evidence |
+|---|---|
+| Products and tasks | Real Chromium IndexedDB retains separate pending payloads across switches |
+| Accounts | One browser profile switches U1 → U2 → U1; U2 receives no U1 owned payload |
+| Tokens and ordering | Store/component tests; two browser tabs demonstrate old-token acknowledgment preserves newer content |
+| Lifecycle | Component tests cancel unsent work and isolate late completions; step/tool/photo helper tests guard later mutation stages |
+| Legacy | Component and browser Review/Back/Not now/Use tests preserve source and prevent replacement; repeat Use creates no duplicate step |
+| Invalid data and failures | Store tests retain malformed/unknown slots and handle transaction abort; component tests retain recovery after tool failure and warn on unavailable storage |
+| Reload | Browser reload restores a locally committed draft while remote saving is blocked; immediate reload observed 3/3 recovery without a commit wait |
+
+These assertions establish the tested contracts, not universal offline safety. Baseline characterization
+cases were updated where C1 intentionally changed behavior; not every test was a pre-fix reproduction.
 
 ## Evidence
 

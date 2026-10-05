@@ -1,22 +1,20 @@
 # Correctness investigation: scope close-out (2026-10-03)
 
-Branch `codex/workspace-structure`. Nothing below has been merged, pushed or deployed. No production migration has been applied, and no guard is active.
+**Current status, 2026-10-04:** the five structural phases were published at `5526cfe` and their
+follow-up fixes are on main `1147c7d`. C1 scoped mobile New Step recovery is also published. This document
+retains the correctness investigation and the unresolved catalog/restore deployment constraints.
 
-> **Status 2026-10-04 (edit-reliability plan, Package A):** the branch above **was merged to `main`**
-> (`5526cfe`, 2026-10-04, CI green) and the branch deleted, so the first sentence is historical. What is
-> still true on `main` `438a6df`: the isolated migration is **not** in the active paths
-> (`supabase/migrations` has 151 files and `supabase/tests` 22, none of them `20261003210000`; the
-> files live under `supabase/isolated/2026-10-03-step-recovery/`), no production migration from this
-> work has been applied, **the catalog rollout in §3 remains BLOCKED**, and the release-checklist item
-> in §2 step 2 has **not** been written (no checklist mentions the production ledger). §4's
-> "memory-only edits" claim is re-verified operation by operation in `docs/edit-operation-inventory.md`.
-> "What resumes now" at the end is historical: structural Phases 3–5 completed and merged.
+The experimental SQL remains under `supabase/isolated/2026-10-03-step-recovery/`, outside active migration
+and CI paths. No production migration from that experiment has been applied by this work. Catalog rollout
+remains **BLOCKED**. The production-ledger comparison checklist item below remains unwritten.
+The blanket “memory-only edits” statement was superseded by the operation inventory and C1 results.
+See [the active roadmap](edit-reliability-plan.md) for next work.
 
-## 1. Completed, validated fixes (committed locally)
+## 1. Published and validated structural fixes
 
 | Fix | Commit | Evidence |
 |---|---|---|
-| Phase 1 save ownership, plus the cross-product save-scope and scenario-draft recovery corrections | Phase 1 ledger in `docs/workspace-structure-plan.md` | lifecycle and seam tests, browser suite |
+| Phase 1 save ownership, plus the cross-product save-scope and scenario-draft recovery corrections | Phase 1 ledger in `docs/history/workspace-structure-plan.md` | lifecycle and seam tests, browser suite |
 | Phase 2 media and tools extraction | Phase 2 ledger | seam tests, browser suite |
 | Catalog operations stop when their task rewrite is refused (unconfirmed state, view-only access) | `aee57b1` | tool tests; mutations caught |
 | A failed catalog rewrite's step-tool changes are undone on screen, keeping edits made meanwhile | `8b14112` | in-memory reproduction with the real savers; 5 mutations caught |
@@ -74,7 +72,7 @@ The retained isolated database and its migration ledger were **not** modified. T
 2. **Add a release checklist item:** compare `supabase/migrations` with the production ledger before any apply, and apply only versions explicitly authorized for that release.
 3. **The retained isolated database** (`scratch/browser-db`) already has the migration applied, with its ledger row. That is isolated only, and no production action follows from it.
 
-Until then, the branch stays local (no merge, no push), which is the current state.
+Structural application changes were published separately. Experimental SQL deployment remains blocked; publication of the refactor does not authorize applying it.
 
 ## 3. Separate implementation project: catalog consistency and targeted restore
 
@@ -108,12 +106,17 @@ Each piece needs its own approval and migration plan.
 
 ## 4. Separate future project: broad durable edit recovery
 
-Today only procedure step name/instruction text (and, partly, photo annotations) survives a reload. Everything else is memory-only: Gantt, product setup, zones, task add/delete, step structure, tool changes, media uploads, catalog, BOM. Most mobile edits are memory-only too (inventory in catalog design §5b).
-
+Recovery varies by operation. Procedure drafts have their existing protections, and C1 now scopes
+mobile New Step recovery by account/product/task with exact acknowledgment. Other edit paths must be
+classified individually using `docs/edit-operation-inventory.md`; its rows describe the `438a6df`
+baseline, with the C1 delta recorded at the top. No blanket claim that every other operation is memory-only
+or durably recoverable is justified.
 **What the project covers:** a write-ahead local journal for every edit type, plus making multi-request operations atomic or idempotent so they can be replayed.
 
 **Why it matters for the blocked rollout:** it is the precondition for ever refusing an outdated client safely, since the refused edit must survive the reload and an interrupted operation must complete on replay. It is independent of the structural phases and of the catalog project.
 
-## What resumes now
+## Next work
 
-Phase 3 of the structural plan (loading, realtime, scenarios) is a behaviour-preserving extraction. It does not absorb sections 2–4. See "Phase 3 execution plan" in `docs/workspace-structure-plan.md`.
+The structural phases are complete. Atomic reorder, targeted restore, catalog consistency and broader
+edit recovery remain separate pilots in [the active roadmap](edit-reliability-plan.md). The isolated
+migration is a candidate design, not authorized production implementation.

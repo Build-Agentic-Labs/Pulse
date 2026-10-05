@@ -1,8 +1,13 @@
 # Workspace structure refactor — review handoff (2026-10-04)
 
-**Implementation is frozen.** The branch is ready for an independent review of the cumulative diff. It has not been merged, pushed or published. A final review on 2026-10-04 (four independent read-only reviewers) led to the bounded corrections listed under "Final review" below; nothing else changed.
+> Historical document, archived 2026-10-04. This preserves the original scope, evidence and decisions; intermediate branch states and proposed algorithms below are not current instructions. See [current documentation status](../README.md).
+> Structural Phases 1–5 were published on main at `5526cfe`; the current main also includes follow-up fixes and C1 at `1147c7d`. Optional Phase 6 has not started.
 
-## Branch state
+This is the frozen independent-review handoff before publication at `5526cfe`. The final review led
+to the bounded corrections listed below. The original branch/range and validation figures are preserved
+as review evidence, not current repository status.
+
+## Branch state at the frozen review
 
 | | |
 |---|---|
@@ -19,7 +24,7 @@ The five core phases are complete:
 - **Phase 4:** persistence foundations and media;
 - **Phase 5:** reads, saves, scenarios and access.
 
-Each phase has a ledger in `docs/workspace-structure-plan.md`. Optional Phase 6 has not started.
+Each phase has a ledger in `docs/history/workspace-structure-plan.md`. Optional Phase 6 has not started.
 
 ## Changed files (76), by kind
 
@@ -80,7 +85,7 @@ Three files exist only for these fixes: `planner-state-cache.ts`, `task-planning
 
 ### Documentation (6)
 
-- `docs/workspace-structure-plan.md`: plan and the five phase ledgers;
+- `docs/history/workspace-structure-plan.md`: plan and the five phase ledgers;
 - `docs/correctness-scope.md`;
 - `docs/tool-catalog-consistency-design.md`: proposal, blocked;
 - `docs/restore-step-design.md`: proposal;

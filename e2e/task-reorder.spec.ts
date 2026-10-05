@@ -58,7 +58,7 @@ test('mobile drag commits narrow ordering and rolls it back after a refused save
  await expect(page.getByRole('button',{name:'Drag Process 1 to reorder'})).toBeEnabled();
  expect(requests).toEqual([{method:'POST',path:'/rest/v1/rpc/reorder_scenario_tasks'}]);
  const after=await f.snapshot();
- const strip=(rows:Record<string,unknown>[])=>rows.map(({wbs,version,updated_at,...other})=>other);
+ const strip=(rows:Record<string,unknown>[])=>rows.map(({wbs: _wbs,version: _version,updated_at: _updated_at,...other})=>other);
  expect(strip(after)).toEqual(strip(before));
  await page.route('**/rest/v1/rpc/reorder_scenario_tasks',route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({code:'40001',message:'Conflict'})}));
  await mobileDrag(page,'Process 2',f.ids[0]);
@@ -80,7 +80,7 @@ test('desktop drag uses the same single atomic write and survives a reload',asyn
  await expect.poll(async()=>(await f.snapshot()).find(t=>t.id===f.ids[0]).wbs).toBe('2');
  expect(requests).toEqual([{method:'POST',path:'/rest/v1/rpc/reorder_scenario_tasks'}]);
  const after=await f.snapshot();
- expect(after.map(({wbs,version,updated_at,...rest})=>rest)).toEqual(before.map(({wbs,version,updated_at,...rest})=>rest));
+ expect(after.map(({wbs: _wbs,version: _version,updated_at: _updated_at,...rest})=>rest)).toEqual(before.map(({wbs: _wbs,version: _version,updated_at: _updated_at,...rest})=>rest));
  await page.reload();await expect(page.locator('[draggable="true"]').filter({hasText:'Process 1'})).toBeVisible();
  expect(await f.snapshot()).toEqual(after);
 });

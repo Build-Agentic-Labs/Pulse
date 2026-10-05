@@ -254,3 +254,36 @@ test('immediate reload characterizes local commit without a durability promise',
   }
   await testInfo.attach('immediate-reload-observations', { body: JSON.stringify({ recovered: observations.filter(Boolean).length, attempts: observations.length, observations }), contentType: 'application/json' });
 });
+
+test('competing tab edits retain both drafts across reload and acknowledgment', async ({ context, page }) => {
+  const f = await fixture(); await signIn(context, f.email);
+  let blocked = true;
+  await page.route('**/rest/v1/manufacturing_steps*', async route => {
+    if (blocked && route.request().method() !== 'GET') await route.abort(); else await route.continue();
+  });
+  const key = scopedKey(f.user, f.projectId, f.taskId);
+  const first = await openDraft(page, f.projectId);
+  await first.fill('Shared baseline');
+  await expect(page.getByRole('button', { name: 'Retry save' })).toBeVisible();
+  const other = await context.newPage(); await blockStepWrites(other);
+  await other.goto(`/projects/${f.projectId}/mobile-photos`);
+  const second = other.getByRole('textbox', { name: 'New step name', exact: true });
+  await expect(second).toHaveValue('Shared baseline');
+  await first.fill('First tab unsaved');
+  await expect.poll(async () => (await readRecoveryRecord(page, key))?.name).toBe('First tab unsaved');
+  await second.fill('Second tab unsaved');
+  await expect(other.getByRole('button', { name: 'Retry save' })).toBeVisible();
+  const affinity = await other.evaluate(key => sessionStorage.getItem(`pulse:recovery-selection:${key}`), key);
+  expect(affinity).toMatch(new RegExp(`^${key}:fork:`));
+  await expect.poll(async () => (await readRecoveryRecord(other, affinity!))?.name).toBe('Second tab unsaved');
+  expect((await readRecoveryRecord(page, key))?.name).toBe('First tab unsaved');
+  await page.reload(); await other.reload();
+  await expect(page.getByRole('textbox', { name: 'New step name', exact: true })).toHaveValue('First tab unsaved');
+  await expect(second).toHaveValue('Second tab unsaved');
+  await expect(page.getByRole('button', { name: 'Retry save' })).toBeVisible();
+  blocked = false; await page.getByRole('button', { name: 'Retry save' }).click();
+  await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
+  expect(await readRecoveryRecord(page, key)).toBeNull();
+  expect((await readRecoveryRecord(other, affinity!))?.name).toBe('Second tab unsaved');
+  await other.close();
+});

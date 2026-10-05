@@ -4,7 +4,7 @@ import { installIndexedDbDouble, type IndexedDbDouble } from "@/test-support/ind
 import { createMobileRecoveryDraftStore, recoveryDraftKey, type ScopedRecoveryDraft } from "./recovery-draft-store";
 
 let idb: IndexedDbDouble;
-beforeEach(() => { idb = installIndexedDbDouble(); });
+beforeEach(() => { sessionStorage.clear(); idb = installIndexedDbDouble(); });
 afterEach(() => idb.uninstall());
 const scope = { userId: "u", projectId: "p", taskId: "t" };
 const record = (overrides: Partial<ScopedRecoveryDraft> = {}): ScopedRecoveryDraft => ({
@@ -28,7 +28,7 @@ it("an older acknowledgment cannot delete another tab's equal-revision content",
   const a = createMobileRecoveryDraftStore(); const b = createMobileRecoveryDraftStore();
   await a.save(record());
   await b.save(record({ writeToken: "token-b", name: "Other tab" }));
-  expect(await a.acknowledge(record())).toBe(false);
+  expect(await a.acknowledge(record())).toBe(true); // only A's own slot is cleared
   expect((await b.load(scope))?.name).toBe("Other tab");
   expect(await b.acknowledge(record({ writeToken: "token-b" }))).toBe(true);
   expect(await b.load(scope)).toBeNull();
@@ -96,4 +96,49 @@ it("adoption refuses both an occupied destination and a legacy record changed si
   await expect(store.adoptLegacy(scope, original)).rejects.toThrow("changed");
   expect(await store.load(scope)).toBeNull();
   expect((await loadMobileNewStepRecoveryDraft())?.name).toBe("Changed");
+});
+
+function tabStorage() {
+  const data = new Map<string, string>();
+  return { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } };
+}
+
+it("preserves competing tab drafts, including independent reload and exact acknowledgment", async () => {
+  const tabA = tabStorage(), tabB = tabStorage();
+  const a = createMobileRecoveryDraftStore(tabA), b = createMobileRecoveryDraftStore(tabB);
+  await a.save(record());
+  await b.load(scope);
+  await a.save(record({ writeToken: "a-new", name: "A unsaved" }));
+  await b.save(record({ writeToken: "b-new", name: "B unsaved" }));
+  expect((await a.load(scope))?.name).toBe("A unsaved");
+  expect((await b.load(scope))?.name).toBe("B unsaved");
+  expect((await createMobileRecoveryDraftStore(tabA).load(scope))?.name).toBe("A unsaved");
+  const restoredB = (await createMobileRecoveryDraftStore(tabB).load(scope))!;
+  expect(restoredB.name).toBe("B unsaved");
+  expect(await b.acknowledge(restoredB)).toBe(true);
+  expect((await a.load(scope))?.name).toBe("A unsaved");
+});
+
+it("a second tab that did not load first cannot replace another draft", async () => {
+  const a = createMobileRecoveryDraftStore(tabStorage()), b = createMobileRecoveryDraftStore(tabStorage());
+  await a.save(record());
+  await b.save(record({ draftId: "another-step", stepId: "another-step", writeToken: "b", name: "Second step" }));
+  expect((await a.load(scope))?.name).toBe("Fit");
+  expect((await b.load(scope))?.name).toBe("Second step");
+  expect(idb.records("buildlogic-mobile-drafts", "drafts")).toHaveLength(2);
+});
+
+it("a fresh tab can recover a remaining fork after the canonical draft is acknowledged", async () => {
+  const a = createMobileRecoveryDraftStore(tabStorage()), b = createMobileRecoveryDraftStore(tabStorage());
+  await a.save(record());
+  await b.save(record({ writeToken: "b", name: "Remaining draft" }));
+  await a.acknowledge(record());
+  expect((await createMobileRecoveryDraftStore(tabStorage()).load(scope))?.name).toBe("Remaining draft");
+});
+
+it("blocked tab storage does not prevent durable writes or recovery", async () => {
+  const blocked = { getItem: () => { throw new Error("Blocked"); }, setItem: () => { throw new Error("Blocked"); }, removeItem: () => { throw new Error("Blocked"); } };
+  const store = createMobileRecoveryDraftStore(blocked);
+  await store.save(record());
+  expect((await createMobileRecoveryDraftStore(blocked).load(scope))?.name).toBe("Fit");
 });

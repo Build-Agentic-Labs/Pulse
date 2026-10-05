@@ -262,12 +262,10 @@ Status verified against published main `1147c7d` on 2026-10-04. C1 is shipped, n
 Full implementation contract, tests and limits: [C1 results](mobile-draft-recovery-c1-results.md).
 The B1/B2 extraction ledgers retain the historical behavior and original incident evidence.
 
-**a. Open: stale stored selection can reopen a draft panel on the fallback task.** The scoped
-capture-session hydration still has a characterized path where a missing selected task falls back to
-the first task but retains the draft-panel state. C1 adds account isolation; it does not fix this
-same-account selection behavior. See `mobile-photo-portal.capture-session.test.tsx`, “KNOWN GAP: a
-stored selection for a task that no longer exists…”. Verify the ownership of the stale step id before
-changing this path. Historical line numbers no longer apply.
+**a. Fixed locally on `codex/edit-safety-followups`: a stale selection no longer opens a draft
+on the fallback task.** Draft-panel hydration now goes through `applySavedState`, after task membership
+is known. The regression test fails before the correction and passes afterward. No draft record is
+removed and no visible control changes. Publication has not occurred.
 
 **b. Fixed: unsent autosave after unmount. Remaining: commit timing at document teardown.** C1 cancels
 unsent New Step autosaves on editor cleanup and guards subsequent mutation stages against old account/
@@ -290,7 +288,19 @@ preserved and can be reviewed/adopted only through the approved explicit flow; r
 the original step id. Invalid or absent-task records stay stored. Scope protection is tested in real
 Chromium across products, tasks and accounts.
 
-**Remaining C1 limits:** same-user/same-task concurrent puts are last-write-win; old unowned
+**Local follow-up, not yet published:** stale-base writes and blind writes to an occupied draft slot
+now retain a separate fork instead of overwriting another recoverable draft. Tab-local selection keeps
+each editor's fork available after reload; acknowledgment targets the exact stored fork/token. The real
+browser regression covers two different failed drafts, reload of both, and acknowledgment of one while
+the other remains. A fresh tab can find a remaining fork after the canonical slot is acknowledged.
+This changes neither the legacy record nor the database schema. Fallback discovery currently scans
+local draft records and filters by scope; large photo-heavy draft stores may merit indexed lookup.
+
+**Remaining C1 limits:** two editors that intentionally loaded the same current snapshot can still
+advance that snapshot; remote mobile step updates remain unversioned field patches. This is protection
+for competing recoverable drafts, not complete remote conflict resolution. Older clients do not know
+about fork slots and can still overwrite the canonical slot. Document teardown before local commit
+remains a loss boundary. No expiry or automatic fork cleanup is introduced; old unowned
 localStorage parked fields are preserved but not exposed by the IndexedDB legacy review; unknown or
 empty occupied slots are not overwritten by legacy adoption. A failed local put warns and does not
 block remote saving; a fresh edit is needed to attempt another local put for an otherwise unchanged

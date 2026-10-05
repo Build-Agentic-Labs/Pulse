@@ -74,6 +74,7 @@ export function installIndexedDbDouble(options: IndexedDbDoubleOptions = {}): In
             return {
               put: (record: Record_) => request(() => { store.rows.set(record[store.keyPath] as IDBValidKey, structuredClone(record)); return record[store.keyPath]; }),
               get: (key: IDBValidKey) => request(() => { const value = store.rows.get(key); return value === undefined ? undefined : structuredClone(value); }),
+              getAll: () => request(() => [...store.rows.values()].map(value => structuredClone(value))),
               delete: (key: IDBValidKey) => request(() => { store.rows.delete(key); return undefined; }),
             };
           },

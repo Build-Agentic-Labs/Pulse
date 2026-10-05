@@ -717,15 +717,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
         setActiveScreen("detail");
       }
 
-      if (session.showNewStepForm) {
-        setShowNewStepForm(true);
-      }
-
-      if (session.newStepId) {
-        setNewStepId(session.newStepId);
-        setDraftStepId(session.newStepId);
-        newStepIdRef.current = session.newStepId;
-      }
+      // Draft-panel ownership is restored only by applySavedState, after task membership
+      // is known. Hydrating a stale id here would attach it to the fallback task.
 
       if (session.parkedCaptureByTaskId && Object.keys(session.parkedCaptureByTaskId).length > 0) {
         const now = Date.now();

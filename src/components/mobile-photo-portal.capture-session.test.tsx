@@ -249,7 +249,7 @@ describe("capture session: reload hydration", () => {
     expect(session().parkedCaptureByTaskId["task-b"].timer.storedElapsedMs).toBe(125_000);
   });
 
-  it("KNOWN GAP: a stored selection for a task that no longer exists falls back to the first task but still reopens the stored draft form there", async () => {
+  it("a deleted task selection never opens its draft on the fallback task", async () => {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       captureTimer: { running: false, startedAt: null, storedElapsedMs: 0, lapMarkerMs: 0, activeStepId: null, taskId: null, taskName: "" },
       parkedCaptureByTaskId: {}, activeScreen: "detail", selectedTaskId: "task-gone", showNewStepForm: true, newStepId: "step-z",
@@ -257,12 +257,8 @@ describe("capture session: reload hydration", () => {
     render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
     await screen.findByRole("button", { name: "Process list" });
     expect(processName()).toBe("Alpha process");
-    // Current behaviour: the load path refuses to reopen the draft because the stored task is not the
-    // resolved one, but the separate session-hydration effect has already set showNewStepForm and the
-    // stored newStepId without checking that the task exists, so an empty draft panel opens on the
-    // fallback task. Recorded as a defect, not corrected in this slice.
-    expect(screen.getByRole("textbox", { name: "New step name" })).toBeInTheDocument();
-    expect(session()).toMatchObject({ selectedTaskId: "task-a", showNewStepForm: true, newStepId: "step-z" });
+    expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+    expect(session()).toMatchObject({ selectedTaskId: "task-a", showNewStepForm: false, newStepId: null });
   });
 });
 

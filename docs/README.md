@@ -65,3 +65,16 @@ remain evidence for their stated feature and date. They are not a combined curre
 backup reports and measurement artifacts; completion alone does not make that evidence redundant.
 
 Atomic task reorder: [Package D results and deployment](atomic-task-reorder-results.md). Active SQL/browser CI coverage and production record-preservation evidence are included. The measured reorder uses 2 requests instead of 10; large-scenario version payloads are larger.
+
+## Local edit-safety follow-up (not published)
+
+Branch `codex/edit-safety-followups`, based on `f3f3ac5`: fixes the missing-task draft-panel
+selection and preserves competing local draft snapshots in separate slots. The existing UI controls
+are unchanged. Remote same-step edits and old clients remain separate compatibility limitations.
+The [targeted step recovery pilot](../supabase/isolated/2026-10-04-targeted-step-recovery/README.md)
+is isolated, tested with rollback, and not wired into the production mobile client.
+
+Local validation for this follow-up: 2,208 app tests / 255 files; lint, production build, settled
+typecheck and bundle budgets pass. Seven recovery browser cases pass, including the new competing-tab
+case. The isolated SQL pilot's 33 assertions are separate from the active SQL suite and were rolled
+back with all pilot objects and fixtures. Nothing from this follow-up has been pushed or deployed.

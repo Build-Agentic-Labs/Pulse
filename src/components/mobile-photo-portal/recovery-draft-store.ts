@@ -135,13 +135,35 @@ export function isMobileRecoveryPayload(value: unknown): value is MobileNewStepD
 function isScopedDraft(value: unknown, scope: RecoveryDraftScope): value is ScopedRecoveryDraft {
   return isObject(value) && value.schemaVersion === 2 &&
     value.userId === scope.userId && value.projectId === scope.projectId && value.taskId === scope.taskId &&
-    value.key === recoveryDraftKey(scope) && value.draftId === value.stepId &&
+    typeof value.key === "string" && (value.key === recoveryDraftKey(scope) || value.key.startsWith(`${recoveryDraftKey(scope)}:fork:`)) && value.draftId === value.stepId &&
     typeof value.writeToken === "string" && Boolean(value.writeToken) && isMobileRecoveryPayload(value);
 }
 
 // Instance-owned ordering: opening separate connections must not reorder writes that were issued
 // synchronously by one editor. IndexedDB supplies the cross-tab transaction lock, not this queue.
-export function createMobileRecoveryDraftStore() {
+type TabDraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+export function createMobileRecoveryDraftStore(tabStorage?: TabDraftStorage) {
+  // sessionStorage is tab-local; IndexedDB remains the durable authority. Storage errors only
+  // disable selection affinity, never the actual draft write.
+  let selectionStorage = tabStorage;
+  if (!selectionStorage && typeof window !== "undefined") {
+    try { selectionStorage = window.sessionStorage; } catch { /* browser blocks tab storage */ }
+  }
+  const selected = new Map<string, string>();
+  const observedTokens = new Map<string, string>();
+  const issuedKeys = new Map<string, string>();
+  const affinityKey = (scopeKey: string) => `pulse:recovery-selection:${scopeKey}`;
+  function remember(scopeKey: string, record: ScopedRecoveryDraft) {
+    selected.set(scopeKey, record.key);
+    observedTokens.set(record.key, record.writeToken);
+    try { selectionStorage?.setItem(affinityKey(scopeKey), record.key); } catch { /* keep memory affinity */ }
+  }
+  function preferredKey(scopeKey: string) {
+    let key = selected.get(scopeKey);
+    if (!key) { try { key = selectionStorage?.getItem(affinityKey(scopeKey)) ?? undefined; } catch { /* use canonical */ } }
+    return key && (key === scopeKey || key.startsWith(`${scopeKey}:fork:`)) ? key : scopeKey;
+  }
   const pending = new Map<string, Promise<unknown>>();
   function ordered<T>(key: string, operation: () => Promise<T>): Promise<T> {
     const next = (pending.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation);
@@ -170,34 +192,56 @@ export function createMobileRecoveryDraftStore() {
       const key = recoveryDraftKey(draft);
       // Capture before enqueueing: callers may subsequently mutate arrays/objects in their editor.
       const snapshot = structuredClone(draft);
-      return ordered(key, () => transaction<void>("readwrite", (store, result, fail) => {
+      return ordered(key, () => transaction<ScopedRecoveryDraft>("readwrite", (store, result, fail) => {
         if (!isScopedDraft(snapshot, snapshot)) throw new Error("Invalid recovery draft.");
-        const read = store.get(key);
+        const targetKey = preferredKey(key);
+        const read = store.get(targetKey);
         read.onsuccess = () => {
           if (read.result !== undefined && !isScopedDraft(read.result, snapshot)) {
-            // Abort rather than replacing an unknown schema or malformed record.
             fail(new Error("Unrecognized local recovery draft; existing data was preserved."));
             return;
           }
-          store.put(snapshot);
-          result(undefined);
+          const existing = read.result as ScopedRecoveryDraft | undefined;
+          // A concurrent writer owns a different exact snapshot. Fork this editor rather than
+          // replacing that writer's recoverable work. The read and put share one write transaction.
+          const competing = existing && (existing.draftId !== snapshot.draftId ||
+            (existing.writeToken !== snapshot.writeToken && observedTokens.get(targetKey) !== existing.writeToken));
+          const stored = { ...snapshot, key: competing ? `${key}:fork:${snapshot.writeToken}` : targetKey };
+          store.put(stored);
+          result(stored);
         };
+      }).then((stored) => {
+        issuedKeys.set(snapshot.writeToken, stored.key);
+        remember(key, stored);
       }));
     },
     load(scope: RecoveryDraftScope) {
       const key = recoveryDraftKey(scope);
       return ordered(key, () => transaction<ScopedRecoveryDraft | null>("readonly", (store, result) => {
-        const read = store.get(key);
-        read.onsuccess = () => result(isScopedDraft(read.result, scope) ? read.result : null);
+        const read = store.get(preferredKey(key));
+        read.onsuccess = () => {
+          if (isScopedDraft(read.result, scope)) { remember(key, read.result); result(read.result); return; }
+          // An acknowledged slot or a closed tab must not make other unfinished drafts invisible.
+          const remaining = store.getAll();
+          remaining.onsuccess = () => {
+            const candidates = remaining.result.filter((value): value is ScopedRecoveryDraft => isScopedDraft(value, scope));
+            candidates.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.key.localeCompare(b.key));
+            const draft = candidates[0] ?? null;
+            if (draft) remember(key, draft);
+            result(draft);
+          };
+        };
       }));
     },
     acknowledge(draft: ScopedRecoveryDraft) {
       const key = recoveryDraftKey(draft);
       return ordered(key, () => transaction<boolean>("readwrite", (store, result) => {
-        const read = store.get(key);
+        const targetKey = issuedKeys.get(draft.writeToken) ?? draft.key;
+        if (targetKey !== key && !targetKey.startsWith(`${key}:fork:`)) { result(false); return; }
+        const read = store.get(targetKey);
         read.onsuccess = () => {
           const matches = isScopedDraft(read.result, draft) && read.result.draftId === draft.draftId && read.result.writeToken === draft.writeToken;
-          if (matches) store.delete(key);
+          if (matches) store.delete(targetKey);
           result(matches);
         };
       }));

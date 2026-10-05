@@ -244,6 +244,14 @@ Important: this makes the updated path safer. It does not neutralize old clients
 
 ## Package E targeted delete and restore
 
+**2026-10-04 local follow-up:** a new independent SQL pilot is under
+[`supabase/isolated/2026-10-04-targeted-step-recovery`](../supabase/isolated/2026-10-04-targeted-step-recovery/README.md).
+33 rolled-back database assertions pass. The pilot includes captured actor/scope/version checks,
+operation-id replay, child snapshots and targeted restoration against current state. It does not
+replace the mobile whole-snapshot path yet and has no production authorization. Database and client
+integration, independent concurrent-session tests and the legacy-writer compatibility decision remain
+release gates. Do not count these assertions in active SQL CI totals.
+
 Re-review the isolated SQL as a candidate design, not approved production code. Record the selected step and associated rows atomically before explicit user-requested deletion. Restore only those records, preserving attribution, versions, ordering rules, tools, photo metadata, exploded views, and part associations. Storage objects require their own preservation/lifecycle design; database atomicity does not cover remote file operations.
 
 Acceptance: teammate-created steps and unrelated edits survive; repeat restore is idempotent; restore into a deleted task refuses safely; failures retain a recoverable record; authorization is enforced for delete, record visibility, and restore. No expiry, purge, or historical cleanup is authorized.

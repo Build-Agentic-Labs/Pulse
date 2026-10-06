@@ -135,7 +135,7 @@ describe("StepPhotoViewer toolbar", () => {
       onClose={vi.fn()} onPhotoChange={vi.fn()} onUpdatePhoto={save} />);
     prepareOverlay(container);
     fireEvent.pointerDown(container.querySelector('[data-annotation-type="image"]')!, { pointerId: 1, clientX: 100, clientY: 100 });
-    fireEvent.click(screen.getByRole("button", { name: "Crop", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Crop" }));
     const frame = container.querySelector(".ui-overlay-crop-frame")!;
     Object.defineProperty(frame, "getBoundingClientRect", { value: () => ({ width: 400, height: 300 }) });
     const handle = screen.getByRole("button", { name: "Resize crop w" });
@@ -144,7 +144,7 @@ describe("StepPhotoViewer toolbar", () => {
     fireEvent.pointerMove(handle, { clientX: 100, clientY: 150, pointerId: 1 });
     fireEvent.pointerUp(handle, { pointerId: 1 });
     expect(container.querySelector('[data-annotation-type="image"]')).toHaveAttribute("viewBox", "0 0 800 600");
-    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(container.querySelector('[data-annotation-type="image"]')).toHaveAttribute("viewBox", "200 0 600 600");
     unmount();
     const saved = save.mock.calls.at(-1)?.[1].annotations.items[0];

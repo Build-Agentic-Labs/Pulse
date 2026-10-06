@@ -336,6 +336,8 @@ export interface Task {
   partReferences?: PartReference[];
   customFields: Record<string, unknown>;
   version?: number;
+  /** Explicit step removals requested by the editor, with the version the user saw. Never persisted. */
+  procedureStepDeletions?: Record<string, number>;
   /** Last complete master-AWI read; carried through local edits for safe removal checks. */
   procedureSaveBaseline?: {
     stepVersions: Record<string, number>;

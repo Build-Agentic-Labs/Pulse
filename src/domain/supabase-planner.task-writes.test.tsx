@@ -299,6 +299,7 @@ describe("procedure save (non-AWI)", () => {
       if (r.target === "manufacturing_steps" && r.op === "select") {
         return { data: server.steps.map((s) => ({ ...s, task_id: "task-1", name: `server ${s.id}` })) };
       }
+      if (r.target === "manufacturing_steps" && r.op === "delete") return { data: { id: "gone" } };
       if (r.target === "manufacturing_steps" && r.op === "update" && r.modifiers.some((m) => m.startsWith("returning"))) {
         if (stepConflicts > 0) { stepConflicts -= 1; return { data: null }; }
         return { data: { id: "x", version: 9 } };
@@ -310,19 +311,31 @@ describe("procedure save (non-AWI)", () => {
   const procedureServer = (server: Server, options: { conflictTaskUpdates?: number; conflictStepUpdates?: number } = {}) =>
     install(procedureReply(server, options));
 
+  it("refuses a stale desktop list before any write even when the task version matches", async () => {
+    const db = procedureServer({ taskVersion: 4, steps: [{ id: "s1", sequence: 1, version: 2 }, { id: "phone-step", sequence: 2, version: 1 }], parts: [] });
+    await expect(saveProcedureTaskUpdateToSupabase(task({ version: 4, manufacturingSteps: [step("s1", 1, 2)] }), [], PROJECT)).rejects.toThrow("Steps changed on another device");
+    expect(db.writes()).toEqual([]);
+  });
+
+  it("refuses a requested deletion if the step changed on another device", async () => {
+    const db = procedureServer({ taskVersion: 4, steps: [{ id: "gone", sequence: 1, version: 2 }], parts: [] });
+    await expect(saveProcedureTaskUpdateToSupabase(task({ version: 4, procedureStepDeletions: { gone: 1 } }), [], PROJECT)).rejects.toThrow("Steps changed on another device");
+    expect(db.writes()).toEqual([]);
+  });
+
   it("version-checks the task, then each existing step, upserts new steps, writes parts, and re-reads", async () => {
     const db = procedureServer({ taskVersion: 4, steps: [{ id: "s1", sequence: 1, version: 2 }, { id: "gone", sequence: 2, version: 1 }], parts: [{ id: "old-part" }] });
     const saved = await saveProcedureTaskUpdateToSupabase(
-      task({ version: 4, manufacturingSteps: [step("s1", 1, 2), step("s-new", 2)], partReferences: [{ id: "p1", partNumber: "PN", quantity: 1 }] as never }),
+      task({ version: 4, procedureStepDeletions: { gone: 1 }, manufacturingSteps: [step("s1", 1, 2), step("s-new", 2)], partReferences: [{ id: "p1", partNumber: "PN", quantity: 1 }] as never }),
       [], PROJECT,
     );
     expect(db.lines()).toMatchInlineSnapshot(`
       [
         "rpc:task_project_id",
-        "tasks.update id=task-1 version=4 | returning(id,version) maybeSingle",
         "manufacturing_steps.select(id,sequence,version) task_id=task-1",
+        "tasks.update id=task-1 version=4 | returning(id,version) maybeSingle",
         "part_references.select(id) task_id=task-1",
-        "manufacturing_steps.delete id in [gone]",
+        "manufacturing_steps.delete task_id=task-1 id=gone version=1 | returning(id) maybeSingle",
         "manufacturing_steps.update id=s1 version=2 | returning(id,version) maybeSingle",
         "manufacturing_steps.upsert",
         "part_references.upsert",
@@ -347,8 +360,8 @@ describe("procedure save (non-AWI)", () => {
     expect(db.lines()).toMatchInlineSnapshot(`
       [
         "rpc:task_project_id",
-        "tasks.update id=task-1 version=1 | returning(id,version) maybeSingle",
         "manufacturing_steps.select(id,sequence,version) task_id=task-1",
+        "tasks.update id=task-1 version=1 | returning(id,version) maybeSingle",
         "part_references.select(id) task_id=task-1",
         "manufacturing_steps.select(id,sequence) id in [a,b]",
         "manufacturing_steps.update id=a",
@@ -374,6 +387,7 @@ describe("procedure save (non-AWI)", () => {
     expect(db.lines()).toMatchInlineSnapshot(`
       [
         "rpc:task_project_id",
+        "manufacturing_steps.select(id,sequence,version) task_id=task-1",
         "tasks.update id=task-1 version=6 | returning(id,version) maybeSingle",
         "rpc:task_project_id",
         "tasks.select(*) id=task-1 | maybeSingle",
@@ -385,8 +399,8 @@ describe("procedure save (non-AWI)", () => {
         "step_exploded_views.select(*) task_id=task-1 deleted_at is null | order(captured_at) order(id) range(0,499)",
         "task_videos.select(*) task_id=task-1 deleted_at is null | order(captured_at) order(id) range(0,499)",
         "rpc:task_project_id",
-        "tasks.update id=task-1 version=7 | returning(id,version) maybeSingle",
         "manufacturing_steps.select(id,sequence,version) task_id=task-1",
+        "tasks.update id=task-1 version=7 | returning(id,version) maybeSingle",
         "part_references.select(id) task_id=task-1",
         "rpc:task_project_id",
         "tasks.select(*) id=task-1 | maybeSingle",

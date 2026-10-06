@@ -319,6 +319,7 @@ export function DetailDrawer({
     const nextTask = removeStepScopedCustomFields(currentTask, stepId);
 
     onUpdateTask(taskId, {
+      procedureStepDeletions: { ...currentTask.procedureStepDeletions, ...(stepToDelete?.version !== undefined ? { [stepId]: stepToDelete.version } : {}) },
       manufacturingSteps: nextSteps,
       plannedDurationMinutes,
       customFields: nextTask.customFields,

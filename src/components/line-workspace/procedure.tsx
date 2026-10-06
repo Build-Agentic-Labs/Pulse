@@ -492,6 +492,7 @@ export function ProcedureWorkspace({
     const nextTask = removeStepScopedCustomFields(task, stepId);
 
     onUpdateTask(task.id, {
+      procedureStepDeletions: { ...task.procedureStepDeletions, ...(stepToDelete?.version !== undefined ? { [stepId]: stepToDelete.version } : {}) },
       manufacturingSteps: nextSteps,
       plannedDurationMinutes,
       customFields: nextTask.customFields,

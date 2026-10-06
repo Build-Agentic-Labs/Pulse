@@ -453,7 +453,7 @@ function mergeTaskWithServerVersions(localTask: Task, serverTask: Task): Task {
       const serverStep = serverStepById.get(step.id);
       return serverStep ? { ...serverStep, ...step, version: serverStep.version } : step;
     }),
-    ...(serverTask.manufacturingSteps ?? []).filter((step) => !localStepIds.has(step.id)),
+    ...(serverTask.manufacturingSteps ?? []).filter((step) => !localStepIds.has(step.id) && localTask.procedureStepDeletions?.[step.id] === undefined),
   ];
 
   return {
@@ -506,6 +506,19 @@ export async function saveProcedureTaskUpdateToSupabase(
     return withMedia;
   }
   await assertTaskInProject(supabase, task.id, projectId);
+  // A missing row in a client snapshot is not deletion intent. In particular, phone
+  // inserts do not necessarily change the task version checked below. Refuse before
+  // any writes if this save would remove a step the user did not explicitly delete.
+  const existingSteps = await throwIfError(supabase.from("manufacturing_steps").select("id,sequence,version").eq("task_id", taskToSave.id));
+  const nextStepIds = normalizedSteps.map((step) => step.id);
+  const staleStepIds = (existingSteps ?? []).map((step) => String(step.id)).filter((id) => !nextStepIds.includes(id));
+  for (const id of staleStepIds) {
+    const expectedVersion = taskToSave.procedureStepDeletions?.[id];
+    const serverStep = existingSteps?.find((step) => String(step.id) === id);
+    if (expectedVersion === undefined || expectedVersion !== serverStep?.version) {
+      throw new Error("Procedure step save conflict. Steps changed on another device. Your draft is kept; reload the task before saving again.");
+    }
+  }
   let taskUpdate = supabase.from("tasks").update(taskProcedurePatch).eq("id", task.id);
 
   if (taskToSave.version !== undefined) {
@@ -530,15 +543,8 @@ export async function saveProcedureTaskUpdateToSupabase(
     throw new Error("Task save conflict. Reload this task before saving again.");
   }
 
-  const [existingSteps, existingParts] = await Promise.all([
-    throwIfError(supabase.from("manufacturing_steps").select("id,sequence,version").eq("task_id", taskToSave.id)),
-    throwIfError(supabase.from("part_references").select("id").eq("task_id", taskToSave.id)),
-  ]);
+  const existingParts = await throwIfError(supabase.from("part_references").select("id").eq("task_id", taskToSave.id));
   const existingStepById = new Map((existingSteps ?? []).map((step) => [String(step.id), step]));
-  const nextStepIds = normalizedSteps.map((step) => step.id);
-  const staleStepIds = (existingSteps ?? [])
-    .map((step) => String(step.id))
-    .filter((stepId) => !nextStepIds.includes(stepId));
   const nextPartIds = (taskToSave.partReferences ?? []).map((part) => part.id);
   const stalePartIds = (existingParts ?? [])
     .map((part) => String(part.id))
@@ -549,8 +555,10 @@ export async function saveProcedureTaskUpdateToSupabase(
     existingSteps ?? [],
   );
 
-  if (staleStepIds.length) {
-    await throwIfError(supabase.from("manufacturing_steps").delete().in("id", staleStepIds));
+  for (const id of staleStepIds) {
+    const removed = await throwIfError(supabase.from("manufacturing_steps").delete()
+      .eq("task_id", taskToSave.id).eq("id", id).eq("version", taskToSave.procedureStepDeletions![id]).select("id").maybeSingle());
+    if (!removed) throw new Error("Procedure step save conflict. The step changed before deletion; reload the task before trying again.");
   }
 
   if (needsCollisionSafeResequence && existingSteps?.length) {

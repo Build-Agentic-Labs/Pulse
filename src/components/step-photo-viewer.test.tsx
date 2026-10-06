@@ -1,10 +1,15 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { StepPhotoAttachment } from "@/domain/step-photos";
 import { drawTextOnCanvas, StepPhotoViewer } from "./step-photo-viewer";
 import { StaticPhotoAnnotation } from "./static-photo-annotation";
 import type { PhotoTextAnnotation } from "@/domain/photo-annotations";
+import { preparePhotoOverlay } from "@/lib/prepare-photo-overlay";
+
+vi.mock("@/lib/prepare-photo-overlay", () => ({ preparePhotoOverlay: vi.fn(async () => ({
+  dataUrl: "data:image/png;base64,AAAA", sourceWidth: 400, sourceHeight: 300,
+})) }));
 
 const photos: StepPhotoAttachment[] = [1, 2, 3].map((number) => ({
   id: `photo-${number}`,
@@ -61,6 +66,93 @@ function prepareOverlay(container: HTMLElement) {
 }
 
 describe("StepPhotoViewer toolbar", () => {
+  it("pastes a photo copied from another step with the button and keyboard without system clipboard access", async () => {
+    const context = { drawImage: vi.fn() };
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(cb => cb(new Blob(["photo"], { type: "image/png" })));
+    const originalImage = globalThis.Image;
+    vi.stubGlobal("Image", class { naturalWidth = 800; naturalHeight = 600; onload?: () => void;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); } });
+    try {
+      const { container } = render(<StepPhotoViewer photo={photos[0]} photos={photos} copiedPhoto={photos[1]}
+        stepSequence={1} onClose={vi.fn()} onPhotoChange={vi.fn()} onUpdatePhoto={vi.fn()} />);
+      prepareOverlay(container);
+      fireEvent.click(screen.getByRole("button", { name: "Paste photo overlay" }));
+      await waitFor(() => expect(container.querySelectorAll('[data-annotation-type="image"]')).toHaveLength(1));
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "v", ctrlKey: true });
+      await waitFor(() => expect(container.querySelectorAll('[data-annotation-type="image"]')).toHaveLength(2));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    } finally { getContext.mockRestore(); toBlob.mockRestore(); vi.stubGlobal("Image", originalImage); }
+  });
+  it("pastes a clipboard image onto the canvas without passing it to the step", async () => {
+    const save = vi.fn();
+    const parentPaste = vi.fn();
+    const { container, unmount } = render(<div onPaste={parentPaste}><StepPhotoViewer photo={photos[0]} photos={photos}
+      stepSequence={1} onClose={vi.fn()} onPhotoChange={vi.fn()} onUpdatePhoto={save} /></div>);
+    prepareOverlay(container);
+    const file = new File(["image"], "clipboard.png", { type: "image/png" });
+    fireEvent.paste(screen.getByRole("dialog"), { clipboardData: { files: [file], items: [], getData: () => "" } });
+    await waitFor(() => expect(screen.getByRole("group", { name: "Crop photo overlay" })).toBeVisible());
+    expect(preparePhotoOverlay).toHaveBeenCalledWith(file);
+    expect(parentPaste).not.toHaveBeenCalled();
+    unmount();
+    expect(save.mock.calls.at(-1)?.[1].annotations.items[0].type).toBe("image");
+  });
+
+  it("reads an image from the paste button and explains blocked clipboard access", async () => {
+    const read = vi.fn().mockResolvedValue([{ types: ["image/png"], getType: async () => new Blob(["image"], { type: "image/png" }) }]);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { read } });
+    const { container } = render(<StepPhotoViewer photo={photos[0]} photos={photos} stepSequence={1}
+      onClose={vi.fn()} onPhotoChange={vi.fn()} onUpdatePhoto={vi.fn()} />);
+    prepareOverlay(container);
+    fireEvent.click(screen.getByRole("button", { name: "Paste photo overlay" }));
+    await waitFor(() => expect(screen.getByRole("group", { name: "Crop photo overlay" })).toBeVisible());
+    read.mockRejectedValue(new DOMException("Denied", "NotAllowedError"));
+    fireEvent.click(screen.getByRole("button", { name: "Paste photo overlay" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Use Ctrl+V or Cmd+V"));
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("leaves native paste available while editing a text callout", () => {
+    const photo = { ...photos[0], annotations: { version: 2 as const, items: [{ id: "text", type: "text" as const,
+      text: "Instruction", color: "#ffcc00", fontSize: 20, x: .2, y: .2, width: .3, anchorX: .1, anchorY: .1 }] } };
+    const { container } = render(<StepPhotoViewer photo={photo} photos={[photo]} stepSequence={1}
+      onClose={vi.fn()} onPhotoChange={vi.fn()} onUpdatePhoto={vi.fn()} />);
+    prepareOverlay(container);
+    const textbox = container.querySelector<HTMLTextAreaElement>("textarea")!;
+    act(() => textbox.focus());
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    textbox.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+  it("crops an image overlay, persists it and renders the same crop in static previews", () => {
+    const image = { id: "overlay", type: "image" as const, dataUrl: "data:image/png;base64,AAAA",
+      sourceWidth: 800, sourceHeight: 600, x: .1, y: .1, width: .4, height: .3,
+      color: "#ffcc00", strokeWidth: 2, crop: { left: 0, top: 0, right: 0, bottom: 0 } };
+    const photo = { ...photos[0], annotations: { version: 2 as const, items: [image] } };
+    const save = vi.fn();
+    const { container, unmount } = render(<StepPhotoViewer photo={photo} photos={[photo]} stepSequence={1}
+      onClose={vi.fn()} onPhotoChange={vi.fn()} onUpdatePhoto={save} />);
+    prepareOverlay(container);
+    fireEvent.pointerDown(container.querySelector('[data-annotation-type="image"]')!, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.click(screen.getByRole("button", { name: "Crop", exact: true }));
+    const frame = container.querySelector(".ui-overlay-crop-frame")!;
+    Object.defineProperty(frame, "getBoundingClientRect", { value: () => ({ width: 400, height: 300 }) });
+    const handle = screen.getByRole("button", { name: "Resize crop w" });
+    Object.defineProperty(handle, "setPointerCapture", { value: vi.fn() });
+    fireEvent.pointerDown(handle, { clientX: 0, clientY: 150, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 100, clientY: 150, pointerId: 1 });
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    expect(container.querySelector('[data-annotation-type="image"]')).toHaveAttribute("viewBox", "0 0 800 600");
+    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
+    expect(container.querySelector('[data-annotation-type="image"]')).toHaveAttribute("viewBox", "200 0 600 600");
+    unmount();
+    const saved = save.mock.calls.at(-1)?.[1].annotations.items[0];
+    expect(saved).toMatchObject({ crop: { left: .25 } });
+    expect(saved.width).toBeCloseTo(.3);
+    const preview = render(<svg><StaticPhotoAnnotation annotation={saved} width={800} height={600} markerId="overlay-test" /></svg>);
+    expect(preview.container.querySelector('[data-annotation-type="image"]')).toHaveAttribute("viewBox", "200 0 600 600");
+  });
   const label: PhotoTextAnnotation = {
     id: "alignment-label", type: "text", color: "#d71921", fontSize: 14,
     anchorX: 0.1, anchorY: 0.1, x: 0.2, y: 0.2, width: 0.3, height: 0.2,
@@ -409,7 +501,10 @@ describe("StepPhotoViewer toolbar", () => {
     fireEvent.pointerUp(overlay, { clientX: 300, clientY: 250, pointerId: 1 });
     fireEvent.keyDown(dialog, { key: "d", ctrlKey: true });
     fireEvent.keyDown(dialog, { key: "c", metaKey: true });
+    const clipboard = new Map<string, string>();
+    fireEvent.copy(dialog, { clipboardData: { setData: (type: string, value: string) => clipboard.set(type, value) } });
     fireEvent.keyDown(dialog, { key: "v", metaKey: true });
+    fireEvent.paste(dialog, { clipboardData: { files: [], items: [], getData: (type: string) => clipboard.get(type) ?? "" } });
     expect(screen.getByRole("button", { name: "Draw rectangle" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.keyDown(window, { key: "v" });
     expect(overlay).toHaveClass("ui-photo-viewer-annotation-layer-select");

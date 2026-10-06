@@ -60,7 +60,7 @@ function prepareOverlay(container: HTMLElement) {
 }
 
 function expandToolbar() {
-  fireEvent.click(screen.getByRole("button", { name: "Expand photo toolbar" }));
+  expect(screen.getByRole("region", { name: "Photo annotation tools" })).toBeVisible();
 }
 
 

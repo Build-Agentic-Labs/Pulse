@@ -1,5 +1,7 @@
 "use client";
 
+import "./photo-overlay.css";
+
 import {
   AlignCenter,
   AlignLeft,
@@ -9,8 +11,10 @@ import {
   ChevronRight,
   Circle,
   CopyPlus,
+  ClipboardPaste,
   Download,
   Highlighter,
+  ImagePlus,
   Loader2,
   Minus,
   MousePointer2,
@@ -40,6 +44,7 @@ import {
 
 import {
   createAnnotationId,
+  cropPhotoImage,
   fontSizeToStrokeWidth,
   measureTextCalloutBox,
   movePhotoAnnotation,
@@ -59,6 +64,7 @@ import {
   textCalloutLeaderPoint,
   textCalloutAnchors,
   type PhotoAnnotation,
+  type PhotoImageAnnotation,
   type PhotoAnnotationDocument,
   type PhotoAnnotationTool,
   type PhotoArrowAnnotation,
@@ -74,6 +80,10 @@ import { useRecoveringPhoto } from "@/lib/use-recovering-photo";
 import { mergeAnnotationDocuments, readAnnotationDraft, writeAnnotationDraft } from "@/lib/photo-annotation-drafts";
 import { useConfirm } from "@/components/confirm-provider";
 import { ThemedSelect } from "./themed-select";
+import { PhotoImageOverlay } from "./photo-image-overlay";
+import { PhotoOverlayCropEditor } from "./photo-overlay-crop-editor";
+import { preparePhotoOverlay } from "@/lib/prepare-photo-overlay";
+import { clipboardImageFiles } from "@/domain/clipboard-images";
 
 type AnnotationContextMenu = {
   x: number;
@@ -224,7 +234,7 @@ async function renderAnnotatedPhotoBlob(
   }
 
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  drawAnnotationsOnCanvas(context, canvas.width, canvas.height, document.items);
+  await drawAnnotationsOnCanvas(context, canvas.width, canvas.height, document.items);
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
@@ -252,7 +262,7 @@ function loadImage(src: string) {
   });
 }
 
-function drawAnnotationsOnCanvas(
+export async function drawAnnotationsOnCanvas(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
@@ -260,24 +270,32 @@ function drawAnnotationsOnCanvas(
 ) {
   const appFont = getComputedStyle(document.documentElement).getPropertyValue("--type-sans").trim() || "system-ui, sans-serif";
 
-  items.forEach((item) => {
+  for (const item of items) {
+    if (item.type === "image") {
+      const overlay = await loadImage(item.dataUrl);
+      const { left, top, right, bottom } = item.crop;
+      context.drawImage(overlay, left * overlay.naturalWidth, top * overlay.naturalHeight,
+        (1 - left - right) * overlay.naturalWidth, (1 - top - bottom) * overlay.naturalHeight,
+        item.x * width, item.y * height, item.width * width, item.height * height);
+      continue;
+    }
     if (item.type === "arrow") {
       drawArrowOnCanvas(context, item, width, height);
-      return;
+      continue;
     }
 
     if (item.type === "text") {
       drawTextOnCanvas(context, item, width, height, appFont);
-      return;
+      continue;
     }
 
     if (isPhotoBoxAnnotation(item)) {
       drawBoxAnnotationOnCanvas(context, item, width, height);
-      return;
+      continue;
     }
 
     drawFreehandOnCanvas(context, item, width, height);
-  });
+  }
 }
 
 function canvasAnnotationScale(width: number, height: number) {
@@ -492,6 +510,7 @@ export function StepPhotoViewer({
   stepSequence,
   photo,
   photos,
+  copiedPhoto,
   onClose,
   onPhotoChange,
   onUpdatePhoto,
@@ -499,6 +518,7 @@ export function StepPhotoViewer({
   stepSequence: number;
   photo: StepPhotoAttachment;
   photos: StepPhotoAttachment[];
+  copiedPhoto?: StepPhotoAttachment;
   onClose: () => void;
   onPhotoChange: (photo: StepPhotoAttachment) => void;
   taskId?: string;
@@ -533,6 +553,75 @@ export function StepPhotoViewer({
   const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("expanded");
   const [exportAction, setExportAction] = useState<PhotoExportAction>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const overlayInputRef = useRef<HTMLInputElement>(null);
+  const [overlayLoading, setOverlayLoading] = useState(false);
+  const [croppingImage, setCroppingImage] = useState<PhotoImageAnnotation | null>(null);
+  const copiedMedia = useRecoveringPhoto(copiedPhoto?.dataUrl ?? "", copiedPhoto?.storagePath);
+  const overlayMounted = useRef(true);
+  useEffect(() => {
+    overlayMounted.current = true;
+    viewerRef.current?.focus({ preventScroll: true });
+    return () => { overlayMounted.current = false; };
+  }, []);
+
+  async function pasteImageOverlay() {
+    const targetPhotoId = photo.id;
+    try {
+      if (copiedPhoto) {
+        setOverlayLoading(true);
+        setExportError(null);
+        const source = await copiedMedia.recover();
+        let blob: Blob;
+        try {
+          blob = await renderAnnotatedPhotoBlob(copiedPhoto, annotationDocumentFromPhoto(copiedPhoto), source);
+        } catch (error) {
+          if (!copiedPhoto.storagePath) throw error;
+          blob = await renderAnnotatedPhotoBlob(copiedPhoto, annotationDocumentFromPhoto(copiedPhoto), await copiedMedia.retry());
+        }
+        if (!overlayMounted.current || selectedPhotoRef.current.id !== targetPhotoId) return;
+        await addImageOverlay(new File([blob], copiedPhoto.name, { type: blob.type }));
+        return;
+      }
+      if (!navigator.clipboard?.read) throw new Error("Use Ctrl+V or Cmd+V to paste an image onto the photo.");
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const type = item.types.find((type) => /^image\/(png|jpeg|webp)$/.test(type));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        if (!overlayMounted.current || selectedPhotoRef.current.id !== targetPhotoId) return;
+        await addImageOverlay(new File([blob], "Pasted overlay", { type }));
+        return;
+      }
+      throw new Error("Copy an image first, then paste it here.");
+    } catch (error) {
+      if (overlayMounted.current && selectedPhotoRef.current.id === targetPhotoId)
+        setExportError(error instanceof DOMException && error.name === "NotAllowedError"
+          ? "Clipboard access was blocked. Use Ctrl+V or Cmd+V on the photo instead."
+          : error instanceof Error ? error.message : "Unable to paste this image.");
+    } finally { if (overlayMounted.current) setOverlayLoading(false); }
+  }
+
+  async function addImageOverlay(file: File) {
+    const targetPhotoId = photo.id;
+    setOverlayLoading(true);
+    setExportError(null);
+    try {
+      const source = await preparePhotoOverlay(file);
+      if (!overlayMounted.current || selectedPhotoRef.current.id !== targetPhotoId) return;
+      const id = createAnnotationId("image");
+      const aspect = (overlaySize.width || photo.width || 800) / (overlaySize.height || photo.height || 600);
+      const height = Math.min(0.5, 0.3 * aspect * source.sourceHeight / source.sourceWidth);
+      const width = height / aspect * source.sourceWidth / source.sourceHeight;
+      updateAnnotations((current) => [...current, {
+        id, type: "image", ...source, color: "#ffcc00", strokeWidth: 2,
+        x: 0.1, y: 0.1, width, height, crop: { left: 0, top: 0, right: 0, bottom: 0 },
+      }]);
+      setSelectedId(id);
+      setActiveTool("select");
+    } catch (error) {
+      if (overlayMounted.current) setExportError(error instanceof Error ? error.message : "Unable to add overlay.");
+    } finally { if (overlayMounted.current) setOverlayLoading(false); }
+  }
   const media = useRecoveringPhoto(photo.dataUrl, photo.storagePath);
   const confirm = useConfirm();
   const incomingRef = useRef({ id: photo.id, document: annotationDocumentFromPhoto(photo) });
@@ -1707,7 +1796,10 @@ export function StepPhotoViewer({
           onPointerDown={(event) => beginAnnotationDrag(event, item)}
           onContextMenu={(event) => handleAnnotationContextMenu(event, item)}
         >
-          {item.type === "ellipse" ? (
+          {item.type === "image" ? <>
+            <PhotoImageOverlay annotation={item} width={overlaySize.width} height={overlaySize.height} />
+            <rect {...shapeProps} fill="transparent" stroke={selected ? item.color : "none"} strokeWidth={2} />
+          </> : item.type === "ellipse" ? (
             <>
               <ellipse
                 cx={x + width / 2}
@@ -2045,17 +2137,49 @@ export function StepPhotoViewer({
       role="dialog"
       aria-modal="true"
       aria-label={`Step ${stepSequence} photo preview`}
+      tabIndex={-1}
+      onPointerDownCapture={(event) => {
+        if (croppingImage) return;
+        if (!(event.target instanceof Element) || event.target.closest("button, input, textarea, select, [contenteditable]")) return;
+        viewerRef.current?.focus({ preventScroll: true });
+      }}
+      onCopyCapture={(event) => {
+        if (croppingImage) { event.stopPropagation(); return; }
+        if (isAnnotationTextInputFocused() || !selectedAnnotation) return;
+        event.preventDefault();
+        event.stopPropagation();
+        copiedAnnotationRef.current = selectedAnnotation;
+        event.clipboardData.setData("application/x-pulse-annotation", selectedAnnotation.id);
+      }}
+      onPasteCapture={(event) => {
+        if (croppingImage) { event.stopPropagation(); event.preventDefault(); return; }
+        if (isAnnotationTextInputFocused()) return;
+        event.stopPropagation();
+        const files = clipboardImageFiles(event.clipboardData);
+        if (files.length) {
+          event.preventDefault();
+          void addImageOverlay(files[0]);
+        } else if (copiedAnnotationRef.current && event.clipboardData.getData("application/x-pulse-annotation") === copiedAnnotationRef.current.id) {
+          event.preventDefault();
+          duplicateAnnotation(copiedAnnotationRef.current);
+        } else if (copiedPhoto) {
+          event.preventDefault();
+          void pasteImageOverlay();
+        }
+      }}
       onKeyDownCapture={(event) => {
+        if (croppingImage) return;
         if (!(event.ctrlKey || event.metaKey) || event.altKey || isAnnotationTextInputFocused()) return;
         const key = event.key.toLowerCase();
         if (key === "c" && selectedAnnotation) {
-          event.preventDefault();
           event.stopPropagation();
           copiedAnnotationRef.current = selectedAnnotation;
-        } else if (key === "v" && copiedAnnotationRef.current) {
-          event.preventDefault();
+        } else if (key === "v") {
           event.stopPropagation();
-          copiedAnnotationRef.current = duplicateAnnotation(copiedAnnotationRef.current);
+          if (copiedPhoto && !copiedAnnotationRef.current) {
+            event.preventDefault();
+            if (!overlayLoading) void pasteImageOverlay();
+          }
         } else if (key === "d" && selectedAnnotation) {
           event.preventDefault();
           event.stopPropagation();
@@ -2198,6 +2322,16 @@ export function StepPhotoViewer({
             inert={toolbarVisibility === "minimized"}
           >
             <div className="ui-photo-viewer-toolbar-tools" role="group" aria-label="Drawing tools">
+                <input ref={overlayInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" aria-label="Overlay image file"
+                  onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void addImageOverlay(file); }} />
+                <button type="button" className="ui-photo-viewer-tool" disabled={overlayLoading}
+                  onClick={() => overlayInputRef.current?.click()} aria-label="Add photo overlay" title="Add photo overlay">
+                  {overlayLoading ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
+                </button>
+                <button type="button" className="ui-photo-viewer-tool" disabled={overlayLoading}
+                  onClick={() => void pasteImageOverlay()} aria-label="Paste photo overlay" title={copiedPhoto ? `Paste copied photo: ${copiedPhoto.name} (Ctrl/Cmd+V)` : "Paste photo overlay (Ctrl/Cmd+V)"}>
+                  <ClipboardPaste size={15} />
+                </button>
                 <button
                   type="button"
                   className={`ui-photo-viewer-tool ${activeTool === "select" ? "ui-photo-viewer-tool-active" : ""}`}
@@ -2429,12 +2563,22 @@ export function StepPhotoViewer({
             </button>
           </div>
         </div>
+        {selectedAnnotation?.type === "image" && (
+          <div className="ui-photo-overlay-crop" role="group" aria-label="Crop photo overlay" onClick={(event) => event.stopPropagation()}>
+            <button type="button" onClick={() => setCroppingImage(selectedAnnotation)}>Crop</button>
+          </div>
+        )}
       </div>
         {exportError ? (
           <p className="ui-photo-viewer-export-error" role="alert">
             {exportError}
           </p>
         ) : null}
+      {croppingImage && <PhotoOverlayCropEditor image={croppingImage} onCancel={() => setCroppingImage(null)}
+        onDone={(crop) => {
+          updateAnnotations(items => items.map(item => item.id === croppingImage.id && item.type === "image" ? cropPhotoImage(item, crop) : item));
+          setCroppingImage(null);
+        }} />}
       {contextMenu ? (
         <div
           className="ui-photo-annotation-context-menu"

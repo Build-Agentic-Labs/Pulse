@@ -544,6 +544,7 @@ export function StepPhotoAttachmentEditor({
       <p className={pasteHint ? "text-[11px] text-ink-secondary" : "sr-only"} role="status" aria-live="polite">{pasteHint}</p>
       {previewPhoto ? (
         <StepPhotoViewer
+          copiedPhoto={entry?.photo}
           taskId={taskId}
           stepSequence={step.sequence}
           photo={photos.find((candidate) => candidate.id === previewPhoto.id) ?? previewPhoto}

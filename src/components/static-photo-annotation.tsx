@@ -1,3 +1,4 @@
+import { PhotoImageOverlay } from "./photo-image-overlay";
 import {
   isPhotoBoxAnnotation,
   textCalloutLeaderPoint,
@@ -26,6 +27,8 @@ export function StaticPhotoAnnotation({
   calloutClassName?: string;
 }) {
   const scale = photoRenderScale(width, height, targetSize);
+
+  if (annotation.type === "image") return <PhotoImageOverlay annotation={annotation} width={width} height={height} />;
 
   if (annotation.type === "arrow") {
     return (

@@ -64,6 +64,26 @@ export type PhotoRectangleAnnotation = PhotoBoxGeometry & {
   type: "rectangle";
 };
 
+export type PhotoImageAnnotation = PhotoBoxGeometry & {
+  type: "image";
+  dataUrl: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  crop: { left: number; top: number; right: number; bottom: number };
+};
+
+/** Trim the visible box at its current scale, without stretching the photograph. */
+export function cropPhotoImage(item: PhotoImageAnnotation, crop: PhotoImageAnnotation["crop"]): PhotoImageAnnotation {
+  const fullWidth = item.width / (1 - item.crop.left - item.crop.right);
+  const fullHeight = item.height / (1 - item.crop.top - item.crop.bottom);
+  const width = fullWidth * (1 - crop.left - crop.right);
+  const height = fullHeight * (1 - crop.top - crop.bottom);
+  const scale = Math.min(1, 0.98 / width, 0.98 / height);
+  return { ...item, crop, width: width * scale, height: height * scale,
+    x: Math.max(0, Math.min(1 - width * scale, item.x + (crop.left - item.crop.left) * fullWidth)),
+    y: Math.max(0, Math.min(1 - height * scale, item.y + (crop.top - item.crop.top) * fullHeight)) };
+}
+
 export type PhotoEllipseAnnotation = PhotoBoxGeometry & {
   type: "ellipse";
 };
@@ -87,6 +107,7 @@ export type PhotoFreehandAnnotation = {
 };
 
 export type PhotoBoxAnnotation =
+  | PhotoImageAnnotation
   | PhotoRectangleAnnotation
   | PhotoEllipseAnnotation
   | PhotoHighlightAnnotation;
@@ -203,6 +224,20 @@ function sanitizePhotoAnnotation(value: unknown): PhotoAnnotation | null {
           : undefined,
       text: typeof record.text === "string" ? record.text : "",
       textAlign: record.textAlign === "center" || record.textAlign === "right" ? record.textAlign : "left",
+    };
+  }
+
+  if (record.type === "image") {
+    if (typeof record.dataUrl !== "string" || record.dataUrl.length > 500_000 ||
+        !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(record.dataUrl)) return null;
+    const crop = (record.crop ?? {}) as Record<string, unknown>;
+    const left = Math.min(clamp01(Number(crop.left)), 0.9);
+    const top = Math.min(clamp01(Number(crop.top)), 0.9);
+    return {
+      id, type: "image", ...sanitizeBoxGeometry(record), dataUrl: record.dataUrl,
+      sourceWidth: Math.max(1, Math.min(Number(record.sourceWidth) || 1, 10000)),
+      sourceHeight: Math.max(1, Math.min(Number(record.sourceHeight) || 1, 10000)),
+      crop: { left, top, right: Math.min(clamp01(Number(crop.right)), 0.95 - left), bottom: Math.min(clamp01(Number(crop.bottom)), 0.95 - top) },
     };
   }
 
@@ -514,7 +549,7 @@ export function moveTextCalloutAnchor(annotation: PhotoTextAnnotation, deltaX: n
 }
 
 export function isPhotoBoxAnnotation(annotation: PhotoAnnotation): annotation is PhotoBoxAnnotation {
-  return annotation.type === "rectangle" || annotation.type === "ellipse" || annotation.type === "highlight";
+  return annotation.type === "rectangle" || annotation.type === "ellipse" || annotation.type === "highlight" || annotation.type === "image";
 }
 
 export function resizePhotoBoxAnnotation(
@@ -522,6 +557,13 @@ export function resizePhotoBoxAnnotation(
   pointerX: number,
   pointerY: number,
 ): PhotoBoxAnnotation {
+  if (annotation.type === "image") {
+    const scale = Math.min(
+      Math.max(0.05, (pointerX - annotation.x) / annotation.width, (pointerY - annotation.y) / annotation.height),
+      (1 - annotation.x) / annotation.width, (1 - annotation.y) / annotation.height,
+    );
+    return { ...annotation, width: annotation.width * scale, height: annotation.height * scale };
+  }
   return {
     ...annotation,
     width: clampBetween(pointerX - annotation.x, 0.015, 1 - annotation.x),

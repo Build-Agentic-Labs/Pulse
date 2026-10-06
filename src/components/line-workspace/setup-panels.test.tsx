@@ -80,6 +80,27 @@ const annotatedPlannerState = {
 } as PlannerState;
 
 describe("WorkInstructionsPanel", () => {
+  it("tracks saved draft completion and allows reopening a draft without discarding metadata", () => {
+    const onUpdateTask = vi.fn();
+    const draft = { ...task, customFields: { existing: "keep" } };
+    const props = { tasks: [draft], zones: [zone], product, onOpenTask: vi.fn(), onUpdateTask };
+    const { rerender } = render(<WorkInstructionsPanel {...props} />);
+    expect(screen.getByText("0 of 1 · 1 remaining")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: `Draft complete for ${task.name}` }));
+    expect(onUpdateTask).toHaveBeenLastCalledWith(task.id, {
+      customFields: { existing: "keep", workInstructionDraftComplete: true },
+    });
+    rerender(<WorkInstructionsPanel {...props} tasks={[{ ...draft, customFields: { existing: "keep", workInstructionDraftComplete: true } }]} />);
+    expect(screen.getByText("1 of 1 · 0 remaining")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Drafts complete" })).toHaveAttribute("value", "1");
+    fireEvent.click(screen.getByRole("checkbox", { name: `Draft complete for ${task.name}` }));
+    expect(onUpdateTask).toHaveBeenLastCalledWith(task.id, {
+      customFields: { existing: "keep", workInstructionDraftComplete: false },
+    });
+    rerender(<WorkInstructionsPanel {...props} readOnly />);
+    expect(screen.getByRole("checkbox", { name: `Draft complete for ${task.name}` })).toBeDisabled();
+  });
+
   it("opens a row preview in a closable dialog without navigating away", () => {
     render(
       <WorkInstructionsPanel

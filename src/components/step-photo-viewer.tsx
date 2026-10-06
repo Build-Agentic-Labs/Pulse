@@ -517,9 +517,9 @@ export function StepPhotoViewer({
   const selectedPhotoRef = useRef(photo);
   selectedPhotoRef.current = photo;
   const [activeTool, setActiveTool] = useState<PhotoAnnotationTool>("select");
-  const [activeColor, setActiveColor] = useState<string>(PHOTO_ANNOTATION_COLORS[0].value);
-  const [activeFontSize, setActiveFontSize] = useState<number>(14);
-  const [activeTextAlign, setActiveTextAlign] = useState<PhotoTextAlignment>("left");
+  const [activeColor, setActiveColor] = useState<string>("#ffcc00");
+  const [activeFontSize, setActiveFontSize] = useState<number>(20);
+  const [activeTextAlign, setActiveTextAlign] = useState<PhotoTextAlignment>("center");
   const [annotations, setAnnotations] = useState<PhotoAnnotation[]>(() => annotationDocumentFromPhoto(photo).items);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftArrow, setDraftArrow] = useState<DraftArrow | null>(null);
@@ -530,7 +530,7 @@ export function StepPhotoViewer({
   const [textBoxDragPending, setTextBoxDragPending] = useState<TextBoxDragPending | null>(null);
   const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
   const [contextMenu, setContextMenu] = useState<AnnotationContextMenu | null>(null);
-  const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("minimized");
+  const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("expanded");
   const [exportAction, setExportAction] = useState<PhotoExportAction>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const media = useRecoveringPhoto(photo.dataUrl, photo.storagePath);

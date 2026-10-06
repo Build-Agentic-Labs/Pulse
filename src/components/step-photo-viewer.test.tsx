@@ -60,10 +60,6 @@ function prepareOverlay(container: HTMLElement) {
   return overlay!;
 }
 
-function expandToolbar() {
-  fireEvent.click(screen.getByRole("button", { name: "Expand photo toolbar" }));
-}
-
 describe("StepPhotoViewer toolbar", () => {
   const label: PhotoTextAnnotation = {
     id: "alignment-label", type: "text", color: "#d71921", fontSize: 14,
@@ -79,7 +75,6 @@ describe("StepPhotoViewer toolbar", () => {
         onClose={vi.fn()} onPhotoChange={vi.fn()} onUpdatePhoto={onUpdatePhoto} />,
     );
     prepareOverlay(container);
-    expandToolbar();
     expect(screen.getByRole("button", { name: "Align text center" })).toBeDisabled();
     const textBox = container.querySelector<HTMLTextAreaElement>('[data-annotation-id="alignment-label"]')!;
     fireEvent.focus(textBox);
@@ -101,7 +96,6 @@ describe("StepPhotoViewer toolbar", () => {
         onClose={vi.fn()} onPhotoChange={vi.fn()} onUpdatePhoto={onUpdatePhoto} />,
     );
     const overlay = prepareOverlay(container);
-    expandToolbar();
     fireEvent.click(screen.getByRole("button", { name: "Add text callout" }));
     fireEvent.click(screen.getByRole("button", { name: "Align text right" }));
     fireEvent.pointerDown(overlay, { clientX: 100, clientY: 100, pointerId: 1 });
@@ -162,7 +156,7 @@ describe("StepPhotoViewer toolbar", () => {
     expect(saved.additionalAnchors).toEqual([{ x: 0.6, y: 0.6 }, { x: 0.75, y: 0.5 }]);
   });
 
-  it("opens with a minimized toolbar and visible photo navigation", () => {
+  it("opens with an expanded toolbar and visible photo navigation", () => {
     const onPhotoChange = vi.fn();
     const { container } = render(
       <StepPhotoViewer
@@ -174,20 +168,20 @@ describe("StepPhotoViewer toolbar", () => {
       />,
     );
 
-    const expandButton = screen.getByRole("button", { name: "Expand photo toolbar" });
+    const toggleButton = screen.getByRole("button", { name: "Collapse photo toolbar" });
     expect(screen.getByRole("dialog", { name: "Step 2 photo preview" })).toHaveClass("!m-0");
-    expect(expandButton).toHaveAttribute("aria-expanded", "false");
-    expect(expandButton).toHaveFocus();
-    expect(container.querySelector(".ui-photo-viewer-toolbar")).toHaveClass(
+    expect(toggleButton).toHaveAttribute("aria-expanded", "true");
+    expect(toggleButton).toHaveFocus();
+    expect(container.querySelector(".ui-photo-viewer-toolbar")).not.toHaveClass(
       "ui-photo-viewer-toolbar-minimized",
     );
-    expect(screen.queryByRole("button", { name: "Select annotation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select annotation" })).toBeInTheDocument();
     expect(container.querySelector(".ui-photo-viewer-annotation-layer")).toHaveClass(
       "ui-photo-viewer-annotation-layer-select",
     );
-    expect(screen.queryByRole("button", { name: "Draw arrow" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Download photo" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Print photo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Draw arrow" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download photo" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Print photo" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close photo preview" })).toBeInTheDocument();
     expect(screen.getByText("1 of 3")).toBeInTheDocument();
 
@@ -209,6 +203,7 @@ describe("StepPhotoViewer toolbar", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Collapse photo toolbar" }));
     expect(screen.getByRole("button", { name: "Expand photo toolbar" })).toHaveAttribute(
       "aria-expanded",
       "false",
@@ -252,7 +247,6 @@ describe("StepPhotoViewer toolbar", () => {
     );
     const overlay = prepareOverlay(container);
 
-    expandToolbar();
     fireEvent.click(screen.getByRole("button", { name: "Draw arrow" }));
     fireEvent.pointerDown(overlay, { clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(overlay, { clientX: 300, clientY: 250, pointerId: 1 });
@@ -292,7 +286,6 @@ describe("StepPhotoViewer toolbar", () => {
     );
     const overlay = prepareOverlay(container);
 
-    expandToolbar();
     fireEvent.click(screen.getByRole("button", { name: buttonName }));
     fireEvent.pointerDown(overlay, { clientX: 120, clientY: 140, pointerId: 2 });
     fireEvent.pointerMove(overlay, { clientX: 360, clientY: 320, pointerId: 2 });
@@ -410,7 +403,6 @@ describe("StepPhotoViewer toolbar", () => {
     );
     const overlay = prepareOverlay(container);
     const dialog = screen.getByRole("dialog");
-    expandToolbar();
     fireEvent.click(screen.getByRole("button", { name: "Draw rectangle" }));
     fireEvent.pointerDown(overlay, { clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(overlay, { clientX: 300, clientY: 250, pointerId: 1 });

@@ -1,14 +1,12 @@
 "use client";
 
-import { Eye, FileCheck2, FileText, ListChecks, Plus, Trash2, Wrench } from "lucide-react";
+import { Eye, FileCheck2, FileText, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   getManufacturingStepCheckDefinitions,
-  getManufacturingStepCheckState,
   normalizeManufacturingStepCheck,
   type ManufacturingStepCheckDefinition,
 } from "@/domain/manufacturing-step-checks";
-import { countTaskStepTools } from "@/domain/step-tools";
 import { normalizeCode } from "@/domain/nomenclature";
 import { loadTaskPrivateMediaFromSupabase } from "@/domain/supabase-planner";
 import { mergeTaskPrivateMedia, type TaskPrivateMedia } from "@/domain/task-private-media";
@@ -427,6 +425,7 @@ export function WorkInstructionsPanel({
   isAwiMaster = false,
   onBeforeRelease,
   onOpenTask,
+  onUpdateTask,
 }: {
   tasks: Task[];
   zones: Zone[];
@@ -438,15 +437,12 @@ export function WorkInstructionsPanel({
   isAwiMaster?: boolean;
   onBeforeRelease?: () => Promise<boolean>;
   onOpenTask: (taskId: string) => void;
+  onUpdateTask?: (taskId: string, patch: Partial<Task>) => void;
 }) {
   const parentIds = new Set(tasks.map((task) => task.parentTaskId).filter((id): id is string => Boolean(id)));
   // One work instruction per leaf work-task (skip summary rows, milestones, holds, etc.).
   const workTasks = tasks.filter((task) => task.rowType === "task" && !parentIds.has(task.id));
-  const checkDefinitions = getManufacturingStepCheckDefinitions(product.customFields);
-
-  const hasTools = (task: Task) => countTaskStepTools(task) > 0;
-  const hasChecks = (task: Task) =>
-    (task.manufacturingSteps ?? []).some((step) => getManufacturingStepCheckState(step.qualityCheck, checkDefinitions).selected.size > 0);
+  const draftCompleteCount = workTasks.filter((task) => task.customFields?.workInstructionDraftComplete === true).length;
 
   // The print route reloads planner state by project, so a product with no
   // project behind it cannot produce a shareable document.
@@ -524,10 +520,6 @@ export function WorkInstructionsPanel({
     const entry = documents.get(task.id);
     return entry?.state.kind === "unreleased" && !entry.blocked;
   }).length;
-  const incompleteCount = workTasks.filter((task) => {
-    const entry = documents.get(task.id);
-    return entry?.state.kind === "unreleased" && entry.blocked;
-  }).length;
   const [previewSelection, setPreviewSelection] = useState<{ taskIds: string[]; scenarioId?: string; releaseId?: string } | null>(null);
 
   async function openControl(task: Task, step?: "readiness" | "references" | "release" | "history") {
@@ -574,14 +566,7 @@ export function WorkInstructionsPanel({
     if (entry?.state.kind === "modified") {
       return { label: `${revisionLabel(entry.state.release.revision)} · modified`, className: "border-warn/40 bg-warn/10 text-warn" };
     }
-    if (entry && !entry.blocked) {
-      return { label: "Ready", className: "border-accent/50 bg-accent/10 text-ink" };
-    }
-    return {
-      label: "Incomplete",
-      className: "border-line bg-surface-raised text-ink-secondary",
-      title: entry?.blockers.length ? `Not ready to release:\n• ${entry.blockers.join("\n• ")}` : undefined,
-    };
+    return null;
   }
 
   // Batch preview stacks one document per task in a single print job, so a whole
@@ -596,7 +581,7 @@ export function WorkInstructionsPanel({
           <p className="ui-section-subtitle">
             {workTasks.length === 0
               ? "Add tasks in the Gantt to see the work instructions you need to build."
-              : `${releasedCount} of ${workTasks.length} released · ${modifiedCount + readyCount} waiting to be released · ${incompleteCount} incomplete.`}
+              : `${releasedCount} of ${workTasks.length} released · ${modifiedCount + readyCount} waiting to be released.`}
           </p>
           <p className="text-xs text-ink-tertiary">
             Each work instruction is released on its own, as Rev A, B, C… A released copy never changes; edits in the planner show as modified until you release again.
@@ -633,11 +618,18 @@ export function WorkInstructionsPanel({
       </header>
 
       {controlError ? <p role="alert" className="text-xs text-danger">{controlError}</p> : null}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <section aria-label="Draft progress" className="rounded-lg border border-line p-4 space-y-2">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="font-medium">Drafts complete</span>
+          <span aria-live="polite">{draftCompleteCount} of {workTasks.length} · {workTasks.length - draftCompleteCount} remaining</span>
+        </div>
+        <progress aria-label="Drafts complete" className="h-2 w-full accent-accent" value={draftCompleteCount} max={Math.max(1, workTasks.length)} />
+        <p className="text-xs text-ink-tertiary">Check each draft when you finish writing it. You can uncheck it whenever more work is needed.</p>
+      </section>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <StatCard label="Needed" value={String(workTasks.length)} meta="one per task" />
         <StatCard label="Released" value={String(releasedCount)} tone={releasedCount > 0 ? "good" : "neutral"} meta="current revision matches" />
         <StatCard label="To release" value={String(modifiedCount + readyCount)} tone={modifiedCount > 0 ? "warn" : "neutral"} meta={`${modifiedCount} modified · ${readyCount} new`} />
-        <StatCard label="Incomplete" value={String(incompleteCount)} tone={incompleteCount > 0 ? "warn" : "neutral"} meta="not ready to release" />
       </div>
 
       {workTasks.length === 0 ? null : (
@@ -672,24 +664,23 @@ export function WorkInstructionsPanel({
                             {task.manufacturingCode || "Uncoded"}
                           </span>
                           <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{task.name}</span>
-                          <span className="flex shrink-0 items-center gap-2 text-ink-tertiary">
-                            <span
-                              title={hasTools(task) ? "Tools assigned" : "No tools assigned"}
-                              className={hasTools(task) ? "text-ink-secondary" : "opacity-30"}
-                            >
-                              <Wrench size={13} strokeWidth={1.75} />
-                            </span>
-                            <span
-                              title={hasChecks(task) ? "Checks assigned" : "No checks assigned"}
-                              className={hasChecks(task) ? "text-ink-secondary" : "opacity-30"}
-                            >
-                              <ListChecks size={13} strokeWidth={1.75} />
-                            </span>
-                          </span>
-                          <span className={`ui-chip shrink-0 ${status.className}`} title={"title" in status ? status.title : undefined}>
+                          {status ? <span className={`ui-chip shrink-0 ${status.className}`}>
                             {status.label}
-                          </span>
+                          </span> : null}
                         </button>
+                        <label className="flex shrink-0 items-center gap-2 py-2 text-xs text-ink-secondary">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-accent"
+                            checked={task.customFields?.workInstructionDraftComplete === true}
+                            disabled={readOnly || !onUpdateTask}
+                            aria-label={`Draft complete for ${task.name}`}
+                            onChange={(event) => onUpdateTask?.(task.id, {
+                              customFields: { ...task.customFields, workInstructionDraftComplete: event.target.checked },
+                            })}
+                          />
+                          Draft complete
+                        </label>
                         {projectId ? (
                           <button
                             type="button"

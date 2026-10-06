@@ -3493,6 +3493,7 @@ export function LineWorkspace({
                     <ChecklistWorkspace />
                   ) : activeModule === "work-instructions" ? (
                     <WorkInstructionsPanel
+                      onUpdateTask={updateTask}
                       onBeforeRelease={awiMaster ? () => ensureSavedBeforeScenarioAction("AWI is still saving", "Resolve the save issue before releasing this AWI.") : undefined}
                       isAwiMaster={Boolean(awiMaster)}
                       tasks={derivedState.tasks}

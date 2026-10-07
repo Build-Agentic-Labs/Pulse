@@ -158,7 +158,8 @@ test("private image and Word export survive reload", async ({ page }) => {
 test("annotation text is included in Word image export",async({page})=>{
  await draft(page,`Annotated WI ${Date.now()}`);
  const payload=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=800;canvas.height=400;const context=canvas.getContext('2d')!;context.fillStyle='#daeef0';context.fillRect(0,0,800,400);return canvas.toDataURL('image/png').split(',')[1];});
- await page.getByLabel('Upload image for step 1',{exact:true}).setInputFiles({name:'annotated.png',mimeType:'image/png',buffer:Buffer.from(payload,'base64')});await expect(page.getByRole('status')).toHaveText('Saved');
+ const imageSaved = page.waitForResponse(response => response.url().endsWith('/rpc/edit_quality_wi') && response.request().postDataJSON()?.p_kind === 'image' && response.ok());
+ await page.getByLabel('Upload image for step 1',{exact:true}).setInputFiles({name:'annotated.png',mimeType:'image/png',buffer:Buffer.from(payload,'base64')});await imageSaved;await expect(page.getByRole('status')).toHaveText('Saved');
  await page.getByRole('button',{name:'Open image for step 1'}).click();await expect(page.getByRole('dialog')).toBeVisible();
  await page.getByRole('button',{name:/text/i}).first().click();
  // Annotation tools are verified through their shared renderer; save an explicit text scene

@@ -186,7 +186,7 @@ test("long title, revision description and instructions export without losing th
 test("Preview uses the SOP document presentation with continuous PDF pages and download", async ({page}) => {
   await draft(page, `PDF WI ${Date.now()}`);
   await page.getByRole('button', {name:'Preview',exact:true}).click();
-  await expect(page.locator('.document-preview-pdf-sheet')).toHaveCount(1);
+  await expect(page.locator('.document-preview-pdf-sheet')).toHaveCount(2);
   await expect(page.locator('.sop-document-toolbar')).toHaveCount(1);
   await expect(page.getByRole('button',{name:'Zoom in',exact:true})).toHaveCount(0);
   const download=page.waitForEvent('download');

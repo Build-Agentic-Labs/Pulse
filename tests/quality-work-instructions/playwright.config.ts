@@ -19,9 +19,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "node tests/quality-work-instructions/local-runtime.mjs dev",
+    command: `node tests/quality-work-instructions/local-runtime.mjs ${process.env.CI ? "start" : "dev"}`,
     url: "http://127.0.0.1:3215/sops/work-instructions",
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 60000,
   },
 });

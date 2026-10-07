@@ -97,7 +97,7 @@ jobs:
       - name: pgTAP
         run: |
           set -o pipefail
-          supabase test db --local 2>&1 | tee database-tests.log
+          supabase test db --local supabase/tests tests/quality-work-instructions/database.sql 2>&1 | tee database-tests.log
 
       - name: Upload database test log
         if: always()
@@ -135,4 +135,25 @@ jobs:
             playwright-report/
             test-results/
           if-no-files-found: ignore
+          retention-days: 7
+
+  quality-wi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: WI browser workflows on a fresh isolated database
+        run: node scripts/test-quality-wi-ci.mjs
+      - name: Upload WI browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: quality-wi-failures
+          path: test-results/
           retention-days: 7

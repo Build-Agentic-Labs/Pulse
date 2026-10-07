@@ -63,11 +63,11 @@ stays the same afterward, and the original published revision remains readable.
   remain visible; PDF text is not selectable/searchable. Word export retains editable text.
   PDF and Word use the same template content but their page breaks can differ.
 - Department reassignment, SOP linking, step restore UI and an SOP review flow are outside scope.
-- After user acceptance: wire the local SQL/browser tests into CI, verify fresh migration replay
+- CI includes the WI SQL suite in the database job and a dedicated WI browser job. Verify fresh migration replay
   and final schema parity, run all CI jobs, and separately review production migration/release.
   Existing local database functions were updated during development, so local passing tests alone
   do not substitute for a clean migration replay.
-- No push, merge or release is authorized at this stage. Feature rollout is gated by
+- User authorized merge and push on October 7 after local acceptance. Production database rollout remains separate. Feature rollout is gated by
   `NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED=1`; default production builds hide the link.
 
 ## WI attribution and revision history (local, October 7)
@@ -78,3 +78,7 @@ stays the same afterward, and the original published revision remains readable.
 - Author lookup returns only the name, gated by existing WI read access. No email fallback. The two additive migrations were applied only to the retained isolated WI database.
 - Validation: 43 rolled-back SQL assertions, 20 focused unit/export tests, typecheck and targeted lint. PDF sample rendered and inspected. SOP templates untouched.
 - Sample PDF is a standalone artifact; no new WIs were added to the cleaned library. Browser page-count expectations now include the history page; the fixture-creating browser suite was not rerun in this pass.
+
+## Publication checks
+
+The latest local checks passed production build, standalone typecheck, bundle budgets, 2,298 unit tests, and lint. The browser rerun found and corrected one stale page-count expectation after adding the history page. CI now checks all six WI browser workflows on a fresh isolated database using a production build. The WI SQL suite remains transaction-rolled-back and now runs in the existing database CI job.

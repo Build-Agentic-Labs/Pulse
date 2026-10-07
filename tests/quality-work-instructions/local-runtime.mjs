@@ -155,6 +155,7 @@ if (mode === "setup") {
             "playwright",
             "test",
             "--config=tests/quality-work-instructions/playwright.config.ts",
+            ...process.argv.slice(3),
           ]
         : [
             "next",

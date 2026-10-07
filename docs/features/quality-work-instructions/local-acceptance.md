@@ -82,3 +82,20 @@ stays the same afterward, and the original published revision remains readable.
 ## Publication checks
 
 The latest local checks passed production build, standalone typecheck, bundle budgets, 2,298 unit tests, and lint. The browser rerun found and corrected one stale page-count expectation after adding the history page. CI now checks all six WI browser workflows on a fresh isolated database using a production build. The WI SQL suite remains transaction-rolled-back and now runs in the existing database CI job.
+
+
+## Production rollout (October 7)
+
+The user authorized rollout from the Quality sidebar. The three additive WI migrations
+(builder, author display name, revision author snapshot) were installed in the Pulse
+production database. Fresh WI migration installation passed 43 rolled-back database
+assertions locally; the same 43 assertions passed against production with all fixture
+writes rolled back. The latest main CI WI and database jobs also passed, including
+fresh full migration replay and the six browser workflows.
+
+The builder is enabled by default in the library, editor route and Quality navigation.
+`NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED=0` is an explicit rollback switch; changing it
+requires rebuilding the app. Existing Quality view/edit and department permissions
+continue to govern access. The live-backed library was verified from the sidebar with
+no production WIs created by the rollout. Work instructions publish directly and
+retain immutable revisions; they do not enter the SOP review queue.

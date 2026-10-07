@@ -75,7 +75,7 @@ export function SopTabNav({
         {item("library", <Library size={15} strokeWidth={1.75} />, "Effective library")}
         {item("retired", <Archive size={15} strokeWidth={1.75} />, "Retired")}
       </NavSelectionTrack>
-      {process.env.NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED === "1" ? (
+      {process.env.NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED !== "0" ? (
         <div className="mt-4 border-t border-line pt-3">
         <NavSelectionTrack activeIndex={active === "work-instructions" ? 0 : -1}>
           <Link href="/sops/work-instructions" prefetch={false} scroll={false} className={`ui-nav-item w-full ${active === "work-instructions" ? "ui-nav-item-active" : "ui-nav-item-idle"}`}>

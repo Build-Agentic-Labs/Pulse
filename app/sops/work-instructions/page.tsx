@@ -3,7 +3,7 @@ import { listQualityWis } from "@/lib/quality-wi/read-store";
 import { wiServerSeed } from "@/lib/quality-wi/server-seed";
 export const metadata = { title: "Work instructions | Pulse" };
 export default async function WorkInstructionsPage() {
-  if (process.env.NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED !== "1")
+  if (process.env.NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED === "0")
     return (
       <div className="p-6">
         The work instruction builder is not enabled in this environment.

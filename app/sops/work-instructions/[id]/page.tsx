@@ -7,7 +7,7 @@ export default async function WorkInstructionPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  if (process.env.NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED !== "1")
+  if (process.env.NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED === "0")
     return (
       <div className="p-6">
         The work instruction builder is not enabled in this environment.

@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const access = vi.hoisted(() => ({ allowed: false }));
 vi.mock("./work-instruction-template-access", () => ({
@@ -41,4 +41,19 @@ describe("SopTabNav — work instruction template", () => {
     expect(screen.getByRole("link", { name: /WI template/ })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Quality settings/ })).toBeNull();
   });
+});
+
+
+afterEach(() => vi.unstubAllEnvs());
+
+it("offers the released WI builder to members by default", () => {
+  vi.stubEnv("NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED", undefined);
+  render(<SopTabNav active="work-instructions" manage={false} />);
+  expect(screen.getByRole("link", { name: "Work instructions" }).getAttribute("href")).toBe("/sops/work-instructions");
+});
+
+it("honors the explicit WI rollback switch", () => {
+  vi.stubEnv("NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED", "0");
+  render(<SopTabNav active="all" manage={false} />);
+  expect(screen.queryByRole("link", { name: "Work instructions" })).toBeNull();
 });

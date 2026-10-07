@@ -10,10 +10,12 @@ vi.mock("@/domain/supabase-planner", () => ({
   getUserFromSession: mocks.getUserFromSession,
 }));
 
-import { annexDownloadName, removeSopAnnexFile, uploadSopAnnexFile, type SopAnnexFile } from "./annex-files";
+import { downloadSopAnnexFile, openSopAnnexFile, annexDownloadName, removeSopAnnexFile, uploadSopAnnexFile, type SopAnnexFile } from "./annex-files";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
   mocks.createPlannerSupabaseClient.mockReset();
   mocks.getUserFromSession.mockReset();
 });
@@ -217,5 +219,47 @@ describe("uploadSopAnnexFile race cleanup", () => {
 
     expect(result.storagePath).toBe(state.uploadedPath);
     expect(state.removedPaths).toEqual([]);
+  });
+});
+
+
+describe("attachment downloads", () => {
+  function setup(data: Blob | null, error: { message: string } | null = null) {
+    const download = vi.fn().mockResolvedValue({ data, error });
+    mocks.createPlannerSupabaseClient.mockReturnValue({ storage: { from: () => ({ download }) } });
+    const anchor = { href: "", download: "", click: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal("document", { createElement: () => anchor, body: { appendChild: vi.fn() } });
+    const open = vi.fn();
+    vi.stubGlobal("window", { open });
+    const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:attachment");
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    return { download, anchor, open, create, revoke };
+  }
+
+  it("downloads complete Excel bytes with the original name without a popup", async () => {
+    vi.useFakeTimers();
+    const mocks = setup(new Blob(["spreadsheet"]));
+    await openSopAnnexFile({ ...sampleFile, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", originalName: "Control Plan.xlsx", sizeBytes: 11 });
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.download).toHaveBeenCalledWith(sampleFile.storagePath);
+    expect(mocks.anchor.download).toBe("Control Plan.xlsx");
+    expect(mocks.anchor.click).toHaveBeenCalledOnce();
+    expect(mocks.anchor.remove).toHaveBeenCalledOnce();
+    expect(mocks.revoke).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60_000);
+    expect(mocks.revoke).toHaveBeenCalledWith("blob:attachment");
+  });
+
+  it("does not save a partial attachment", async () => {
+    const mocks = setup(new Blob(["short"]));
+    await expect(downloadSopAnnexFile(sampleFile)).rejects.toThrow("incomplete");
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.anchor.click).not.toHaveBeenCalled();
+  });
+
+  it("surfaces storage failures instead of starting a broken download", async () => {
+    const mocks = setup(null, { message: "Access denied" });
+    await expect(downloadSopAnnexFile(sampleFile)).rejects.toThrow("Access denied");
+    expect(mocks.anchor.click).not.toHaveBeenCalled();
   });
 });

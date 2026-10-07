@@ -215,7 +215,33 @@ export async function createSopAnnexFileUrl(
   return data.signedUrl;
 }
 
+export async function downloadSopAnnexFile(file: SopAnnexFile): Promise<void> {
+  const supabase = createPlannerSupabaseClient();
+  const { data, error } = await supabase.storage.from(BUCKET).download(file.storagePath);
+  if (error) throw new Error(error.message);
+  if (!data || data.size === 0 || data.size !== file.sizeBytes) {
+    throw new Error("The attachment download was incomplete. Please try again.");
+  }
+  // Start the browser download only after all bytes arrived. Keep the local URL
+  // alive long enough for the browser to finish saving it, including larger files.
+  const url = URL.createObjectURL(data);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.originalName.trim() || "download";
+  document.body.appendChild(anchor);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+}
+
 export async function openSopAnnexFile(file: SopAnnexFile): Promise<void> {
+  if (annexDownloadName(file.contentType, file.originalName)) {
+    await downloadSopAnnexFile(file);
+    return;
+  }
   const preview = window.open("about:blank", "_blank");
   if (preview) preview.opener = null;
   try {

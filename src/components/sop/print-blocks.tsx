@@ -31,6 +31,7 @@ export interface PrintBlockExtras {
   /** "Attached form: …" annotations under annex rows, keyed by annex id. */
   annexFileLines?: Map<string, { name: string; error?: string }>;
   annexLoading?: boolean;
+  renderAnnexFile?: (annex: Sop["annexes"][number], name: string) => ReactNode;
   renderAnnexComment?: (annex: Sop["annexes"][number]) => ReactNode;
 }
 
@@ -369,7 +370,7 @@ function buildAnnexesSection(sop: Sop, extras?: PrintBlockExtras): PrintBlock[] 
                   </p>
                   {fileLine ? (
                     <p className={`sop-export-annex-file ${fileLine.error ? "sop-export-annex-file-error" : ""}`}>
-                      Attached form: {fileLine.name}
+                      Attached form: {extras?.renderAnnexFile?.(annex, fileLine.name) ?? fileLine.name}
                       {fileLine.error ? ` - ${fileLine.error}` : ""}
                     </p>
                   ) : null}

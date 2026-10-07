@@ -24,7 +24,7 @@ import {
   signatureStrokePath,
 } from "@/domain/sop/signature";
 import { buildApprovalEntries, type ApprovalSignatureEntry } from "@/lib/sop/approval-entries";
-import { createSopAnnexFileUrl, openSopAnnexFile, type SopAnnexFile } from "@/lib/sop/annex-files";
+import { createSopAnnexFileUrl, downloadSopAnnexFile, openSopAnnexFile, type SopAnnexFile } from "@/lib/sop/annex-files";
 import { buildProcedureSvgPages } from "@/lib/sop/procedure-flow-image";
 import type { SopReviewAnnotation } from "@/lib/sop/review-annotations";
 import { buildPrintBlocks, type PrintBlock, type PrintBlockExtras } from "./print-blocks";
@@ -383,6 +383,7 @@ export function SopPrintPreview({
     return annexFiles.filter((file) => !referenceDocIds.has(file.annexId));
   }, [annexFiles, sop.referenceDocs]);
   const [annexPreview, setAnnexPreview] = useState<AnnexPreviewState>({ loading: false, pages: [], errors: {} });
+  const [annexDownloadErrors, setAnnexDownloadErrors] = useState<Record<string, string>>({});
   const [referenceOpenError, setReferenceOpenError] = useState("");
   // Referenced PDF opened inline over this preview (signed URL in an iframe).
   const [inlineDoc, setInlineDoc] = useState<{ name: string; url: string } | null>(null);
@@ -537,6 +538,17 @@ export function SopPrintPreview({
           {linkedSopLabel(link)}
         </Link>{canCommentOnAttachments ? <AttachmentCommentButton id={link.sopId} name={linkedSopLabel(link)} category="references" /> : null}</>
       ),
+      renderAnnexFile: (annex, name) => {
+        const file = formFiles.find((item) => item.annexId === annex.id);
+        if (!file) return name;
+        return <><button type="button" className="sop-export-link" title={`Download ${name}`}
+          onClick={() => {
+            setAnnexDownloadErrors((current) => ({ ...current, [file.id]: "" }));
+            downloadSopAnnexFile(file).catch((error: unknown) => {
+              setAnnexDownloadErrors((current) => ({ ...current, [file.id]: error instanceof Error ? error.message : "The attachment could not be downloaded." }));
+            });
+          }}>{name}</button>{annexDownloadErrors[file.id] ? <span role="alert" className="sop-export-annex-file-error"> — {annexDownloadErrors[file.id]}</span> : null}</>;
+      },
       renderReferenceDoc: (doc) => {
         // The binary sits in the annex-file table keyed by this doc's id.
         // Storage URLs are short-lived signed URLs, so mint one on click.
@@ -574,7 +586,7 @@ export function SopPrintPreview({
       annexFileLines,
       annexLoading: annexPreview.loading,
     }),
-    [sop, annexFiles, systemAuthorName, approvalEntries, revealSignatureId, annexFileLines, annexPreview.loading, canCommentOnAttachments],
+    [sop, annexFiles, formFiles, annexDownloadErrors, systemAuthorName, approvalEntries, revealSignatureId, annexFileLines, annexPreview.loading, canCommentOnAttachments],
   );
 
   // `buildPrintBlocks` stays pure of preview UI state (see PrintBlockExtras),
@@ -1294,7 +1306,7 @@ export function SopPrintPreview({
                         <p className="sop-export-annex"><strong>{annex.label}: </strong>{annex.description}{extras.renderAnnexComment?.(annex)}</p>
                         {file ? (
                           <p className={`sop-export-annex-file ${error ? "sop-export-annex-file-error" : ""}`}>
-                            Attached form: {file.originalName}{error ? ` - ${error}` : ""}
+                            Attached form: {extras.renderAnnexFile?.(annex, file.originalName) ?? file.originalName}{error ? ` - ${error}` : ""}
                           </p>
                         ) : null}
                       </div>

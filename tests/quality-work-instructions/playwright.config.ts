@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 if (
   process.env.NEXT_PUBLIC_SUPABASE_URL !== "http://127.0.0.1:57721" ||
   process.env.NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED !== "1"
@@ -19,6 +20,7 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
+    cwd: fileURLToPath(new URL("../..", import.meta.url)),
     command: `node tests/quality-work-instructions/local-runtime.mjs ${process.env.CI ? "start" : "dev"}`,
     url: "http://127.0.0.1:3215/sops/work-instructions",
     reuseExistingServer: !process.env.CI,

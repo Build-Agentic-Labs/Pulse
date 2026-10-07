@@ -15,7 +15,7 @@
 -- read; the resend trigger refreshes only provisional rows.
 
 begin;
-select plan(44);
+select plan(50);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures (owner context: RLS bypassed)
@@ -203,6 +203,38 @@ select throws_like(
   'a seated Quality-gate department is still never nominatable through the SOP'
 );
 reset role;
+-- The submit flow must also reuse another inviter's grant across departments.
+insert into public.workspace_access_grants
+  (workspace_id,email,role,quality_access,department_access,granted_by,expires_at)
+values ('ws_nom','nom-second@anacorp.com','editor','edit',
+  '[{"department_id":"dept_nom_eng","role":"reviewer","position_title":"Engineer"}]',
+  'd0000000-0000-0000-0000-000000000001',now()+interval '30 days');
+insert into public.sop_approver_nominations (sop_id,department_id,email,position_title,created_by)
+values ('sop_nom_1','dept_nom_eng','nom-second@anacorp.com','Engineer',
+  'd0000000-0000-0000-0000-000000000002');
+select test_as('d0000000-0000-0000-0000-000000000002');
+select lives_ok(
+  $$ select public.mint_pending_department_reviewer('dept_nom_eng','d0000000-0000-0000-0000-000000000008') $$,
+  'the SOP author can reuse an admin invitation for a seated cross-department reviewer'
+);
+reset role;
+select is((select granted_by from public.workspace_access_grants where workspace_id='ws_nom' and email='nom-second@anacorp.com'),
+  'd0000000-0000-0000-0000-000000000001'::uuid,'reuse preserves the original invitation creator');
+delete from public.department_members where department_id='dept_nom_eng' and user_id='d0000000-0000-0000-0000-000000000005';
+select test_as('d0000000-0000-0000-0000-000000000005');
+select throws_like(
+  $$ select public.mint_pending_department_reviewer('dept_nom_eng','d0000000-0000-0000-0000-000000000008') $$,
+  '%cannot prepare reviewers%','a workspace member cannot use a draft they cannot edit'
+);
+reset role;
+delete from public.sop_approver_nominations where sop_id='sop_nom_1';
+select test_as('d0000000-0000-0000-0000-000000000002');
+select throws_like(
+  $$ select public.mint_pending_department_reviewer('dept_nom_eng','d0000000-0000-0000-0000-000000000008') $$,
+  '%cannot prepare reviewers%','an SOP seat alone cannot mint an unstaged cross-department reviewer'
+);
+reset role;
+delete from public.workspace_access_grants where workspace_id='ws_nom' and email='nom-second@anacorp.com';
 -- Leave the roster and memberships as the later tasks expect them (27 seats PRD itself and
 -- submits; 10 adds u5 to PRD from a clean slate), then resume as the author.
 delete from public.sop_review_seats where sop_id = 'sop_nom_1' and department_id in ('dept_nom_eng', 'dept_nom_qas');
@@ -320,22 +352,35 @@ select is(
   'the provisional row mirrors the kept approver entry'
 );
 
+select test_as('d0000000-0000-0000-0000-000000000002');
+select lives_ok(
+  $$ select public.mint_pending_department_reviewer('dept_nom_prd', 'd0000000-0000-0000-0000-000000000009') $$,
+  'an author can reuse the admin-created approver invitation'
+);
+reset role;
+
 -- ---------------------------------------------------------------------------
--- 23-25. mint_pending_department_reviewer: refused without a matching grant BY THE CALLER,
--- refused for a department the grant does not name, idempotent with one.
+-- 23-25. mint_pending_department_reviewer: shared invitations are reusable by authorized department members,
+-- refused without department/SOP authorization, idempotent with a valid invitation.
 -- ---------------------------------------------------------------------------
 select test_as('d0000000-0000-0000-0000-000000000003');
+select lives_ok(
+  $$ select public.mint_pending_department_reviewer('dept_nom_prd', 'd0000000-0000-0000-0000-000000000006') $$,
+  'another authorized author can reuse the invitation'
+);
+reset role;
+select test_as('d0000000-0000-0000-0000-000000000007');
 select throws_like(
   $$ select public.mint_pending_department_reviewer('dept_nom_prd', 'd0000000-0000-0000-0000-000000000006') $$,
-  '%No matching invitation%',
-  'a peer who did not send the invitation cannot mint the provisional row'
+  '%cannot prepare reviewers%',
+  'a caller without department or SOP access cannot reuse the invitation'
 );
 reset role;
 select test_as('d0000000-0000-0000-0000-000000000002');
 select throws_like(
   $$ select public.mint_pending_department_reviewer('dept_nom_eng', 'd0000000-0000-0000-0000-000000000006') $$,
-  '%does not name this department%',
-  'the nominator cannot mint a row in a department the invitation does not name'
+  '%cannot prepare reviewers%',
+  'the nominator cannot mint a row in an unauthorized department'
 );
 select lives_ok(
   $$ select public.mint_pending_department_reviewer('dept_nom_prd', 'd0000000-0000-0000-0000-000000000006') $$,

@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(route.query),
   useRouter: () => ({ push: vi.fn() }),
 }));
+vi.mock("./work-instruction-template-access", () => ({ WORK_INSTRUCTION_TEMPLATE_HREF: "/api/quality/work-instruction-template", useWorkInstructionTemplateAccess: () => false }));
 vi.mock("./sop-shell", () => ({ SopShell: ({ sidebar, children }: { sidebar: React.ReactNode; children: React.ReactNode }) => <div><nav>{sidebar}</nav>{children}</div> }));
 afterEach(() => { cleanup(); route.pathname = "/sops"; route.query = ""; });
 

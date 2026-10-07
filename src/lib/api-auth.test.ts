@@ -140,6 +140,16 @@ describe("requireApiUser", () => {
     expect(result.failure).toBeNull();
   });
 
+  it("returns the verified email, or null when the user has none", async () => {
+    const getUser = vi.fn()
+      .mockResolvedValueOnce({ data: { user: { id: "user-1", email: "rlopez@anacorp.com" } }, error: null })
+      .mockResolvedValueOnce({ data: { user: { id: "user-2" } }, error: null });
+    createClientMock.mockReturnValue({ auth: { getUser } });
+
+    expect((await requireApiUser(requestWithAuth("Bearer one"))).email).toBe("rlopez@anacorp.com");
+    expect((await requireApiUser(requestWithAuth("Bearer two"))).email).toBeNull();
+  });
+
   it("falls back to a cookie session when no bearer header is present", async () => {
     const getUser = vi.fn().mockResolvedValue({ data: { user: { id: "cookie-user" } }, error: null });
     createServerClientMock.mockReturnValue({ auth: { getUser } });

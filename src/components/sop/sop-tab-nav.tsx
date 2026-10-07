@@ -1,11 +1,12 @@
 "use client";
 
-import { Archive, Building2, FileText, Inbox, LayoutDashboard, Library } from "lucide-react";
+import { Archive, Building2, FileDown, FileText, Inbox, LayoutDashboard, Library } from "lucide-react";
 import Link from "next/link";
 import type { MouseEvent, ReactNode } from "react";
 import { NavSelectionTrack } from "@/components/nav-selection-track";
 import { badgeLabel } from "@/domain/sop/queue-summary";
 import { ProblemPilotLink } from "@/components/problem-solving/problem-pilot-link";
+import { WORK_INSTRUCTION_TEMPLATE_HREF, useWorkInstructionTemplateAccess } from "./work-instruction-template-access";
 
 export type SopTab = "dashboard" | "all" | "review" | "library" | "retired" | "settings";
 
@@ -22,6 +23,7 @@ export function SopTabNav({
   /** SOPs waiting on the viewer (to review, or back from review); null = not known yet. */
   reviewCount?: number | null;
 }) {
+  const templateAccess = useWorkInstructionTemplateAccess();
   function handleClick(event: MouseEvent<HTMLAnchorElement>, tab: SopTab) {
     if (
       !onSelect ||
@@ -74,24 +76,38 @@ export function SopTabNav({
         {item("retired", <Archive size={15} strokeWidth={1.75} />, "Retired")}
       </NavSelectionTrack>
       <ProblemPilotLink />
-      {manage ? (
+      {manage || templateAccess ? (
         <>
           <div className="ui-nav-section mt-3">Manage</div>
-          <NavSelectionTrack activeIndex={active === "settings" ? 0 : -1} className="space-y-0.5">
-            <Link
-              href="/sops?tab=settings"
-              prefetch
-              scroll={false}
-              onClick={(event) => handleClick(event, "settings")}
-              className={`ui-nav-item w-full ${
-                active === "settings" ? "ui-nav-item-active" : "ui-nav-item-idle"
-              }`}
-              title="Quality settings"
+          {manage ? (
+            <NavSelectionTrack activeIndex={active === "settings" ? 0 : -1} className="space-y-0.5">
+              <Link
+                href="/sops?tab=settings"
+                prefetch
+                scroll={false}
+                onClick={(event) => handleClick(event, "settings")}
+                className={`ui-nav-item w-full ${
+                  active === "settings" ? "ui-nav-item-active" : "ui-nav-item-idle"
+                }`}
+                title="Quality settings"
+              >
+                <Building2 size={15} strokeWidth={1.75} />
+                <span>Quality settings</span>
+              </Link>
+            </NavSelectionTrack>
+          ) : null}
+          {templateAccess ? (
+            // A download, not a tab: a plain anchor so the browser saves the .docx.
+            <a
+              href={WORK_INSTRUCTION_TEMPLATE_HREF}
+              download
+              className={`ui-nav-item ui-nav-item-idle w-full${manage ? " mt-0.5" : ""}`}
+              title="Download the blank work instruction template (Word)"
             >
-              <Building2 size={15} strokeWidth={1.75} />
-              <span>Quality settings</span>
-            </Link>
-          </NavSelectionTrack>
+              <FileDown size={15} strokeWidth={1.75} />
+              <span>WI template</span>
+            </a>
+          ) : null}
         </>
       ) : null}
     </>

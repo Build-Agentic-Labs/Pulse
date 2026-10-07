@@ -53,6 +53,11 @@ const securityHeaders = [
 
 /** @type {(phase: string) => import('next').NextConfig} */
 const nextConfig = (phase) => ({
+  // The work instruction template route reads the logo from disk; public/ files
+  // are not traced into server functions on their own.
+  outputFileTracingIncludes: {
+    "/api/quality/work-instruction-template": ["./public/sop/ana-logo.png"],
+  },
   distDir: process.env.PULSE_BROWSER_TEST === "1" ? ".next-e2e" : phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
   experimental: {
     // Next 16.1 turned nested async chunking OFF in dev, which makes Turbopack's

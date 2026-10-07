@@ -36,8 +36,9 @@ export function callerScopedSupabase(token: string): SupabaseClient<Database> {
 }
 
 export type ApiUserResult =
-  | { userId: string; supabase: SupabaseClient<Database>; failure: null }
-  | { userId: null; supabase: null; failure: NextResponse };
+  /** `email` comes from the verified user, never from the request. */
+  | { userId: string; email: string | null; supabase: SupabaseClient<Database>; failure: null }
+  | { userId: null; email: null; supabase: null; failure: NextResponse };
 
 export async function requireApiUser(request: Request): Promise<ApiUserResult> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -46,6 +47,7 @@ export async function requireApiUser(request: Request): Promise<ApiUserResult> {
   if (!supabaseUrl || !supabaseAnonKey) {
     return {
       userId: null,
+      email: null,
       supabase: null,
       failure: NextResponse.json({ error: "Supabase auth is not configured." }, { status: 503 }),
     };
@@ -56,6 +58,7 @@ export async function requireApiUser(request: Request): Promise<ApiUserResult> {
   if (request.headers.has("authorization") && !token) {
     return {
       userId: null,
+      email: null,
       supabase: null,
       failure: NextResponse.json({ error: "Invalid authorization header." }, { status: 401 }),
     };
@@ -71,6 +74,7 @@ export async function requireApiUser(request: Request): Promise<ApiUserResult> {
   if (error || !data.user) {
     return {
       userId: null,
+      email: null,
       supabase: null,
       failure: NextResponse.json({ error: "Invalid or expired session." }, { status: 401 }),
     };
@@ -78,7 +82,7 @@ export async function requireApiUser(request: Request): Promise<ApiUserResult> {
 
   // Reuse this verified client for all data access. Reconstructing it from only
   // the Authorization header drops cookie sessions and makes RLS see anon.
-  return { userId: data.user.id, supabase, failure: null };
+  return { userId: data.user.id, email: data.user.email ?? null, supabase, failure: null };
 }
 
 /** Read-only cookies: token rotation belongs to the proxy, not API routes. */

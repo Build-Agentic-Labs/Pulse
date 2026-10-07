@@ -19,7 +19,10 @@ export const WI_TEMPLATE_TITLE_PROMPT = "[Title]";
 
 /** The AWI's Purpose / scope + Safety / PPE band, with Safety swapped out. */
 export const WI_TEMPLATE_SUMMARY_ROWS: TemplateSummaryRow[] = [
-  { label: "Purpose / scope", prompt: "[Why this procedure exists and who it applies to.]" },
+  {
+    label: "Purpose / scope",
+    prompt: "[Why this procedure exists and who it applies to.]",
+  },
   { label: "Responsibilities", prompt: "[Roles that act in the steps below.]" },
 ];
 
@@ -30,7 +33,8 @@ export const WI_TEMPLATE_SUMMARY_ROWS: TemplateSummaryRow[] = [
  */
 export const WI_TEMPLATE_STEPS_PER_PAGE = [3, 3] as const;
 export const WI_TEMPLATE_STEP_TITLE_PROMPT = "[Step title]";
-export const WI_TEMPLATE_STEP_PROMPT = "[Describe the action, starting with a verb.]";
+export const WI_TEMPLATE_STEP_PROMPT =
+  "[Describe the action, starting with a verb.]";
 export const WI_TEMPLATE_IMAGE_PROMPT = "Image / reference view";
 
 /**
@@ -50,13 +54,28 @@ export const WI_TEMPLATE_CONFIDENTIAL_LINE =
 // the two can never drift apart in layout.
 
 export type GeneralWorkInstructionStep = {
+  /** Print-only continuation fields; authored steps stay intact. */
+  sequence?: number;
+  continued?: boolean;
   title: string;
   instruction: string;
   /** Key into the renderer's image map; absent = "Image / reference view". */
   image?: string;
 };
 
+export type WiRevisionHistoryRow = {
+  revision: string;
+  releaseDate: string;
+  description: string;
+  authorName: string;
+};
+
 export type GeneralWorkInstruction = {
+  revisionHistory?: WiRevisionHistoryRow[];
+  /** Filled builder drafts are explicitly labeled; blank template output stays unchanged. */
+  isDraft?: boolean;
+  /** Original WI creator; never inferred from the person viewing or exporting. */
+  authorName?: string;
   title: string;
   documentNumber: string;
   revision: string;
@@ -68,8 +87,12 @@ export type GeneralWorkInstruction = {
 };
 
 export function blankGeneralWorkInstruction(): GeneralWorkInstruction {
-  const total = WI_TEMPLATE_STEPS_PER_PAGE.reduce((sum, count) => sum + count, 0);
+  const total = WI_TEMPLATE_STEPS_PER_PAGE.reduce(
+    (sum, count) => sum + count,
+    0,
+  );
   return {
+    authorName: "[Author name]",
     title: WI_TEMPLATE_TITLE_PROMPT,
     documentNumber: WI_TEMPLATE_DOC_NUMBER_PROMPT,
     revision: "",
@@ -89,15 +112,23 @@ export function blankGeneralWorkInstruction(): GeneralWorkInstruction {
  * every continuation page the second figure, and a document always has at
  * least the template's two pages.
  */
-export function paginateGeneralWorkInstruction(stepCount: number): number[][] {
+export function paginateGeneralWorkInstruction(
+  stepCount: number,
+  padToTemplate = true,
+): number[][] {
   const [firstPage, perPage] = WI_TEMPLATE_STEPS_PER_PAGE;
   const pages: number[][] = [];
   let next = 1;
   const minimum = firstPage + perPage;
-  const total = Math.max(stepCount, minimum);
+  const total = Math.max(stepCount, padToTemplate ? minimum : 1);
   while (next <= total) {
     const size = pages.length === 0 ? firstPage : perPage;
-    pages.push(Array.from({ length: Math.min(size, total - next + 1) }, (_, i) => next + i));
+    pages.push(
+      Array.from(
+        { length: Math.min(size, total - next + 1) },
+        (_, i) => next + i,
+      ),
+    );
     next += size;
   }
   return pages;

@@ -3,11 +3,15 @@
 import { Suspense, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { SopDetailLoadingSurface } from "./sop-detail-loading-surface";
+import { WiRouteLoadingState } from "@/components/quality-wi/wi-route-loading-state";
 
 /** Outer boundaries can suspend before the workspace provider exists. */
 function RouteLoadingSurface({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const params = useSearchParams();
+  if (pathname === "/sops/work-instructions" || pathname?.startsWith("/sops/work-instructions/")) {
+    return <WiRouteLoadingState />;
+  }
   if (!/^\/sops\/[^/]+\/?$/.test(pathname ?? "") || pathname === "/sops/new" || pathname === "/sops/problem-solving") {
     return children;
   }

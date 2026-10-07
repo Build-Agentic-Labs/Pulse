@@ -1,5 +1,7 @@
 "use client";
 
+import { DocumentPreviewToolbar } from "./document-preview-toolbar";
+
 import { SopReviewLoading } from "./sop-review-loading";
 
 import { formatProcedureText } from "@/domain/sop/procedure-text";
@@ -8,7 +10,7 @@ import { AttachmentCommentButton } from "./attachment-comment-button";
 import { reviewQuotes, reviewTextRange } from "./review-text-highlights";
 import { ReferencePdfPreview } from "./reference-pdf-preview";
 
-import { ArrowLeft, Printer, X } from "lucide-react";
+import { ArrowLeft, Printer } from "lucide-react";
 import Link from "next/link";
 import { formatDateControlled, formatDateTime } from "@/domain/formatting";
 import NextImage from "next/image";
@@ -931,12 +933,10 @@ export function SopPrintPreview({
            hidden box fragment across printed pages; display:none removes it from
            layout entirely, so it can never contribute extra printed sheets. */
         @media print { .sop-print-measure { display: none !important; } }
-        .sop-preview-scroll { position: relative; flex: 1; min-width: 0; overflow: auto; padding: 24px 16px 64px; }
         .sop-review-panel {
           width: clamp(520px, 38vw, 680px); flex: none; overflow: hidden;
           background: var(--color-surface, #fff); border-left: 1px solid var(--color-line, #ddd);
         }
-        .sop-print-pages { display: grid; gap: 24px; justify-content: center; }
         .sop-pages-row { display: flex; align-items: flex-start; justify-content: center; gap: ${MARGIN_GAP_PX}px; }
         .sop-margin-notes { position: relative; flex: none; width: ${MARGIN_COLUMN_PX}px; }
         .sop-margin-note { position: absolute; left: 0; right: 0; transition: top 120ms ease; }
@@ -1108,8 +1108,17 @@ export function SopPrintPreview({
         }
       `}</style>
 
-      <div className="sop-preview-bar sop-document-toolbar">
-        <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+      <DocumentPreviewToolbar onClose={onClose} actions={<>
+
+          {canDownloadPdf ? (
+            <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" onClick={() => window.print()}>
+              <Printer size={15} />
+              Save as PDF
+            </button>
+          ) : null}
+          {toolbarActions}
+      </>}>
+
           {backLink ? (
             <Link href={backLink.href} className="ui-btn-ghost inline-flex h-9 shrink-0 items-center gap-1.5 px-3">
               <ArrowLeft size={15} />
@@ -1127,20 +1136,7 @@ export function SopPrintPreview({
                 : "Final approval · review the controlled PDF and add your digital signature")}
             </span>
           ) : null}
-        </div>
-        <div className="flex max-w-[55%] shrink-0 items-center gap-2 overflow-x-auto">
-          {canDownloadPdf ? (
-            <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" onClick={() => window.print()}>
-              <Printer size={15} />
-              Save as PDF
-            </button>
-          ) : null}
-          {toolbarActions}
-          <button type="button" className="ui-btn-ghost h-9 w-9 px-0" onClick={onClose} aria-label="Close preview">
-            <X size={16} className="mx-auto" />
-          </button>
-        </div>
-      </div>
+      </DocumentPreviewToolbar>
 
       <div className="sop-preview-content">
         <div

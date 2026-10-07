@@ -39,3 +39,9 @@ describe("document numbers", () => {
     expect(SAMPLE_GENERAL_WORK_INSTRUCTION.documentNumber).toBe("WI-PUR-001");
   });
 });
+
+it("filled builder documents have only authored steps while the blank template keeps its slots", () => {
+  expect(paginateGeneralWorkInstruction(1, false)).toEqual([[1]]);
+  expect(paginateGeneralWorkInstruction(4, false)).toEqual([[1, 2, 3], [4]]);
+  expect(paginateGeneralWorkInstruction(1)).toEqual([[1, 2, 3], [4, 5, 6]]);
+});

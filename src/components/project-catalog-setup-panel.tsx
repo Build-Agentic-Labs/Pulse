@@ -53,6 +53,11 @@ export function MasterBomPanel({
   const [error, setError] = useState<string>();
   const [retryRequest, setRetryRequest] = useState<{ bom: MasterBom | undefined }>();
   const [searchQuery, setSearchQuery] = useState("");
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const columnDrag = useRef<{ key: string; x: number; width: number } | null>(null);
+  const columnWidth = (column: MasterBomTableColumn) => columnWidths[column.key] ??
+    (column.kind === "source" && /description/i.test(column.name) ? 352 :
+      Math.max(100, (column.kind === "source" ? column.name.length : 9) * 7 + 28));
 
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const hasSearchQuery = normalizedSearchQuery.length > 0;
@@ -336,15 +341,43 @@ export function MasterBomPanel({
             className="overflow-auto rounded-lg border border-line"
             style={{ maxHeight: "calc(100dvh - 13.5rem)" }}
           >
-            <table className="w-full border-collapse text-xs">
+            <table className="border-collapse text-xs" style={{ tableLayout: "fixed", minWidth: "100%", width: tableColumns.reduce((sum, column) => sum + columnWidth(column), 0) }}>
+              <colgroup>{tableColumns.map(column => <col key={column.key} style={{ width: columnWidth(column) }} />)}</colgroup>
               <thead className="sticky top-0 z-10 bg-surface-raised">
                 <tr>
                   {tableColumns.map((column) => (
                     <th
                       key={column.key}
-                      className="ui-mono-label whitespace-nowrap border-b border-line px-3 py-2 text-left text-ink-secondary"
+                      aria-label={column.kind === "allocation" ? "Allocated" : column.name}
+                      className="ui-mono-label relative whitespace-nowrap border-b border-line px-3 py-2 text-left text-ink-secondary"
                     >
                       {column.kind === "allocation" ? "Allocated" : column.name}
+                      <span role="separator" aria-orientation="vertical" tabIndex={0}
+                        aria-label={`Resize ${column.kind === "allocation" ? "Allocated" : column.name} column`}
+                        aria-valuenow={Math.round(columnWidth(column))} aria-valuemin={80} aria-valuemax={2000}
+                        title="Drag to resize. Double-click to fit text."
+                        className="absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none border-r border-line hover:bg-accent/30 focus-visible:bg-accent/30"
+                        onPointerDown={event => {
+                          event.preventDefault();
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                          columnDrag.current = { key: column.key, x: event.clientX, width: event.currentTarget.parentElement?.getBoundingClientRect().width ?? columnWidth(column) };
+                        }}
+                        onPointerMove={event => {
+                          const drag = columnDrag.current;
+                          if (!drag || drag.key !== column.key) return;
+                          setColumnWidths(widths => ({ ...widths, [column.key]: Math.max(80, Math.min(2000, drag.width + event.clientX - drag.x)) }));
+                        }}
+                        onPointerUp={() => { columnDrag.current = null; }}
+                        onPointerCancel={() => { columnDrag.current = null; }}
+                        onDoubleClick={() => {
+                          const length = column.kind === "source" ? Math.max(column.name.length, ...masterBom.rows.map(row => (row[column.name] ?? "").length)) : 12;
+                          setColumnWidths(widths => ({ ...widths, [column.key]: Math.max(80, Math.min(2000, length * 7 + 32)) }));
+                        }}
+                        onKeyDown={event => {
+                          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                          event.preventDefault();
+                          setColumnWidths(widths => ({ ...widths, [column.key]: Math.max(80, Math.min(2000, columnWidth(column) + (event.key === "ArrowRight" ? 24 : -24))) }));
+                        }} />
                     </th>
                   ))}
                 </tr>
@@ -374,7 +407,7 @@ export function MasterBomPanel({
                         ) : (
                           <td
                             key={column.key}
-                            className="max-w-[22rem] truncate px-3 py-1.5 text-ink"
+                            className="truncate px-3 py-1.5 text-ink"
                             title={row[column.name]}
                           >
                             {row[column.name]}

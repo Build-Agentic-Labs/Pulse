@@ -96,7 +96,7 @@ describe("WorkInstructionDocument", () => {
     expect(sheets()[1].querySelectorAll(".wi-card")).toHaveLength(CARDS_PER_SHEET);
   });
 
-  it("puts the ANA logo and document number in the header of every sheet", () => {
+  it("puts the ANA logo and assembly heading on every sheet without a document number", () => {
     render(
       <WorkInstructionDocument layout={WORK_INSTRUCTION_LAYOUTS.v2}
         instruction={makeInstruction(Array.from({ length: CARDS_ON_FIRST_SHEET + 1 }, (_, i) => makeCard(i + 1)))}
@@ -104,7 +104,8 @@ describe("WorkInstructionDocument", () => {
     );
 
     expect(screen.getAllByAltText("ANA Inc.")).toHaveLength(2);
-    expect(screen.getAllByText("FA-INV-010-WI1")).toHaveLength(2);
+    expect(screen.getAllByText("Assembly Work Instruction")).toHaveLength(2);
+    expect(screen.queryByText("FA-INV-010-WI1")).not.toBeInTheDocument();
   });
 
   it("numbers each sheet page N of M", () => {

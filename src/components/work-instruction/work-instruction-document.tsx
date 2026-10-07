@@ -344,7 +344,7 @@ function HeaderBand({ instruction, sheet }: { instruction: WorkInstruction; shee
       </div>
       <div>
         <span className="wi-hdr-title">{meta.title || "Assembly work instruction"}</span>
-        <span className="wi-hdr-docno">{meta.documentNumber || "WI number pending"}</span>
+        <span className="wi-hdr-docno">Assembly Work Instruction</span>
       </div>
       <div className="wi-hdr-meta">
         <div>
@@ -900,7 +900,7 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
             {/* eslint-disable-next-line @next/next/no-img-element -- document logo */}
             <img src="/sop/ana-logo.png" alt="ANA Inc." />
           </div>
-          <div className="wil-title"><span className="wil-label">Work instruction</span><h1>{meta.title || "Work instruction"}</h1><span style={{fontSize:"7pt",marginTop:4}}>{meta.documentNumber || "WI number pending"}</span></div>
+          <div className="wil-title"><span className="wil-label">Assembly Work Instruction</span><h1>{meta.title || "Assembly Work Instruction"}</h1></div>
           <table className="wil-revision"><thead><tr><th>Rev</th><th>Date</th><th>Description</th></tr></thead><tbody><tr><td>{meta.revision || "Draft"}</td><td>{formatDateControlled(meta.effectiveDate)}</td><td>{meta.revision === "Draft" || !meta.revision ? "Not released" : latestRevision?.description}</td></tr></tbody></table>
         </header>
         {sheet.kind === "setup" && <div className="wi-setup-band">
@@ -927,7 +927,7 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
             </section>;
           })}
         </main>
-        <footer className="wil-footer"><div><strong>{meta.documentNumber || "Document no. pending"}</strong><span>Rev. {meta.revision || "Draft"}</span><span>Page {sheet.page} of {sheet.total}</span></div><p>{CONFIDENTIAL_LINE}</p></footer>
+        <footer className="wil-footer"><div><span>Rev. {meta.revision || "Draft"}</span><span>Page {sheet.page} of {sheet.total}</span></div><p>{CONFIDENTIAL_LINE}</p></footer>
       </article>)}
     </div>
   </>;

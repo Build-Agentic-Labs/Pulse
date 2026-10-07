@@ -611,7 +611,7 @@ export function WorkInstructionPrintPreview({
         ? "Work instruction preview"
         : `${taskIds.length} work instructions`
       : documents.length === 1
-      ? documents[0].instruction.meta.documentNumber || documents[0].instruction.meta.title || "Work instruction"
+      ? documents[0].instruction.meta.title || "Assembly Work Instruction"
       : `${documents.length} work instructions`;
 
   // One short line saying what the reader is looking at, so a draft is never mistaken for a release.

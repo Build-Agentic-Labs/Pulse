@@ -7,6 +7,7 @@ export async function wiServerSeed<T>(
   read: (
     workspaceId: string,
     client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+    userId: string,
   ) => Promise<T>,
 ) {
   try {
@@ -17,7 +18,7 @@ export async function wiServerSeed<T>(
     return {
       workspaceId,
       userId: user.id,
-      value: await read(workspaceId, client),
+      value: await read(workspaceId, client, user.id),
     };
   } catch {
     return undefined;

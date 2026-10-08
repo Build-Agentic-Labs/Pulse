@@ -1,3 +1,4 @@
+import { NavSelectionProvider } from "@/components/nav-selection-track";
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { ConfirmProvider } from "@/components/confirm-provider";
@@ -83,7 +84,7 @@ export default function RootLayout({
         <DeploymentBanner />
         <ThemeProvider>
           <ConfirmProvider>
-            {children}
+            <NavSelectionProvider>{children}</NavSelectionProvider>
             <DisplayNamePrompt />
           </ConfirmProvider>
         </ThemeProvider>

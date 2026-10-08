@@ -38,7 +38,7 @@ export function PlanningNav() {
   const active = activeNavHref(usePathname() ?? "");
 
   return (
-    <>
+    <NavSelectionTrack persistenceKey="planning" className="flex flex-col">
       <div className="ui-nav-section">Planning</div>
       <NavSelectionTrack
         activeIndex={FLOW_ITEMS.findIndex((item) => item.href === active)}
@@ -69,6 +69,6 @@ export function PlanningNav() {
           <span>Product configuration</span>
         </Link>
       </div>
-    </>
+    </NavSelectionTrack>
   );
 }

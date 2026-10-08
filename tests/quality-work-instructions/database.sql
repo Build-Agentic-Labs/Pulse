@@ -51,13 +51,13 @@ select throws_ok($$select public.wi_test_edit('details','{"title":"Wrong departm
 select public.wi_test_actor(1);
 select lives_ok($$select public.wi_test_edit('details','{"title":"Open file","purpose":"Process scope","responsibilities":"Engineer"}')$$,'details patch saves');
 select throws_ok($$select public.wi_test_edit('details','{"document_number":"Forged"}')$$,'22023',null,'controlled fields cannot be patched');
-select throws_ok($$select public.wi_test_edit('details','{"title":"Stale"}',gen_random_uuid(),999)$$,'40001',null,'stale version refuses rather than overwrites');
+select throws_ok($$select public.wi_test_edit('details','{"title":"Stale"}',gen_random_uuid(),999)$$,'PT409',null,'stale version refuses rather than overwrites');
 select lives_ok($$select public.wi_test_edit('add_step','{"id":"e7300000-0000-0000-0000-000000000001","title":"Open","instruction":"Open the file"}')$$,'step creation saves');
 select lives_ok($$select public.wi_test_edit('add_step','{"id":"e7300000-0000-0000-0000-000000000002","title":"Save","instruction":"Save the file"}','e7400000-0000-0000-0000-000000000001',3)$$,'second step saves');
 select lives_ok($$select public.wi_test_edit('add_step','{"id":"e7300000-0000-0000-0000-000000000002","title":"Save","instruction":"Save the file"}','e7400000-0000-0000-0000-000000000001',3)$$,'edit response loss retries exact operation');
 select is((select version from public.quality_work_instructions where id='e7200000-0000-0000-0000-000000000001'),4,'retry does not increment version twice');
 select throws_ok($$select public.wi_test_edit('details','{"title":"Reused"}','e7400000-0000-0000-0000-000000000001',3)$$,'22023',null,'operation id cannot be reused');
-select throws_ok($$select public.wi_test_edit('reorder','{"ids":["e7300000-0000-0000-0000-000000000001","e7300000-0000-0000-0000-000000000001"]}')$$,'40001',null,'duplicate reorder refuses');
+select throws_ok($$select public.wi_test_edit('reorder','{"ids":["e7300000-0000-0000-0000-000000000001","e7300000-0000-0000-0000-000000000001"]}')$$,'PT409',null,'duplicate reorder refuses');
 select lives_ok($$select public.wi_test_edit('reorder','{"ids":["e7300000-0000-0000-0000-000000000002","e7300000-0000-0000-0000-000000000001"]}')$$,'complete step reorder commits');
 select throws_ok($$select public.wi_test_edit('image','{"id":"e7300000-0000-0000-0000-000000000001","image":{"id":"fake","width":100,"height":100,"storagePath":"forged/path"}}')$$,'22023',null,'uncommitted or foreign image refuses');
 select lives_ok($$select public.wi_test_publish('e7500000-0000-0000-0000-000000000001',5)$$,'member publishes directly with no review flow');

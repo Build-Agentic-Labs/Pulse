@@ -1,12 +1,11 @@
 "use client";
 
-import { Archive, Building2, FileDown, FileText, Inbox, LayoutDashboard, Library } from "lucide-react";
+import { Archive, Building2, FileText, Inbox, LayoutDashboard, Library } from "lucide-react";
 import Link from "next/link";
 import type { MouseEvent, ReactNode } from "react";
 import { NavSelectionTrack } from "@/components/nav-selection-track";
 import { badgeLabel } from "@/domain/sop/queue-summary";
 import { ProblemPilotLink } from "@/components/problem-solving/problem-pilot-link";
-import { WORK_INSTRUCTION_TEMPLATE_HREF, useWorkInstructionTemplateAccess } from "./work-instruction-template-access";
 
 export type SopTab = "dashboard" | "all" | "review" | "library" | "retired" | "settings";
 
@@ -17,13 +16,12 @@ export function SopTabNav({
   onSelect,
   reviewCount = null,
 }: {
-  active: SopTab | "work-instructions";
+  active: SopTab | "work-instructions" | "published-work-instructions";
   manage: boolean;
   onSelect?: (tab: SopTab) => void;
   /** SOPs waiting on the viewer (to review, or back from review); null = not known yet. */
   reviewCount?: number | null;
 }) {
-  const templateAccess = useWorkInstructionTemplateAccess();
   function handleClick(event: MouseEvent<HTMLAnchorElement>, tab: SopTab) {
     if (
       !onSelect ||
@@ -65,6 +63,7 @@ export function SopTabNav({
 
   return (
     <>
+      <div className="ui-nav-section">SOPs</div>
       <NavSelectionTrack
         activeIndex={["dashboard", "all", "review", "library", "retired"].indexOf(active)}
         className="space-y-0.5"
@@ -76,17 +75,22 @@ export function SopTabNav({
         {item("retired", <Archive size={15} strokeWidth={1.75} />, "Retired")}
       </NavSelectionTrack>
       {process.env.NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED !== "0" ? (
-        <div className="mt-4 border-t border-line pt-3">
-        <NavSelectionTrack activeIndex={active === "work-instructions" ? 0 : -1}>
-          <Link href="/sops/work-instructions" prefetch={false} scroll={false} className={`ui-nav-item w-full ${active === "work-instructions" ? "ui-nav-item-active" : "ui-nav-item-idle"}`}>
-            <FileText size={15} strokeWidth={1.75} />
-            <span>Work instructions</span>
-          </Link>
-        </NavSelectionTrack>
+        <div className="mt-3">
+          <div className="ui-nav-section">Work Instructions</div>
+          <div className="space-y-0.5">
+            <Link href="/sops/work-instructions/published" prefetch={false} scroll={false} className={`ui-nav-item w-full ${active === "published-work-instructions" ? "ui-nav-item-active" : "ui-nav-item-idle"}`}>
+              <Library size={15} strokeWidth={1.75} className="shrink-0" />
+              <span>Published WIs</span>
+            </Link>
+            <Link href="/sops/work-instructions" prefetch={false} scroll={false} className={`ui-nav-item w-full ${active === "work-instructions" ? "ui-nav-item-active" : "ui-nav-item-idle"}`}>
+              <FileText size={15} strokeWidth={1.75} />
+              <span>WI Builder</span>
+            </Link>
+          </div>
         </div>
       ) : null}
       <ProblemPilotLink />
-      {manage || templateAccess ? (
+      {manage ? (
         <>
           <div className="ui-nav-section mt-3">Manage</div>
           {manage ? (
@@ -106,18 +110,7 @@ export function SopTabNav({
               </Link>
             </NavSelectionTrack>
           ) : null}
-          {templateAccess ? (
-            // A download, not a tab: a plain anchor so the browser saves the .docx.
-            <a
-              href={WORK_INSTRUCTION_TEMPLATE_HREF}
-              download
-              className={`ui-nav-item ui-nav-item-idle w-full${manage ? " mt-0.5" : ""}`}
-              title="Download the blank work instruction template (Word)"
-            >
-              <FileDown size={15} strokeWidth={1.75} />
-              <span>WI template</span>
-            </a>
-          ) : null}
+
         </>
       ) : null}
     </>

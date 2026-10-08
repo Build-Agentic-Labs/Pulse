@@ -39,5 +39,13 @@ export function ProblemPilotAccessProvider({ children, initialUserId, initialAll
 
 export function ProblemPilotLink() {
   const allowed = useContext(PilotAccess);
-  return allowed ? <Link href="/sops/problem-solving" className="ui-nav-item ui-nav-item-idle mt-3"><ClipboardCheck size={15} strokeWidth={1.75} /><span>Problem Solving</span></Link> : null;
+  return allowed ? (
+    <>
+      <div className="ui-nav-section mt-3">Tools</div>
+      <Link href="/sops/problem-solving" className="ui-nav-item ui-nav-item-idle">
+        <ClipboardCheck size={15} strokeWidth={1.75} />
+        <span>Problem Solving</span>
+      </Link>
+    </>
+  ) : null;
 }

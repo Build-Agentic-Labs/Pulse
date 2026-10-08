@@ -107,7 +107,7 @@ export function Sidebar({
       </div>
       <SidebarWorkspacePanel activeProject={project} />
 
-      <nav className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-2">
+      <NavSelectionTrack as="nav" persistenceKey="product-modules" className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-2">
         {isSettingsModule ? (
           <>
             <button
@@ -180,7 +180,7 @@ export function Sidebar({
             </div>
           </>
         )}
-      </nav>
+      </NavSelectionTrack>
 
       <div className="mt-auto space-y-2 px-2 py-2">
         {!isSettingsModule ? (

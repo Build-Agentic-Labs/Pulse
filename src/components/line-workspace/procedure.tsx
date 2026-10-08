@@ -1,5 +1,6 @@
 "use client";
 
+import { NavSelectionTrack } from "@/components/nav-selection-track";
 import { PhonePortalQrButton } from "@/components/line-workspace/phone-portal-qr-button";
 import {
   ChevronDown,
@@ -764,7 +765,7 @@ export function ProcedureWorkspace({
           <div className="mt-1 text-[11px] text-ink-tertiary">{tasks.length} task rows</div>
         </div>
 
-        <div className="px-2 pb-2">
+        <NavSelectionTrack persistenceKey="procedure-tasks" className="px-2 pb-2">
           {groupedTasks.map((group) => (
             <div key={group.id} className="mb-3 last:mb-0">
               {!isAwiMaster ? <div className="ui-nav-section ui-procedure-zone-heading mb-1 flex items-center gap-1.5 px-0 normal-case tracking-[0.08em]">
@@ -794,7 +795,7 @@ export function ProcedureWorkspace({
               </div>
             </div>
           ))}
-        </div>
+        </NavSelectionTrack>
         <ScrollDownHint className="pb-1" />
         <button
           type="button"

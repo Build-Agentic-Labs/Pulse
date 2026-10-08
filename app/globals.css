@@ -1908,35 +1908,22 @@ body {
 
   .ui-nav-selection-track {
     position: relative;
+    isolation: isolate;
   }
 
-  .ui-nav-selection-track::before {
+  .ui-nav-selection-indicator {
     position: absolute;
-    z-index: 0;
-    top: var(--nav-selection-top, 0);
-    right: var(--nav-selection-inset, 0);
-    left: var(--nav-selection-left, var(--nav-selection-inset, 0));
-    height: var(--control-height-compact);
-    border-radius: var(--radius-control);
-    background: var(--color-accent-muted);
-    content: "";
+    top: 0;
+    left: 0;
+    z-index: -1;
+    margin: 0 !important;
     pointer-events: none;
-    transform: translateY(var(--nav-active-offset, 0));
-    transition: transform 280ms cubic-bezier(0.34, 1.45, 0.64, 1);
-    will-change: transform;
+    background: var(--color-accent-muted);
+    border-radius: var(--radius-control);
   }
 
-  .ui-nav-selection-track-inset {
-    --nav-selection-inset: 0.5rem;
-  }
-
-  .ui-nav-selection-track > * {
-    position: relative;
-    z-index: 1;
-  }
-
-  .ui-nav-selection-track .ui-nav-item-active,
-  .ui-nav-selection-track .ui-settings-subnav-item-active {
+  [data-nav-selection-ready] .ui-nav-item.ui-nav-item-active,
+  [data-nav-selection-ready] .ui-settings-subnav-item-active {
     background: transparent;
   }
 
@@ -3860,12 +3847,6 @@ body {
 .ui-setup-accordion { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms ease, opacity 160ms ease; }
 .ui-setup-accordion[data-open="true"] { grid-template-rows: 1fr; opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .ui-setup-accordion { transition: none; } }
-
-/* Nested product rows begin inside the category's guide and top spacing. */
-.ui-portfolio-product-track {
-  --nav-selection-top: 4px;
-  --nav-selection-left: 8px;
-}
 
 .ui-context-menu-comfortable {
   padding: 4px;

@@ -593,7 +593,7 @@ export function SidebarWorkspacePanel({
 
   return (
     <>
-      <div data-portfolio-scroll className={`${pathname === "/awi" ? "min-h-0 flex-1" : "max-h-[50dvh] shrink-0"} overflow-y-auto px-2 py-2`}>
+      <NavSelectionTrack persistenceKey="product-library" data-portfolio-scroll className={`${pathname === "/awi" ? "min-h-0 flex-1" : "max-h-[50dvh] shrink-0"} overflow-y-auto px-2 py-2`}>
         <div className="group flex min-h-8 items-center justify-between gap-1">
           <div className="ui-nav-section mb-0 px-2">Product Library</div>
           {status === "ready" && canEdit(role) ? (
@@ -802,7 +802,7 @@ export function SidebarWorkspacePanel({
 
         {createError ? <div className="mt-1 px-2 text-[10px] leading-snug text-danger">{createError}</div> : null}
         {deleteError ? <div className="mt-1 px-2 text-[10px] leading-snug text-danger">{deleteError}</div> : null}
-      </div>
+      </NavSelectionTrack>
 
       <ThemedFeedbackLayer
         confirm={feedbackConfirm}

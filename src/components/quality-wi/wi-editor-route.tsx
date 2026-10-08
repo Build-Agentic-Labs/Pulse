@@ -7,7 +7,7 @@ import { useSopWorkspace } from "@/components/sop/sop-workspace-provider";
 import { SopShell } from "@/components/sop/sop-shell";
 import { SopTabNav } from "@/components/sop/sop-tab-nav";
 import { useWiIdentity } from "./use-wi-identity";
-import { WiDetails } from "./wi-details";
+import { QualitySkeleton } from "@/components/sop/quality-skeleton";
 import { WiEditor } from "./wi-editor";
 import "./quality-wi.css";
 export function WiEditorRoute({
@@ -15,11 +15,13 @@ export function WiEditorRoute({
   initialWorkspaceId,
   initialUserId,
   initialDocument,
+  initialCanEdit,
 }: {
   id: string;
   initialWorkspaceId?: string;
   initialUserId?: string;
   initialDocument?: QualityWi;
+  initialCanEdit?: boolean;
 }) {
   const { workspaceId, role, canEditSops } = useSopWorkspace();
   const userId = useWiIdentity(initialUserId);
@@ -27,10 +29,18 @@ export function WiEditorRoute({
     scope: string;
     document: QualityWi;
     canEdit: boolean;
-  } | null>(null);
+  } | null>(() => initialDocument && initialCanEdit !== undefined && initialUserId === userId && initialWorkspaceId === workspaceId
+    ? { scope: `${userId}:${workspaceId}:${id}`, document: initialDocument, canEdit: initialCanEdit }
+    : null);
   const [error, setError] = useState("");
   useEffect(() => {
     if (!workspaceId || !userId) return;
+    if (initialDocument && initialCanEdit !== undefined && initialUserId === userId && initialWorkspaceId === workspaceId) {
+      setLoaded((current) => current?.scope === `${userId}:${workspaceId}:${id}` ? current : {
+        scope: `${userId}:${workspaceId}:${id}`, document: initialDocument, canEdit: initialCanEdit,
+      });
+      return;
+    }
     let active = true;
     setError("");
     const scope = `${userId}:${workspaceId}:${id}`;
@@ -70,6 +80,8 @@ export function WiEditorRoute({
     canEditSops,
     initialDocument,
     initialWorkspaceId,
+    initialUserId,
+    initialCanEdit,
   ]);
   if (userId && loaded?.scope === `${userId}:${workspaceId}:${id}`)
     return (
@@ -91,20 +103,8 @@ export function WiEditorRoute({
       }
       crumb="Quality / Work instruction"
     >
-      <div className="mx-auto max-w-5xl p-6" role={error ? "alert" : "status"}>
-        {error || "Loading work instruction…"}
-        {!error &&
-        initialDocument &&
-        initialUserId === userId &&
-        initialWorkspaceId === workspaceId ? (
-          <div className="mt-6">
-            <WiDetails
-              document={initialDocument}
-              disabled={true}
-              onEdit={() => undefined}
-            />
-          </div>
-        ) : null}
+      <div className="mx-auto max-w-5xl p-6">
+        {error ? <p role="alert">{error}</p> : <QualitySkeleton variant="form" label="Opening work instruction" />}
       </div>
     </SopShell>
   );

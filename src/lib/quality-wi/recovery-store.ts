@@ -9,6 +9,7 @@ type RecordValue = WiDraftScope & {
   schemaVersion: 1;
   updatedAt: string;
   pending: PendingWiEdit[];
+  archivedAt?: string;
 };
 const DATABASE = "pulse-quality-wi-recovery",
   STORE = "drafts";
@@ -48,22 +49,41 @@ async function transaction<T>(
     throw new Error("Browser recovery is unavailable.");
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DATABASE, 1);
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      reject(new Error("Browser draft storage did not respond. Close other Pulse tabs and retry."));
+    }, 10_000);
+    const fail = (error: Error | DOMException | null) => {
+      settled = true;
+      clearTimeout(timer);
+      reject(error ?? new Error("Browser draft storage is unavailable."));
+    };
+    request.onblocked = () => fail(new Error("Another Pulse tab is blocking draft storage. Close it and retry."));
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE))
         request.result.createObjectStore(STORE, { keyPath: "key" });
     };
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => fail(request.error);
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      if (settled) { request.result.close(); return; }
+      settled = true;
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
   });
   try {
     return await new Promise<T>((resolve, reject) => {
       const tx = db.transaction(STORE, mode);
       let value: T;
-      tx.oncomplete = () => resolve(value);
-      tx.onerror = () =>
-        reject(tx.error ?? new Error("Unable to store this draft."));
-      tx.onabort = () =>
-        reject(tx.error ?? new Error("Draft storage aborted."));
+      const timer = setTimeout(() => {
+        tx.abort();
+        reject(new Error("Browser draft storage transaction timed out."));
+      }, 10_000);
+      tx.oncomplete = () => { clearTimeout(timer); resolve(value); };
+      tx.onerror = () => { clearTimeout(timer); reject(tx.error ?? new Error("Unable to store this draft.")); };
+      tx.onabort = () => { clearTimeout(timer); reject(tx.error ?? new Error("Draft storage aborted.")); };
       try {
         run(tx.objectStore(STORE), (next) => {
           value = next;
@@ -83,6 +103,7 @@ export function createWiRecoveryStore(scope: WiDraftScope) {
     key = `${prefix}:${crypto.randomUUID()}`,
     affinity = `pulse:wi-recovery:${prefix}`;
   let queue: Promise<unknown> = Promise.resolve();
+  let recoveredSource: RecordValue | undefined;
   function ordered<T>(operation: () => Promise<T>) {
     const next = queue.catch(() => undefined).then(operation);
     queue = next;
@@ -99,13 +120,14 @@ export function createWiRecoveryStore(scope: WiDraftScope) {
               preferred = sessionStorage.getItem(affinity);
             } catch {}
             const records = request.result.filter(
-              (v): v is RecordValue => valid(v, scope) && v.pending.length > 0,
+              (v): v is RecordValue => valid(v, scope) && !v.archivedAt && v.pending.length > 0,
             );
             records.sort(
               (a, b) =>
                 Number(b.key === preferred) - Number(a.key === preferred) ||
                 b.updatedAt.localeCompare(a.updatedAt),
             );
+            recoveredSource = records[0]?.key !== key ? records[0] : undefined;
             set(records[0]?.pending ?? []);
           };
         }),
@@ -115,6 +137,17 @@ export function createWiRecoveryStore(scope: WiDraftScope) {
       const snapshot = structuredClone(pending);
       return ordered(() =>
         transaction<void>("readwrite", (store, set) => {
+          // Retire only the exact fork we recovered, atomically with its replacement.
+          // A live editor that has since changed that fork keeps its own recovery.
+          const source = recoveredSource;
+          if (source) {
+            const request = store.getAll();
+            request.onsuccess = () => {
+              const current = request.result.find(record => valid(record, scope) && record.key === source.key);
+              if (current && JSON.stringify(current.pending) === JSON.stringify(source.pending))
+                store.put({ ...current, archivedAt: new Date().toISOString() });
+            };
+          }
           store.put({
             ...scope,
             key,
@@ -129,6 +162,22 @@ export function createWiRecoveryStore(scope: WiDraftScope) {
           sessionStorage.setItem(affinity, key);
         } catch {}
       });
+    },
+    archive(pending: PendingWiEdit[]) {
+      const snapshot = structuredClone(pending);
+      return ordered(() => transaction<void>("readwrite", (store, set) => {
+        const request = store.getAll();
+        request.onsuccess = () => {
+          for (const record of request.result) {
+            if (valid(record, scope) && record.pending.length && record.pending.every(entry => snapshot.some(saved =>
+              saved.operation === entry.operation && JSON.stringify(saved.edit) === JSON.stringify(entry.edit) &&
+              (saved.expectedVersion ?? saved.baseVersion) === (entry.expectedVersion ?? entry.baseVersion)))) {
+              store.put({ ...record, archivedAt: new Date().toISOString() });
+            }
+          }
+          set(undefined);
+        };
+      }));
     },
     acknowledge(entry: PendingWiEdit) {
       const snapshot = structuredClone(entry);

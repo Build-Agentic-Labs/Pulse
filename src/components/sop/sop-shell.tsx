@@ -4,6 +4,7 @@ import { PanelLeft, PanelLeftClose } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type MouseEvent, type ReactNode, type Ref } from "react";
 import { SpaceTopNav } from "@/components/space-top-nav";
+import { QualityNavSelection } from "./quality-nav-selection";
 
 /**
  * App-shell layout for the SOP section, matching the settings page: a full-width
@@ -92,15 +93,15 @@ export function SopShell({
           }`}
         >
           <nav
-            className="flex min-h-0 flex-1 flex-col overflow-auto px-2 py-3"
+            className="flex min-h-0 flex-1 flex-col overflow-auto overscroll-none px-2 py-3"
             onClick={() => setMobileOpen(false)}
           >
-            {sidebar}
+            <QualityNavSelection>{sidebar}</QualityNavSelection>
           </nav>
         </aside>
 
         <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-          <div ref={contentRef} className="h-full overflow-auto bg-canvas p-4 md:p-6 lg:rounded-tl-2xl">
+          <div ref={contentRef} className="h-full overflow-auto overscroll-none bg-canvas p-4 md:p-6 lg:rounded-tl-2xl">
             {children}
           </div>
         </main>

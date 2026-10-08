@@ -54,7 +54,7 @@ it("retries transport failure with identical operation and version", async () =>
 });
 it("never retries a database conflict", async () => {
   const rpc = vi.fn().mockResolvedValue({
-    error: { code: "40001", message: "Conflict" },
+    error: { code: "PT409", message: "Conflict" },
     status: 409,
   });
   await expect(

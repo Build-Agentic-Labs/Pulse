@@ -12,9 +12,13 @@ import { ThemedSelect } from "@/components/themed-select";
 export function WiPreview({
   document,
   onClose,
+  publishedOnly = false,
+  onEdit,
 }: {
   document: QualityWi;
   onClose: () => void;
+  publishedOnly?: boolean;
+  onEdit?: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -24,7 +28,7 @@ export function WiPreview({
   }, []);
   const [revisions, setRevisions] = useState<WiRevision[]>([]);
   const [revisionDocumentId, setRevisionDocumentId] = useState<string | null>(null);
-  const [selected, setSelected] = useState("draft");
+  const [selected, setSelected] = useState(publishedOnly ? document.publishedRevisionId ?? "" : "draft");
   const [displayed, setDisplayed] = useState(document);
   const [displayedRevision, setDisplayedRevision] = useState("draft");
   const [busy, setBusy] = useState(false);
@@ -157,12 +161,13 @@ export function WiPreview({
       aria-label="Work instruction preview"
     >
       <DocumentPreviewToolbar onClose={onClose} actions={<>
+        {onEdit ? <button type="button" className="ui-btn-ghost h-8 px-3" onClick={onEdit}>Open builder</button> : null}
         <ThemedSelect
           ariaLabel="Preview version"
           value={selected}
           onChange={setSelected}
           options={[
-            { value: "draft", label: "Working draft" },
+            ...(!publishedOnly ? [{ value: "draft", label: "Working draft" }] : []),
             ...revisions.map((item) => ({
               value: item.id,
               label: `Published revision ${item.snapshot.revision}`,

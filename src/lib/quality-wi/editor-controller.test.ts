@@ -213,3 +213,91 @@ it("refuses recovered unissued intent based on an older document version", async
     document: { title: "My old edit" },
   });
 });
+
+it("leaves Saving when a save request stalls and retries the same operation", async () => {
+  await controller.start();
+  const normalSave = deps.save;
+  deps.save = vi.fn(() => new Promise<never>(() => {}));
+  controller.edit({ kind: "details", payload: { title: "Retained title" } });
+  const saving = controller.flush();
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await saving).toBe(false);
+  expect(controller.getSnapshot().status).toBe("error");
+  expect(controller.getSnapshot().message).toContain("Work instruction save timed out");
+  expect(controller.getSnapshot().document.title).toBe("Retained title");
+  const operation = recovery[0].operation;
+  deps.save = normalSave;
+  expect(await controller.flush()).toBe(true);
+  expect(controller.getSnapshot().status).toBe("saved");
+  expect(vi.mocked(normalSave).mock.calls.at(-1)?.[0].operation).toBe(operation);
+});
+
+it("reports a stalled confirmation without dropping the pending edit", async () => {
+  await controller.start();
+  deps.reload = vi.fn(() => new Promise<never>(() => {}));
+  controller.edit({ kind: "details", payload: { title: "Retained title" } });
+  const saving = controller.flush();
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await saving).toBe(false);
+  expect(controller.getSnapshot().message).toContain("Saved draft confirmation timed out");
+  expect(controller.getSnapshot().pending).toBe(1);
+});
+
+it("stops autosaving after a conflict and loads the saved draft only on explicit acceptance", async () => {
+  await controller.start();
+  deps.save = vi.fn(async () => { throw Object.assign(new Error("Changed elsewhere"), { code: "PT409" }); });
+  deps.archiveRecovery = vi.fn(async () => undefined);
+  controller.edit({ kind: "details", payload: { title: "Local intent" } });
+  expect(await controller.flush()).toBe(false);
+  expect(controller.getSnapshot().conflicted).toBe(true);
+  controller.edit({ kind: "details", payload: { title: "Keep editing" } });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(deps.save).toHaveBeenCalledOnce();
+  expect(controller.getSnapshot().document.title).toBe("Keep editing");
+  expect(controller.getSnapshot().status).toBe("error");
+  expect(await controller.acceptSaved()).toBe(true);
+  expect(deps.archiveRecovery).toHaveBeenCalledOnce();
+  expect(controller.getSnapshot().status).toBe("saved");
+  expect(controller.getSnapshot().document.title).toBe(server.title);
+});
+
+it("navigation must not resubmit a known conflict", async () => {
+  await controller.start();
+  deps.save = vi.fn(async () => { throw Object.assign(new Error("Changed elsewhere"), {code: "PT409"}); });
+  controller.edit({kind:"details",payload:{title:"Local"}});
+  await controller.flush();
+  await controller.flush();
+  expect(deps.save).toHaveBeenCalledTimes(1);
+});
+
+it("accepting saved must not drop edits made during archive", async () => {
+  await controller.start();
+  deps.save = vi.fn(async () => { throw Object.assign(new Error("Changed elsewhere"), {code: "PT409"}); });
+  controller.edit({kind:"details",payload:{title:"Old local"}});
+  await controller.flush();
+  let entered!: () => void;
+  const archiving = new Promise<void>(resolve => { entered=resolve; });
+  let release!: () => void;
+  deps.archiveRecovery = vi.fn(async () => { entered(); await new Promise<void>(resolve => { release=resolve; }); });
+  const normalSave = deps.save;
+  const accepting = controller.acceptSaved();
+  await archiving;
+  controller.edit({kind:"details",payload:{title:"Typed during reload"}});
+  release();
+  await accepting;
+  expect(controller.getSnapshot().document.title).toBe("Typed during reload");
+  expect(controller.getSnapshot().pending).toBe(1);
+  expect(deps.archiveRecovery).toHaveBeenCalledWith([
+    expect.objectContaining({ edit: { kind: "details", payload: { title: "Old local" } } }),
+  ]);
+  expect(normalSave).toHaveBeenCalledTimes(1);
+});
+
+it("publish must time out instead of staying Saving indefinitely", async () => {
+  await controller.start();
+  deps.publish = vi.fn(() => new Promise<never>(() => {}));
+  void controller.publish("Initial");
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(controller.getSnapshot().publishing).toBe(false);
+  expect(controller.getSnapshot().status).toBe("error");
+});

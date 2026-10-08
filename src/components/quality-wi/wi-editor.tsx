@@ -50,7 +50,16 @@ export function WiEditor({
         cancelLabel: "Keep editing",
       });
     if (!state.pending) return true;
-    if (await state.flush()) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const saved = await Promise.race([
+        state.flush(),
+        new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), 5_000); }),
+      ]);
+      if (saved) return true;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     return confirm({
       title: "This draft has not finished saving",
       body: "Pending changes are retained in this browser when recovery is available. Stay here to retry, or leave without publishing.",
@@ -71,11 +80,13 @@ export function WiEditor({
       event.altKey
     )
       return;
+    const href = anchor.getAttribute("href");
+    if (!href) return;
     if (!state.pending && !photoBusy) return;
     event.preventDefault();
     event.stopPropagation();
     void canLeave().then((allowed) => {
-      if (allowed) router.push(anchor.getAttribute("href")!);
+      if (allowed) router.push(href);
     });
   }
   return (
@@ -90,7 +101,7 @@ export function WiEditor({
       confirmLeave={canLeave}
       actions={
         <div className="flex shrink-0 items-center gap-2">
-          <span className="mr-1 whitespace-nowrap text-xs text-ink-tertiary" role="status">
+          <span className={`mr-1 whitespace-nowrap text-xs text-ink-tertiary${!state.ready ? " invisible" : ""}`} role="status">
             {!state.ready
               ? "Loading…"
               : state.status === "saved"
@@ -111,7 +122,9 @@ export function WiEditor({
               type="button"
               className="ui-btn-primary h-8 shrink-0 gap-1.5 whitespace-nowrap px-3 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={disabled || !state.document.hasChanges}
-              onClick={() => void state.publish(description)}
+              onClick={() => void state.publish(description).then((published) => {
+                if (published) router.push("/sops/work-instructions/published");
+              })}
             >
               <Upload size={14} strokeWidth={1.75} className="shrink-0" />{" "}
               {state.publishing ? "Publishing…" : "Publish WI"}
@@ -159,9 +172,17 @@ export function WiEditor({
             {state.status === "error" && canEdit ? (
               <button
                 className="ui-btn-ghost ml-2"
-                onClick={() => void state.flush()}
+                onClick={() => {
+                  if (!state.conflicted) { void state.flush(); return; }
+                  void confirm({
+                    title: "Use the latest saved draft?",
+                    body: "This replaces the edits currently shown with the latest server version. Your local edits will be archived in this browser instead of automatically retried.",
+                    confirmLabel: "Use saved draft",
+                    cancelLabel: "Keep my edits",
+                  }).then((allowed) => { if (allowed) void state.acceptSaved(); });
+                }}
               >
-                Retry save
+                {state.conflicted ? "Use saved draft" : "Retry save"}
               </button>
             ) : null}
           </div>

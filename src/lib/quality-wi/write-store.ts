@@ -33,7 +33,7 @@ async function send(
     assertCurrent();
     if (result.error) {
       if (result.status === 0 && attempt === 0) continue;
-      throw new Error(result.error.message);
+      throw Object.assign(new Error(result.error.message), { code: result.error.code });
     }
     const value = result.data as Result | null;
     if (

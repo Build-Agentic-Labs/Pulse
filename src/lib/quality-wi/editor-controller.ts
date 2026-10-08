@@ -15,10 +15,23 @@ type Snapshot = {
   localWarning: string;
   pending: number;
   publishing: boolean;
+  conflicted: boolean;
 };
+async function saveStage<T>(label: string, task: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([task, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out. Your draft has been retained. Retry saving.`)), 15_000);
+    })]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 type Confirmation = { id: string; version: number; operation?: string };
 export type WiEditorDependencies = {
   loadRecovery: () => Promise<PendingWiEdit[]>;
+  archiveRecovery?: (pending: PendingWiEdit[]) => Promise<void>;
   storeRecovery: (pending: PendingWiEdit[]) => Promise<void>;
   acknowledge: (entry: PendingWiEdit) => Promise<void>;
   save: (
@@ -42,6 +55,7 @@ export class WiEditorController {
   private disposed = false;
   private running: Promise<boolean> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private acceptingOperations: Set<string> | null = null;
   private publishIntent: {
     version: number;
     operation: string;
@@ -60,6 +74,7 @@ export class WiEditorController {
       localWarning: "",
       pending: 0,
       publishing: false,
+      conflicted: false,
     };
   }
   getSnapshot = () => this.snapshot;
@@ -97,7 +112,7 @@ export class WiEditorController {
   }
   private async remember() {
     try {
-      await this.deps.storeRecovery(this.pending);
+      await saveStage("Browser draft storage", this.deps.storeRecovery(this.pending));
     } catch {
       this.emit({
         localWarning:
@@ -107,7 +122,7 @@ export class WiEditorController {
   }
   async start() {
     try {
-      const entries = await this.deps.loadRecovery();
+      const entries = await saveStage("Browser draft recovery", this.deps.loadRecovery());
       this.assertCurrent();
       this.pending = entries;
       this.emit({ ready: true, status: entries.length ? "saving" : "saved" });
@@ -127,16 +142,21 @@ export class WiEditorController {
     if (this.disposed || !this.snapshot.ready || this.snapshot.publishing)
       return;
     this.publishIntent = null;
-    this.pending = appendWiEdit(this.pending, edit, crypto.randomUUID());
+    const operation = crypto.randomUUID();
+    // Edits typed during replacement belong to the new draft, not the archived batch.
+    this.pending = this.acceptingOperations?.has(this.pending.at(-1)?.operation ?? "")
+      ? [...this.pending, { operation, edit }]
+      : appendWiEdit(this.pending, edit, operation);
     if (
       this.pending.length === 1 &&
       this.pending[0].baseVersion === undefined &&
       this.pending[0].expectedVersion === undefined
     )
       this.pending[0].baseVersion = this.server.version;
-    this.emit({ status: "saving", message: "" });
+    if (this.snapshot.conflicted) this.emit({ status: "error" });
+    else this.emit({ status: "saving", message: "" });
     void this.remember();
-    this.schedule();
+    if (!this.snapshot.conflicted && !this.acceptingOperations) this.schedule();
   }
   private schedule() {
     if (this.timer) clearTimeout(this.timer);
@@ -151,6 +171,7 @@ export class WiEditorController {
       this.timer = null;
     }
     if (this.running) return this.running;
+    if (this.snapshot.conflicted || this.acceptingOperations) return Promise.resolve(false);
     this.running = this.run().finally(() => {
       this.running = null;
     });
@@ -167,10 +188,10 @@ export class WiEditorController {
         entry.issued = true;
         await this.remember();
         this.assertCurrent();
-        const result = await this.deps.save(
+        const result = await saveStage("Work instruction save", this.deps.save(
           structuredClone(entry),
           this.assertCurrent,
-        );
+        ));
         this.assertCurrent();
         if (
           result.id !== this.server.id ||
@@ -179,11 +200,11 @@ export class WiEditorController {
           throw new Error(
             "Unable to confirm this edit. Your draft has been retained.",
           );
-        const fresh = await this.deps.reload();
+        const fresh = await saveStage("Saved draft confirmation", this.deps.reload());
         this.assertCurrent();
         if (fresh.id !== this.server.id || fresh.version < result.version)
           throw new Error("Unable to confirm the saved draft.");
-        await this.deps.acknowledge(entry);
+        await saveStage("Browser draft acknowledgement", this.deps.acknowledge(entry));
         this.assertCurrent();
         this.server = fresh;
         this.pending = this.pending.filter(
@@ -202,6 +223,7 @@ export class WiEditorController {
       if (!this.disposed)
         this.emit({
           status: "error",
+          conflicted: Boolean(error && typeof error === "object" && "code" in error && error.code === "PT409"),
           message:
             error instanceof Error
               ? error.message
@@ -210,6 +232,35 @@ export class WiEditorController {
       return false;
     }
   }
+  acceptSaved = async () => {
+    if (this.disposed || this.running || this.snapshot.publishing || this.acceptingOperations || !this.deps.archiveRecovery) return false;
+    const replacing = structuredClone(this.pending);
+    const operations = new Set(replacing.map(entry => entry.operation));
+    this.acceptingOperations = operations;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    try {
+      const fresh = await saveStage("Saved draft confirmation", this.deps.reload());
+      this.assertCurrent();
+      if (fresh.id !== this.server.id || fresh.version < this.server.version)
+        throw new Error("Unable to confirm the saved draft.");
+      await saveStage("Browser draft archive", this.deps.archiveRecovery(replacing));
+      this.assertCurrent();
+      this.server = fresh;
+      this.pending = this.pending.filter(entry => !operations.has(entry.operation));
+      if (this.pending[0]) this.pending[0].baseVersion = fresh.version;
+      await this.remember();
+      this.assertCurrent();
+      this.emit({ status: this.pending.length ? "saving" : "saved", conflicted: false, message: "" });
+      if (this.pending.length) this.schedule();
+      return true;
+    } catch (error) {
+      this.emit({ status: "error", message: error instanceof Error ? error.message : "Could not load the saved draft." });
+      return false;
+    } finally {
+      this.acceptingOperations = null;
+    }
+  };
   publish = async (description: string) => {
     if (this.snapshot.publishing || this.disposed) return false;
     if (
@@ -237,14 +288,14 @@ export class WiEditorController {
     const intent = this.publishIntent;
     this.emit({ publishing: true, status: "saving", message: "" });
     try {
-      const result = await this.deps.publish(
+      const result = await saveStage("Work instruction publication", this.deps.publish(
         intent.version,
         intent.operation,
         intent.description,
         this.assertCurrent,
-      );
+      ));
       this.assertCurrent();
-      const fresh = await this.deps.reload();
+      const fresh = await saveStage("Saved draft confirmation", this.deps.reload());
       this.assertCurrent();
       if (fresh.id !== this.server.id || fresh.version < result.version)
         throw new Error("Unable to confirm publication.");

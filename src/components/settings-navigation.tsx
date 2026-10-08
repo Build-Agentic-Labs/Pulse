@@ -35,7 +35,7 @@ export function SettingsNavigation({
 
   return (
     <>
-      <nav
+      <NavSelectionTrack as="nav" persistenceKey="settings-mobile"
         className="flex shrink-0 gap-1 overflow-x-auto border-b border-line bg-surface px-2 py-2 md:hidden"
         aria-label="Settings sections"
       >
@@ -58,11 +58,12 @@ export function SettingsNavigation({
             </button>
           );
         })}
-      </nav>
+      </NavSelectionTrack>
 
       <aside className="ui-settings-subnav">
         <div className="ui-nav-section px-4">Settings</div>
         <NavSelectionTrack
+          persistenceKey="settings-desktop"
           activeIndex={activeSectionIndex}
           as="nav"
           inset

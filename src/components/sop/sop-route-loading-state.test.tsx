@@ -17,8 +17,8 @@ it.each(["/sops/work-instructions", "/sops/work-instructions/wi-1"])("keeps WI n
   vi.stubEnv("NEXT_PUBLIC_QUALITY_WI_BUILDER_ENABLED", "1");
   route.pathname = pathname;
   render(<SopRouteLoadingState><div>List skeleton</div></SopRouteLoadingState>);
-  expect(screen.getByRole("status", { name: "Opening work instructions" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Work instructions" })).toHaveClass("ui-nav-item-active");
+  expect(screen.getByRole("status", { name: pathname === "/sops/work-instructions" ? "Opening work instructions" : "Opening work instruction" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "WI Builder" })).toHaveClass("ui-nav-item-active");
   expect(screen.queryByText("SOP Builder")).not.toBeInTheDocument();
   expect(screen.queryByText("Approvals")).not.toBeInTheDocument();
   vi.unstubAllEnvs();
@@ -30,6 +30,14 @@ it("uses the document builder at the outer boundary without requiring a workspac
   expect(screen.getByText("SOP Builder")).toBeInTheDocument();
   expect(screen.getByRole("status", { name: "Opening Document" })).toBeInTheDocument();
   expect(screen.queryByText("List skeleton")).not.toBeInTheDocument();
+});
+
+it("uses a list loader and published navigation for the published WI route", () => {
+  route.pathname = "/sops/work-instructions/published";
+  render(<SopRouteLoadingState><div>List skeleton</div></SopRouteLoadingState>);
+  expect(screen.getByRole("status", { name: "Opening work instructions" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Published WIs" })).toHaveClass("ui-nav-item-active");
+  expect(screen.queryByRole("status", { name: "Opening work instruction" })).not.toBeInTheDocument();
 });
 
 it("keeps the document preview loader when entering through the review queue", () => {

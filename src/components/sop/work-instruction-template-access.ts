@@ -8,7 +8,7 @@ import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 export const WORK_INSTRUCTION_TEMPLATE_HREF = "/api/quality/work-instruction-template";
 
 /**
- * Whether to show the template download in Quality → Manage. Fails closed and
+ * Whether to show the template download in the Work instructions page. Fails closed and
  * re-evaluates when the signed-in identity changes. A mirror only: the API
  * route is the gate (CLAUDE.md — UI checks are never the enforcement layer).
  */
@@ -19,7 +19,7 @@ export function useWorkInstructionTemplateAccess(): boolean {
     try {
       client = createPlannerSupabaseClient();
     } catch (error) {
-      // An optional link must never take the whole Quality sidebar down with it.
+      // An optional link must never take the Work instructions page down with it.
       console.error("WI template access: Supabase client unavailable", error);
       return;
     }

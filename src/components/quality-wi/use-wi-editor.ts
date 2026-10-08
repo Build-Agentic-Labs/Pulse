@@ -19,6 +19,7 @@ export function useWiEditor(initial: QualityWi, userId: string) {
     localWarning: "",
     pending: 0,
     publishing: false,
+    conflicted: false,
   }));
   useEffect(() => {
     const recovery = createWiRecoveryStore({
@@ -28,6 +29,7 @@ export function useWiEditor(initial: QualityWi, userId: string) {
     });
     const controller = new WiEditorController(initial, {
       loadRecovery: () => recovery.load(),
+      archiveRecovery: (entries) => recovery.archive(entries),
       storeRecovery: (entries) => recovery.write(entries),
       acknowledge: (entry) => recovery.acknowledge(entry),
       save: async (entry, assertCurrent) => {
@@ -65,6 +67,7 @@ export function useWiEditor(initial: QualityWi, userId: string) {
         ),
     });
     controllerRef.current = controller;
+    setSnapshot(controller.getSnapshot());
     const unsubscribe = controller.subscribe(() =>
       setSnapshot(controller.getSnapshot()),
     );
@@ -88,5 +91,6 @@ export function useWiEditor(initial: QualityWi, userId: string) {
       controllerRef.current?.publish(description) ?? Promise.resolve(false),
     [],
   );
-  return { ...snapshot, edit, flush, publish };
+  const acceptSaved = useCallback(() => controllerRef.current?.acceptSaved() ?? Promise.resolve(false), []);
+  return { ...snapshot, edit, flush, publish, acceptSaved };
 }

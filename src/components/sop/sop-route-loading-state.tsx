@@ -10,7 +10,8 @@ function RouteLoadingSurface({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const params = useSearchParams();
   if (pathname === "/sops/work-instructions" || pathname?.startsWith("/sops/work-instructions/")) {
-    return <WiRouteLoadingState />;
+    const published = pathname === "/sops/work-instructions/published";
+    return <WiRouteLoadingState published={published} editor={!published && pathname !== "/sops/work-instructions"} />;
   }
   if (!/^\/sops\/[^/]+\/?$/.test(pathname ?? "") || pathname === "/sops/new" || pathname === "/sops/problem-solving") {
     return children;

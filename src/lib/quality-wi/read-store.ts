@@ -59,18 +59,30 @@ async function pages<T>(
 export async function listQualityWis(
   workspaceId: string,
   client?: SupabaseClient<Database>,
+  view: "drafts" | "published" = "drafts",
 ): Promise<QualityWi[]> {
   const db = qualityWiClient(client);
-  const rows = await pages((from, to) =>
-    db
+  const rows = await pages((from, to) => {
+    const query = db
       .from("quality_work_instructions")
-      .select(LIST_FIELDS)
-      .eq("workspace_id", workspaceId)
+      .select(view === "published"
+        ? `${LIST_FIELDS},release:quality_wi_revisions!quality_work_instructions_published_revision_id_fkey(title:snapshot->>title,published_at)`
+        : LIST_FIELDS)
+      .eq("workspace_id", workspaceId);
+    return (view === "published"
+      ? query.not("published_revision_id", "is", null)
+      : query.or("published_revision_id.is.null,has_changes.eq.true"))
       .order("updated_at", { ascending: false })
       .order("id")
-      .range(from, to),
-  );
-  return rows.map((row) => mapDocument(row as unknown as Row));
+      .range(from, to);
+  });
+  return rows.map((value) => {
+    const row = value as unknown as Row;
+    if (view !== "published") return mapDocument(row);
+    const release = row.release as { title: string; published_at: string } | null;
+    if (!release) throw new Error("The published work instruction could not be loaded.");
+    return mapDocument({ ...row, title: release.title, updated_at: release.published_at, has_changes: false });
+  }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
 }
 export async function loadQualityWi(
   workspaceId: string,

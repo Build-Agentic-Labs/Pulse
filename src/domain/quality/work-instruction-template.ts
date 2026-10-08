@@ -61,6 +61,8 @@ export type GeneralWorkInstructionStep = {
   instruction: string;
   /** Key into the renderer's image map; absent = "Image / reference view". */
   image?: string;
+  /** False renders a full-width instruction with no photo slot. */
+  showPhoto?: boolean;
 };
 
 export type WiRevisionHistoryRow = {

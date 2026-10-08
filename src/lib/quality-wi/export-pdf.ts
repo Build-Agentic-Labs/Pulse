@@ -34,7 +34,7 @@ export async function buildQualityWiPdf(
   const logo = await loadImage(await fetchWiImageBlob("/sop/ana-logo.png"));
   const images = new Map<string, HTMLImageElement>();
   for (const step of steps)
-    if (step.image) {
+    if (step.showPhoto !== false && step.image) {
       const png = await wiImageToPng(step.image);
       images.set(
         step.image.id,
@@ -139,13 +139,16 @@ export async function buildQualityWiPdf(
   }
   for (let index = 0; index < model.steps.length; index++) {
     const step = model.steps[index];
-    const instruction = lines(step.instruction, 230, 12);
-    const heading = lines(step.title, 206, 12, true);
+    const showPhoto = step.showPhoto !== false;
+    const textX = showPhoto ? 538 : LEFT + 12;
+    const titleX = showPhoto ? 563 : LEFT + 37;
+    const instruction = lines(step.instruction, showPhoto ? 230 : RIGHT - textX - 12, 12);
+    const heading = lines(step.title, showPhoto ? 206 : RIGHT - titleX - 12, 12, true);
     const headingHeight = heading.length * 16 + 24;
     let offset = 0,
       part = 0;
     do {
-      if (BOTTOM - y < Math.max(220, headingHeight + 30)) newPage();
+      if (BOTTOM - y < Math.max(showPhoto ? 220 : 80, headingHeight + 30)) newPage();
       const capacity = Math.floor((BOTTOM - y - headingHeight - 20) / 17);
       if (capacity < 1)
         throw new Error(
@@ -154,15 +157,15 @@ export async function buildQualityWiPdf(
       const chunk = instruction.slice(offset, offset + capacity);
       const rowHeight = Math.min(
         BOTTOM - y,
-        Math.max(220, headingHeight + chunk.length * 17 + 20),
+        Math.max(showPhoto ? 220 : 80, headingHeight + chunk.length * 17 + 20),
       );
       rule(LEFT, y, RIGHT);
-      rule(526, y, 526, y + rowHeight);
-      text([String(index + 1)], 538, y + 22, 12, true);
-      text(heading, 563, y + 22, 12, true);
-      if (part) text(["(continued)"], 538, y + headingHeight - 3, 9);
-      text(chunk, 538, y + headingHeight + 12, 12, false, 17);
-      const image = step.image ? images.get(step.image) : undefined;
+      if (showPhoto) rule(526, y, 526, y + rowHeight);
+      text([String(index + 1)], textX, y + 22, 12, true);
+      text(heading, titleX, y + 22, 12, true);
+      if (part) text(["(continued)"], textX, y + headingHeight - 3, 9);
+      text(chunk, textX, y + headingHeight + 12, 12, false, 17);
+      const image = showPhoto && step.image ? images.get(step.image) : undefined;
       if (image) {
         const scale = Math.min(
           462 / image.width,
@@ -177,7 +180,7 @@ export async function buildQualityWiPdf(
           width,
           height,
         );
-      } else {
+      } else if (showPhoto) {
         text(["Image / reference view"], LEFT + 180, y + rowHeight / 2, 10);
       }
       y += rowHeight;

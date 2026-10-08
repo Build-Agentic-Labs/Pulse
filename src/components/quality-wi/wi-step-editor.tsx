@@ -1,6 +1,6 @@
 "use client";
-import { ArrowDown, ArrowUp, GripVertical, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2 } from "lucide-react";
+import { Fragment, useState } from "react";
 import { InstructionFormatToolbar } from "@/components/line-workspace/instruction-format-toolbar";
 import { useConfirm } from "@/components/confirm-provider";
 import type { QualityWi, WiEdit } from "@/domain/quality-wi/schema";
@@ -30,8 +30,8 @@ export function WiStepEditor({
   return (
     <section className="space-y-5" aria-label="Work instruction steps">
       {document.steps.map((step, index) => (
+        <Fragment key={step.id}>
         <article
-          key={step.id}
           data-instruction-step
           className="ui-procedure-card rounded border border-line p-4"
           onDragOver={(event) => {
@@ -107,16 +107,35 @@ export function WiStepEditor({
               <Trash2 size={14} />
             </button>
           </div>
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <WiPhotos
-              document={document}
-              step={step}
-              sequence={index + 1}
-              userId={userId}
-              disabled={disabled}
-              onEdit={onEdit}
-              onBusy={onBusy}
-            />
+          <div className="mb-3 flex justify-end">
+            <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-ink-secondary">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={`Show photo for step ${index + 1}`}
+                className="ui-checkbox"
+                checked={step.showPhoto !== false}
+                disabled={disabled}
+                onChange={(event) => onEdit({
+                  kind: "step",
+                  payload: { id: step.id, showPhoto: event.target.checked },
+                })}
+              />
+              Show photo
+            </label>
+          </div>
+          <div className={`grid gap-5${step.showPhoto !== false ? " lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : ""}`}>
+            {step.showPhoto !== false ? (
+              <WiPhotos
+                document={document}
+                step={step}
+                sequence={index + 1}
+                userId={userId}
+                disabled={disabled}
+                onEdit={onEdit}
+                onBusy={onBusy}
+              />
+            ) : null}
             <div>
               <span className="ui-field-label">Instruction</span>
               {!disabled ? (
@@ -147,6 +166,22 @@ export function WiStepEditor({
             </div>
           </div>
         </article>
+        {index < document.steps.length - 1 ? (
+          <div className="flex justify-center">
+            <button
+              className="ui-btn-ghost inline-flex h-8 items-center gap-1.5 px-3 text-xs"
+              disabled={disabled}
+              aria-label={`Insert step after step ${index + 1}`}
+              onClick={() => onEdit({
+                kind: "add_step",
+                payload: { id: crypto.randomUUID(), afterId: step.id },
+              })}
+            >
+              <Plus size={13} /> Insert step
+            </button>
+          </div>
+        ) : null}
+        </Fragment>
       ))}
       <button
         className="ui-btn-ghost h-9 px-3"

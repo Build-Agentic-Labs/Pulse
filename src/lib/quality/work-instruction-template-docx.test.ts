@@ -25,3 +25,12 @@ it("exports document owner and page fields without repeating revision in the Wor
  expect(body).toContain("Document Owner");
  expect(body).not.toContain(">Author<");
 });
+
+it("exports text-only steps across both columns without the photo prompt", async () => {
+ const model = { ...blankGeneralWorkInstruction(), steps: [{ title: "Complete final inspection", instruction: "Complete the inspection before photographing.", showPhoto: false }] };
+ const zip = new PizZip(await Packer.toBuffer(buildWorkInstructionTemplate(null, model, {}, { filledDocument: true })));
+ const body = zip.file("word/document.xml")!.asText();
+ expect(body).toContain('w:gridSpan w:val="2"');
+ expect(body).toContain("Complete final inspection");
+ expect(body).not.toContain("Image / reference view");
+});

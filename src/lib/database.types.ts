@@ -1478,6 +1478,7 @@ export type Database = {
           instruction: string
           position: number
           removed_at: string | null
+          show_photo: boolean
           title: string
           wi_id: string
         }
@@ -1487,6 +1488,7 @@ export type Database = {
           instruction?: string
           position: number
           removed_at?: string | null
+          show_photo?: boolean
           title?: string
           wi_id: string
         }
@@ -1496,6 +1498,7 @@ export type Database = {
           instruction?: string
           position?: number
           removed_at?: string | null
+          show_photo?: boolean
           title?: string
           wi_id?: string
         }

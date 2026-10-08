@@ -14,7 +14,7 @@ export async function exportQualityWiWord(
 ) {
   const images: WorkInstructionImages = {};
   for (const step of steps)
-    if (step.image) images[step.image.id] = await wiImageToPng(step.image);
+    if (step.showPhoto !== false && step.image) images[step.image.id] = await wiImageToPng(step.image);
   const logo = await fetchWiImageBlob("/sop/ana-logo.png");
   const headerHeightTwips = wiHeaderHeightTwips(model);
   const plan = wiPrintPlan(model, headerHeightTwips);

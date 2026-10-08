@@ -219,3 +219,58 @@ test("Preview uses the SOP document presentation with continuous PDF pages and d
   await page.getByRole('button',{name:'Close preview',exact:true}).click();
   await expect(page.getByLabel('Work instruction title')).toBeVisible();
 });
+
+
+test("photo toggle persists and renders a text-only example", async ({page}) => {
+ const title = "Text-only step example";
+ await draft(page, title);
+ await page.getByLabel("Step 1 title", {exact:true}).fill("Complete final inspection");
+ await page.getByLabel("Step 1 instruction", {exact:true}).fill("Complete the final inspection before starting the photo process. Confirm the unit is ready to photograph.");
+ await expect(page.getByRole("status")).toHaveText("Saved");
+ await page.getByRole("switch", {name:"Show photo for step 1",exact:true}).uncheck();
+ await expect(page.getByRole("status")).toHaveText("Saved");
+ await page.reload();
+ await expect(page.getByRole("switch", {name:"Show photo for step 1",exact:true})).not.toBeChecked();
+ await expect(page.getByRole("region", {name:"Step 1 photo area"})).toHaveCount(0);
+ await expect(page.getByRole("status")).toHaveText("Saved");
+ await page.screenshot({path:"scratch/quality-wi-build/optional-photo-builder.png"});
+ await page.getByRole("button", {name:"Preview",exact:true}).click();
+ await expect(page.getByRole("img", {name:`${title}, page 1 of 2`,exact:true})).toBeVisible();
+ await page.screenshot({path:"scratch/quality-wi-build/optional-photo-preview.png"});
+ const download = page.waitForEvent("download");
+ await page.getByRole("button", {name:"Word",exact:true}).click();
+ await (await download).saveAs("scratch/quality-wi-build/optional-photo.docx");
+ const {default:PizZip} = await import("pizzip");
+ const xml = new PizZip(readFileSync("scratch/quality-wi-build/optional-photo.docx")).file("word/document.xml")!.asText();
+ expect(xml).toContain('w:gridSpan w:val="2"');
+ expect(xml).not.toContain("Image / reference view");
+ await page.getByRole("button", {name:"Close preview"}).click();
+ await page.getByRole("switch", {name:"Show photo for step 1",exact:true}).check();
+ await expect(page.getByRole("status")).toHaveText("Saved");
+ await page.reload();
+ await expect(page.getByRole("switch", {name:"Show photo for step 1",exact:true})).toBeChecked();
+ await expect(page.getByText("Image / reference view",{exact:true})).toBeVisible();
+});
+
+
+test("inserts between two steps and preserves their order after reload", async ({page}) => {
+ await draft(page, "Insert step example");
+ await page.getByLabel("Step 1 title",{exact:true}).fill("Open the record");
+ await page.getByRole("button",{name:/Add step/}).click();
+ await page.getByLabel("Step 2 title",{exact:true}).fill("Save the record");
+ await page.getByLabel("Step 2 instruction",{exact:true}).fill("Save the completed record.");
+ await expect(page.getByRole("status")).toHaveText("Saved");
+ await page.getByRole("button",{name:"Insert step after step 1",exact:true}).click();
+ await expect(page.getByLabel("Step 3 title",{exact:true})).toHaveValue("Save the record");
+ await page.getByLabel("Step 2 title",{exact:true}).fill("Check the details");
+ await page.getByLabel("Step 2 instruction",{exact:true}).fill("Check the details before saving the record.");
+ await expect(page.getByRole("status")).toHaveText("Saved");
+ await page.reload();
+ await expect(page.getByRole("status")).toHaveText("Saved");
+ await expect(page.getByLabel("Step 1 title",{exact:true})).toHaveValue("Open the record");
+ await expect(page.getByLabel("Step 2 title",{exact:true})).toHaveValue("Check the details");
+ await expect(page.getByLabel("Step 3 title",{exact:true})).toHaveValue("Save the record");
+ await expect(page.getByLabel("Step 3 instruction",{exact:true})).toHaveValue("Save the completed record.");
+ await page.getByLabel("Step 2 title",{exact:true}).scrollIntoViewIfNeeded();
+ await page.screenshot({path:"scratch/quality-wi-build/insert-step-builder.png"});
+});

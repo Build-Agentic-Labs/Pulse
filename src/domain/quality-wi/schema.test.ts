@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyWiEdit,
+  isWiEdit,
   wiPublishProblems,
   wiTemplateDocument,
   type QualityWi,
@@ -126,4 +127,31 @@ it("carries the original author into draft and revision previews", () => {
   expect(wiTemplateDocument(document).authorName).toBe("Jordan Smith");
   expect(wiTemplateDocument(document, 2, "2026-10-07", "Correction").authorName).toBe("Jordan Smith");
   expect(wiTemplateDocument(base).authorName).toBeUndefined();
+});
+
+it("hides a photo without discarding it and restores its template mapping", () => {
+ const image = { id: "photo", name: "reference.jpg", storagePath: "path", width: 100, height: 100 };
+ const doc = { ...base, steps: [{ ...base.steps[0], image }] };
+ const hidden = applyWiEdit(doc, { kind: "step", payload: { id: "a", showPhoto: false } });
+ expect(hidden.steps[0].image).toEqual(image);
+ expect(wiTemplateDocument(hidden).steps[0]).toMatchObject({ showPhoto: false });
+ expect(wiTemplateDocument(hidden).steps[0].image).toBeUndefined();
+ const restored = applyWiEdit(hidden, { kind: "step", payload: { id: "a", showPhoto: true } });
+ expect(wiTemplateDocument(restored).steps[0].image).toBe("photo");
+ expect(wiTemplateDocument(doc).steps[0].showPhoto).toBe(true);
+ expect(isWiEdit({ kind: "step", payload: { id: "a", showPhoto: false } })).toBe(true);
+ expect(isWiEdit({ kind: "step", payload: { id: "a", showPhoto: "false" } })).toBe(false);
+});
+
+it("inserts after a stable step id, renumbers and preserves existing content", () => {
+ const next = applyWiEdit(base, { kind: "add_step", payload: { id: "middle", afterId: "a" } });
+ expect(next.steps.map(step => step.id)).toEqual(["a", "middle", "b"]);
+ expect(next.steps.map(step => step.position)).toEqual([1, 2, 3]);
+ expect(next.steps[2].instruction).toBe(base.steps[1].instruction);
+ expect(base.steps.map(step => step.id)).toEqual(["a", "b"]);
+ expect(applyWiEdit(base, { kind: "add_step", payload: { id: "last" } }).steps.at(-1)?.id).toBe("last");
+ expect(() => applyWiEdit(base, { kind: "add_step", payload: { id: "new", afterId: "removed" } })).toThrow("no longer in the draft");
+ expect(isWiEdit({kind:"add_step",payload:{id:"new",afterId:"a"}})).toBe(true);
+ expect(isWiEdit({kind:"add_step",payload:{id:"new",afterId:7}})).toBe(false);
+ expect(isWiEdit({kind:"add_step",payload:{id:"new",afterId:""}})).toBe(false);
 });

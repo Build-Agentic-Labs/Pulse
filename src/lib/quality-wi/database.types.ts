@@ -83,6 +83,7 @@ export type QualityWiDatabase = {
           id: string;
           image: Json | null;
           instruction: string;
+          show_photo: boolean;
           position: number;
           removed_at: string | null;
           title: string;
@@ -92,6 +93,7 @@ export type QualityWiDatabase = {
           id: string;
           image?: Json | null;
           instruction?: string;
+          show_photo?: boolean;
           position: number;
           removed_at?: string | null;
           title?: string;
@@ -101,6 +103,7 @@ export type QualityWiDatabase = {
           id?: string;
           image?: Json | null;
           instruction?: string;
+          show_photo?: boolean;
           position?: number;
           removed_at?: string | null;
           title?: string;

@@ -42,6 +42,7 @@ function mapStep(row: Row): WiStep {
     title: String(row.title),
     instruction: String(row.instruction),
     image: row.image as WiImage | null,
+    showPhoto: row.show_photo !== false,
   };
 }
 async function pages<T>(
@@ -154,7 +155,7 @@ export async function signWiImages(
   client?: SupabaseClient<Database>,
 ): Promise<QualityWi> {
   const paths = document.steps.flatMap((step) =>
-    step.image ? [step.image.storagePath] : [],
+    step.image && step.showPhoto !== false ? [step.image.storagePath] : [],
   );
   if (!paths.length) return document;
   const result = await qualityWiClient(client)

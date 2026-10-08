@@ -17,6 +17,7 @@ export type WiStep = {
   title: string;
   instruction: string;
   image: WiImage | null;
+  showPhoto?: boolean;
 };
 export type QualityWi = {
   conversionSource?: import("./conversion").ConversionSource;
@@ -55,11 +56,11 @@ export type WiEdit =
     }
   | {
       kind: "add_step";
-      payload: { id: string; title?: string; instruction?: string };
+      payload: { id: string; title?: string; instruction?: string; afterId?: string };
     }
   | {
       kind: "step";
-      payload: { id: string; title?: string; instruction?: string };
+      payload: { id: string; title?: string; instruction?: string; showPhoto?: boolean };
     }
   | { kind: "remove_step"; payload: { id: string } }
   | { kind: "reorder"; payload: { ids: string[] } }
@@ -80,21 +81,25 @@ export function applyWiEdit(document: QualityWi, edit: WiEdit): QualityWi {
   switch (edit.kind) {
     case "details":
       return { ...document, ...edit.payload, hasChanges: true };
-    case "add_step":
+    case "add_step": {
+      const after = edit.payload.afterId;
+      const anchor = after === undefined ? document.steps.length - 1 : document.steps.findIndex(step => step.id === after);
+      if (after !== undefined && anchor < 0)
+        throw new Error("The insertion step is no longer in the draft. Your draft has been retained.");
+      const steps = [...document.steps];
+      steps.splice(anchor + 1, 0, {
+        id: edit.payload.id,
+        position: anchor + 2,
+        title: edit.payload.title ?? "",
+        instruction: edit.payload.instruction ?? "",
+        image: null,
+      });
       return {
         ...document,
         hasChanges: true,
-        steps: [
-          ...document.steps,
-          {
-            id: edit.payload.id,
-            position: document.steps.length + 1,
-            title: edit.payload.title ?? "",
-            instruction: edit.payload.instruction ?? "",
-            image: null,
-          },
-        ],
+        steps: steps.map((step, index) => ({ ...step, position: index + 1 })),
       };
+    }
     case "step":
       return {
         ...document,
@@ -184,7 +189,8 @@ export function wiTemplateDocument(
     steps: document.steps.map((step) => ({
       title: step.title,
       instruction: step.instruction,
-      ...(step.image ? { image: step.image.id } : {}),
+      showPhoto: step.showPhoto !== false,
+      ...(step.image && step.showPhoto !== false ? { image: step.image.id } : {}),
     })),
   };
 }
@@ -216,10 +222,17 @@ export function isWiEdit(value: unknown): value is WiEdit {
       p.ids.every((id) => typeof id === "string")
     );
   if (typeof p.id !== "string" || !p.id) return false;
-  if (edit.kind === "add_step" || edit.kind === "step")
+  if (edit.kind === "step")
     return (
-      fields(["id", "title", "instruction"]) &&
-      strings(["title", "instruction"])
+      fields(["id", "title", "instruction", "showPhoto"]) &&
+      strings(["title", "instruction"]) &&
+      (p.showPhoto === undefined || typeof p.showPhoto === "boolean")
+    );
+  if (edit.kind === "add_step")
+    return (
+      fields(["id", "title", "instruction", "afterId"]) &&
+      strings(["title", "instruction", "afterId"]) &&
+      (p.afterId === undefined || p.afterId !== "")
     );
   if (edit.kind === "remove_step") return fields(["id"]);
   if (

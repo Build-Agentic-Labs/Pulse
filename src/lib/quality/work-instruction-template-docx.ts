@@ -141,12 +141,14 @@ function cell(
     edges?: Partial<ITableCellBorders>;
     pad?: [number, number, number?, number?];
     valign?: VAlign;
+    span?: number;
   } = {},
 ): TableCell {
   const [top, right, bottom = top, left = right] = opts.pad ?? [0, 0];
   return new TableCell({
     width: { size: width, type: WidthType.DXA },
     borders: borders(opts.edges),
+    columnSpan: opts.span,
     margins: { top, right, bottom, left },
     verticalAlign: opts.valign ?? VerticalAlign.TOP,
     children,
@@ -437,18 +439,20 @@ function steps(
   allowSplit = false,
 ): Table {
   const bodyColumn = CONTENT - IMAGE_COLUMN;
-  const inner = bodyColumn - 24 * PX;
+
   const rows = sequences.map((sequence) => {
     const step: GeneralWorkInstructionStep = doc.steps[sequence - 1] ?? {
       title: "",
       instruction: "",
     };
-    const image = step.image ? images[step.image] : undefined;
+    const showPhoto = step.showPhoto !== false;
+    const inner = (showPhoto ? bodyColumn : CONTENT) - 24 * PX;
+    const image = showPhoto && step.image ? images[step.image] : undefined;
     return new TableRow({
-      height: { value: height, rule: "atLeast" },
+      height: { value: showPhoto ? height : 80 * PX, rule: "atLeast" },
       cantSplit: !allowSplit,
       children: [
-        cell(
+        ...(showPhoto ? [cell(
           [
             para(
               [
@@ -465,7 +469,7 @@ function steps(
             pad: [10 * PX, 10 * PX],
             valign: VerticalAlign.CENTER,
           },
-        ),
+        )] : []),
         cell(
           [
             stepHeading(
@@ -477,8 +481,8 @@ function steps(
             para([], { after: 12 * PX }),
             ...instructionParagraphs(step.instruction),
           ],
-          bodyColumn,
-          { edges: { bottom: rule(RULE) }, pad: [12 * PX, 12 * PX] },
+          showPhoto ? bodyColumn : CONTENT,
+          { edges: { bottom: rule(RULE) }, pad: [12 * PX, 12 * PX], span: showPhoto ? undefined : 2 },
         ),
       ],
     });

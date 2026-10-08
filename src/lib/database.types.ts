@@ -1341,6 +1341,247 @@ export type Database = {
         }
         Relationships: []
       }
+      quality_wi_conversions: {
+        Row: {
+          actor_id: string
+          created_at: string
+          department_id: string
+          error: string | null
+          expires_at: string
+          file_name: string
+          id: string
+          imported_at: string | null
+          payload: Json | null
+          source_path: string
+          status: string
+          workspace_id: string
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          department_id: string
+          error?: string | null
+          expires_at?: string
+          file_name: string
+          id: string
+          imported_at?: string | null
+          payload?: Json | null
+          source_path: string
+          status?: string
+          workspace_id: string
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          department_id?: string
+          error?: string | null
+          expires_at?: string
+          file_name?: string
+          id?: string
+          imported_at?: string | null
+          payload?: Json | null
+          source_path?: string
+          status?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quality_wi_conversions_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quality_wi_conversions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quality_wi_operations: {
+        Row: {
+          actor_id: string
+          id: string
+          request: Json
+          result: Json
+          wi_id: string
+        }
+        Insert: {
+          actor_id: string
+          id: string
+          request: Json
+          result: Json
+          wi_id: string
+        }
+        Update: {
+          actor_id?: string
+          id?: string
+          request?: Json
+          result?: Json
+          wi_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quality_wi_operations_wi_id_fkey"
+            columns: ["wi_id"]
+            isOneToOne: false
+            referencedRelation: "quality_work_instructions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quality_wi_revisions: {
+        Row: {
+          change_description: string
+          id: string
+          published_at: string
+          published_by: string
+          revision_index: number
+          snapshot: Json
+          wi_id: string
+        }
+        Insert: {
+          change_description: string
+          id: string
+          published_at?: string
+          published_by: string
+          revision_index: number
+          snapshot: Json
+          wi_id: string
+        }
+        Update: {
+          change_description?: string
+          id?: string
+          published_at?: string
+          published_by?: string
+          revision_index?: number
+          snapshot?: Json
+          wi_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quality_wi_revisions_wi_id_fkey"
+            columns: ["wi_id"]
+            isOneToOne: false
+            referencedRelation: "quality_work_instructions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quality_wi_steps: {
+        Row: {
+          id: string
+          image: Json | null
+          instruction: string
+          position: number
+          removed_at: string | null
+          title: string
+          wi_id: string
+        }
+        Insert: {
+          id: string
+          image?: Json | null
+          instruction?: string
+          position: number
+          removed_at?: string | null
+          title?: string
+          wi_id: string
+        }
+        Update: {
+          id?: string
+          image?: Json | null
+          instruction?: string
+          position?: number
+          removed_at?: string | null
+          title?: string
+          wi_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quality_wi_steps_wi_id_fkey"
+            columns: ["wi_id"]
+            isOneToOne: false
+            referencedRelation: "quality_work_instructions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quality_work_instructions: {
+        Row: {
+          conversion_source: Json | null
+          created_at: string
+          created_by: string
+          department_id: string
+          document_number: string | null
+          has_changes: boolean
+          id: string
+          published_revision_id: string | null
+          purpose: string
+          responsibilities: string
+          title: string
+          updated_at: string
+          version: number
+          workspace_id: string
+        }
+        Insert: {
+          conversion_source?: Json | null
+          created_at?: string
+          created_by: string
+          department_id: string
+          document_number?: string | null
+          has_changes?: boolean
+          id: string
+          published_revision_id?: string | null
+          purpose?: string
+          responsibilities?: string
+          title?: string
+          updated_at?: string
+          version?: number
+          workspace_id: string
+        }
+        Update: {
+          conversion_source?: Json | null
+          created_at?: string
+          created_by?: string
+          department_id?: string
+          document_number?: string | null
+          has_changes?: boolean
+          id?: string
+          published_revision_id?: string | null
+          purpose?: string
+          responsibilities?: string
+          title?: string
+          updated_at?: string
+          version?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quality_work_instructions_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quality_work_instructions_published_revision_id_fkey"
+            columns: ["published_revision_id"]
+            isOneToOne: false
+            referencedRelation: "quality_wi_revisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quality_work_instructions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sales_order_lines: {
         Row: {
           acc_sku: string
@@ -4112,12 +4353,27 @@ export type Database = {
           set_no: string
         }[]
       }
+      begin_quality_wi_conversion: {
+        Args: {
+          p_department: string
+          p_id: string
+          p_name: string
+          p_path: string
+          p_workspace: string
+        }
+        Returns: boolean
+      }
       can_access_problem_workspace: {
         Args: { p_workspace: string }
         Returns: boolean
       }
+      can_edit_quality_wi_department: {
+        Args: { p_department: string }
+        Returns: boolean
+      }
       can_edit_sop_content: { Args: { p_sop: string }; Returns: boolean }
       can_edit_sop_roster: { Args: { p_sop: string }; Returns: boolean }
+      can_read_quality_wi: { Args: { p_id: string }; Returns: boolean }
       can_read_sop: { Args: { p_sop: string }; Returns: boolean }
       can_view_member_profile: {
         Args: { target_user_id: string }
@@ -4136,6 +4392,15 @@ export type Database = {
         Args: { p_name: string; p_workspace_id: string }
         Returns: string
       }
+      create_quality_wi: {
+        Args: {
+          p_actor: string
+          p_department: string
+          p_id: string
+          p_workspace: string
+        }
+        Returns: Json
+      }
       custom_column_project_id: {
         Args: { target_product_id: string; target_scenario_id: string }
         Returns: string
@@ -4143,6 +4408,15 @@ export type Database = {
       custom_column_workspace_id: {
         Args: { target_product_id: string; target_scenario_id: string }
         Returns: string
+      }
+      delete_quality_wi: {
+        Args: {
+          p_actor: string
+          p_expected_version: number
+          p_id: string
+          p_workspace: string
+        }
+        Returns: Json
       }
       delete_scenario: { Args: { p_scenario_id: string }; Returns: undefined }
       department_has_members: { Args: { dept_id: string }; Returns: boolean }
@@ -4154,7 +4428,22 @@ export type Database = {
         Args: { p_new_name: string; p_source_scenario_id: string }
         Returns: string
       }
+      edit_quality_wi: {
+        Args: {
+          p_actor: string
+          p_expected_version: number
+          p_id: string
+          p_kind: string
+          p_operation: string
+          p_payload: Json
+        }
+        Returns: Json
+      }
       enable_sop_self_review_test: { Args: { p_sop: string }; Returns: boolean }
+      finish_quality_wi_conversion: {
+        Args: { p_error?: string; p_id: string }
+        Returns: undefined
+      }
       has_department_role: {
         Args: {
           dept_id: string
@@ -4188,6 +4477,15 @@ export type Database = {
         Returns: boolean
       }
       holds_sop_seat: { Args: { p_sop: string }; Returns: boolean }
+      import_quality_wi_conversion: {
+        Args: {
+          p_id: string
+          p_purpose: string
+          p_responsibilities: string
+          p_title: string
+        }
+        Returns: Json
+      }
       is_department_member: {
         Args: { dept_id: string; p_user?: string }
         Returns: boolean
@@ -4202,6 +4500,10 @@ export type Database = {
         Returns: boolean
       }
       is_super_admin: { Args: never; Returns: boolean }
+      load_quality_wi_document: {
+        Args: { p_id: string; p_workspace: string }
+        Returns: Json
+      }
       load_task_reorder_baseline: {
         Args: {
           p_actor_id: string
@@ -4240,6 +4542,10 @@ export type Database = {
         }
         Returns: Json
       }
+      prepare_quality_wi_conversion: {
+        Args: { p_id: string; p_payload: Json }
+        Returns: undefined
+      }
       product_project_id: {
         Args: { target_product_id: string }
         Returns: string
@@ -4255,6 +4561,28 @@ export type Database = {
       project_workspace_id: {
         Args: { target_project_id: string }
         Returns: string
+      }
+      publish_quality_wi: {
+        Args: {
+          p_actor: string
+          p_description: string
+          p_expected_version: number
+          p_id: string
+          p_operation: string
+        }
+        Returns: Json
+      }
+      quality_wi_author_display_name: {
+        Args: { p_wi: string }
+        Returns: string
+      }
+      quality_wi_conversion_image_access: {
+        Args: { p_name: string; p_write: boolean }
+        Returns: boolean
+      }
+      quality_wi_storage_access: {
+        Args: { p_edit: boolean; p_name: string }
+        Returns: boolean
       }
       reassign_sop_seat: {
         Args: { p_department: string; p_new_signer: string; p_sop: string }

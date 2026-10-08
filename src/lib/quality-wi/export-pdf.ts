@@ -55,14 +55,14 @@ export async function buildQualityWiPdf(
   }
   const title = lines(
     model.title || "Untitled work instruction",
-    380,
+    376,
     16,
     true,
   );
-  const headerHeight = Math.max(
-    84,
-    title.length * 20 + 46,
-  );
+  // Center the whole identity block beside the logo, including wrapped titles.
+  // The label and number belong to the title, rather than to fixed page baselines.
+  const identityHeight = 9 + 6 + title.length * 20 + 5 + 10;
+  const headerHeight = Math.max(84, identityHeight + 28);
   if (headerHeight > 590)
     throw new Error(
       "Shorten the title before previewing on Letter paper.",
@@ -77,8 +77,9 @@ export async function buildQualityWiPdf(
     size = 12,
     bold = false,
     leading = 16,
+    color = "#202428",
   ) {
-    context.fillStyle = "#202428";
+    context.fillStyle = color;
     context.font = `${bold ? "bold " : ""}${size}px Arial`;
     value.forEach((line, index) =>
       context.fillText(line, x, top + index * leading),
@@ -104,10 +105,11 @@ export async function buildQualityWiPdf(
     context.fillStyle = "white";
     context.fillRect(0, 0, WIDTH, HEIGHT);
     canvases.push(canvas);
-    context.drawImage(logo, LEFT + 10, 40 + headerHeight / 2 - 12, 90, 26);
-    text([`WORK INSTRUCTION${model.isDraft ? " · DRAFT" : ""}`], 158, 56, 9);
-    text(title, 158, 75, 16, true, 20);
-    text([model.documentNumber], 158, 80 + title.length * 20, 10, true);
+    const identityTop = 40 + (headerHeight - identityHeight) / 2;
+    context.drawImage(logo, LEFT + 10, 40 + (headerHeight - 26) / 2, 90, 26);
+    text([`WORK INSTRUCTION${model.isDraft ? " · DRAFT" : ""}`], 158, identityTop + 9, 9, false, 16, "#5b6167");
+    text(title, 158, identityTop + 31, 16, true, 20);
+    text([model.documentNumber], 158, identityTop + identityHeight, 10, true);
     text(["Rev"], 558, 56, 9, true);
     text(["Release date"], 627, 56, 9, true);
     text([model.revision || "—"], 558, 80, 10);

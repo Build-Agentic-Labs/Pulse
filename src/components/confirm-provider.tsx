@@ -6,6 +6,7 @@ import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackTone } from "./
 /** Options for a single confirmation, minus the imperative onConfirm wiring the hook supplies. */
 export type ConfirmOptions = {
   title: string;
+  label?: string;
   body?: string;
   tone?: FeedbackTone;
   confirmLabel?: string;
@@ -41,6 +42,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         resolverRef.current = resolve;
         setPending({
           title: options.title,
+          label: options.label,
           body: options.body,
           tone: options.tone ?? "danger",
           confirmLabel: options.confirmLabel,

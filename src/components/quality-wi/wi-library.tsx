@@ -1,12 +1,14 @@
 "use client";
 import Link from "next/link";
+import "./wi-conversion-progress.css";
+import dynamic from "next/dynamic";
 import { useEffect, useState, useRef } from "react";
-import { FileDown, Plus, Search } from "lucide-react";
+import { FileDown, Plus, Search, Trash2, Upload } from "lucide-react";
 import type { QualityWi } from "@/domain/quality-wi/schema";
 import { formatDate } from "@/domain/formatting";
 import { loadWiLibraryDepartments, type WiLibraryDepartments } from "@/lib/quality-wi/library-departments";
 import { listQualityWis } from "@/lib/quality-wi/read-store";
-import { createQualityWi } from "@/lib/quality-wi/write-store";
+import { createQualityWi, deleteQualityWi } from "@/lib/quality-wi/write-store";
 import { QualitySkeleton } from "@/components/sop/quality-skeleton";
 import { SopShell } from "@/components/sop/sop-shell";
 import { SopTabNav } from "@/components/sop/sop-tab-nav";
@@ -16,6 +18,11 @@ import { useRouter } from "next/navigation";
 import { useWiIdentity } from "./use-wi-identity";
 import { WORK_INSTRUCTION_TEMPLATE_HREF, useWorkInstructionTemplateAccess } from "@/components/sop/work-instruction-template-access";
 import { WiPreview } from "./wi-preview";
+import type { ConversionJob } from "@/domain/quality-wi/conversion";
+import { useWiConversions } from "./use-wi-conversions";
+import { useConfirm } from "@/components/confirm-provider";
+
+const WiConvertDialog = dynamic(() => import("./wi-convert-dialog"), { ssr: false });
 
 export function WiLibrary({
   view = "drafts",
@@ -32,11 +39,23 @@ export function WiLibrary({
 }) {
   const published = view === "published";
   const title = published ? "Published Work Instructions" : "Work Instruction Builder";
+  const [converting, setConverting] = useState(false);
+  const [conversionReview, setConversionReview] = useState<ConversionJob | null>(null);
   const [preview, setPreview] = useState<QualityWi | null>(null);
   const { workspaceId, role, canEditSops } = useSopWorkspace();
   const userId = useWiIdentity(initialUserId);
+  const conversions = useWiConversions(userId, workspaceId, !published);
   const templateAccess = useWorkInstructionTemplateAccess();
   const router = useRouter();
+  const confirm = useConfirm();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deletingRef = useRef(false);
+  const deletedIds = useRef(new Set<string>());
+  const currentScope = useRef({ workspaceId, userId });
+  useEffect(() => {
+    currentScope.current = { workspaceId, userId };
+    return () => { currentScope.current = { workspaceId: undefined, userId: undefined }; };
+  }, [workspaceId, userId]);
   const [rows, setRows] = useState(initialRows ?? []);
   const [rowScope, setRowScope] = useState(
     initialWorkspaceId && initialUserId
@@ -78,7 +97,7 @@ export function WiLibrary({
     listQualityWis(workspaceId, undefined, view)
       .then((next) => {
         if (!active) return;
-        setRows(next);
+        setRows(next.filter(row => !deletedIds.current.has(row.id)));
         setRowScope(`${userId}:${workspaceId}`);
         setLoading(false);
       })
@@ -115,11 +134,45 @@ export function WiLibrary({
         .toLowerCase()
         .includes(search.trim().toLowerCase()),
   );
+  const conversionRows = conversions.jobs.filter(job => job.fileName.toLowerCase().includes(search.trim().toLowerCase()));
+  const conversionDepartment = conversionReview?.departmentId ?? department;
   const groups = [
     ...new Map(
-      visible.map((row) => [row.departmentId, row.departmentName]),
+      [...visible.map((row) => [row.departmentId, row.departmentName] as const),
+       ...conversionRows.map(job => [job.departmentId, departments.find(d => d.id === job.departmentId)?.name ?? "Work instructions"] as const)],
     ).entries(),
   ].sort((a, b) => a[1].localeCompare(b[1]));
+  async function remove(row: QualityWi) {
+    if (!workspaceId || !userId || row.createdBy !== userId || deletingRef.current) return;
+    deletingRef.current = true;
+    const captured = { workspaceId, userId };
+    const assertCurrent = () => {
+      if (currentScope.current.workspaceId !== captured.workspaceId || currentScope.current.userId !== captured.userId)
+        throw new Error("Account or organization changed. Reload before deleting this work instruction.");
+    };
+    try {
+      if (!await confirm({
+        title: `Delete "${row.title || "Untitled work instruction"}"?`,
+        label: "Delete work instruction",
+        body: "This permanently deletes the work instruction, its steps, and its published revision history. This cannot be undone.",
+        tone: "danger",
+        confirmLabel: "Delete WI",
+      })) return;
+      assertCurrent();
+      setDeletingId(row.id);
+      setError("");
+      await deleteQualityWi(row.id, workspaceId, row.version, undefined, assertCurrent, userId);
+      assertCurrent();
+      deletedIds.current.add(row.id);
+      setRows(current => current.filter(item => item.id !== row.id));
+    } catch (caught) {
+      if (currentScope.current.workspaceId === captured.workspaceId && currentScope.current.userId === captured.userId)
+        setError(caught instanceof Error ? caught.message : "Could not delete the work instruction.");
+    } finally {
+      setDeletingId(null);
+      deletingRef.current = false;
+    }
+  }
   async function create() {
     if (!workspaceId || !department || !userId || creating) return;
     setCreating(true);
@@ -195,6 +248,7 @@ export function WiLibrary({
                 placeholder="Choose department"
                 onChange={id => setDepartmentChoice({ scope, id })}
               />}
+              <button className="ui-btn-secondary inline-flex h-9 items-center gap-2 px-3" disabled={!department || !userId} onClick={() => { setConversionReview(null); setConverting(true); }}><Upload size={14} />Convert WI</button>
               <button
                 className="ui-btn-primary inline-flex h-9 items-center gap-2 px-3"
                 disabled={!department || creating || !userId}
@@ -207,9 +261,9 @@ export function WiLibrary({
           ) : null}
           </div>
         </div>
-        {error || departmentError ? (
+        {error || departmentError || conversions.error ? (
           <div className="ui-notice ui-notice-warn p-3" role="alert">
-            {error || departmentError}
+            {error || departmentError || conversions.error}
             <button
               className="ui-btn-ghost ml-2"
               onClick={() => setRetry((value) => value + 1)}
@@ -236,7 +290,7 @@ export function WiLibrary({
         </div>
         {loading ? (
           <QualitySkeleton variant="list" label="Loading work instructions" />
-        ) : !visible.length ? (
+        ) : !visible.length && !conversionRows.length ? (
           <div className="rounded border border-line p-8 text-center text-sm text-ink-secondary">
             {search
               ? "No work instructions match your search."
@@ -252,6 +306,7 @@ export function WiLibrary({
                   <th className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Title</th>
                   <th className="w-32 px-5 py-3 text-[11px] font-medium text-ink-secondary">Status</th>
                   <th className="w-28 px-5 py-3 text-[11px] font-medium text-ink-secondary">Updated</th>
+                  <th className="w-10 px-3 py-3"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -260,7 +315,12 @@ export function WiLibrary({
                     key={id}
                     name={name}
                     published={published}
+                    conversions={conversionRows.filter(job => job.departmentId === id)}
+                    onReview={job => { setConversionReview(job.status === "ready" ? job : { ...job, id: "" }); setConverting(true); }}
                     onPreview={setPreview}
+                    userId={userId}
+                    deletingId={deletingId}
+                    onDelete={remove}
                     rows={visible.filter((row) => row.departmentId === id)}
                   />
                 ))}
@@ -270,12 +330,18 @@ export function WiLibrary({
           </div>
         )}
       </div>
+      {converting && workspaceId && userId && conversionDepartment && !published && canEditSops ? <WiConvertDialog key={`${userId}:${workspaceId}:${conversionDepartment}:${conversionReview?.id ?? "new"}`} workspaceId={workspaceId} userId={userId} departmentId={conversionDepartment} departmentName={departments.find(d => d.id === conversionDepartment)?.name ?? ""} conversionId={conversionReview?.id || undefined} onStarted={job => { conversions.started(job); setConverting(false); }} onSubmissionError={message => { if (currentScope.current.workspaceId === workspaceId && currentScope.current.userId === userId) setError(message); }} onClose={() => setConverting(false)} onImported={id => { setConverting(false); router.push(`/sops/work-instructions/${id}`); }} /> : null}
       {preview ? <WiPreview key={preview.id} document={preview} publishedOnly onClose={() => setPreview(null)}
         onEdit={canEditSops ? () => router.push(`/sops/work-instructions/${preview.id}`) : undefined} /> : null}
     </SopShell>
   );
 }
-function DepartmentRows({ name, rows, published, onPreview }: {
+function DepartmentRows({ name, rows, published, onPreview, userId, deletingId, onDelete, conversions, onReview }: {
+  conversions: ConversionJob[];
+  onReview: (job: ConversionJob) => void;
+  userId?: string | null;
+  deletingId: string | null;
+  onDelete: (document: QualityWi) => Promise<void>;
   name: string;
   rows: QualityWi[];
   published: boolean;
@@ -284,15 +350,30 @@ function DepartmentRows({ name, rows, published, onPreview }: {
   return (
     <>
       <tr className="border-b border-line bg-canvas/70">
-        <th colSpan={4} className="px-5 py-2.5 text-left">
+        <th colSpan={5} className="px-5 py-2.5 text-left">
           <div className="flex items-center justify-between gap-3">
             <span className="truncate text-sm font-semibold text-ink">{name}</span>
             <span className="shrink-0 text-xs font-normal tabular-nums text-ink-tertiary">
-              {rows.length} {rows.length === 1 ? "WI" : "WIs"}
+              {rows.length + conversions.length} {rows.length + conversions.length === 1 ? "WI" : "WIs"}
             </span>
           </div>
         </th>
       </tr>
+      {conversions.map(job => (
+        <tr key={job.id} className="border-b border-line last:border-b-0">
+          <td className="px-5 py-3.5 text-xs text-ink-tertiary">—</td>
+          <td className="max-w-0 px-5 py-3.5">
+            <p className="truncate text-[13px] font-medium">{job.fileName.replace(/\.docx$/i, "")}</p>
+            {job.status === "processing" ? <div className="mt-2 max-w-xs">
+              <div role="progressbar" aria-label={`Converting ${job.fileName}`} aria-valuetext="Analyzing steps and checking images" className="wi-conversion-progress w-full" />
+              <p className="mt-1 text-[11px] text-ink-tertiary">Analyzing steps and images. You can leave this page.</p>
+            </div> : job.error ? <p className="mt-1 text-xs text-ink-secondary">{job.error}</p> : null}
+          </td>
+          <td className="whitespace-nowrap px-5 py-3.5 text-[11px] text-ink-secondary">{job.status === "processing" ? "Converting…" : job.status === "ready" ? "Ready to review" : "Conversion failed"}</td>
+          <td className="px-5 py-3.5 text-xs text-ink-tertiary">{formatDate(job.createdAt)}</td>
+          <td className="px-3 py-3.5 text-right">{job.status !== "processing" ? <button className="ui-btn-secondary h-8 whitespace-nowrap px-3 text-xs" onClick={() => onReview(job)}>{job.status === "ready" ? "Review" : "Try again"}</button> : null}</td>
+        </tr>
+      ))}
       {rows.map((row) => {
         const number = row.documentNumber ?? `WI-${row.departmentCode}-###`;
         const title = row.title || "Untitled work instruction";
@@ -318,6 +399,15 @@ function DepartmentRows({ name, rows, published, onPreview }: {
               </span>
             </td>
             <td className="px-5 py-3.5 align-middle text-xs text-ink-tertiary">{formatDate(row.updatedAt)}</td>
+            <td className="px-3 py-3.5 align-middle text-right">
+              {userId && row.createdBy === userId ? (
+                <button type="button" className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center p-0 text-ink-tertiary hover:text-danger"
+                  aria-label={`Delete ${title}`} title="Delete work instruction" disabled={deletingId !== null}
+                  onClick={() => void onDelete(row)}>
+                  <Trash2 size={14} />
+                </button>
+              ) : null}
+            </td>
           </tr>
         );
       })}

@@ -136,6 +136,26 @@ export async function saveQualityWiEdit(
     assertCurrent,
   );
 }
+export async function deleteQualityWi(
+  id: string,
+  workspaceId: string,
+  version: number,
+  client?: SupabaseClient<Database>,
+  assertCurrent: () => void = () => undefined,
+  expectedActor?: string,
+) {
+  const guard = await accountGuard(client, assertCurrent, expectedActor);
+  const db = qualityWiClient(client);
+  return send(id, undefined, async () => {
+    await guard.check();
+    return db.rpc("delete_quality_wi", {
+      p_id: id,
+      p_workspace: workspaceId,
+      p_expected_version: version,
+      p_actor: guard.actor,
+    });
+  }, assertCurrent);
+}
 export async function publishQualityWi(
   id: string,
   version: number,

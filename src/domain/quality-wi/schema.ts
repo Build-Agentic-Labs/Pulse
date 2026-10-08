@@ -19,6 +19,8 @@ export type WiStep = {
   image: WiImage | null;
 };
 export type QualityWi = {
+  conversionSource?: import("./conversion").ConversionSource;
+  createdBy?: string;
   authorName?: string;
   id: string;
   workspaceId: string;

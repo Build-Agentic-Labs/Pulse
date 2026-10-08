@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import {
   createQualityWi,
+  deleteQualityWi,
   publishQualityWi,
   saveQualityWiEdit,
 } from "./write-store";
@@ -143,5 +144,21 @@ it("cannot begin an old editor's write under a new signed-in account", async () 
       "original-account",
     ),
   ).rejects.toThrow("Account changed");
+  expect(rpc).not.toHaveBeenCalled();
+});
+
+
+it("deletes using the captured author, workspace and displayed version", async () => {
+  const rpc = vi.fn().mockResolvedValue({ data: { id: "wi", version: 7 }, error: null });
+  await deleteQualityWi("wi", "workspace", 7, client(rpc), () => {}, "author");
+  expect(rpc).toHaveBeenCalledExactlyOnceWith("delete_quality_wi", {
+    p_id: "wi", p_workspace: "workspace", p_expected_version: 7, p_actor: "author",
+  });
+});
+
+it("does not delete under a changed account", async () => {
+  auth.id = "other";
+  const rpc = vi.fn();
+  await expect(deleteQualityWi("wi", "workspace", 1, client(rpc), () => {}, "author")).rejects.toThrow("Account changed");
   expect(rpc).not.toHaveBeenCalled();
 });

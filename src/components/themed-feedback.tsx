@@ -27,6 +27,7 @@ export interface FeedbackToast {
 
 export interface FeedbackConfirm {
   title: string;
+  label?: string;
   body?: string;
   tone?: FeedbackTone;
   confirmLabel?: string;
@@ -306,7 +307,7 @@ export function ThemedFeedbackLayer({
               aria-labelledby="feedback-confirm-title"
             >
               <div className="border-b border-line px-4 py-4">
-                <div className="ui-mono-label">{toneStyles[confirm.tone ?? "neutral"].label}</div>
+                <div className="ui-mono-label">{confirm.label ?? toneStyles[confirm.tone ?? "neutral"].label}</div>
                 <h2 id="feedback-confirm-title" className="ui-section-title mt-2">
                   {confirm.title}
                 </h2>

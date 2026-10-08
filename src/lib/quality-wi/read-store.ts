@@ -7,14 +7,17 @@ import type {
   WiStep,
 } from "@/domain/quality-wi/schema";
 import { wiTemplateDocument } from "@/domain/quality-wi/schema";
+import { readConversionSource } from "@/domain/quality-wi/conversion";
 import { qualityWiClient } from "./client";
 
 const LIST_FIELDS =
-  "id,workspace_id,department_id,title,document_number,version,has_changes,published_revision_id,updated_at,department:departments!quality_work_instructions_department_id_fkey(code,name)";
+  "id,workspace_id,department_id,created_by,title,document_number,version,has_changes,published_revision_id,updated_at,department:departments!quality_work_instructions_department_id_fkey(code,name)";
 type Row = Record<string, unknown>;
 function mapDocument(row: Row): QualityWi {
   const department = row.department as { code: string; name: string } | null;
   return {
+    conversionSource: readConversionSource(row.conversion_source),
+    createdBy: typeof row.created_by === "string" ? row.created_by : undefined,
     authorName: typeof row.author_name === "string" ? row.author_name : undefined,
     id: String(row.id),
     workspaceId: String(row.workspace_id),

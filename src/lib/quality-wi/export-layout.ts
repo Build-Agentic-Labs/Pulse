@@ -31,11 +31,11 @@ export function wiHeaderHeightTwips(model: GeneralWorkInstruction) {
     }
     return count;
   }
-  // Letter content is 7.7in wide; logo/revision use 1.1/2.35in. Twips = CSS px × 15.
+  // Match the shared Word header's logo/revision columns. Twips = CSS px × 15.
   const title =
-    lines(model.title, (7.7 - 1.1 - 2.35) * 96 - 20, "bold 12pt Arial") * 20 +
-    44;
-  const height = Math.max(0.78 * 96, title) + 8;
+    lines(model.title, 7.7 * 96 - 108 - 230 - 20, "bold 12pt Arial") * 20 +
+    58;
+  const height = Math.max(84, title);
   if (height > 7 * 96)
     throw new Error(
       "Shorten the title before exporting on letter paper.",

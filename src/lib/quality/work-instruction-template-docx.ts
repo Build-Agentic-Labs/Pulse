@@ -4,7 +4,7 @@
  * Reproduces the letter-portrait AWI (markup in work-instruction-document.tsx,
  * metrics in work-instruction-letter-styles.ts; reference render
  * public/templates/work-instruction-letter-template.pdf):
- *   header  logo + label/title | Rev · Date · Description, framed in #737779
+ *   header  centered logo + label/title/number | Rev · Release date
  *   body    label rows (`.wil-summary`), then image | numbered step (`.wil-step`)
  *   footer  document owner ··· Page X of Y, then the 6pt line
  *
@@ -55,7 +55,7 @@ export type WorkInstructionImages = Record<string, WorkInstructionImage>;
 // Palette mirrors LETTER_TEMPLATE_STYLES.
 const FONT = "Arial";
 const INK = "202428";
-const LABEL = "62666A";
+const LABEL = "5B6167";
 const PROMPT = "8A8E91";
 const FRAME = "737779";
 const RULE = "96999B";
@@ -68,15 +68,16 @@ const PX = 15; // one CSS px at 96dpi
 const PAGE = { width: 12240, height: 15840 };
 const EDGE = Math.round(0.4 * INCH); // .wil-sheet padding
 const CONTENT = PAGE.width - EDGE * 2;
-const HEADER_HEIGHT = Math.round(0.78 * INCH);
-const REVISION_COLUMN = Math.round(2.35 * INCH);
-const LOGO_COLUMN = Math.round(1.1 * INCH);
+const HEADER_HEIGHT = 84 * PX;
+const REVISION_COLUMN = 230 * PX;
+const LOGO_COLUMN = 108 * PX;
 const SUMMARY_LABEL = Math.round(1.05 * INCH);
 const IMAGE_COLUMN = Math.round((CONTENT * 2) / 3); // .wil-step 2fr | 1fr
 // Page 1 shares its height with the summary band; the continuation page's
 // steps grow to fill the sheet.
-const STEP_HEIGHT = Math.round(2.55 * INCH);
-const CONTINUATION_STEP_HEIGHT = Math.round(2.85 * INCH);
+// Leave room for cell padding, the repeated header, and the footer in Word.
+const STEP_HEIGHT = Math.round(2.1 * INCH);
+const CONTINUATION_STEP_HEIGHT = Math.round(2.55 * INCH);
 
 type Align = (typeof AlignmentType)[keyof typeof AlignmentType];
 type VAlign = typeof VerticalAlign.TOP | typeof VerticalAlign.CENTER;
@@ -214,7 +215,7 @@ function documentHeader(
     ? new ImageRun({
         type: "png",
         data: logo,
-        transformation: { width: 82, height: 23 },
+        transformation: { width: 90, height: 26 },
       })
     : text("ANA INC.", 20, { bold: true });
   return new Header({
@@ -242,16 +243,16 @@ function documentHeader(
                           ? `${WI_TEMPLATE_LABEL} · Draft`
                           : WI_TEMPLATE_LABEL,
                         13,
-                        { color: LABEL, spacing: 13, caps: true },
+                        { color: LABEL, caps: true },
                       ),
                     ],
-                    { after: 4 * PX },
+                    { after: 6 * PX },
                   ),
                   para([text(doc.title, 24, { bold: true })], {
-                    after: 3 * PX,
+                    after: 5 * PX,
                   }),
                   // The document number repeats in the header so every page carries its own identity.
-                  para([documentNumber(doc.documentNumber, 17)]),
+                  para([documentNumber(doc.documentNumber, 15)]),
                 ],
                 titleColumn,
                 {

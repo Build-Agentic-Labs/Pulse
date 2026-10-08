@@ -23,6 +23,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@xmldom/xmldom": "^0.9.12",
     "buffer": "^6.0.3",
     "docx": "^9.7.1",
     "docxtemplater": "^3.68.7",
@@ -36,6 +37,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "read-excel-file": "^9.0.10",
+    "sharp": "^0.35.5",
     "slot-text": "^0.2.2",
     "typescript": "^5.7.2",
     "ws": "8.21.1"
@@ -52,7 +54,6 @@
     "jsdom": "^29.1.1",
     "pg": "^8.22.0",
     "postcss": "^8.5.10",
-    "sharp": "^0.35.3",
     "tailwindcss": "^3.4.17",
     "vitest": "4.1.10"
   },

@@ -1,9 +1,13 @@
-// Generated from the isolated WI database. Only additive WI objects are included;
-// the published base Database type is unchanged until production schema approval.
+// Narrow WI contracts layered over the generated production schema.
+// Preserve non-null payloads and prevent direct writes through the conversion client.
 import type { Database, Json } from "@/lib/database.types";
 export type QualityWiDatabase = {
   public: Omit<Database["public"], "Tables" | "Functions"> & {
     Tables: Database["public"]["Tables"] & {
+      quality_wi_conversions: {
+        Row: { id: string; workspace_id: string; department_id: string; actor_id: string; source_path: string; file_name: string; status: string; payload: Json | null; error: string | null; created_at: string; expires_at: string; imported_at: string | null };
+        Insert: never; Update: never; Relationships: [];
+      };
       quality_wi_operations: {
         Row: {
           actor_id: string;
@@ -184,6 +188,10 @@ export type QualityWiDatabase = {
       };
     };
     Functions: Database["public"]["Functions"] & {
+      begin_quality_wi_conversion: { Args: { p_id: string; p_workspace: string; p_department: string; p_path: string; p_name: string }; Returns: boolean };
+      prepare_quality_wi_conversion: { Args: { p_id: string; p_payload: Json }; Returns: undefined };
+      finish_quality_wi_conversion: { Args: { p_id: string; p_error?: string }; Returns: undefined };
+      import_quality_wi_conversion: { Args: { p_id: string; p_title: string; p_purpose: string; p_responsibilities: string }; Returns: Json };
       can_edit_quality_wi_department: {
         Args: { p_department: string };
         Returns: boolean;
@@ -207,6 +215,10 @@ export type QualityWiDatabase = {
           p_operation: string;
           p_payload: Json;
         };
+        Returns: Json;
+      };
+      delete_quality_wi: {
+        Args: { p_id: string; p_workspace: string; p_expected_version: number; p_actor: string };
         Returns: Json;
       };
       load_quality_wi_document: {

@@ -97,7 +97,7 @@ jobs:
       - name: pgTAP
         run: |
           set -o pipefail
-          supabase test db --local supabase/tests tests/quality-work-instructions/database.sql 2>&1 | tee database-tests.log
+          supabase test db --local supabase/tests tests/quality-work-instructions/database.sql tests/quality-work-instructions/delete.sql tests/quality-work-instructions/conversion.sql 2>&1 | tee database-tests.log
 
       - name: Upload database test log
         if: always()

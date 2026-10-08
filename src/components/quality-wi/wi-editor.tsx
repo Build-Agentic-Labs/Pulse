@@ -1,4 +1,5 @@
 "use client";
+import { WiConversionSource } from "./wi-conversion-source";
 import { useState, type MouseEvent, useEffect } from "react";
 import { Eye, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -192,6 +193,7 @@ export function WiEditor({
             {state.localWarning}
           </p>
         ) : null}
+        {state.document.conversionSource ? <WiConversionSource source={state.document.conversionSource} /> : null}
         <WiDetails
           document={state.document}
           disabled={disabled}

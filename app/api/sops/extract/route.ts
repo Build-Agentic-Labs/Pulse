@@ -238,7 +238,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const client = new Anthropic({ apiKey });
+    const client = new Anthropic({ apiKey, defaultHeaders: process.env.ANTHROPIC_WORKSPACE_ID ? { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID } : undefined });
     const model = process.env.SOP_EXTRACTION_MODEL || DEFAULT_EXTRACTION_MODEL;
 
     const maxTokens = resolveMaxOutputTokens();

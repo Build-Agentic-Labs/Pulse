@@ -34,4 +34,3 @@ begin
  execute definition;
 end;
 $migration$;
-

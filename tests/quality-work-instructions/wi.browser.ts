@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { createServerClient } from "@supabase/ssr";
 const login = JSON.parse(
   readFileSync("scratch/quality-wi-build/login.json", "utf8"),
 ) as { email: string; password: string; userId: string; workspaceId: string };
@@ -7,22 +8,27 @@ test.beforeEach(async ({ page }) => {
   page.on("dialog", (dialog) => dialog.accept());
 });
 async function signIn(page: Page) {
+  // Match the AWI suite: authenticate the isolated test user before navigation.
+  // These WI workflows test document behavior, not sign-in form hydration.
+  const client = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => [],
+        setAll: async (cookies) => {
+          await page.context().addCookies(cookies.map(({ name, value }) => ({
+            name, value, domain: "127.0.0.1", path: "/", sameSite: "Lax" as const,
+          })));
+        },
+      },
+    },
+  );
+  const { error } = await client.auth.signInWithPassword({ email: login.email, password: login.password });
+  if (error) throw error;
   await page.goto("/sops/work-instructions");
-  const email = page
-    .getByPlaceholder(/email/i)
-    .or(page.getByRole("textbox", { name: /email/i }));
   await expect(
-    page
-      .getByRole("heading", { name: "Work instructions", exact: true })
-      .or(email.first()),
-  ).toBeVisible();
-  if (await email.isVisible()) {
-    await email.first().fill(login.email);
-    await page.getByPlaceholder(/password/i).fill(login.password);
-    await page.getByRole("button", { name: /sign in/i }).click();
-  }
-  await expect(
-    page.getByRole("heading", { name: "Work instructions", exact: true }),
+    page.getByRole("heading", { name: "Work Instruction Builder", exact: true }),
   ).toBeVisible();
 }
 async function draft(page: Page, title: string) {
@@ -48,13 +54,22 @@ async function draft(page: Page, title: string) {
   await expect(page.getByRole("status")).toHaveText("Saved");
 }
 
+async function publishAndOpenBuilder(page: Page, title: string) {
+  await page.getByRole("button", { name: "Publish WI", exact: true }).click();
+  await expect(page).toHaveURL(/\/sops\/work-instructions\/published$/);
+  await expect(page.getByRole("heading", { name: "Published Work Instructions", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("button", { name: "Open builder", exact: true }).click();
+  await expect(page.getByLabel("Work instruction title")).toHaveValue(title);
+}
+
 test("department draft publishes directly, keeps its number and preserves its original revision", async ({
   page,
 }) => {
   const title = `Local WI ${Date.now()}`;
   await draft(page, title);
   await expect(page.getByText(/WI-PRO-###/)).toBeVisible();
-  await page.getByRole("button", { name: "Publish WI", exact: true }).click();
+  await publishAndOpenBuilder(page, title);
   await expect(
     page.getByText(/Process Engineering · WI-PRO-\d+ · Published$/),
   ).toBeVisible();
@@ -75,7 +90,7 @@ test("department draft publishes directly, keeps its number and preserves its or
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Close preview" }).click();
   await page.getByLabel("Revision description").fill("Corrected title");
-  await page.getByRole("button", { name: "Publish WI", exact: true }).click();
+  await publishAndOpenBuilder(page, title + " revised");
   await expect(
     page.getByText(`Process Engineering · ${number} · Published`, {
       exact: true,
@@ -86,11 +101,12 @@ test("department draft publishes directly, keeps its number and preserves its or
     title + " revised",
   );
   await page
-    .getByRole("link", { name: "Back to Work instructions", exact: true })
+    .getByRole("link", { name: "WI Builder", exact: true })
     .click();
-  await expect(
-    page.getByRole("link", { name: title + " revised", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Work Instruction Builder", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: title + " revised", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "Published WIs", exact: true }).click();
+  await expect(page.getByRole("button", { name: title + " revised", exact: true })).toBeVisible();
 });
 
 test("an offline edit survives reload and retries without publishing incomplete work", async ({
@@ -173,12 +189,12 @@ test("annotation text is included in Word image export",async({page})=>{
 });
 
 test("long title, revision description and instructions export without losing the ending",async({page})=>{
- const title=("Detailed general procedure for department operations ".repeat(6)).slice(0,290);
+ const title=(`${Date.now()} ` + "Detailed general procedure for department operations ".repeat(6)).slice(0,290);
  await draft(page,title);
  await page.getByLabel('Step 1 instruction',{exact:true}).fill('LONG_CONTENT_START '+('Detailed action and explanation. '.repeat(180))+' LONG_CONTENT_END');
  await expect(page.getByRole('status')).toHaveText('Saved');
  await page.getByLabel('Revision description').fill(('Clarified procedure and responsibilities. '.repeat(12)).slice(0,450));
- await page.getByRole('button',{name:'Publish WI',exact:true}).click();await expect(page.getByText(/Process Engineering · WI-PRO-\d+ · Published$/)).toBeVisible();
+ await publishAndOpenBuilder(page, title);await expect(page.getByText(/Process Engineering · WI-PRO-\d+ · Published$/)).toBeVisible();
  await page.getByRole('button',{name:'Preview',exact:true}).click();await page.getByRole('button',{name:'Preview version'}).click();await page.getByRole('option',{name:'Published revision A'}).click();
  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Word',exact:true}).click();await(await download).saveAs('scratch/quality-wi-build/browser-long-export.docx'); await expect(page.getByRole('button',{name:'PDF',exact:true})).toBeEnabled(); const pdfDownload=page.waitForEvent('download'); await page.getByRole('button',{name:'PDF',exact:true}).click(); await(await pdfDownload).saveAs('scratch/quality-wi-build/browser-long-preview.pdf');
 });

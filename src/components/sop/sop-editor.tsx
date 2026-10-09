@@ -22,27 +22,20 @@ import { useConfirm } from "@/components/confirm-provider";
 
 import type { Department, DeptRole } from "@/domain/departments";
 import { draftReviewGate } from "@/domain/sop/review-gate";
-import { type Sop, type SopReferenceDoc } from "@/domain/sop/schema";
+import { type Sop } from "@/domain/sop/schema";
 import { listDecisionBranchRequirements } from "@/domain/sop/procedure-validation";
 import { type ChangeSignificance } from "@/domain/sop/version";
 import { authoringMode, DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
-import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
-import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
+import { loadEditorApprovalRouting, requestEditorSignatures, submitEditorDraft } from "@/lib/sop/editor-workflow";
 import {
   getSopControl,
   isBlockingSeat,
-  isSignatureCurrent,
-  listSeats,
-  listSignatures,
-  listProfileNames,
-  sendSopForSignatures,
-  signSop,
   transitionSop,
   submitSopWithApproverInvitations,
   type SopReviewSeat,
   type SopSignature,
 } from "@/lib/sop/review";
-import { getSop, listSops, saveSop, SopConflictError, type SaveSopOptions, type SopListItem } from "@/lib/sop/store";
+import { getSop, listSops, type SopListItem } from "@/lib/sop/store";
 import { addRasicRole, listRasicRoles } from "@/lib/sop/rasic-roles/store";
 import type { SopSearchResult } from "@/lib/sop/search";
 import { buildApprovalEntries } from "@/lib/sop/approval-entries";
@@ -55,16 +48,7 @@ import {
 } from "@/lib/sop/review-annotations";
 import { listSopAuditEvents, type SopAuditEvent } from "@/lib/sop/audit-events";
 import type { SopApprovalRoutingInitialData } from "@/lib/sop/detail-data";
-import {
-  listSopAnnexFiles,
-  createSopAnnexFileUrl,
-  openSopAnnexFile,
-  removeSopAnnexFile,
-  renameSopAnnexFile,
-  uploadSopAnnexFile,
-  type SopAnnexFile,
-} from "@/lib/sop/annex-files";
-import { AnnexesEditor, type AnnexUploadStatus } from "./editor/annexes-editor";
+import { AnnexesEditor } from "./editor/annexes-editor";
 import { ReferenceLibraryEditor } from "./editor/reference-library-editor";
 import { formatReviewDate } from "./editor/editor-formatting";
 import { SopDocumentSection } from "./editor/document-section";
@@ -73,7 +57,8 @@ import { SopProcedureSection } from "./editor/procedure-section";
 import { SopApprovalsSection } from "./editor/approvals-section";
 import { SopQualitySection } from "./editor/quality-section";
 import { Section, StringListEditor, PairListEditor, SystemChangeHistory } from "./editor/editor-fields";
-import type { SopPatch } from "./editor/editor-types";
+import { useSopDraft } from "./editor/use-sop-draft";
+import { useSopAttachments } from "./editor/use-sop-attachments";
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
 
@@ -191,34 +176,12 @@ function stepFilled(sop: Sop, id: StepId): boolean {
   }
 }
 
-type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 
 
 /** Debounce for autosave: persist this long after the last edit settles. */
-const AUTOSAVE_DELAY_MS = 2000;
 
 
-
-function withAnnexIds(sop: Sop): Sop {
-  return {
-    ...sop,
-    // Documents authored before the linked-SOPs / reference-docs features (e.g.
-    // restored local drafts) may lack the keys entirely; the editor requires arrays.
-    linkedSops: Array.isArray(sop.linkedSops) ? sop.linkedSops : [],
-    referenceDocs: Array.isArray(sop.referenceDocs) ? sop.referenceDocs : [],
-    annexes: sop.annexes.map((annex, index) => ({
-      ...annex,
-      id: annex.id || `${sop.id}-annex-${index}`,
-    })),
-  };
-}
-
-function newReferenceDocId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? `refdoc-${crypto.randomUUID()}`
-    : `refdoc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 const SOP_FIELD_EXAMPLES: Record<string, string> = {
   QMS: "Quality Management System",
@@ -306,8 +269,6 @@ export function SopEditor({
     ? { href: `/sops/${encodeURIComponent(previewBackSopId)}?preview=pdf`, label: "Back" }
     : undefined;
   const confirm = useConfirm();
-  const [sop, setSop] = useState<Sop>(() => withAnnexIds(initial));
-  const canEdit = canEditPermission && sop.status === "draft";
   // Owning-department selection for a new SOP (undefined mode => not the create flow).
   const authMode = isNew && authoringDepartments ? authoringMode(authoringDepartments) : null;
   const [deptId, setDeptId] = useState<string>(() => {
@@ -317,8 +278,6 @@ export function SopEditor({
   });
   const selectedDept = owningDepartment ?? authoringDepartments?.find((d) => d.id === deptId) ?? null;
   const selectedDepartmentId = selectedDept?.id ?? "";
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [saveError, setSaveError] = useState("");
   const [reloadingLatest, setReloadingLatest] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [previewing, setPreviewing] = useState(initialView === "pdf");
@@ -331,8 +290,6 @@ export function SopEditor({
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [reviewVisible, setReviewVisible] = useState(false);
   const [fieldHint, setFieldHint] = useState<FieldHint | null>(null);
-  const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
-  const [annexFileError, setAnnexFileError] = useState("");
   // Roles this workspace has added, offered under "Added by your team" in the RASIC dropdown.
   // Lazily loaded on the procedure step, same as the References picker below: dropdown contents
   // are not first-paint content.
@@ -340,11 +297,6 @@ export function SopEditor({
   // Workspace SOPs offered by the References picker; loaded lazily on the overview step.
   const [linkableSops, setLinkableSops] = useState<SopListItem[] | undefined>(undefined);
   const [linkableSopsError, setLinkableSopsError] = useState("");
-  const [referenceDocError, setReferenceDocError] = useState("");
-  const [referencePreview, setReferencePreview] = useState<{ name: string; url: string } | null>(null);
-  const [uploadingReferenceDoc, setUploadingReferenceDoc] = useState(false);
-  const [uploadingAnnexId, setUploadingAnnexId] = useState<string | null>(null);
-  const [annexUploadStatus, setAnnexUploadStatus] = useState<AnnexUploadStatus | null>(null);
   const [approvalDepartments, setApprovalDepartments] = useState<Department[]>(
     () => initialApprovalRouting?.departments ?? [],
   );
@@ -414,41 +366,31 @@ export function SopEditor({
   const [controlledChangeKind, setControlledChangeKind] = useState<ChangeSignificance | null>(null);
   const [controlledChangeReason, setControlledChangeReason] = useState("");
   const [startingControlledChange, setStartingControlledChange] = useState(false);
-  // Edits since the last successful save -- drives the leave guards and autosave.
-  const [dirty, setDirty] = useState(false);
-  // A save lost the concurrency check: freeze autosave so we never loop against the conflict.
-  const [conflicted, setConflicted] = useState(false);
-  // Optimistic-concurrency token: the updated_at loaded with the SOP (undefined until the
-  // first insert), refreshed from every save response so consecutive saves keep working.
-  const [persistedUpdatedAt, setPersistedUpdatedAt] = useState<string | undefined>(
-    isNew ? undefined : initial.updatedAt,
-  );
-  // Mirror of the concurrency token read by persist(): an in-flight save advances it
-  // synchronously (before its promise resolves), so a click that awaited that save reads the
-  // fresh token here rather than this closure's stale state copy.
-  const persistedUpdatedAtRef = useRef<string | undefined>(isNew ? undefined : initial.updatedAt);
-  // Bumped on every user edit so a save that raced with typing doesn't clobber newer edits.
-  const editVersionRef = useRef(0);
-  const persistedAnnexIdsRef = useRef(
-    new Set(withAnnexIds(initial).annexes.flatMap((annex) => (annex.id ? [annex.id] : []))),
-  );
-  // The edit version reflected in this render's `sop`. persist() closes over this snapshot
-  // rather than reading the ref when it runs: a stale autosave timer can fire after a
-  // keystroke but before its effect cleanup cancels it, and reading the ref at call time
-  // would count that keystroke as "already saved" -- the server copy of the older text
-  // would then be adopted, resurrecting the deleted characters.
-  const sopEditVersion = editVersionRef.current;
-  // Blocks overlapped saves from the same timer-vs-cleanup gap; a second in-flight save
-  // would reuse the same expectedUpdatedAt and land as a false concurrency conflict.
-  const saveInFlightRef = useRef(false);
-  // Handle to the save currently running, so a click that races an autosave can await it
-  // instead of being silently dropped (persist returned false while a save was in flight).
-  const inFlightSaveRef = useRef<Promise<boolean> | null>(null);
+  const {
+    sop, observeWorkflowStatus, adoptWorkflowTransition, canEdit, controlledVersion, dirty, conflicted,
+    saveStatus, saveError, clearSaveError, reportSaveError, reportWorkflowSaved, persistedUpdatedAt,
+    hasPersistedSop, update, persist, replaceWithLatest,
+    beginControlledDraft, isAnnexPersisted,
+  } = useSopDraft({
+    initial, isNew, workspaceId, canEditPermission, deptId,
+    hasSelectedDepartment: Boolean(selectedDept), reviewCycle: approvalReviewCycle,
+    pauseAutosave: submittingForApproval || requestingFinalApproval,
+  });
+  const {
+    annexFiles, annexFileError, reportUnavailableAttachment, referenceDocError, referencePreview, closeReferencePreview,
+    uploadingReferenceDoc, uploadingAnnexId, annexUploadStatus, clearUploadStatus,
+    referenceFileByDocId, handleAnnexUpload, handleAnnexOpen, handleAnnexFileRemove,
+    handleReferenceDocUpload, handleReferenceDocOpen, handleReferenceDocRemove,
+    handleAnnexRowRemove, handleAnnexRename,
+  } = useSopAttachments({ sopId: sop.id, annexes: sop.annexes, workspaceId, persistedUpdatedAt, hasPersistedSop,
+    persist, isAnnexPersisted,
+    updateReferenceDocs: change => update(current => ({ referenceDocs: change(current.referenceDocs) })),
+    updateAnnexes: rows => update({ annexes: rows }),
+  });
   const reviewDismissTimerRef = useRef<number | null>(null);
   const skipInitialApprovalFetchRef = useRef(Boolean(initialApprovalRouting));
   const skipInitialReviewFetchRef = useRef(Boolean(initialApprovalRouting));
   const skipInitialAuditFetchRef = useRef(Boolean(initialApprovalRouting));
-  const hasPersistedSop = !isNew || Boolean(persistedUpdatedAt);
 
 
 
@@ -458,18 +400,8 @@ export function SopEditor({
     if (!options.background) setApprovalRoutingLoading(true);
     setApprovalRoutingError("");
     try {
-      const supabase = createPlannerSupabaseClient();
-      const [departments, seats, signatures, control, userResult, departmentRoles] = await Promise.all([
-        listDepartments(workspaceId),
-        hasPersistedSop ? listSeats(sop.id) : Promise.resolve([] as SopReviewSeat[]),
-        hasPersistedSop ? listSignatures(sop.id) : Promise.resolve([] as SopSignature[]),
-        hasPersistedSop ? getSopControl(sop.id) : Promise.resolve(undefined),
-        getUserFromSession(supabase),
-        fetchMyDeptRoles(workspaceId),
-      ]);
-      const reviewerNames = await listProfileNames(
-        seats.flatMap((seat) => seat.signerId ? [seat.signerId] : []),
-      );
+      const { departments, seats, signatures, control, userResult, departmentRoles, reviewerNames } =
+        await loadEditorApprovalRouting(workspaceId, sop.id, hasPersistedSop);
       if (!isCurrent()) return;
       setApprovalDepartments(departments);
       setApprovalSeats(seats.filter((seat) => isBlockingSeat(seat.rasic)));
@@ -489,7 +421,7 @@ export function SopEditor({
         ),
       );
       if (control) {
-        setSop((current) => current.status === control.status ? current : { ...current, status: control.status });
+        observeWorkflowStatus(control.status);
       }
     } catch (error) {
       if (!isCurrent()) return;
@@ -497,7 +429,7 @@ export function SopEditor({
     } finally {
       if (isCurrent() && !options.background) setApprovalRoutingLoading(false);
     }
-  }, [hasPersistedSop, sop.id, workspaceId]));
+  }, [hasPersistedSop, observeWorkflowStatus, sop.id, workspaceId]));
 
   useEffect(() => {
     if (skipInitialApprovalFetchRef.current) {
@@ -774,13 +706,6 @@ export function SopEditor({
     };
   }, [step.id, workspaceId, linkableSops]);
 
-  // Reference-doc uploads share the annex-file table (keyed by the reference row's id
-  // in the annex_id slot); this map serves the References UI's open/remove actions.
-  const referenceFileByDocId = useMemo(
-    () => new Map(annexFiles.map((file) => [file.annexId, file] as const)),
-    [annexFiles],
-  );
-
   const stepReviewAnnotations = useMemo(() => {
     const categories = STEP_REVIEW_CATEGORIES[step.id] ?? [];
     return reviewAnnotations.filter((annotation) => categories.includes(annotation.category));
@@ -809,14 +734,6 @@ export function SopEditor({
     selectedDept?.code,
     DEFAULT_DOC_TYPE,
   );
-  // Version is lifecycle-owned: a new SOP is always 1.0 and only the database's
-  // effective -> draft revision transition may increment it. Never trust typed/imported text.
-  const controlledVersion = approvalReviewCycle > 0
-    ? /^\d+\.\d+$/.test(sop.meta.version.trim())
-      ? sop.meta.version.trim()
-      : `1.${approvalReviewCycle}`
-    : "1.0";
-
   // Until release there is no numeric sequence yet. Keep every rendered document (masthead, PDF
   // preview, and Word export) showing the same placeholder the form shows.
   // Memoized: `sop` identity here is load-bearing for SopPrintPreview's measured pagination — a
@@ -863,16 +780,6 @@ export function SopEditor({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [auditPanelOpen]);
 
-  function update(patch: SopPatch) {
-    setSop((current) => ({
-      ...current,
-      ...(typeof patch === "function" ? patch(current) : patch),
-    }));
-    editVersionRef.current += 1;
-    setDirty(true);
-    setSaveStatus("idle");
-  }
-
   function revealFieldHint(target: EventTarget) {
     const match = getEmptyFieldExample(target);
     if (!match) {
@@ -905,47 +812,6 @@ export function SopEditor({
     window.setTimeout(() => revealFieldHint(target), 0);
   }
 
-  // Persist the current SOP, returning whether it succeeded. Callers that navigate or export
-  // gate on the boolean so a failed save never silently drops the user's work.
-  async function persist(): Promise<boolean> {
-    if (!canEdit || !workspaceId) {
-      setSaveError(workspaceId ? "You do not have permission to save this SOP." : "Select an organization before saving.");
-      setSaveStatus("error");
-      return false;
-    }
-
-    // A save (typically an autosave that a keystroke re-enabled the buttons over) may already be
-    // running. Wait for it to settle, then fall through to one fresh save so this click captures
-    // the latest edits against the up-to-date token -- never a silent no-op. The loop also
-    // serializes two clicks that both awaited the same in-flight save. saveInFlightRef and
-    // inFlightSaveRef are always set together, so this can't spin on a null promise.
-    while (saveInFlightRef.current) {
-      try {
-        await inFlightSaveRef.current;
-      } catch {
-        // The in-flight save reported its own outcome; attempt a fresh save regardless.
-      }
-    }
-
-    // First save of a new SOP: the owning department mints the number (and is written on INSERT).
-    // Read the token from the ref: a save we just awaited advances it synchronously, while this
-    // closure's `persistedUpdatedAt` would still show the pre-save value.
-    const expectedUpdatedAt = persistedUpdatedAtRef.current;
-    const firstSave = isNew && !expectedUpdatedAt;
-    if (firstSave && !deptId) {
-      setSaveError("Choose an owning department before saving.");
-      setSaveStatus("error");
-      return false;
-    }
-
-    setSaveStatus("saving");
-    setSaveError("");
-    saveInFlightRef.current = true;
-    const run = runSave(firstSave, expectedUpdatedAt);
-    inFlightSaveRef.current = run;
-    return run;
-  }
-
   /**
    * Add a typed role to the workspace list. The document write already happened through
    * ProcessFlowchart's onChange — this is the shared half of the same gesture, so a failure here
@@ -971,55 +837,6 @@ export function SopEditor({
       });
   }
 
-  async function runSave(firstSave: boolean, expectedUpdatedAt: string | undefined): Promise<boolean> {
-    try {
-      let working: Sop = { ...sop, meta: { ...sop.meta, version: controlledVersion } };
-      const saveOptions: SaveSopOptions = { expectedUpdatedAt };
-      if (firstSave) {
-        // No number is minted here any more -- the `approved -> effective` transition mints it,
-        // so creating and discarding drafts no longer burns sequence positions. Persist an empty
-        // number rather than the rendered placeholder: `SOP-PRO-###` is a label, not a value, and
-        // the database clamps sop_number to null on INSERT regardless.
-        working = { ...working, meta: { ...working.meta, sopNumber: "" } };
-        saveOptions.departmentId = deptId;
-        saveOptions.docType = DEFAULT_DOC_TYPE;
-      }
-
-      try {
-        const next = await saveSop(working, workspaceId!, saveOptions);
-        persistedAnnexIdsRef.current = new Set(next.annexes.flatMap((annex) => (annex.id ? [annex.id] : [])));
-        // Advance the ref synchronously so a click awaiting this save reads the fresh token.
-        persistedUpdatedAtRef.current = next.updatedAt;
-        setPersistedUpdatedAt(next.updatedAt);
-        if (editVersionRef.current === sopEditVersion) {
-          // Nothing changed since the render that produced `sop` -- adopt the server copy wholesale.
-          setSop(next);
-          setDirty(false);
-          setSaveStatus("saved");
-        } else {
-          // Edits landed after that render: keep them (still dirty, so autosave picks them up)
-          // and only fold in the server timestamp. Change history is database-managed.
-          setSop((current) => ({
-            ...current,
-            updatedAt: next.updatedAt,
-          }));
-          setSaveStatus("idle");
-        }
-        return true;
-      } catch (error) {
-        if (error instanceof SopConflictError) {
-          // Never retry into a conflict -- the user copies their changes and reloads.
-          setConflicted(true);
-        }
-        setSaveError(error instanceof Error ? error.message : "Save failed.");
-        setSaveStatus("error");
-        return false;
-      }
-    } finally {
-      saveInFlightRef.current = false;
-    }
-  }
-
   async function handleReloadLatest() {
     const proceed = !dirty || await confirm({
       title: "Reload the latest saved version?",
@@ -1034,215 +851,14 @@ export function SopEditor({
     try {
       const latest = await getSop(sop.id);
       if (!latest) throw new Error("The latest SOP could not be loaded.");
-      const next = withAnnexIds(latest.sop);
-      persistedAnnexIdsRef.current = new Set(next.annexes.flatMap((annex) => (annex.id ? [annex.id] : [])));
-      editVersionRef.current += 1;
-      setSop(next);
-      persistedUpdatedAtRef.current = next.updatedAt;
-      setPersistedUpdatedAt(next.updatedAt);
-      setDirty(false);
-      setConflicted(false);
-      setSaveError("");
-      setSaveStatus("saved");
-      setAnnexUploadStatus(null);
+      replaceWithLatest(latest.sop);
+      clearUploadStatus();
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Could not reload the latest SOP.");
-      setSaveStatus("error");
+      reportSaveError(error instanceof Error ? error.message : "Could not reload the latest SOP.");
     } finally {
       setReloadingLatest(false);
     }
   }
-
-  async function handleAnnexUpload(index: number, file: File) {
-    const annex = sop.annexes[index];
-    if (!annex?.id || !workspaceId) {
-      setAnnexFileError("Save this SOP before uploading a form.");
-      return;
-    }
-    const requiresSopSave = !persistedAnnexIdsRef.current.has(annex.id);
-    setUploadingAnnexId(annex.id);
-    setAnnexFileError("");
-    setAnnexUploadStatus({
-      annexId: annex.id,
-      phase: requiresSopSave ? "saving" : "uploading",
-      message: requiresSopSave ? "Saving this new form row before upload…" : `Uploading ${file.name}…`,
-    });
-    try {
-      if (requiresSopSave && !(await persist())) {
-        setAnnexUploadStatus({
-          annexId: annex.id,
-          phase: "error",
-          message: "Upload paused because the SOP could not be saved. Resolve the save warning above, then try again.",
-        });
-        return;
-      }
-      setAnnexUploadStatus({ annexId: annex.id, phase: "uploading", message: `Uploading ${file.name}…` });
-      const saved = await uploadSopAnnexFile({ workspaceId, sopId: sop.id, annexId: annex.id, file });
-      setAnnexFiles((current) => [...current.filter((item) => item.annexId !== annex.id), saved]);
-      setAnnexUploadStatus({
-        annexId: annex.id,
-        phase: "success",
-        message: "Upload complete.",
-      });
-    } catch (error) {
-      setAnnexUploadStatus({
-        annexId: annex.id,
-        phase: "error",
-        message: error instanceof Error ? error.message : "Could not upload the form.",
-      });
-    } finally {
-      setUploadingAnnexId(null);
-    }
-  }
-
-  async function handleAnnexOpen(file: SopAnnexFile) {
-    setAnnexFileError("");
-    try {
-      if (file.contentType === "application/pdf") {
-        const url = await createSopAnnexFileUrl(file, 600);
-        setReferencePreview({ name: file.originalName, url });
-      } else {
-        await openSopAnnexFile(file);
-      }
-    } catch (error) {
-      setAnnexFileError(error instanceof Error ? error.message : "Could not open the form.");
-    }
-  }
-
-  async function handleAnnexFileRemove(file: SopAnnexFile) {
-    setAnnexFileError("");
-    try {
-      await removeSopAnnexFile(file);
-      setAnnexFiles((current) => current.filter((item) => item.id !== file.id));
-    } catch (error) {
-      setAnnexFileError(error instanceof Error ? error.message : "Could not remove the form.");
-    }
-  }
-
-  async function handleReferenceDocUpload(file: File) {
-    if (!workspaceId) {
-      setReferenceDocError("Select an organization before uploading.");
-      return;
-    }
-    setReferenceDocError("");
-    setUploadingReferenceDoc(true);
-    try {
-      // The file row's sop_id FK needs the SOP to exist server-side; persist() closes over
-      // this render's document, so it runs BEFORE the new reference row is added to state.
-      if (!hasPersistedSop && !(await persist())) {
-        setReferenceDocError(
-          "Upload paused because the SOP could not be saved. Resolve the save warning above, then try again.",
-        );
-        return;
-      }
-      const docId = newReferenceDocId();
-      const saved = await uploadSopAnnexFile({ workspaceId, sopId: sop.id, annexId: docId, file });
-      setAnnexFiles((current) => [...current.filter((item) => item.annexId !== docId), saved]);
-      // Added after the upload succeeds; autosave persists the document row.
-      update((current) => ({
-        referenceDocs: [...current.referenceDocs, { id: docId, name: file.name }],
-      }));
-    } catch (error) {
-      setReferenceDocError(error instanceof Error ? error.message : "Could not upload the document.");
-    } finally {
-      setUploadingReferenceDoc(false);
-    }
-  }
-
-  async function handleReferenceDocOpen(doc: SopReferenceDoc) {
-    const file = referenceFileByDocId.get(doc.id);
-    if (!file) {
-      setReferenceDocError("This document's file is missing. Remove the row and upload it again.");
-      return;
-    }
-    setReferenceDocError("");
-    try {
-      if (file.contentType === "application/pdf") {
-        const url = await createSopAnnexFileUrl(file, 600);
-        setReferencePreview({ name: doc.name, url });
-      } else {
-        await openSopAnnexFile(file);
-      }
-    } catch (error) {
-      setReferenceDocError(error instanceof Error ? error.message : "Could not open the document.");
-    }
-  }
-
-  async function handleReferenceDocRemove(doc: SopReferenceDoc) {
-    setReferenceDocError("");
-    const file = referenceFileByDocId.get(doc.id);
-    try {
-      if (file) {
-        await removeSopAnnexFile(file);
-        setAnnexFiles((current) => current.filter((item) => item.id !== file.id));
-      }
-      update((current) => ({
-        referenceDocs: current.referenceDocs.filter((item) => item.id !== doc.id),
-      }));
-    } catch (error) {
-      setReferenceDocError(error instanceof Error ? error.message : "Could not remove the document.");
-    }
-  }
-
-  async function handleAnnexRowRemove(index: number) {
-    const annex = sop.annexes[index];
-    const file = annex?.id ? annexFiles.find((item) => item.annexId === annex.id) : undefined;
-    if (file) {
-      try {
-        await removeSopAnnexFile(file);
-        setAnnexFiles((current) => current.filter((item) => item.id !== file.id));
-      } catch (error) {
-        setAnnexFileError(error instanceof Error ? error.message : "Could not remove the attached form.");
-        return;
-      }
-    }
-    update({ annexes: sop.annexes.filter((_, rowIndex) => rowIndex !== index) });
-  }
-
-  // Warn on tab close / hard navigation while there are unsaved edits.
-  useEffect(() => {
-    if (!dirty) return;
-    function warnBeforeLeaving(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      event.returnValue = "";
-    }
-    window.addEventListener("beforeunload", warnBeforeLeaving);
-    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
-  }, [dirty]);
-
-  // Debounced autosave after the latest edit settles. New SOPs use the same path for their
-  // initial INSERT and number assignment; simply opening the builder never creates an empty
-  // draft. A failed save waits for a retry or the next edit, and conflicts stop autosave.
-  const autosaveArmed =
-    canEdit && !submittingForApproval && !requestingFinalApproval && Boolean(workspaceId) && dirty && !conflicted && Boolean(selectedDept) && saveStatus === "idle";
-  useEffect(() => {
-    if (!autosaveArmed) return;
-    const timer = window.setTimeout(() => {
-      void persist();
-    }, AUTOSAVE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-    // `persist` is recreated per render with the latest sop; re-arming on `sop` restarts
-    // the debounce after every edit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autosaveArmed, sop, deptId]);
-
-  useEffect(() => {
-    if (!workspaceId || !persistedUpdatedAt) {
-      setAnnexFiles([]);
-      return;
-    }
-    let active = true;
-    listSopAnnexFiles(sop.id)
-      .then((files) => {
-        if (active) setAnnexFiles(files);
-      })
-      .catch((error: unknown) => {
-        if (active) setAnnexFileError(error instanceof Error ? error.message : "Could not load attached forms.");
-      });
-    return () => {
-      active = false;
-    };
-  }, [persistedUpdatedAt, sop.id, workspaceId]);
 
   // Confirm in-app exits (shell back link / brand link) while edits are unsaved. The shell
   // awaits this, so an unsaved-changes exit resolves through the themed dialog instead of a
@@ -1288,7 +904,7 @@ export function SopEditor({
     if (feedbackUnlockAttempt.current === attempt) return;
     feedbackUnlockAttempt.current = attempt;
     setRecallingReview(true);
-    setSaveError("");
+    clearSaveError();
     void (async () => {
       try {
         const latest = await getSopControl(sop.id);
@@ -1298,26 +914,21 @@ export function SopEditor({
           : latest;
         // The workflow transition writes the row too. Advance the save token
         // before enabling editing so autosave does not conflict with our own update.
-        persistedUpdatedAtRef.current = updated.updatedAt;
-        setPersistedUpdatedAt(updated.updatedAt);
-        setSop((current) => current.id === sop.id
-          ? { ...current, status: updated.status, updatedAt: updated.updatedAt }
-          : current);
+        adoptWorkflowTransition(updated, sop.id);
       } catch (error) {
-        setSaveError(error instanceof Error ? error.message : "Could not enable editing. Reload to retry.");
-        setSaveStatus("error");
+        reportSaveError(error instanceof Error ? error.message : "Could not enable editing. Reload to retry.");
       } finally {
         setRecallingReview(false);
       }
     })();
-  }, [approvalReviewCycle, approvalRoutingLoading, canEditPermission, finalApprovalRequested,
+  }, [adoptWorkflowTransition, clearSaveError, reportSaveError, approvalReviewCycle, approvalRoutingLoading, canEditPermission, finalApprovalRequested,
     isCurrentUserAuthor, reviewGate.canMakeChanges, sop.id, sop.status, submittingForApproval, requestingFinalApproval]);
 
   async function handleStartControlledChange() {
     const reason = controlledChangeReason.trim();
     if (!controlledChangeKind || !reason || startingControlledChange) return;
     setStartingControlledChange(true);
-    setSaveError("");
+    clearSaveError();
     try {
       const latest = await getSopControl(sop.id);
       if (!latest) throw new Error("The SOP could not be loaded before starting this change.");
@@ -1332,17 +943,13 @@ export function SopEditor({
       const refreshed = await getSop(sop.id);
       if (!refreshed) throw new Error("The new controlled draft could not be loaded.");
 
-      setSop(refreshed.sop);
-      persistedUpdatedAtRef.current = refreshed.sop.updatedAt;
-      setPersistedUpdatedAt(refreshed.sop.updatedAt);
+      beginControlledDraft(refreshed.sop);
       setApprovalReviewCycle(transitioned.reviewCycle);
       setApprovalContentHash(transitioned.contentHash);
       setFinalApprovalRequestedAt(transitioned.finalApprovalRequestedAt);
       setFinalApprovalContentHash(transitioned.finalApprovalContentHash);
       setControlledChangeKind(null);
       setControlledChangeReason("");
-      setDirty(false);
-      setSaveStatus("idle");
       setStepIndex(0);
       window.history.replaceState(
         window.history.state,
@@ -1352,8 +959,7 @@ export function SopEditor({
       await refreshApprovalRouting({ background: true, force: true });
       setAuditEvents(await listSopAuditEvents(sop.id));
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "The controlled change could not be started.");
-      setSaveStatus("error");
+      reportSaveError(error instanceof Error ? error.message : "The controlled change could not be started.");
     } finally {
       setStartingControlledChange(false);
     }
@@ -1362,7 +968,7 @@ export function SopEditor({
   async function handleMarkRemarkAddressed(annotationId: string, resolved = true) {
     if (resolvingAnnotationId) return;
     setResolvingAnnotationId(annotationId);
-    setSaveError("");
+    clearSaveError();
     try {
       if (resolved && !(await persist())) return;
       await resolveSopReviewAnnotation(annotationId, resolved);
@@ -1371,8 +977,7 @@ export function SopEditor({
       setAddressedAnnotations(comments.filter((item) => item.reviewCycle === approvalReviewCycle && item.resolvedAt));
       setAuditEvents(await listSopAuditEvents(sop.id));
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "The remark could not be marked addressed.");
-      setSaveStatus("error");
+      reportSaveError(error instanceof Error ? error.message : "The remark could not be marked addressed.");
     } finally {
       setResolvingAnnotationId(null);
     }
@@ -1392,12 +997,8 @@ export function SopEditor({
     }));
   }
 
-  async function syncSignatureRequestControl() {
-    const control = await getSopControl(sop.id);
-    if (!control) throw new Error("The signature request could not be refreshed. Reload the SOP.");
-    persistedUpdatedAtRef.current = control.updatedAt;
-    setPersistedUpdatedAt(control.updatedAt);
-    setSop(current => ({ ...current, status: control.status, updatedAt: control.updatedAt }));
+  function adoptSignatureRequest(control: Awaited<ReturnType<typeof requestEditorSignatures>>) {
+    adoptWorkflowTransition(control);
     setFinalApprovalRequestedAt(control.finalApprovalRequestedAt);
     setFinalApprovalContentHash(control.finalApprovalContentHash);
     setApprovalContentHash(control.contentHash);
@@ -1406,15 +1007,13 @@ export function SopEditor({
   async function handleRequestFinalApproval() {
     if (requestingFinalApproval || finalApprovalRequested) return;
     setRequestingFinalApproval(true);
-    setSaveError("");
+    clearSaveError();
     try {
-      await sendSopForSignatures(sop.id, approvalContentHash ?? "", approvalReviewCycle);
-      await syncSignatureRequestControl();
+      adoptSignatureRequest(await requestEditorSignatures(sop.id, approvalContentHash ?? "", approvalReviewCycle));
       await refreshApprovalRouting({ force: true });
       setAuditEvents(await listSopAuditEvents(sop.id));
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "The SOP could not be sent for final approval.");
-      setSaveStatus("error");
+      reportSaveError(error instanceof Error ? error.message : "The SOP could not be sent for final approval.");
     } finally {
       setRequestingFinalApproval(false);
     }
@@ -1433,91 +1032,38 @@ export function SopEditor({
     // Single review round: after every reviewer has responded, resubmitting
     // routes to final approval — the remarks must be addressed first.
     if (reviewGate.allResponded && reviewAnnotations.length > 0) {
-      setSaveError("Mark every returned remark as addressed before sending for signatures.");
-      setSaveStatus("error");
+      reportSaveError("Mark every returned remark as addressed before sending for signatures.");
       return;
     }
     setSubmittingForApproval(true);
-    setSaveError("");
+    clearSaveError();
     try {
-      if (!(await persist())) return;
-
-      const control = await getSopControl(sop.id);
-      if (!control) throw new Error("The saved SOP could not be loaded for submission.");
-      if (control.status !== "draft") {
-        if (control.status === "in_review" && approvalSeats.some((seat) => seat.nomination && !seat.nomination.deliveredAt)) await submitSopWithApproverInvitations(sop.id, control.updatedAt);
-        setSop((current) => ({ ...current, status: control.status, updatedAt: control.updatedAt }));
-        persistedUpdatedAtRef.current = control.updatedAt;
-        setPersistedUpdatedAt(control.updatedAt);
-        setStepIndex(CREATOR_STEPS.length);
-        window.history.replaceState(
-          window.history.state,
-          "",
-          `/sops/${encodeURIComponent(sop.id)}?step=draft-review`,
-        );
-        return;
+      const submitted = await submitEditorDraft({
+        sopId: sop.id, persist, seats: approvalSeats,
+        readyForSignatures: reviewGate.allResponded && reviewAnnotations.length === 0,
+      });
+      if (!submitted) return;
+      if (submitted.destination === "final-approval") {
+        adoptSignatureRequest(submitted.control);
+      } else {
+        adoptWorkflowTransition(submitted.control);
       }
-
-      if (reviewGate.allResponded && reviewAnnotations.length === 0) {
-        await sendSopForSignatures(sop.id, control.contentHash ?? "", control.reviewCycle);
-        await syncSignatureRequestControl();
+      if (submitted.refresh) {
         await refreshApprovalRouting({ background: true, force: true });
         setAuditEvents(await listSopAuditEvents(sop.id));
-        setStepIndex(CREATOR_STEPS.length + 1);
-        window.history.replaceState(window.history.state, "", `/sops/${encodeURIComponent(sop.id)}?step=final-approval`);
-        return;
       }
-
-      const supabase = createPlannerSupabaseClient();
-      const userResult = await getUserFromSession(supabase);
-      const userId = userResult.data.user?.id;
-      if (!userId) throw new Error("Your session expired. Sign in again before submitting this SOP.");
-
-      const signatures = await listSignatures(sop.id);
-      const hasCurrentAuthorship = signatures.some(
-        (signature) =>
-          signature.meaning === "authorship" &&
-          signature.signerId === userId &&
-          isSignatureCurrent(signature, control),
-      );
-      if (!hasCurrentAuthorship) await signSop(sop.id, "authorship");
-
-      const latest = await getSopControl(sop.id);
-      if (!latest) throw new Error("The SOP could not be reloaded after signing.");
-      const transitioned = approvalSeats.some((seat) => seat.nomination)
-        ? await submitSopWithApproverInvitations(sop.id, latest.updatedAt)
-        : await transitionSop(sop.id, "in_review", latest.updatedAt);
-      setSop((current) => ({ ...current, status: transitioned.status, updatedAt: transitioned.updatedAt }));
-      persistedUpdatedAtRef.current = transitioned.updatedAt;
-      setPersistedUpdatedAt(transitioned.updatedAt);
-      // The review round already happened — go straight to the signature phase
-      // instead of reopening the reviewers' queue.
-      // Only with every remark addressed; otherwise the author lands back in draft review.
-      const readyForSignatures = reviewGate.allResponded && reviewAnnotations.length === 0;
-
-      await refreshApprovalRouting({ background: true, force: true });
-      setAuditEvents(await listSopAuditEvents(sop.id));
-
-      const nextWorkflowStep = readyForSignatures ? "final-approval" : "draft-review";
-      setStepIndex(CREATOR_STEPS.length + (readyForSignatures ? 1 : 0));
-      window.history.replaceState(
-        window.history.state,
-        "",
-        `/sops/${encodeURIComponent(sop.id)}?step=${nextWorkflowStep}`,
-      );
+      setStepIndex(CREATOR_STEPS.length + (submitted.destination === "final-approval" ? 1 : 0));
+      window.history.replaceState(window.history.state, "", `/sops/${encodeURIComponent(sop.id)}?step=${submitted.destination}`);
     } catch (error) {
       // Delivery may fail after the review has already started. Adopt that state so retrying
       // sends pending invitations rather than trying to save or submit a frozen draft again.
       const submitted = await getSopControl(sop.id).catch(() => null);
       if (submitted?.status === "in_review") {
         kickSopNotifications();
-        setSop((current) => ({ ...current, status: submitted.status, updatedAt: submitted.updatedAt }));
-        persistedUpdatedAtRef.current = submitted.updatedAt;
-        setPersistedUpdatedAt(submitted.updatedAt);
+        adoptWorkflowTransition(submitted);
         await refreshApprovalRouting({ background: true, force: true });
       }
-      setSaveError(error instanceof Error ? error.message : "The SOP could not be sent for review.");
-      setSaveStatus("error");
+      reportSaveError(error instanceof Error ? error.message : "The SOP could not be sent for review.");
     } finally {
       setSubmittingForApproval(false);
     }
@@ -1823,7 +1369,7 @@ export function SopEditor({
           if (file) { void handleAnnexOpen(file); return; }
           const linked = sop.linkedSops.find((item) => item.sopId === id);
           if (linked) { router.push(`/sops/${encodeURIComponent(id)}?preview=pdf&from=${encodeURIComponent(sop.id)}`); return; }
-          setAnnexFileError("This attachment is no longer available. Open the section in the builder to check its replacement.");
+          reportUnavailableAttachment();
         }}
         editor={sectionEditors[category as keyof typeof sectionEditors] ?? null}
         editing={editingCategory === category}
@@ -2019,8 +1565,8 @@ export function SopEditor({
                 <span>Review started. Approver invitations are pending.</span>
                 <button type="button" className="ui-btn-ghost" disabled={submittingForApproval} onClick={async () => {
                   setSubmittingForApproval(true);
-                  try { await submitSopWithApproverInvitations(sop.id, sop.updatedAt); await refreshApprovalRouting({ force: true }); setSaveError(""); setSaveStatus("saved"); }
-                  catch (error) { setSaveStatus("error"); setSaveError(error instanceof Error ? error.message : "Invitation delivery failed."); }
+                  try { await submitSopWithApproverInvitations(sop.id, sop.updatedAt); await refreshApprovalRouting({ force: true }); reportWorkflowSaved(); }
+                  catch (error) { reportSaveError(error instanceof Error ? error.message : "Invitation delivery failed."); }
                   finally { setSubmittingForApproval(false); }
                 }}>Retry invitations</button>
               </div>
@@ -2147,10 +1693,7 @@ export function SopEditor({
                     }
                     onUpload={handleAnnexUpload}
                     onOpen={(file) => void handleAnnexOpen(file)}
-                    onRename={async (file, name) => {
-                      const renamed = await renameSopAnnexFile(file, name);
-                      setAnnexFiles((current) => current.map((item) => item.id === renamed.id ? renamed : item));
-                    }}
+                    onRename={handleAnnexRename}
                     onRemoveFile={(file) => void handleAnnexFileRemove(file)}
                     onRemoveRow={(index) => void handleAnnexRowRemove(index)}
                   />
@@ -2421,7 +1964,7 @@ export function SopEditor({
           />
         ) : null}
         {referencePreview ? (
-          <ReferencePdfPreview {...referencePreview} onClose={() => setReferencePreview(null)} />
+          <ReferencePdfPreview {...referencePreview} onClose={() => closeReferencePreview()} />
         ) : null}
         {qualityApprovalOpen ? (
           <SopQualityApprovalWorkspace

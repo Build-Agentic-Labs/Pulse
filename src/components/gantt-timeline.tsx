@@ -1,5 +1,7 @@
 "use client";
 
+import { taskDependsOn } from "@/domain/task-scheduling";
+
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Copy, Link2, Maximize2, Minimize2, Plus, Sparkles, Trash2 } from "lucide-react";
 import {
   useEffect,
@@ -463,38 +465,6 @@ function getGroupState(group: ProcessGroup, currentMinute: number) {
   }
 
   return "not_started";
-}
-
-function hasDependencyPath(
-  taskMap: Map<string, Task>,
-  fromTaskId: string,
-  targetTaskId: string,
-  visited = new Set<string>(),
-): boolean {
-  if (fromTaskId === targetTaskId) {
-    return true;
-  }
-
-  if (visited.has(fromTaskId)) {
-    return false;
-  }
-
-  visited.add(fromTaskId);
-  const task = taskMap.get(fromTaskId);
-
-  if (!task) {
-    return false;
-  }
-
-  return task.dependencyIds.some((dependencyId) => hasDependencyPath(taskMap, dependencyId, targetTaskId, visited));
-}
-
-function wouldCreateDependencyCycle(
-  taskMap: Map<string, Task>,
-  successorTaskId: string,
-  predecessorTaskId: string,
-): boolean {
-  return successorTaskId === predecessorTaskId || hasDependencyPath(taskMap, predecessorTaskId, successorTaskId);
 }
 
 export function GanttTimeline({
@@ -1339,7 +1309,7 @@ export function GanttTimeline({
       .filter(
         (candidate) =>
           predecessorPickerTask.dependencyIds.includes(candidate.id) ||
-          !wouldCreateDependencyCycle(taskMap, predecessorPickerTask.id, candidate.id),
+          !taskDependsOn(taskMap, candidate.id, predecessorPickerTask.id),
       )
       .map((candidate) => candidate.id);
 
@@ -1373,7 +1343,7 @@ export function GanttTimeline({
       return "selected";
     }
 
-    if (candidate.id === predecessorPickerTask.id || wouldCreateDependencyCycle(taskMap, predecessorPickerTask.id, candidate.id)) {
+    if (candidate.id === predecessorPickerTask.id || taskDependsOn(taskMap, candidate.id, predecessorPickerTask.id)) {
       return "invalid";
     }
 

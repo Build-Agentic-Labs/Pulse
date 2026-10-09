@@ -7,11 +7,7 @@ import {
 } from "@/lib/sop/annex-files";
 import { AddButton, RowDeleteButton } from "./editor-controls";
 
-export type AnnexUploadStatus = {
-  annexId: string;
-  phase: "saving" | "uploading" | "success" | "error";
-  message: string;
-};
+import type { AnnexUploadStatus } from "./attachment-types";
 
 function newAnnexId(sopId: string): string {
   const suffix =

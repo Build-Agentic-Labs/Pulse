@@ -1,5 +1,4 @@
-import type { MobileStepDraftSnapshot } from "./editor-types";
-import type { CaptureTimerState } from "@/components/mobile-photo-portal/capture-session";
+import type { MobileDraftTextEditor, MobileDraftCaptureView, MobileDraftMedia } from "./editor-types";
 import type { ManufacturingStepCheckDefinition } from "@/domain/manufacturing-step-checks";
 import type { Task } from "@/domain/types";
 import { Camera, ImageIcon, Plus, Trash2 } from "lucide-react";
@@ -11,7 +10,6 @@ import {
   type ManufacturingStepCheckValue,
 } from "@/domain/manufacturing-step-checks";
 import { stepDisplayCode } from "@/domain/nomenclature";
-import { type StepPhotoAttachment } from "@/domain/step-photos";
 
 import { NothingSpinner } from "@/components/nothing-ui";
 
@@ -19,37 +17,22 @@ import { ProcedureStepChecksEditor } from "@/components/line-workspace/step-edit
 import { formatElapsedTimer } from "@/components/mobile-photo-portal/capture-session";
 
 export function MobileNewStepEditor({
+  draft,
+  capture,
+  media,
   newStepFormRef,
-  newStepId,
   newStepMotionPhase,
   mobileHeaderHeight,
   selectedTask,
   draftStepSequence,
-  newStepName,
   handleMobileFieldFocus,
-  setNewStepName,
-  scheduleNewStepAutosave,
   closeNewStepForm,
-  captureTimer,
   errorMessage,
   saveState,
   writesPending,
-  persistNewStepDraft,
-  getNewStepDraftSnapshot,
-  newStepDraftPhotos,
-  newStepPhotoBusyCount,
-  handleNewStepPhotoFiles,
-  removeNewStepDraftPhoto,
   bindNewStepInstructionRef,
-  newStepInstruction,
   resizeTextareaToContent,
-  setNewStepInstruction,
   handleStepInstructionFocus,
-  isTimerOnSelectedTask,
-  captureTimerLapElapsedMs,
-  captureTimerElapsedMs,
-  newStepDurationText,
-  setNewStepDurationText,
   newStepDraftTools,
   renderToolPicker,
   addNewStepDraftToolFromLibrary,
@@ -62,55 +45,29 @@ export function MobileNewStepEditor({
   updateNewStepDraftChecks,
   goToNextManufacturingStep,
 }: {
+  draft: MobileDraftTextEditor;
+  capture: MobileDraftCaptureView;
+  media: MobileDraftMedia;
   newStepFormRef: React.RefObject<HTMLDivElement | null>;
-  newStepId: string | null;
   newStepMotionPhase: "idle" | "exit" | "enter";
   mobileHeaderHeight: number;
   selectedTask: Task;
   draftStepSequence: number;
-  newStepName: string;
   handleMobileFieldFocus: (
     event: React.FocusEvent<HTMLElement, Element>,
   ) => void;
-  setNewStepName: React.Dispatch<React.SetStateAction<string>>;
-  scheduleNewStepAutosave: (
-    overrides?: Partial<MobileStepDraftSnapshot> | undefined,
-  ) => void;
   closeNewStepForm: () => void;
-  captureTimer: CaptureTimerState;
   errorMessage: string | null;
   saveState: "loading" | "idle" | "saving" | "saved" | "error";
   writesPending: boolean;
-  persistNewStepDraft: (
-    snapshot?: MobileStepDraftSnapshot,
-    options?: {
-      saveTask?: boolean | undefined;
-      showSaving?: boolean | undefined;
-      onSaved?: (() => void) | undefined;
-    },
-  ) => string | null;
-  getNewStepDraftSnapshot: (
-    overrides?: Partial<MobileStepDraftSnapshot>,
-  ) => MobileStepDraftSnapshot;
-  newStepDraftPhotos: StepPhotoAttachment[];
-  newStepPhotoBusyCount: number;
-  handleNewStepPhotoFiles: (files: File[]) => Promise<void>;
-  removeNewStepDraftPhoto: (photoId: string) => void;
   bindNewStepInstructionRef: (node: HTMLTextAreaElement | null) => void;
-  newStepInstruction: string;
   resizeTextareaToContent: (
     textarea: HTMLTextAreaElement,
     maxHeight?: number,
   ) => void;
-  setNewStepInstruction: React.Dispatch<React.SetStateAction<string>>;
   handleStepInstructionFocus: (
     event: React.FocusEvent<HTMLTextAreaElement, Element>,
   ) => void;
-  isTimerOnSelectedTask: boolean;
-  captureTimerLapElapsedMs: number;
-  captureTimerElapsedMs: number;
-  newStepDurationText: string;
-  setNewStepDurationText: React.Dispatch<React.SetStateAction<string>>;
   newStepDraftTools: string[];
   renderToolPicker: (
     selectedTools: string[],
@@ -135,6 +92,10 @@ export function MobileNewStepEditor({
   updateNewStepDraftChecks: (qualityCheck: string) => void;
   goToNextManufacturingStep: () => void;
 }) {
+  const { timer: captureTimer, stepId: newStepId, onSelectedTask: isTimerOnSelectedTask,
+    lapElapsedMs: captureTimerLapElapsedMs, elapsedMs: captureTimerElapsedMs } = capture;
+  const { photos: newStepDraftPhotos, busyCount: newStepPhotoBusyCount,
+    add: handleNewStepPhotoFiles, remove: removeNewStepDraftPhoto } = media;
   return (
     <div
       ref={newStepFormRef}
@@ -154,11 +115,10 @@ export function MobileNewStepEditor({
             className="ui-photo-mobile-step-name-inline w-full"
             aria-label="New step name"
             placeholder={`New step ${draftStepSequence}`}
-            value={newStepName}
+            value={draft.values.name}
             onFocus={handleMobileFieldFocus}
             onChange={(event) => {
-              setNewStepName(event.target.value);
-              scheduleNewStepAutosave({ name: event.target.value });
+              draft.change({ name: event.target.value });
             }}
           />
         </div>
@@ -179,11 +139,7 @@ export function MobileNewStepEditor({
               type="button"
               className="ui-photo-mobile-btn-secondary mt-2"
               disabled={writesPending}
-              onClick={() =>
-                persistNewStepDraft(getNewStepDraftSnapshot(), {
-                  showSaving: true,
-                })
-              }
+              onClick={draft.retrySave}
             >
               Retry save
             </button>
@@ -285,12 +241,11 @@ export function MobileNewStepEditor({
           <textarea
             ref={bindNewStepInstructionRef}
             className="ui-photo-mobile-textarea min-h-[104px]"
-            value={newStepInstruction}
+            value={draft.values.instruction}
             onChange={(event) => {
               const instruction = event.target.value;
               resizeTextareaToContent(event.currentTarget);
-              setNewStepInstruction(instruction);
-              scheduleNewStepAutosave({ instruction });
+              draft.change({ instruction });
             }}
             onFocus={handleStepInstructionFocus}
             placeholder="Describe the manufacturing step"
@@ -318,13 +273,12 @@ export function MobileNewStepEditor({
               className="ui-photo-mobile-step-duration-input"
               type="text"
               inputMode="numeric"
-              value={newStepDurationText}
+              value={draft.values.durationText}
               onFocus={handleMobileFieldFocus}
               onChange={(event) => {
                 const value = event.target.value;
                 if (/^\d*\.?\d*$/.test(value)) {
-                  setNewStepDurationText(value);
-                  scheduleNewStepAutosave({ durationText: value });
+                  draft.change({ durationText: value });
                 }
               }}
             />

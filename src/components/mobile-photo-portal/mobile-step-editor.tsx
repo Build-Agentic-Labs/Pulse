@@ -20,7 +20,7 @@ export function MobileStepEditor({
   handleMobileFieldFocus,
   updateManufacturingStep,
   toggleStepExpanded,
-  setConfirmDeleteStepId,
+  onDeletePromptChange,
   saveState,
   isUploading,
   confirmingDelete,
@@ -36,8 +36,8 @@ export function MobileStepEditor({
   renderToolPicker,
   addManufacturingStepToolFromLibrary,
   removeManufacturingStepTool,
-  newStepToolNames,
-  setNewStepToolNames,
+  toolNameDraft,
+  onToolNameChange,
   selectedChecks,
   stepCheckDefinitions,
 }: {
@@ -52,7 +52,7 @@ export function MobileStepEditor({
     patch: Partial<ManufacturingStep>,
   ) => Promise<void>;
   toggleStepExpanded: (stepId: string) => void;
-  setConfirmDeleteStepId: React.Dispatch<React.SetStateAction<string | null>>;
+  onDeletePromptChange: (open: boolean) => void;
   saveState: "loading" | "idle" | "saving" | "saved" | "error";
   isUploading: boolean;
   confirmingDelete: boolean;
@@ -92,10 +92,8 @@ export function MobileStepEditor({
     stepId: string,
     toolToRemove: string,
   ) => Promise<void>;
-  newStepToolNames: Record<string, string>;
-  setNewStepToolNames: React.Dispatch<
-    React.SetStateAction<Record<string, string>>
-  >;
+  toolNameDraft: string;
+  onToolNameChange: (value: string) => void;
   selectedChecks: Set<string>;
   stepCheckDefinitions: ManufacturingStepCheckDefinition[];
 }) {
@@ -194,7 +192,7 @@ export function MobileStepEditor({
             </label>
             <button
               type="button"
-              onClick={() => setConfirmDeleteStepId(step.id)}
+              onClick={() => onDeletePromptChange(true)}
               disabled={saveState === "saving" || isUploading}
               className="ui-photo-mobile-icon-btn ui-photo-mobile-icon-btn-danger disabled:opacity-40"
               aria-label={`Delete step ${step.sequence}`}
@@ -212,7 +210,7 @@ export function MobileStepEditor({
             <div className="mt-2 grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setConfirmDeleteStepId(null)}
+                onClick={() => onDeletePromptChange(false)}
                 className="ui-photo-mobile-btn-secondary h-9"
               >
                 Keep step
@@ -338,13 +336,9 @@ export function MobileStepEditor({
               void addManufacturingStepToolFromLibrary(step.id, toolName),
             (toolName) => void removeManufacturingStepTool(step.id, toolName),
             {
-              value: newStepToolNames[step.id] ?? "",
+              value: toolNameDraft,
               sequence: step.sequence,
-              onChange: (value) =>
-                setNewStepToolNames((current) => ({
-                  ...current,
-                  [step.id]: value,
-                })),
+              onChange: onToolNameChange,
               disabled: saveState === "saving",
             },
           )}

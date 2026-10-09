@@ -1,5 +1,7 @@
 "use client";
 
+import { rescheduleMobileTasksByDependencies as rescheduleTasksByDependencies } from "@/domain/mobile-task-scheduling";
+
 import { reorderTasksInSupabase } from "@/lib/planner/task-order-store";
 import { mergeTaskOrder, rollbackTaskOrder } from "@/domain/task-reorder";
 
@@ -27,6 +29,7 @@ import { AppLoadingShell } from "@/components/app-flow-panels";
 import { StepExplodedViewGallery } from "@/components/step-exploded-view-gallery";
 import { TaskVideoGallery } from "@/components/task-video-gallery";
 import { MobileProcessList } from "./mobile-photo-portal/mobile-process-list";
+import type { MobileStepDraftSnapshot } from "./mobile-photo-portal/editor-types";
 import { MobileNewStepEditor } from "./mobile-photo-portal/mobile-new-step-editor";
 import { MobileStepSummary } from "./mobile-photo-portal/mobile-step-summary";
 import { MobileStepEditor } from "./mobile-photo-portal/mobile-step-editor";
@@ -145,71 +148,6 @@ function getNextTopLevelWbs(tasks: Task[]) {
         .filter(Number.isFinite),
     ) + 1,
   );
-}
-
-function rescheduleTasksByDependencies(tasks: Task[]) {
-  if (tasks.length === 0) {
-    return tasks;
-  }
-
-  const taskStartTimes = tasks.map((task) => Date.parse(task.plannedStart)).filter(Number.isFinite);
-  const lineStartMs = taskStartTimes.length ? Math.min(...taskStartTimes) : Date.now();
-  const taskById = new Map(tasks.map((task) => [task.id, task]));
-  const scheduledById = new Map<string, { startMs: number; finishMs: number }>();
-  const visiting = new Set<string>();
-
-  function resolveSchedule(taskId: string): { startMs: number; finishMs: number } {
-    const existing = scheduledById.get(taskId);
-    if (existing) {
-      return existing;
-    }
-
-    const task = taskById.get(taskId);
-    if (!task) {
-      return { startMs: lineStartMs, finishMs: lineStartMs };
-    }
-
-    if (visiting.has(taskId)) {
-      const fallbackStartMs = Date.parse(task.plannedStart);
-      const startMs = Number.isFinite(fallbackStartMs) ? fallbackStartMs : lineStartMs;
-      return {
-        startMs,
-        finishMs: startMs + Math.max(task.plannedDurationMinutes, 0) * 60_000,
-      };
-    }
-
-    visiting.add(taskId);
-
-    const plannedStartMs = Date.parse(task.plannedStart);
-    const manualStartMs = Number.isFinite(plannedStartMs) ? Math.max(lineStartMs, plannedStartMs) : lineStartMs;
-    const dependencyFinishMs = task.dependencyIds.reduce((latestFinish, dependencyId) => {
-      const predecessor = taskById.get(dependencyId);
-      if (!predecessor) {
-        return latestFinish;
-      }
-
-      return Math.max(latestFinish, resolveSchedule(predecessor.id).finishMs);
-    }, lineStartMs);
-    const startMs = task.dependencyIds.length > 0
-      ? Math.max(lineStartMs, dependencyFinishMs)
-      : Math.max(lineStartMs, manualStartMs);
-    const finishMs = startMs + Math.max(task.plannedDurationMinutes, 0) * 60_000;
-    const schedule = { startMs, finishMs };
-    scheduledById.set(taskId, schedule);
-    visiting.delete(taskId);
-
-    return schedule;
-  }
-
-  return tasks.map((task) => {
-    const { startMs, finishMs } = resolveSchedule(task.id);
-
-    return {
-      ...task,
-      plannedStart: new Date(startMs).toISOString(),
-      plannedFinish: new Date(finishMs).toISOString(),
-    };
-  });
 }
 
 function withStepDerivedDuration(task: Task, nextSteps: ManufacturingStep[]): Task {
@@ -1385,16 +1323,14 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     );
   }
 
-  function getNewStepDraftSnapshot(overrides: Partial<{
-    stepId: string | null;
-    name: string;
-    instruction: string;
-    durationText: string;
-    tools: string[];
-    photos: StepPhotoAttachment[];
-    checks: Set<string>;
-    checkValues: Record<string, ManufacturingStepCheckValue>;
-  }> = {}) {
+  function changeNewStepText(patch: Partial<Pick<MobileStepDraftSnapshot, "name" | "instruction" | "durationText">>) {
+    if (patch.name !== undefined) setNewStepName(patch.name);
+    if (patch.instruction !== undefined) setNewStepInstruction(patch.instruction);
+    if (patch.durationText !== undefined) setNewStepDurationText(patch.durationText);
+    scheduleNewStepAutosave(patch);
+  }
+
+  function getNewStepDraftSnapshot(overrides: Partial<MobileStepDraftSnapshot> = {}): MobileStepDraftSnapshot {
     return {
       stepId: overrides.stepId ?? newStepIdRef.current ?? newStepId,
       name: overrides.name ?? newStepName,
@@ -3095,37 +3031,28 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
                   onUse={() => void adoptReviewedLegacyDraft()} /> : null}
                 {showNewStepForm ? (
                   <MobileNewStepEditor key={newStepId ?? "new-step-draft"}
+                    draft={{
+                      values: { name: newStepName, instruction: newStepInstruction, durationText: newStepDurationText },
+                      change: changeNewStepText,
+                      retrySave: () => { persistNewStepDraft(getNewStepDraftSnapshot(), { showSaving: true }); },
+                    }}
+                    capture={{ timer: captureTimer, stepId: newStepId, onSelectedTask: isTimerOnSelectedTask,
+                      lapElapsedMs: captureTimerLapElapsedMs, elapsedMs: captureTimerElapsedMs }}
+                    media={{ photos: newStepDraftPhotos, busyCount: newStepPhotoBusyCount,
+                      add: handleNewStepPhotoFiles, remove: removeNewStepDraftPhoto }}
                     newStepFormRef={newStepFormRef}
-                    newStepId={newStepId}
                     newStepMotionPhase={newStepMotionPhase}
                     mobileHeaderHeight={mobileHeaderHeight}
                     selectedTask={selectedTask}
                     draftStepSequence={draftStepSequence}
-                    newStepName={newStepName}
                     handleMobileFieldFocus={handleMobileFieldFocus}
-                    setNewStepName={setNewStepName}
-                    scheduleNewStepAutosave={scheduleNewStepAutosave}
                     closeNewStepForm={closeNewStepForm}
-                    captureTimer={captureTimer}
                     errorMessage={errorMessage}
                     saveState={saveState}
                     writesPending={writesPending}
-                    persistNewStepDraft={persistNewStepDraft}
-                    getNewStepDraftSnapshot={getNewStepDraftSnapshot}
-                    newStepDraftPhotos={newStepDraftPhotos}
-                    newStepPhotoBusyCount={newStepPhotoBusyCount}
-                    handleNewStepPhotoFiles={handleNewStepPhotoFiles}
-                    removeNewStepDraftPhoto={removeNewStepDraftPhoto}
                     bindNewStepInstructionRef={bindNewStepInstructionRef}
-                    newStepInstruction={newStepInstruction}
                     resizeTextareaToContent={resizeTextareaToContent}
-                    setNewStepInstruction={setNewStepInstruction}
                     handleStepInstructionFocus={handleStepInstructionFocus}
-                    isTimerOnSelectedTask={isTimerOnSelectedTask}
-                    captureTimerLapElapsedMs={captureTimerLapElapsedMs}
-                    captureTimerElapsedMs={captureTimerElapsedMs}
-                    newStepDurationText={newStepDurationText}
-                    setNewStepDurationText={setNewStepDurationText}
                     newStepDraftTools={newStepDraftTools}
                     renderToolPicker={renderToolPicker}
                     addNewStepDraftToolFromLibrary={addNewStepDraftToolFromLibrary}
@@ -3192,7 +3119,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
                     handleMobileFieldFocus={handleMobileFieldFocus}
                     updateManufacturingStep={updateManufacturingStep}
                     toggleStepExpanded={toggleStepExpanded}
-                    setConfirmDeleteStepId={setConfirmDeleteStepId}
+                    onDeletePromptChange={(open) => setConfirmDeleteStepId(open ? step.id : null)}
                     saveState={saveState}
                     isUploading={isUploading}
                     confirmingDelete={confirmingDelete}
@@ -3208,8 +3135,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
                     renderToolPicker={renderToolPicker}
                     addManufacturingStepToolFromLibrary={addManufacturingStepToolFromLibrary}
                     removeManufacturingStepTool={removeManufacturingStepTool}
-                    newStepToolNames={newStepToolNames}
-                    setNewStepToolNames={setNewStepToolNames}
+                    toolNameDraft={newStepToolNames[step.id] ?? ""}
+                    onToolNameChange={(value) => setNewStepToolNames(current => ({ ...current, [step.id]: value }))}
                     selectedChecks={selectedChecks}
                     stepCheckDefinitions={stepCheckDefinitions}
                   />

@@ -22,6 +22,7 @@ import { useConfirm } from "@/components/confirm-provider";
 
 import type { Department, DeptRole } from "@/domain/departments";
 import { draftReviewGate } from "@/domain/sop/review-gate";
+import { shouldPollReviewAnnotations } from "@/domain/sop/review-polling";
 import { type Sop } from "@/domain/sop/schema";
 import { listDecisionBranchRequirements } from "@/domain/sop/procedure-validation";
 import { type ChangeSignificance } from "@/domain/sop/version";
@@ -382,7 +383,7 @@ export function SopEditor({
     referenceFileByDocId, handleAnnexUpload, handleAnnexOpen, handleAnnexFileRemove,
     handleReferenceDocUpload, handleReferenceDocOpen, handleReferenceDocRemove,
     handleAnnexRowRemove, handleAnnexRename,
-  } = useSopAttachments({ sopId: sop.id, annexes: sop.annexes, workspaceId, persistedUpdatedAt, hasPersistedSop,
+  } = useSopAttachments({ sopId: sop.id, annexes: sop.annexes, workspaceId, hasPersistedSop,
     persist, isAnnexPersisted,
     updateReferenceDocs: change => update(current => ({ referenceDocs: change(current.referenceDocs) })),
     updateAnnexes: rows => update({ annexes: rows }),
@@ -465,9 +466,8 @@ export function SopEditor({
         );
       })
       .catch(() => {
-        if (!active) return;
-        setReviewAnnotations([]);
-        setReviewSubmissions([]);
+        // Retain the last loaded remarks and submissions on a read error, matching the
+        // annotation poll: a transient failure must not blank the review conversation.
       });
     return () => {
       active = false;
@@ -773,12 +773,19 @@ export function SopEditor({
 
   useEffect(() => {
     if (!auditPanelOpen) return;
+    // Escape layering, topmost first: referenced-PDF previews (window capture) → the overlay
+    // print preview (document capture; it sits above this panel, so the panel yields to it) →
+    // this panel (document capture) → an embedded print preview (window bubble, drawn beneath
+    // the panel). Each layer consumes the key so exactly one closes.
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setAuditPanelOpen(false);
+      if (event.key !== "Escape" || previewing) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setAuditPanelOpen(false);
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [auditPanelOpen]);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => document.removeEventListener("keydown", closeOnEscape, true);
+  }, [auditPanelOpen, previewing]);
 
   function revealFieldHint(target: EventTarget) {
     const match = getEmptyFieldExample(target);
@@ -1301,7 +1308,9 @@ export function SopEditor({
         : "Every remark is addressed.";
   }
 
+  const pollReviewAnnotations = shouldPollReviewAnnotations({ hasPersistedSop, status: sop.status, hasReviewHistory });
   useEffect(() => {
+    if (!pollReviewAnnotations) return;
     let alive = true;
     let pending = false;
     const refresh = async () => {
@@ -1319,7 +1328,7 @@ export function SopEditor({
     window.addEventListener("focus", run);
     document.addEventListener("visibilitychange", run);
     return () => { alive = false; window.clearInterval(timer); window.removeEventListener("focus", run); document.removeEventListener("visibilitychange", run); };
-  }, [sop.id, approvalReviewCycle]);
+  }, [sop.id, approvalReviewCycle, pollReviewAnnotations]);
 
   const builderHasFeedback = showDraftReview && step.id !== "draftReview" &&
     [...reviewAnnotations, ...addressedAnnotations].some((remark) =>

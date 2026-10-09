@@ -31,6 +31,47 @@ import { buildPrintBlocks, type PrintBlock, type PrintBlockExtras } from "./prin
 import { usePaginatedPages } from "./use-paginated-pages";
 import { MarginNotesColumn, type MarginNote } from "./sop-margin-notes";
 
+export interface PreviewEscapeLayers {
+  busy: boolean;
+  commentSelected: boolean;
+  dismissComment: () => void;
+  inlineDocOpen: boolean;
+  closeInlineDoc: () => void;
+  close: () => void;
+}
+
+/**
+ * Escape peels exactly one preview layer — the comment composer, then an inline referenced
+ * document, then the preview itself — and consumes the key so no layer beneath also closes.
+ */
+export function handlePreviewEscape(event: KeyboardEvent, layers: PreviewEscapeLayers): void {
+  if (event.key !== "Escape" || layers.busy) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (layers.commentSelected) layers.dismissComment();
+  else if (layers.inlineDocOpen) layers.closeInlineDoc();
+  else layers.close();
+}
+
+/**
+ * Registers the preview's Escape listener at its layer. The overlay preview sits above the
+ * editor's audit panel, so it listens capture-phase on `document` — after referenced-PDF
+ * previews (window capture), before everything else. An embedded preview is page content
+ * drawn beneath the audit panel, so it listens in the window bubble phase and only sees
+ * Escape when no layer above consumed it.
+ */
+export function listenForPreviewEscape(
+  embedded: boolean,
+  onKey: (event: KeyboardEvent) => void,
+): () => void {
+  if (embedded) {
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }
+  document.addEventListener("keydown", onKey, true);
+  return () => document.removeEventListener("keydown", onKey, true);
+}
+
 interface RenderedAnnexPage {
   fileId: string;
   annexId: string;
@@ -435,26 +476,22 @@ export function SopPrintPreview({
   const warnedOverflowBlockIds = useRef<Set<string>>(new Set());
   const canDownloadPdf = mode === "export" && sop.status === "effective";
 
+  const inlineDocOpen = inlineDoc !== null;
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (commentBusy) return;
-      if (commentSelection) {
-        setCommentSelection(null);
-        onDismissReviewComment?.();
-        return;
-      }
-      // An inline referenced document sits on top: Escape peels that layer
-      // first and returns to the SOP, a second Escape closes the preview.
-      setInlineDoc((current) => {
-        if (current) return null;
-        onClose();
-        return current;
+    const onKey = (event: KeyboardEvent) =>
+      handlePreviewEscape(event, {
+        busy: commentBusy,
+        commentSelected: Boolean(commentSelection),
+        dismissComment: () => {
+          setCommentSelection(null);
+          onDismissReviewComment?.();
+        },
+        inlineDocOpen,
+        closeInlineDoc: () => setInlineDoc(null),
+        close: onClose,
       });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, commentSelection, onDismissReviewComment, commentBusy]);
+    return listenForPreviewEscape(embedded, onKey);
+  }, [onClose, commentSelection, onDismissReviewComment, commentBusy, inlineDocOpen, embedded]);
 
   useEffect(() => () => {
     if (reviewScrollFrame.current !== null) window.cancelAnimationFrame(reviewScrollFrame.current);

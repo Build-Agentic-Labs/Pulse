@@ -112,10 +112,7 @@ describe("SOP attachment ordering", () => {
     vi.mocked(removeSopAnnexFile).mockRejectedValue(
       new Error("storage unavailable"),
     );
-    const { result, options } = setup({
-      persistedUpdatedAt: "saved",
-      hasPersistedSop: true,
-    });
+    const { result, options } = setup({ hasPersistedSop: true });
     await act(async () => {});
     await act(async () => {
       await result.current.handleAnnexRowRemove(0);
@@ -123,5 +120,50 @@ describe("SOP attachment ordering", () => {
     expect(options.updateAnnexes).not.toHaveBeenCalled();
     expect(result.current.annexFiles).toEqual([file]);
     expect(result.current.annexFileError).toBe("storage unavailable");
+  });
+});
+describe("SOP attachment list refetch", () => {
+  it("does not re-list attached files when an autosave advances the concurrency token", async () => {
+    const persisted = {
+      sopId: "test",
+      annexes: [{ id: "annex", label: "Form", description: "" }],
+      workspaceId: "local",
+      hasPersistedSop: true,
+      persist: vi.fn().mockResolvedValue(true),
+      updateReferenceDocs: vi.fn(),
+      updateAnnexes: vi.fn(),
+      isAnnexPersisted: vi.fn().mockReturnValue(true),
+    };
+    // Autosave advances `persistedUpdatedAt` on every save; the hook must not key on it.
+    const firstSave = { ...persisted, persistedUpdatedAt: "2026-10-09T10:00:00Z" };
+    const { rerender } = renderHook((options) => useSopAttachments(options), {
+      initialProps: firstSave,
+    });
+    await act(async () => {});
+    expect(listSopAnnexFiles).toHaveBeenCalledOnce();
+    rerender({ ...firstSave, persistedUpdatedAt: "2026-10-09T10:00:05Z" });
+    rerender({ ...firstSave, persistedUpdatedAt: "2026-10-09T10:00:10Z" });
+    await act(async () => {});
+    expect(listSopAnnexFiles).toHaveBeenCalledOnce();
+  });
+  it("lists attached files once a new SOP is first persisted", async () => {
+    const unsaved = {
+      sopId: "test",
+      annexes: [],
+      workspaceId: "local",
+      hasPersistedSop: false,
+      persist: vi.fn().mockResolvedValue(true),
+      updateReferenceDocs: vi.fn(),
+      updateAnnexes: vi.fn(),
+      isAnnexPersisted: vi.fn().mockReturnValue(false),
+    };
+    const { rerender } = renderHook((options) => useSopAttachments(options), {
+      initialProps: unsaved,
+    });
+    await act(async () => {});
+    expect(listSopAnnexFiles).not.toHaveBeenCalled();
+    rerender({ ...unsaved, hasPersistedSop: true });
+    await act(async () => {});
+    expect(listSopAnnexFiles).toHaveBeenCalledOnce();
   });
 });

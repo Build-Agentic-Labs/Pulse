@@ -20,7 +20,6 @@ interface SopAttachmentsOptions {
   sopId: string;
   annexes: Sop["annexes"];
   workspaceId?: string;
-  persistedUpdatedAt?: string;
   hasPersistedSop: boolean;
   persist: () => Promise<boolean>;
   updateReferenceDocs: (change: (current: SopReferenceDoc[]) => SopReferenceDoc[]) => void;
@@ -33,7 +32,6 @@ export function useSopAttachments({
   sopId,
   annexes,
   workspaceId,
-  persistedUpdatedAt,
   hasPersistedSop,
   persist,
   updateReferenceDocs,
@@ -250,8 +248,11 @@ export function useSopAttachments({
     updateAnnexes(annexes.filter((_, rowIndex) => rowIndex !== index));
   }
 
+  // Keyed on persistence, not on the autosave concurrency token: every autosave advances
+  // `persistedUpdatedAt`, and re-listing on each one re-rasterized every attached PDF in a
+  // mounted print preview. Upload/rename/remove paths update the list from their own writes.
   useEffect(() => {
-    if (!workspaceId || !persistedUpdatedAt) {
+    if (!workspaceId || !hasPersistedSop) {
       setAnnexFiles([]);
       return;
     }
@@ -271,7 +272,7 @@ export function useSopAttachments({
     return () => {
       active = false;
     };
-  }, [persistedUpdatedAt, sopId, workspaceId]);
+  }, [hasPersistedSop, sopId, workspaceId]);
 
   async function handleAnnexRename(file: SopAnnexFile, name: string) {
     const renamed = await renameSopAnnexFile(file, name);

@@ -60,6 +60,7 @@ export async function POST(request: Request) {
     organizationRole?: string;
     accessPackage?: string;
     qualityAccess?: string;
+    productAccess?: string;
     planningAccess?: boolean;
     projectAccess?: unknown;
     departmentAccess?: unknown;
@@ -81,6 +82,8 @@ export async function POST(request: Request) {
   const qualityAccess = ACCESS_LEVELS.includes(body.qualityAccess as (typeof ACCESS_LEVELS)[number])
     ? (body.qualityAccess as WorkspaceInviteEntitlements["qualityAccess"])
     : null;
+  const productAccess = body.productAccess === undefined ? "none" : ACCESS_LEVELS.includes(body.productAccess as (typeof ACCESS_LEVELS)[number]) ? body.productAccess as (typeof ACCESS_LEVELS)[number] : null;
+  if (productAccess === null) return NextResponse.json({ error: "Product access is invalid." }, { status: 400 });
   const planningAccess = body.planningAccess === true;
   const rawProjectAccess = Array.isArray(body.projectAccess) ? body.projectAccess : [];
   const rawDepartmentAccess = Array.isArray(body.departmentAccess) ? body.departmentAccess : [];
@@ -173,6 +176,7 @@ export async function POST(request: Request) {
     organizationRole,
     accessPackage,
     qualityAccess,
+    productAccess,
     planningAccess,
     projectAccess,
     departmentAccess,
@@ -195,6 +199,7 @@ export async function POST(request: Request) {
       email,
       role: workspaceRoleForOrganizationRole(entitlements.organizationRole),
       quality_access: entitlements.qualityAccess,
+      product_access: entitlements.productAccess ?? "none",
       access_package: entitlements.accessPackage,
       planning_access: entitlements.planningAccess,
       project_access: entitlements.projectAccess.map((grant) => ({

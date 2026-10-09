@@ -24,6 +24,8 @@ export interface WorkspaceInviteEntitlements {
   organizationRole: OrganizationInviteRole;
   accessPackage: InviteAccessPackage;
   qualityAccess: AccessLevel;
+  /** Omitted legacy payloads grant no Product access. */
+  productAccess?: AccessLevel;
   planningAccess: boolean;
   projectAccess: InviteProjectAccess[];
   departmentAccess: InviteDepartmentAccess[];
@@ -33,7 +35,7 @@ export const ORGANIZATION_ROLE_OPTIONS = [
   {
     value: "member",
     label: "Member",
-    description: "Uses only the modules, projects, and workflow duties assigned below.",
+    description: "Uses only the modules and workflow duties assigned below.",
   },
   {
     value: "admin",
@@ -92,6 +94,7 @@ export function normalizedInviteEntitlements(
   return {
     ...entitlements,
     qualityAccess: "edit",
+    productAccess: "edit",
     planningAccess: true,
     // Admin access is derived from the organization role. Persisting hidden
     // project rows would unexpectedly survive a later demotion to Member.
@@ -121,6 +124,7 @@ export function entitlementsForPackage(
     organizationRole: "member",
     accessPackage,
     qualityAccess: "none",
+    productAccess: "none",
     planningAccess: false,
     projectAccess: [],
     departmentAccess: [],
@@ -166,6 +170,7 @@ export function describeInviteEntitlements(
       : [
           "Organization: Member",
           `Quality Module: ${entitlements.qualityAccess === "edit" ? "Edit" : entitlements.qualityAccess === "view" ? "View" : "No access"}`,
+          `Product Module: ${entitlements.productAccess === "edit" ? "Edit" : entitlements.productAccess === "view" ? "View" : "No access"}`,
           `Planning: ${entitlements.planningAccess ? "Access" : "No access"}`,
         ];
 
@@ -187,6 +192,7 @@ export function compactInviteEntitlementSummary(entitlements: WorkspaceInviteEnt
   if (entitlements.qualityAccess !== "none") {
     details.push(`Quality ${entitlements.qualityAccess === "edit" ? "Edit" : "View"}`);
   }
+  if (entitlements.productAccess && entitlements.productAccess !== "none") details.push(`Product ${entitlements.productAccess === "edit" ? "Edit" : "View"}`);
   if (entitlements.planningAccess) details.push("Planning");
   if (entitlements.projectAccess.length) {
     details.push(`${entitlements.projectAccess.length} project${entitlements.projectAccess.length === 1 ? "" : "s"}`);
@@ -207,6 +213,7 @@ export function entitlementsFromWorkspaceAccessGrant(
     organizationRole: grant.role === "admin" ? "admin" : "member",
     accessPackage,
     qualityAccess: grant.qualityAccess,
+    productAccess: grant.productAccess ?? "none",
     planningAccess: grant.planningAccess,
     projectAccess: grant.projectAccess,
     departmentAccess: grant.departmentAccess,

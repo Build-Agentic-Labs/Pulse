@@ -188,6 +188,7 @@ type LinkedInstructionTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaEl
 };
 
 type StepPhotoAttachmentEditorProps = {
+  readOnly?: boolean;
   taskId: string;
   step: ManufacturingStep;
   photos: StepPhotoAttachment[];
@@ -296,6 +297,7 @@ function StepPhotoThumbnailSlot({
 }
 
 export function StepPhotoAttachmentEditor({
+  readOnly = false,
   taskId,
   step,
   photos,
@@ -339,7 +341,7 @@ export function StepPhotoAttachmentEditor({
   const clipboardReadRef = useRef(0);
   useEffect(() => () => { clipboardReadRef.current++; }, [taskId, step.id]);
   const canPasteCopied = Boolean(entry && canPasteInto(entry, taskId, step.id));
-  const pasteBusy = isUploading || isPasting || readingClipboard;
+  const pasteBusy = readOnly || isUploading || isPasting || readingClipboard;
 
   async function pasteCopiedPhoto() {
     if (pasteBusy) return;
@@ -422,9 +424,9 @@ export function StepPhotoAttachmentEditor({
       aria-label={`Step ${step.sequence} photos. Paste an image, press Ctrl/Cmd+V to paste a copied photo, or use Upload.`}
       tabIndex={isUploading ? -1 : 0}
       onPaste={handlePaste}
-      onPointerEnter={() => setActiveStep({ taskId, stepId: step.id })}
+      onPointerEnter={readOnly ? undefined : () => setActiveStep({ taskId, stepId: step.id })}
       onPointerLeave={() => clearActiveStep(step.id)}
-      onFocus={() => setActiveStep({ taskId, stepId: step.id })}
+      onFocus={readOnly ? undefined : () => setActiveStep({ taskId, stepId: step.id })}
       onBlur={() => clearActiveStep(step.id)}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -450,7 +452,7 @@ export function StepPhotoAttachmentEditor({
               accept="image/*"
               multiple
               className="sr-only"
-              disabled={isUploading}
+              disabled={readOnly || isUploading}
               onChange={(event) => {
                 const files = Array.from(event.currentTarget.files ?? []);
                 event.currentTarget.value = "";
@@ -510,6 +512,7 @@ export function StepPhotoAttachmentEditor({
                     onRequestRemove(photo);
                   }}
                   className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded bg-black/55 text-white opacity-0 transition hover:bg-black/75 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100 group-focus-within:opacity-100"
+                  disabled={readOnly}
                   aria-label={`Remove photo from step ${step.sequence}`}
                   title="Remove photo"
                 >
@@ -538,7 +541,7 @@ export function StepPhotoAttachmentEditor({
             photoAreaRef.current?.focus();
             setPasteHint(`Ready to paste into Step ${step.sequence}. Press Cmd/Ctrl+V, or click Paste photo above.`);
           }}>
-          No photos yet. Click here, then press Cmd/Ctrl+V to paste an image.
+          {readOnly ? "No photos yet." : "No photos yet. Click here, then press Cmd/Ctrl+V to paste an image."}
         </button>
       )}
       <p className={pasteHint ? "text-[11px] text-ink-secondary" : "sr-only"} role="status" aria-live="polite">{pasteHint}</p>
@@ -551,7 +554,7 @@ export function StepPhotoAttachmentEditor({
           photos={photos}
           onClose={() => setPreviewPhoto(null)}
           onPhotoChange={setPreviewPhoto}
-          onUpdatePhoto={onUpdatePhoto}
+          onUpdatePhoto={readOnly ? undefined : onUpdatePhoto}
         />
       ) : null}
     </div>

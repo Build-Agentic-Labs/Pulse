@@ -921,15 +921,16 @@ export function ProcedureWorkspace({
             </div>
             <StepExplodedViewGallery
               views={getTaskExplodedViews(task)}
-              onDelete={(view) => onDeleteExplodedView(task.id, view)}
+              onDelete={readOnly ? undefined : (view) => onDeleteExplodedView(task.id, view)}
             />
-            <TaskVideoGallery videos={getTaskVideos(task)} onDelete={(video) => onDeleteTaskVideo(task.id, video)} />
+            <TaskVideoGallery videos={getTaskVideos(task)} onDelete={readOnly ? undefined : (video) => onDeleteTaskVideo(task.id, video)} />
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
             <label className="block">
               <span className="ui-field-label">Task Description</span>
               <textarea
+                readOnly={readOnly}
                 className="ui-field-standalone min-h-[96px] h-auto resize-y py-2 leading-relaxed"
                 value={task.description ?? ""}
                 onChange={(event) => onUpdateTask(task.id, { description: event.target.value })}
@@ -940,6 +941,7 @@ export function ProcedureWorkspace({
             <label className="block">
               <span className="ui-field-label">Safety Notes</span>
               <textarea
+                readOnly={readOnly}
                 className="ui-field-standalone min-h-[96px] h-auto resize-y py-2 leading-relaxed"
                 value={task.safetyNotes ?? ""}
                 onChange={(event) => onUpdateTask(task.id, { safetyNotes: event.target.value })}
@@ -956,7 +958,7 @@ export function ProcedureWorkspace({
                   {manufacturingSteps.length} step(s) · step total {formatMinutes(manufacturingStepDurationMinutes)} · {formatManHours(stepDerivedManHours)}
                 </p>
               </div>
-              <button type="button" onClick={addManufacturingStep} className="ui-btn-ghost h-9 gap-2">
+              <button type="button" disabled={readOnly} onClick={addManufacturingStep} className="ui-btn-ghost h-9 gap-2">
                 <Plus size={14} strokeWidth={1.75} />
                 Add Step
               </button>
@@ -981,7 +983,7 @@ export function ProcedureWorkspace({
                             type="button"
                             className="ui-btn-ghost h-7 gap-1.5 text-xs"
                             aria-label={`Insert step between steps ${index} and ${index + 1}`}
-                            onClick={() => insertManufacturingStep(index)}
+                            disabled={readOnly} onClick={() => insertManufacturingStep(index)}
                           >
                             <Plus size={12} strokeWidth={1.75} />
                             Insert step
@@ -994,6 +996,7 @@ export function ProcedureWorkspace({
                             <label className="ui-procedure-step-title-field">
                               <span className="ui-procedure-step-title">Step {step.sequence}</span>
                               <input
+                                readOnly={readOnly}
                                 aria-label={`Step ${step.sequence} name`}
                                 data-step-name-id={step.id}
                                 className="ui-procedure-step-inline-text ui-procedure-step-name-input"
@@ -1013,6 +1016,7 @@ export function ProcedureWorkspace({
                               <label className="ui-procedure-step-inline-field">
                                 <span className="ui-field-label mb-0">Seq</span>
                                 <ClearableNumberInput
+                                  readOnly={readOnly}
                                   aria-label={`Step ${step.sequence} sequence`}
                                   className="number-input ui-procedure-step-inline-value"
                                   value={step.sequence}
@@ -1026,6 +1030,7 @@ export function ProcedureWorkspace({
                               <label className="ui-procedure-step-inline-field">
                                 <span className="ui-field-label mb-0">Min</span>
                                 <ClearableNumberInput
+                                  readOnly={readOnly}
                                   aria-label={`Step ${step.sequence} duration minutes`}
                                   className="number-input ui-procedure-step-inline-value ui-procedure-step-inline-value-wide"
                                   value={step.durationMinutes ?? 0}
@@ -1038,6 +1043,7 @@ export function ProcedureWorkspace({
                             </div>
                             {moveTargetTasks.length > 0 ? (
                               <ThemedSelect
+                                disabled={readOnly}
                                 ariaLabel={`Move step ${step.sequence} to another task`}
                                 value=""
                                 className="ui-procedure-step-move"
@@ -1074,7 +1080,7 @@ export function ProcedureWorkspace({
 
                             <button
                               type="button"
-                              onClick={() => requestRemoveManufacturingStep(step.id)}
+                              disabled={readOnly} onClick={() => requestRemoveManufacturingStep(step.id)}
                               className="ui-btn-ghost h-7 gap-1 px-2 text-[10px] text-danger hover:text-danger"
                               title={`Delete step ${step.sequence}`}
                               aria-label={`Delete step ${step.sequence}`}
@@ -1088,6 +1094,7 @@ export function ProcedureWorkspace({
                       {showPhotos ? (
                         <div className="ui-procedure-card-photos">
                           <StepPhotoAttachmentEditor
+                            readOnly={readOnly}
                             carousel
                             taskId={task.id}
                             step={step}
@@ -1102,12 +1109,13 @@ export function ProcedureWorkspace({
                         <div className="ui-procedure-step-instruction-field block">
                           <span className="ui-field-label mb-0 block">Instruction</span>
                           <div className="ui-instruction-composer">
-                            <div className="ui-instruction-composer-toolbar">
+                            {!readOnly ? <div className="ui-instruction-composer-toolbar">
                               <InstructionFormatToolbar sequence={step.sequence}
                               value={getProcedureFieldValue(task.id, step.id, "instruction", step.instruction)}
                               onChange={instruction => updateManufacturingStepInstruction(step.id, instruction)} />
-                            </div>
+                            </div> : null}
                             <LinkedInstructionTextarea
+                              readOnly={readOnly}
                               task={task}
                               step={step}
                               aria-label={`Step ${step.sequence} instruction`}
@@ -1115,9 +1123,9 @@ export function ProcedureWorkspace({
                               value={getProcedureFieldValue(task.id, step.id, "instruction", step.instruction)}
                               onFocus={() => onProcedureFieldFocus(task.id, step.id, "instruction", step.instruction)}
                               onBlur={() => onProcedureFieldBlur(task.id, step.id, "instruction")}
-                              onSelect={(event) => captureInstructionSelection(step.id, event.currentTarget)}
+                              onSelect={readOnly ? undefined : (event) => captureInstructionSelection(step.id, event.currentTarget)}
                               onChange={(event) => updateManufacturingStepInstruction(step.id, event.target.value)}
-                              onKeyDown={(event) =>
+                              onKeyDown={readOnly ? undefined : (event) =>
                                 handleInstructionBulletKeyDown(event, (instruction) =>
                                   updateManufacturingStepInstruction(step.id, instruction),
                                 )
@@ -1140,7 +1148,7 @@ export function ProcedureWorkspace({
                           </div>
                         </div>
                         </div>
-                        <StepPartMentionEditor
+                        {!readOnly ? <StepPartMentionEditor
                           task={task}
                           step={step}
                           selection={instructionSelections[step.id]}
@@ -1148,13 +1156,13 @@ export function ProcedureWorkspace({
                           onLink={(entry) => linkInstructionSelectionToPart(step.id, entry)}
                           onCancelSelection={() => clearInstructionSelection(step.id)}
                           onRemoveMention={(mentionId) => removeInstructionPartMention(step.id, mentionId)}
-                        />
+                        /> : null}
                       </div>
 
 
 
                       {showStepDetails ? (
-                      <div className="ui-procedure-step-details">
+                      <fieldset disabled={readOnly} className="ui-procedure-step-details min-w-0">
                         {showChecks ? (
                         <div className="ui-procedure-step-detail">
                           <span className="ui-field-label mb-0 block">Checks</span>
@@ -1213,7 +1221,7 @@ export function ProcedureWorkspace({
                           onRemove={(partReferenceId) => removeManufacturingStepPartReference(step.id, partReferenceId)}
                         />
                         ) : null}
-                      </div>
+                      </fieldset>
                       ) : null}
                     </div>
                   );
@@ -1224,7 +1232,7 @@ export function ProcedureWorkspace({
               <div className="mt-4 flex justify-end border-t border-line pt-3">
                 <button
                   type="button"
-                  onClick={addManufacturingStep}
+                  disabled={readOnly} onClick={addManufacturingStep}
                   className="ui-btn-ghost h-9 gap-2"
                   aria-label="Add step after final step"
                 >

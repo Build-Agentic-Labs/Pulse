@@ -80,7 +80,7 @@ const annotatedPlannerState = {
 } as PlannerState;
 
 describe("WorkInstructionsPanel", () => {
-  it("gates compact publishing on saving and disables it for view-only access", async () => {
+  it("gates compact publishing on saving and offers revision browsing for view-only access", async () => {
     const onBeforeRelease = vi.fn().mockResolvedValue(false);
     const props = { compact: true, isAwiMaster: true, tasks: [task], zones: [zone], product, onOpenTask: vi.fn(), onBeforeRelease };
     const { rerender } = render(<WorkInstructionsPanel {...props} />);
@@ -90,7 +90,8 @@ describe("WorkInstructionsPanel", () => {
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled());
     expect(screen.queryByRole("dialog")).toBeNull();
     rerender(<WorkInstructionsPanel {...props} readOnly />);
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Revisions" })).toBeEnabled();
   });
 
   it("tracks saved draft completion and allows reopening a draft without discarding metadata", () => {

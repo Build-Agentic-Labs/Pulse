@@ -47,13 +47,13 @@ export type InitialSopWorkspaceData = {
  *
  * Every failure path returns undefined and the shell behaves exactly as before.
  */
-export const fetchInitialWorkspaceGroups = cache(async (): Promise<WorkspaceProjectGroup[] | undefined> => {
+export const fetchInitialWorkspaceGroups = cache(async (scope: "project" | "product" = "project"): Promise<WorkspaceProjectGroup[] | undefined> => {
   try {
     const { supabase, user } = await getServerAuthContext();
     if (!user) {
       return undefined;
     }
-    return await loadWorkspaceProjectGroups(user.id, supabase);
+    return await loadWorkspaceProjectGroups(user.id, supabase, scope);
   } catch {
     return undefined;
   }
@@ -194,7 +194,7 @@ export async function fetchInitialPlannerData(projectId: string): Promise<{
       return {};
     }
     const [groups, plannerState] = await Promise.all([
-      loadWorkspaceProjectGroups(user.id, supabase).catch(() => undefined),
+      loadWorkspaceProjectGroups(user.id, supabase, "product").catch(() => undefined),
       loadPlannerStateFromSupabase(projectId, undefined, supabase).catch(() => undefined),
     ]);
     return { groups, plannerState: plannerState ?? undefined };
@@ -220,7 +220,7 @@ export async function fetchInitialPlannerSummaryData(projectId: string): Promise
       return {};
     }
     const [groups, plannerState] = await Promise.all([
-      loadWorkspaceProjectGroups(user.id, supabase).catch(() => undefined),
+      loadWorkspaceProjectGroups(user.id, supabase, "product").catch(() => undefined),
       loadPlannerSummaryStateFromSupabase(projectId, supabase).catch(() => undefined),
     ]);
     return { groups, plannerState: plannerState ?? undefined };

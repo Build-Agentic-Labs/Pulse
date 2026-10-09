@@ -23,7 +23,7 @@ export const SPACE_META: Record<SpaceKey, { name: string; desc: string }> = {
 export function spaceHref(space: SpaceKey, preferredProjectId?: string): string | undefined {
   switch (space) {
     case "product":
-      return preferredProjectId ? `/projects/${preferredProjectId}/planner?view=dashboard` : undefined;
+      return preferredProjectId ? `/projects/${preferredProjectId}/planner?view=dashboard` : "/awi";
     case "planning":
       return "/planning";
     case "production":

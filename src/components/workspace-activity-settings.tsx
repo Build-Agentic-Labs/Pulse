@@ -63,6 +63,10 @@ function describeEntry(
       if (op === "delete") return `cleared ${target}'s access to ${projectName}`;
       return `set ${target}'s access to ${projectName} to ${detailText(next.level) || "none"}`;
     }
+    case "product_module_access": {
+      if (op === "delete") return `cleared ${target}'s Product Module access`;
+      return `set ${target}'s Product Module access to ${detailText(next.level) || "none"}`;
+    }
     case "org_tool_access": {
       if (op === "delete") return `cleared ${target}'s Quality Module access`;
       return `set ${target}'s Quality Module access to ${detailText(next.level) || "none"}`;

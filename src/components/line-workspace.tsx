@@ -773,8 +773,12 @@ export function LineWorkspace({
     currentAllocationRecommendationKey && dismissedPlanningRecommendationKey === currentAllocationRecommendationKey
       ? []
       : currentAllocationRecommendations;
-  const activeProjectContext = derivedState.project ?? projectContext;
-  // Per-project view-only access. RLS already rejects these writes server-side; gating
+  // The route gate revalidates Product access on tab return. Prefer its current
+  // context to the permission captured inside an older planner snapshot.
+  const activeProjectContext = projectContext?.projectId === derivedState.project?.projectId
+    ? projectContext
+    : derivedState.project ?? projectContext;
+  // Module-wide view-only access. RLS already rejects these writes server-side; gating
   // here keeps the UI honest instead of letting edits look saved and silently vanish.
   const isViewOnlyAccess = Boolean(
     activeProjectContext &&
@@ -1339,7 +1343,7 @@ export function LineWorkspace({
     if (!commandPaletteOpen) {
       return;
     }
-    void loadWorkspaceProjectGroups()
+    void loadWorkspaceProjectGroups(undefined, undefined, "product")
       .then((groups) =>
         setPaletteProjects(
           groups.flatMap((group) =>

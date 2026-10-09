@@ -51,18 +51,11 @@ export async function loadProjectContext(
     role = memberRole ?? "owner";
     accessLevel = "edit";
   } else {
-    const level = userData.user
-      ? await fetchProjectAccessLevel(supabase, String(project.id), userData.user.id)
-      : undefined;
-    if (level === undefined) {
-      // Access model not available yet — fall back to legacy workspace role.
-      role = memberRole;
-    } else {
-      accessLevel = level;
-      // Reuse role-based edit gating: edit -> editor, view -> viewer, none -> no access.
-      role = level === "edit" ? "editor" : level === "view" ? "viewer" : undefined;
-    }
+    accessLevel = await fetchProductAccess(String(workspace.id), supabase);
+    role = accessLevel === "edit" ? "editor" : accessLevel === "view" ? "viewer" : undefined;
   }
+
+  if (accessLevel === "none") throw new Error("Product access is required.");
 
   return {
     isAwiMaster: project.is_awi_master,
@@ -105,27 +98,23 @@ export function fetchIsSuperAdmin(
   return trackedCheck;
 }
 
-// The signed-in user's access level for a single project. Returns undefined when the
-// project_access table doesn't exist yet (pre-migration) so callers can fall back to
-// legacy role-based behavior.
-async function fetchProjectAccessLevel(
-  supabase: ReturnType<typeof plannerClient>,
-  projectId: string,
-  userId: string,
-): Promise<AccessLevel | undefined> {
-  const { data, error } = await supabase
-    .from("project_access")
-    .select("level")
-    .eq("project_id", projectId)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) {
-    if (isMissingRelationError(error)) {
-      return undefined;
-    }
-    throw error;
-  }
-  return normalizeAccessLevel(data?.level);
+/** Product permission is resolved by the database, including manager inheritance. */
+export async function fetchProductAccess(
+  workspaceId: string,
+  supabase: ReturnType<typeof plannerClient> = plannerClient(),
+): Promise<AccessLevel> {
+  return normalizeAccessLevel(await throwIfError(supabase.rpc("product_access_level", { p_workspace_id: workspaceId })));
+}
+
+export async function setProductAccessInSupabase(
+  workspaceId: string, userId: string, level: AccessLevel, client?: ReturnType<typeof plannerClient>,
+): Promise<void> {
+  const supabase = client ?? plannerClient();
+  const { data } = await getUserFromSession(supabase);
+  await throwIfError(supabase.from("product_module_access").upsert(
+    { workspace_id: workspaceId, user_id: userId, level, granted_by: data.user?.id ?? null },
+    { onConflict: "workspace_id,user_id" },
+  ));
 }
 
 // The signed-in user's full project-access map (projectId -> level). Returns undefined when

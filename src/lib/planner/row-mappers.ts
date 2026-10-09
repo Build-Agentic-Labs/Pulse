@@ -153,6 +153,7 @@ export function mapWorkspaceAccessGrant(row: Record<string, unknown>): Workspace
     email: String(row.email ?? ""),
     role: String(row.role ?? "editor") as WorkspaceRole,
     qualityAccess: normalizeAccessLevel(row.quality_access),
+    productAccess: normalizeAccessLevel(row.product_access),
     accessPackage: String(row.access_package ?? "custom"),
     planningAccess: Boolean(row.planning_access),
     projectAccess: mapInviteProjectAccess(row.project_access),

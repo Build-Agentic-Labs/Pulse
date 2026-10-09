@@ -1,5 +1,7 @@
 "use client";
 
+import { effectiveProductAccess } from "@/domain/product-access";
+
 import { ArrowRight } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { useEffect, useState } from "react";
@@ -156,7 +158,7 @@ export function CompanyDashboard({ groups, displayName, preferredProjectId }: Da
     desc: SPACE_META[space].desc,
     href: spaceHref(space, preferredProjectId),
     soonLabel: spaceDisabledLabel(space),
-    lockedLabel: space === "planning" && planningLocked ? "Restricted" : undefined,
+    lockedLabel: (space === "planning" && planningLocked) || (space === "product" && !groups.some((group) => effectiveProductAccess(group) !== "none")) ? "Restricted" : undefined,
     project: space === "product" ? preferredProject : undefined,
   }));
 

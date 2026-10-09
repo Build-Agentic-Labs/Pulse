@@ -14,6 +14,7 @@ async function fixture(context:BrowserContext){
  const made=await admin.auth.admin.createUser({email,password,email_confirm:true});if(made.error)throw made.error;
  const user=made.data.user.id;
  await pool.query("insert into workspace_members(workspace_id,user_id,role) values($1,$2,'editor')",[ws,user]);
+ await pool.query("insert into product_module_access(workspace_id,user_id,level) values($1,$2,'edit')",[ws,user]);
  const client=createServerClient(api,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[],setAll:async cookies=>{
  await context.addCookies(cookies.map(({name,value})=>({name,value,domain:'127.0.0.1',path:'/',sameSite:'Lax' as const})));}}});
  const signed=await client.auth.signInWithPassword({email,password});if(signed.error)throw signed.error;

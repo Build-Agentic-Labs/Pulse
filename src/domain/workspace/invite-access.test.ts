@@ -41,6 +41,7 @@ describe("workspace invitation access", () => {
       accessPackage: "industrial_engineer",
       qualityAccess: "edit",
       planningAccess: true,
+      productAccess: "none",
       projectAccess: [],
       departmentAccess: [
         { departmentId: "pro-1", role: "author", positionTitle: "Industrial Engineer" },

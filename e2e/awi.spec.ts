@@ -13,7 +13,7 @@ let user: string;
 let email: string;
 let pageErrors: string[];
 
-async function authenticate(context: BrowserContext) {
+async function authenticate(context: BrowserContext, signInEmail = email) {
   const client = createServerClient(api, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       getAll: () => [],
@@ -22,7 +22,7 @@ async function authenticate(context: BrowserContext) {
       },
     },
   });
-  const { error } = await client.auth.signInWithPassword({ email, password });
+  const { error } = await client.auth.signInWithPassword({ email: signInEmail, password });
   if (error) throw error;
 }
 async function saved(page: Page) {
@@ -179,6 +179,7 @@ test.beforeEach(async ({ context, page }) => {
   if (error) throw error;
   user = data.user.id;
   await db.query('insert into workspace_members(workspace_id,user_id,role) values($1,$2,$3) on conflict(workspace_id,user_id) do update set role=excluded.role', [workspace, user, 'editor']);
+  await db.query("insert into product_module_access(workspace_id,user_id,level) values($1,$2,'edit')", [workspace, user]);
   await authenticate(context);
 });
 test.afterEach(() => { expect(pageErrors, 'Uncaught browser errors').toEqual([]); });
@@ -310,8 +311,7 @@ test('publishes a fixed revision and keeps later edits as draft changes', async 
   await edit(page, original);
   // Supply required readiness data through the actual builder controls.
   await releaseReadiness(page);
-  await page.getByRole('button', { name: 'Work Instructions', exact: true }).click();
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: /^3.*Release$/ }).click();
   await page.getByLabel('What changed in this revision').fill('Initial release');
   await page.getByRole('button', { name: 'Release Rev A', exact: true }).click();
@@ -335,13 +335,12 @@ test('publishes a fixed revision and keeps later edits as draft changes', async 
 test('failed revision reads block release and allow a safe retry', async ({ page }) => {
   await createDraft(page);
   await page.route('**/rest/v1/work_instruction_releases?*', (route) => route.abort());
-  await page.getByRole('button', { name: 'Work Instructions', exact: true }).click();
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'Unable to load revision history' })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Release', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
   await page.unroute('**/rest/v1/work_instruction_releases?*');
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
@@ -524,7 +523,7 @@ test('AWI and product navigation avoids duplicate workspace read bursts', async 
   page.on('request', (request) => {
     const url = new URL(request.url());
     if (url.origin === api && request.method() === 'GET' &&
-      /^\/rest\/v1\/(workspace_members|project_access|workspaces|projects)$/.test(url.pathname)) {
+      /^\/rest\/v1\/(workspace_members|product_module_access|project_access|workspaces|projects)$/.test(url.pathname)) {
       workspaceReads.push(url.pathname);
     }
   });
@@ -627,19 +626,16 @@ test('procedure media loads without downloading the task content again', async (
   }
   console.log('Procedure media measurements (decoded task JSON bytes):', JSON.stringify(measurements));
   expect(Math.max(...measurements.map((item) => item.taskBytes))).toBeLessThan(1024);
-  // Open directly into document control without first visiting Procedure.
-  // This separate consumer must freeze the same annotated photo on release.
+  // Open a fresh browser and publish through the current AWI builder control.
+  // The release must freeze the same annotated photo after its lazy load.
   const fresh = await browser.newContext();
   try {
     await authenticate(fresh);
     const control = await fresh.newPage();
     control.on('pageerror', (error) => pageErrors.push(error.message));
-    const target = new URL(url);
-    target.searchParams.set('view', 'work-instructions');
-    await control.goto(target.href);
-    await expect(control.getByRole('heading', { name: 'Work Instructions', exact: true })).toBeVisible();
+    await control.goto(url);
     await saved(control);
-    await control.getByRole('button', { name: 'Release', exact: true }).click();
+    await control.getByRole('button', { name: 'Publish', exact: true }).click();
     await control.getByRole('dialog').getByRole('button', { name: /^3.*Release$/ }).click();
     await control.getByLabel('What changed in this revision').fill('Release with lazily loaded annotated photo');
     await control.getByRole('button', { name: 'Release Rev A', exact: true }).click();
@@ -758,10 +754,9 @@ test('AWI and product opening trace keeps access checks off a serial waterfall',
 test('a fresh AWI opening respects a changed view-only permission', async ({ page, browser }) => {
   const url = await createDraft(page);
   await edit(page, 'Preserve this instruction when author access changes.');
-  const projectId = (await db.query('select project_id from awi_masters where workspace_id=$1', [workspace])).rows[0].project_id;
   await page.goto(`/awi?workspace=${workspace}`);
   await expect(page.getByRole('heading', { name: 'AWI Master List', exact: true })).toBeVisible();
-  await db.query("update project_access set level='view' where project_id=$1 and user_id=$2", [projectId, user]);
+  await db.query("update product_module_access set level='view' where workspace_id=$1 and user_id=$2", [workspace, user]);
   const fresh = await browser.newContext();
   try {
     await authenticate(fresh);
@@ -782,14 +777,61 @@ test('a fresh AWI opening respects a changed view-only permission', async ({ pag
       if (path.startsWith('/rest/v1/') && !readRpc &&
           ['POST', 'PATCH', 'DELETE'].includes(request.method())) writes.push(request.url());
     });
-    // Existing procedure controls allow a local edit; the permission guard must
-    // stop it before any database write, with feedback explaining the restriction.
-    await instruction.fill('A view-only change must not overwrite the saved instruction.');
-    await instruction.blur();
-    await expect(opened.getByText("You can browse this project, but changes are not saved. Ask an organization admin for edit access.", { exact: true })).toBeVisible();
+    await expect(instruction).not.toBeEditable();
+    await expect(opened.getByRole('button', { name: 'Add Step', exact: true })).toBeDisabled();
     // Observe beyond the edit debounce so a delayed write cannot pass unnoticed.
     await opened.waitForTimeout(1000);
     expect(writes).toEqual([]);
     expect((await db.query('select s.instruction from manufacturing_steps s join awi_masters m on m.task_id=s.task_id where m.workspace_id=$1', [workspace])).rows[0]?.instruction).toBe('Preserve this instruction when author access changes.');
   } finally { await fresh.close(); }
+});
+
+test('Product module shares another author AWI with View and Edit and enforces revocation', async ({ page, browser }) => {
+  const url = await createDraft(page, 'AWI-SHARED');
+  await edit(page, 'Instruction created by the first author.');
+  const teammateEmail = `teammate-${randomUUID()}@awi-browser.test`;
+  const made = await admin.auth.admin.createUser({ email: teammateEmail, password, email_confirm: true, user_metadata: { full_name: "Product Teammate" } });
+  if (made.error) throw made.error;
+  const teammate = made.data.user.id;
+  await db.query("insert into workspace_members(workspace_id,user_id,role) values($1,$2,'editor') on conflict(workspace_id,user_id) do update set role='editor'", [workspace, teammate]);
+  await db.query("insert into product_module_access(workspace_id,user_id,level) values($1,$2,'view')", [workspace, teammate]);
+  const shared = await browser.newContext();
+  try {
+    await authenticate(shared, teammateEmail);
+    const other = await shared.newPage();
+    other.on('pageerror', (error) => pageErrors.push(error.message));
+    await other.goto(`/awi?workspace=${workspace}`);
+    await expect(other.getByRole('link').filter({ hasText: 'AWI-SHARED' })).toBeVisible();
+    await expect(other.getByRole('button', { name: 'Add AWI', exact: true })).toHaveCount(0);
+    await other.getByRole('link').filter({ hasText: 'AWI-SHARED' }).click();
+    await expect(other.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toHaveValue('Instruction created by the first author.');
+    await expect(other.getByText('[View-only access]', { exact: true })).toBeVisible();
+    await expect(other.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).not.toBeEditable();
+    await other.getByRole('button', { name: 'Revisions', exact: true }).click();
+    await expect(other.getByRole('dialog')).toBeVisible();
+    await other.getByRole('button', { name: 'Close document control', exact: true }).click();
+    await other.screenshot({ path: test.info().outputPath('product-shared-view.png'), fullPage: true });
+    expect((await db.query('select count(*)::int n from project_access where user_id=$1', [teammate])).rows[0].n).toBe(0);
+    await db.query("update product_module_access set level='edit' where workspace_id=$1 and user_id=$2", [workspace, teammate]);
+    await other.reload();
+    await expect(other.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toBeEditable();
+    await edit(other, 'Updated by the second Product editor.');
+    await db.query("update product_module_access set level='view' where workspace_id=$1 and user_id=$2", [workspace, teammate]);
+    await other.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(other.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).not.toBeEditable();
+    await db.query("update product_module_access set level='none' where workspace_id=$1 and user_id=$2", [workspace, teammate]);
+    await other.goto(`/awi?workspace=${workspace}`);
+    await expect(other.getByRole('heading', { name: 'Product access required' })).toBeVisible();
+    await other.goto(url);
+    await expect(other.getByRole('textbox', { name: 'Step 1 instruction', exact: true })).toHaveCount(0);
+  } finally { await shared.close(); }
+});
+
+test('Product opens an empty portfolio and a new AWI without per-project grants', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: /Product Line design/ })).toBeVisible();
+  await page.getByRole('link', { name: /Product Line design/ }).click();
+  await expect(page.getByRole('heading', { name: 'AWI Master List', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add AWI', exact: true })).toBeVisible();
+  expect((await db.query('select count(*)::int n from project_access where user_id=$1', [user])).rows[0].n).toBe(0);
 });

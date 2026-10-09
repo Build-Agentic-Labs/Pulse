@@ -1,8 +1,11 @@
 # Pulse structure audit — modular-refactoring priorities
 
-**Date:** 2026-10-08  
-**Base:** local `main` at `e47add7` (refactor: clarify workflow ownership and module contracts), verified present.  
-**Mode:** read-only. No application code, dependencies, database, or hosted environment was touched. This file is the only artifact.  
+**Date:** 2026-10-08
+
+**Base:** local `main` at `e47add7` (refactor: clarify workflow ownership and module contracts), verified present.
+
+**Mode:** read-only. No application code, dependencies, database, or hosted environment was touched. This file is the only artifact.
+
 **Method:** five parallel read-only reviews (SOP editor cluster, mobile capture, planner + Gantt, photo annotation viewer, repo-wide scan), each required to cite lines. Every defect and every top-ranked structural claim below was then re-read against source by the lead before inclusion. Items marked **[lead-verified]** were independently confirmed line by line; the rest were reviewed for plausibility but not re-executed.
 
 **Scope note (2026-10-09):** the Planning space (work orders, SKU configurations, `src/lib/planning/*`, `src/components/planning/*`) is excluded from this audit by owner decision; that space is slated for removal. Findings that touched it were dropped from this report. **SOP approval routing** (routing state owner, workflow-view derivation, the remaining approval writes, and their defects) is also parked by owner decision: a dedicated harness for it will be built later. A one-line pointer remains in §3.1 so the material is not lost.

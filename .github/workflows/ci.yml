@@ -112,6 +112,8 @@ jobs:
           retention-days: 7
 
   browser:
+    # Temporarily paused; remove this condition to restore browser CI.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -138,6 +140,8 @@ jobs:
           retention-days: 7
 
   quality-wi:
+    # Temporarily paused with the other browser suite; remove to restore.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

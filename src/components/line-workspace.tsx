@@ -1,5 +1,6 @@
 "use client";
 
+import { requestIeSmartAllocationPlan } from "@/lib/planner/smart-allocation-client";
 import { AwiEditorActions } from "./awi-editor-actions";
 import { settleWriteBatch } from "@/domain/workspace-save-status";
 import { useProcedureDrafts } from "./line-workspace/use-procedure-drafts";
@@ -118,7 +119,6 @@ import {
 } from "@/domain/task-scheduling";
 import { optimizeLine as runLineOptimization } from "@/domain/joint-scheduler";
 import {
-  createPlannerSupabaseClient,
   duplicateScenario,
   listSopSummariesFromSupabase,
   type SopSummary,
@@ -209,35 +209,7 @@ const playbackSpeeds = [
   { label: "1h/s", value: 60 },
 ];
 
-async function requestIeSmartAllocationPlan(request: IeSmartAllocationRequest): Promise<IeSmartAllocationPlan> {
-  const supabase = createPlannerSupabaseClient();
-  const { data } = await supabase.auth.getSession();
-  const accessToken = data.session?.access_token;
 
-  if (!accessToken) {
-    throw new Error("Sign in before running smart allocation.");
-  }
-
-  const response = await fetch("/api/smart-allocation", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(request),
-  });
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(typeof payload.error === "string" ? payload.error : "Smart allocation agent failed.");
-  }
-
-  if (!payload.plan) {
-    throw new Error("Smart allocation agent did not return a plan.");
-  }
-
-  return payload.plan as IeSmartAllocationPlan;
-}
 
 
 

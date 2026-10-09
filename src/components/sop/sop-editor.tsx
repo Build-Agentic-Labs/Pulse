@@ -4,8 +4,7 @@ import { useCoalescedRefresh } from "@/lib/use-coalesced-refresh";
 
 import { kickSopNotifications } from "@/lib/sop/notify-kick";
 
-import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Pencil, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
-import Link from "next/link";
+import { Check, ChevronLeft, ChevronRight, Download, FileText, History, Loader2, MessageSquare, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -20,12 +19,12 @@ import {
   type ReactNode,
 } from "react";
 import { useConfirm } from "@/components/confirm-provider";
-import { ThemedSelect } from "@/components/themed-select";
+
 import type { Department, DeptRole } from "@/domain/departments";
 import { draftReviewGate } from "@/domain/sop/review-gate";
-import { linkedSopLabel, rasicLegend, SOP_STATUS_LABELS, type Sop, type SopLinkedSop, type SopReferenceDoc } from "@/domain/sop/schema";
+import { type Sop, type SopReferenceDoc } from "@/domain/sop/schema";
 import { listDecisionBranchRequirements } from "@/domain/sop/procedure-validation";
-import { nextVersionLabel, versionLabel, type ChangeSignificance } from "@/domain/sop/version";
+import { type ChangeSignificance } from "@/domain/sop/version";
 import { authoringMode, DEFAULT_DOC_TYPE, documentNumberLabel } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
@@ -62,13 +61,22 @@ import {
   openSopAnnexFile,
   removeSopAnnexFile,
   renameSopAnnexFile,
-  SOP_ANNEX_FILE_ACCEPT,
   uploadSopAnnexFile,
   type SopAnnexFile,
 } from "@/lib/sop/annex-files";
+import { AnnexesEditor, type AnnexUploadStatus } from "./editor/annexes-editor";
+import { ReferenceLibraryEditor } from "./editor/reference-library-editor";
+import { formatReviewDate } from "./editor/editor-formatting";
+import { SopDocumentSection } from "./editor/document-section";
+import { SopOverviewSection } from "./editor/overview-section";
+import { SopProcedureSection } from "./editor/procedure-section";
+import { SopApprovalsSection } from "./editor/approvals-section";
+import { SopQualitySection } from "./editor/quality-section";
+import { Section, StringListEditor, PairListEditor, SystemChangeHistory } from "./editor/editor-fields";
+import type { SopPatch } from "./editor/editor-types";
 import { SopShell } from "./sop-shell";
 import { AutoTextarea } from "./auto-textarea";
-import { ProcessFlowchart } from "./process-flowchart";
+
 import { ResponsiblePersonsField } from "./responsible-persons-field";
 import { SopDetailLoadingState } from "./sop-detail-loading-state";
 import { SopPrintPreview } from "./sop-print-preview";
@@ -77,7 +85,7 @@ import { QUEUE_ORIGIN_PARAM, QUEUE_ORIGIN_VALUE, REVIEW_QUEUE_HREF } from "@/dom
 import type { MarginNote } from "./sop-margin-notes";
 import { ReferencePdfPreview } from "./reference-pdf-preview";
 import { SopQualityApprovalWorkspace } from "./sop-quality-approval-workspace";
-import { SopRosterEditor } from "./sop-roster-editor";
+
 import { SopSearch } from "./sop-search";
 import {
   clearSopSearchMatch,
@@ -184,27 +192,13 @@ function stepFilled(sop: Sop, id: StepId): boolean {
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
-type SopPatch = Partial<Sop> | ((current: Sop) => Partial<Sop>);
 
-type AnnexUploadStatus = {
-  annexId: string;
-  phase: "saving" | "uploading" | "success" | "error";
-  message: string;
-};
+
 
 /** Debounce for autosave: persist this long after the last edit settles. */
 const AUTOSAVE_DELAY_MS = 2000;
 
-function newAnnexId(sopId: string): string {
-  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  return `${sopId}-annex-${suffix}`;
-}
-function formatReviewDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
-}
+
 
 function withAnnexIds(sop: Sop): Sop {
   return {
@@ -2062,105 +2056,21 @@ export function SopEditor({
             </div>
 
             {step.id === "document" ? (
-              <div className={`grid min-h-[calc(100dvh-8rem)] gap-6 py-8 ${builderHasFeedback ? "xl:grid-cols-[minmax(0,16rem)_minmax(0,56rem)_minmax(0,16rem)]" : ""}`}>
-                <section
-                  className={`flex min-w-0 w-full flex-col px-2 py-4 sm:px-5 sm:py-8 ${builderHasFeedback ? "xl:col-start-2" : ""}`}
-                  data-review-attention={
-                    reviewCategoriesNeedingAttention.has("document") ||
-                    reviewCategoriesNeedingAttention.has("overall")
-                      ? "true"
-                      : undefined
-                  }
-                >
-                  <h2 className="border-b border-line pb-4 text-lg font-semibold leading-7 text-ink">Document</h2>
-                  <div className="mt-8 grid gap-x-12 gap-y-9 sm:grid-cols-2">
-                    {authMode && authMode.kind !== "blocked" ? (
-                      <DocumentField label="Owning department" className="sm:col-span-2">
-                        {authMode.kind === "choose" && !persistedUpdatedAt ? (
-                          <div
-                            className={canEdit ? "sop-document-select-shell" : "border-b border-line"}
-                          >
-                            <ThemedSelect
-                              variant="sop"
-                              ariaLabel="Owning department"
-                              value={deptId}
-                              disabled={!canEdit}
-                              triggerClassName="ui-sop-select-inline"
-                              options={authMode.departments.map((department) => ({
-                                value: department.id,
-                                label: `${department.code} · ${department.name}`,
-                              }))}
-                              onChange={setDeptId}
-                            />
-                          </div>
-                        ) : (
-                          <div className="sop-document-field flex items-center" aria-readonly="true">
-                            <span className="truncate">{selectedDept?.name ?? "—"}</span>
-                          </div>
-                        )}
-                      </DocumentField>
-                    ) : null}
-
-                    <DocumentField label="SOP number">
-                      <div className="sop-document-field flex items-center" aria-readonly="true">
-                        <span className="truncate">
-                          {/* The number is earned at release, so the placeholder stands for all of
-                              authoring and review -- "Assigned on save" was true only while the
-                              first save minted it. Without a department chosen there is not even a
-                              sequence to name yet. */}
-                          {selectedDept ? displaySopNumber : "Assigned at release"}
-                        </span>
-                      </div>
-                    </DocumentField>
-
-                    <DocumentField label="Title">
-                      <input
-                        className={`ui-field-standalone sop-document-field ${canEdit ? "sop-document-input" : ""}`}
-                        value={sop.meta.title}
-                        placeholder="QMS"
-                        disabled={!canEdit}
-                        onChange={(event) => update({ meta: { ...sop.meta, title: event.target.value } })}
-                      />
-                    </DocumentField>
-
-                    <DocumentField label="Version">
-                      <div className="sop-document-field flex items-center" aria-readonly="true">
-                        <span className="truncate">{controlledVersion}</span>
-                      </div>
-                    </DocumentField>
-
-                    <DocumentField label="Status">
-                      <div className="flex h-11 items-center">
-                        <span
-                          className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${
-                            sop.status === "approved"
-                              ? "bg-accent-subtle text-accent"
-                              : sop.status === "obsolete"
-                                ? "bg-danger-muted text-danger"
-                                : "bg-surface-muted text-ink-secondary"
-                          }`}
-                        >
-                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
-                          {SOP_STATUS_LABELS[sop.status]}
-                        </span>
-                      </div>
-                    </DocumentField>
-
-                    {approvalReviewCycle > 0 ? (
-                      <DocumentField label="Revision date">
-                        <input
-                          type="date"
-                          required
-                          className={`ui-field-standalone sop-document-field ${canEdit ? "sop-document-input" : ""}`}
-                          value={sop.meta.revisionDate}
-                          disabled={!canEdit}
-                          onChange={(event) => update({ meta: { ...sop.meta, revisionDate: event.target.value } })}
-                        />
-                      </DocumentField>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
+              <SopDocumentSection
+                builderHasFeedback={builderHasFeedback}
+                reviewCategoriesNeedingAttention={reviewCategoriesNeedingAttention}
+                authMode={authMode}
+                persistedUpdatedAt={persistedUpdatedAt}
+                canEdit={canEdit}
+                deptId={deptId}
+                setDeptId={setDeptId}
+                selectedDept={selectedDept}
+                displaySopNumber={displaySopNumber}
+                sop={sop}
+                update={update}
+                controlledVersion={controlledVersion}
+                approvalReviewCycle={approvalReviewCycle}
+                navigation={<div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -2192,72 +2102,34 @@ export function SopEditor({
                       Next
                       <ChevronRight size={14} />
                     </button>
-                  </div>
-                </section>
-                {builderHasFeedback ? <aside className="min-w-0 xl:col-start-3">{builderFeedback("document")}</aside> : null}
-              </div>
+                  </div>}
+                builderFeedback={builderFeedback}
+              />
             ) : null}
 
             {step.id === "overview" ? (
-              <>
-                <Section title="Purpose" reserveMargin={builderHasFeedback} feedback={builderFeedback("purpose")} reviewAttention={reviewCategoriesNeedingAttention.has("purpose")}>
-                  {sectionEditors.purpose}
-                </Section>
-                <Section title="Scope" reserveMargin={builderHasFeedback} feedback={builderFeedback("scope")} reviewAttention={reviewCategoriesNeedingAttention.has("scope")}>
-                  {sectionEditors.scope}
-                </Section>
-                <Section title="Definitions" reserveMargin={builderHasFeedback} feedback={builderFeedback("definitions")} reviewAttention={reviewCategoriesNeedingAttention.has("definitions")}>
-                  {sectionEditors.definitions}
-                </Section>
-                <Section title="References" reserveMargin={builderHasFeedback} feedback={builderFeedback("references")} hideHeading reviewAttention={reviewCategoriesNeedingAttention.has("references")}>
-                  {sectionEditors.references}
-                </Section>
-              </>
+              <SopOverviewSection
+                builderHasFeedback={builderHasFeedback}
+                builderFeedback={builderFeedback}
+                reviewCategoriesNeedingAttention={reviewCategoriesNeedingAttention}
+                sectionEditors={sectionEditors}
+              />
             ) : null}
 
             {step.id === "procedure" ? (
-              <>
-                <Section
-                  title="Responsible person(s)"
-                  reviewAttention={reviewCategoriesNeedingAttention.has("responsible")}
-                  reserveMargin={builderHasFeedback} feedback={builderFeedback("responsible")}
-                >
-                  {sectionEditors.responsible}
-                </Section>
-                <Section
-                  title="Measurement (KPIs)"
-                  reviewAttention={reviewCategoriesNeedingAttention.has("measurements")}
-                  reserveMargin={builderHasFeedback} feedback={builderFeedback("measurements")}
-                >
-                  {sectionEditors.measurements}
-                </Section>
-                <Section title="Procedure" reserveMargin={builderHasFeedback} feedback={builderFeedback("procedure")} reviewAttention={reviewCategoriesNeedingAttention.has("procedure")}>
-                  <Field label="Process flow description" optional>
-                    <AutoTextarea
-                      className="ui-field-standalone min-h-16 py-2"
-                      value={sop.procedure.processFlowDescription}
-                      placeholder="Describe the process flow"
-                      disabled={!canEdit}
-                      onChange={(event) =>
-                        update({ procedure: { ...sop.procedure, processFlowDescription: event.target.value } })
-                      }
-                    />
-                  </Field>
-                  <p className="ui-mono-label mt-3 text-ink-tertiary">
-                    RASIC — {rasicLegend()}
-                  </p>
-                  <ProcessFlowchart
-                    roles={sop.procedure.roles}
-                    activities={sop.procedure.activities}
-                    departments={approvalDepartments}
-                    owningDepartmentId={selectedDepartmentId}
-                    workspaceRoleNames={workspaceRoleNames}
-                    onCreateRole={handleCreateRasicRole}
-                    disabled={!canEdit}
-                    onChange={(roles, activities) => update({ procedure: { ...sop.procedure, roles, activities } })}
-                  />
-                </Section>
-              </>
+              <SopProcedureSection
+                builderHasFeedback={builderHasFeedback}
+                builderFeedback={builderFeedback}
+                reviewCategoriesNeedingAttention={reviewCategoriesNeedingAttention}
+                sectionEditors={sectionEditors}
+                sop={sop}
+                canEdit={canEdit}
+                update={update}
+                approvalDepartments={approvalDepartments}
+                selectedDepartmentId={selectedDepartmentId}
+                workspaceRoleNames={workspaceRoleNames}
+                handleCreateRasicRole={handleCreateRasicRole}
+              />
             ) : null}
 
             {step.id === "annexes" ? (
@@ -2291,52 +2163,20 @@ export function SopEditor({
             ) : null}
 
             {step.id === "approvals" ? (
-              <>
-                {approvalRoutingError ? (
-                  <div className="ui-notice ui-notice-warn px-4 py-3 text-xs">{approvalRoutingError}</div>
-                ) : null}
-                {approvalRoutingLoading ? (
-                  <section className="ui-panel flex min-h-32 items-center justify-center">
-                    <Loader2 size={18} className="animate-spin text-ink-tertiary" />
-                  </section>
-                ) : hasPersistedSop && canEdit ? (
-                  <SopRosterEditor
-                    sopId={sop.id}
-                    authorId={approvalAuthorId ?? undefined}
-                    departments={approvalDepartments}
-                    seats={approvalSeats}
-                    myDeptRoles={approvalMyDeptRoles}
-                    owningDepartmentId={selectedDepartmentId || undefined}
-                    convertedApprovals={sop.source === "converted" ? sop.approvals : undefined}
-                    onMapApproval={handleMapApproval}
-                    onChanged={() => refreshApprovalRouting({ background: true, force: true })}
-                  />
-                ) : (
-                  <section className="ui-panel overflow-hidden">
-                    <div className="border-b border-line px-4 py-3 ui-mono-label text-ink-tertiary">
-                      Approval routing
-                    </div>
-                    <div className="divide-y divide-line">
-                      {approvalSeats.length ? approvalSeats.map((seat) => {
-                        const department = approvalDepartments.find((item) => item.id === seat.departmentId);
-                        return (
-                          <div key={seat.departmentId} className="flex items-center gap-3 px-4 py-3 text-sm">
-                            <span className="ui-chip">{department?.code ?? "—"}</span>
-                            <span className="min-w-0 flex-1 truncate">{department?.name ?? "Unknown department"}</span>
-                            <span className="ui-mono-label text-ink-tertiary">Required approval</span>
-                          </div>
-                        );
-                      }) : (
-                        <p className="px-4 py-8 text-center text-xs text-ink-tertiary">
-                          {hasPersistedSop
-                            ? "No department routing configured."
-                            : "Save the draft to configure department routing."}
-                        </p>
-                      )}
-                    </div>
-                  </section>
-                )}
-              </>
+              <SopApprovalsSection
+                approvalRoutingError={approvalRoutingError}
+                approvalRoutingLoading={approvalRoutingLoading}
+                hasPersistedSop={hasPersistedSop}
+                canEdit={canEdit}
+                sop={sop}
+                approvalAuthorId={approvalAuthorId}
+                approvalDepartments={approvalDepartments}
+                approvalSeats={approvalSeats}
+                approvalMyDeptRoles={approvalMyDeptRoles}
+                selectedDepartmentId={selectedDepartmentId}
+                handleMapApproval={handleMapApproval}
+                refreshApprovalRouting={refreshApprovalRouting}
+              />
             ) : null}
 
             {step.id === "draftReview" ? (
@@ -2386,179 +2226,21 @@ export function SopEditor({
             ) : null}
 
             {step.id === "qualityApproval" ? (
-              <div className="space-y-5">
-                <section className="ui-panel overflow-hidden">
-                  <div className="flex flex-wrap items-start justify-between gap-4 px-4 py-4">
-                    <div className="flex min-w-0 items-start gap-3">
-                      {sop.status === "effective" ? (
-                        <CircleCheck size={17} className="mt-0.5 shrink-0 text-emerald-700" />
-                      ) : (
-                        <ShieldCheck size={17} className="mt-0.5 shrink-0 text-sky-700" />
-                      )}
-                      <div>
-                        <h2 className="ui-setup-section-title">Quality approval</h2>
-                        <p className="mt-1 text-xs leading-5 text-ink-tertiary">
-                          {sop.status === "effective"
-                            ? "Quality signed the controlled document and released it to the Effective Library."
-                            : "Every stakeholder has signed. Quality must verify the controlled PDF, add the final signature, and release it."}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`ui-chip shrink-0 ${
-                      sop.status === "effective"
-                        ? "border-emerald-600 text-emerald-700"
-                        : "border-sky-600 text-sky-700"
-                    }`}>
-                      {sop.status === "effective" ? "Effective" : "Awaiting Quality"}
-                    </span>
-                  </div>
-
-                  {qualitySignature ? (
-                    <div className="flex items-center gap-3 border-t border-line px-4 py-3">
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-600" aria-hidden />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-ink">
-                          {qualitySignature.signerName || "Quality approver"}
-                        </p>
-                        <p className="mt-0.5 text-xs text-ink-tertiary">Quality final signature</p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-xs font-medium text-emerald-700">Signed</p>
-                        <p className="mt-0.5 text-[11px] tabular-nums text-ink-tertiary">
-                          {formatReviewDate(qualitySignature.signedAt)}
-                        </p>
-                      </div>
-                    </div>
-                  ) : null}
-                </section>
-
-                {isCurrentUserAuthor && canEditPermission && sop.status === "effective" ? (
-                  <section className="ui-panel overflow-hidden">
-                    <div className="border-b border-line px-4 py-4">
-                      <h2 className="ui-setup-section-title">Start a controlled change</h2>
-                      <p className="mt-1 max-w-2xl text-xs leading-5 text-ink-tertiary">
-                        Only you, as the recorded author, can reopen this effective SOP. Choose how the version
-                        should advance; the system will add the change-history entry automatically.
-                      </p>
-                    </div>
-                    <div className="space-y-4 px-4 py-4">
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {([
-                          {
-                            kind: "MINOR" as const,
-                            title: "Amendment",
-                            description: "A focused correction or clarification.",
-                          },
-                          {
-                            kind: "MAJOR" as const,
-                            title: "New revision",
-                            description: "A substantive process or responsibility change.",
-                          },
-                        ]).map((option) => {
-                          const selected = controlledChangeKind === option.kind;
-                          return (
-                            <button
-                              key={option.kind}
-                              type="button"
-                              aria-pressed={selected}
-                              className={`rounded-lg border px-3 py-3 text-left transition-colors motion-reduce:transition-none ${
-                                selected
-                                  ? "border-ink bg-ink text-canvas"
-                                  : "border-line bg-canvas text-ink hover:border-ink-tertiary"
-                              }`}
-                              onClick={() => setControlledChangeKind(option.kind)}
-                            >
-                              <span className="flex items-center justify-between gap-3">
-                                <span className="text-sm font-medium">{option.title}</span>
-                                <span className={`ui-mono-label ${selected ? "text-canvas/70" : "text-ink-tertiary"}`}>
-                                  {nextVersionLabel(sop.meta.version, option.kind)}
-                                </span>
-                              </span>
-                              <span className={`mt-1 block text-xs leading-5 ${selected ? "text-canvas/70" : "text-ink-tertiary"}`}>
-                                {option.description}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {controlledChangeKind ? (
-                        <form
-                          className="space-y-3 border-t border-line pt-4"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            void handleStartControlledChange();
-                          }}
-                        >
-                          <label className="block">
-                            <span className="ui-field-label">Reason for change</span>
-                            <AutoTextarea
-                              className="ui-field-standalone mt-2 min-h-24"
-                              value={controlledChangeReason}
-                              placeholder="Describe what is changing and why."
-                              onChange={(event) => setControlledChangeReason(event.target.value)}
-                              disabled={startingControlledChange}
-                            />
-                          </label>
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <p className="text-[11px] leading-4 text-ink-tertiary">
-                              {controlledChangeKind === "MINOR"
-                                ? `This amendment creates ${nextVersionLabel(sop.meta.version, "MINOR")}.`
-                                : `This revision creates ${nextVersionLabel(sop.meta.version, "MAJOR")} and requires retraining review.`}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                className="ui-btn-ghost h-9 px-3"
-                                onClick={() => {
-                                  setControlledChangeKind(null);
-                                  setControlledChangeReason("");
-                                }}
-                                disabled={startingControlledChange}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="submit"
-                                className="ui-btn-primary h-9 gap-2 px-4 disabled:opacity-50"
-                                disabled={!controlledChangeReason.trim() || startingControlledChange}
-                              >
-                                {startingControlledChange ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                                {startingControlledChange
-                                  ? "Starting…"
-                                  : controlledChangeKind === "MINOR"
-                                    ? "Start amendment"
-                                    : "Start revision"}
-                              </button>
-                            </div>
-                          </div>
-                        </form>
-                      ) : null}
-                    </div>
-                  </section>
-                ) : null}
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    className="ui-btn-ghost h-9 gap-2 border border-line px-3"
-                    onClick={() => setPreviewing(true)}
-                  >
-                    <FileText size={14} />
-                    Preview signed PDF
-                  </button>
-                  {isCurrentUserQualityApprover && sop.status === "approved" ? (
-                    <button
-                      type="button"
-                      className="ui-btn-primary h-9 gap-2 px-4"
-                      onClick={() => setQualityApprovalOpen(true)}
-                    >
-                      <ShieldCheck size={14} />
-                      Review, sign & release
-                    </button>
-                  ) : null}
-                </div>
-              </div>
+              <SopQualitySection
+                sop={sop}
+                qualitySignature={qualitySignature}
+                isCurrentUserAuthor={isCurrentUserAuthor}
+                canEditPermission={canEditPermission}
+                controlledChangeKind={controlledChangeKind}
+                setControlledChangeKind={setControlledChangeKind}
+                handleStartControlledChange={handleStartControlledChange}
+                controlledChangeReason={controlledChangeReason}
+                setControlledChangeReason={setControlledChangeReason}
+                startingControlledChange={startingControlledChange}
+                setPreviewing={setPreviewing}
+                isCurrentUserQualityApprover={isCurrentUserQualityApprover}
+                setQualityApprovalOpen={setQualityApprovalOpen}
+              />
             ) : null}
 
             {/* Footer nav */}
@@ -2750,749 +2432,5 @@ export function SopEditor({
           />
         ) : null}
       </SopShell>
-  );
-}
-// ---------------------------------------------------------------------------
-// Layout helpers
-// ---------------------------------------------------------------------------
-
-function Section({
-  title,
-  hideHeading = false,
-  children,
-  reviewAttention = false,
-  feedback,
-  reserveMargin = false,
-}: {
-  title: string;
-  hideHeading?: boolean;
-  children: ReactNode;
-  reviewAttention?: boolean;
-  feedback?: ReactNode;
-  reserveMargin?: boolean;
-}) {
-  return (
-    <div className={`grid gap-4 ${reserveMargin ? "xl:grid-cols-[minmax(0,16rem)_minmax(0,56rem)_minmax(0,16rem)] xl:gap-6" : ""}`}>
-    <section
-      className={`min-w-0 border-b border-line bg-transparent px-5 py-4 transition-[border-color,background-color] duration-200 ${reserveMargin ? "xl:col-start-2" : ""}`}
-      style={reviewAttention ? {
-        borderColor: "var(--color-warn)",
-        backgroundColor: "color-mix(in srgb, var(--color-warn) 5%, var(--color-canvas))",
-      } : undefined}
-      data-review-attention={reviewAttention ? "true" : undefined}
-    >
-      {hideHeading ? null : <h2 className="ui-setup-section-title mb-3">{title}</h2>}
-      {children}
-    </section>
-    {feedback ? <aside className="min-w-0 py-4 xl:col-start-3">{feedback}</aside> : null}
-    </div>
-  );
-}
-function Field({
-  label,
-  optional = false,
-  children,
-}: {
-  label: string;
-  /**
-   * Marks a field the author may leave blank. Nothing enforces these fields anyway — this only
-   * says so, so a blank one doesn't read as unfinished work on a controlled document.
-   */
-  optional?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <label className="block">
-      <span className="ui-field-label">
-        {label}
-        {optional ? <span className="ml-1.5 font-normal text-ink-tertiary">(optional)</span> : null}
-      </span>
-      {children}
-    </label>
-  );
-}
-function DocumentField({
-  label,
-  children,
-  className = "",
-}: {
-  label: string;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <label className={`block min-w-0 ${className}`}>
-      <span className="ui-setup-section-title mb-2 block">{label}</span>
-      {children}
-    </label>
-  );
-}
-function RowDeleteButton({ onClick, title }: { onClick: () => void; title: string }) {
-  return (
-    <button
-      type="button"
-      className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary hover:text-danger"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-    >
-      <Trash2 size={13} />
-    </button>
-  );
-}
-function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
-  return (
-    <button type="button" className="ui-btn-ghost mt-2 h-8 gap-1.5 px-3" onClick={onClick}>
-      <Plus size={13} />
-      {label}
-    </button>
-  );
-}
-// ---------------------------------------------------------------------------
-// List editors
-// ---------------------------------------------------------------------------
-
-function ReferenceLibraryEditor({
-  references,
-  links,
-  docs,
-  files,
-  options,
-  loading,
-  error,
-  disabled = false,
-  uploading = false,
-  onChangeReferences,
-  onChangeLinks,
-  onUpload,
-  onOpenDoc,
-  onRemoveDoc,
-  onRenameDoc,
-}: {
-  references: string[];
-  links: SopLinkedSop[];
-  docs: SopReferenceDoc[];
-  /** Reference-doc id -> uploaded file (for open/remove and the "missing file" state). */
-  files: Map<string, SopAnnexFile>;
-  /** Workspace SOPs offered by the picker (the current SOP already excluded). */
-  options: SopListItem[];
-  loading: boolean;
-  error: string;
-  disabled?: boolean;
-  uploading?: boolean;
-  onChangeReferences: (references: string[]) => void;
-  onChangeLinks: (links: SopLinkedSop[]) => void;
-  onUpload: (file: File) => void;
-  onOpenDoc: (doc: SopReferenceDoc) => void;
-  onRemoveDoc: (doc: SopReferenceDoc) => void;
-  onRenameDoc: (id: string, name: string) => void;
-}) {
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [composerMode, setComposerMode] = useState<"sop" | "text">("sop");
-  const [typedReference, setTypedReference] = useState("");
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
-  function saveReferenceName() {
-    if (disabled || !renaming?.name.trim()) return;
-    onRenameDoc(renaming.id, renaming.name.trim());
-    setRenaming(null);
-  }
-  const available = options.filter((option) => !links.some((link) => link.sopId === option.id));
-
-  function addTypedReference() {
-    const value = typedReference.trim();
-    if (!value) return;
-    onChangeReferences([...references, value]);
-    setTypedReference("");
-    setComposerOpen(false);
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="mb-3 flex min-h-9 items-center justify-between gap-3">
-        <h2 className="ui-setup-section-title">References</h2>
-        {!disabled && !composerOpen ? (
-          <ThemedSelect
-            className="w-fit shrink-0"
-            menuAlign="right"
-            triggerClassName="h-9 gap-2.5 px-3 text-xs font-medium"
-            leadingIcon={<Plus size={14} />}
-            ariaLabel="Add reference"
-            value=""
-            placeholder="Add reference"
-            options={[
-              { value: "sop", label: "Effective SOP" },
-              { value: "text", label: "Typed reference" },
-            ]}
-            onChange={(mode) => {
-              setComposerMode(mode === "text" ? "text" : "sop");
-              setComposerOpen(true);
-            }}
-          />
-        ) : null}
-      </div>
-      {references.map((reference, index) => (
-        <div key={`reference-${index}`} className="flex min-h-9 items-center gap-2">
-          <input
-            className="ui-field-standalone min-w-0 flex-1"
-            value={reference}
-            placeholder="e.g. ISO 9001:2015"
-            disabled={disabled}
-            onChange={(event) => {
-              const next = [...references];
-              next[index] = event.target.value;
-              onChangeReferences(next);
-            }}
-          />
-          {disabled ? null : (
-            <RowDeleteButton
-              title="Remove reference"
-              onClick={() => onChangeReferences(references.filter((_, rowIndex) => rowIndex !== index))}
-            />
-          )}
-        </div>
-      ))}
-
-      {links.map((link) => (
-        <div key={link.sopId} className="flex min-h-9 items-center gap-2">
-          <span className="ui-chip shrink-0">{link.sopNumber || "SOP"}</span>
-          <Link
-            href={`/sops/${link.sopId}`}
-            className="min-w-0 flex-1 truncate text-sm text-ink hover:underline"
-            title={linkedSopLabel(link)}
-          >
-            {link.title || "Untitled SOP"}
-          </Link>
-          {disabled ? null : (
-            <RowDeleteButton
-              title="Remove SOP reference"
-              onClick={() => onChangeLinks(links.filter((item) => item.sopId !== link.sopId))}
-            />
-          )}
-        </div>
-      ))}
-
-      {docs.map((doc) => {
-        const file = files.get(doc.id);
-        return (
-          <div key={doc.id} className="flex min-h-9 items-center gap-2">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center text-ink-tertiary">
-              <Paperclip size={14} />
-            </span>
-            {renaming?.id === doc.id && !disabled ? (
-              <>
-                <input
-                  autoFocus
-                  aria-label="Reference name"
-                  className="ui-field-standalone min-w-0 flex-1"
-                  value={renaming.name}
-                  maxLength={260}
-                  onChange={(event) => setRenaming({ id: doc.id, name: event.target.value })}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") { event.preventDefault(); saveReferenceName(); }
-                    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setRenaming(null); }
-                  }}
-                />
-                <button type="button" className="ui-btn-ghost h-9 w-9 shrink-0 px-0" aria-label="Save reference name" title="Save reference name" disabled={!renaming.name.trim()} onClick={saveReferenceName}>
-                  <Check size={14} />
-                </button>
-                <button type="button" className="ui-btn-ghost h-9 w-9 shrink-0 px-0" aria-label="Cancel rename" title="Cancel rename" onClick={() => setRenaming(null)}>
-                  <X size={14} />
-                </button>
-              </>
-            ) : (
-              <>
-            <button
-              type="button"
-              className="min-w-0 flex-1 truncate text-left text-sm text-ink hover:underline"
-              title={file ? `Open ${doc.name}` : `${doc.name} (file missing)`}
-              onClick={() => onOpenDoc(doc)}
-            >
-              {doc.name}
-              {!file ? (
-                <span className="ml-2 text-[11px] text-danger">file missing</span>
-              ) : null}
-            </button>
-            {disabled ? null : (
-              <button type="button" className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary" aria-label={`Rename ${doc.name}`} title="Rename reference" onClick={() => setRenaming({ id: doc.id, name: doc.name })}>
-                <Pencil size={13} />
-              </button>
-            )}
-              </>
-            )}
-            {disabled ? null : (
-              <RowDeleteButton title="Remove document reference" onClick={() => onRemoveDoc(doc)} />
-            )}
-          </div>
-        );
-      })}
-
-      {error ? <p className="text-xs text-danger">{error}</p> : null}
-
-      {disabled ? null : (
-        composerOpen ? (
-          <div className="mt-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="min-w-0 flex-1">
-                {composerMode === "sop" ? (
-                  loading ? (
-                    <div className="flex min-h-9 items-center gap-2 text-xs text-ink-tertiary">
-                      <Loader2 size={13} className="animate-spin" /> Loading effective SOPs…
-                    </div>
-                  ) : available.length ? (
-                    <ThemedSelect
-                      className="w-full"
-                      ariaLabel="Select an effective SOP"
-                      value=""
-                      placeholder="Select effective SOP…"
-                      options={available.map((option) => ({
-                        value: option.id,
-                        label: `${option.sopNumber || "—"} · ${option.title || "Untitled SOP"}`,
-                      }))}
-                      onChange={(sopId) => {
-                        const target = available.find((option) => option.id === sopId);
-                        if (!target) return;
-                        onChangeLinks([
-                          ...links,
-                          { sopId: target.id, sopNumber: target.sopNumber, title: target.title },
-                        ]);
-                        setComposerOpen(false);
-                      }}
-                    />
-                  ) : (
-                    <div className="flex min-h-9 items-center rounded-md border border-line px-3 text-xs text-ink-tertiary">
-                      {options.length
-                        ? "Every effective SOP is already referenced."
-                        : "No effective SOPs are available yet."}
-                    </div>
-                  )
-                ) : (
-                  <div className="flex gap-2">
-                    <input
-                      id="typed-sop-reference"
-                      className="ui-field-standalone min-w-0 flex-1"
-                      aria-label="Typed reference"
-                      value={typedReference}
-                      placeholder="e.g. ISO 9001:2015"
-                      onChange={(event) => setTypedReference(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter") return;
-                        event.preventDefault();
-                        addTypedReference();
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="ui-btn-primary h-9 shrink-0 px-3 disabled:opacity-40"
-                      disabled={!typedReference.trim()}
-                      onClick={addTypedReference}
-                    >
-                      Add
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex shrink-0 items-center gap-1">
-                {composerMode === "text" ? (
-                  <label
-                    className={`ui-btn-ghost inline-flex h-9 w-9 items-center justify-center px-0 ${
-                      uploading ? "pointer-events-none cursor-wait opacity-60" : "cursor-pointer"
-                    }`}
-                    aria-disabled={uploading}
-                    aria-label={uploading ? "Attaching reference document" : "Attach reference document"}
-                    title={uploading ? "Attaching document…" : "Attach document"}
-                  >
-                    {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                    <span className="sr-only">{uploading ? "Attaching…" : "Attach document"}</span>
-                    <input
-                      type="file"
-                      className="sr-only"
-                      aria-label="Attach reference document"
-                      accept={SOP_ANNEX_FILE_ACCEPT}
-                      disabled={uploading}
-                      onChange={(event) => {
-                        const selected = event.target.files?.[0];
-                        if (selected) onUpload(selected);
-                        event.target.value = "";
-                      }}
-                    />
-                  </label>
-                ) : null}
-                <button
-                  type="button"
-                  className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary"
-                  aria-label="Close reference options"
-                  title="Close"
-                  onClick={() => {
-                    setComposerOpen(false);
-                    setComposerMode("sop");
-                    setTypedReference("");
-                  }}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          null
-        )
-      )}
-    </div>
-  );
-}
-
-function StringListEditor({
-  items,
-  placeholder,
-  disabled = false,
-  onChange,
-}: {
-  items: string[];
-  placeholder: string;
-  disabled?: boolean;
-  onChange: (items: string[]) => void;
-}) {
-  return (
-    <div className="space-y-2">
-      {items.map((item, index) => (
-        <div key={index} className="flex items-center gap-2">
-          <input
-            className="ui-field-standalone min-w-0 flex-1"
-            value={item}
-            placeholder={placeholder}
-            disabled={disabled}
-            onChange={(event) => {
-              const next = [...items];
-              next[index] = event.target.value;
-              onChange(next);
-            }}
-          />
-          {disabled ? null : (
-            <RowDeleteButton title="Remove" onClick={() => onChange(items.filter((_, i) => i !== index))} />
-          )}
-        </div>
-      ))}
-      {disabled ? null : <AddButton label="Add" onClick={() => onChange([...items, ""])} />}
-    </div>
-  );
-}
-
-type PairRow<K extends string, V extends string> = Record<K | V, string>;
-
-function PairListEditor<K extends string, V extends string>({
-  rows,
-  keyLabel,
-  valueLabel,
-  keyExample,
-  valueExample,
-  keyName,
-  valueName,
-  disabled = false,
-  onChange,
-}: {
-  rows: Array<PairRow<K, V>>;
-  keyLabel: string;
-  valueLabel: string;
-  keyExample?: string;
-  valueExample?: string;
-  keyName: K;
-  valueName: V;
-  disabled?: boolean;
-  onChange: (rows: Array<PairRow<K, V>>) => void;
-}) {
-  function patch(index: number, field: K | V, value: string) {
-    const next = rows.map((row, i) => (i === index ? { ...row, [field]: value } : row));
-    onChange(next);
-  }
-
-  return (
-    <div className="space-y-2">
-      {rows.map((row, index) => (
-        <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2">
-          <input
-            className="ui-field-standalone min-w-0"
-            value={row[keyName]}
-            placeholder={keyLabel}
-            data-example={keyExample}
-            disabled={disabled}
-            onChange={(event) => patch(index, keyName, event.target.value)}
-          />
-          <input
-            className="ui-field-standalone min-w-0"
-            value={row[valueName]}
-            placeholder={valueLabel}
-            data-example={valueExample}
-            disabled={disabled}
-            onChange={(event) => patch(index, valueName, event.target.value)}
-          />
-          {disabled ? null : (
-            <RowDeleteButton title="Remove" onClick={() => onChange(rows.filter((_, i) => i !== index))} />
-          )}
-        </div>
-      ))}
-      {disabled ? null : (
-        <AddButton
-          label="Add"
-          onClick={() => onChange([...rows, { [keyName]: "", [valueName]: "" } as PairRow<K, V>])}
-        />
-      )}
-    </div>
-  );
-}
-function AnnexesEditor({
-  sopId,
-  rows,
-  files,
-  disabled = false,
-  uploadingAnnexId,
-  uploadStatus,
-  onChange,
-  onUpload,
-  onOpen,
-  onRename,
-  onRemoveFile,
-  onRemoveRow,
-}: {
-  sopId: string;
-  rows: Sop["annexes"];
-  files: SopAnnexFile[];
-  disabled?: boolean;
-  uploadingAnnexId: string | null;
-  uploadStatus: AnnexUploadStatus | null;
-  onChange: (changeRows: (current: Sop["annexes"]) => Sop["annexes"]) => void;
-  onUpload: (index: number, file: File) => void | Promise<void>;
-  onOpen: (file: SopAnnexFile) => void;
-  onRename: (file: SopAnnexFile, name: string) => Promise<void>;
-  onRemoveFile: (file: SopAnnexFile) => void;
-  onRemoveRow: (index: number) => void;
-}) {
-  const [renaming, setRenaming] = useState<{ file: SopAnnexFile; name: string } | null>(null);
-  const [renameBusy, setRenameBusy] = useState(false);
-  const [renameError, setRenameError] = useState("");
-  async function saveName() {
-    if (!renaming?.name.trim() || renameBusy || disabled) return;
-    setRenameBusy(true);
-    setRenameError("");
-    try {
-      await onRename(renaming.file, renaming.name.trim());
-      setRenaming(null);
-    } catch (error) {
-      setRenameError(error instanceof Error ? error.message : "Could not rename the attachment.");
-    } finally { setRenameBusy(false); }
-  }
-  function patch(index: number, field: "label" | "description", value: string) {
-    onChange((current) =>
-      current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
-    );
-  }
-
-  return (
-    <div>
-      {rows.length ? (
-        <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] gap-2 px-1 pb-2 sm:grid">
-          <span className="ui-field-label">Form name</span>
-          <span className="ui-field-label">Description</span>
-          <span className="w-9" aria-hidden="true" />
-        </div>
-      ) : null}
-      <div className={rows.length ? "divide-y divide-line border-y border-line" : ""}>
-        {rows.map((row, index) => {
-          const file = files.find((item) => item.annexId === row.id);
-          const uploading = uploadingAnnexId === row.id;
-          const rowStatus = uploadStatus?.annexId === row.id ? uploadStatus : null;
-          const uploadLabel = uploading
-            ? rowStatus?.phase === "saving"
-              ? "Saving attachment"
-              : "Uploading attachment"
-            : file
-              ? "Replace attachment"
-              : "Upload attachment";
-          return (
-            <div key={row.id ?? index} className="py-3 first:pt-2 last:pb-2">
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
-                <input
-                  className="ui-field-standalone col-start-1 row-start-1 min-w-0 sm:col-start-auto sm:row-start-auto"
-                  value={row.label}
-                  aria-label="Form name"
-                  data-example="Appendix A"
-                  disabled={disabled}
-                  onChange={(event) => patch(index, "label", event.target.value)}
-                />
-                <input
-                  className="ui-field-standalone col-span-2 row-start-2 min-w-0 sm:col-span-1 sm:row-start-auto"
-                  value={row.description}
-                  aria-label="Form description"
-                  data-example="Order escalation approval form"
-                  disabled={disabled}
-                  onChange={(event) => patch(index, "description", event.target.value)}
-                />
-                <div className="col-start-2 row-start-1 sm:col-start-auto sm:row-start-auto">
-                  {disabled ? <span className="block w-9" /> : (
-                    <RowDeleteButton title="Delete annex row" onClick={() => onRemoveRow(index)} />
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-2 flex min-h-9 items-center gap-2 border-t border-line/70 pt-2">
-                {file && renaming?.file.id === file.id && !disabled ? (
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <input autoFocus aria-label="Attachment name" className="ui-field-standalone min-w-0 flex-1" maxLength={260} value={renaming.name} disabled={renameBusy}
-                      onChange={(event) => setRenaming({ file, name: event.target.value })}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") { event.preventDefault(); void saveName(); }
-                        if (event.key === "Escape" && !renameBusy) { event.preventDefault(); setRenaming(null); setRenameError(""); }
-                      }} />
-                    <button type="button" className="ui-btn-ghost h-9 w-9 px-0" aria-label="Save attachment name" disabled={renameBusy || !renaming.name.trim()} onClick={() => void saveName()}>{renameBusy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}</button>
-                    <button type="button" className="ui-btn-ghost h-9 w-9 px-0" aria-label="Cancel attachment rename" disabled={renameBusy} onClick={() => { setRenaming(null); setRenameError(""); }}><X size={14} /></button>
-                  </div>
-                ) : file ? (
-                  <button
-                    type="button"
-                    className="group flex min-w-0 flex-1 items-center gap-2 text-left"
-                    title={`Open ${file.originalName}`}
-                    onClick={() => onOpen(file)}
-                  >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center text-ink-secondary">
-                      <Paperclip size={14} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium text-ink group-hover:underline">
-                        {file.originalName}
-                      </span>
-                    </span>
-                  </button>
-                ) : (
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center text-ink-tertiary">
-                      <Paperclip size={14} />
-                    </span>
-                    <span className="text-xs text-ink-tertiary">No form attached</span>
-                  </div>
-                )}
-                {disabled ? null : (
-                  <div className="flex shrink-0 items-center gap-1">
-                    {file && !renaming ? <button type="button" className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary" aria-label={`Rename ${file.originalName}`} title="Rename attachment" onClick={() => { setRenaming({ file, name: file.originalName }); setRenameError(""); }}><Pencil size={13} /></button> : null}
-                    <label
-                      className={`ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 ${
-                        uploading ? "pointer-events-none cursor-wait opacity-60" : "cursor-pointer"
-                      }`}
-                      aria-disabled={uploading}
-                      aria-label={uploadLabel}
-                      title={uploadLabel}
-                    >
-                      {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                      <span className="sr-only">{uploadLabel}</span>
-                      <input
-                        type="file"
-                        className="sr-only"
-                        aria-label={uploadLabel}
-                        accept={SOP_ANNEX_FILE_ACCEPT}
-                        disabled={uploading}
-                        onChange={(event) => {
-                          const selected = event.target.files?.[0];
-                          if (selected) void onUpload(index, selected);
-                          event.target.value = "";
-                        }}
-                      />
-                    </label>
-                    {file ? (
-                      <button
-                        type="button"
-                        className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
-                        title="Remove attachment"
-                        aria-label="Remove attachment"
-                        onClick={() => onRemoveFile(file)}
-                      >
-                        <X size={14} />
-                      </button>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-              {renaming?.file.annexId === row.id && renameError ? <p role="alert" className="mt-2 text-xs text-danger">{renameError}</p> : null}
-              {rowStatus ? (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className={`mt-2 flex items-center gap-1.5 text-[11px] ${
-                    rowStatus.phase === "error"
-                      ? "text-danger"
-                      : rowStatus.phase === "success"
-                        ? "text-success"
-                        : "text-ink-secondary"
-                  }`}
-                >
-                  {rowStatus.phase === "saving" || rowStatus.phase === "uploading" ? (
-                    <Loader2 size={12} className="shrink-0 animate-spin" />
-                  ) : rowStatus.phase === "success" ? (
-                    <Check size={12} className="shrink-0" />
-                  ) : (
-                    <X size={12} className="shrink-0" />
-                  )}
-                  <span>{rowStatus.phase === "success" ? "Upload complete." : rowStatus.message}</span>
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      {disabled ? null : (
-        <AddButton
-          label="Add form"
-          onClick={() =>
-            onChange((current) => [
-              ...current,
-              { id: newAnnexId(sopId), label: "", description: "" },
-            ])
-          }
-        />
-      )}
-    </div>
-  );
-}
-function SystemChangeHistory({ rows }: { rows: Sop["changeHistory"] }) {
-  return (
-    <div className="overflow-hidden rounded-lg border border-line">
-      <div className="flex items-center gap-2 border-b border-line bg-canvas px-3 py-2">
-        <History size={13} className="text-ink-tertiary" />
-        <p className="text-[11px] leading-4 text-ink-tertiary">
-          Managed by the SOP lifecycle. Entries cannot be edited or removed.
-        </p>
-      </div>
-      {rows.length ? (
-        <div className="divide-y divide-line">
-          {rows.map((row, index) => (
-            <div
-              key={`${row.version}-${row.createdByDate}-${index}`}
-              className="grid gap-3 px-3 py-3 sm:grid-cols-[5rem_minmax(0,1fr)_minmax(10rem,0.55fr)_7rem] sm:items-center"
-            >
-              <span className="ui-chip w-fit border-ink/20 bg-transparent font-medium text-ink">
-                {versionLabel(row.version) || "—"}
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-medium leading-5 text-ink">{row.changes || "System change"}</p>
-                <p className="mt-0.5 text-[11px] text-ink-tertiary sm:hidden">
-                  {row.createdByName || "SOP author"} · {row.createdByPosition || "Department Author"}
-                </p>
-              </div>
-              <div className="hidden min-w-0 sm:block">
-                <p className="truncate text-xs text-ink">{row.createdByName || "SOP author"}</p>
-                <p className="mt-0.5 truncate text-[11px] text-ink-tertiary">
-                  {row.createdByPosition || "Department Author"}
-                </p>
-              </div>
-              <time className="text-xs tabular-nums text-ink-tertiary" dateTime={row.createdByDate}>
-                {row.createdByDate || "Pending"}
-              </time>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="px-3 py-5 text-sm text-ink-tertiary">
-          V1 will be recorded automatically when this SOP is first saved.
-        </div>
-      )}
-    </div>
   );
 }

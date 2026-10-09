@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Sop, SopReferenceDoc } from "@/domain/sop/schema";
 import type { AnnexUploadStatus } from "./attachment-types";
 import {
@@ -39,6 +39,11 @@ export function useSopAttachments({
   isAnnexPersisted,
 }: SopAttachmentsOptions) {
   const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
+  // Counts local writes to `annexFiles`. A list response that started before a local write
+  // (e.g. the first save of a new SOP starts the list, then the upload appends) is stale and
+  // is dropped: the later write already reflects the server. Never merge — that would re-add
+  // a file removed after the list started.
+  const localWritesRef = useRef(0);
   const [annexFileError, setAnnexFileError] = useState("");
   const [referenceDocError, setReferenceDocError] = useState("");
   const [referencePreview, setReferencePreview] = useState<{
@@ -93,6 +98,7 @@ export function useSopAttachments({
         annexId: annex.id,
         file,
       });
+      localWritesRef.current += 1;
       setAnnexFiles((current) => [
         ...current.filter((item) => item.annexId !== annex.id),
         saved,
@@ -134,6 +140,7 @@ export function useSopAttachments({
     setAnnexFileError("");
     try {
       await removeSopAnnexFile(file);
+      localWritesRef.current += 1;
       setAnnexFiles((current) => current.filter((item) => item.id !== file.id));
     } catch (error) {
       setAnnexFileError(
@@ -165,6 +172,7 @@ export function useSopAttachments({
         annexId: docId,
         file,
       });
+      localWritesRef.current += 1;
       setAnnexFiles((current) => [
         ...current.filter((item) => item.annexId !== docId),
         saved,
@@ -211,6 +219,7 @@ export function useSopAttachments({
     try {
       if (file) {
         await removeSopAnnexFile(file);
+        localWritesRef.current += 1;
         setAnnexFiles((current) =>
           current.filter((item) => item.id !== file.id),
         );
@@ -233,6 +242,7 @@ export function useSopAttachments({
     if (file) {
       try {
         await removeSopAnnexFile(file);
+        localWritesRef.current += 1;
         setAnnexFiles((current) =>
           current.filter((item) => item.id !== file.id),
         );
@@ -257,9 +267,10 @@ export function useSopAttachments({
       return;
     }
     let active = true;
+    const seenWrites = localWritesRef.current;
     listSopAnnexFiles(sopId)
       .then((files) => {
-        if (active) setAnnexFiles(files);
+        if (active && localWritesRef.current === seenWrites) setAnnexFiles(files);
       })
       .catch((error: unknown) => {
         if (active)
@@ -276,6 +287,7 @@ export function useSopAttachments({
 
   async function handleAnnexRename(file: SopAnnexFile, name: string) {
     const renamed = await renameSopAnnexFile(file, name);
+    localWritesRef.current += 1;
     setAnnexFiles((current) =>
       current.map((item) => (item.id === renamed.id ? renamed : item)),
     );

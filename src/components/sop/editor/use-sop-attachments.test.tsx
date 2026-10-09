@@ -166,4 +166,52 @@ describe("SOP attachment list refetch", () => {
     await act(async () => {});
     expect(listSopAnnexFiles).toHaveBeenCalledOnce();
   });
+  it("keeps a first upload when the list response started by the first save lands after it", async () => {
+    let resolveList!: (files: SopAnnexFile[]) => void;
+    vi.mocked(listSopAnnexFiles).mockImplementation(
+      () => new Promise<SopAnnexFile[]>((resolve) => { resolveList = resolve; }),
+    );
+    const base = {
+      sopId: "test",
+      annexes: [{ id: "annex", label: "Form", description: "" }],
+      workspaceId: "local",
+      hasPersistedSop: false,
+      updateReferenceDocs: vi.fn(),
+      updateAnnexes: vi.fn(),
+      isAnnexPersisted: vi.fn().mockReturnValue(false),
+    };
+    // persist() flips the SOP to persisted, which starts the list request mid-upload.
+    const persist = vi.fn(async () => {
+      rerender({ ...base, persist, hasPersistedSop: true });
+      return true;
+    });
+    const { result, rerender } = renderHook((options) => useSopAttachments(options), {
+      initialProps: { ...base, persist },
+    });
+    let finishUpload!: (saved: SopAnnexFile) => void;
+    vi.mocked(uploadSopAnnexFile).mockImplementation(
+      () => new Promise<SopAnnexFile>((resolve) => { finishUpload = resolve; }),
+    );
+    let upload!: Promise<void>;
+    await act(async () => {
+      upload = result.current.handleAnnexUpload(0, new File(["test"], "form.csv"));
+    });
+    // The save committed and the list request is in flight while the file still uploads.
+    expect(listSopAnnexFiles).toHaveBeenCalledOnce();
+    await act(async () => {
+      finishUpload(file);
+      await upload;
+    });
+    expect(result.current.annexFiles).toEqual([file]);
+    await act(async () => {
+      resolveList([]);
+    });
+    expect(result.current.annexFiles).toEqual([file]);
+  });
+  it("applies a list response when no local write intervened", async () => {
+    vi.mocked(listSopAnnexFiles).mockResolvedValue([file]);
+    const { result } = setup({ hasPersistedSop: true });
+    await act(async () => {});
+    expect(result.current.annexFiles).toEqual([file]);
+  });
 });

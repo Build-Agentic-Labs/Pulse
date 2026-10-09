@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { letterCards, letterPageCounts } from "./letter";
+import { letterCards, letterPageCounts, splitLetterInstruction } from "./letter";
 import { sampleWorkInstruction } from "./sample";
 import { paginateWorkInstruction } from "./paginate";
 import { releasedPrintLayout, WORK_INSTRUCTION_LAYOUTS } from "./schema";
@@ -51,5 +51,19 @@ describe("measured Letter pagination", () => {
   });
   it("moves a whole step past a full setup page and retains oversized steps", () => {
     expect(letterPageCounts([900, 250, 250], 100, 850)).toEqual([0, 1, 2]);
+  });
+});
+
+describe("Letter continuation text", () => {
+  it("preserves all characters and prefers action boundaries", () => {
+    const text = "First action.\nSecond action is longer.\nThird action.";
+    const parts = splitLetterInstruction(text, value => value.length <= 30);
+    expect(parts.join("")).toBe(text);
+    expect(parts.every(part => part.length <= 30)).toBe(true);
+    expect(parts[0]).toBe("First action.\n");
+  });
+  it("splits unbroken text and leaves fitting instructions intact", () => {
+    expect(splitLetterInstruction("abcdefghij", value => value.length <= 4)).toEqual(["abcd", "efgh", "ij"]);
+    expect(splitLetterInstruction("Short step", () => true)).toEqual(["Short step"]);
   });
 });

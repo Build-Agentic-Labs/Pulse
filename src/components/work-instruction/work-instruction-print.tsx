@@ -373,7 +373,6 @@ export function WorkInstructionPrintPreview({
   const [fullReleases, setFullReleases] = useState<ReadonlyMap<string, WorkInstructionRelease>>(new Map());
   const [pinnedMissing, setPinnedMissing] = useState(false);
   const previewBodyRef = useRef<HTMLDivElement | null>(null);
-  const [printBlocked, setPrintBlocked] = useState(false);
   const loadedStateRef = useRef<PlannerState | undefined>(
     serverStateIsUsable(initialPlannerState, scenarioId) ? initialPlannerState : undefined,
   );
@@ -525,16 +524,6 @@ export function WorkInstructionPrintPreview({
     };
   }, [fullReleases, neededReleaseIds, pinnedReleaseId]);
 
-  useEffect(() => {
-    const body = previewBodyRef.current;
-    if (!body) return;
-    const check = () => setPrintBlocked(Boolean(body.querySelector('[data-print-overflow="true"]')));
-    const observer = new MutationObserver(check);
-    observer.observe(body, {childList:true, subtree:true, attributes:true, attributeFilter:["data-print-overflow"]});
-    check();
-    return () => observer.disconnect();
-  }, []);
-
   const pinnedRelease = pinnedReleaseId ? fullReleases.get(pinnedReleaseId) : undefined;
 
   // What is actually drawn: each entry carries the layout it must be paginated with, because a
@@ -638,7 +627,7 @@ export function WorkInstructionPrintPreview({
     >
       {sopViewer && onClose ? <div className="wi-print-chrome">
         <DocumentPreviewToolbar onClose={onClose} actions={
-          <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" disabled={effectiveStatus !== "ready" || printBlocked} onClick={() => window.print()}>
+          <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" disabled={effectiveStatus !== "ready"} onClick={() => window.print()}>
             <Printer size={15} />Save as PDF
           </button>
         }>
@@ -653,7 +642,7 @@ export function WorkInstructionPrintPreview({
         hrefForLayout={hrefForLayout}
         onLayoutChange={setLayout}
         onClose={onClose}
-        canPrint={effectiveStatus === "ready" && !printBlocked}
+        canPrint={effectiveStatus === "ready"}
         controlNote={controlNote}
         view={!pinnedReleaseId && modifiedStates.length > 0 ? view : undefined}
         onViewChange={setView}

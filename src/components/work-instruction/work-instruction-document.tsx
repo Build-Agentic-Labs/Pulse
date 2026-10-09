@@ -19,7 +19,7 @@
  */
 
 import { LETTER_TEMPLATE_STYLES } from "./work-instruction-letter-styles";
-import { letterCards, letterPageCounts } from "@/domain/work-instruction/letter";
+import { letterCards, letterPageCounts, splitLetterInstruction } from "@/domain/work-instruction/letter";
 import { DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT } from "@/domain/work-instruction/schema";
 import { instructionBlocks } from "@/domain/instruction-bullets";
 import { formatMinutes } from "@/domain/calculations";
@@ -33,7 +33,7 @@ import {
   type WorkInstructionPhoto,
   type WorkInstructionSheet,
 } from "@/domain/work-instruction/schema";
-import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RecoveringPhoto } from "../recovering-photo";
 import { StaticPhotoAnnotation } from "../static-photo-annotation";
 
@@ -816,10 +816,33 @@ export function WorkInstructionDocument({
   );
 }
 
+/** Switch after two inches of tool rows, without dropping or shrinking text. */
+function LetterSetupTools({ tools }: { tools: string[] }) {
+  const list = useRef<HTMLUListElement>(null);
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
+    const node = list.current;
+    if (!node || node.getBoundingClientRect().width === 0) return;
+    const measure = () => setCompact(node.offsetHeight > 192);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [tools]);
+  return <section className="wil-setup-tools" data-tools-format={compact ? "compact" : "rows"}>
+    <h2>Tools &amp; equipment</h2>
+    <ul ref={list} className={compact ? "wil-tools-measure" : undefined} aria-hidden={compact || undefined}>
+      {tools.length ? tools.map((tool, i) => <li key={i}>{tool}</li>) : <li>&nbsp;</li>}
+    </ul>
+    {compact && <p className="wil-tools-compact">{tools.join(" · ")}</p>}
+  </section>;
+}
+
 function LetterDocument({ instruction, layout }: { instruction: WorkInstruction; layout: WorkInstructionLayout }) {
   const root = useRef<HTMLDivElement>(null);
-  const [capacity, setCapacity] = useState<{counts: number[]; heights: number[]; overflow: boolean}>({counts:[], heights:[], overflow:false});
-  const cards = letterCards(instruction.cards);
+  const [capacity, setCapacity] = useState<{counts: number[]; heights: number[]; overflow: boolean; available: number; setupHeight: number; source?: string; cards?: WorkInstructionCard[]}>({counts:[], heights:[], overflow:false, available:868, setupHeight:0});
+  const source = JSON.stringify(instruction);
+  const cards = useMemo(() => capacity.source === source && capacity.cards ? capacity.cards : letterCards(instruction.cards), [capacity.source, capacity.cards, source, instruction.cards]);
   let cardOffset = 0;
   const sheets: WorkInstructionSheet[] = capacity.counts.length && !instruction.blank
     ? capacity.counts.map((count, index) => {
@@ -850,16 +873,64 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
       const footer = page.querySelector<HTMLElement>(".wil-footer")?.offsetHeight ?? 36;
       const setupHeight = page.querySelector<HTMLElement>(".wi-setup-band")?.offsetHeight ?? 0;
       const available = 1056 - 77 - header - footer;
+      const splitCards = cards.flatMap((card, index) => {
+        if (heights[index] <= available || !card.instruction) return [card];
+        const body = bodies.filter(body => body.dataset.stepId)[index];
+        const text = body?.querySelector<HTMLElement>(".wil-instructions");
+        if (!text) return [card];
+        const range = document.createRange(); range.selectNodeContents(text);
+        const overhead = heights[index] - range.getBoundingClientRect().height / scale + 24;
+        const probe = text.cloneNode(false) as HTMLElement;
+        Object.assign(probe.style, {position:"absolute", visibility:"hidden", width:`${text.offsetWidth}px`, height:"auto", minHeight:"0", flex:"none", left:"0", top:"0"});
+        body.appendChild(probe);
+        const chunks = splitLetterInstruction(card.instruction, value => {
+          probe.replaceChildren();
+          const blocks = instructionBlocks(value);
+          if (blocks.every(block => block.kind === "text")) probe.textContent = value;
+          else {
+            const container = document.createElement("div"); container.className = "wi-instruction-blocks";
+            for (const block of blocks) {
+              const row = document.createElement("div");
+              row.className = block.kind === "text" ? "wi-instruction-paragraph" : `wi-instruction-item wi-instruction-${block.kind}`;
+              if (block.kind === "text") row.textContent = block.body || "\u00a0";
+              else {
+                const label = document.createElement("strong"); label.className = "wi-instruction-label"; label.textContent = block.marker ?? "";
+                const content = document.createElement("div"); content.textContent = block.body;
+                row.append(label, content);
+              }
+              container.appendChild(row);
+            }
+            probe.appendChild(container);
+          }
+          const measurement = document.createRange(); measurement.selectNodeContents(probe);
+          return overhead + measurement.getBoundingClientRect().height / scale <= available - 4;
+        });
+        probe.remove();
+        return chunks.map((instruction, part) => ({...card, instruction, part:part + 1, partCount:chunks.length}));
+      });
+      if (splitCards.length !== cards.length) {
+        // Keep each continuation identifiable when measuring subsequent pages.
+        const totals = new Map<string, number>();
+        const offsets = new Map<string, number>();
+        for (const card of splitCards) totals.set(card.stepId, (totals.get(card.stepId) ?? 0) + 1);
+        for (const card of splitCards) {
+          const part = (offsets.get(card.stepId) ?? 0) + 1;
+          offsets.set(card.stepId, part);
+          card.part = part; card.partCount = totals.get(card.stepId) ?? 1;
+        }
+        setCapacity(old => ({...old, source, cards:splitCards, counts:[], heights:[]}));
+        return;
+      }
       const counts = letterPageCounts(heights, available - setupHeight, available);
       const overflow = heights.some(height => height > available) || setupHeight > available;
-      setCapacity(old => JSON.stringify(old) === JSON.stringify({counts, heights, overflow}) ? old : {counts, heights, overflow});
+      setCapacity(old => JSON.stringify(old) === JSON.stringify({counts, heights, overflow, available, setupHeight, source, cards}) ? old : {counts, heights, overflow, available, setupHeight, source, cards});
     };
     // jsdom has no geometry; browser measurement remains the authority.
     if (node.getBoundingClientRect().width === 0) return;
     measure();
     const observer = new ResizeObserver(measure); observer.observe(node);
     return () => observer.disconnect();
-  }, [instruction, capacity.counts]);
+  }, [instruction, capacity.counts, cards, source]);
   const { meta, setup } = instruction;
   const latestRevision = meta.revisionHistory.at(-1);
   return <>
@@ -886,15 +957,26 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
       .wil-reference { font-size:7pt; overflow-wrap:anywhere; padding:5px 0; border-bottom:1px solid #96999b; }
       .wil-reference a { color:inherit; }
       .wil-sheet .wil-preparation { flex:none; }
+      .wil-setup-tools { position:relative; }
+      .wil-preparation .wil-tools-measure { position:absolute; left:12px; right:0; visibility:hidden !important; pointer-events:none; }
+      .wil-tools-measure * { visibility:hidden !important; }
+      .wil-tools-compact { font-size:8.5pt; line-height:1.4; overflow-wrap:anywhere; }
+      .wil-sheet.wil-sheet-overflow { height:auto; min-height:11in; overflow:visible; }
+      .wil-sheet-overflow .wil-steps { flex:none; display:block; }
+      .wil-sheet-overflow .wil-step { min-height:0; }
+      @media print {
+        .wil-sheet.wil-sheet-overflow { height:auto; overflow:visible; }
+        .wil-sheet-overflow .wil-step { break-inside:auto; }
+      }
       .wil-sheet .wil-bom td { overflow-wrap:anywhere; }
       .wil-step-body { overflow:visible; flex-shrink:0; }
       .wil-sheet .wil-footer { margin-top:auto; }
       @media print { @page wi-letter { size:8.5in 11in; margin:0; } .wil-sheet.wi-sheet { page:wi-letter; width:8.5in; height:11in; padding:.4in; gap:0; } }
       .wil-sheet.wi-sheet { width:8.5in; height:11in; padding:.4in; gap:0; font-family:Arial,sans-serif; }
     `}</style>
-    {capacity.overflow && <div className="wi-print-chrome ui-notice ui-notice-warn" role="alert">This instruction has more setup or step detail than one Letter page can hold. Shorten the detail before printing.</div>}
+    {capacity.overflow && <div className="wi-print-chrome ui-notice ui-notice-warn" role="alert">A step or setup section exceeds one Letter page. Printing is still available. Use shorter steps for a cleaner page layout; long content will continue onto additional printed pages.</div>}
     <div ref={root} className="wil-pages wi-pages" data-wi-layout="letter" data-print-overflow={capacity.overflow}>
-      {sheets.map((sheet) => <article className="wil-sheet wi-sheet" key={sheet.page}>
+      {sheets.map((sheet) => <article className={`wil-sheet wi-sheet${(sheet.kind === "setup" && (capacity.heights[0] ?? 0) + capacity.setupHeight > capacity.available) || sheet.cards.some(card => (capacity.heights[cards.findIndex(item => item.stepId === card.stepId && item.part === card.part)] ?? 0) > capacity.available) ? " wil-sheet-overflow" : ""}`} key={sheet.page}>
         <header className="wil-header">
           <div className="wil-logo">
             {/* eslint-disable-next-line @next/next/no-img-element -- document logo */}
@@ -908,11 +990,11 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
           <section className="wil-summary wil-safety"><h2>Safety / PPE</h2><p>{setup.safetyNotes || (instruction.blank ? "" : "Not recorded")}</p></section>
           <div className="wil-preparation">
             <section><h2>BOM / materials</h2><table className="wil-bom"><thead><tr><th>Part number</th><th>Description</th><th>Qty</th></tr></thead><tbody>{setup.parts.length ? setup.parts.map((part,i)=><tr key={i}><td>{part.partNumber}</td><td>{part.description}</td><td>{part.quantity ?? "—"}</td></tr>) : Array.from({length:3},(_,i)=><tr key={i}><td>&nbsp;</td><td/><td/></tr>)}</tbody></table></section>
-            <section><h2>Tools &amp; equipment</h2><ul>{setup.tools.length ? setup.tools.map((tool,i)=><li key={i}>{tool}</li>) : <li>&nbsp;</li>}</ul></section>
+            <LetterSetupTools tools={setup.tools}/>
           </div>
           {(setup.references?.length || setup.drawingLink || setup.sopLink) ? <div className="wil-reference"><strong>References: </strong>{setup.references?.length ? setup.references.map((reference,i)=><Fragment key={i}>{i > 0 ? " · " : ""}<a href={reference.url}>{referenceLine(reference)}</a></Fragment>) : [setup.drawingLink,setup.sopLink].filter(Boolean).join(" · ")}</div> : null}
         </div>}
-        <main className="wil-steps" style={{gridTemplateRows: sheet.cards.length && capacity.heights.length ? sheet.cards.map(card => `minmax(${capacity.heights[cards.findIndex(item => item.stepId === card.stepId)] ?? 0}px,1fr)`).join(" ") : `repeat(${sheet.kind === "setup" ? 1 : 2},minmax(0,1fr))`}}>
+        <main className="wil-steps" style={{gridTemplateRows: sheet.cards.length && capacity.heights.length ? sheet.cards.map(card => `minmax(${capacity.heights[cards.findIndex(item => item.stepId === card.stepId && item.part === card.part)] ?? 0}px,1fr)`).join(" ") : `repeat(${sheet.kind === "setup" ? 1 : 2},minmax(0,1fr))`}}>
           {Array.from({length:instruction.blank ? (sheet.kind === "setup" ? 1 : 2) : sheet.cards.length},(_,index)=>{
             const card=sheet.cards[index];
             return <section className="wil-step wi-letter-card" key={index}>

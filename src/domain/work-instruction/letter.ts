@@ -44,3 +44,27 @@ export function letterPageCounts(heights: number[], firstAvailable: number, late
   } while (index < heights.length);
   return counts;
 }
+
+/** Preserve every character while preferring action/word boundaries between pages. */
+export function splitLetterInstruction(text: string, fits: (text: string) => boolean): string[] {
+  const parts: string[] = [];
+  let remaining = text;
+  while (remaining && !fits(remaining)) {
+    let low = 0;
+    let high = remaining.length;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (fits(remaining.slice(0, middle))) low = middle;
+      else high = middle - 1;
+    }
+    if (low === 0) break; // Metadata alone needs the overflow fallback.
+    const prefix = remaining.slice(0, low);
+    const action = Math.max(prefix.lastIndexOf("\n"), prefix.lastIndexOf("•"));
+    const word = prefix.lastIndexOf(" ");
+    const boundary = action > 0 ? action + (prefix[action] === "\n" ? 1 : 0) : word > low / 2 ? word + 1 : low;
+    parts.push(remaining.slice(0, boundary));
+    remaining = remaining.slice(boundary);
+  }
+  if (remaining) parts.push(remaining);
+  return parts.length ? parts : [text];
+}

@@ -40,6 +40,8 @@ const PROJECT_ID = "project-media";
 const notifyFeedback = vi.fn();
 const notifyRestoreAction = vi.fn<(notice: RestoreActionNotice) => void>();
 const flushDeferredRemoteRefresh = vi.fn();
+// Records each release of the shell-save lock (useWorkspaceSaves.releaseShellLock drains a queued save).
+const shellLockReleased = vi.fn();
 
 function photo(id: string, storagePath?: string): StepPhotoAttachment {
   return { id, name: `${id}.png`, dataUrl: "data:image/png;base64,AA==", capturedAt: "2026-10-01T00:00:00.000Z", storagePath };
@@ -64,6 +66,10 @@ function renderMedia() {
     const saveInFlightRef = useRef(false);
     const [saveState, setSaveState] = useState<SaveState>("saved");
     const [saveError, setSaveError] = useState<string>();
+    const releaseShellLock = () => {
+      shellLockReleased();
+      saveInFlightRef.current = false;
+    };
     const media = useWorkspaceMedia({
       projectId: PROJECT_ID,
       activeProjectContext: undefined,
@@ -71,6 +77,7 @@ function renderMedia() {
       setPlannerState,
       writeTracker: tracker,
       saveInFlightRef,
+      releaseShellLock,
       setSaveState,
       setSaveError,
       notifyFeedback,
@@ -247,4 +254,43 @@ it("cuts a photo to another task destination-first, and compensates if a later w
   expect(vi.mocked(saveTaskCustomFieldsToSupabase).mock.calls.map((call) => call[0])).toEqual(["task-2", "task-1", "task-2", "task-1"]);
   expect(second.result.current.saveInFlightRef.current).toBe(false);
   expect(second.result.current.saveState).toBe("error");
+});
+
+it("releases the shell lock through releaseShellLock exactly once per locking write, on success and on failure", async () => {
+  vi.mocked(copyStepPhotoAttachmentToStep).mockImplementation(async (_taskId, _stepId, pasted) => ({ ...pasted, storagePath: "photos/copy.png" }));
+  const { result } = renderMedia();
+
+  vi.mocked(uploadStepPhotoAttachment).mockResolvedValueOnce(photo("local-ok.png", "photos/ok.png"));
+  await act(async () => { await result.current.media.uploadStepPhotos("task-1", "step-1", [new File(["x"], "ok.png")]); });
+  expect(shellLockReleased).toHaveBeenCalledTimes(1);
+
+  vi.mocked(uploadStepPhotoAttachment).mockRejectedValueOnce(new Error("Upload failed"));
+  await act(async () => { await result.current.media.uploadStepPhotos("task-1", "step-1", [new File(["x"], "bad.png")]); });
+  expect(shellLockReleased).toHaveBeenCalledTimes(2);
+
+  const copyEntry = { mode: "copy" as const, photo: existingPhoto, sourceTaskId: "task-1", sourceStepId: "step-1" };
+  await act(async () => { await result.current.media.pasteStepPhoto(copyEntry as never, { taskId: "task-2", stepId: "step-1" }); });
+  expect(shellLockReleased).toHaveBeenCalledTimes(3);
+
+  vi.mocked(saveTaskCustomFieldsToSupabase).mockRejectedValueOnce(new Error("Destination write failed"));
+  await act(async () => {
+    await expect(result.current.media.pasteStepPhoto(copyEntry as never, { taskId: "task-2", stepId: "step-1" }))
+      .rejects.toThrow("Destination write failed");
+  });
+  expect(shellLockReleased).toHaveBeenCalledTimes(4);
+
+  await act(async () => { await result.current.media.removeStepPhoto("task-1", "step-1", "photo-existing"); });
+  expect(shellLockReleased).toHaveBeenCalledTimes(5);
+
+  vi.mocked(softDeleteStepPhotoAttachmentFromSupabase).mockRejectedValueOnce(new Error("Delete failed"));
+  await act(async () => { await result.current.media.removeStepPhoto("task-1", "step-1", "local-ok.png"); });
+  expect(shellLockReleased).toHaveBeenCalledTimes(6);
+  expect(result.current.saveInFlightRef.current).toBe(false);
+
+  // Video and exploded-view deletes never take the lock, so they never release it.
+  await act(async () => {
+    await result.current.media.deleteTaskVideo("task-1", video);
+    await result.current.media.deleteExplodedView("task-1", view);
+  });
+  expect(shellLockReleased).toHaveBeenCalledTimes(6);
 });

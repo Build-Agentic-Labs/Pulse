@@ -93,6 +93,9 @@ export function useWorkspaceSaves({
   const saveInFlightRef = useRef(false);
   const masterBomSaveInFlightRef = useRef(false);
   const queuedSaveStateRef = useRef<PlannerState | null>(null);
+  // True only while persistPlannerState's own save loop runs. Media writes share saveInFlightRef, so the
+  // lock alone cannot tell releaseShellLock whether that loop is still there to drain the queue.
+  const shellSaveLoopActiveRef = useRef(false);
   const plannerSaveTimerRef = useRef<number | null>(null);
   const { state: saveState, error: saveError } = workspaceSaveStatus(
     reportedSaveState,
@@ -190,6 +193,7 @@ export function useWorkspaceSaves({
     }
 
     saveInFlightRef.current = true;
+    shellSaveLoopActiveRef.current = true;
     const finishWrite = writeTracker.begin("planner");
     setSaveError(undefined);
     setSaveState("saving");
@@ -214,6 +218,7 @@ export function useWorkspaceSaves({
           tone: "danger",
         });
         saveInFlightRef.current = false;
+        shellSaveLoopActiveRef.current = false;
         return;
       }
 
@@ -221,6 +226,7 @@ export function useWorkspaceSaves({
     }
 
     saveInFlightRef.current = false;
+    shellSaveLoopActiveRef.current = false;
     finishWrite();
     plannerDirtyRef.current = false;
     if (lastPersistedState) {
@@ -231,6 +237,19 @@ export function useWorkspaceSaves({
     }
     setSaveState("saved");
     flushDeferredRemoteRefresh();
+  }
+
+  // Release the shell-save lock taken by a media or Gantt-order write, and send a shell save that queued
+  // behind it through persistPlannerState -- the same drain the BOM save uses. When this hook's own save
+  // loop is still running it drains the queue itself, so starting a second, concurrent save is never right.
+  function releaseShellLock() {
+    saveInFlightRef.current = false;
+    const queuedState = queuedSaveStateRef.current;
+    if (!queuedState || shellSaveLoopActiveRef.current) {
+      return;
+    }
+    queuedSaveStateRef.current = null;
+    void persistPlannerState(queuedState);
   }
 
   async function updateMasterBom(bom: MasterBom | undefined): Promise<void> {
@@ -405,8 +424,10 @@ export function useWorkspaceSaves({
     dirtyVersion,
     markDirty,
     // The shell-save lock. Media and Gantt-order writes in LineWorkspace also take it, so shell saves
-    // queue behind them (queuedSaveStateRef) exactly as before the extraction.
+    // queue behind them (queuedSaveStateRef) exactly as before the extraction. They release it only
+    // through releaseShellLock, which drains a save that queued meanwhile.
     saveInFlightRef,
+    releaseShellLock,
     plannerSaveTimerRef,
     hasPlannerShellSaveWork,
     hasLocalSaveWork,
@@ -428,7 +449,11 @@ export type UsePlannerShellAutosaveOptions = Pick<
   derivedState: PlannerState;
   hasLoadedRemoteState: boolean;
   remoteStateConfirmedRef: RefObject<boolean>;
-  /** Set when the latest planner-state change came from the server; the autosave skips it once. */
+  /**
+   * Set when the latest planner-state change came from the server (realtime refresh, procedure-save
+   * acknowledgment). On a clean planner the autosave consumes it as an echo; it never suppresses the
+   * save of a dirty planner.
+   */
   remoteRefreshAppliedRef: RefObject<boolean>;
 };
 
@@ -449,6 +474,16 @@ export function usePlannerShellAutosave({
   persistPlannerStateRef.current = persistPlannerState;
 
   useEffect(() => {
+    // A server-applied change is an echo only while there is no local edit to save: consume the flag then.
+    // With a local edit pending (a Restore, or a shell edit that a procedure-save acknowledgment re-renders)
+    // clear it and save on the normal 900 ms path, or the edit would wait for the next one.
+    if (remoteRefreshAppliedRef.current) {
+      remoteRefreshAppliedRef.current = false;
+      if (!plannerDirtyRef.current) {
+        return;
+      }
+    }
+
     // Procedure edits have their own queue. Once the shell has saved, later
     // procedure renders must not restart a competing full planner save.
     if (!hasLoadedRemoteState || dirtyVersion === 0 || !plannerDirtyRef.current) {
@@ -459,11 +494,6 @@ export function usePlannerShellAutosave({
     // the shell save is a destructive diff, and persisting stale state would delete teammates'
     // newer tasks. The remote apply replaces local state wholesale, so nothing is lost by waiting.
     if (!remoteStateConfirmedRef.current) {
-      return;
-    }
-
-    if (remoteRefreshAppliedRef.current) {
-      remoteRefreshAppliedRef.current = false;
       return;
     }
 

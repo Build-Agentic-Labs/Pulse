@@ -9,6 +9,7 @@ import { emptyPlannerState } from "@/domain/empty-planner-state";
 import type { PlannerRealtimePayload } from "@/domain/supabase-planner";
 import type { PlannerState, ScenarioSummary, Task } from "@/domain/types";
 import type { AwiMaster } from "@/lib/awi/store";
+import { reorderTasksInSupabase } from "@/lib/planner/task-order-store";
 import {
   loadPlannerCoreStateFromSupabase,
   loadPlannerStateFromSupabase,
@@ -59,6 +60,10 @@ vi.mock("@/lib/planner-state-cache", async (original) => ({
   readCachedPlannerState: vi.fn(async () => undefined),
   writeCachedPlannerState: vi.fn(async () => undefined),
   clearCachedPlannerState: vi.fn(async () => undefined),
+}));
+vi.mock("@/lib/planner/task-order-store", async (original) => ({
+  ...await original<typeof import("@/lib/planner/task-order-store")>(),
+  reorderTasksInSupabase: vi.fn(),
 }));
 vi.mock("@/domain/supabase-planner", async (original) => ({
   ...await original<typeof import("@/domain/supabase-planner")>(),
@@ -278,6 +283,87 @@ describe("deferred remote refresh", () => {
     await flushMicrotasks();
     expect(screen.queryAllByText(/Refreshed from A/)).toHaveLength(0);
     expect(screen.queryAllByText(`Task ${TASK_B}`).length).toBeGreaterThan(0);
+  });
+});
+
+describe("shell lock release and restore autosave", () => {
+  // Two process groups (WBS 1 and 2) so the Gantt can reorder one onto the other.
+  const twoGroupState = (projectId: string) => {
+    const base = buildState(projectId);
+    const scenarioId = base.scenario.id;
+    return {
+      ...base,
+      tasks: [
+        buildTask(`${projectId}-first`, scenarioId, "First", { wbs: "1", name: "First group" }),
+        buildTask(`${projectId}-second`, scenarioId, "Second", { wbs: "2", name: "Second group" }),
+      ],
+    };
+  };
+  const groupRow = (wbs: string) => screen.getByRole("button", { name: `Delete task ${wbs}` }).closest("[draggable]")!;
+  // The Gantt timeline is code-split; wait for its chunk the first time it is opened.
+  async function openGanttTimeline() {
+    await openModule("Gantt");
+    await act(async () => { await vi.dynamicImportSettled(); });
+    await flushMicrotasks();
+  }
+  function dragGroupOnto(sourceWbs: string, targetWbs: string) {
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (type: string, value: string) => { data.set(type, value); },
+      getData: (type: string) => data.get(type) ?? "",
+      effectAllowed: "move",
+      dropEffect: "move",
+    };
+    fireEvent.dragStart(groupRow(sourceWbs), { dataTransfer });
+    fireEvent.drop(groupRow(targetWbs), { dataTransfer, clientY: 0 });
+  }
+
+  it("releases the shell lock when the product switches while a Gantt reorder is in flight", async () => {
+    vi.mocked(loadPlannerCoreStateFromSupabase).mockImplementation(async (projectId) => twoGroupState(projectId ?? PROJECT_A));
+    const reorder = deferred<Awaited<ReturnType<typeof reorderTasksInSupabase>>>();
+    vi.mocked(reorderTasksInSupabase).mockReturnValueOnce(reorder.promise);
+    const view = await mountPlanner(PROJECT_A);
+    await openGanttTimeline();
+
+    // jsdom reports zero-height rows, so the drop lands "after" the target: group 1 moves below group 2.
+    dragGroupOnto("1", "2");
+    // The reorder waits on the save barrier (120 ms polls) before calling the RPC.
+    await advance(240);
+    expect(reorderTasksInSupabase).toHaveBeenCalledTimes(1);
+
+    view.rerender(<LineWorkspace projectId={PROJECT_B} />);
+    await flushMicrotasks();
+    await advance(400);
+    await openModule("Gantt");
+    await act(async () => { reorder.reject(new Error("Task reorder scope changed.")); });
+    await flushMicrotasks();
+
+    // An edit in product B autosaves on the normal 900 ms path: the reorder did not keep the lock.
+    addTaskInGantt();
+    await advance(SHELL_AUTOSAVE_MS);
+    await flushMicrotasks();
+    expect(savePlannerShellToSupabase).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(savePlannerShellToSupabase).mock.calls[0]![0].product.projectId).toBe(PROJECT_B);
+  });
+
+  it("autosaves Restore Task 900 ms later without any further edit", async () => {
+    vi.mocked(loadPlannerCoreStateFromSupabase).mockImplementation(async (projectId) => twoGroupState(projectId ?? PROJECT_A));
+    await mountPlanner(PROJECT_A);
+    await openGanttTimeline();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete task 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Task" }));
+    await advance(SHELL_AUTOSAVE_MS);
+    await flushMicrotasks();
+    expect(savePlannerShellToSupabase).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(savePlannerShellToSupabase).mock.calls[0]![0].tasks).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore Task" }));
+    await advance(SHELL_AUTOSAVE_MS);
+    await flushMicrotasks();
+    expect(savePlannerShellToSupabase).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(savePlannerShellToSupabase).mock.calls[1]![0].tasks.map((task) => task.id))
+      .toEqual([`${PROJECT_A}-first`, `${PROJECT_A}-second`]);
   });
 });
 

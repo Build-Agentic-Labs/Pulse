@@ -32,7 +32,7 @@ import type { PlannerStateAccess, ReportedSaveStatusSetters, WorkspaceFeedback }
 // rollbacks. Optimistic changes and rollbacks touch only the affected item on the current task, so
 // procedure edits made while a write runs survive. Photo uploads, pastes and photo deletes hold the
 // shell-save lock (saveInFlightRef from useWorkspaceSaves): a shell save requested meanwhile queues
-// behind them, exactly as before this module existed.
+// behind them and is sent when they release it (releaseShellLock).
 
 export type RestoreActionNotice = {
   body: string;
@@ -50,6 +50,8 @@ export type UseWorkspaceMediaOptions = PlannerStateAccess &
     writeTracker: WorkspaceWriteTracker;
     /** The shared shell-save lock. Held while uploads, pastes and photo deletes run. */
     saveInFlightRef: RefObject<boolean>;
+    /** Releases the lock and drains a shell save that queued behind it (useWorkspaceSaves). */
+    releaseShellLock: () => void;
     /** Shows the existing "Restore" notice after a delete. */
     notifyRestoreAction: (notice: RestoreActionNotice) => void;
     /** Runs a realtime refresh that was deferred while local saves were pending. */
@@ -65,6 +67,7 @@ export function useWorkspaceMedia({
   setPlannerState,
   writeTracker,
   saveInFlightRef,
+  releaseShellLock,
   setSaveState,
   setSaveError,
   notifyFeedback,
@@ -123,7 +126,7 @@ export function useWorkspaceMedia({
       setSaveError(error instanceof Error ? error.message : "Unable to attach the selected photo.");
       setSaveState("error");
     } finally {
-      saveInFlightRef.current = false;
+      releaseShellLock();
       finishWrite();
       flushDeferredRemoteRefresh();
     }
@@ -285,7 +288,7 @@ export function useWorkspaceMedia({
       notifyFeedback({ title: "Photo paste failed", body: message, tone: "danger" });
       throw error;
     } finally {
-      saveInFlightRef.current = false;
+      releaseShellLock();
       finishWrite();
       flushDeferredRemoteRefresh();
     }
@@ -415,7 +418,7 @@ export function useWorkspaceMedia({
       setSaveState("error");
       notifyFeedback({ title: "Delete failed", body: message, tone: "danger" });
     } finally {
-      saveInFlightRef.current = false;
+      releaseShellLock();
       finishWrite();
       flushDeferredRemoteRefresh();
     }

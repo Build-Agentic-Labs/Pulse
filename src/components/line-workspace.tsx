@@ -613,6 +613,7 @@ export function LineWorkspace({
     dirtyVersion,
     markDirty,
     saveInFlightRef,
+    releaseShellLock,
     plannerSaveTimerRef,
     hasPlannerShellSaveWork,
     hasLocalSaveWork,
@@ -830,6 +831,7 @@ export function LineWorkspace({
     setPlannerState,
     writeTracker,
     saveInFlightRef,
+    releaseShellLock,
     setSaveState,
     setSaveError,
     notifyFeedback,
@@ -2727,8 +2729,8 @@ export function LineWorkspace({
   }
 
   function restorePlannerSnapshot(snapshot: PlannerState, restoreSelection?: { taskId?: string; stationId?: string; zoneId?: string }) {
+    // A restore is a user edit: it autosaves on the normal 900 ms path, never as a server echo.
     markDirty();
-    remoteRefreshAppliedRef.current = true;
     setPlannerState(snapshot);
     setSelectedTaskId(restoreSelection?.taskId ?? snapshot.tasks[0]?.id ?? "");
     setSelectedStationId(restoreSelection?.stationId ?? snapshot.tasks[0]?.stationId ?? "");
@@ -2958,7 +2960,9 @@ export function LineWorkspace({
         });
       } finally {
         taskReorderInFlightRef.current = false;
-        if (isCurrent()) saveInFlightRef.current = false;
+        // Always release (and drain) the lock: a scope change mid-request must not leave it held for the
+        // mount. isCurrent() gates only state updates and notices.
+        releaseShellLock();
         finishWrite();
         if (isCurrent()) flushDeferredRemoteRefresh();
       }

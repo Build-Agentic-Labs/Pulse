@@ -245,6 +245,64 @@ describe("master BOM", () => {
   });
 });
 
+describe("shell lock release", () => {
+  const editedState = { ...initialState, tasks: [{ ...plannerTask, name: "Edited while locked" }] };
+
+  it("drains exactly one save queued behind an external lock holder", async () => {
+    saveShell.mockResolvedValue(undefined as never);
+    const { result } = renderSaves();
+    act(() => { result.current.saves.saveInFlightRef.current = true; });
+    await act(async () => {
+      await result.current.saves.persistPlannerState(editedState);
+      await result.current.saves.persistPlannerState(editedState);
+    });
+    expect(saveShell).not.toHaveBeenCalled();
+
+    await act(async () => {
+      result.current.saves.releaseShellLock();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(saveShell).toHaveBeenCalledTimes(1);
+    expect(saveShell.mock.calls[0]?.[0].tasks[0]?.name).toBe("Edited while locked");
+    expect(result.current.saves.saveInFlightRef.current).toBe(false);
+    expect(result.current.saves.saveState).toBe("saved");
+
+    // Nothing queued: releasing again saves nothing.
+    act(() => {
+      result.current.saves.saveInFlightRef.current = true;
+      result.current.saves.releaseShellLock();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(saveShell).toHaveBeenCalledTimes(1);
+    expect(result.current.saves.saveInFlightRef.current).toBe(false);
+  });
+
+  it("never starts a second shell save while one is already running; the running save drains the queue", async () => {
+    const firstSave = deferred<void>();
+    saveShell.mockReturnValueOnce(firstSave.promise as never).mockResolvedValue(undefined as never);
+    const { result } = renderSaves();
+    let firstDone!: Promise<void>;
+    await act(async () => {
+      firstDone = result.current.saves.persistPlannerState(initialState);
+    });
+    // A media write takes the lock while the shell save runs, and a later edit queues behind both.
+    act(() => { result.current.saves.saveInFlightRef.current = true; });
+    await act(async () => {
+      await result.current.saves.persistPlannerState(editedState);
+    });
+    act(() => result.current.saves.releaseShellLock());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(saveShell).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstSave.resolve();
+      await firstDone;
+    });
+    expect(saveShell).toHaveBeenCalledTimes(2);
+    expect(saveShell.mock.calls[1]?.[0].tasks[0]?.name).toBe("Edited while locked");
+  });
+});
+
 describe("navigation guards", () => {
   it("blocks in-app links and unload only while local work is unsaved, and flushes on page hide", async () => {
     saveShell.mockResolvedValue(undefined as never);
@@ -361,20 +419,56 @@ describe("shell autosave", () => {
     expect(loading.persistPlannerState).not.toHaveBeenCalled();
   });
 
-  it("never saves an unconfirmed snapshot, and skips one server-applied change", async () => {
+  it("never saves an unconfirmed snapshot", async () => {
     const unconfirmed = renderAutosave({ remoteStateConfirmedRef: { current: false } });
     unconfirmed.rerender({ ...unconfirmed.options, dirtyVersion: 1 });
     await vi.advanceTimersByTimeAsync(2_000);
     expect(unconfirmed.persistPlannerState).not.toHaveBeenCalled();
+  });
 
-    const echoed = renderAutosave({ remoteRefreshAppliedRef: { current: true } });
-    echoed.rerender({ ...echoed.options, dirtyVersion: 1 });
+  it("consumes a server-applied echo on a clean planner without saving, so it cannot swallow the next edit", async () => {
+    const echoed = renderAutosave({ plannerDirtyRef: { current: false }, remoteRefreshAppliedRef: { current: true } });
+    echoed.rerender({ ...echoed.options, dirtyVersion: 1, derivedState: { ...initialState } });
     await vi.advanceTimersByTimeAsync(2_000);
     expect(echoed.persistPlannerState).not.toHaveBeenCalled();
     expect(echoed.options.remoteRefreshAppliedRef.current).toBe(false);
-    echoed.rerender({ ...echoed.options, dirtyVersion: 2 });
-    await vi.advanceTimersByTimeAsync(900);
+
+    echoed.options.plannerDirtyRef.current = true;
+    const edit = { ...initialState, tasks: [{ ...plannerTask, name: "Edited after the echo" }] };
+    echoed.rerender({ ...echoed.options, dirtyVersion: 2, derivedState: edit });
+    await vi.advanceTimersByTimeAsync(899);
+    expect(echoed.persistPlannerState).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     expect(echoed.persistPlannerState).toHaveBeenCalledTimes(1);
+    expect(echoed.persistPlannerState).toHaveBeenCalledWith(edit);
+  });
+
+  it("still autosaves a dirty planner when the echo flag is set (Restore, procedure-save acknowledgment)", async () => {
+    const restored = { ...initialState, tasks: [{ ...plannerTask, name: "Restored" }] };
+    const echoed = renderAutosave({ remoteRefreshAppliedRef: { current: true } });
+    echoed.rerender({ ...echoed.options, dirtyVersion: 1, derivedState: restored });
+    await vi.advanceTimersByTimeAsync(899);
+    expect(echoed.persistPlannerState).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(echoed.persistPlannerState).toHaveBeenCalledTimes(1);
+    expect(echoed.persistPlannerState).toHaveBeenCalledWith(restored);
+    expect(echoed.options.remoteRefreshAppliedRef.current).toBe(false);
+  });
+
+  it("does not let a procedure-save acknowledgment cancel a pending shell autosave", async () => {
+    const { options, rerender, persistPlannerState } = renderAutosave();
+    const shellEdit = { ...initialState, tasks: [{ ...plannerTask, name: "Shell edit" }] };
+    rerender({ ...options, dirtyVersion: 1, derivedState: shellEdit });
+    await vi.advanceTimersByTimeAsync(500);
+
+    // The procedure queue acknowledges a save: it sets the echo flag and applies the saved task.
+    options.remoteRefreshAppliedRef.current = true;
+    const acknowledged = { ...shellEdit, tasks: [{ ...shellEdit.tasks[0]!, version: 2 }] };
+    rerender({ ...options, dirtyVersion: 1, derivedState: acknowledged });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(persistPlannerState).toHaveBeenCalledTimes(1);
+    expect(persistPlannerState).toHaveBeenCalledWith(acknowledged);
   });
 });
 

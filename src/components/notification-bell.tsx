@@ -1,6 +1,6 @@
 "use client";
 
-import { SOP_NOTIFICATIONS_REFRESH_EVENT } from "@/lib/sop/notify-kick";
+import { SOP_NOTIFICATIONS_REFRESH_EVENT, SOP_NOTIFICATIONS_DELIVERED_EVENT } from "@/lib/sop/notify-kick";
 
 import { Bell, CheckCheck, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,7 @@ import {
 } from "@/domain/sop/queue-summary";
 import { createPlannerSupabaseClient, loadWorkspaceProjectGroups } from "@/domain/supabase-planner";
 import { listInbox, markAllInboxRead, markInboxRead, type InboxItem } from "@/lib/notifications/inbox-store";
-import { fetchReviewQueueData } from "@/lib/sop/review-queue-data";
+import { fetchSharedReviewQueue } from "@/lib/sop/shared-review-queue";
 import { publishReviewQueueCount } from "@/lib/sop/review-queue-count";
 import { SOP_WORKSPACE_STORAGE_KEY } from "@/lib/sop/workspace-cookie";
 import { resolveSupabaseSession } from "@/lib/supabase-auth";
@@ -80,17 +80,27 @@ function useNotificationState(): {
   useEffect(() => {
     let mounted = true;
     let refreshVersion = 0;
+    let inFlight = false;
+    let pending: "all" | "inbox" | null = null;
+    let lastRefreshAt = 0;
+    let currentScope: string | null = null;
+    let currentUserId: string | null = null;
 
-    async function refresh() {
-      const version = ++refreshVersion;
+    async function refresh(requested: "all" | "inbox") {
+      const version = refreshVersion;
       try {
         const { session } = await resolveSupabaseSession(supabase);
+        if (!mounted || version !== refreshVersion) return;
         const user = session?.user;
+        currentUserId = user?.id ?? null;
         if (!user) {
           if (mounted && version === refreshVersion) {
             setSummary(null);
             setInbox([]);
             setLoaded(true);
+            storageKeyRef.current = null;
+            dismissedKeyRef.current = null;
+            currentScope = null;
           }
           return;
         }
@@ -106,10 +116,13 @@ function useNotificationState(): {
           workspaceId = groups[0]?.workspace.id ?? null;
         }
 
-        // The inbox is user-level and needs no workspace; the actionable count does.
+        const scope = JSON.stringify([user.id, workspaceId]);
+        const refreshQueue = requested === "all" || currentScope !== scope;
+        // Delivery completion refreshes only the inbox. Workflow mutations and
+        // ordinary ticks still refresh the actionable queue at its existing cadence.
         const [items, queue] = await Promise.all([
           listInbox(INBOX_LIMIT, supabase),
-          workspaceId ? fetchReviewQueueData(workspaceId, user.id) : Promise.resolve(null),
+          refreshQueue && workspaceId ? fetchSharedReviewQueue(workspaceId, user.id, supabase) : Promise.resolve(null),
         ]);
         if (!mounted || version !== refreshVersion) return;
         const dismissedKey = `pulse:notification-dismissed:v1:${user.id}`;
@@ -122,9 +135,11 @@ function useNotificationState(): {
           const summaryForQueue = summarizeQueue(queue);
           publishReviewQueueCount(workspaceId, summaryForQueue.total);
           setSummary(excludeAcknowledged(summaryForQueue, readAcknowledged(storageKey)));
-        } else {
+        } else if (refreshQueue) {
+          storageKeyRef.current = null;
           setSummary(null);
         }
+        currentScope = scope;
         setLoaded(true);
       } catch {
         // Keep the last good state; retry on the next trigger.
@@ -132,16 +147,62 @@ function useNotificationState(): {
       }
     }
 
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
-    const onFocus = () => void refresh();
+    function requestRefresh(kind: "all" | "inbox" = "all", force = false) {
+      if (!mounted) return;
+      if (force) {
+        if (kind === "all") refreshVersion += 1;
+        pending = pending === "all" ? "all" : kind;
+      }
+      if (document.visibilityState !== "visible" || inFlight) return;
+      if (!force && !pending && Date.now() - lastRefreshAt < 1_000) return;
+      const next = pending === "all" || kind === "all" ? "all" : "inbox";
+      pending = null;
+      inFlight = true;
+      void refresh(next).finally(() => {
+        inFlight = false;
+        lastRefreshAt = Date.now();
+        // A mutation/delivery while reading cannot be swallowed by the overlap guard.
+        if (pending) requestRefresh(pending, true);
+      });
+    }
+
+    requestRefresh();
+    const interval = window.setInterval(() => requestRefresh(), REFRESH_INTERVAL_MS);
+    const onFocus = () => requestRefresh();
+    const onMutation = () => requestRefresh("all", true);
+    const onDelivery = () => requestRefresh("inbox", true);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SOP_WORKSPACE_STORAGE_KEY) onMutation();
+    };
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event !== "SIGNED_OUT" && event !== "SIGNED_IN") return;
+      if (event === "SIGNED_IN" && session?.user.id === currentUserId) return;
+      refreshVersion += 1;
+      if (event === "SIGNED_OUT") {
+        currentUserId = null;
+        currentScope = null;
+        storageKeyRef.current = null;
+        dismissedKeyRef.current = null;
+        setSummary(null);
+        setInbox([]);
+      }
+      // Run outside the auth callback so resolving the session cannot deadlock it.
+      queueMicrotask(onMutation);
+    });
     window.addEventListener("focus", onFocus);
-    window.addEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, onMutation);
+    window.addEventListener(SOP_NOTIFICATIONS_DELIVERED_EVENT, onDelivery);
     return () => {
       mounted = false;
+      authListener.subscription.unsubscribe();
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
-      window.removeEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, onMutation);
+      window.removeEventListener(SOP_NOTIFICATIONS_DELIVERED_EVENT, onDelivery);
     };
   }, [supabase]);
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { useCoalescedRefresh } from "@/lib/use-coalesced-refresh";
+
 import { ChartPie, LayoutGrid } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QualitySkeleton } from "./quality-skeleton";
@@ -217,7 +219,8 @@ export function SopDashboard({
     seeded ? { workspaceId, loadedAt: Date.now() } : { loadedAt: 0 },
   );
 
-  const refresh = useCallback(async (options: { background?: boolean } = {}) => {
+  const refresh = useCoalescedRefresh(useCallback(async (options: { background?: boolean; force?: boolean } = {}, isCurrent: () => boolean) => {
+    if (!isCurrent()) return;
     if (!workspaceId) {
       setSops([]);
       setDepartments([]);
@@ -233,15 +236,17 @@ export function SopDashboard({
         listSops(workspaceId),
         listDepartments(workspaceId),
       ]);
+      if (!isCurrent()) return;
       setSops(nextSops);
       setDepartments(nextDepartments);
       setStatus("ready");
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };
     } catch (caught) {
+      if (!isCurrent()) return;
       setError(errorMessage(caught));
       if (!options.background) setStatus("error");
     }
-  }, [workspaceId]);
+  }, [workspaceId]));
 
   useEffect(() => {
     if (!active && !preload) return;
@@ -252,15 +257,24 @@ export function SopDashboard({
   }, [active, preload, refresh, workspaceId]);
 
   useEffect(() => {
-    const handleDemandUpdate = () => void refresh({ background: true });
+    const handleDemandUpdate = () => void refresh({ background: true, force: true });
     window.addEventListener(SOP_DEMAND_UPDATED_EVENT, handleDemandUpdate);
     return () => window.removeEventListener(SOP_DEMAND_UPDATED_EVENT, handleDemandUpdate);
   }, [refresh]);
 
   useEffect(() => {
     if (!active) return;
-    const interval = window.setInterval(() => void refresh({ background: true }), 15_000);
-    return () => window.clearInterval(interval);
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refresh({ background: true });
+    };
+    const interval = window.setInterval(refreshVisible, 15_000);
+    window.addEventListener("focus", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
   }, [active, refresh]);
 
   const metrics = useMemo(
@@ -277,7 +291,7 @@ export function SopDashboard({
       <div className="sop-dashboard-state">
         <span>[DASHBOARD UNAVAILABLE]</span>
         <p>{error}</p>
-        <button type="button" className="ui-btn-ghost" onClick={() => void refresh()}>
+        <button type="button" className="ui-btn-ghost" onClick={() => void refresh({ force: true })}>
           Retry
         </button>
       </div>

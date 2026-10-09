@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { kickSopNotifications, SOP_NOTIFICATIONS_REFRESH_EVENT } from "./notify-kick";
+import { kickSopNotifications, SOP_NOTIFICATIONS_REFRESH_EVENT, SOP_NOTIFICATIONS_DELIVERED_EVENT } from "./notify-kick";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -27,13 +27,18 @@ describe("kickSopNotifications", () => {
     expect(init?.method).toBe("POST");
   });
 
-  it("refreshes UI immediately and again after delivery finishes", async () => {
+  it("refreshes workflow immediately and only the inbox after delivery finishes", async () => {
     let finish!: (response: Response) => void;
     stubFetch(() => new Promise((resolve) => { finish = resolve; }));
     const refresh = vi.fn(); window.addEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refresh);
+    const delivered = vi.fn(); window.addEventListener(SOP_NOTIFICATIONS_DELIVERED_EVENT, delivered);
     kickSopNotifications(); expect(refresh).toHaveBeenCalledOnce();
+    expect(delivered).not.toHaveBeenCalled();
     finish(new Response(null)); await Promise.resolve();
-    expect(refresh).toHaveBeenCalledTimes(2); window.removeEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refresh);
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(delivered).toHaveBeenCalledOnce();
+    window.removeEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refresh);
+    window.removeEventListener(SOP_NOTIFICATIONS_DELIVERED_EVENT, delivered);
   });
 
   it("marks the kick keepalive so a navigation right after the mutation cannot abort it", () => {

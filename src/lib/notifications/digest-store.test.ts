@@ -24,6 +24,12 @@ function makeAdmin(results: Record<string, Result>, capture?: Capture) {
       gte: () => builder,
       order: () => builder,
       single: () => builder,
+      maybeSingle: () => builder,
+      upsert: (values: Record<string, unknown>, options: unknown) => {
+        expect(options).toEqual({ onConflict: "workspace_id,recipient_id,kind,period_key", ignoreDuplicates: true });
+        capture?.inserts.push({ table, values });
+        return builder;
+      },
       insert: (values: Record<string, unknown>) => {
         capture?.inserts.push({ table, values });
         return builder;
@@ -95,6 +101,13 @@ describe("createStalledDigestDrainStore.collect", () => {
 });
 
 describe("createStalledDigestDrainStore.claim", () => {
+  it("does not write an inbox row or claim delivery when the period already exists", async () => {
+    const capture: Capture = { inserts: [] };
+    const store = createStalledDigestDrainStore(makeAdmin(fixtures({ notification_digests: { data: null, error: null } }), capture));
+    const [item] = (await store.collect(NOW, origin)).items;
+    expect(await store.claim(item)).toEqual({ claimed: false, ledgerId: null });
+    expect(capture.inserts.map(item => item.table)).toEqual(["notification_digests"]);
+  });
   it("claims on the period key and writes the inbox row", async () => {
     const capture: Capture = { inserts: [] };
     const store = createStalledDigestDrainStore(makeAdmin(fixtures({ notification_digests: { data: { id: 3 }, error: null } }), capture));

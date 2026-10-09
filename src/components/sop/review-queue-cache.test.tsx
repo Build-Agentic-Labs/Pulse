@@ -4,7 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ReviewQueue } from "./review-queue";
 import { EMPTY_QUEUE, fetchReviewQueueData } from "@/lib/sop/review-queue-data";
 vi.mock("./sop-workspace-provider", () => ({ useSopWorkspace: () => ({ workspaceId: "workspace" }) }));
-vi.mock("@/domain/supabase-planner", () => ({ createPlannerSupabaseClient: vi.fn(), getUserFromSession: async () => ({ data: { user: { id: "reviewer" } } }) }));
+const client = vi.hoisted(() => ({}));
+vi.mock("@/domain/supabase-planner", () => ({ createPlannerSupabaseClient: () => client, getUserFromSession: async () => ({ data: { user: { id: "reviewer" } } }) }));
 vi.mock("@/lib/sop/review-queue-data", async (original) => ({ ...await original<object>(), fetchReviewQueueData: vi.fn() }));
 vi.mock("./sop-review-workspace", () => ({ SopReviewWorkspace: ({ onSubmitted }: { onSubmitted: () => void }) => <button onClick={onSubmitted}>Submit review</button> }));
 vi.mock("./sop-final-approval-workspace", () => ({ SopFinalApprovalWorkspace: () => null }));
@@ -23,14 +24,14 @@ it("coalesces focus and visibility refreshes while a queue request is pending", 
   expect(fetchReviewQueueData).toHaveBeenCalledOnce();
   await act(async () => resolve(EMPTY_QUEUE));
 });
-it("reuses fresh queue data when switching away and back", async () => {
+it("revalidates a retained queue when switching away and back", async () => {
   vi.mocked(fetchReviewQueueData).mockResolvedValue(EMPTY_QUEUE);
   const view = render(<ReviewQueue active />);
   await waitFor(() => expect(fetchReviewQueueData).toHaveBeenCalledOnce());
   await act(async () => {});
   view.rerender(<ReviewQueue active={false} />);
   view.rerender(<ReviewQueue active />);
-  expect(fetchReviewQueueData).toHaveBeenCalledOnce();
+  await waitFor(() => expect(fetchReviewQueueData).toHaveBeenCalledTimes(2));
 });
 it("refreshes a retained queue once its freshness window expires", async () => {
   vi.mocked(fetchReviewQueueData).mockResolvedValue(EMPTY_QUEUE);
@@ -52,8 +53,9 @@ it("workflow completion forces a refresh even during an older pending request", 
   render(<ReviewQueue openReviewId="sop" />);
   await waitFor(() => expect(fetchReviewQueueData).toHaveBeenCalledOnce());
   fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
-  await waitFor(() => expect(fetchReviewQueueData).toHaveBeenCalledTimes(2));
+  expect(fetchReviewQueueData).toHaveBeenCalledOnce();
   await act(async () => resolveOld(EMPTY_QUEUE));
+  await waitFor(() => expect(fetchReviewQueueData).toHaveBeenCalledTimes(2));
 });
 
 it("refreshes fresh cached data immediately after a workflow mutation", async () => {

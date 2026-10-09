@@ -8,13 +8,13 @@ import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useS
 import { viaReviewQueue } from "@/domain/sop/queue-navigation";
 import { summarizeQueue } from "@/domain/sop/queue-summary";
 import { publishReviewQueueCount } from "@/lib/sop/review-queue-count";
+import { fetchSharedReviewQueue, invalidateSharedReviewQueue } from "@/lib/sop/shared-review-queue";
 import { QualitySkeleton } from "./quality-skeleton";
 import { formatDate } from "@/domain/formatting";
 import { listNumberLabel } from "@/domain/sop/authoring";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import {
   EMPTY_QUEUE as EMPTY,
-  fetchReviewQueueData,
   type QualityQueueItem,
   type QueueData,
 } from "@/lib/sop/review-queue-data";
@@ -177,7 +177,8 @@ export function ReviewQueue({
     refreshPendingRef.current = false;
   }, [workspaceId]);
 
-  const refreshList = useCallback(async (options: { background?: boolean; coalesce?: boolean } = {}) => {
+  const refreshList = useCallback(async (options: { background?: boolean; coalesce?: boolean; afterMutation?: boolean } = {}) => {
+    if (options.afterMutation) invalidateSharedReviewQueue();
     if (options.coalesce && (refreshPendingRef.current || (
       freshnessRef.current.workspaceId === workspaceId && Date.now() - freshnessRef.current.loadedAt < 1_000
     ))) return;
@@ -206,7 +207,7 @@ export function ReviewQueue({
         return;
       }
 
-      const queue = await fetchReviewQueueData(workspaceId, userId);
+      const queue = await fetchSharedReviewQueue(workspaceId, userId, supabase);
       if (!isCurrent()) return;
       setData(queue);
       setError("");
@@ -243,7 +244,7 @@ export function ReviewQueue({
       if (document.visibilityState === "visible") void refreshList({ background: true, coalesce: true });
     };
     const interval = window.setInterval(refreshInBackground, 15_000);
-    const refreshAfterMutation = () => void refreshList({ background: true });
+    const refreshAfterMutation = () => void refreshList({ background: true, afterMutation: true });
     window.addEventListener(SOP_NOTIFICATIONS_REFRESH_EVENT, refreshAfterMutation);
     window.addEventListener("focus", refreshInBackground);
     document.addEventListener("visibilitychange", refreshInBackground);
@@ -346,7 +347,7 @@ export function ReviewQueue({
           departmentId={selectedFinalApproval.departmentId}
           departmentCode={selectedFinalApproval.departmentCode}
           onClose={closeReview}
-          onSigned={() => void refreshList({ background: true })}
+          onSigned={() => void refreshList({ background: true, afterMutation: true })}
         />
     );
   }
@@ -359,7 +360,7 @@ export function ReviewQueue({
         onClose={closeReview}
         onSubmitted={() => {
           closeReview();
-          void refreshList({ background: true });
+          void refreshList({ background: true, afterMutation: true });
         }}
       />
     );

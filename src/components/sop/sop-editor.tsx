@@ -1,5 +1,7 @@
 "use client";
 
+import { useCoalescedRefresh } from "@/lib/use-coalesced-refresh";
+
 import { kickSopNotifications } from "@/lib/sop/notify-kick";
 
 import { Check, ChevronLeft, ChevronRight, CircleCheck, Download, FileText, History, Loader2, MessageSquare, Paperclip, Pencil, Plus, RotateCcw, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
@@ -456,7 +458,8 @@ export function SopEditor({
 
 
 
-  const refreshApprovalRouting = useCallback(async (options: { background?: boolean } = {}) => {
+  const refreshApprovalRouting = useCoalescedRefresh(useCallback(async (options: { background?: boolean; force?: boolean } = {}, isCurrent: () => boolean) => {
+    if (!isCurrent()) return;
     if (!workspaceId) return;
     if (!options.background) setApprovalRoutingLoading(true);
     setApprovalRoutingError("");
@@ -473,6 +476,7 @@ export function SopEditor({
       const reviewerNames = await listProfileNames(
         seats.flatMap((seat) => seat.signerId ? [seat.signerId] : []),
       );
+      if (!isCurrent()) return;
       setApprovalDepartments(departments);
       setApprovalSeats(seats.filter((seat) => isBlockingSeat(seat.rasic)));
       setApprovalSignatures(signatures);
@@ -494,18 +498,19 @@ export function SopEditor({
         setSop((current) => current.status === control.status ? current : { ...current, status: control.status });
       }
     } catch (error) {
+      if (!isCurrent()) return;
       setApprovalRoutingError(error instanceof Error ? error.message : "Could not load approval routing.");
     } finally {
-      if (!options.background) setApprovalRoutingLoading(false);
+      if (isCurrent() && !options.background) setApprovalRoutingLoading(false);
     }
-  }, [hasPersistedSop, sop.id, workspaceId]);
+  }, [hasPersistedSop, sop.id, workspaceId]));
 
   useEffect(() => {
     if (skipInitialApprovalFetchRef.current) {
       skipInitialApprovalFetchRef.current = false;
       return;
     }
-    void refreshApprovalRouting();
+    void refreshApprovalRouting({ force: true });
   }, [refreshApprovalRouting]);
 
   useEffect(() => {
@@ -1350,7 +1355,7 @@ export function SopEditor({
         "",
         `/sops/${encodeURIComponent(sop.id)}?step=document`,
       );
-      await refreshApprovalRouting({ background: true });
+      await refreshApprovalRouting({ background: true, force: true });
       setAuditEvents(await listSopAuditEvents(sop.id));
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The controlled change could not be started.");
@@ -1411,7 +1416,7 @@ export function SopEditor({
     try {
       await sendSopForSignatures(sop.id, approvalContentHash ?? "", approvalReviewCycle);
       await syncSignatureRequestControl();
-      await refreshApprovalRouting();
+      await refreshApprovalRouting({ force: true });
       setAuditEvents(await listSopAuditEvents(sop.id));
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The SOP could not be sent for final approval.");
@@ -1462,7 +1467,7 @@ export function SopEditor({
       if (reviewGate.allResponded && reviewAnnotations.length === 0) {
         await sendSopForSignatures(sop.id, control.contentHash ?? "", control.reviewCycle);
         await syncSignatureRequestControl();
-        await refreshApprovalRouting({ background: true });
+        await refreshApprovalRouting({ background: true, force: true });
         setAuditEvents(await listSopAuditEvents(sop.id));
         setStepIndex(CREATOR_STEPS.length + 1);
         window.history.replaceState(window.history.state, "", `/sops/${encodeURIComponent(sop.id)}?step=final-approval`);
@@ -1496,7 +1501,7 @@ export function SopEditor({
       // Only with every remark addressed; otherwise the author lands back in draft review.
       const readyForSignatures = reviewGate.allResponded && reviewAnnotations.length === 0;
 
-      await refreshApprovalRouting({ background: true });
+      await refreshApprovalRouting({ background: true, force: true });
       setAuditEvents(await listSopAuditEvents(sop.id));
 
       const nextWorkflowStep = readyForSignatures ? "final-approval" : "draft-review";
@@ -1515,7 +1520,7 @@ export function SopEditor({
         setSop((current) => ({ ...current, status: submitted.status, updatedAt: submitted.updatedAt }));
         persistedUpdatedAtRef.current = submitted.updatedAt;
         setPersistedUpdatedAt(submitted.updatedAt);
-        await refreshApprovalRouting({ background: true });
+        await refreshApprovalRouting({ background: true, force: true });
       }
       setSaveError(error instanceof Error ? error.message : "The SOP could not be sent for review.");
       setSaveStatus("error");
@@ -1962,7 +1967,7 @@ export function SopEditor({
   }
 
   if (requestedStepId && requestedStepIndex < 0) {
-    if (approvalRoutingError) return <SopShell sidebar={null}><div className="mx-auto max-w-3xl p-5"><p role="alert" className="text-sm text-danger">{approvalRoutingError}</p><button type="button" className="ui-btn-ghost mt-3" onClick={() => void refreshApprovalRouting()}>Retry</button></div></SopShell>;
+    if (approvalRoutingError) return <SopShell sidebar={null}><div className="mx-auto max-w-3xl p-5"><p role="alert" className="text-sm text-danger">{approvalRoutingError}</p><button type="button" className="ui-btn-ghost mt-3" onClick={() => void refreshApprovalRouting({ force: true })}>Retry</button></div></SopShell>;
     return <SopDetailLoadingState initialView={initialView} fromReviewQueue={cameFromQueue} />;
   }
 
@@ -2020,7 +2025,7 @@ export function SopEditor({
                 <span>Review started. Approver invitations are pending.</span>
                 <button type="button" className="ui-btn-ghost" disabled={submittingForApproval} onClick={async () => {
                   setSubmittingForApproval(true);
-                  try { await submitSopWithApproverInvitations(sop.id, sop.updatedAt); await refreshApprovalRouting(); setSaveError(""); setSaveStatus("saved"); }
+                  try { await submitSopWithApproverInvitations(sop.id, sop.updatedAt); await refreshApprovalRouting({ force: true }); setSaveError(""); setSaveStatus("saved"); }
                   catch (error) { setSaveStatus("error"); setSaveError(error instanceof Error ? error.message : "Invitation delivery failed."); }
                   finally { setSubmittingForApproval(false); }
                 }}>Retry invitations</button>
@@ -2304,7 +2309,7 @@ export function SopEditor({
                     owningDepartmentId={selectedDepartmentId || undefined}
                     convertedApprovals={sop.source === "converted" ? sop.approvals : undefined}
                     onMapApproval={handleMapApproval}
-                    onChanged={() => refreshApprovalRouting({ background: true })}
+                    onChanged={() => refreshApprovalRouting({ background: true, force: true })}
                   />
                 ) : (
                   <section className="ui-panel overflow-hidden">
@@ -2740,7 +2745,7 @@ export function SopEditor({
           <SopQualityApprovalWorkspace
             sopId={sop.id}
             onClose={() => setQualityApprovalOpen(false)}
-            onReleased={() => void refreshApprovalRouting({ background: true })}
+            onReleased={() => void refreshApprovalRouting({ background: true, force: true })}
             returnLabel="Back to Quality Approval"
           />
         ) : null}

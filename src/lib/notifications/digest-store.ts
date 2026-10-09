@@ -140,19 +140,17 @@ export function createStalledDigestDrainStore(admin: SupabaseClient<Database>): 
       const { pending, content } = item;
       const { data, error } = await admin
         .from("notification_digests")
-        .insert({
+        .upsert({
           workspace_id: pending.workspaceId,
           recipient_id: pending.recipientId,
           kind: pending.kind,
           period_key: pending.periodKey,
           content: content as unknown as Json,
-        })
+        }, { onConflict: "workspace_id,recipient_id,kind,period_key", ignoreDuplicates: true })
         .select("id")
-        .single();
-      if (error) {
-        if (error.code === "23505") return { claimed: false, ledgerId: null };
-        throw new Error(error.message);
-      }
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) return { claimed: false, ledgerId: null };
       const ledgerId = Number(data.id);
       const entry = inboxEntryFromEmail(content, item.inbox);
       const { error: inboxError } = await admin.from("notifications").insert({

@@ -1,5 +1,7 @@
 "use client";
 
+import { useCoalescedRefresh } from "@/lib/use-coalesced-refresh";
+
 import { SOP_NOTIFICATIONS_REFRESH_EVENT } from "@/lib/sop/notify-kick";
 
 import { REVIEWER_STATUS_LABELS, type ReviewerStatus } from "@/domain/sop/reviewer-status";
@@ -180,15 +182,15 @@ export function SopList({
     seededFromServer ? { workspaceId, loadedAt: 1 } : { loadedAt: 0 },
   );
   // A tab return fires focus AND visibilitychange within milliseconds, and the
-  // visible-tab interval can overlap both; each background refresh is ~5 queries.
-  // This flag coalesces the burst so only the first background pass runs.
-  const backgroundRefreshInFlight = useRef(false);
+  // visible-tab interval can overlap both; each refresh makes several queries.
+  // The shared refresh runner combines the burst and retains mutation invalidations.
   // Latest sops for the no-op return path (the useCallback closure would be stale).
   const sopsRef = useRef(sops);
   sopsRef.current = sops;
   const converting = convert !== null;
 
-  const refreshList = useCallback(async (options: { background?: boolean; force?: boolean } = {}) => {
+  const refreshList = useCoalescedRefresh(useCallback(async (options: { background?: boolean; force?: boolean } = {}, isCurrent: () => boolean) => {
+    if (!isCurrent()) return [] as SopListItem[];
     if (!workspaceId) {
       setSops([]);
       setReviewResults(new Map());
@@ -203,10 +205,9 @@ export function SopList({
       const justRefreshed =
         freshnessRef.current.workspaceId === workspaceId &&
         Date.now() - freshnessRef.current.loadedAt < 2_000;
-      if (backgroundRefreshInFlight.current || (!options.force && justRefreshed)) {
+      if (!options.force && justRefreshed) {
         return sopsRef.current;
       }
-      backgroundRefreshInFlight.current = true;
     }
     if (!options.background) {
       setListStatus("loading");
@@ -218,6 +219,7 @@ export function SopList({
       const userResult = await getUserFromSession(supabase);
       const userId = userResult.data.user?.id ?? null;
       const review = await fetchSopListReviewData(next, userId, supabase);
+      if (!isCurrent()) return next;
       setSops(next);
       setRefreshWarning(false);
       setReviewResults(reviewResultsFrom(review));
@@ -228,16 +230,15 @@ export function SopList({
       freshnessRef.current = { workspaceId, loadedAt: Date.now() };
       return next;
     } catch (caught) {
+      if (!isCurrent()) return [] as SopListItem[];
       if (options.background) setRefreshWarning(true);
       if (!options.background) {
         setError(caught instanceof Error ? caught.message : "Could not load SOPs.");
         setListStatus("error");
       }
       return [] as SopListItem[];
-    } finally {
-      backgroundRefreshInFlight.current = false;
     }
-  }, [workspaceId]);
+  }, [workspaceId]));
 
   const activeSops = useMemo(
     () => sops.filter(
@@ -532,7 +533,7 @@ export function SopList({
       }
       markImportDone(workspaceId);
       setPendingImport([]);
-      await refreshList({ background: true });
+      await refreshList({ background: true, force: true });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Import failed.");
     } finally {
@@ -656,7 +657,7 @@ export function SopList({
         ) : listStatus === "error" ? (
           <section className="ui-empty-state">
             <p className="ui-section-subtitle text-ink-tertiary">{error || "Could not load SOPs."}</p>
-            <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList()}>
+            <button type="button" className="ui-btn-ghost mt-3 inline-flex h-9 px-3" onClick={() => void refreshList({ force: true })}>
               Retry
             </button>
           </section>

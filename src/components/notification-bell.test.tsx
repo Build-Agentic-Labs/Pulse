@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EMPTY_QUEUE } from "@/lib/sop/review-queue-data";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EMPTY_QUEUE, fetchReviewQueueData } from "@/lib/sop/review-queue-data";
+import { SOP_NOTIFICATIONS_REFRESH_EVENT, SOP_NOTIFICATIONS_DELIVERED_EVENT } from "@/lib/sop/notify-kick";
 import { NotificationBell } from "./notification-bell";
 
 const push = vi.fn();
@@ -19,7 +20,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/domain/supabase-planner", () => ({
-  createPlannerSupabaseClient: () => ({}),
+  createPlannerSupabaseClient: () => ({ auth: { onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })) } }),
   loadWorkspaceProjectGroups: vi.fn(async () => [{ workspace: { id: "ws-1" } }]),
 }));
 
@@ -44,7 +45,10 @@ describe("NotificationBell", () => {
     markInboxRead.mockClear();
     markAllInboxRead.mockClear();
     window.localStorage.clear();
+    listInbox.mockClear();
+    vi.mocked(fetchReviewQueueData).mockClear();
   });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
   it("renders its persistent chrome before notification data resolves", () => {
     resolveSupabaseSession.mockImplementationOnce(() => new Promise(() => undefined));
@@ -92,6 +96,45 @@ describe("NotificationBell", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Notifications" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Mark all read" }));
     expect(markAllInboxRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the inbox after delivery without repeating the review queue", async () => {
+    resolveSupabaseSession.mockImplementation(async () => ({ session: { user: { id: "u1" } } }));
+    render(<NotificationBell />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Notifications" }).hasAttribute("aria-busy")).toBe(false));
+    expect(fetchReviewQueueData).toHaveBeenCalledOnce();
+    act(() => window.dispatchEvent(new Event(SOP_NOTIFICATIONS_DELIVERED_EVENT)));
+    await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+    expect(fetchReviewQueueData).toHaveBeenCalledOnce();
+  });
+
+  it("pauses hidden polling and immediately refreshes on return while coalescing the event pair", async () => {
+    resolveSupabaseSession.mockImplementation(async () => ({ session: { user: { id: "u1" } } }));
+    render(<NotificationBell />);
+    await waitFor(() => expect(listInbox).toHaveBeenCalledOnce());
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(listInbox).toHaveBeenCalledOnce();
+    visibility.mockReturnValue("visible");
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(listInbox).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs a trailing refresh when a mutation arrives during a request", async () => {
+    let finish!: (value: { session: { user: { id: string } } }) => void;
+    resolveSupabaseSession.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
+      .mockImplementation(async () => ({ session: { user: { id: "u1" } } }));
+    render(<NotificationBell />);
+    await act(async () => {
+      window.dispatchEvent(new Event(SOP_NOTIFICATIONS_REFRESH_EVENT));
+      finish({ session: { user: { id: "u1" } } });
+    });
+    await waitFor(() => expect(listInbox).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Notifications" }).hasAttribute("aria-busy")).toBe(false);
   });
 });
 

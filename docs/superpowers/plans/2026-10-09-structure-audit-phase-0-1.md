@@ -4,7 +4,7 @@ Source: `docs/audits/2026-10-08-structure-audit.md` (§4 defects, §5 Phase 0 an
 
 ## Global Constraints
 
-- Branch: `claude/pulse-structure-audit-e48946` (worktree). One commit per task, conventional commit format (`fix:` / `refactor:` / `test:`), ending with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` on its own line.
+- Branch: `claude/pulse-structure-audit-e48946` (worktree). One commit per task, conventional commit format (`fix:` / `refactor:` / `test:`).
 - **Behavior fixes only. No boundary extractions, no new hooks, no file splits** beyond what a task names. Appearance, navigation, save timing, request volume, permissions and functionality stay identical except where a task states the intended change.
 - **Sensitive, must not change unless the task says so:** SOP optimistic concurrency (`persistedUpdatedAt` token, `adoptWorkflowTransition`), approval transitions, save-before-upload ordering, server-seeded loading (`initial*` props, `skipInitial*Ref`), mobile capture timers / recovery drafts / queued writes / media uploads, photo annotation gestures / recovery / persistence, print pagination, the planner's granular save architecture. **Never add a full-state save path**; `savePlannerStateToSupabase` and `assertSaneStateDeletion` are untouched.
 - Mobile scheduling (`domain/mobile-task-scheduling.ts`) and shared scheduling (`domain/task-scheduling.ts`) stay separate. Do not substitute one for the other.

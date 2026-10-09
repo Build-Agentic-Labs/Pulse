@@ -57,7 +57,6 @@ export type UseWorkspaceDataOptions = {
   setSelectedTaskId: Dispatch<SetStateAction<string>>;
   setSelectedStationId: Dispatch<SetStateAction<string>>;
   setActiveZoneId: Dispatch<SetStateAction<string | undefined>>;
-  setDetailDrawerCollapsed: Dispatch<SetStateAction<boolean>>;
   setSidebarCollapsed: Dispatch<SetStateAction<boolean>>;
   setWorkspaceNotice: Dispatch<SetStateAction<Omit<FeedbackToast, "id"> | null>>;
   urlWorkspaceSnapshotRef: RefObject<Partial<WorkspaceSnapshot>>;
@@ -115,7 +114,7 @@ export function useWorkspaceData(options: UseWorkspaceDataOptions) {
   const consumedInitialCachedPlannerStateForRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    const { setProjectSwitchTargetContext, setIsProjectSwitching, setHasLoadedRemoteState, setHasConfirmedRemoteState, setSaveState, setSaveError, setTaskDetailHydrationStatus, setPlannerState, setActiveModule, setSelectedTaskId, setSelectedStationId, setActiveZoneId, setDetailDrawerCollapsed, setSidebarCollapsed, urlWorkspaceSnapshotRef, initialCachedPlannerSnapshotRef, hasLoadedAnyProjectRef, loadedProjectIdRef, projectSwitchStartedAtRef, remoteStateConfirmedRef, mainScenarioIdRef, taskDetailHydrationRequestsRef, fullyHydratedScenarioIdsRef, plannerDirtyRef, restoreProcedureDraftFieldsRef, applyProcedureDraftsToTaskRef, recoverProcedureDraftSavesRef } = optionsRef.current;
+    const { setProjectSwitchTargetContext, setIsProjectSwitching, setHasLoadedRemoteState, setHasConfirmedRemoteState, setSaveState, setSaveError, setTaskDetailHydrationStatus, setPlannerState, setActiveModule, setSelectedTaskId, setSelectedStationId, setActiveZoneId, setSidebarCollapsed, urlWorkspaceSnapshotRef, initialCachedPlannerSnapshotRef, hasLoadedAnyProjectRef, loadedProjectIdRef, projectSwitchStartedAtRef, remoteStateConfirmedRef, mainScenarioIdRef, taskDetailHydrationRequestsRef, fullyHydratedScenarioIdsRef, plannerDirtyRef, restoreProcedureDraftFieldsRef, applyProcedureDraftsToTaskRef, recoverProcedureDraftSavesRef } = optionsRef.current;
     const finishProjectSwitch = finishProjectSwitchRef.current;
     let mounted = true;
     let remoteLoaded = false;
@@ -225,7 +224,6 @@ export function useWorkspaceData(options: UseWorkspaceDataOptions) {
       setSelectedTaskId(selectedTask?.id ?? "");
       setSelectedStationId(urlStation?.id ?? snapshotStation?.id ?? selectedTask?.stationId ?? hydratedState.tasks[0]?.stationId ?? "");
       setActiveZoneId(urlZone?.id ?? snapshotZone?.id);
-      setDetailDrawerCollapsed(workspaceSnapshot?.detailDrawerCollapsed ?? true);
       setSidebarCollapsed(workspaceSnapshot?.sidebarCollapsed ?? false);
       loadedProjectIdRef.current = currentProjectId;
       hasLoadedAnyProjectRef.current = true;

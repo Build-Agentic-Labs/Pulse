@@ -23,7 +23,6 @@ import {
   groupTone,
   TAKT_EXCEEDED_TONE,
   TAKT_FLAG_INPUT_CLASS,
-  taskTone,
   UNZONED_COLOR,
   zoneDefaultFill,
 } from "@/theme/chart-tokens";
@@ -42,8 +41,6 @@ interface GanttTimelineProps {
   availableOperatorLetters: string[];
   operatorCapacityMinutes: number;
   demandQuantity: number;
-  currentMinute: number;
-  showPlaybackMarker: boolean;
   onSelectTask: (taskId: string) => void;
   onOpenTaskDetail: (taskId: string) => void;
   onOpenProcedureStepName: (taskId: string, stepId: string) => void;
@@ -132,12 +129,6 @@ type GanttRow =
     }
   | {
       id: string;
-      kind: "task";
-      task: Task;
-      groupId: string;
-    }
-  | {
-      id: string;
       kind: "step";
       task: Task;
       step: ManufacturingStep;
@@ -145,36 +136,6 @@ type GanttRow =
       startMinute: number;
       finishMinute: number;
   };
-
-function getTaskState(task: Task, taskMap: Map<string, Task>, timelineStartMs: number, currentMinute: number) {
-  const { startMinute, finishMinute } = getTaskWindow(task, timelineStartMs);
-  const predecessorFinish = task.dependencyIds.reduce((latest, dependencyId) => {
-    const predecessor = taskMap.get(dependencyId);
-    if (!predecessor) {
-      return latest;
-    }
-
-    return Math.max(latest, getTaskWindow(predecessor, timelineStartMs).finishMinute);
-  }, 0);
-
-  if (currentMinute >= finishMinute) {
-    return "complete";
-  }
-
-  if (currentMinute >= startMinute && predecessorFinish > currentMinute) {
-    return "blocked";
-  }
-
-  if (currentMinute >= startMinute && currentMinute < finishMinute) {
-    return "in_progress";
-  }
-
-  if (currentMinute >= predecessorFinish && currentMinute >= startMinute - 30) {
-    return "ready";
-  }
-
-  return "not_started";
-}
 
 function tickInterval(durationMinutes: number) {
   return durationMinutes > 900 ? 120 : 60;
@@ -451,22 +412,6 @@ function groupManufacturingStepCount(group: ProcessGroup) {
   return group.tasks.reduce((total, task) => total + (task.manufacturingSteps?.length ?? 0), 0);
 }
 
-function getGroupState(group: ProcessGroup, currentMinute: number) {
-  if (currentMinute >= group.finishMinute) {
-    return "complete";
-  }
-
-  if (currentMinute >= group.startMinute && currentMinute < group.finishMinute) {
-    return "in_progress";
-  }
-
-  if (currentMinute >= group.startMinute - 30) {
-    return "ready";
-  }
-
-  return "not_started";
-}
-
 export function GanttTimeline({
   tasks,
   stations,
@@ -478,8 +423,6 @@ export function GanttTimeline({
   availableOperatorLetters,
   operatorCapacityMinutes,
   demandQuantity,
-  currentMinute,
-  showPlaybackMarker,
   onSelectTask,
   onOpenTaskDetail,
   onOpenProcedureStepName,
@@ -502,7 +445,6 @@ export function GanttTimeline({
 }: GanttTimelineProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [linkingRowId, setLinkingRowId] = useState<string | null>(null);
-  const [highlightedRowIds, setHighlightedRowIds] = useState<Set<string>>(new Set());
   const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null);
   const [dragOverZoneId, setDragOverZoneId] = useState<string | null>(null);
   const [dragOverGroup, setDragOverGroup] = useState<{ id: string; placement: "before" | "after" } | null>(null);
@@ -539,13 +481,6 @@ export function GanttTimeline({
   const taktFlagY = HEADER_HEIGHT + 8;
   const taktFlagTextX = taktFlagX + taktFlagWidth / 2;
   const taktFlagTextY = taktFlagY + 15;
-  const playbackMarkerX = Math.min(
-    Math.max(timelineOriginX + currentMinute * PIXELS_PER_MINUTE, timelineOriginX),
-    chartWidth,
-  );
-  const playbackFlagWidth = 88;
-  const playbackFlagX = Math.min(Math.max(playbackMarkerX - playbackFlagWidth / 2, 0), chartWidth - playbackFlagWidth);
-  const playbackFlagTextX = playbackFlagX + playbackFlagWidth / 2;
   const taskMap = new Map(tasks.map((task) => [task.id, task]));
   const predecessorCandidates = [...tasks].sort(compareTasksByWbs);
   const stationById = new Map(stations.map((station) => [station.id, station]));
@@ -780,17 +715,13 @@ export function GanttTimeline({
           ? row.zone.startMinute
           : row.kind === "group"
           ? row.group.startMinute
-          : row.kind === "step"
-            ? row.startMinute
-            : getTaskWindow(row.task, bounds.startMs).startMinute;
+          : row.startMinute;
       const finishMinute =
         row.kind === "zone"
           ? row.zone.finishMinute
           : row.kind === "group"
           ? row.group.finishMinute
-          : row.kind === "step"
-            ? row.finishMinute
-            : getTaskWindow(row.task, bounds.startMs).finishMinute;
+          : row.finishMinute;
       return [
         row.id,
         {
@@ -815,7 +746,7 @@ export function GanttTimeline({
     return groupByTaskId.get(ref)?.id;
   }
 
-  const dependencyHighlightRowIds = new Set(highlightedRowIds);
+  const dependencyHighlightRowIds = new Set<string>();
   const selectedTask = selectedTaskId ? taskMap.get(selectedTaskId) : undefined;
 
   selectedTask?.dependencyIds.forEach((dependencyId) => {
@@ -1035,7 +966,6 @@ export function GanttTimeline({
       if (targetTask) {
         onSelectTask(targetTask.id);
       }
-      setHighlightedRowIds(new Set());
       setLinkingRowId(rowId);
       setStartDrafts((current) => ({ ...current, [rowId]: "=" }));
       return;
@@ -1054,7 +984,6 @@ export function GanttTimeline({
     }
 
     const row = visibleRows.find((candidate) => candidate.id === rowId);
-    const nextStart = new Date(bounds.startMs + nextHours * 60 * 60_000).toISOString();
 
     if (row?.kind === "group") {
       row.group.tasks.forEach((task) => {
@@ -1068,14 +997,6 @@ export function GanttTimeline({
       });
       setLinkingRowId(null);
       return;
-    }
-
-    if (row?.kind === "task") {
-      onUpdateTask(row.task.id, {
-        plannedStart: nextStart,
-        plannedFinish: new Date(Date.parse(nextStart) + Math.max(row.task.plannedDurationMinutes, 0) * 60_000).toISOString(),
-      });
-      setLinkingRowId(null);
     }
   }
 
@@ -1122,7 +1043,6 @@ export function GanttTimeline({
 
   function selectTaskForEditing(taskId: string) {
     setLinkingRowId(null);
-    setHighlightedRowIds(new Set());
     onSelectTask(taskId);
   }
 
@@ -1192,7 +1112,6 @@ export function GanttTimeline({
 
   function activateRow(row: GanttRow) {
     setLinkingRowId(null);
-    setHighlightedRowIds(new Set());
     const task = getRowStartTask(row);
     if (task) {
       onSelectTask(task.id);
@@ -1327,11 +1246,7 @@ export function GanttTimeline({
       return primaryTask ? taskDisplayLabel(primaryTask) : visibleRow.group.name;
     }
 
-    if (visibleRow.kind === "step") {
-      return `${stepDisplayCode(visibleRow.task, visibleRow.step) || `Step ${visibleRow.step.sequence}`} ${manufacturingStepLabel(visibleRow.step)}`;
-    }
-
-    return taskDisplayLabel(visibleRow.task);
+    return `${stepDisplayCode(visibleRow.task, visibleRow.step) || `Step ${visibleRow.step.sequence}`} ${manufacturingStepLabel(visibleRow.step)}`;
   }
 
   function getPredecessorCandidateState(candidate: Task) {
@@ -1915,149 +1830,6 @@ export function GanttTimeline({
                   </div>
                 );
               }
-
-              const task = row.task;
-              const selected = selectedTaskId === task.id;
-              const highlighted = dependencyHighlightRowIds.has(row.id);
-              const window = getTaskWindow(task, bounds.startMs);
-              const taskDurationOverTakt = exceedsTaktLimit(task.plannedDurationMinutes, taktLimitMinutes);
-              const taskDurationFlag = taskDurationOverTakt ? taktFlagLabel(task.plannedDurationMinutes, taktLimitMinutes) : undefined;
-              return (
-                <div
-                  key={task.id}
-                  data-task-select="true"
-                  onClick={() => activateRow(row)}
-                  onDoubleClick={() => openRowDetail(row)}
-                  className={`grid h-[54px] w-full items-center gap-2 border-b border-line pl-3 pr-4 text-left text-xs transition ${
-                    highlighted
-                      ? "bg-accent-muted shadow-inset-accent-start"
-                      : selected
-                        ? "bg-accent-muted"
-                        : "hover:bg-surface-hover"
-                  }`}
-                  style={tableGridStyle}
-                >
-                  <span className="text-center font-mono text-[11px] text-ink-secondary">{taskDisplayCode(task)}</span>
-                  {editingTaskNameId === task.id || task.name.trim() === "" ? (
-                    <input
-                      aria-label={`${task.wbs} task name`}
-                      data-task-name-id={task.id}
-                      className="h-9 w-full min-w-0 rounded border border-line bg-surface px-2 font-semibold text-ink outline-none transition"
-                      value={task.name}
-                      placeholder="Blank task"
-                      onClick={(event) => event.stopPropagation()}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                      onFocus={() => selectTaskForEditing(task.id)}
-                      onBlur={(event) => finishEditingTaskName(task.id, event.currentTarget.value)}
-                      onKeyDown={(event) => handleTaskNameKeyDown(event, task.id)}
-                      onChange={(event) => onUpdateTask(task.id, { name: event.target.value })}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => activateRow(row)}
-                      onDoubleClick={(event) => {
-                        event.stopPropagation();
-                        beginEditingTaskName(task.id);
-                      }}
-                      className="w-full min-w-0 cursor-text truncate rounded border border-transparent bg-transparent px-2 py-2 text-left font-semibold text-ink"
-                      title="Double-click to rename"
-                    >
-                      {task.name}
-                    </button>
-                  )}
-                  <input
-                    aria-label={`${task.wbs} start link`}
-                    className={`h-9 rounded border px-1 text-center font-mono font-bold outline-none ${
-                      linkingRowId === row.id ? "border-accent bg-accent-muted text-accent" : "border-line bg-surface-sunken text-ink-secondary"
-                    }`}
-                    value={getStartInputValue(row.id, window.startMinute)}
-                    onFocus={(event) => {
-                      selectTaskForEditing(task.id);
-                      beginStartEdit(row.id, window.startMinute);
-                      event.currentTarget.select();
-                    }}
-                    onBlur={() => finishStartEdit(row.id)}
-                    onChange={(event) => updateStartLinkDraft(row.id, event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        clearStartEdit(row.id);
-                        event.currentTarget.blur();
-                      }
-                    }}
-                  />
-                  <div className="relative min-w-0" title={taskDurationFlag}>
-                    <ClearableNumberInput
-                      aria-label={`${task.wbs} duration hours${taskDurationOverTakt ? " over takt" : ""}`}
-                      min={0}
-                      step={0.05}
-                      className={`number-input h-9 w-full min-w-0 rounded border px-1 text-center font-bold outline-none ${
-                        taskDurationOverTakt ? TAKT_FLAG_INPUT_CLASS : "border-line bg-surface text-ink"
-                      }`}
-                      value={round(task.plannedDurationMinutes / 60, 2)}
-                      fallbackValue={task.plannedDurationMinutes / 60}
-                      precision={2}
-                      onClick={(event) => event.stopPropagation()}
-                      onFocus={() => selectTaskForEditing(task.id)}
-                      onValueChange={(value) => updateTaskDuration(task, value)}
-                    />
-                    {taskDurationFlag ? <TaktConditionFlag label={taskDurationFlag} /> : null}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      selectFinishLinkTarget(row);
-                    }}
-                    disabled={linkingRowId !== null && !canUseFinishAsLinkSource(linkingRowId, row)}
-                    className={`rounded border px-1 py-2 text-center font-mono font-bold outline-none transition ${finishLinkClass(row)}`}
-                    aria-label={`${task.wbs} finish ${formatRelativeHours(window.finishMinute)}`}
-                  >
-                    {formatRelativeHours(window.finishMinute)}
-                  </button>
-                  <OperatorAssignmentPicker
-                    task={task}
-                    availableOperatorLetters={availableOperatorLetters}
-                    operatorCapacityMinutes={operatorCapacityMinutes}
-                    demandQuantity={demandQuantity}
-                    isAllocating={smartAllocationPending}
-                    taktMinutes={taktLimitMinutes}
-                    onNotify={onNotify}
-                    onConfirmAction={onConfirmAction}
-                    tasks={tasks}
-                    onToggleOperator={(task, operatorId) => {
-                      selectTaskForEditing(task.id);
-                      toggleTaskOperator(task, operatorId);
-                    }}
-                  />
-                  <span className="text-center font-semibold text-ink-secondary">{round(task.plannedManHours, 1)}</span>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openPredecessorPicker(task);
-                    }}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-accent/30 hover:bg-accent-muted hover:text-accent"
-                    aria-label="Add predecessor"
-                    title="Add predecessor"
-                  >
-                    <Link2 size={14} strokeWidth={1.75} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDeleteTasks([task.id]);
-                    }}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-ink-secondary outline-none hover:border-danger/40 hover:bg-danger-muted hover:text-danger"
-                    aria-label={`Delete task ${task.wbs}`}
-                    title="Delete task"
-                  >
-                    <Trash2 size={14} strokeWidth={1.75} />
-                  </button>
-                  <span aria-hidden="true" />
-                </div>
-              );
             })}
           </div>
             </>
@@ -2247,9 +2019,8 @@ export function GanttTimeline({
               }
 
               if (visibleRow.kind === "group") {
-                const state = showPlaybackMarker ? getGroupState(visibleRow.group, currentMinute) : "not_started";
                 const taktExceeded = exceedsTaktLimit(visibleRow.group.durationMinutes, taktLimitMinutes);
-                const tone = taktExceeded ? TAKT_EXCEEDED_TONE : groupTone(state);
+                const tone = taktExceeded ? TAKT_EXCEEDED_TONE : groupTone("not_started");
                 const width = timelineBarWidth(row.startX, row.finishX, 18);
                 const highlighted = dependencyHighlightRowIds.has(visibleRow.id);
                 const primaryTask = visibleRow.group.tasks[0];
@@ -2281,18 +2052,6 @@ export function GanttTimeline({
                       stroke={highlighted ? chartPalette.highlight : tone.stroke}
                       strokeWidth={highlighted ? 2.4 : 1.4}
                     />
-                    {showPlaybackMarker && state === "in_progress" && !taktExceeded ? (
-                      <rect
-                        x={row.startX}
-                        y={row.y}
-                        rx={5}
-                        ry={5}
-                        width={Math.max((currentMinute - visibleRow.group.startMinute) * PIXELS_PER_MINUTE, 6)}
-                        height={26}
-                        fill={chartPalette.accent}
-                        opacity={0.9}
-                      />
-                    ) : null}
                     <title>
                       {expandedLabel}
                       {taktExceeded
@@ -2342,92 +2101,6 @@ export function GanttTimeline({
                 );
               }
 
-              const task = visibleRow.task;
-
-              const state = showPlaybackMarker ? getTaskState(task, taskMap, bounds.startMs, currentMinute) : "not_started";
-              const taktExceeded = exceedsTaktLimit(task.plannedDurationMinutes, taktLimitMinutes);
-              const tone = taktExceeded ? TAKT_EXCEEDED_TONE : taskTone(state, task);
-              const width = timelineBarWidth(row.startX, row.finishX, task.rowType === "milestone" ? 18 : 14);
-              const highlighted = dependencyHighlightRowIds.has(visibleRow.id);
-              const expandedLabel = taskDisplayLabel(task);
-
-              if (task.rowType === "milestone") {
-                const centerX = row.startX + 12;
-                const centerY = row.y + 13;
-                return (
-                  <g
-                    key={task.id}
-                    data-task-select="true"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => activateRow(visibleRow)}
-                    onDoubleClick={() => openRowDetail(visibleRow)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        activateRow(visibleRow);
-                      }
-                    }}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <polygon
-                      points={`${centerX},${centerY - 12} ${centerX + 12},${centerY} ${centerX},${centerY + 12} ${
-                        centerX - 12
-                      },${centerY}`}
-                      fill={tone.fill}
-                      stroke={highlighted ? chartPalette.highlight : tone.stroke}
-                      strokeWidth={highlighted ? 2.4 : 1.8}
-                    />
-                    <title>{expandedLabel}</title>
-                  </g>
-                );
-              }
-
-              return (
-                <g
-                  key={task.id}
-                  data-task-select="true"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => activateRow(visibleRow)}
-                  onDoubleClick={() => openRowDetail(visibleRow)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      activateRow(visibleRow);
-                    }
-                  }}
-                  style={{ cursor: "pointer" }}
-                >
-                  <rect
-                    x={row.startX}
-                    y={row.y}
-                    rx={4}
-                    ry={4}
-                    width={width}
-                    height={26}
-                    fill={tone.fill}
-                    stroke={highlighted ? chartPalette.highlight : tone.stroke}
-                    strokeWidth={highlighted ? 2.4 : task.criticalPath ? 2 : 1}
-                  />
-                  {showPlaybackMarker && state === "in_progress" && !taktExceeded ? (
-                    <rect
-                      x={row.startX}
-                      y={row.y}
-                      rx={4}
-                      ry={4}
-                      width={Math.max((currentMinute - getTaskWindow(task, bounds.startMs).startMinute) * PIXELS_PER_MINUTE, 6)}
-                      height={26}
-                      fill={chartPalette.accent}
-                      opacity={0.85}
-                    />
-                  ) : null}
-                  <title>
-                    {expandedLabel}
-                    {taktExceeded
-                      ? ` - over takt (${formatMinutes(task.plannedDurationMinutes)} > ${formatMinutes(taktLimitMinutes)})`
-                      : ""}
-                  </title>
-                </g>
-              );
             })}
 
             {hasTaktLimit ? (
@@ -2479,36 +2152,6 @@ export function GanttTimeline({
                   </>
                 ) : null}
               </g>
-            ) : null}
-
-            {showPlaybackMarker ? (
-              <>
-                <line
-                  x1={playbackMarkerX}
-                  x2={playbackMarkerX}
-                  y1={0}
-                  y2={chartHeight}
-                  stroke={chartPalette.danger}
-                  strokeWidth={2}
-                />
-                <rect
-                  x={playbackFlagX}
-                  y={6}
-                  width={playbackFlagWidth}
-                  height={22}
-                  rx={4}
-                  fill={chartPalette.danger}
-                />
-                <text
-                  x={playbackFlagTextX}
-                  y={21}
-                  fill={chartPalette.white}
-                  className="ui-gantt-chart-flag-label"
-                  textAnchor="middle"
-                >
-                  {formatMinutes(currentMinute)}
-                </text>
-              </>
             ) : null}
           </svg>
             </div>

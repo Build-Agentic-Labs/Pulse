@@ -1,6 +1,5 @@
 "use client";
 
-import { requestIeSmartAllocationPlan } from "@/lib/planner/smart-allocation-client";
 import { AwiEditorActions } from "./awi-editor-actions";
 import { settleWriteBatch } from "@/domain/workspace-save-status";
 import { useProcedureDrafts } from "./line-workspace/use-procedure-drafts";
@@ -23,17 +22,8 @@ import { readAnnotationDraft } from "@/lib/photo-annotation-drafts";
 import "./line-workspace.css";
 
 import {
-  Activity,
-  ChevronDown,
-  ChevronUp,
-  Copy,
   Download,
-  Pause,
-  Play,
   Plus,
-  RotateCcw,
-  SkipBack,
-  SkipForward,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -42,7 +32,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   applyCalculatedFields,
@@ -51,14 +40,11 @@ import {
   calculateProductKpis,
   formatMinutes,
   getTopLevelTasks,
-  getTaskWindow,
   getTimelineBounds,
-  round,
 } from "@/domain/calculations";
 import dynamic from "next/dynamic";
 import { createPlannerDerivation } from "@/domain/planner-derivation";
 import { buildOperatorAssignmentsFromIePlan } from "@/domain/operator-allocation";
-import type { IeSmartAllocationPlan, IeSmartAllocationRequest } from "@/domain/ie-smart-allocation";
 import { getTaskOperatorIds, getTaskOperatorResetPatch, syncTaskOperatorCount } from "@/domain/operator-assignments";
 import { buildStationSetupDocumentHtml } from "@/domain/report";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
@@ -66,9 +52,7 @@ import {
   readCachedMainPlannerStateSync,
   writeCachedPlannerState,
 } from "@/lib/planner-state-cache";
-import { buildPlaybackEvents } from "@/domain/playback";
 import {
-  buildProcessStationForTask,
   getTaskProcessNumber,
   getTaskWbsSuffix,
   normalizeTaskPlanningContext,
@@ -83,9 +67,7 @@ import {
   taskPatchChangesSchedule,
 } from "@/domain/task-mutations";
 import {
-  buildSmartAllocationReviewText,
   buildUnallocatedWorkReviews,
-  issueReviewLabel,
 } from "@/domain/smart-allocation-report";
 import { getStepPhotoAttachments, getTaskStepPhotoAnnotationMap } from "@/domain/step-photos";
 import { StepPhotoClipboardProvider } from "@/components/line-workspace/step-photo-clipboard-provider";
@@ -106,10 +88,6 @@ import {
   taskDisplayCode,
 } from "@/domain/nomenclature";
 import { moveManufacturingStepBetweenTasks } from "@/domain/move-manufacturing-step";
-import {
-  formatManHours,
-  safeNumber,
-} from "@/domain/formatting";
 import {
   rebuildDependenciesFromTasks,
   relinkTasksForDependency,
@@ -138,7 +116,6 @@ import type {
   PlannerState,
   Project,
   ScenarioSummary,
-  Station,
   Task,
   Zone,
 } from "@/domain/types";
@@ -146,7 +123,7 @@ import { BulkTaskEditor } from "./bulk-task-editor";
 import { CommandPalette, type CommandPaletteGroup } from "./command-palette";
 import { ScenarioTabs } from "./scenario-tabs";
 import { ThemedFeedbackLayer, type FeedbackConfirm, type FeedbackToast } from "./themed-feedback";
-import { WORKER_ICON_LETTERS, WorkerIcon } from "./worker-icon";
+import { WORKER_ICON_LETTERS } from "./worker-icon";
 import { NothingStatus } from "./nothing-ui";
 import { PlannerDashboardPanel, buildPlannerChromeContext } from "./planner-dashboard-panel";
 import { TopNav } from "./planner-top-nav";
@@ -155,7 +132,6 @@ import { ProcedureWorkspace } from "./line-workspace/procedure";
 import { PlannerWorkspaceSkeleton, ProductLoadingState, SettingsLoadingState } from "./space-loading-states";
 import { usePlannerPresence, type PresencePeer } from "@/lib/use-planner-presence";
 import { AppSettingsPanel, embeddedSettingsSections, type SettingsSection } from "./app-settings-panel";
-import { ThemedSelect } from "./themed-select";
 import { KpiStrip, LineReadinessPanel } from "./line-workspace/analytics";
 import { ChecklistWorkspace } from "./line-workspace/planner-foundation-pages";
 import {
@@ -181,7 +157,6 @@ import {
   WorkInstructionsPanel,
 } from "./line-workspace/setup-panels";
 import {
-  StatCard,
   type ProductNumberField,
   type ProductTextField,
 } from "./line-workspace/shared";
@@ -190,7 +165,6 @@ import {
 const GanttTimeline = dynamic(() => import("./gantt-timeline").then((module) => module.GanttTimeline), { loading: () => <PlannerWorkspaceSkeleton /> });
 const OperatorUtilizationPanel = dynamic(() => import("./operator-utilization-panel").then((module) => module.OperatorUtilizationPanel), { loading: () => <PlannerWorkspaceSkeleton /> });
 const ProjectCatalogSetupPanel = dynamic(() => import("./project-catalog-setup-panel").then((module) => module.ProjectCatalogSetupPanel), { loading: () => <PlannerWorkspaceSkeleton /> });
-const DetailDrawer = dynamic(() => import("./line-workspace/drawer").then((module) => module.DetailDrawer));
 // Procedure is a primary Product/AWI surface. Include it in the already
 // deferred workspace chunk to avoid a second nested Suspense code waterfall.
 // Other panels remain lazy, and fresh core confirmation still gates editing.
@@ -199,187 +173,6 @@ const PfmeaWorkspace = dynamic(() => import("./line-workspace/pfmea-workspace").
 // Cap on the planner undo history. Snapshots are structural-shared PlannerState objects,
 // so the memory cost is per-edit deltas, not full copies.
 const UNDO_HISTORY_LIMIT = 50;
-
-const SIMULATION_ENABLED = false;
-
-const playbackSpeeds = [
-  { label: "1m/s", value: 1 },
-  { label: "5m/s", value: 5 },
-  { label: "15m/s", value: 15 },
-  { label: "1h/s", value: 60 },
-];
-
-
-
-
-
-
-function PlaybackPanel({
-  tasks,
-  stations,
-  currentMinute,
-  speed,
-  isPlaying,
-  collapsed,
-  onPlayPause,
-  onReset,
-  onStep,
-  onSpeed,
-  onToggleCollapsed,
-}: {
-  tasks: Task[];
-  stations: Station[];
-  currentMinute: number;
-  speed: number;
-  isPlaying: boolean;
-  collapsed: boolean;
-  onPlayPause: () => void;
-  onReset: () => void;
-  onStep: (delta: number) => void;
-  onSpeed: (speed: number) => void;
-  onToggleCollapsed: () => void;
-}) {
-  const bounds = getTimelineBounds(tasks);
-  const stationById = new Map(stations.map((station) => [station.id, station]));
-  const activeTasks = tasks.filter((task) => {
-    const window = getTaskWindow(task, bounds.startMs);
-    return currentMinute >= window.startMinute && currentMinute < window.finishMinute;
-  });
-  const operatorsActive = activeTasks.reduce((total, task) => total + task.plannedOperators, 0);
-  const consumedManHours = tasks.reduce((total, task) => {
-    const window = getTaskWindow(task, bounds.startMs);
-    if (currentMinute >= window.finishMinute) {
-      return total + task.plannedManHours;
-    }
-
-    if (currentMinute > window.startMinute) {
-      const progress = Math.min((currentMinute - window.startMinute) / Math.max(task.plannedDurationMinutes, 1), 1);
-      return total + task.plannedManHours * progress;
-    }
-
-    return total;
-  }, 0);
-  const events = buildPlaybackEvents(tasks, bounds.startMs, currentMinute);
-  const nextMilestone = tasks
-    .filter((task) => task.rowType === "milestone")
-    .find((task) => getTaskWindow(task, bounds.startMs).finishMinute > currentMinute);
-
-  return (
-    <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface text-ink">
-      <button
-        type="button"
-        onClick={onToggleCollapsed}
-        className="absolute left-1/2 top-0 flex h-7 w-10 -translate-x-1/2 -translate-y-full items-center justify-center rounded-t-xl border border-b-0 border-line bg-surface text-ink-secondary hover:text-ink"
-        title={collapsed ? "Expand playback footer" : "Collapse playback footer"}
-        aria-label={collapsed ? "Expand playback footer" : "Collapse playback footer"}
-      >
-        {collapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-      </button>
-      {collapsed ? (
-        <div className="flex h-12 items-center justify-between gap-3 px-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              onClick={onPlayPause}
-              className="flex h-8 w-8 items-center justify-center rounded bg-accent text-canvas hover:opacity-90"
-              title={isPlaying ? "Pause" : "Play"}
-            >
-              {isPlaying ? <Pause size={15} /> : <Play size={15} />}
-            </button>
-            <div className="text-[11px] font-semibold text-ink-secondary">Simulation time</div>
-            <div className="font-mono text-sm font-semibold text-ink">{formatMinutes(currentMinute)}</div>
-          </div>
-          <div className="hidden min-w-0 flex-1 items-center gap-3 md:flex">
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
-              <div
-                className="h-full rounded-full bg-accent"
-                style={{ width: `${Math.min((currentMinute / bounds.durationMinutes) * 100, 100)}%` }}
-              />
-            </div>
-            <div className="truncate text-xs font-medium text-ink-secondary">{activeTasks[0]?.name ?? "Idle"}</div>
-          </div>
-        </div>
-      ) : (
-      <div className="grid min-h-36 gap-3 px-4 py-3 lg:grid-cols-[360px_minmax(0,1fr)_420px]">
-        <div>
-          <div className="mb-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onPlayPause}
-              className="flex h-10 w-10 items-center justify-center rounded-md bg-accent text-canvas hover:opacity-90"
-              title={isPlaying ? "Pause" : "Play"}
-            >
-              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-            </button>
-            <button
-              type="button"
-              onClick={() => onStep(-15)}
-              className="flex h-10 w-10 items-center justify-center ui-panel text-ink-secondary hover:bg-surface-muted hover:text-ink"
-              title="Step back"
-            >
-              <SkipBack size={17} />
-            </button>
-            <button
-              type="button"
-              onClick={() => onStep(15)}
-              className="flex h-10 w-10 items-center justify-center ui-panel text-ink-secondary hover:bg-surface-muted hover:text-ink"
-              title="Step forward"
-            >
-              <SkipForward size={17} />
-            </button>
-            <button
-              type="button"
-              onClick={onReset}
-              className="flex h-10 w-10 items-center justify-center ui-panel text-ink-secondary hover:bg-surface-muted hover:text-ink"
-              title="Restart"
-            >
-              <RotateCcw size={17} />
-            </button>
-            <ThemedSelect
-              className="w-24"
-              triggerClassName="h-10 ui-panel px-2 text-sm font-semibold"
-              value={String(speed)}
-              options={playbackSpeeds.map((option) => ({ value: String(option.value), label: option.label }))}
-              onChange={(value) => onSpeed(safeNumber(value, speed))}
-            />
-          </div>
-          <div className="text-[11px] font-semibold text-ink-secondary">Simulation time</div>
-          <div className="mt-1 text-2xl font-semibold tracking-tight text-ink">{formatMinutes(currentMinute)}</div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-sunken">
-            <div
-              className="h-full rounded-full bg-accent"
-              style={{ width: `${Math.min((currentMinute / bounds.durationMinutes) * 100, 100)}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-          <StatCard label="Active Tasks" value={`${activeTasks.length}`} meta={activeTasks[0]?.name ?? "Idle"} />
-          <StatCard label="Operators" value={`${operatorsActive}`} meta="Active now" />
-          <StatCard label="MH Burned" value={formatManHours(consumedManHours)} meta="Planned playback" />
-          <StatCard label="Station" value={activeTasks[0] ? `${stationById.get(activeTasks[0].stationId)?.sequence}` : "-"} meta={activeTasks[0] ? stationById.get(activeTasks[0].stationId)?.name : "Idle"} />
-          <StatCard label="Next Gate" value={nextMilestone ? nextMilestone.wbs : "-"} meta={nextMilestone?.name ?? "Complete"} />
-        </div>
-
-        <div className="overflow-hidden rounded-lg border border-line bg-surface-muted">
-          <div className="flex h-8 items-center gap-2 border-b border-line px-3 text-xs font-semibold text-ink-secondary">
-            <Activity size={14} />
-            Event log
-          </div>
-          <div className="max-h-[104px] overflow-auto px-3 py-2">
-            {events.map((event) => (
-              <div key={`${event.time}-${event.label}`} className="grid grid-cols-[62px_1fr] gap-2 py-1 text-xs">
-                <span className="font-mono font-medium text-ink-tertiary">{formatMinutes(event.time)}</span>
-                <span className="truncate font-medium text-ink">{event.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      )}
-    </footer>
-  );
-}
 
 export function LineWorkspace({
   awiMaster,
@@ -446,14 +239,7 @@ export function LineWorkspace({
   const [focusedProcedureStepId, setFocusedProcedureStepId] = useState<string | undefined>();
   const [selectedStationId, setSelectedStationId] = useState(emptyPlannerState.stations[0]?.id);
   const [activeZoneId, setActiveZoneId] = useState<string>();
-  const [currentMinute, setCurrentMinute] = useState(0);
-  const [speed, setSpeed] = useState(5);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackCollapsed, setPlaybackCollapsed] = useState(true);
-  const [detailDrawerCollapsed, setDetailDrawerCollapsed] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [detailDrawerWidth, setDetailDrawerWidth] = useState(360);
-  const [isResizingDetailDrawer, setIsResizingDetailDrawer] = useState(false);
   // Reported save status. Save paths and the load/project-switch effects below write it; it stays in
   // this component so those effects keep stable dependencies. useWorkspaceSaves derives what is shown.
   const [reportedSaveState, setSaveState] = useState<SaveState>("loading");
@@ -510,8 +296,6 @@ export function LineWorkspace({
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
   const [chromeStatus, setChromeStatus] = useState<{ message: string; error?: boolean } | null>(null);
   const [workspaceNotice, setWorkspaceNotice] = useState<Omit<FeedbackToast, "id"> | null>(null);
-  const chromeStatusTimerRef = useRef<number | null>(null);
-  const detailDrawerResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const workspaceToasts = useMemo<FeedbackToast[]>(
     () => [
       ...(chromeStatus ? [{ id: 0, title: chromeStatus.message, tone: chromeStatus.error ? "danger" as const : "neutral" as const }] : []),
@@ -664,12 +448,9 @@ export function LineWorkspace({
     resetProcedureDrafts,
   } = procedureDrafts;
   // The [projectId] load effect reads restore/apply through refs so a new render never restarts it.
-  // mergeServerTaskIntoLocalTaskRef predates this extraction and currently has no reader.
   const applyProcedureDraftsToTaskRef = useRef(applyProcedureDraftsToTask);
-  const mergeServerTaskIntoLocalTaskRef = useRef(mergeServerTaskIntoLocalTask);
   const restoreProcedureDraftFieldsRef = useRef(restoreProcedureDraftFields);
   applyProcedureDraftsToTaskRef.current = applyProcedureDraftsToTask;
-  mergeServerTaskIntoLocalTaskRef.current = mergeServerTaskIntoLocalTask;
   restoreProcedureDraftFieldsRef.current = restoreProcedureDraftFields;
 
   // Per-task granular procedure saves (debounce, retry, exact acknowledgment, scope-exit flush).
@@ -896,14 +677,13 @@ export function LineWorkspace({
       selectedTaskId,
       selectedStationId,
       activeZoneId,
-      detailDrawerCollapsed,
+      detailDrawerCollapsed: true,
       sidebarCollapsed,
       savedAt: new Date().toISOString(),
     });
   }, [
     activeModule,
     activeZoneId,
-    detailDrawerCollapsed,
     sidebarCollapsed,
     hasLoadedRemoteState,
     isProjectSwitching,
@@ -1004,7 +784,6 @@ export function LineWorkspace({
     setSelectedTaskId,
     setSelectedStationId,
     setActiveZoneId,
-    setDetailDrawerCollapsed,
     setSidebarCollapsed,
     setWorkspaceNotice,
     urlWorkspaceSnapshotRef,
@@ -1066,45 +845,6 @@ export function LineWorkspace({
     [],
   );
 
-  useEffect(() => {
-    if (!SIMULATION_ENABLED || !isPlaying) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      setCurrentMinute((minute) => {
-        const nextMinute = minute + speed / 4;
-        if (nextMinute >= timelineBounds.durationMinutes) {
-          setIsPlaying(false);
-          return timelineBounds.durationMinutes;
-        }
-
-        return nextMinute;
-      });
-    }, 250);
-
-    return () => window.clearInterval(interval);
-  }, [isPlaying, speed, timelineBounds.durationMinutes]);
-
-  useEffect(() => {
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-
-      const clickedTask = target.closest("[data-task-select]");
-      const clickedDrawer = target.closest("[data-detail-drawer]");
-
-      if (!clickedTask && !clickedDrawer) {
-        setDetailDrawerCollapsed((current) => (current ? current : true));
-      }
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
-  }, []);
-
   // Undo history capture. dirtyVersion only advances on user-driven edits (markDirty),
   // so remote realtime patches and scenario/project loads never pollute the stack — they
   // just reset the tracking baseline. Undo/redo applications set skipHistoryCaptureRef
@@ -1143,55 +883,8 @@ export function LineWorkspace({
     remoteRefreshAppliedRef,
   });
 
-  useEffect(() => () => clearChromeStatusTimer(), []);
-
-  useEffect(() => {
-    if (!isResizingDetailDrawer) return;
-
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-
-    function clampDrawerWidth(width: number) {
-      const viewportMax = Math.max(360, window.innerWidth - 520);
-      return Math.min(Math.max(width, 320), Math.min(760, viewportMax));
-    }
-
-    function handlePointerMove(event: PointerEvent) {
-      const resizeStart = detailDrawerResizeRef.current;
-      if (!resizeStart) return;
-
-      setDetailDrawerWidth(clampDrawerWidth(resizeStart.startWidth + resizeStart.startX - event.clientX));
-    }
-
-    function stopResize() {
-      detailDrawerResizeRef.current = null;
-      setIsResizingDetailDrawer(false);
-    }
-
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopResize);
-    window.addEventListener("pointercancel", stopResize);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopResize);
-      window.removeEventListener("pointercancel", stopResize);
-    };
-  }, [isResizingDetailDrawer]);
-
-  function clearChromeStatusTimer() {
-    if (chromeStatusTimerRef.current) {
-      window.clearTimeout(chromeStatusTimerRef.current);
-      chromeStatusTimerRef.current = null;
-    }
-  }
-
   function dismissWorkspaceNotice(id = 1) {
-    if (id === 0) { clearChromeStatusTimer(); setChromeStatus(null); return; }
+    if (id === 0) { setChromeStatus(null); return; }
     setWorkspaceNotice(null);
   }
 
@@ -1201,7 +894,6 @@ export function LineWorkspace({
       return;
     }
 
-    clearChromeStatusTimer();
     setChromeStatus(null);
     setWorkspaceNotice({
       ...message,
@@ -1250,18 +942,6 @@ export function LineWorkspace({
     const action = feedbackConfirm?.onConfirm;
     setFeedbackConfirm(undefined);
     action?.();
-  }
-
-  function startDetailDrawerResize(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (detailDrawerCollapsed) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    detailDrawerResizeRef.current = {
-      startX: event.clientX,
-      startWidth: detailDrawerWidth,
-    };
-    setIsResizingDetailDrawer(true);
   }
 
   // Global shortcuts read the latest handlers through a ref so the window listener can be
@@ -1561,7 +1241,6 @@ export function LineWorkspace({
   const displayedPlannerChromeContext = awiMaster ? plannerChromeContext : isProjectSwitching
     ? projectSwitchTargetContext ?? stablePlannerChromeContextRef.current ?? plannerChromeContext
     : plannerChromeContext;
-  const showDetailDrawer = false;
   const showsSchedulingWorkspace = activeModule === "gantt";
   const selectedTask = derivedState.tasks.find((task) => task.id === selectedTaskId) ?? derivedState.tasks[0];
   const selectedProcedureTaskHydrationStatus = selectedTask
@@ -1572,13 +1251,9 @@ export function LineWorkspace({
     Boolean(selectedTask) &&
     selectedProcedureTaskHydrationStatus !== "loaded" &&
     selectedProcedureTaskHydrationStatus !== "error";
-  const selectedStation = selectedTask
-    ? buildProcessStationForTask(selectedTask, derivedState.tasks, kpis.bottleneckStation?.id)
-    : undefined;
   const workspaceGridClass = "ui-workspace-shell";
   const workspaceGridStyle = {
     "--workspace-sidebar-width": sidebarCollapsed ? "0px" : "var(--shell-sidebar)",
-    "--detail-drawer-width": detailDrawerCollapsed ? "44px" : `${detailDrawerWidth}px`,
   } as CSSProperties;
   const hasDisplayablePlannerState = Boolean(
     projectId && String(plannerState.product.projectId ?? "") === String(projectId),
@@ -2011,86 +1686,10 @@ export function LineWorkspace({
     }));
   }
 
-  function copyTextWithSelection(text: string) {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "true");
-    textarea.style.position = "fixed";
-    textarea.style.top = "0";
-    textarea.style.left = "0";
-    textarea.style.width = "1px";
-    textarea.style.height = "1px";
-    textarea.style.opacity = "0";
-    textarea.style.pointerEvents = "none";
-    document.body.appendChild(textarea);
-
-    try {
-      textarea.focus({ preventScroll: true });
-      textarea.select();
-      textarea.setSelectionRange(0, text.length);
-      return document.execCommand("copy");
-    } finally {
-      document.body.removeChild(textarea);
-    }
-  }
-
-  async function copySmartAllocationReview(text: string) {
-    let copied = false;
-    const errors: string[] = [];
-
-    try {
-      copied = copyTextWithSelection(text);
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Legacy clipboard copy failed.");
-    }
-
-    if (!copied && navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(text);
-        copied = true;
-      } catch (error) {
-        errors.push(error instanceof Error ? error.message : "Clipboard API copy failed.");
-      }
-    }
-
-    if (copied) {
-      notifyFeedback({
-        title: "Allocation audit copied",
-        body: "Paste it here and I can review the allocation inputs, audit, issues, and Gantt rows.",
-        tone: "success",
-      });
-      return;
-    }
-
-    notifyFeedback({
-      title: "Manual copy needed",
-      content: (
-        <div className="space-y-3">
-          <p className="ui-workspace-notice-body">
-            The browser blocked clipboard access. Select the text below and copy it manually.
-          </p>
-          <textarea
-            readOnly
-            value={text}
-            onFocus={(event) => event.currentTarget.select()}
-            className="ui-field-standalone h-[320px] resize-none p-3 font-mono text-xs leading-relaxed"
-          />
-          {errors.length ? (
-            <p className="ui-workspace-notice-body text-danger">{errors.join(" ")}</p>
-          ) : null}
-        </div>
-      ),
-      tone: "warning",
-      placement: "center",
-      persistent: true,
-    });
-  }
-
   // "Optimize line": deterministically schedule dependent work as early as possible (shortest lead
   // time) and balance the crew with the fewest operators, leveling only within free float so the
   // finish never slips. The proposal is written into a fresh duplicated scenario (sandbox) so the
-  // source plan is never touched. Replaces the old in-place IE headcount allocation on this button;
-  // _smartAllocateHeadcount is kept dormant for the later LLM-strategist phase.
+  // source plan is never touched. Replaces the old in-place IE headcount allocation on this button.
   async function optimizeLineIntoScenario() {
     if (smartAllocationPending || isSwitchingScenario) {
       return;
@@ -2165,415 +1764,6 @@ export function LineWorkspace({
       setSmartAllocationPending(false);
       setIsSwitchingScenario(false);
     }
-  }
-
-  async function _smartAllocateHeadcount() {
-    if (smartAllocationPending) {
-      return;
-    }
-
-    const operatorCapacityMinutes = calculateAvailabilityMinutesForDemandPeriod(derivedState.product);
-    const clearedTasks = derivedState.tasks.map((task) => ({
-      ...task,
-      ...getTaskOperatorResetPatch(task),
-    }));
-    const clearedPlanningContext = normalizeTaskPlanningContext(
-      clearedTasks,
-      derivedState.zones,
-      derivedState.stations,
-      derivedState.scenario.id,
-    );
-    const clearedCalculatedState = applyCalculatedFields(
-      derivedState.product,
-      clearedPlanningContext.stations,
-      clearedPlanningContext.tasks.map(syncTaskOperatorCount),
-    );
-    const clearedKpis = calculateProductKpis(
-      clearedCalculatedState.product,
-      clearedCalculatedState.stations,
-      clearedCalculatedState.tasks,
-    );
-    const request: IeSmartAllocationRequest = {
-      plannerState: {
-        ...derivedState,
-        product: clearedCalculatedState.product,
-        stations: clearedCalculatedState.stations,
-        tasks: clearedCalculatedState.tasks,
-      },
-      availableOperatorIds: availableOperatorLetters,
-      constraints: {
-        demandPeriod: derivedState.product.demandPeriod,
-        demandQuantity: derivedState.product.demandQuantity,
-        targetManHours: derivedState.product.targetManHours,
-        taktMinutes: clearedKpis.taktMinutes,
-        budgetedCrewEquivalent: clearedKpis.budgetedCrewEquivalent,
-        wholePersonStaffingRequirement: clearedKpis.wholePersonStaffingRequirement,
-        requiredAverageAllocationPercent: clearedKpis.requiredAverageAllocationPercent,
-        operatorCapacityMinutes,
-        plannedManHours: clearedKpis.plannedManHours,
-        assignedPlannedManHours: clearedKpis.assignedPlannedManHours,
-        unassignedPlannedManHours: clearedKpis.unassignedPlannedManHours,
-        plannedLaborLoadFte: clearedKpis.plannedLaborLoadFte,
-        assignedLaborLoadFte: clearedKpis.assignedLaborLoadFte,
-        peakManpower: clearedKpis.peakManpower,
-      },
-    };
-
-    let agentPlan: IeSmartAllocationPlan;
-    try {
-      setSmartAllocationPending(true);
-      agentPlan = await requestIeSmartAllocationPlan(request);
-    } catch (error) {
-      notifyFeedback({
-        title: "Smart allocation unavailable",
-        body: error instanceof Error ? error.message : "The IE allocation agent could not return a plan.",
-        tone: "danger",
-        placement: "center",
-        persistent: true,
-      });
-      setSmartAllocationPending(false);
-      return;
-    }
-
-    const allocation = buildOperatorAssignmentsFromIePlan({
-      assignments: agentPlan.assignments,
-      availableOperatorIds: availableOperatorLetters,
-      budgetedAllocationPercent: clearedKpis.requiredAverageAllocationPercent,
-      demandQuantity: derivedState.product.demandQuantity,
-      operatorCapacityMinutes,
-      strategyNotes: agentPlan.strategyNotes,
-      taktMinutes: clearedKpis.taktMinutes,
-      tasks: clearedCalculatedState.tasks,
-    });
-    const reviewPlanningContext = normalizeTaskPlanningContext(
-      allocation.tasks,
-      derivedState.zones,
-      derivedState.stations,
-      derivedState.scenario.id,
-    );
-    const reviewCalculatedState = applyCalculatedFields(
-      derivedState.product,
-      reviewPlanningContext.stations,
-      reviewPlanningContext.tasks.map(syncTaskOperatorCount),
-    );
-    const reviewKpis = calculateProductKpis(
-      reviewCalculatedState.product,
-      reviewCalculatedState.stations,
-      reviewCalculatedState.tasks,
-    );
-    const allocatedTaskById = new Map(allocation.tasks.map((task) => [task.id, task]));
-    const proposedChangedTaskIds = derivedState.tasks
-      .filter((task) => {
-        const allocatedTask = allocatedTaskById.get(task.id);
-        if (!allocatedTask) {
-          return false;
-        }
-
-        return (
-          getTaskOperatorIds(task, availableOperatorLetters).join("|") !==
-            getTaskOperatorIds(allocatedTask, availableOperatorLetters).join("|") ||
-          task.plannedOperators !== allocatedTask.plannedOperators
-        );
-      })
-      .map((task) => task.id);
-    const hardValidationFailure =
-      allocation.audit.scheduleConflictCount > 0 ||
-      allocation.audit.physicalCapacityOverageCount > 0 ||
-      allocation.audit.summaryTaskAssignmentCount > 0;
-    const validationRejectionReason = hardValidationFailure
-      ? [
-          allocation.audit.scheduleConflictCount > 0 ? `${allocation.audit.scheduleConflictCount} schedule conflict(s)` : "",
-          allocation.audit.physicalCapacityOverageCount > 0 ? `${allocation.audit.physicalCapacityOverageCount} physical capacity overage(s)` : "",
-          allocation.audit.summaryTaskAssignmentCount > 0 ? `${allocation.audit.summaryTaskAssignmentCount} summary row assignment(s)` : "",
-        ].filter(Boolean).join(", ")
-      : undefined;
-    const changedTaskIds = hardValidationFailure ? [] : proposedChangedTaskIds;
-    const reviewText = buildSmartAllocationReviewText({
-      agentPlan,
-      allocation: {
-        ...allocation,
-        tasks: reviewCalculatedState.tasks,
-      },
-      applicationStatus: {
-        applied: !hardValidationFailure,
-        appliedTaskCount: changedTaskIds.length,
-        proposedTaskCount: proposedChangedTaskIds.length,
-        rejectionReason: validationRejectionReason,
-      },
-      availableOperatorLetters,
-      kpis: reviewKpis,
-      operatorCapacityMinutes,
-      product: derivedState.product,
-      zones: derivedState.zones,
-    });
-
-    if (changedTaskIds.length > 0) {
-      markDirty();
-      setPlannerState((current) => ({
-        ...current,
-        tasks: current.tasks.map((task) => {
-          const allocatedTask = allocatedTaskById.get(task.id);
-          if (!allocatedTask) {
-            return task;
-          }
-
-          return {
-            ...task,
-            customFields: allocatedTask.customFields,
-            plannedOperators: allocatedTask.plannedOperators,
-          };
-        }),
-      }));
-    }
-
-    const issueGroups = allocation.issues.reduce((groups, issue) => {
-      const key = issue.taskId ?? issue.operatorId ?? issue.message;
-      const current = groups.get(key) ?? {
-        label: issue.taskId
-          ? allocation.tasks.find((task) => task.id === issue.taskId)?.name ?? issue.message
-          : issue.operatorId
-            ? `Operator ${issue.operatorId}`
-            : issue.message,
-        blockers: new Set<string>(),
-        warnings: new Set<string>(),
-      };
-      const severity =
-        issue.severity ??
-        (issue.kind === "unassigned_task" || issue.kind === "capacity_overage" || issue.kind === "schedule_conflict"
-          ? "blocker"
-          : "warning");
-      const reason =
-        issue.kind === "unassigned_task"
-          ? issueReviewLabel(issue)
-          : issue.kind === "takt_overage"
-            ? "exceeds takt"
-            : issue.kind === "budget_overage"
-              ? "over budgeted allocation"
-              : issue.kind === "capacity_overage"
-                ? "over physical capacity"
-                : "schedule conflict";
-
-      if (severity === "blocker") {
-        current.blockers.add(reason);
-      } else {
-        current.warnings.add(reason);
-      }
-      groups.set(key, current);
-      return groups;
-    }, new Map<string, { label: string; blockers: Set<string>; warnings: Set<string> }>());
-    const issueEntries = [...issueGroups.values()].map((issue) => ({
-      label: issue.label,
-      blockers: [...issue.blockers],
-      warnings: [...issue.warnings],
-    }));
-    const unallocatedWorkReviews = buildUnallocatedWorkReviews({
-      allocation,
-      kpis: reviewKpis,
-      operatorCapacityMinutes,
-      product: derivedState.product,
-    });
-    const nonUnallocatedBlockerCount = allocation.issues.filter((issue) => {
-      const severity =
-        issue.severity ??
-        (issue.kind === "unassigned_task" || issue.kind === "capacity_overage" || issue.kind === "schedule_conflict"
-          ? "blocker"
-          : "warning");
-      return severity === "blocker" && issue.kind !== "unassigned_task";
-    }).length;
-    const audit = allocation.audit;
-    const visibleIssueEntries = issueEntries.slice(0, 6);
-    const issueRemainder = issueEntries.length - visibleIssueEntries.length;
-    notifyFeedback({
-      title: hardValidationFailure
-        ? "IE allocation rejected"
-        : unallocatedWorkReviews.length
-          ? "Feasible with exceptions"
-          : "IE smart allocation complete",
-      content: (
-        <div className="space-y-3">
-          <div className="ui-panel-raised p-3">
-            <div className="ui-mono-label">IE Agent Summary</div>
-            <div className="mt-1 text-sm font-bold leading-snug text-ink">{agentPlan.summary}</div>
-          </div>
-
-          {hardValidationFailure ? (
-            <div className="rounded-md border border-danger/30 bg-danger-muted p-3">
-              <div className="text-[10px] ui-mono-label tracking-wide text-danger">Not Applied</div>
-              <div className="mt-1 text-sm font-bold leading-snug text-ink">
-                The IE agent returned an invalid headcount plan. No Gantt assignments were changed because validation found {validationRejectionReason}.
-              </div>
-            </div>
-          ) : null}
-
-          {unallocatedWorkReviews.length ? (
-            <div className="rounded-md border border-warn/35 bg-accent-muted">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warn/25 px-3 py-2">
-                <div>
-                  <div className="text-[10px] ui-mono-label tracking-wide text-warn-strong">Unallocated Required Work</div>
-                  <div className="mt-0.5 text-xs font-bold text-ink-secondary">
-                    The plan is feasible only after these staffing exceptions are resolved.
-                  </div>
-                </div>
-                <div className="text-[10px] font-medium text-warn-strong">{unallocatedWorkReviews.length} exception(s)</div>
-              </div>
-              <div className="max-h-[190px] overflow-auto">
-                {unallocatedWorkReviews.map((review) => (
-                  <div
-                    key={review.taskId}
-                    className="grid gap-2 border-b border-warn/20 bg-surface px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[minmax(150px,0.8fr)_1.3fr_minmax(120px,0.55fr)]"
-                  >
-                    <div>
-                      <div className="font-medium leading-snug text-ink">{review.taskLabel}</div>
-                      <div className="mt-1 inline-flex rounded border border-warn/35 bg-accent-muted px-2 py-0.5 text-[9px] ui-mono-label tracking-wide text-warn-strong">
-                        {review.classification}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="font-medium text-ink-secondary">{review.condition}</div>
-                      <div className="mt-1 font-semibold leading-snug text-ink-secondary">{review.impact}</div>
-                      <div className="mt-1 font-bold leading-snug text-ink">{review.recommendation}</div>
-                    </div>
-                    <div className="flex items-start sm:justify-end">
-                      <span className="inline-flex rounded border border-graphite/20 bg-surface-sunken px-2 py-1 text-[10px] ui-mono-label tracking-wide text-ink-secondary">
-                        {review.action}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap items-center justify-between gap-3 ui-panel-raised px-3 py-2">
-            <div>
-              <div className="ui-mono-label">Review Packet</div>
-              <div className="mt-0.5 text-xs font-bold text-ink-secondary">
-                Copies audit text plus the Gantt data used by Smart Allocation.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => void copySmartAllocationReview(reviewText)}
-              className="ui-btn-primary h-9 gap-2 px-3 text-xs"
-            >
-              <Copy size={14} />
-              Copy Audit
-            </button>
-          </div>
-
-          <div className="ui-panel">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
-              <div>
-                <div className="ui-mono-label">Allocation Audit</div>
-                <div className="mt-0.5 text-xs font-bold text-ink-secondary">
-                  {round(audit.assignmentCoveragePercent, 0)}% coverage · peak {audit.peakManpower} · spread {formatMinutes(audit.loadSpreadMinutes)}
-                </div>
-              </div>
-              <div className="ui-mono-label">
-                {audit.assignedTaskCount}/{audit.eligibleTaskCount} eligible task(s)
-              </div>
-            </div>
-
-            <div className="p-2">
-              <div className="overflow-hidden rounded border border-line">
-                <div className="grid grid-cols-[54px_0.8fr_1fr_1fr] items-center gap-2 border-b border-line bg-surface-sunken px-2 py-1.5 text-[9px] ui-mono-label tracking-wide text-ink-secondary">
-                  <div>Op</div>
-                  <div>Load</div>
-                  <div>Work</div>
-                  <div>Budget</div>
-                </div>
-                {audit.operators.map((operator, index) => {
-                  const budgetTone =
-                    operator.budgetVarianceMinutes > 1
-                      ? "text-warn-strong"
-                      : operator.budgetVarianceMinutes < -1
-                        ? "text-ink-secondary"
-                        : "text-accent";
-                  return (
-                    <div
-                      key={operator.operatorId}
-                      className="grid grid-cols-[54px_0.8fr_1fr_1fr] items-center gap-2 border-b border-line bg-surface-raised px-2 py-1.5 text-xs last:border-b-0"
-                      title={operator.assignedTaskLabels.join("\n")}
-                    >
-                      <div className="flex items-center gap-2">
-                        <WorkerIcon className="h-6 w-6 shrink-0" colorIndex={index} letter={operator.operatorId} />
-                      </div>
-                      <div className="whitespace-nowrap">
-                        <span className="font-medium text-ink">{formatMinutes(operator.assignedMinutes)}</span>
-                        <span className="ml-1 font-bold text-ink-secondary">· {round(operator.utilizationPercent, 0)}%</span>
-                      </div>
-                      <div className="truncate font-bold text-ink-secondary">
-                        {operator.assignedTaskCount} task(s) · {operator.idleGapCount > 0 ? `${formatMinutes(operator.idleMinutes)} idle` : "continuous"}
-                      </div>
-                      <div className={`truncate font-medium ${budgetTone}`}>
-                        {operator.budgetVarianceMinutes > 1
-                          ? `+${formatMinutes(operator.budgetVarianceMinutes)} vs budget`
-                          : operator.budgetVarianceMinutes < -1
-                            ? `${formatMinutes(Math.abs(operator.budgetVarianceMinutes))} under budget`
-                            : "on budget"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="border-t border-line px-3 py-2 text-[11px] font-semibold leading-snug text-ink-secondary">
-              {audit.strategyNotes[audit.strategyNotes.length - 1]}
-            </div>
-          </div>
-
-          {issueEntries.length ? (
-            <div className="ui-panel">
-              <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2">
-                <div className="ui-mono-label">Needs Review</div>
-                <div className="text-[10px] font-medium text-ink-secondary">{issueEntries.length} item(s)</div>
-              </div>
-              <div className="max-h-[170px] overflow-auto">
-                {visibleIssueEntries.map((issue) => (
-                  <div key={issue.label} className="grid gap-2 border-b border-line bg-surface-raised px-3 py-2 last:border-b-0 sm:grid-cols-[minmax(180px,1fr)_1.35fr] sm:items-center">
-                    <div className="truncate text-sm font-medium leading-snug text-ink" title={issue.label}>
-                      {issue.label}
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 sm:justify-end">
-                      {issue.blockers.map((reason) => (
-                        <span
-                          key={reason}
-                          className="inline-flex h-6 items-center rounded border border-danger/30 bg-danger-muted px-2 text-[9px] ui-mono-label tracking-wide text-danger"
-                        >
-                          {reason}
-                        </span>
-                      ))}
-                      {issue.warnings.map((reason) => (
-                        <span
-                          key={reason}
-                          className="inline-flex h-6 items-center rounded border border-warn/35 bg-accent-muted px-2 text-[9px] ui-mono-label tracking-wide text-warn-strong"
-                        >
-                          {reason}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {issueRemainder > 0 ? (
-                  <div className="bg-surface px-3 py-2 text-xs font-bold text-ink-secondary">
-                    {issueRemainder} more item(s)
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-md border border-accent/25 bg-accent-muted p-3 text-sm font-bold text-accent">
-              All eligible tasks were assigned without review items.
-            </div>
-          )}
-        </div>
-      ),
-      tone: hardValidationFailure || nonUnallocatedBlockerCount ? "danger" : issueEntries.length ? "warning" : "success",
-      placement: "center",
-      persistent: true,
-    });
-    setSmartAllocationPending(false);
   }
 
   function setTaskDependencies(taskId: string, dependencyIds: string[]) {
@@ -2654,16 +1844,6 @@ export function LineWorkspace({
     if (targetTask) {
       setSelectedStationId(targetTask.stationId);
     }
-  }
-
-  function _updateStationOperators(stationId: string, operators: number) {
-    markDirty();
-    setPlannerState((current) => ({
-      ...current,
-      stations: current.stations.map((station) =>
-        station.id === stationId ? { ...station, plannedOperators: Math.max(operators, 0) } : station,
-      ),
-    }));
   }
 
   function addZone() {
@@ -3168,9 +2348,6 @@ export function LineWorkspace({
 
   function openTaskDetail(taskId: string) {
     selectTask(taskId);
-    if (showDetailDrawer) {
-      setDetailDrawerCollapsed(false);
-    }
   }
 
   function openProcedureStepName(taskId: string, stepId: string) {
@@ -3394,7 +2571,7 @@ export function LineWorkspace({
               className={`ui-workspace-content ${activeModule === "gantt" ? "ui-gantt-page" : ""} ${
                 isDashboardModule
                   ? "p-0 pb-6"
-                  : `space-y-4 p-3 sm:p-4 ${SIMULATION_ENABLED ? (playbackCollapsed ? "pb-20" : "pb-44") : "pb-6"}`
+                  : "space-y-4 p-3 sm:p-4 pb-6"
               }`}
             >
               {isDashboardModule ? (
@@ -3524,19 +2701,6 @@ export function LineWorkspace({
                           <Plus size={16} />
                           Task
                         </button>
-                        {SIMULATION_ENABLED ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPlaybackCollapsed(false);
-                            setIsPlaying(true);
-                          }}
-                          className="ui-btn-ghost h-9 gap-2"
-                        >
-                          <Play size={16} />
-                          Playback
-                        </button>
-                        ) : null}
                       </div>
                     </div>
                     <ScenarioTabs
@@ -3563,8 +2727,6 @@ export function LineWorkspace({
                       availableOperatorLetters={availableOperatorLetters}
                       operatorCapacityMinutes={operatorCapacityMinutes}
                       demandQuantity={derivedState.product.demandQuantity}
-                      currentMinute={currentMinute}
-                      showPlaybackMarker={SIMULATION_ENABLED && (isPlaying || currentMinute > 0)}
                       onSelectTask={selectTask}
                       onOpenTaskDetail={openTaskDetail}
                       onOpenProcedureStepName={openProcedureStepName}
@@ -3597,55 +2759,8 @@ export function LineWorkspace({
               )}
             </main>
           )}
-
-          {showDetailDrawer ? (
-            <DetailDrawer
-              task={selectedTask}
-              station={selectedStation}
-              zones={derivedState.zones}
-              components={derivedState.components}
-              tasks={derivedState.tasks}
-              collapsed={detailDrawerCollapsed}
-              isResizing={isResizingDetailDrawer}
-              onConfirmAction={requestFeedbackConfirm}
-              onStepDeleted={notifyDeletedStepRestore}
-              onToggleCollapsed={() => setDetailDrawerCollapsed((collapsed) => !collapsed)}
-              onResizeStart={startDetailDrawerResize}
-              onUpdateTask={updateTask}
-              getProcedureFieldValue={getProcedureFieldValue}
-              onProcedureFieldFocus={markProcedureFieldActive}
-              onProcedureFieldBlur={markProcedureFieldInactive}
-              onProcedureFieldChange={updateProcedureStepField}
-              onUploadStepPhotos={uploadStepPhotos}
-              onRemoveStepPhoto={removeStepPhoto}
-              onDeleteExplodedView={deleteExplodedView}
-              onDeleteTaskVideo={deleteTaskVideo}
-              onAddStepTool={persistAddStepTool}
-              onRemoveStepTool={persistRemoveStepTool}
-              toolLibrary={toolLibrary}
-              masterBom={masterBom}
-            />
-          ) : null}
         </div>
 
-        {SIMULATION_ENABLED && !isProcedureModule && !isDashboardModule ? (
-          <PlaybackPanel
-            tasks={derivedState.tasks}
-            stations={derivedState.stations}
-            currentMinute={currentMinute}
-            speed={speed}
-            isPlaying={isPlaying}
-            collapsed={playbackCollapsed}
-            onPlayPause={() => setIsPlaying((value) => !value)}
-            onReset={() => {
-              setCurrentMinute(0);
-              setIsPlaying(false);
-            }}
-            onStep={(delta) => setCurrentMinute((minute) => Math.min(Math.max(minute + delta, 0), timelineBounds.durationMinutes))}
-            onSpeed={setSpeed}
-            onToggleCollapsed={() => setPlaybackCollapsed((value) => !value)}
-          />
-        ) : null}
         <ThemedFeedbackLayer
           confirm={feedbackConfirm}
           toasts={workspaceToasts}

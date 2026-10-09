@@ -1,3 +1,4 @@
+import { awiTaskLink, withLinkedAwiProcedure } from "@/domain/awi-task-link";
 // Planner reads: the full and editable-core planner graph (paged, ID-batched child reads; media signed
 // only for full loads), the narrow dashboard summary, a single task with its children and media, a
 // task's private media alone, and the SolidWorks task-target feed. Read-only. Moved verbatim from
@@ -239,6 +240,7 @@ export async function loadPlannerStateWithProjectFromSupabase(
     customColumns: (customColumns ?? []).map(mapCustomColumn),
   };
 
+  state.tasks = await Promise.all(state.tasks.map(task => resolveLinkedAwiTask(task, supabase)));
   return { state, project: projectContext };
 }
 
@@ -482,11 +484,16 @@ export async function loadTaskPrivateMediaFromSupabase(
   // save baselines. Only photo markup is needed to hydrate normalized media.
   // Select it inside JSONB so legacy embedded photos never cross the network.
   const task = await throwIfError(supabase.from("tasks")
-    .select("id,photo_annotations:custom_fields->stepPhotoAnnotations")
+    .select("id,photo_annotations:custom_fields->stepPhotoAnnotations,awi_link:custom_fields->awiMasterLink")
     .eq("id", taskId).maybeSingle());
 
   if (!task) {
     return null;
+  }
+
+  if (task.awi_link) {
+    const linked = await loadTaskFromSupabase(taskId, projectId, supabase);
+    return linked ? {id:taskId, customFields:linked.customFields} : null;
   }
 
   const [stepPhotos, explodedViews, taskVideos] = await Promise.all([
@@ -518,6 +525,7 @@ export async function loadTaskFromSupabase(
   taskId: string,
   projectId?: string,
   client?: ReturnType<typeof plannerClient>,
+  resolveLinks = true,
 ): Promise<Task | null> {
   const supabase = client ?? plannerClient();
   await assertTaskInProject(supabase, taskId, projectId);
@@ -553,11 +561,22 @@ export async function loadTaskFromSupabase(
     withSignedTaskVideoRows(supabase, (taskVideos ?? []) as TaskVideoRow[]),
   ]);
 
-  return withNormalizedStepAssets(
+  const normalizedTask = withNormalizedStepAssets(
     mappedTask,
     indexStepPhotos(signedStepPhotos),
     indexStepTools((stepTools ?? []) as StepToolRow[]),
     indexExplodedViews(signedExplodedViews),
     indexTaskVideos(signedTaskVideos),
   );
+  return resolveLinks ? resolveLinkedAwiTask(normalizedTask, supabase) : normalizedTask;
+}
+
+async function resolveLinkedAwiTask(task: Task, client: ReturnType<typeof plannerClient>): Promise<Task> {
+  const link = awiTaskLink(task);
+  if (!link) return task;
+  const master = await throwIfError(client.from("awi_masters").select("project_id,task_id").eq("id", link.masterId).maybeSingle());
+  if (!master || master.task_id !== link.taskId || master.project_id !== link.projectId || master.task_id === task.id) throw new Error("The linked master AWI is unavailable. Check the master list and your access.");
+  const source = await loadTaskFromSupabase(master.task_id, master.project_id, client, false);
+  if (!source || awiTaskLink(source)) throw new Error("Unable to load the linked master AWI.");
+  return withLinkedAwiProcedure(task, source);
 }

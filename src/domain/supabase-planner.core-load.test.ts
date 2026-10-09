@@ -254,7 +254,7 @@ describe("private media refresh", () => {
     expect(task?.id).toBe("task-1");
     expect(requestedTables).toEqual(["tasks", "step_photos", "step_exploded_views", "task_videos"]);
     expect(task?.customFields).not.toHaveProperty("stepPhotoAttachments");
-    expect(selects.find(({ table }) => table === "tasks")?.columns).toBe("id,photo_annotations:custom_fields->stepPhotoAnnotations");
+    expect(selects.find(({ table }) => table === "tasks")?.columns).toBe("id,photo_annotations:custom_fields->stepPhotoAnnotations,awi_link:custom_fields->awiMasterLink");
     expect(task).toEqual({ id: "task-1", customFields: { stepPhotoAnnotations: {} } });
     expect(rpc).toHaveBeenCalledWith("task_project_id", { target_task_id: "task-1" });
   });

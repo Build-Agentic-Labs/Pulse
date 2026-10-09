@@ -1,3 +1,4 @@
+import { awiTaskLink } from "@/domain/awi-task-link";
 // Granular task and step writes: task rows (with batched step-tool sync), custom fields, photo markup
 // merge, step sets with collision-safe sequence parking, single phone-step edits, field patches and
 // procedure steps under version checks, the procedure save (AWI through its single transaction;
@@ -113,7 +114,7 @@ export async function saveTasksToSupabase(tasks: Task[], projectId?: string) {
   const supabase = plannerClient();
   await Promise.all(tasks.map((task) => assertTaskRowInProject(supabase, task, projectId)));
   await throwIfError(supabase.from("tasks").upsert(tasks.map(taskRow)));
-  await syncStepToolsForTasks(supabase, tasks);
+  await syncStepToolsForTasks(supabase, tasks.filter(task => !awiTaskLink(task)));
 }
 
 export async function saveTaskRowToSupabase(task: Task, projectId?: string) {
@@ -165,6 +166,7 @@ export async function saveTaskCustomFieldsToSupabase(taskId: string, customField
 }
 
 export async function saveTaskWithManufacturingStepsToSupabase(task: Task, projectId?: string) {
+  if (awiTaskLink(task)) throw new Error("Edit these instructions in the linked master AWI.");
   const supabase = plannerClient();
   await assertTaskInProject(supabase, task.id, projectId);
   await throwIfError(supabase.from("tasks").upsert(taskRow(task)));
@@ -194,6 +196,7 @@ export async function saveTaskWithManufacturingStepsToSupabase(task: Task, proje
 }
 
 export async function saveTaskAndManufacturingStepToSupabase(task: Task, step: ManufacturingStep, projectId?: string) {
+  if (awiTaskLink(task)) throw new Error("Edit these instructions in the linked master AWI.");
   const supabase = plannerClient();
   await assertTaskInProject(supabase, task.id, projectId);
   await throwIfError(supabase.from("tasks").upsert(taskRow(task)));
@@ -474,6 +477,7 @@ export async function saveProcedureTaskUpdateToSupabase(
   client?: ReturnType<typeof plannerClient>,
 ) {
   const supabase = client ?? plannerClient();
+  if (awiTaskLink(task)) throw new Error("Edit these instructions in the linked master AWI.");
   const normalizedSteps = normalizeManufacturingStepSequences(task.manufacturingSteps ?? []);
   const taskToSave = { ...task, manufacturingSteps: normalizedSteps };
   const taskProcedurePatch = procedureTaskUpdateRow(taskToSave);

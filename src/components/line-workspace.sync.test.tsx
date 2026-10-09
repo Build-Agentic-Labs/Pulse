@@ -182,6 +182,7 @@ async function openModule(name: string) {
 // A shell edit: adds a task through the Gantt toolbar (marks the planner dirty; the shell autosave follows).
 function addTaskInGantt() {
   fireEvent.click(screen.getByRole("button", { name: "Task" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "New task" }));
 }
 function scenarioSummary(id: string, name: string, createdAt: string): ScenarioSummary {
   return { id, name, targetOutput: 1, targetOutputPeriod: "day", createdAt };

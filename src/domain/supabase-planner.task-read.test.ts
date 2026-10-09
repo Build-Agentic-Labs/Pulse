@@ -168,3 +168,24 @@ describe("filters", () => {
     expect(browser.requests).toEqual([]);
   });
 });
+
+describe("linked master AWI reads", () => {
+  it("reloads the current master procedure without replacing product scheduling", async () => {
+    let text = "First master instruction";
+    const db = createRecordingSupabase({reply:r=>{
+      const source = r.filters.includes("id=master-task");
+      if (r.target === "task_project_id") return {data:(r.payload as {target_task_id?:string})?.target_task_id === "master-task" ? "master-project" : PROJECT};
+      if (r.target === "tasks") return {data:source ? {...TASK,id:"master-task",description:"Master scope",custom_fields:{},planned_duration_minutes:90} : {...TASK,planned_duration_minutes:30,custom_fields:{awiMasterLink:{masterId:"master",projectId:"master-project",taskId:"master-task",documentNumber:"AWI-001"}}}};
+      if (r.target === "awi_masters") return {data:{project_id:"master-project",task_id:"master-task"}};
+      if (r.target === "manufacturing_steps") return {data:r.filters.includes("task_id=master-task") ? [{...STEP,id:"master-step",task_id:"master-task",instruction:text}] : []};
+      return {data:[]};
+    }});
+    const client = db.client as unknown as Client;
+    const loaded = await loadTaskFromSupabase("task-1", PROJECT, client);
+    expect(loaded?.plannedDurationMinutes).toBe(30);
+    expect(loaded?.manufacturingSteps?.[0].instruction).toBe(text);
+    text = "Updated master instruction";
+    expect((await loadTaskFromSupabase("task-1", PROJECT, client))?.manufacturingSteps?.[0].instruction).toBe(text);
+    expect(db.requests.every(r=>!r.modifiers.some(m=>m.startsWith("upsert")))).toBe(true);
+  });
+});

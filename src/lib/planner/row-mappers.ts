@@ -1,3 +1,4 @@
+import { awiTaskLink } from "@/domain/awi-task-link";
 // Row mapping and serialization for planner entities: scalar coercion helpers, database-row -> domain
 // mappers (workspaces, projects, access grants, products, scenarios, stations, zones, components, document
 // types, tasks, steps, parts, dependencies, actual events, custom columns), and domain -> row serializers
@@ -640,6 +641,7 @@ export function dependencyRow(dependency: Dependency) {
 }
 
 export function manufacturingStepRows(tasks: Task[]) {
+  tasks = tasks.filter(task => !awiTaskLink(task));
   return tasks.flatMap((task) =>
     (task.manufacturingSteps ?? []).map((step) => manufacturingStepRow(task.id, step)),
   );
@@ -674,6 +676,7 @@ export function normalizeManufacturingStepSequences(steps: ManufacturingStep[]):
 }
 
 export function partReferenceRows(tasks: Task[]) {
+  tasks = tasks.filter(task => !awiTaskLink(task));
   return tasks.flatMap((task) =>
     (task.partReferences ?? []).map((part) => ({
       id: part.id,

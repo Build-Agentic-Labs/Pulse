@@ -1,5 +1,7 @@
 "use client";
 
+import { AddTaskMenu } from "./line-workspace/add-task-menu";
+import { AWI_TASK_LINK_FIELD, awiTaskLink, withLinkedAwiProcedure } from "@/domain/awi-task-link";
 import { AwiEditorActions } from "./awi-editor-actions";
 import { settleWriteBatch } from "@/domain/workspace-save-status";
 import { useProcedureDrafts } from "./line-workspace/use-procedure-drafts";
@@ -101,6 +103,7 @@ import {
   listSopSummariesFromSupabase,
   type SopSummary,
   loadPlannerStateFromSupabase,
+  loadTaskFromSupabase,
   loadScenariosForProduct,
   loadWorkspaceProjectGroups,
   moveManufacturingStepToTaskInSupabase,
@@ -1247,6 +1250,28 @@ export function LineWorkspace({
     : plannerChromeContext;
   const showsSchedulingWorkspace = activeModule === "gantt";
   const selectedTask = derivedState.tasks.find((task) => task.id === selectedTaskId) ?? derivedState.tasks[0];
+  const linkedAwiSources = useMemo(() => plannerState.tasks.flatMap(task => {
+    const link = awiTaskLink(task);
+    return link ? [{id:task.id, ...link}] : [];
+  }), [plannerState.tasks]);
+  const linkedAwiSourceKey = JSON.stringify(linkedAwiSources);
+  useEffect(() => {
+    const links = JSON.parse(linkedAwiSourceKey) as typeof linkedAwiSources;
+    if (!links.length) return;
+    let active = true;
+    const refresh = async () => {
+      const sources = await Promise.all(links.map(async link => ({link, source:await loadTaskFromSupabase(link.taskId, link.projectId)})));
+      if (!active) return;
+      setPlannerState(current => ({...current, tasks:current.tasks.map(task => {
+        const result = sources.find(item => item.link.id === task.id && item.link.masterId === awiTaskLink(task)?.masterId);
+        return result?.source ? withLinkedAwiProcedure(task, result.source) : task;
+      })}));
+    };
+    const onFocus = () => { void refresh().catch(() => setWorkspaceNotice({tone:"danger", title:"Unable to refresh linked AWI", body:"Reload to try again. Your task planning is preserved."})); };
+    window.addEventListener("focus", onFocus);
+    return () => {active=false; window.removeEventListener("focus", onFocus);};
+  }, [linkedAwiSourceKey]);
+
   const selectedProcedureTaskHydrationStatus = selectedTask
     ? taskDetailHydrationStatus[selectedTask.id]
     : "loaded";
@@ -1574,6 +1599,8 @@ export function LineWorkspace({
   }
 
   function updateProcedureTask(taskId: string, patch: Partial<Task>) {
+    const task = plannerState.tasks.find(item => item.id === taskId);
+    if (task && awiTaskLink(task)) return;
     setSaveError(undefined);
     setSaveState((state) => (state === "loading" || state === "saving" ? state : "draft"));
     if (patch.stationId && taskId === selectedTaskId) {
@@ -2164,7 +2191,7 @@ export function LineWorkspace({
     })();
   }
 
-  function addTaskToZone(zoneId?: string) {
+  function addTaskToZone(zoneId?: string, linkedMaster?: AwiMaster, masterTask?: Task) {
     markDirty();
     const currentTasks = plannerState.tasks;
     const zoneTasks = currentTasks.filter((task) => (zoneId ? task.zoneId === zoneId : !task.zoneId));
@@ -2189,7 +2216,7 @@ export function LineWorkspace({
       taskNumber,
       rowType: "task",
       wbs: nextWbs,
-      name: "",
+      name: linkedMaster?.title ?? "",
       description: "",
       plannedStart: start,
       plannedFinish: start,
@@ -2205,9 +2232,10 @@ export function LineWorkspace({
       travelerSignoffRequired: false,
       manufacturingSteps: [],
       partReferences: [],
-      customFields: {},
+      customFields: linkedMaster ? {[AWI_TASK_LINK_FIELD]: {masterId:linkedMaster.id, projectId:linkedMaster.project_id, taskId:linkedMaster.task_id, documentNumber:linkedMaster.document_number}} : {},
+      workInstructionLink: linkedMaster ? `/awi/${linkedMaster.id}?view=procedure&task=${encodeURIComponent(linkedMaster.task_id)}` : undefined,
     };
-    const codedTask = applyTaskCode(newTask, plannerState.zones, plannerState.components, true);
+    const codedTask = applyTaskCode(masterTask ? withLinkedAwiProcedure(newTask, masterTask) : newTask, plannerState.zones, plannerState.components, true);
 
     setPlannerState((current) => {
       return {
@@ -2537,14 +2565,14 @@ export function LineWorkspace({
             <div className="contents" inert={Boolean(awiMaster && !hasConfirmedRemoteState)} aria-busy={Boolean(awiMaster && !hasConfirmedRemoteState)}>
             <ProcedureWorkspace
               isAwiMaster={Boolean(awiMaster)}
-              publishAction={awiMaster ? <WorkInstructionsPanel compact isAwiMaster
+              publishAction={selectedTask && awiTaskLink(selectedTask) ? <a className="ui-btn-ghost h-9" href={`/awi/${awiTaskLink(selectedTask)!.masterId}?view=procedure&task=${encodeURIComponent(awiTaskLink(selectedTask)!.taskId)}`}>Open master AWI</a> : awiMaster ? <WorkInstructionsPanel compact isAwiMaster
                 tasks={derivedState.tasks.filter(task => task.id === awiMaster.task_id)}
                 zones={derivedState.zones} product={derivedState.product}
                 initialPlannerState={derivedState} hydratedTaskIds={hydratedTaskIds}
                 readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
                 onBeforeRelease={() => ensureSavedBeforeScenarioAction("AWI is still saving", "Resolve the save issue before publishing this AWI.")}
                 onOpenTask={selectTask} /> : undefined}
-              readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
+              readOnly={isViewOnlyAccess || !hasConfirmedRemoteState || Boolean(selectedTask && awiTaskLink(selectedTask))}
               project={activeProjectContext}
               product={derivedState.product}
               tasks={derivedState.tasks}
@@ -2712,10 +2740,14 @@ export function LineWorkspace({
                           <Plus size={16} />
                           Zone
                         </button>
-                        <button type="button" onClick={addTaskAtBottom} className="ui-btn-ghost h-9 gap-2">
-                          <Plus size={16} />
-                          Task
-                        </button>
+                        <AddTaskMenu key={projectId} workspaceId={activeProjectContext?.workspaceId} disabled={isViewOnlyAccess || !hasConfirmedRemoteState}
+                          onNewTask={addTaskAtBottom}
+                          onLinkTask={async master => {
+                            const source = await loadTaskFromSupabase(master.task_id, master.project_id);
+                            if (latestDerivedStateRef.current.product.projectId !== projectId) throw new Error("The active product changed. Choose the AWI again.");
+                            if (!source) throw new Error("This master AWI is unavailable.");
+                            addTaskToZone(activeZoneId ?? plannerState.tasks.at(-1)?.zoneId, master, source);
+                          }} />
                       </div>
                     </div>
                     <ScenarioTabs

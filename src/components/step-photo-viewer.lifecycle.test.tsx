@@ -17,7 +17,7 @@ const photos: StepPhotoAttachment[] = [1, 2, 3].map((number) => ({
 
 let notifyResizeObserver: (() => void) | undefined;
 
-beforeAll(() => {
+function stubResizeObserver() {
   class ResizeObserverMock {
     constructor(callback: ResizeObserverCallback) {
       notifyResizeObserver = () => callback([], this as unknown as ResizeObserver);
@@ -27,7 +27,9 @@ beforeAll(() => {
   }
 
   vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-});
+}
+
+beforeAll(stubResizeObserver);
 
 function prepareOverlay(container: HTMLElement) {
   const overlay = container.querySelector<HTMLElement>(".ui-photo-viewer-annotation-layer");
@@ -140,5 +142,58 @@ describe("Annotation export audit",()=>{
    expect(getContext).toHaveBeenCalled();expect(encode).toHaveBeenCalled();expect(create).toHaveBeenCalled();
    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   } finally {getContext.mockRestore();encode.mockRestore();click.mockRestore();vi.unstubAllGlobals();}
+ });
+});
+
+describe("Photo-switch, pointer-cancel and draft-write audit",()=>{
+ // The export audit above unstubs all globals, so re-install the ResizeObserver mock.
+ beforeAll(stubResizeObserver);
+ const draftPrefix="pulse:photo-annotation-draft:";
+ it("measures legacy text under its own photo id and never cross-saves on photo switch",()=>{
+  const ctx=new Proxy({}, {get:(_target,key)=> key==="measureText" ? () => ({width:30}) : vi.fn()});
+  const getContext=vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(ctx as CanvasRenderingContext2D);
+  try {
+   const legacyText={id:"legacy",type:"text",color:"#d71921",fontSize:20,anchorX:0.2,anchorY:0.2,x:0.3,y:0.3,width:0.22,text:"Legacy note"};
+   const set=[photos[0],{...photos[1],annotations:{version:2,items:[legacyText]}} as StepPhotoAttachment,photos[2]];
+   const p={stepSequence:2,photo:set[0],photos:set,onClose:vi.fn(),onPhotoChange:vi.fn(),onUpdatePhoto:vi.fn()};
+   const {container,rerender,unmount}=render(<StepPhotoViewer {...p}/>);prepareOverlay(container);
+   rerender(<StepPhotoViewer {...p} photo={set[1]}/>);
+   rerender(<StepPhotoViewer {...p} photo={set[2]}/>);
+   unmount();
+   const calls=p.onUpdatePhoto.mock.calls as [string,{annotations:{items:{id:string;height?:number}[]}}][];
+   expect(calls.filter(([id,update])=>id!==set[1].id&&update.annotations.items.some((item)=>item.id==="legacy"))).toEqual([]);
+   expect(calls).toContainEqual([set[1].id,expect.objectContaining({annotations:expect.objectContaining({
+    items:[expect.objectContaining({id:"legacy",height:expect.any(Number)})]})})]);
+  } finally {getContext.mockRestore();}
+ });
+ it("clears a stuck drag on pointercancel so the next pointer deselects instead of dragging",()=>{
+  const p=props();const {container,unmount}=render(<StepPhotoViewer {...p}/>);const overlay=prepareOverlay(container);expandToolbar();
+  fireEvent.pointerDown(container.querySelector(".ui-photo-annotation-item line[stroke='transparent']")!,{clientX:80,clientY:60,pointerId:1});
+  fireEvent.pointerMove(overlay,{clientX:160,clientY:120,pointerId:1});
+  fireEvent.pointerCancel(overlay,{pointerId:1});
+  const calls=p.onUpdatePhoto.mock.calls.length;
+  fireEvent.pointerDown(overlay,{clientX:600,clientY:500,pointerId:2});
+  expect(container.querySelector(".ui-photo-annotation-item-selected")).toBeNull();
+  fireEvent.pointerMove(overlay,{clientX:700,clientY:550,pointerId:2});
+  fireEvent.pointerUp(overlay,{clientX:700,clientY:550,pointerId:2});
+  unmount();
+  const saved=p.onUpdatePhoto.mock.calls.slice(calls).map(([,update])=>update.annotations.items[0]);
+  expect(saved.every((item)=>item.x1===arrow.x1+0.1&&item.y1===arrow.y1+0.1)).toBe(true);
+ });
+ it("writes the local draft on the debounced save, not on every pointermove",()=>{
+  vi.useFakeTimers();
+  const setItem=vi.spyOn(Storage.prototype,"setItem");
+  try {
+   const p={...props(),taskId:"drag-draft-test"};const {container,unmount}=render(<StepPhotoViewer {...p}/>);const overlay=prepareOverlay(container);expandToolbar();
+   const draftWrites=()=>setItem.mock.calls.filter(([storageKey])=>storageKey.startsWith(draftPrefix)).length;
+   fireEvent.pointerDown(container.querySelector(".ui-photo-annotation-item line[stroke='transparent']")!,{clientX:80,clientY:60,pointerId:1});
+   for (let step=1;step<=5;step+=1) fireEvent.pointerMove(overlay,{clientX:80+step*20,clientY:60+step*10,pointerId:1});
+   expect(draftWrites()).toBe(0);
+   fireEvent.pointerUp(overlay,{clientX:180,clientY:110,pointerId:1});
+   act(()=>{vi.advanceTimersByTime(350);});
+   expect(draftWrites()).toBe(1);
+   expect(p.onUpdatePhoto).toHaveBeenCalledTimes(1);
+   unmount();
+  } finally {setItem.mockRestore();vi.useRealTimers();}
  });
 });

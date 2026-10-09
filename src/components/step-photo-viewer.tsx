@@ -212,6 +212,45 @@ function annotationDocumentFromPhoto(photo: StepPhotoAttachment) {
   return normalizePhotoAnnotationDocument(photo.annotations);
 }
 
+type PendingAnnotationSave = {
+  photoId: string;
+  items: PhotoAnnotation[];
+  /** Present when the save should also be recorded as a local recovery draft. */
+  draft?: { taskId: string; base: PhotoAnnotationDocument };
+};
+
+/** Size legacy text callouts saved without a height; null when nothing needs measuring. */
+function measureLegacyTextItems(
+  items: PhotoAnnotation[],
+  overlayWidth: number,
+  overlayHeight: number,
+): PhotoAnnotation[] | null {
+  if (overlayWidth <= 0 || overlayHeight <= 0) {
+    return null;
+  }
+
+  if (!items.some((item) => item.type === "text" && !item.height)) {
+    return null;
+  }
+
+  return items.map((item) => {
+    if (item.type !== "text" || item.height) {
+      return item;
+    }
+
+    const measured = measureTextCalloutBox(
+      item.text,
+      item.fontSize,
+      overlayWidth,
+      overlayHeight,
+      item.width,
+      getAnnotationFontFamily(),
+      true,
+    );
+    return { ...item, width: measured.width, height: measured.height };
+  });
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -245,7 +284,7 @@ export function StepPhotoViewer({
   const initialFocusRef = useRef<HTMLButtonElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
-  const pendingSaveRef = useRef<{ photoId: string; items: PhotoAnnotation[] } | null>(null);
+  const pendingSaveRef = useRef<PendingAnnotationSave | null>(null);
   const onUpdatePhotoRef = useRef(onUpdatePhoto);
   onUpdatePhotoRef.current = onUpdatePhoto;
   const pendingFocusIdRef = useRef<string | null>(null);
@@ -265,6 +304,8 @@ export function StepPhotoViewer({
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [textBoxDragPending, setTextBoxDragPending] = useState<TextBoxDragPending | null>(null);
   const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
+  const overlaySizeRef = useRef(overlaySize);
+  overlaySizeRef.current = overlaySize;
   const [contextMenu, setContextMenu] = useState<AnnotationContextMenu | null>(null);
   const [toolbarVisibility, setToolbarVisibility] = useState<ToolbarVisibility>("expanded");
   const [exportAction, setExportAction] = useState<PhotoExportAction>(null);
@@ -367,6 +408,13 @@ export function StepPhotoViewer({
         window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
+      // The recovery draft is written once per save (debounce, unload, unmount, photo switch)
+      // rather than per pointermove, and always before the parent hears about the change.
+      if (pending.draft) {
+        writeAnnotationDraft(pending.draft.taskId, pending.photoId, pending.draft.base, {
+          version: PHOTO_ANNOTATION_VERSION, items: pending.items,
+        });
+      }
       updatePhoto(pending.photoId, {
         annotations: {
           version: PHOTO_ANNOTATION_VERSION,
@@ -383,10 +431,17 @@ export function StepPhotoViewer({
         return;
       }
 
-      writeAnnotationDraft(taskId, photo.id, incomingRef.current.document, {
-        version: PHOTO_ANNOTATION_VERSION, items: nextItems,
-      });
-      pendingSaveRef.current = { photoId: photo.id, items: nextItems };
+      // Mid-switch (the restore effect has not adopted photo.id yet), `nextItems` still belong
+      // to the previous photo; persisting them here would save them under the new photo's id.
+      if (incomingRef.current.id !== photo.id) {
+        return;
+      }
+
+      const previous = pendingSaveRef.current;
+      const draft = previous?.photoId === photo.id && previous.draft?.taskId === taskId
+        ? previous.draft
+        : { taskId, base: incomingRef.current.document };
+      pendingSaveRef.current = { photoId: photo.id, items: nextItems, draft };
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
       }
@@ -561,8 +616,11 @@ export function StepPhotoViewer({
     const draft = readAnnotationDraft(taskId, photo.id);
     const restored = draft ? mergeAnnotationDocuments(draft.base, draft.local, incoming) : incoming;
     incomingRef.current = {id: photo.id, document: incoming};
-    annotationsRef.current = restored.items;
-    setAnnotations(restored.items);
+    const measured = measureLegacyTextItems(
+      restored.items, overlaySizeRef.current.width, overlaySizeRef.current.height,
+    );
+    annotationsRef.current = measured ?? restored.items;
+    setAnnotations(measured ?? restored.items);
     if (draft && JSON.stringify(restored.items) !== JSON.stringify(incoming.items)) {
       pendingSaveRef.current = {photoId: photo.id, items: restored.items};
       flushPendingAnnotations();
@@ -576,7 +634,10 @@ export function StepPhotoViewer({
     setDragState(null);
     setTextBoxDragPending(null);
     setContextMenu(null);
-  }, [flushPendingAnnotations, photo.id, taskId]);
+    if (measured) {
+      persistAnnotations(measured);
+    }
+  }, [flushPendingAnnotations, persistAnnotations, photo.id, taskId]);
 
   const incomingAnnotations = JSON.stringify(annotationDocumentFromPhoto(photo));
   useEffect(() => {
@@ -588,9 +649,10 @@ export function StepPhotoViewer({
     incomingRef.current = {id: photo.id, document: incoming};
     if (JSON.stringify(merged.items) !== JSON.stringify(annotationsRef.current)) {
       setAnnotations(merged.items);
-      if (pendingSaveRef.current?.photoId === photo.id) {
-        pendingSaveRef.current.items = merged.items;
-        writeAnnotationDraft(taskId, photo.id, incoming, merged);
+      const pending = pendingSaveRef.current;
+      if (pending?.photoId === photo.id) {
+        pendingSaveRef.current = { ...pending, items: merged.items };
+        writeAnnotationDraft(taskId, photo.id, pending.draft?.base ?? incoming, merged);
       }
     }
   }, [incomingAnnotations, photo.id, taskId]);
@@ -634,38 +696,21 @@ export function StepPhotoViewer({
   }, [photo.id, photos]);
 
   useLayoutEffect(() => {
-    if (overlaySize.width <= 0 || overlaySize.height <= 0) {
+    // A photo switch re-creates persistAnnotations before the restore effect swaps the items in;
+    // the restore path measures the incoming photo itself, so skip the outgoing photo's items.
+    if (incomingRef.current.id !== selectedPhotoRef.current.id) {
       return;
     }
 
-    setAnnotations((current) => {
-      let changed = false;
-      const nextItems = current.map((item) => {
-        if (item.type !== "text" || item.height) {
-          return item;
-        }
+    const measured = measureLegacyTextItems(annotationsRef.current, overlaySize.width, overlaySize.height);
+    if (!measured) {
+      return;
+    }
 
-        const measured = measureTextCalloutBox(
-          item.text,
-          item.fontSize,
-          overlaySize.width,
-          overlaySize.height,
-          item.width,
-          getAnnotationFontFamily(),
-          true,
-        );
-        changed = true;
-        return { ...item, width: measured.width, height: measured.height };
-      });
-
-      if (changed) {
-        persistAnnotations(nextItems);
-        return nextItems;
-      }
-
-      return current;
-    });
-  }, [overlaySize.height, overlaySize.width, persistAnnotations, photo.id]);
+    annotationsRef.current = measured;
+    setAnnotations(measured);
+    persistAnnotations(measured);
+  }, [overlaySize.height, overlaySize.width, persistAnnotations]);
 
   useEffect(() => {
     const focusId = pendingFocusIdRef.current;
@@ -1019,7 +1064,44 @@ export function StepPhotoViewer({
     }
   }
 
+  /** A drag belongs to the pointer that started it; other pointers must not steer or end it. */
+  function isForeignPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    const activePointerId = dragState?.pointerId ?? textBoxDragPending?.pointerId;
+    return activePointerId !== undefined && event.pointerId !== activePointerId;
+  }
+
+  function handleOverlayPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    if (isForeignPointer(event)) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    setDragState(null);
+    setTextBoxDragPending(null);
+    setDraftArrow(null);
+    setDraftShape(null);
+    setDraftFreehand(null);
+    setDraftCallout(null);
+  }
+
+  function handleOverlayLostPointerCapture(event: ReactPointerEvent<HTMLDivElement>) {
+    // lostpointercapture bubbles: a child losing its implicit touch capture to the overlay
+    // (beginAnnotationDrag) is the start of a drag, not its end.
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    handleOverlayPointerCancel(event);
+  }
+
   function handleOverlayPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (isForeignPointer(event)) {
+      return;
+    }
+
     if (textBoxDragPending) {
       const moved = Math.hypot(
         event.clientX - textBoxDragPending.startClientX,
@@ -1160,6 +1242,10 @@ export function StepPhotoViewer({
   }
 
   function handleOverlayPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    if (isForeignPointer(event)) {
+      return;
+    }
+
     if (textBoxDragPending) {
       const pendingId = textBoxDragPending.annotationId;
 
@@ -1930,6 +2016,8 @@ export function StepPhotoViewer({
           onPointerDown={handleOverlayPointerDown}
           onPointerMove={handleOverlayPointerMove}
           onPointerUp={handleOverlayPointerUp}
+          onPointerCancel={handleOverlayPointerCancel}
+          onLostPointerCapture={handleOverlayLostPointerCapture}
         >
           {overlaySize.width > 0 && overlaySize.height > 0 ? (
             <svg

@@ -1,5 +1,8 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { TextInput } from "@/components/ui/text-input";
+
 import { useEffect, useMemo, useState } from "react";
 import { createPlannerSupabaseClient, updateOwnProfileNameInSupabase } from "@/domain/supabase-planner";
 import {
@@ -168,9 +171,9 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
           <label className="acct-row-label" htmlFor="account-first-name">Name</label>
           <div>
             <div className="acct-fields">
-              <input
+              <TextInput
                 id="account-first-name"
-                className={`ui-field-standalone acct-field ${shouldShowNameValidation ? "!border-danger" : ""}`}
+
                 type="text"
                 value={firstName}
                 onChange={(event) => {
@@ -185,8 +188,8 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
                 autoComplete="given-name"
                 disabled={isSaving}
               />
-              <input
-                className={`ui-field-standalone acct-field ${shouldShowNameValidation ? "!border-danger" : ""}`}
+              <TextInput
+
                 type="text"
                 value={lastName}
                 onChange={(event) => {
@@ -208,14 +211,14 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
           </div>
         </div>
         <footer className="acct-actions">
-          <button
+          <Button
             type="button"
-            className="acct-btn acct-btn-primary"
+            pending={isSaving}
             onClick={() => void saveName()}
             disabled={isSaving || !nameDirty}
           >
             Save name
-          </button>
+          </Button>
         </footer>
       </section>
 
@@ -236,9 +239,9 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
               <label className="acct-row-label" htmlFor="account-new-password">New password</label>
               <div>
                 <div className="acct-fields">
-                  <input
+                  <TextInput
                     id="account-new-password"
-                    className="ui-field-standalone acct-field"
+
                     type="password"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
@@ -247,8 +250,8 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
                     aria-describedby="account-password-message"
                     disabled={isSaving}
                   />
-                  <input
-                    className="ui-field-standalone acct-field"
+                  <TextInput
+
                     type="password"
                     value={passwordConfirm}
                     onChange={(event) => setPasswordConfirm(event.target.value)}
@@ -265,14 +268,14 @@ export function AccountSettings({ embedded = false }: { embedded?: boolean }) {
               </div>
             </div>
             <footer className="acct-actions">
-              <button
+              <Button
                 type="button"
-                className="acct-btn acct-btn-primary"
+                pending={isSaving}
                 onClick={() => void savePassword()}
                 disabled={isSaving || !password}
               >
                 Update password
-              </button>
+              </Button>
             </footer>
           </>
         ) : null}

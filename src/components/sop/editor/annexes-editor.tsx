@@ -1,3 +1,5 @@
+import { IconButton } from "@/components/ui/button";
+import { TextInput } from "@/components/ui/text-input";
 import { useState } from "react";
 import { Check, Loader2, Paperclip, Pencil, Upload, X } from "lucide-react";
 import type { Sop } from "@/domain/sop/schema";
@@ -104,8 +106,8 @@ export function AnnexesEditor({
           return (
             <div key={row.id ?? index} className="py-3 first:pt-2 last:pb-2">
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
-                <input
-                  className="ui-field-standalone col-start-1 row-start-1 min-w-0 sm:col-start-auto sm:row-start-auto"
+                <TextInput
+                  className=" col-start-1 row-start-1 min-w-0 sm:col-start-auto sm:row-start-auto"
                   value={row.label}
                   aria-label="Form name"
                   data-example="Appendix A"
@@ -114,8 +116,8 @@ export function AnnexesEditor({
                     patch(index, "label", event.target.value)
                   }
                 />
-                <input
-                  className="ui-field-standalone col-span-2 row-start-2 min-w-0 sm:col-span-1 sm:row-start-auto"
+                <TextInput
+                  className=" col-span-2 row-start-2 min-w-0 sm:col-span-1 sm:row-start-auto"
                   value={row.description}
                   aria-label="Form description"
                   data-example="Order escalation approval form"
@@ -139,10 +141,10 @@ export function AnnexesEditor({
               <div className="mt-2 flex min-h-9 items-center gap-2 border-t border-line/70 pt-2">
                 {file && renaming?.file.id === file.id && !disabled ? (
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <input
+                    <TextInput
                       autoFocus
                       aria-label="Attachment name"
-                      className="ui-field-standalone min-w-0 flex-1"
+                      className="min-w-0 flex-1"
                       maxLength={260}
                       value={renaming.name}
                       disabled={renameBusy}
@@ -161,10 +163,9 @@ export function AnnexesEditor({
                         }
                       }}
                     />
-                    <button
+                    <IconButton
                       type="button"
-                      className="ui-btn-ghost h-9 w-9 px-0"
-                      aria-label="Save attachment name"
+                      label="Save attachment name"
                       disabled={renameBusy || !renaming.name.trim()}
                       onClick={() => void saveName()}
                     >
@@ -173,11 +174,10 @@ export function AnnexesEditor({
                       ) : (
                         <Check size={14} />
                       )}
-                    </button>
-                    <button
+                    </IconButton>
+                    <IconButton
                       type="button"
-                      className="ui-btn-ghost h-9 w-9 px-0"
-                      aria-label="Cancel attachment rename"
+                      label="Cancel attachment rename"
                       disabled={renameBusy}
                       onClick={() => {
                         setRenaming(null);
@@ -185,7 +185,7 @@ export function AnnexesEditor({
                       }}
                     >
                       <X size={14} />
-                    </button>
+                    </IconButton>
                   </div>
                 ) : file ? (
                   <button
@@ -216,10 +216,9 @@ export function AnnexesEditor({
                 {disabled ? null : (
                   <div className="flex shrink-0 items-center gap-1">
                     {file && !renaming ? (
-                      <button
+                      <IconButton
                         type="button"
-                        className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary"
-                        aria-label={`Rename ${file.originalName}`}
+                        label={`Rename ${file.originalName}`}
                         title="Rename attachment"
                         onClick={() => {
                           setRenaming({ file, name: file.originalName });
@@ -227,14 +226,17 @@ export function AnnexesEditor({
                         }}
                       >
                         <Pencil size={13} />
-                      </button>
+                      </IconButton>
                     ) : null}
                     <label
-                      className={`ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 ${
+                      className={`ui-control-button ${
                         uploading
                           ? "pointer-events-none cursor-wait opacity-60"
                           : "cursor-pointer"
                       }`}
+                      data-variant="ghost"
+                      data-density="standard"
+                      data-icon-only
                       aria-disabled={uploading}
                       aria-label={uploadLabel}
                       title={uploadLabel}
@@ -259,15 +261,15 @@ export function AnnexesEditor({
                       />
                     </label>
                     {file ? (
-                      <button
+                      <IconButton
                         type="button"
-                        className="ui-btn-ghost h-8 w-8 px-0 text-ink-tertiary hover:text-danger"
                         title="Remove attachment"
-                        aria-label="Remove attachment"
+                        label="Remove attachment"
+                        tone="danger"
                         onClick={() => onRemoveFile(file)}
                       >
                         <X size={14} />
-                      </button>
+                      </IconButton>
                     ) : null}
                   </div>
                 )}

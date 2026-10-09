@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
 
 export function RowDeleteButton({
@@ -8,15 +9,14 @@ export function RowDeleteButton({
   title: string;
 }) {
   return (
-    <button
-      type="button"
-      className="ui-btn-ghost h-9 w-9 shrink-0 px-0 text-ink-tertiary hover:text-danger"
+    <IconButton
+      tone="danger"
       title={title}
-      aria-label={title}
+      label={title}
       onClick={onClick}
     >
       <Trash2 size={13} />
-    </button>
+    </IconButton>
   );
 }
 
@@ -28,13 +28,13 @@ export function AddButton({
   label: string;
 }) {
   return (
-    <button
-      type="button"
-      className="ui-btn-ghost mt-2 h-8 gap-1.5 px-3"
+    <Button
+      variant="ghost"
+      className="mt-2"
       onClick={onClick}
     >
       <Plus size={13} />
       {label}
-    </button>
+    </Button>
   );
 }

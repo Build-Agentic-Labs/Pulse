@@ -301,6 +301,34 @@ describe("shell lock release", () => {
     expect(saveShell).toHaveBeenCalledTimes(2);
     expect(saveShell.mock.calls[1]?.[0].tasks[0]?.name).toBe("Edited while locked");
   });
+  it("leaves the lock with a running save loop when a media write releases it, so a new save queues", async () => {
+    const firstSave = deferred<void>();
+    saveShell.mockReturnValueOnce(firstSave.promise as never).mockResolvedValue(undefined as never);
+    const { result } = renderSaves();
+    let firstDone!: Promise<void>;
+    await act(async () => {
+      firstDone = result.current.saves.persistPlannerState(initialState);
+    });
+    // A media write that started during the loop finishes and releases the lock.
+    act(() => {
+      result.current.saves.saveInFlightRef.current = true;
+      result.current.saves.releaseShellLock();
+    });
+    expect(result.current.saves.saveInFlightRef.current).toBe(true);
+
+    await act(async () => {
+      await result.current.saves.persistPlannerState(editedState);
+    });
+    expect(saveShell).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstSave.resolve();
+      await firstDone;
+    });
+    expect(saveShell).toHaveBeenCalledTimes(2);
+    expect(saveShell.mock.calls[1]?.[0].tasks[0]?.name).toBe("Edited while locked");
+    expect(result.current.saves.saveInFlightRef.current).toBe(false);
+  });
 });
 
 describe("navigation guards", () => {

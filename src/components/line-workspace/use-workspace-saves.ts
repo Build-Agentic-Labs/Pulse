@@ -240,12 +240,16 @@ export function useWorkspaceSaves({
   }
 
   // Release the shell-save lock taken by a media or Gantt-order write, and send a shell save that queued
-  // behind it through persistPlannerState -- the same drain the BOM save uses. When this hook's own save
-  // loop is still running it drains the queue itself, so starting a second, concurrent save is never right.
+  // behind it through persistPlannerState -- the same drain the BOM save uses. While this hook's own save
+  // loop runs, the lock is the loop's: it releases the lock and drains the queue itself when it exits, and
+  // freeing it here would let a second, concurrent shell save start.
   function releaseShellLock() {
+    if (shellSaveLoopActiveRef.current) {
+      return;
+    }
     saveInFlightRef.current = false;
     const queuedState = queuedSaveStateRef.current;
-    if (!queuedState || shellSaveLoopActiveRef.current) {
+    if (!queuedState) {
       return;
     }
     queuedSaveStateRef.current = null;

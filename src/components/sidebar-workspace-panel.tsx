@@ -1,5 +1,7 @@
 "use client";
 
+import { effectiveProductAccess, productAuthorRole } from "@/domain/product-access";
+
 import { BookOpen, Check, ChevronDown, FolderKanban, GripVertical, MoreHorizontal, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -21,15 +23,10 @@ import { UiContextMenu } from "./ui-context-menu";
 import { NavSelectionTrack } from "./nav-selection-track";
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
-const SIDEBAR_PROJECT_CACHE_KEY = "pulse:sidebar-projects-v2";
 const PROJECT_SWITCH_EVENT = "pulse:project-switch-start";
 const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
 const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
 
-type SidebarProjectCache = {
-  projects: Project[];
-  roles: Record<string, WorkspaceRole>;
-};
 
 function projectFromContext(project: PlannerProjectContext): Project {
   return {
@@ -37,6 +34,7 @@ function projectFromContext(project: PlannerProjectContext): Project {
     workspaceId: project.workspaceId,
     name: project.projectName,
     status: "active",
+    accessLevel: project.accessLevel,
     createdAt: "",
     updatedAt: "",
   };
@@ -63,39 +61,6 @@ function clearLastProjectIdIfMatch(projectId: string) {
     if (window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY) === projectId) {
       window.localStorage.removeItem(LAST_PROJECT_STORAGE_KEY);
     }
-  } catch {
-    // Ignore storage failures in private browsing.
-  }
-}
-
-function readSidebarProjectCache(): SidebarProjectCache {
-  if (typeof window === "undefined") {
-    return { projects: [], roles: {} };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(SIDEBAR_PROJECT_CACHE_KEY);
-    if (!raw) {
-      return { projects: [], roles: {} };
-    }
-
-    const parsed = JSON.parse(raw) as Partial<SidebarProjectCache>;
-    return {
-      projects: Array.isArray(parsed.projects) ? parsed.projects : [],
-      roles: parsed.roles && typeof parsed.roles === "object" ? parsed.roles as Record<string, WorkspaceRole> : {},
-    };
-  } catch {
-    return { projects: [], roles: {} };
-  }
-}
-
-function writeSidebarProjectCache(cache: SidebarProjectCache) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(SIDEBAR_PROJECT_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // Ignore storage failures in private browsing.
   }
@@ -130,9 +95,11 @@ export function announceProjectSwitch(project: Project, hasCachedState = false) 
 export function SidebarWorkspacePanel({
   activeProject,
   initialGroups,
+  preferredWorkspaceId,
 }: {
   activeProject?: PlannerProjectContext;
   initialGroups?: WorkspaceProjectGroup[];
+  preferredWorkspaceId?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -155,19 +122,31 @@ export function SidebarWorkspacePanel({
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const cachedSidebar = useMemo(() => initialGroups ? {
     projects: initialGroups.flatMap((group) => group.projects.filter((project) => project.status !== "archived" && !project.isAwiMaster)),
-    roles: Object.fromEntries(initialGroups.map((group) => [group.workspace.id, group.role])),
-  } : readSidebarProjectCache(), [initialGroups]);
+    roles: Object.fromEntries(initialGroups.map((group) => [group.workspace.id, productAuthorRole(group)])),
+  } : { projects: [], roles: {} }, [initialGroups]);
   const [projects, setProjects] = useState<Project[]>(() => mergeProjects(cachedSidebar.projects, activeProject));
   const [workspaceId, setWorkspaceId] = useState<string | undefined>(() => activeProject?.workspaceId);
   const [role, setRole] = useState<WorkspaceRole | undefined>(() => activeProject?.role);
-  const [roleByWorkspaceId, setRoleByWorkspaceId] = useState<Record<string, WorkspaceRole>>(() =>
+  const [roleByWorkspaceId, setRoleByWorkspaceId] = useState<Record<string, WorkspaceRole | undefined>>(() =>
     activeProject?.workspaceId && activeProject.role
       ? { ...cachedSidebar.roles, [activeProject.workspaceId]: activeProject.role }
       : cachedSidebar.roles,
   );
   const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">(() =>
-    activeProject ? "ready" : "loading",
+    activeProject || initialGroups ? "ready" : "loading",
   );
+  // The directory gate owns revalidation when it supplies groups. Reuse that
+  // authenticated result rather than issue a second full directory query.
+  useEffect(() => {
+    if (!initialGroups) return;
+    const selected = initialGroups.find((group) => group.workspace.id === (activeProject?.workspaceId ?? preferredWorkspaceId))
+      ?? initialGroups.find((group) => effectiveProductAccess(group) !== "none");
+    setProjects(cachedSidebar.projects);
+    setRoleByWorkspaceId(cachedSidebar.roles);
+    setWorkspaceId(selected?.workspace.id);
+    setRole(productAuthorRole(selected));
+    setStatus("ready");
+  }, [initialGroups, cachedSidebar, activeProject?.workspaceId, preferredWorkspaceId]);
   const [isAdding, setIsAdding] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [inlineCategory, setInlineCategory] = useState<string | null>(null);
@@ -238,12 +217,11 @@ export function SidebarWorkspacePanel({
       setProjects(next);
       setExpandedCategories((current) => ({ ...current, [category]: true }));
       await updateProjectInSupabase(source.id, { portfolioCategory: portfolioCategory ?? null, portfolioPosition: position });
-      writeSidebarProjectCache({ projects: next, roles: roleByWorkspaceId });
     } catch (error) {
       setProjects(original);
       setDeleteError(error instanceof Error ? error.message : "Unable to move product.");
     } finally { setIsSubmitting(false); }
-  }, [isSubmitting, projects, roleByWorkspaceId]);
+  }, [isSubmitting, projects]);
 
   // Pointer input supports the full row and avoids the browser's native drag image.
   useEffect(() => {
@@ -330,7 +308,7 @@ export function SidebarWorkspacePanel({
 
   const activeProjectId = activeProject?.projectId;
   const activeProjectName = activeProject?.projectName;
-  const activeWorkspaceId = activeProject?.workspaceId;
+  const activeWorkspaceId = activeProject?.workspaceId ?? preferredWorkspaceId;
   const activeProjectRole = activeProject?.role;
 
   useEffect(() => {
@@ -393,8 +371,8 @@ export function SidebarWorkspacePanel({
 
   const hydrate = useCallback(async () => {
     try {
-      const groups = await ensureDefaultWorkspaceMembership();
-      const activeGroup = groups.find((entry) => entry.workspace.id === activeWorkspaceId) ?? groups[0];
+      const groups = await ensureDefaultWorkspaceMembership(undefined, "product");
+      const activeGroup = groups.find((entry) => entry.workspace.id === activeWorkspaceId) ?? groups.find((entry) => effectiveProductAccess(entry) !== "none");
 
       if (!activeGroup) {
         setProjects([]);
@@ -409,15 +387,11 @@ export function SidebarWorkspacePanel({
         group.projects.filter((project) => project.status !== "archived" && !project.isAwiMaster),
       );
       setWorkspaceId(activeGroup.workspace.id);
-      setRole(activeGroup.role);
+      setRole(productAuthorRole(activeGroup));
       setRoleByWorkspaceId(
-        Object.fromEntries(groups.map((group) => [group.workspace.id, group.role])),
+        Object.fromEntries(groups.map((group) => [group.workspace.id, productAuthorRole(group)])),
       );
       setProjects(nextProjects);
-      writeSidebarProjectCache({
-        projects: nextProjects,
-        roles: Object.fromEntries(groups.map((group) => [group.workspace.id, group.role])),
-      });
       setStatus("ready");
       return nextProjects;
     } catch {
@@ -435,7 +409,7 @@ export function SidebarWorkspacePanel({
         setStatus("auth");
         return;
       }
-      void hydrate();
+      if (!initialGroups) void hydrate();
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -444,14 +418,14 @@ export function SidebarWorkspacePanel({
         setProjects([]);
         return;
       }
-      void hydrate();
+      if (!initialGroups) void hydrate();
     });
 
     return () => {
       mounted = false;
       listener.subscription.unsubscribe();
     };
-  }, [hydrate, supabase]);
+  }, [hydrate, supabase, initialGroups]);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

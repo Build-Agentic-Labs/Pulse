@@ -1,8 +1,8 @@
 "use client";
 
 import type { SaveState } from "@/domain/supabase-planner";
-import { useState, type FormEvent } from "react";
-import { createPortal } from "react-dom";
+import { useId, useState, type FormEvent } from "react";
+import { ModalSurface } from "./ui/modal-surface";
 import { Eye, Pencil, X } from "lucide-react";
 import type { PlannerState } from "@/domain/types";
 import { updateAwiMetadata, type AwiMaster } from "@/lib/awi/store";
@@ -14,6 +14,8 @@ export function AwiEditorActions({ master, state, saveState, saveError, recovery
   saveError?: string;
   recoveryDrafts?: unknown;
 }) {
+  const titleId = useId();
+  const categoriesId = useId();
   const [preview, setPreview] = useState(false);
   const [editing, setEditing] = useState(false);
   const [number, setNumber] = useState(master.document_number);
@@ -48,20 +50,19 @@ export function AwiEditorActions({ master, state, saveState, saveError, recovery
     </button> : null}
     <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-2" disabled={!ready} onClick={() => setPreview(true)}><Eye size={15} />Preview</button>
     {preview ? <WorkInstructionPrintPreview projectId={master.project_id} taskIds={[master.task_id]} initialPlannerState={state} sopViewer onClose={() => setPreview(false)} /> : null}
-    {editing ? createPortal(<div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 p-4">
-      <form onSubmit={save} role="dialog" aria-modal="true" aria-labelledby="awi-details-title"
-        onKeyDown={(event) => { if (event.key === "Escape" && !pending) setEditing(false); }}
+    {editing ? <ModalSurface labelledBy={titleId} onCancel={() => { if (!pending) setEditing(false); }}><div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 p-4">
+      <form onSubmit={save}
         className="w-full max-w-sm rounded-xl border border-line bg-surface-raised p-6 shadow-lg">
-        <div className="mb-5 flex items-center justify-between"><h2 id="awi-details-title" className="ui-section-title">AWI details</h2>
+        <div className="mb-5 flex items-center justify-between"><h2 id={titleId} className="ui-section-title">AWI details</h2>
           <button type="button" className="ui-btn-ghost h-8 w-8 px-0" aria-label="Close AWI details" disabled={pending} onClick={() => setEditing(false)}><X size={15} /></button></div>
-        <label className="block text-xs text-ink-secondary">AWI number<input autoFocus required maxLength={64} className="ui-field-standalone mt-2 h-9 w-full rounded-md px-3" value={number} onChange={event => setNumber(event.target.value)} disabled={pending} /></label>
-        <label className="mt-4 block text-xs text-ink-secondary">Category<input list="awi-category-suggestions" maxLength={80} placeholder="e.g. Accessory or Trailer" className="ui-field-standalone mt-2 h-9 w-full rounded-md px-3" value={category} onChange={event => setCategory(event.target.value)} disabled={pending} /></label>
-        <datalist id="awi-category-suggestions"><option value="Accessory" /><option value="Trailer" /><option value="Compressor" /><option value="Generator" /><option value="Hybrid" /><option value="Power Module" /></datalist>
+        <label className="block text-xs text-ink-secondary">AWI number<input data-modal-initial-focus required maxLength={64} className="ui-field-standalone mt-2 h-9 w-full rounded-md px-3" value={number} onChange={event => setNumber(event.target.value)} disabled={pending} /></label>
+        <label className="mt-4 block text-xs text-ink-secondary">Category<input list={categoriesId} maxLength={80} placeholder="e.g. Accessory or Trailer" className="ui-field-standalone mt-2 h-9 w-full rounded-md px-3" value={category} onChange={event => setCategory(event.target.value)} disabled={pending} /></label>
+        <datalist id={categoriesId}><option value="Accessory" /><option value="Trailer" /><option value="Compressor" /><option value="Generator" /><option value="Hybrid" /><option value="Power Module" /></datalist>
         {error ? <p role="alert" className="mt-3 text-xs text-danger">{error}</p> : null}
         <div className="mt-6 flex justify-end gap-2"><button type="button" className="ui-btn-ghost h-9 px-3" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
           <button type="submit" className="ui-btn-primary h-9 px-4" disabled={pending || !number.trim()}>{pending ? "Saving…" : "Save"}</button></div>
       </form>
-    </div>, document.body) : null}
+    </div></ModalSurface> : null}
   </>;
 }
 

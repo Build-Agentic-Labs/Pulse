@@ -388,7 +388,7 @@ export function AppSettingsPanel({
 
 
       <div className="ui-settings-content">
-        {isSuperAdmin && mountedSections.has("backups") ? <div hidden={activeSection !== "backups"} aria-hidden={activeSection !== "backups"}><SettingsPage title="Backups" description="Preserve your company data with verified, encrypted local exports."><BackupSettings /></SettingsPage></div> : null}
+        {isSuperAdmin && mountedSections.has("backups") ? <div hidden={activeSection !== "backups"} aria-hidden={activeSection !== "backups"}><SettingsPage title="Backups" description="Preserve your company data with verified, encrypted local exports."><BackupSettings active={activeSection === "backups"} /></SettingsPage></div> : null}
 
         {mountedSections.has("account") ? (
 

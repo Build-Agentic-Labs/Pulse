@@ -1,7 +1,9 @@
 "use client";
 
 import { CircleCheck, Info, TriangleAlert, CircleAlert, X } from "lucide-react";
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
+
+import { ModalSurface } from "./ui/modal-surface";
 
 export type FeedbackTone = "neutral" | "success" | "warning" | "danger";
 
@@ -112,7 +114,7 @@ function ConfirmActions({
 
     return (
       <div className="mt-3 flex items-center justify-end gap-1">
-        <button type="button" onClick={onCancelConfirm} className="ui-btn-ghost h-8 px-2 text-xs">
+        <button type="button" data-modal-initial-focus onClick={onCancelConfirm} className="ui-btn-ghost h-8 px-2 text-xs">
           {confirm.cancelLabel ?? "Cancel"}
         </button>
         <button type="button" onClick={onConfirm} className={confirmClass}>
@@ -124,7 +126,7 @@ function ConfirmActions({
 
   return (
     <div className="mt-5 flex justify-end gap-2">
-      <button type="button" onClick={onCancelConfirm} className="ui-btn-ghost h-9 px-4">
+      <button type="button" data-modal-initial-focus onClick={onCancelConfirm} className="ui-btn-ghost h-9 px-4">
         {confirm.cancelLabel ?? "Cancel"}
       </button>
       <button
@@ -166,19 +168,7 @@ export function ThemedFeedbackLayer({
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [toasts]);
 
-  // Escape cancels an open confirm, matching every menu/popover in the app.
-  useEffect(() => {
-    if (!confirm) {
-      return;
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onCancelConfirm();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [confirm, onCancelConfirm]);
+  const confirmTitleId = useId();
 
   return (
     <>
@@ -225,7 +215,6 @@ export function ThemedFeedbackLayer({
             {centerToasts.map((toast) => {
               const tone = toast.tone ?? "neutral";
 
-
               return (
                 <div
                   key={toast.id}
@@ -263,62 +252,60 @@ export function ThemedFeedbackLayer({
       ) : null}
 
       {confirm ? (
-        confirm.placement === "anchor" && confirm.anchorRect ? (
-          <>
-            <button
-              type="button"
-              className="fixed inset-0 z-[99] cursor-default bg-transparent"
-              onClick={onCancelConfirm}
-              aria-label="Dismiss confirmation"
-            />
-            <div
-              className="ui-feedback-popover fixed z-[100]"
-              style={anchorPopoverStyle(confirm.anchorRect)}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="feedback-confirm-title"
-            >
-              <p id="feedback-confirm-title" className="text-sm font-medium text-ink">
-                {confirm.title}
-              </p>
-              <BodyText body={confirm.body} compact />
-              <ConfirmActions
-                compact
-                confirm={confirm}
-                onCancelConfirm={onCancelConfirm}
-                onConfirm={onConfirm}
+        <ModalSurface labelledBy={confirmTitleId} onCancel={onCancelConfirm}>
+          {confirm.placement === "anchor" && confirm.anchorRect ? (
+            <>
+              <button
+                type="button"
+                className="fixed inset-0 z-[99] cursor-default bg-transparent"
+                onClick={onCancelConfirm}
+                tabIndex={-1}
+                aria-label="Dismiss confirmation"
               />
-            </div>
-          </>
-        ) : (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
-            {/* Backdrop: clicking outside cancels (danger confirms included — Escape and
-                the explicit Cancel button remain, so this can't destroy data by accident). */}
-            <button
-              type="button"
-              className="absolute inset-0 cursor-default bg-ink/20"
-              onClick={onCancelConfirm}
-              aria-label="Dismiss confirmation"
-            />
-            <div
-              className={`relative w-full max-w-[460px] overflow-hidden rounded-md border bg-surface shadow-modal ${toneStyles[confirm.tone ?? "neutral"].border}`}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="feedback-confirm-title"
-            >
-              <div className="border-b border-line px-4 py-4">
-                <div className="ui-mono-label">{confirm.label ?? toneStyles[confirm.tone ?? "neutral"].label}</div>
-                <h2 id="feedback-confirm-title" className="ui-section-title mt-2">
+              <div
+                className="ui-feedback-popover fixed z-[100]"
+                style={anchorPopoverStyle(confirm.anchorRect)}
+              >
+                <p id={confirmTitleId} className="text-sm font-medium text-ink">
                   {confirm.title}
-                </h2>
+                </p>
+                <BodyText body={confirm.body} compact />
+                <ConfirmActions
+                  compact
+                  confirm={confirm}
+                  onCancelConfirm={onCancelConfirm}
+                  onConfirm={onConfirm}
+                />
               </div>
-              <div className="p-4">
-                <BodyText body={confirm.body} />
-                <ConfirmActions confirm={confirm} onCancelConfirm={onCancelConfirm} onConfirm={onConfirm} />
+            </>
+          ) : (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
+              {/* Backdrop: clicking outside cancels (danger confirms included — Escape and
+                  the explicit Cancel button remain, so this can't destroy data by accident). */}
+              <button
+                type="button"
+                className="absolute inset-0 cursor-default bg-ink/20"
+                onClick={onCancelConfirm}
+                tabIndex={-1}
+                aria-label="Dismiss confirmation"
+              />
+              <div
+                className={`relative w-full max-w-[460px] overflow-hidden rounded-md border bg-surface shadow-modal ${toneStyles[confirm.tone ?? "neutral"].border}`}
+              >
+                <div className="border-b border-line px-4 py-4">
+                  <div className="ui-mono-label">{confirm.label ?? "Confirm action"}</div>
+                  <h2 id={confirmTitleId} className="ui-section-title mt-2">
+                    {confirm.title}
+                  </h2>
+                </div>
+                <div className="p-4">
+                  <BodyText body={confirm.body} />
+                  <ConfirmActions confirm={confirm} onCancelConfirm={onCancelConfirm} onConfirm={onConfirm} />
+                </div>
               </div>
             </div>
-          </div>
-        )
+          )}
+        </ModalSurface>
       ) : null}
     </>
   );

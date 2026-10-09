@@ -185,3 +185,28 @@ describe("workspace directory collection reads", () => {
     expect((await loadWorkspaceProjectGroups(USER, client as never))[0].projects[0].id).toBe("p-1");
   });
 });
+
+describe("Product module directory", () => {
+  it("shares the whole portfolio while keeping the legacy directory separately scoped", async () => {
+    const rows = {
+      workspace_members: [membership("w-1", "editor")], workspaces: [workspace("w-1")],
+      projects: [project("p-1", "w-1"), project("p-2", "w-1")],
+      project_access: [{ user_id: USER, project_id: "p-1", level: "edit" }],
+      product_module_access: [{ user_id: USER, workspace_id: "w-1", level: "view" }],
+    };
+    const { client, reads } = fixture(rows);
+    const [productGroups, legacyGroups] = await Promise.all([
+      loadWorkspaceProjectGroups(USER, client as never, "product"), loadWorkspaceProjectGroups(USER, client as never),
+    ]);
+    expect(productGroups[0].projects.map((p) => [p.id, p.accessLevel])).toEqual([["p-1", "view"], ["p-2", "view"]]);
+    expect(legacyGroups[0].projects.map((p) => p.id)).toEqual(["p-1"]);
+    expect(reads.filter((read) => read.table === "workspace_members")).toHaveLength(1);
+    rows.product_module_access[0].level = "none";
+    expect((await loadWorkspaceProjectGroups(USER, client as never, "product"))[0].projects).toEqual([]);
+  });
+  it("retains an empty organization with Product access so its first product can be created", async () => {
+    const { client } = fixture({ workspace_members: [membership("w-1", "viewer")], workspaces: [workspace("w-1")], projects: [],
+      product_module_access: [{ user_id: USER, workspace_id: "w-1", level: "edit" }] });
+    expect((await loadWorkspaceProjectGroups(USER, client as never, "product"))[0]).toMatchObject({ productAccess: "edit", projects: [] });
+  });
+});

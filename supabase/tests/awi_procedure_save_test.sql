@@ -11,6 +11,9 @@ insert into public.workspace_members(workspace_id,user_id,role) values
  ('ws_awi_save_ci','a7200000-0000-0000-0000-000000000001','editor'),
  ('ws_awi_save_ci','a7200000-0000-0000-0000-000000000002','editor'),
  ('ws_awi_save_ci','a7200000-0000-0000-0000-000000000003','viewer');
+insert into public.product_module_access(workspace_id,user_id,level) values
+('ws_awi_save_ci','a7200000-0000-0000-0000-000000000001','edit'),
+('ws_awi_save_ci','a7200000-0000-0000-0000-000000000003','view');
 create function public.test_awi_save_as(p_uid text) returns void language plpgsql as $$
 begin
  perform set_config('request.jwt.claims',json_build_object('sub',p_uid,'role','authenticated')::text,true);
@@ -120,7 +123,7 @@ select throws_ok($$select public.test_awi_save_apply((select payload - 'p_parts'
 
 select public.test_awi_save_as('a7200000-0000-0000-0000-000000000002');
 select throws_ok($$select public.test_awi_save_apply((select payload from awi_save_inputs where name='base'))$$,
- '42501',null,'another editor cannot save a private master');
+ '42501',null,'generic editor without Product cannot save a master');
 reset role;
 insert into public.project_access(project_id,user_id,level)
  select payload->>'p_project_id','a7200000-0000-0000-0000-000000000003','view'

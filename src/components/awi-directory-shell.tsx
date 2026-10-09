@@ -8,9 +8,10 @@ import { SidebarWorkspacePanel } from "./sidebar-workspace-panel";
 import { SidebarReopenButton } from "./line-workspace/nav";
 
 /** Shared geometry for the streamed list fallback and the ready directory. */
-export function AwiDirectoryShell({ project, groups, loading = false, children }: {
+export function AwiDirectoryShell({ project, groups, workspaceId, loading = false, children }: {
   project?: PlannerProjectContext;
   groups?: WorkspaceProjectGroup[];
+  workspaceId?: string;
   loading?: boolean;
   children: ReactNode;
 }) {
@@ -26,7 +27,7 @@ export function AwiDirectoryShell({ project, groups, loading = false, children }
             <button type="button" className="ui-btn-ghost inline-flex h-8 w-8 items-center justify-center px-0 text-ink-tertiary hover:text-ink"
               aria-label="Hide sidebar" title="Hide sidebar" onClick={() => setCollapsed(true)}><PanelLeftClose size={15} strokeWidth={1.75} /></button>
           </div>
-          <SidebarWorkspacePanel activeProject={project} initialGroups={groups} />
+          <SidebarWorkspacePanel activeProject={project} initialGroups={groups} preferredWorkspaceId={workspaceId} />
         </aside>
       </div>
       <main aria-busy={loading || undefined} className="min-h-0 min-w-0 overflow-auto rounded-l-xl bg-canvas p-6 transition-[border-radius] duration-300 ease-out sm:p-8">

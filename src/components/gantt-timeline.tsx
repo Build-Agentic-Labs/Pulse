@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { taskDependsOn } from "@/domain/task-scheduling";
 
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Copy, Link2, Maximize2, Minimize2, Plus, Sparkles, Trash2 } from "lucide-react";
@@ -2160,11 +2162,9 @@ export function GanttTimeline({
       </div>
     </section>
     {mappingTask ? (
-      <div
+      <ModalSurface labelledBy="task-code-mapping-title" onCancel={closeCodeMapping}><div
         className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/55 px-4 py-6"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="task-code-mapping-title"
+
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) {
             closeCodeMapping();
@@ -2281,14 +2281,12 @@ export function GanttTimeline({
             </button>
           </div>
         </div>
-      </div>
+      </div></ModalSurface>
     ) : null}
     {predecessorPickerTask ? (
-      <div
+      <ModalSurface labelledBy="predecessor-picker-title" onCancel={closePredecessorPicker}><div
         className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/55 px-4 py-6"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="predecessor-picker-title"
+
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) {
             closePredecessorPicker();
@@ -2393,7 +2391,7 @@ export function GanttTimeline({
             </button>
           </div>
         </div>
-      </div>
+      </div></ModalSurface>
     ) : null}
     </>
   );

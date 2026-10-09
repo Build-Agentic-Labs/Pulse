@@ -317,8 +317,12 @@ export function StepPhotoViewer({
   const overlayMounted = useRef(true);
   useEffect(() => {
     overlayMounted.current = true;
-    viewerRef.current?.focus({ preventScroll: true });
-    return () => { overlayMounted.current = false; };
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    initialFocusRef.current?.focus({ preventScroll: true });
+    return () => {
+      overlayMounted.current = false;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
   }, []);
 
   async function pasteImageOverlay() {
@@ -767,13 +771,9 @@ export function StepPhotoViewer({
   }, [contextMenu]);
 
   useEffect(() => {
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    initialFocusRef.current?.focus();
-    return () => previouslyFocused?.focus();
-  }, []);
-
-  useEffect(() => {
     function handlePreviewKeyDown(event: KeyboardEvent) {
+      // A nested native modal owns its own shortcuts and focus.
+      if (event.target instanceof Element && event.target.closest("dialog[open]") && !viewerRef.current?.contains(event.target)) return;
       if (event.key === "Tab") {
         const focusable = Array.from(
           viewerRef.current?.querySelectorAll<HTMLElement>(

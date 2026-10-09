@@ -1,0 +1,15 @@
+"use client";
+import { useState } from "react";
+import { CommandPalette } from "@/components/command-palette";
+import { BulkTaskEditor } from "@/components/bulk-task-editor";
+import { StepExplodedViewGallery } from "@/components/step-exploded-view-gallery";
+import { TaskVideoGallery } from "@/components/task-video-gallery";
+import { AwiDirectory } from "@/components/awi-directory";
+import type { WorkspaceProjectGroup } from "@/domain/types";
+export default function Fixture(){const [mode,setMode]=useState(''),[open,setOpen]=useState(false);return <main style={{padding:32}}><h1>Local dialog behavior checks</h1><p>Synthetic data; no writes. Open a dialog, Tab through it, then close.</p>{['command','bulk','image','video','awi'].map(m=><button className="ui-btn-secondary" key={m} onClick={()=>{setMode(m);setOpen(true)}}>{m}</button>)}<button>Background action</button>
+<CommandPalette open={mode==='command'&&open} onClose={()=>setOpen(false)} groups={[{label:'Fixture',items:[{id:'one',label:'Example action',action:()=>{}}]}]}/>
+<BulkTaskEditor open={mode==='bulk'&&open} onClose={()=>setOpen(false)} tasks={[]} zones={[]} taskCode={()=>'TEST'} onMoveToZone={()=>{}} onDelete={()=>{}}/>
+{mode==='image'&&<StepExplodedViewGallery views={[{id:'one',name:'Synthetic diagram',capturedAt:'2026-10-09',dataUrl:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="steelblue"/><text x="60" y="150" fill="white" font-size="24">Synthetic diagram</text></svg>')}]}/>}
+{mode==='video'&&<TaskVideoGallery videos={[{id:'one',name:'Synthetic animation',capturedAt:'2026-10-09',videoUrl:''}]}/>}
+{mode==='awi'&&<AwiDirectory initialMasters={[]} workspaceId="fixture" groups={[{workspace:{id:'fixture',name:'Local fixture'},role:'owner',projects:[]} as unknown as WorkspaceProjectGroup]}/>}
+</main>}

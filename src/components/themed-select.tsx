@@ -172,21 +172,26 @@ export function ThemedSelect({
       }
 
       const rect = button.getBoundingClientRect();
-      const width = Math.min(Math.max(rect.width, menuMinWidth), window.innerWidth - 16);
-      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-      const viewportOffsetTop = window.visualViewport?.offsetTop ?? 0;
-      const top = rect.bottom + viewportOffsetTop + 6;
-      const maxHeight = Math.max(160, viewportHeight - rect.bottom - 18);
-      const left =
-        menuAlign === "right"
-          ? Math.max(8, rect.right - width)
-          : Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+      const viewport = window.visualViewport;
+      const viewportWidth = viewport?.width ?? window.innerWidth;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const width = Math.max(0, Math.min(Math.max(rect.width, menuMinWidth), viewportWidth - 16));
+      const below = Math.max(0, viewportTop + viewportHeight - rect.bottom - 14);
+      const above = Math.max(0, rect.top - viewportTop - 14);
+      const opensAbove = below < menuMaxHeight && above > below;
+      const maxHeight = Math.min(menuMaxHeight, opensAbove ? above : below);
+      const preferredLeft = menuAlign === "right" ? rect.right - width : rect.left;
+      const left = Math.max(viewportLeft + 8, Math.min(preferredLeft, viewportLeft + viewportWidth - width - 8));
 
       setMenuStyle({
         left,
-        top,
+        top: opensAbove ? rect.top - 6 : rect.bottom + 6,
+        // Keep placement separate from the menu's transform-based entrance animation.
+        translate: opensAbove ? "0 -100%" : undefined,
         width,
-        maxHeight: Math.min(menuMaxHeight, maxHeight),
+        maxHeight,
       });
     }
 
@@ -233,6 +238,14 @@ export function ThemedSelect({
   }
 
   function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    // Handle locally before the parent modal handles Escape; also works with no matches.
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      buttonRef.current?.focus();
+      return;
+    }
     const optionButtons = Array.from(
       menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [],
     );

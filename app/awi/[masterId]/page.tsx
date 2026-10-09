@@ -8,7 +8,7 @@ export const metadata = { title: "AWI Builder | Pulse" };
 export default async function AwiEditorPage({ params }: { params: Promise<{ masterId: string }> }) {
   const { masterId } = await params;
   const client = await createSupabaseServerClient();
-  const groupsPromise = fetchInitialWorkspaceGroups();
+  const groupsPromise = fetchInitialWorkspaceGroups("product");
   const master = await getAwiMaster(masterId, client);
   if (!master) notFound();
   // The Procedure editor needs its editable core, not a dashboard summary.

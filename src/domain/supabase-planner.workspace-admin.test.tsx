@@ -125,12 +125,13 @@ describe("members and the access matrix", () => {
       "workspace_members.select(workspace_id,user_id,role,created_at) workspace_id=ws-1 | order(created_at)",
       "projects.select(id) workspace_id=ws-1 | order(created_at)",
       "profiles.select(id,full_name,avatar_url,email) id in [manager-1,user-2]",
+      "product_module_access.select(user_id, level) workspace_id=ws-1",
       "project_access.select(project_id, user_id, level) project_id in [p1,p2]",
       "org_tool_access.select(user_id, level) workspace_id=ws-1 user_id in [manager-1,user-2]",
     ]);
     expect(matrix).toEqual([
-      { userId: "manager-1", fullName: undefined, email: undefined, role: "owner", isSelf: true, joinedAt: "2026-01-01", projectLevels: { p1: "none", p2: "none" }, orgTools: "edit" },
-      { userId: "user-2", fullName: "Robin", email: "r@x", role: "editor", isSelf: false, joinedAt: "2026-02-01", projectLevels: { p1: "none", p2: "view" }, orgTools: "none" },
+      { userId: "manager-1", fullName: undefined, email: undefined, role: "owner", isSelf: true, joinedAt: "2026-01-01", productAccess: "none", projectLevels: { p1: "none", p2: "none" }, orgTools: "edit" },
+      { userId: "user-2", fullName: "Robin", email: "r@x", role: "editor", isSelf: false, joinedAt: "2026-02-01", productAccess: "none", projectLevels: { p1: "none", p2: "view" }, orgTools: "none" },
     ]);
   });
 
@@ -186,7 +187,7 @@ describe("invitations", () => {
     expect(grant.options).toEqual({ onConflict: "workspace_id,email" });
     expect(grant.payload).toEqual({
       workspace_id: "ws-1", email: "pat@anacorp.com", granted_by: "manager-1",
-      role: "editor", quality_access: "view", access_package: "custom", planning_access: false,
+      role: "editor", product_access: "none", quality_access: "view", access_package: "custom", planning_access: false,
       project_access: [{ project_id: "p1", level: "edit" }],
       department_access: [{ department_id: "dept-qa", role: "reviewer", position_title: "Quality Engineer" }],
       expires_at: "2026-11-02T12:00:00.000Z", redeemed_by: null, redeemed_at: null,

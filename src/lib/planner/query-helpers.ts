@@ -40,7 +40,7 @@ export function customColumnScopeFilter(productId: string, scenarioId: string): 
 }
 
 // Project-membership assertions are advisory UX guards -- the real enforcement is RLS, which
-// gates every write on has_project_access(). These resolve a task/scenario's project in ONE
+// gates Product writes on has_product_project_access(). These resolve a task/scenario's project in ONE
 // round-trip via the SECURITY DEFINER resolver functions (was 3 sequential queries each).
 export async function assertTaskInProject(supabase: ReturnType<typeof plannerClient>, taskId: string, projectId?: string) {
   if (!projectId) {

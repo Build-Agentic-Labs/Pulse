@@ -80,7 +80,7 @@ const annotatedPlannerState = {
 } as PlannerState;
 
 describe("WorkInstructionsPanel", () => {
-  it("gates compact publishing on saving and disables it for view-only access", async () => {
+  it("gates compact publishing on saving and offers revision browsing for view-only access", async () => {
     const onBeforeRelease = vi.fn().mockResolvedValue(false);
     const props = { compact: true, isAwiMaster: true, tasks: [task], zones: [zone], product, onOpenTask: vi.fn(), onBeforeRelease };
     const { rerender } = render(<WorkInstructionsPanel {...props} />);
@@ -90,7 +90,8 @@ describe("WorkInstructionsPanel", () => {
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled());
     expect(screen.queryByRole("dialog")).toBeNull();
     rerender(<WorkInstructionsPanel {...props} readOnly />);
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Revisions" })).toBeEnabled();
   });
 
   it("tracks saved draft completion and allows reopening a draft without discarding metadata", () => {
@@ -131,7 +132,7 @@ describe("WorkInstructionsPanel", () => {
 
     const previewDialog = screen.getByRole("dialog", { name: "Work instruction document preview" });
     expect(previewDialog.parentElement).toBe(document.body);
-    expect(previewDialog.classList.contains("wi-print-modal")).toBe(true);
+    expect(Boolean(previewDialog.querySelector(".wi-print-modal"))).toBe(true);
     expect(screen.getByRole("status", { name: "Loading work instruction preview" })).toBeTruthy();
     expect(previewDialog.querySelectorAll(".ui-skeleton-line").length).toBeGreaterThan(10);
     expect(screen.getByRole("button", { name: "Print / Save PDF" }).hasAttribute("disabled")).toBe(true);
@@ -150,7 +151,8 @@ describe("WorkInstructionsPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-    fireEvent.keyDown(window, { key: "Escape" });
+    // Browsers translate Escape into the native dialog cancel event; jsdom does not.
+    fireEvent(screen.getByRole("dialog", { name: "Work instruction document preview" }), new Event("cancel", { bubbles: false, cancelable: true }));
 
     expect(screen.queryByRole("dialog", { name: "Work instruction document preview" })).toBeNull();
   });

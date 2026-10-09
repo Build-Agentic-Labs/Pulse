@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { Film, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -59,6 +61,7 @@ export function TaskVideoGallery({
       return;
     }
     function onKeyDown(event: KeyboardEvent) {
+      if (!(event.target instanceof Element) || !event.target.closest("[data-media-lightbox]")) return;
       if (event.key === "Escape") {
         setActiveId(null);
         return;
@@ -151,11 +154,10 @@ export function TaskVideoGallery({
       </div>
 
       {active ? (
-        <div
+        <ModalSurface label={active.name} onCancel={() => setActiveId(null)}><div
+          data-media-lightbox
           className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label={active.name}
+
           onClick={() => setActiveId(null)}
         >
           <div className="absolute right-4 top-4 flex items-center gap-2">
@@ -183,7 +185,7 @@ export function TaskVideoGallery({
             </button>
           </div>
           {resolveMediaSource(active.storagePath, active.videoUrl) ? (
-             
+
             <video
               src={resolveMediaSource(active.storagePath, active.videoUrl)}
               poster={active.thumbnailUrl}
@@ -208,7 +210,7 @@ export function TaskVideoGallery({
           >
             <div className="font-medium">{active.caption || active.name}</div>
           </div>
-        </div>
+        </div></ModalSurface>
       ) : null}
     </div>
   );

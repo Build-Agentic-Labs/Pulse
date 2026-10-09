@@ -1,35 +1,56 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, HardDrive, Loader2 } from "lucide-react";
 
 type Backup = { id: string; state: string; phase: string; updatedAt: string; integrityVerified?: boolean; restoreTested?:boolean; error?: string };
 type Overview = { ready: boolean; problems: string[]; backups: Backup[] };
-export function BackupSettings() {
+export function BackupSettings({ active = true }: { active?: boolean }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
-  const refresh = useCallback(async () => {
-    const response = await fetch("/api/backups", { cache: "no-store" });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Could not load backup status.");
-    setOverview(result);
+  const pendingRefresh = useRef<Promise<void> | null>(null);
+  const refresh = useCallback(() => {
+    if (pendingRefresh.current) return pendingRefresh.current;
+    const request = (async () => {
+      const response = await fetch("/api/backups", { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not load backup status.");
+      setOverview(result);
+      setError("");
+    })();
+    pendingRefresh.current = request;
+    void request.finally(() => { pendingRefresh.current = null; }).catch(() => {});
+    return request;
   }, []);
-  useEffect(() => { void refresh().catch((e) => setError(e.message)); }, [refresh]);
+  useEffect(() => {
+    if (!active) return;
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refresh().catch((e) => setError(e.message));
+    };
+    refreshVisible();
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => document.removeEventListener("visibilitychange", refreshVisible);
+  }, [active, refresh]);
   const running = overview?.backups.some((backup) => backup.state === "running");
   useEffect(() => {
-    if (!running) return;
-    const timer = setInterval(() => { void refresh().catch((e) => setError(e.message)); }, 3000);
+    if (!active || !running) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void refresh().catch((e) => setError(e.message));
+    }, 3000);
     return () => clearInterval(timer);
-  }, [running, refresh]);
+  }, [active, running, refresh]);
   async function create() {
     setStarting(true); setError("");
     try {
       const response = await fetch("/api/backups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Backup could not start.");
-      setPassword(""); setConfirmation(""); await refresh();
+      setPassword(""); setConfirmation("");
+      // A read started before creation may not include the new job. Wait, then read again.
+      await pendingRefresh.current?.catch(() => {});
+      await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : "Backup could not start."); }
     finally { setStarting(false); }
   }

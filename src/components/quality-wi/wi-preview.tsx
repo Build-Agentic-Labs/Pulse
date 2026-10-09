@@ -88,13 +88,6 @@ export function WiPreview({
       if (url) URL.revokeObjectURL(url);
     };
   }, [document, selected, retry]);
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
   const current = preview.source === document && preview.selected === selected && preview.attempt === retry;
   const ready = current && preview.phase === "ready";
   const canExportWord = current && !!preview.model && !!preview.steps;

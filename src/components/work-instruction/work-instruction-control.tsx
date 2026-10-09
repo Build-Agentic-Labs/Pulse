@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 /**
  * Document control for ONE work instruction: a short stepped flow in the spirit of the SOP
  * builder — Readiness → References → Release → History.
@@ -135,15 +137,6 @@ export function WorkInstructionControl({
   const draftDirty = Boolean(draftSopId || draftNumber.trim() || draftTitle.trim() || draftUrl.trim() || draftFile);
   const [sops, setSops] = useState<Array<{ id: string; number: string; title: string; version: string; status: string }> | null>(null);
 
-  useEffect(() => {
-    if (suspended) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [busy, onClose, suspended]);
-
   // The SOP list is only needed once someone is about to pick one.
   useEffect(() => {
     if (step !== "references" || sops !== null || readOnly) return;
@@ -191,11 +184,9 @@ export function WorkInstructionControl({
         : { label: "Not released", className: "border-line bg-surface-raised text-ink-secondary" };
 
   const dialog = (
-    <div
+    <ModalSurface label={`Document control for ${instruction.meta.title || "work instruction"}`} active={!suspended} onCancel={() => { if (!busy) onClose(); }}><div
       className="fixed inset-0 z-[55] flex items-center justify-center bg-black/50 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Document control for ${instruction.meta.title || "work instruction"}`}
+
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) onClose();
       }}
@@ -631,7 +622,7 @@ export function WorkInstructionControl({
           </div>
         </div>
       </div>
-    </div>
+    </div></ModalSurface>
   );
 
   return typeof document !== "undefined" ? createPortal(dialog, document.body) : dialog;

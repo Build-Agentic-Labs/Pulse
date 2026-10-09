@@ -1,113 +1,77 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { handlePreviewEscape, listenForPreviewEscape } from "./sop-print-preview";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { createEmptySop } from "@/domain/sop/schema";
+import { ModalSurface } from "@/components/ui/modal-surface";
+import { handleAuditPanelEscape } from "./sop-editor";
+import { SopPrintPreview } from "./sop-print-preview";
 
-function layers(overrides: Partial<Parameters<typeof handlePreviewEscape>[1]> = {}) {
-  return {
-    busy: false,
-    commentSelected: false,
-    dismissComment: vi.fn(),
-    inlineDocOpen: false,
-    closeInlineDoc: vi.fn(),
-    close: vi.fn(),
-    ...overrides,
-  };
-}
-
-function escape(): KeyboardEvent {
-  return new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-}
-
+vi.mock("@/lib/sop/approval-entries", () => ({
+  buildApprovalEntries: vi.fn(() => new Promise(() => {})),
+}));
+vi.mock("./use-paginated-pages", () => ({
+  usePaginatedPages: () => ({ offscreenRef: { current: null }, sectionPages: [], trailingPages: [], measuring: true, failed: false }),
+}));
+beforeAll(() => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+});
 const cleanups: Array<() => void> = [];
-afterEach(() => {
-  cleanups.splice(0).forEach((cleanup) => cleanup());
-});
+afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()));
+const sop = createEmptySop("escape-test", "2026-10-09T00:00:00Z");
+function auditListener(close: () => void) {
+  const listener = (event: KeyboardEvent) => handleAuditPanelEscape(event, close);
+  document.addEventListener("keydown", listener, true);
+  cleanups.push(() => document.removeEventListener("keydown", listener, true));
+}
 
-describe("handlePreviewEscape", () => {
-  it("closes only the inline document when one is open, and consumes the key", () => {
-    const state = layers({ inlineDocOpen: true });
-    const event = escape();
-    const stop = vi.spyOn(event, "stopImmediatePropagation");
-    handlePreviewEscape(event, state);
-    expect(state.closeInlineDoc).toHaveBeenCalledOnce();
-    expect(state.close).not.toHaveBeenCalled();
-    expect(stop).toHaveBeenCalledOnce();
+describe("SOP preview Escape integration", () => {
+  it("uses native cancel for an overlay and leaves the audit panel open", () => {
+    const close = vi.fn(), auditClose = vi.fn();
+    auditListener(auditClose);
+    render(<SopPrintPreview sop={sop} annexFiles={[]} onClose={close} />);
+    const dialog = screen.getByRole("dialog", { name: "SOP document preview" });
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(auditClose).not.toHaveBeenCalled();
+    // jsdom does not implement Escape's native cancel default action.
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(close).toHaveBeenCalledOnce();
+    expect(auditClose).not.toHaveBeenCalled();
   });
 
-  it("closes the preview when no inner layer is open", () => {
-    const state = layers();
-    const event = escape();
-    const stop = vi.spyOn(event, "stopImmediatePropagation");
-    handlePreviewEscape(event, state);
-    expect(state.close).toHaveBeenCalledOnce();
-    expect(stop).toHaveBeenCalledOnce();
+  it("retains a busy preview when its native dialog receives cancel", () => {
+    const close = vi.fn();
+    render(<SopPrintPreview sop={sop} annexFiles={[]} onClose={close} commentBusy />);
+    fireEvent(screen.getByRole("dialog"), new Event("cancel", { cancelable: true }));
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("dismisses a pending comment selection before anything else", () => {
-    const state = layers({ commentSelected: true, inlineDocOpen: true });
-    handlePreviewEscape(escape(), state);
-    expect(state.dismissComment).toHaveBeenCalledOnce();
-    expect(state.closeInlineDoc).not.toHaveBeenCalled();
-    expect(state.close).not.toHaveBeenCalled();
-  });
-
-  it("ignores other keys and leaves them to other listeners", () => {
-    const state = layers();
-    const event = new KeyboardEvent("keydown", { key: "Enter" });
-    const stop = vi.spyOn(event, "stopImmediatePropagation");
-    handlePreviewEscape(event, state);
-    expect(state.close).not.toHaveBeenCalled();
-    expect(stop).not.toHaveBeenCalled();
-  });
-});
-
-describe("listenForPreviewEscape layering", () => {
-  function register(target: Window | Document, capture: boolean, listener: (event: Event) => void) {
-    target.addEventListener("keydown", listener, capture);
-    cleanups.push(() => target.removeEventListener("keydown", listener, capture));
-  }
-
-  it("an overlay preview consumes Escape so listeners beneath it never see the key", () => {
-    const state = layers();
-    cleanups.push(listenForPreviewEscape(false, (event) => handlePreviewEscape(event, state)));
-    const beneath = vi.fn();
-    register(window, false, beneath);
-    document.body.dispatchEvent(escape());
-    expect(state.close).toHaveBeenCalledOnce();
-    expect(beneath).not.toHaveBeenCalled();
-  });
-
-  it("a referenced PDF over the preview closes alone, whatever the registration order", () => {
-    const pdfClose = vi.fn();
-    // The print preview registers first; the PDF opened over it later must still win.
-    const state = layers();
-    cleanups.push(listenForPreviewEscape(false, (event) => handlePreviewEscape(event, state)));
-    register(window, true, (event) => {
-      event.stopImmediatePropagation();
-      pdfClose();
-    });
-    document.body.dispatchEvent(escape());
+  it("leaves the preview and audit panel open when a nested modal closes", () => {
+    const close = vi.fn(), pdfClose = vi.fn(), auditClose = vi.fn();
+    auditListener(auditClose);
+    render(<SopPrintPreview sop={sop} annexFiles={[]} onClose={close}
+      footerActions={<ModalSurface label="Referenced PDF" onCancel={pdfClose}><button>PDF control</button></ModalSurface>} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "PDF control" }), { key: "Escape" });
+    fireEvent(screen.getByRole("dialog", { name: "Referenced PDF" }), new Event("cancel", { cancelable: true }));
     expect(pdfClose).toHaveBeenCalledOnce();
-    expect(state.close).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(auditClose).not.toHaveBeenCalled();
   });
 
-  it("an embedded preview yields to the audit panel drawn above it", () => {
-    const state = layers();
-    // Embedded preview registered after the panel (its listener re-registers on every dependency change).
-    const auditClose = vi.fn();
-    register(document, true, (event) => {
-      event.stopImmediatePropagation();
-      auditClose();
-    });
-    cleanups.push(listenForPreviewEscape(true, (event) => handlePreviewEscape(event, state)));
-    document.body.dispatchEvent(escape());
+  it("closes the audit panel before an embedded preview", () => {
+    const close = vi.fn(), auditClose = vi.fn();
+    auditListener(auditClose);
+    render(<SopPrintPreview sop={sop} annexFiles={[]} onClose={close} embedded />);
+    fireEvent.keyDown(screen.getByRole("region", { name: "SOP document preview" }), { key: "Escape" });
     expect(auditClose).toHaveBeenCalledOnce();
-    expect(state.close).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
   });
 
-  it("an embedded preview closes on Escape when no layer is above it", () => {
-    const state = layers();
-    cleanups.push(listenForPreviewEscape(true, (event) => handlePreviewEscape(event, state)));
-    document.body.dispatchEvent(escape());
-    expect(state.close).toHaveBeenCalledOnce();
+  it("limits embedded Escape handling to its own content", () => {
+    const close = vi.fn();
+    render(<SopPrintPreview sop={sop} annexFiles={[]} onClose={close} embedded />);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("region", { name: "SOP document preview" }), { key: "Escape" });
+    expect(close).toHaveBeenCalledOnce();
   });
 });

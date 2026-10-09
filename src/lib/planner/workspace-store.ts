@@ -54,25 +54,26 @@ const bootstrappedMembershipUserIdsByClient = new WeakMap<SupabaseClient, Set<st
 // Concurrent callers on the same client share one in-flight load instead of issuing
 // duplicate query chains. The promise is cleared on settle: later calls (e.g. sidebar
 // refresh after creating a project) still fetch fresh data.
-const inflightMembershipLoads = new WeakMap<SupabaseClient, Promise<WorkspaceProjectGroup[]>>();
+export type WorkspaceDirectoryScope = "project" | "product";
+const inflightMembershipLoads = new WeakMap<SupabaseClient, Map<string, Promise<WorkspaceProjectGroup[]>>>();
 
 export async function ensureDefaultWorkspaceMembership(
   client?: ReturnType<typeof plannerClient>,
+  scope: WorkspaceDirectoryScope = "project",
 ): Promise<WorkspaceProjectGroup[]> {
   const supabase = client ?? plannerClient();
-  const inflight = inflightMembershipLoads.get(supabase);
+  const { data: userData } = await getUserFromSession(supabase);
+  if (!userData.user) throw new Error("Sign in before loading organizations.");
+  const user = userData.user;
+  const key = `${user.id}:${scope}`;
+  let pendingLoads = inflightMembershipLoads.get(supabase);
+  if (!pendingLoads) { pendingLoads = new Map(); inflightMembershipLoads.set(supabase, pendingLoads); }
+  const inflight = pendingLoads.get(key);
   if (inflight) {
     return inflight;
   }
 
   const load = (async () => {
-    const { data: userData } = await getUserFromSession(supabase);
-
-    if (!userData.user) {
-      throw new Error("Sign in before loading organizations.");
-    }
-
-    const user = userData.user;
     let bootstrappedUserIds = bootstrappedMembershipUserIdsByClient.get(supabase);
     if (!bootstrappedUserIds) {
       bootstrappedUserIds = new Set<string>();
@@ -107,6 +108,11 @@ export async function ensureDefaultWorkspaceMembership(
       }
 
       bootstrappedUserIds.add(user.id);
+      // Reads begun before redemption must not supply the post-invite snapshot.
+      const rowReads = inflightDirectoryRows.get(supabase);
+      for (const key of rowReads?.keys() ?? []) {
+        if (key === `members:${user.id}` || key.startsWith(`workspaces:${user.id}:`) || key.startsWith(`projects:${user.id}:`)) rowReads?.delete(key);
+      }
 
       // A redemption may have just minted memberships (invite or domain
       // auto-join) — nudge the notification drain so the welcome email lands in
@@ -118,14 +124,14 @@ export async function ensureDefaultWorkspaceMembership(
     // already running. The first post-bootstrap read must start after those
     // writes, rather than join a snapshot captured before the new membership.
     return didBootstrap
-      ? readWorkspaceProjectGroups(user.id, supabase)
-      : loadWorkspaceProjectGroups(user.id, supabase);
+      ? readWorkspaceProjectGroups(user.id, supabase, scope)
+      : loadWorkspaceProjectGroups(user.id, supabase, scope);
   })();
 
   const tracked = load.finally(() => {
-    inflightMembershipLoads.delete(supabase);
+    pendingLoads.delete(key);
   });
-  inflightMembershipLoads.set(supabase, tracked);
+  pendingLoads.set(key, tracked);
 
   return tracked;
 }
@@ -138,6 +144,7 @@ const inflightWorkspaceGroupReads = new WeakMap<SupabaseClient, Map<string, Prom
 export async function loadWorkspaceProjectGroups(
   knownUserId?: string,
   client?: ReturnType<typeof plannerClient>,
+  scope: WorkspaceDirectoryScope = "project",
 ): Promise<WorkspaceProjectGroup[]> {
   const supabase = client ?? plannerClient();
   let userId = knownUserId;
@@ -157,35 +164,53 @@ export async function loadWorkspaceProjectGroups(
     reads = new Map();
     inflightWorkspaceGroupReads.set(supabase, reads);
   }
-  const pending = reads.get(userId);
+  const key = `${userId}:${scope}`;
+  const pending = reads.get(key);
   if (pending) return pending;
   const userReads = reads;
-  const key = userId;
-  const tracked = readWorkspaceProjectGroups(key, supabase).finally(() => {
+  const tracked = readWorkspaceProjectGroups(userId, supabase, scope).finally(() => {
     if (userReads.get(key) === tracked) userReads.delete(key);
   });
   userReads.set(key, tracked);
   return tracked;
 }
 
+// Product and legacy directories apply different permissions to the same raw
+// rows. Share only concurrent identical reads, keyed by client and caller.
+const inflightDirectoryRows = new WeakMap<SupabaseClient, Map<string, Promise<unknown>>>();
+function shareDirectoryRead<T>(client: SupabaseClient, key: string, read: () => Promise<T>): Promise<T> {
+  let reads = inflightDirectoryRows.get(client);
+  if (!reads) { reads = new Map(); inflightDirectoryRows.set(client, reads); }
+  const pending = reads.get(key);
+  if (pending) return pending as Promise<T>;
+  const currentReads = reads;
+  const result = read().finally(() => {
+    if (currentReads.get(key) === result) currentReads.delete(key);
+  });
+  currentReads.set(key, result);
+  return result;
+}
+
 async function readWorkspaceProjectGroups(
   userId: string,
   supabase: ReturnType<typeof plannerClient>,
+  scope: WorkspaceDirectoryScope,
 ): Promise<WorkspaceProjectGroup[]> {
 
   // The role probe, membership read, and per-project access map only need the user id, so
   // they run together; the extra queries on the (rare) superadmin path are far cheaper
   // than serializing every load behind the probe.
-  const [isSuperAdmin, memberships, accessMap] = await Promise.all([
+  const [isSuperAdmin, memberships, accessMap, productGrants] = await Promise.all([
     fetchIsSuperAdmin(supabase),
-    readAllPages((from, to) => throwIfError(
+    shareDirectoryRead(supabase, `members:${userId}`, () => readAllPages((from, to) => throwIfError(
       supabase
         .from("workspace_members")
         .select("workspace_id, role")
         .eq("user_id", userId)
         .order("created_at").order("workspace_id").range(from, to),
-    )),
-    fetchUserProjectAccessMap(supabase, userId),
+    ))),
+    scope === "project" ? fetchUserProjectAccessMap(supabase, userId) : Promise.resolve(undefined),
+    scope === "product" ? readAllPages((from, to) => throwIfError(supabase.from("product_module_access").select("workspace_id, level").eq("user_id", userId).order("workspace_id").range(from, to))) : Promise.resolve([]),
   ]);
 
   // Superadmins see every workspace and project (RLS grants full read access), acting as
@@ -211,6 +236,7 @@ async function readWorkspaceProjectGroups(
         workspace: mappedWorkspace,
         role: "owner" as WorkspaceRole,
         isSuperAdmin: true,
+        ...(scope === "product" ? { productAccess: "edit" as const } : {}),
         projects: projectsByWorkspaceId.get(mappedWorkspace.id) ?? [],
       };
     });
@@ -223,8 +249,10 @@ async function readWorkspaceProjectGroups(
   }
 
   const [workspaces, projects] = await Promise.all([
-    readRowsByIds(workspaceIds, (ids, from, to) => throwIfError(supabase.from("workspaces").select(WORKSPACE_COLUMNS).in("id", ids).order("created_at").order("id").range(from, to))),
-    readRowsByIds(workspaceIds, (ids, from, to) => throwIfError(supabase.from("projects").select(PROJECT_COLUMNS).in("workspace_id", ids).order("created_at").order("id").range(from, to))),
+    shareDirectoryRead(supabase, `workspaces:${userId}:${JSON.stringify(workspaceIds)}`, () =>
+      readRowsByIds(workspaceIds, (ids, from, to) => throwIfError(supabase.from("workspaces").select(WORKSPACE_COLUMNS).in("id", ids).order("created_at").order("id").range(from, to)))),
+    shareDirectoryRead(supabase, `projects:${userId}:${JSON.stringify(workspaceIds)}`, () =>
+      readRowsByIds(workspaceIds, (ids, from, to) => throwIfError(supabase.from("projects").select(PROJECT_COLUMNS).in("workspace_id", ids).order("created_at").order("id").range(from, to)))),
   ]);
 
   // IN filters are batched, but the directory still follows one global creation order.
@@ -256,8 +284,11 @@ async function readWorkspaceProjectGroups(
     const isManager = role === "owner" || role === "admin";
     const allProjects = projectsByWorkspaceId.get(mappedWorkspace.id) ?? [];
 
+    const productAccess: AccessLevel = isManager ? "edit" : normalizeAccessLevel(productGrants.find((grant) => grant.workspace_id === mappedWorkspace.id)?.level);
     let visibleProjects: Project[];
-    if (isManager || !accessMap) {
+    if (scope === "product") {
+      visibleProjects = productAccess === "none" ? [] : allProjects.map((project) => ({ ...project, accessLevel: productAccess }));
+    } else if (isManager || !accessMap) {
       visibleProjects = allProjects.map((project) => ({
         ...project,
         accessLevel: isManager ? "edit" : project.accessLevel,
@@ -272,6 +303,7 @@ async function readWorkspaceProjectGroups(
       workspace: mappedWorkspace,
       role,
       isSuperAdmin: false,
+      ...(scope === "product" ? { productAccess } : {}),
       projects: visibleProjects,
     };
   });
@@ -472,6 +504,7 @@ export async function upsertWorkspaceAccessGrantInSupabase(
         email: normalizedEmail,
         role: workspaceRoleForOrganizationRole(normalizedEntitlements.organizationRole),
         quality_access: normalizedEntitlements.qualityAccess,
+        product_access: normalizedEntitlements.productAccess ?? "none",
         access_package: normalizedEntitlements.accessPackage,
         planning_access: normalizedEntitlements.planningAccess,
         project_access: normalizedEntitlements.projectAccess.map((grant) => ({
@@ -592,7 +625,8 @@ export async function loadMembersAccessForWorkspace(
   const userIds = members.map((member) => member.userId);
 
   // Project and Quality grants are independent, but both are scoped to this organization.
-  const [accessRows, orgRows] = await Promise.all([
+  const [productRows, accessRows, orgRows] = await Promise.all([
+    throwIfError(supabase.from("product_module_access").select("user_id, level").eq("workspace_id", workspaceId)),
     projectIds.length
       ? throwIfError(supabase.from("project_access").select("project_id, user_id, level").in("project_id", projectIds))
       : Promise.resolve([]),
@@ -630,6 +664,7 @@ export async function loadMembersAccessForWorkspace(
       joinedAt: member.createdAt,
       projectLevels,
       orgTools: orgByUser.get(member.userId) ?? "none",
+      productAccess: normalizeAccessLevel((productRows ?? []).find((row) => row.user_id === member.userId)?.level),
     };
   });
 }

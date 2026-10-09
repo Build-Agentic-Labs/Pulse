@@ -1,0 +1,6 @@
+"use client";
+import { AwiEditorActions } from "@/components/awi-editor-actions";
+import type { AwiMaster } from "@/lib/awi/store";
+export default function Fixture() {
+ return <main style={{padding:40}}><h1>AWI details — local audit fixture</h1><p>Synthetic record. Saving is blocked before any database write.</p><AwiEditorActions master={{document_number:"AWI-TEST-001",category:"Accessory",project_id:"fixture",task_id:"fixture"} as AwiMaster} saveState="saved" readOnly={false} ready beforeSave={async()=>false}/><button className="ui-btn-secondary">Background action</button></main>;
+}

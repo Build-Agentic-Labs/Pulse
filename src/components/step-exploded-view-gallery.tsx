@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { Box, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -78,6 +80,7 @@ export function StepExplodedViewGallery({
       return;
     }
     function onKeyDown(event: KeyboardEvent) {
+      if (!(event.target instanceof Element) || !event.target.closest("[data-media-lightbox]")) return;
       if (event.key === "Escape") {
         setActiveId(null);
         return;
@@ -157,11 +160,10 @@ export function StepExplodedViewGallery({
       </div>
 
       {active ? (
-        <div
+        <ModalSurface label={active.name} onCancel={() => setActiveId(null)}><div
+          data-media-lightbox
           className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label={active.name}
+
           onClick={() => setActiveId(null)}
         >
           <div className="absolute right-4 top-4 flex items-center gap-2">
@@ -215,7 +217,7 @@ export function StepExplodedViewGallery({
               <div className="ui-mono-label mt-1 text-white/70">{explodedViewMeta(active)}</div>
             ) : null}
           </div>
-        </div>
+        </div></ModalSurface>
       ) : null}
     </div>
   );

@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { DocumentPreviewToolbar } from "./document-preview-toolbar";
 
 import { SopReviewLoading } from "./sop-review-loading";
@@ -31,47 +33,6 @@ import { buildPrintBlocks, type PrintBlock, type PrintBlockExtras } from "./prin
 import { usePaginatedPages } from "./use-paginated-pages";
 import { MarginNotesColumn, type MarginNote } from "./sop-margin-notes";
 
-export interface PreviewEscapeLayers {
-  busy: boolean;
-  commentSelected: boolean;
-  dismissComment: () => void;
-  inlineDocOpen: boolean;
-  closeInlineDoc: () => void;
-  close: () => void;
-}
-
-/**
- * Escape peels exactly one preview layer — the comment composer, then an inline referenced
- * document, then the preview itself — and consumes the key so no layer beneath also closes.
- */
-export function handlePreviewEscape(event: KeyboardEvent, layers: PreviewEscapeLayers): void {
-  if (event.key !== "Escape" || layers.busy) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  if (layers.commentSelected) layers.dismissComment();
-  else if (layers.inlineDocOpen) layers.closeInlineDoc();
-  else layers.close();
-}
-
-/**
- * Registers the preview's Escape listener at its layer. The overlay preview sits above the
- * editor's audit panel, so it listens capture-phase on `document` — after referenced-PDF
- * previews (window capture), before everything else. An embedded preview is page content
- * drawn beneath the audit panel, so it listens in the window bubble phase and only sees
- * Escape when no layer above consumed it.
- */
-export function listenForPreviewEscape(
-  embedded: boolean,
-  onKey: (event: KeyboardEvent) => void,
-): () => void {
-  if (embedded) {
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }
-  document.addEventListener("keydown", onKey, true);
-  return () => document.removeEventListener("keydown", onKey, true);
-}
-
 interface RenderedAnnexPage {
   fileId: string;
   annexId: string;
@@ -94,7 +55,6 @@ function isPdf(file: SopAnnexFile): boolean {
 function isImage(file: SopAnnexFile): boolean {
   return file.contentType.startsWith("image/");
 }
-
 
 function DocumentHeader({ sop, reviewCategory }: { sop: Sop; reviewCategory?: string }) {
   return (
@@ -177,7 +137,6 @@ function DocumentPage({
     </article>
   );
 }
-
 
 /**
  * Screen-only highlight for flagged review sections: a warm band with a left rule, so a remark's
@@ -471,27 +430,29 @@ export function SopPrintPreview({
   const [flowRendererReady, setFlowRendererReady] = useState(false);
   const [approvalDetailsReady, setApprovalDetailsReady] = useState(false);
   const [initialPagesReady, setInitialPagesReady] = useState(false);
+  useEffect(() => {
+    // Loading controls unmount when pages are ready. Keep focus inside the preview.
+    if (initialPagesReady && !embedded && document.activeElement === document.body) {
+      previewRootRef.current?.querySelector<HTMLButtonElement>('button[aria-label="Close preview"]')?.focus({ preventScroll: true });
+    }
+  }, [initialPagesReady, embedded]);
   // Block ids already warned about this mount — re-measures (debounced edits,
   // resize) repeat the same overflowing block on every pass otherwise.
   const warnedOverflowBlockIds = useRef<Set<string>>(new Set());
   const canDownloadPdf = mode === "export" && sop.status === "effective";
 
-  const inlineDocOpen = inlineDoc !== null;
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) =>
-      handlePreviewEscape(event, {
-        busy: commentBusy,
-        commentSelected: Boolean(commentSelection),
-        dismissComment: () => {
-          setCommentSelection(null);
-          onDismissReviewComment?.();
-        },
-        inlineDocOpen,
-        closeInlineDoc: () => setInlineDoc(null),
-        close: onClose,
-      });
-    return listenForPreviewEscape(embedded, onKey);
-  }, [onClose, commentSelection, onDismissReviewComment, commentBusy, inlineDocOpen, embedded]);
+  function dismissPreviewLayer() {
+    if (commentBusy) return;
+    if (commentSelection) {
+      setCommentSelection(null);
+      onDismissReviewComment?.();
+    } else if (inlineDoc) {
+      setInlineDoc(null);
+    } else {
+      onClose();
+    }
+  }
+
 
   useEffect(() => () => {
     if (reviewScrollFrame.current !== null) window.cancelAnimationFrame(reviewScrollFrame.current);
@@ -730,7 +691,6 @@ export function SopPrintPreview({
     return () => cancelAnimationFrame(frame);
   }, [flowRendererReady, approvalDetailsReady, measuring]);
 
-
   // The measurement layer cannot prove the render layer honest on its own: a
   // leak it hasn't imagined (the :first-child scoping above was exactly such a
   // leak) under-budgets pages silently. This post-paint guard re-checks every
@@ -923,11 +883,15 @@ export function SopPrintPreview({
   }, [formFiles]);
 
   return (
-    <div
+    <ModalSurface modal={!embedded} label="SOP document preview" onCancel={dismissPreviewLayer}><div
       ref={previewRootRef}
+      onKeyDown={(event) => {
+        if (embedded && event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault(); event.stopPropagation(); dismissPreviewLayer();
+        }
+      }}
       className={`sop-preview-overlay${embedded ? " sop-preview-embedded" : ""}${!initialPagesReady ? " sop-preview-preparing" : ""}`}
-      role={embedded ? "region" : "dialog"}
-      aria-modal={embedded ? undefined : true}
+      role={embedded ? "region" : undefined}
       aria-label="SOP document preview"
     >
       {!initialPagesReady ? <SopReviewLoading inline label={taskLabel ?? (mode === "approval" ? "Final approval" : mode === "review" ? "Review document" : "Document preview")} onClose={onClose} /> : null}
@@ -1596,6 +1560,6 @@ export function SopPrintPreview({
       {inlineDoc ? (
         <ReferencePdfPreview {...inlineDoc} onClose={() => setInlineDoc(null)} />
       ) : null}
-    </div>
+    </div></ModalSurface>
   );
 }

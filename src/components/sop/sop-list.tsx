@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { useCoalescedRefresh } from "@/lib/use-coalesced-refresh";
 
 import { SOP_NOTIFICATIONS_REFRESH_EVENT } from "@/lib/sop/notify-kick";
@@ -45,7 +47,6 @@ import {
 import { ReviewerRemindButton } from "./reviewer-remind-button";
 import { SopConvertOverlay, type ConvertPhase } from "./sop-convert-overlay";
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
-
 
 /** Periodic-review flag for a next-review date: overdue (past) or due soon (within 30 days). */
 function reviewFlag(iso: string | null): { label: string; className: string } | null {
@@ -859,11 +860,9 @@ export function SopList({
       </div>
 
       {feedbackSop ? (
-        <div
+        <ModalSurface label={`Review status for ${feedbackSop.title || feedbackSop.sopNumber || "Untitled SOP"}`} onCancel={() => setFeedbackSop(null)}><div
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Review status for ${feedbackSop.title || feedbackSop.sopNumber || "Untitled SOP"}`}
+
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setFeedbackSop(null);
           }}
@@ -934,7 +933,7 @@ export function SopList({
               )}
             </div>
           </section>
-        </div>
+        </div></ModalSurface>
       ) : null}
     </>
   );

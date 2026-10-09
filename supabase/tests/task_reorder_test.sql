@@ -16,6 +16,7 @@ insert into public.project_access(project_id,user_id,level) values
  ('d-project','d4000000-0000-0000-0000-000000000001','edit'),
  ('d-project','d4000000-0000-0000-0000-000000000002','edit'),
  ('d-project','d4000000-0000-0000-0000-000000000003','view');
+insert into public.product_module_access(workspace_id,user_id,level) select 'd-reorder-ws',pa.user_id,max(pa.level) from public.project_access pa join public.projects p on p.id=pa.project_id where p.workspace_id='d-reorder-ws' group by pa.user_id;
 insert into public.products(id,project_id,name) values('d-product','d-project','Pilot');
 insert into public.scenarios(id,product_id,name) values('d-scenario','d-product','Main'),('d-other','d-product','Other');
 insert into public.zones(id,scenario_id,sequence,name) values('d-zone','d-scenario',1,'Zone'),('d-zone-2','d-scenario',2,'Second zone'),('d-foreign-zone','d-other',1,'Other');
@@ -148,7 +149,7 @@ select lives_ok($$select public.test_d_apply((select payload from d_inputs where
 select is((select zone_id from public.tasks where id='d-task-a'),'d-zone-2','intended zone applied');
 select is((select station_id from public.tasks where id='d-task-a'),'d-station-2','intended station applied');
 reset role;
-update public.project_access set level='view' where project_id='d-project' and user_id='d4000000-0000-0000-0000-000000000001';
+update public.product_module_access set level='view' where workspace_id='d-reorder-ws' and user_id='d4000000-0000-0000-0000-000000000001';
 select public.test_d_as('d4000000-0000-0000-0000-000000000001');
 select throws_ok($$select public.test_d_apply((select payload from d_inputs where name='base'))$$,
  '42501','You do not have permission to reorder these tasks.','revoked permission blocks even duplicate acknowledgment');

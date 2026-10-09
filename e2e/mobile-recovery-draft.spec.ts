@@ -40,6 +40,7 @@ async function fixture() {
   const user = data.user.id;
 
   await db.query('insert into workspace_members(workspace_id,user_id,role) values($1,$2,$3) on conflict(workspace_id,user_id) do update set role=excluded.role', [workspace, user, 'editor']);
+  await db.query("insert into product_module_access(workspace_id,user_id,level) values($1,$2,'edit')", [workspace, user]);
   const connection = await db.connect();
   let projectId: string;
   try {
@@ -58,7 +59,7 @@ async function fixture() {
   const secondUser = await admin.auth.admin.createUser({ email: `two@${domain}`, password, email_confirm: true });
   if (secondUser.error) throw secondUser.error;
   await db.query('insert into workspace_members(workspace_id,user_id,role) values($1,$2,$3) on conflict(workspace_id,user_id) do update set role=excluded.role', [workspace, secondUser.data.user.id, 'editor']);
-  await db.query("insert into project_access(project_id,user_id,level) values($1,$2,'edit') on conflict(project_id,user_id) do update set level='edit'", [projectId, secondUser.data.user.id]);
+  await db.query("insert into product_module_access(workspace_id,user_id,level) values($1,$2,'edit') on conflict(workspace_id,user_id) do update set level='edit'", [workspace, secondUser.data.user.id]);
   return { projectId, taskId, secondTask, user, otherUser: secondUser.data.user.id, email, otherEmail: `two@${domain}` };
 }
 
@@ -154,7 +155,7 @@ test('scoped drafts survive task and product switches in real IndexedDB', async 
   await expect(page.getByRole('textbox', { name: 'New step name', exact: true })).toHaveValue('Task A pending');
   // Give the same account explicit access to the independently seeded second product.
   await db.query(`insert into workspace_members(workspace_id,user_id,role) select workspace_id,$1,'editor' from workspace_members where user_id=$2 on conflict(workspace_id,user_id) do nothing`, [first.user, second.user]);
-  await db.query("insert into project_access(project_id,user_id,level) values($1,$2,'edit') on conflict(project_id,user_id) do update set level='edit'", [second.projectId, first.user]);
+  await db.query("insert into product_module_access(workspace_id,user_id,level) select workspace_id,$2,'edit' from projects where id=$1 on conflict(workspace_id,user_id) do update set level='edit'", [second.projectId, first.user]);
   const other = await openDraft(page, second.projectId); await other.fill('Product Y pending');
   await expect.poll(async () => (await readRecoveryRecord(page, scopedKey(first.user, second.projectId, second.taskId)))?.name).toBe('Product Y pending');
   expect((await readRecoveryRecord(page, keyA))?.name).toBe('Task A pending');

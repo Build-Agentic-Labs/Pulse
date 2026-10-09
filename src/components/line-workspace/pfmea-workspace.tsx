@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import Image from "next/image";
 import {
   AlertCircle,
@@ -227,7 +229,7 @@ function PfmeaModal({
   onClose: () => void;
 }) {
   return (
-    <div
+    <ModalSurface label={title} onCancel={onClose}><div
       className="ui-pfmea-modal-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -235,12 +237,7 @@ function PfmeaModal({
     >
       <section
         className="ui-pfmea-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") onClose();
-        }}
+
       >
         <header>
           <div>
@@ -252,7 +249,7 @@ function PfmeaModal({
         <div className="ui-pfmea-modal-body">{children}</div>
         {actions ? <footer>{actions}</footer> : null}
       </section>
-    </div>
+    </div></ModalSurface>
   );
 }
 

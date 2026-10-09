@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { ArrowLeft, Minus, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -10,8 +12,6 @@ export function ReferencePdfPreview({ name, url, onClose }: {
   url: string;
   onClose: () => void;
 }) {
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
   const backRef = useRef<HTMLButtonElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -138,27 +138,12 @@ export function ReferencePdfPreview({ name, url, onClose }: {
     })();
     return () => { active = false; render?.cancel(); };
   }, [pdf, pageNumber, zoom, availableWidth]);
-  useEffect(() => {
-    const previousFocus = document.activeElement;
-    backRef.current?.focus();
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      closeRef.current();
-    };
-    window.addEventListener("keydown", escape, true);
-    return () => {
-      window.removeEventListener("keydown", escape, true);
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
-    };
-  }, []);
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 print:hidden" role="dialog" aria-modal="true" aria-label={`Referenced document ${name}`} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <ModalSurface label={`Referenced document ${name}`} onCancel={onClose}><div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 print:hidden"    onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="flex h-full max-h-[960px] w-full max-w-[1400px] flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-xl">
         <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-3 py-2">
-          <button ref={backRef} type="button" className="ui-btn-ghost inline-flex h-9 items-center gap-1.5 px-3" onClick={onClose}>
+          <button ref={backRef} data-modal-initial-focus type="button" className="ui-btn-ghost inline-flex h-9 items-center gap-1.5 px-3" onClick={onClose}>
             <ArrowLeft size={15} /> Back
           </button>
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink" title={name}>{name}</span>
@@ -183,6 +168,6 @@ export function ReferencePdfPreview({ name, url, onClose }: {
           <canvas ref={canvasRef} aria-label={`${name}, page ${pageNumber}`} className={`mx-auto max-w-none bg-white shadow ${error ? "hidden" : "block"}`} />
         </div>
       </section>
-    </div>
+    </div></ModalSurface>
   );
 }

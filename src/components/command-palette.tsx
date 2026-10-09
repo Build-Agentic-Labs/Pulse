@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { CornerDownLeft, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -60,8 +62,7 @@ export function CommandPalette({
     if (open) {
       setQuery("");
       setHighlightIndex(0);
-      // Focus after the portal paints.
-      window.setTimeout(() => inputRef.current?.focus(), 0);
+
     }
   }, [open]);
 
@@ -132,22 +133,20 @@ export function CommandPalette({
   let lastGroupLabel = "";
 
   return createPortal(
-    <div
+    <ModalSurface label="Command palette" onCancel={onClose}><div
       className="fixed inset-0 z-[120] flex items-start justify-center bg-black/40 px-4 pt-[12vh]"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
         }
       }}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command palette"
+
     >
       <div className="w-full max-w-xl overflow-hidden rounded-sm border border-line bg-surface text-ink shadow-modal">
         <div className="flex items-center gap-2.5 border-b border-line px-4 py-3">
           <Search size={15} className="shrink-0 text-ink-tertiary" />
           <input
-            ref={inputRef}
+            ref={inputRef} data-modal-initial-focus
             className="w-full bg-transparent text-[14px] outline-none placeholder:text-ink-tertiary"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -194,7 +193,7 @@ export function CommandPalette({
           )}
         </div>
       </div>
-    </div>,
+    </div></ModalSurface>,
     document.body,
   );
 }

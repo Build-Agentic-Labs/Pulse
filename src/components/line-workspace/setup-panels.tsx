@@ -529,7 +529,7 @@ export function WorkInstructionsPanel({
     setPreparingTaskId(task.id);
     setControlError("");
     try {
-      if (onBeforeRelease && !await onBeforeRelease()) return;
+      if (!readOnly && onBeforeRelease && !await onBeforeRelease()) return;
       // Unknown history must never be treated as an empty revision list.
       if (!await reloadControl()) return;
       if (!hydratedTaskIds?.has(task.id) && !photoLoadedTasks.has(task.id)) {
@@ -579,9 +579,9 @@ export function WorkInstructionsPanel({
     <div className={compact ? "relative" : "mx-auto max-w-[1100px] space-y-6"}>
       {compact ? <>
         <button type="button" className="ui-btn-primary h-9 gap-2 px-3" aria-haspopup="dialog"
-          disabled={readOnly || !projectId || !workTasks.length || preparingTaskId !== null}
-          onClick={() => { const task = workTasks[0]; if (task) void openControl(task); }}>
-          <FileCheck2 size={14} />{preparingTaskId ? "Preparing…" : "Publish"}
+          disabled={!projectId || !workTasks.length || preparingTaskId !== null}
+          onClick={() => { const task = workTasks[0]; if (task) void openControl(task, readOnly ? "history" : undefined); }}>
+          <FileCheck2 size={14} />{preparingTaskId ? "Preparing…" : readOnly ? "Revisions" : "Publish"}
         </button>
         {controlError ? <p role="alert" className="absolute right-0 top-full z-20 mt-2 w-72 rounded border border-line bg-surface p-3 text-xs text-danger">{controlError}</p> : null}
       </> : <>

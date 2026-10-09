@@ -125,18 +125,6 @@ export function WorkspaceInviteComposer({
     setEntitlements({ ...preset, organizationRole: entitlements.organizationRole });
   }
 
-  function setProjectLevel(projectId: string, level: AccessLevel) {
-    setEntitlements((current) => ({
-      ...current,
-      projectAccess:
-        level === "none"
-          ? current.projectAccess.filter((grant) => grant.projectId !== projectId)
-          : [
-              ...current.projectAccess.filter((grant) => grant.projectId !== projectId),
-              { projectId, level },
-            ],
-    }));
-  }
 
   function setDepartmentRole(departmentId: string, role: DeptRole | "none") {
     setEntitlements((current) => ({
@@ -353,26 +341,11 @@ export function WorkspaceInviteComposer({
               </div>
             )}
 
-            {entitlements.organizationRole !== "admin" && projects.length ? (
-              <div className="mt-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary">Projects</p>
-                <div className="mt-2 overflow-hidden rounded-lg border border-line bg-surface">
-                  {projects.map((project, index) => (
-                    <div
-                      key={project.id}
-                      className={`grid items-center gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_220px] ${index ? "border-t border-line" : ""}`}
-                    >
-                      <p className="truncate text-[13px] font-medium text-ink">{project.name}</p>
-                      <ThemedSelect
-                        ariaLabel={`${project.name} access`}
-                        value={entitlements.projectAccess.find((grant) => grant.projectId === project.id)?.level ?? "none"}
-                        options={ACCESS_OPTIONS}
-                        onChange={(value) => setProjectLevel(project.id, value as AccessLevel)}
-                        triggerClassName="h-9 px-3"
-                      />
-                    </div>
-                  ))}
-                </div>
+            {entitlements.organizationRole !== "admin" ? (
+              <div className="mt-4 grid items-center gap-3 rounded-lg border border-line bg-surface p-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+                <div><p className="text-[13px] font-medium text-ink">Product</p><p className="mt-1 text-xs text-ink-tertiary">All products, sections and AWI instructions.</p></div>
+                <ThemedSelect ariaLabel="Product access" value={entitlements.productAccess ?? "none"} options={ACCESS_OPTIONS}
+                  onChange={(value) => setEntitlements((current) => ({ ...current, productAccess: value as AccessLevel }))} triggerClassName="h-9 px-3" />
               </div>
             ) : null}
 

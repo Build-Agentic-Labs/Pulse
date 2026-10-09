@@ -235,6 +235,15 @@ function getEmptyFieldExample(target: EventTarget): { element: HTMLInputElement 
   return text ? { element: target, text } : null;
 }
 
+/** Native modal dialogs own Escape; this nonmodal panel only handles the page beneath them. */
+export function handleAuditPanelEscape(event: KeyboardEvent, close: () => void) {
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  close();
+}
+
 export function SopEditor({
   initial,
   workspaceId,
@@ -773,15 +782,10 @@ export function SopEditor({
 
   useEffect(() => {
     if (!auditPanelOpen) return;
-    // Escape layering, topmost first: referenced-PDF previews (window capture) → the overlay
-    // print preview (document capture; it sits above this panel, so the panel yields to it) →
-    // this panel (document capture) → an embedded print preview (window bubble, drawn beneath
-    // the panel). Each layer consumes the key so exactly one closes.
+    // Capture lets the panel close before the embedded page preview. Native modal
+    // previews above it keep their own cancel handling and focus restoration.
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || previewing) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setAuditPanelOpen(false);
+      if (!previewing) handleAuditPanelEscape(event, () => setAuditPanelOpen(false));
     };
     document.addEventListener("keydown", closeOnEscape, true);
     return () => document.removeEventListener("keydown", closeOnEscape, true);

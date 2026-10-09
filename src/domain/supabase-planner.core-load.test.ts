@@ -112,7 +112,10 @@ function createPlannerClientFixture() {
   const createSignedUrls = vi.fn((paths: string[]) => Promise.resolve({
     data: paths.map((path) => ({ path, signedUrl: `https://private.test/${path}?signed=true` })), error: null,
   }));
-  const rpc = vi.fn((name: string) => Promise.resolve({ data: name === "task_project_id" ? "project-1" : false, error: null }));
+  const rpc = vi.fn((name: string) => Promise.resolve({
+    data: name === "product_access_level" ? (rows.product_module_access as Array<{ level: string }> | undefined)?.[0]?.level ?? "none" : name === "task_project_id" ? "project-1" : false,
+    error: name === "product_access_level" ? readErrors.get("product_module_access") ?? null : null,
+  }));
   const client = {
     from(table: string) {
       requestedTables.push(table);
@@ -205,11 +208,11 @@ describe("loadPlannerCoreStateFromSupabase", () => {
   });
 
   it.each([
-    ["edit", "editor"], ["view", "viewer"], ["none", undefined],
+    ["edit", "editor"], ["view", "viewer"],
   ])("preserves explicit %s access for a non-manager", async (level, role) => {
     const fixture = createPlannerClientFixture();
     fixture.rows.workspace_members = [{ role: "editor" }];
-    fixture.rows.project_access = [{ level }];
+    fixture.rows.product_module_access = [{ level }];
     const state = await loadPlannerCoreStateFromSupabase("project-1", undefined, fixture.client as never);
     expect(state?.project?.role).toBe(role);
     expect(state?.project?.accessLevel).toBe(level);
@@ -218,25 +221,24 @@ describe("loadPlannerCoreStateFromSupabase", () => {
   it("rechecks changed access on the next load instead of retaining the earlier permission", async () => {
     const fixture = createPlannerClientFixture();
     fixture.rows.workspace_members = [{ role: "editor" }];
-    fixture.rows.project_access = [{ level: "edit" }];
+    fixture.rows.product_module_access = [{ level: "edit" }];
     const first = await loadPlannerCoreStateFromSupabase("project-1", undefined, fixture.client as never);
-    fixture.rows.project_access = [{ level: "view" }];
+    fixture.rows.product_module_access = [{ level: "view" }];
     const second = await loadPlannerCoreStateFromSupabase("project-1", undefined, fixture.client as never);
     expect(first?.project?.accessLevel).toBe("edit");
     expect(second?.project?.accessLevel).toBe("view");
-    expect(fixture.requestedTables.filter((table) => table === "project_access")).toHaveLength(2);
+    expect(fixture.rpc.mock.calls.filter(([name]) => name === "product_access_level")).toHaveLength(2);
   });
 
-  it("preserves legacy membership fallback only when the project access table is absent", async () => {
+  it("rejects Product None without confirming the editable graph", async () => {
     const fixture = createPlannerClientFixture();
-    fixture.rows.workspace_members = [{ role: "viewer" }];
-    fixture.readErrors.set("project_access", { message: "Missing relation", code: "42P01" });
-    const state = await loadPlannerCoreStateFromSupabase("project-1", undefined, fixture.client as never);
-    expect(state?.project?.role).toBe("viewer");
-    expect(state?.project?.accessLevel).toBeUndefined();
+    fixture.rows.workspace_members = [{ role: "editor" }];
+    fixture.rows.product_module_access = [{ level: "none" }];
+    await expect(loadPlannerCoreStateFromSupabase("project-1", undefined, fixture.client as never)).rejects.toThrow("Product access is required");
+    expect(fixture.requestedTables).not.toContain("manufacturing_steps");
   });
 
-  it.each(["workspaces", "workspace_members", "project_access"])("never confirms the graph when the %s access read fails", async (table) => {
+  it.each(["workspaces", "workspace_members", "product_module_access"])("never confirms the graph when the %s access read fails", async (table) => {
     const fixture = createPlannerClientFixture();
     fixture.rows.workspace_members = [{ role: "editor" }];
     fixture.readErrors.set(table, { message: "Access lookup unavailable", code: "08006" });

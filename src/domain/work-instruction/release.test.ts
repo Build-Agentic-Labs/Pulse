@@ -185,8 +185,8 @@ describe("releaseStateFor / withReleaseMeta", () => {
     const state = releaseStateFor(wi, releases);
     expect(state.kind).toBe("released");
     const shown = withReleaseMeta(wi, releases, state);
-    expect(shown.meta).toMatchObject({ revision: "Rev A", effectiveDate: "2026-09-11T12:00:00", preparedBy: "Rosendo Lopez", approvedBy: "Rosendo Lopez", reviewedBy: "" });
-    expect(shown.meta.revisionHistory).toEqual([{ revision: "A", date: "2026-09-11T12:00:00", description: "Initial release", author: "Rosendo Lopez" }]);
+    expect(shown.meta).toMatchObject({ revision: "Rev A", effectiveDate: "2026-09-11", preparedBy: "Rosendo Lopez", approvedBy: "Rosendo Lopez", reviewedBy: "" });
+    expect(shown.meta.revisionHistory).toEqual([{ revision: "A", date: "2026-09-11", description: "Initial release", author: "Rosendo Lopez" }]);
   });
 
   it("turns back into a draft once the content drifts, keeping the released history", () => {

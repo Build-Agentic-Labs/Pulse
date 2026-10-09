@@ -184,7 +184,7 @@ export function wiTemplateDocument(
     documentNumber:
       document.documentNumber ?? `WI-${document.departmentCode}-###`,
     revision: revisionIndex ? revisionLetter(revisionIndex) : "",
-    revisionDate: revisionDate ? formatDateControlled(/^\d{4}-\d{2}-\d{2}$/.test(revisionDate) ? `${revisionDate}T12:00:00` : revisionDate) : "",
+    revisionDate: revisionDate ? formatDateControlled(revisionDate) : "",
     revisionDescription: description,
     steps: document.steps.map((step) => ({
       title: step.title,

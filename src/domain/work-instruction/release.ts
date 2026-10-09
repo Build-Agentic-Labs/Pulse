@@ -170,15 +170,6 @@ export function snapshotForRelease(
   };
 }
 
-/**
- * `formatDateControlled` parses with `new Date(iso)`, and a bare YYYY-MM-DD parses as UTC midnight
- * — which prints as the PREVIOUS day anywhere west of Greenwich. Anchoring the date at local noon
- * keeps the printed day equal to the day that was chosen.
- */
-function controlledDate(dateOnly: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(dateOnly) ? `${dateOnly}T12:00:00` : dateOnly;
-}
-
 function historyThrough(
   releases: readonly WorkInstructionReleaseSummary[],
   through?: WorkInstructionReleaseSummary,
@@ -188,7 +179,7 @@ function historyThrough(
     .filter((release) => !through || release.revisionIndex <= through.revisionIndex)
     .map((release) => ({
       revision: release.revision,
-      date: controlledDate(release.effectiveDate),
+      date: release.effectiveDate,
       description: release.changeDescription,
       author: release.releasedByName,
     }));
@@ -236,7 +227,7 @@ export function withReleaseMeta(
     meta: {
       ...instruction.meta,
       revision: released ? revisionLabel(released.revision) : "Draft",
-      effectiveDate: released ? controlledDate(released.effectiveDate) : "",
+      effectiveDate: released ? released.effectiveDate : "",
       preparedBy: released?.releasedByName ?? "",
       reviewedBy: "",
       approvedBy: released?.releasedByName ?? "",
@@ -255,7 +246,7 @@ export function releasedDocument(
     meta: {
       ...release.content.meta,
       revision: revisionLabel(release.revision),
-      effectiveDate: controlledDate(release.effectiveDate),
+      effectiveDate: release.effectiveDate,
       preparedBy: release.releasedByName,
       reviewedBy: "",
       approvedBy: release.releasedByName,

@@ -50,7 +50,7 @@ import { listSopAuditEvents, type SopAuditEvent } from "@/lib/sop/audit-events";
 import type { SopApprovalRoutingInitialData } from "@/lib/sop/detail-data";
 import { AnnexesEditor } from "./editor/annexes-editor";
 import { ReferenceLibraryEditor } from "./editor/reference-library-editor";
-import { formatReviewDate } from "./editor/editor-formatting";
+import { formatDate } from "@/domain/formatting";
 import { SopDocumentSection } from "./editor/document-section";
 import { SopOverviewSection } from "./editor/overview-section";
 import { SopProcedureSection } from "./editor/procedure-section";
@@ -1927,7 +1927,7 @@ export function SopEditor({
                           </p>
                         </div>
                         <span className="shrink-0 text-[11px] tabular-nums text-ink-tertiary">
-                          {formatReviewDate(event.createdAt)}
+                          {formatDate(event.createdAt)}
                         </span>
                       </div>
                     ))}

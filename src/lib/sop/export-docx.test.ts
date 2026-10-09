@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import PizZip from "pizzip";
 import { createEmptySop } from "@/domain/sop/schema";
 import { applySampleData } from "@/domain/sop/sample";
+import { formatDateControlled } from "@/domain/formatting";
 import { exportSopToDocx } from "./export-docx";
 
 describe("exportSopToDocx — Procedure flowchart", () => {
@@ -131,5 +132,28 @@ describe("exportSopToDocx — Procedure narrative structure", () => {
     expect(procSection).not.toContain("—");
     expect(procSection).not.toContain("&#8212;");
     expect(procSection).not.toContain("&#x2014;");
+  });
+});
+
+describe("exportSopToDocx — Change Approvals signed date", () => {
+  it("prints the local calendar day of the signature instant, not the UTC date prefix of the timestamp", async () => {
+    // 23:30 at UTC-10 is 09:30Z on the 16th, so the timestamp's text prefix ("2026-07-15") is the
+    // wrong day almost everywhere. The old slice-then-parse printed the 15th in UTC and the 14th
+    // west of it; the instant's local day is the 16th from UTC-9:30 eastward (the 15th at UTC-10).
+    const signedAt = "2026-07-15T23:30:00-10:00";
+    const local = new Date(signedAt);
+    const expected = `${String(local.getMonth() + 1).padStart(2, "0")}/${String(local.getDate()).padStart(2, "0")}/${local.getFullYear()}`;
+    expect(formatDateControlled(signedAt)).toBe(expected);
+
+    const sop = createEmptySop("verify", "2026-01-01T00:00:00.000Z");
+    const blob = await exportSopToDocx(sop, [
+      { key: "qa", approval: "Quality", name: "Signer Name", position: "QA Lead", signedAt, signatureStrokes: [] },
+      { key: "ops", approval: "Operations", name: "Unsigned Name", position: "Ops Lead", signedAt: null, signatureStrokes: [] },
+    ]);
+    const xml = new PizZip(Buffer.from(await blob.arrayBuffer())).file("word/document.xml")!.asText();
+    const approvals = xml.slice(xml.indexOf("Change Approvals")).replace(/<[^>]+>/g, " ");
+
+    expect(approvals).toContain(expected);
+    expect(approvals).toContain("Pending signature");
   });
 });

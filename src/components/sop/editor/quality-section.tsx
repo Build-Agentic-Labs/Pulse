@@ -1,4 +1,4 @@
-import { formatReviewDate } from "./editor-formatting";
+import { formatDate } from "@/domain/formatting";
 import {
   CircleCheck,
   ShieldCheck,
@@ -94,7 +94,7 @@ export function SopQualitySection({
             <div className="shrink-0 text-right">
               <p className="text-xs font-medium text-emerald-700">Signed</p>
               <p className="mt-0.5 text-[11px] tabular-nums text-ink-tertiary">
-                {formatReviewDate(qualitySignature.signedAt)}
+                {formatDate(qualitySignature.signedAt)}
               </p>
             </div>
           </div>

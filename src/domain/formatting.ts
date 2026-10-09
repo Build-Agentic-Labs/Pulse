@@ -65,6 +65,20 @@ export function reviewerInitials(name: string): string {
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
 }
 
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * A bare YYYY-MM-DD is a calendar day, but `new Date("2026-07-15")` parses it as UTC midnight,
+ * which renders as the PREVIOUS day anywhere west of Greenwich. Date-only input is constructed as
+ * LOCAL midnight instead; anything else (timestamps) keeps `new Date` instant semantics.
+ */
+function parseIsoDateInput(iso: string): Date {
+  const match = DATE_ONLY.exec(iso);
+  if (!match) return new Date(iso);
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
+}
+
 /**
  * Locale-aware date for UI surfaces (lists, tables, settings). Empty or invalid
  * input renders as "" — call sites wanting a placeholder use `formatDate(x) || "—"`.
@@ -73,14 +87,14 @@ export function reviewerInitials(name: string): string {
  */
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "";
-  const date = new Date(iso);
+  const date = parseIsoDateInput(iso);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
 }
 
 /** Locale-aware date + time (2-digit date, hh:mm) for UI surfaces. */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "";
-  const date = new Date(iso);
+  const date = parseIsoDateInput(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleString([], {
     year: "numeric",
@@ -98,7 +112,7 @@ export function formatDateTime(iso: string | null | undefined): string {
  */
 export function formatDateControlled(iso: string): string {
   if (!iso) return "";
-  const date = new Date(iso);
+  const date = parseIsoDateInput(iso);
   if (Number.isNaN(date.getTime())) return iso;
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatDate,
+  formatDateControlled,
+  formatDateTime,
   formatManHours,
   formatRelativeFromBounds,
   formatSignedMinutes,
@@ -78,5 +81,57 @@ describe("formatRelativeFromBounds", () => {
   });
   it("returns n/a for unparseable input", () => {
     expect(formatRelativeFromBounds("not-a-date", 0)).toBe("n/a");
+  });
+});
+
+// A bare YYYY-MM-DD is a calendar day, not an instant. `new Date("2026-07-15")` parses as UTC
+// midnight, which renders as 07/14 anywhere west of Greenwich. The expectations below are built
+// from a LOCAL-constructed date so they fail on the old parse in any timezone west of UTC, and the
+// controlled literal fails there too; in UTC (CI) the local and UTC days coincide.
+describe("date-only input parses as a local calendar day", () => {
+  const localJuly15 = new Date(2026, 6, 15).toISOString();
+
+  it("formatDateControlled renders the chosen day", () => {
+    expect(formatDateControlled("2026-07-15")).toBe(formatDateControlled(localJuly15));
+    expect(formatDateControlled("2026-07-15")).toBe("07/15/2026");
+  });
+
+  it("formatDate renders the chosen day", () => {
+    expect(formatDate("2026-07-15")).toBe(formatDate(localJuly15));
+    expect(formatDate("2026-07-15")).toBe(new Date(2026, 6, 15).toLocaleDateString());
+  });
+
+  it("formatDateTime renders the chosen day at local midnight", () => {
+    expect(formatDateTime("2026-07-15")).toBe(formatDateTime(localJuly15));
+  });
+});
+
+describe("timestamp input keeps instant semantics", () => {
+  const instant = "2026-07-15T12:00:00Z";
+  const local = new Date(instant);
+
+  it("formatDateControlled renders the local day of the instant", () => {
+    const mm = String(local.getMonth() + 1).padStart(2, "0");
+    const dd = String(local.getDate()).padStart(2, "0");
+    expect(formatDateControlled(instant)).toBe(`${mm}/${dd}/${local.getFullYear()}`);
+  });
+
+  it("formatDate renders the local day of the instant", () => {
+    expect(formatDate(instant)).toBe(local.toLocaleDateString());
+  });
+
+  it("formatDateTime renders the local date and time of the instant", () => {
+    expect(formatDateTime(instant)).toBe(
+      local.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }),
+    );
+  });
+});
+
+describe("invalid date input", () => {
+  it("keeps each formatter's existing fallback", () => {
+    expect(formatDateControlled("not-a-date")).toBe("not-a-date");
+    expect(formatDate("not-a-date")).toBe("");
+    expect(formatDate(null)).toBe("");
+    expect(formatDateTime("not-a-date")).toBe("not-a-date");
   });
 });

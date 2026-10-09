@@ -473,7 +473,7 @@ async function buildBody(
         row.approval,
         row.name,
         row.position,
-        row.signedAt ? formatDateControlled(row.signedAt.slice(0, 10)) : "Pending signature",
+        row.signedAt ? formatDateControlled(row.signedAt) : "Pending signature",
       ]),
       [28, 26, 26, 20],
     ),

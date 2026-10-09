@@ -8,13 +8,13 @@ import {
 
 describe("paginateGeneralWorkInstruction", () => {
   it("always yields the template's two pages", () => {
-    expect(paginateGeneralWorkInstruction(0)).toEqual([[1, 2, 3], [4, 5, 6]]);
-    expect(paginateGeneralWorkInstruction(2)).toEqual([[1, 2, 3], [4, 5, 6]]);
+    expect(paginateGeneralWorkInstruction(0)).toEqual([[1], [2, 3]]);
+    expect(paginateGeneralWorkInstruction(2)).toEqual([[1], [2, 3]]);
   });
 
-  it("adds continuation pages of three, keeping a short last page", () => {
-    expect(paginateGeneralWorkInstruction(7)).toEqual([[1, 2, 3], [4, 5, 6], [7]]);
-    expect(paginateGeneralWorkInstruction(9)).toEqual([[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
+  it("adds continuation pages of two, keeping a short last page", () => {
+    expect(paginateGeneralWorkInstruction(7)).toEqual([[1], [2, 3], [4, 5], [6, 7]]);
+    expect(paginateGeneralWorkInstruction(9)).toEqual([[1], [2, 3], [4, 5], [6, 7], [8, 9]]);
   });
 });
 
@@ -42,6 +42,6 @@ describe("document numbers", () => {
 
 it("filled builder documents have only authored steps while the blank template keeps its slots", () => {
   expect(paginateGeneralWorkInstruction(1, false)).toEqual([[1]]);
-  expect(paginateGeneralWorkInstruction(4, false)).toEqual([[1, 2, 3], [4]]);
-  expect(paginateGeneralWorkInstruction(1)).toEqual([[1, 2, 3], [4, 5, 6]]);
+  expect(paginateGeneralWorkInstruction(4, false)).toEqual([[1], [2, 3], [4]]);
+  expect(paginateGeneralWorkInstruction(1)).toEqual([[1], [2, 3]]);
 });

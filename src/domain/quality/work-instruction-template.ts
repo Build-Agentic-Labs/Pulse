@@ -31,7 +31,7 @@ export const WI_TEMPLATE_SUMMARY_ROWS: TemplateSummaryRow[] = [
  * band; page 2 is a steps-only continuation, like the AWI's — authors
  * duplicate it in Word when they need more.
  */
-export const WI_TEMPLATE_STEPS_PER_PAGE = [3, 3] as const;
+export const WI_TEMPLATE_STEPS_PER_PAGE = [1, 2] as const;
 export const WI_TEMPLATE_STEP_TITLE_PROMPT = "[Step title]";
 export const WI_TEMPLATE_STEP_PROMPT =
   "[Describe the action, starting with a verb.]";

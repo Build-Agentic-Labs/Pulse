@@ -72,12 +72,12 @@ const HEADER_HEIGHT = 84 * PX;
 const REVISION_COLUMN = 230 * PX;
 const LOGO_COLUMN = 108 * PX;
 const SUMMARY_LABEL = Math.round(1.05 * INCH);
-const IMAGE_COLUMN = Math.round((CONTENT * 2) / 3); // .wil-step 2fr | 1fr
+const IMAGE_COLUMN = Math.round(CONTENT * 0.6); // shared AWI 60% image / 40% instruction
 // Page 1 shares its height with the summary band; the continuation page's
 // steps grow to fill the sheet.
 // Leave room for cell padding, the repeated header, and the footer in Word.
-const STEP_HEIGHT = Math.round(2.1 * INCH);
-const CONTINUATION_STEP_HEIGHT = Math.round(2.55 * INCH);
+const STEP_HEIGHT = Math.round(6.3 * INCH);
+const CONTINUATION_STEP_HEIGHT = Math.round(3.8 * INCH);
 
 type Align = (typeof AlignmentType)[keyof typeof AlignmentType];
 type VAlign = typeof VerticalAlign.TOP | typeof VerticalAlign.CENTER;
@@ -125,11 +125,12 @@ function text(
 
 function para(
   children: ParagraphChild[],
-  opts: { after?: number; align?: Align; line?: number } = {},
+  opts: { after?: number; align?: Align; line?: number; indent?: number } = {},
 ): Paragraph {
   return new Paragraph({
     children,
     alignment: opts.align,
+    indent: opts.indent ? { left: opts.indent } : undefined,
     spacing: { before: 0, after: opts.after ?? 0, line: opts.line },
   });
 }
@@ -372,7 +373,7 @@ function summaryBand(doc: GeneralWorkInstruction, allowSplit = false): Table {
   return grid(rows, widths);
 }
 
-/** `.wil-step-heading`: 25px boxed number, then the bold step title. */
+/** `.wil-step-heading`: 25px unboxed number, then the bold step title. */
 function stepHeading(
   sequence: number,
   title: string,
@@ -393,7 +394,7 @@ function stepHeading(
             ],
             badge,
             {
-              edges: box(FRAME),
+              edges: {},
               valign: VerticalAlign.CENTER,
             },
           ),
@@ -410,8 +411,8 @@ function stepHeading(
 
 /** Scale an image to fit its slot (CSS px at 96dpi), never enlarging it. */
 function fitImage(image: WorkInstructionImage, slotHeight: number): ImageRun {
-  const maxWidth = (IMAGE_COLUMN - 2 * 10 * PX) / PX;
-  const maxHeight = (slotHeight - 2 * 10 * PX) / PX;
+  const maxWidth = (IMAGE_COLUMN - 2 * 3 * PX) / PX;
+  const maxHeight = (slotHeight - 2 * 3 * PX) / PX;
   const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
   return new ImageRun({
     type: "png",
@@ -427,7 +428,7 @@ function fitImage(image: WorkInstructionImage, slotHeight: number): ImageRun {
 function instructionParagraphs(instruction: string): Paragraph[] {
   return instruction
     .split("\n")
-    .map((line) => para([text(line, 20)], { line: 330, after: 4 * PX }));
+    .map((line) => para([text(line, 20)], { line: 330, after: 4 * PX, indent: 34 * PX }));
 }
 
 /** `.wil-step`: image / reference view | numbered instruction body. */
@@ -466,7 +467,7 @@ function steps(
           IMAGE_COLUMN,
           {
             edges: { right: rule(RULE), bottom: rule(RULE) },
-            pad: [10 * PX, 10 * PX],
+            pad: [3 * PX, 3 * PX],
             valign: VerticalAlign.CENTER,
           },
         )] : []),

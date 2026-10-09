@@ -131,6 +131,7 @@ function buildAwiMaster(projectId: string, taskId: string): AwiMaster {
     project_id: projectId,
     task_id: taskId,
     title: "Sync AWI",
+    category: "",
     document_number: `AWI-${projectId}`,
     created_at: "2026-10-01T00:00:00.000Z",
     draft_updated_at: "2026-10-01T00:00:00.000Z",

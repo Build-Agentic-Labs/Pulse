@@ -221,7 +221,7 @@ const MARGIN_LINES = 1;
 
 export const WORK_INSTRUCTION_LAYOUTS: Record<string, WorkInstructionLayout> = {
   letter: {
-    id: "letter", label: "Letter portrait", columns: 1, cardsPerSheet: 2, cardsOnFirstSheet: 2,
+    id: "letter", label: "Letter portrait", columns: 1, cardsPerSheet: 2, cardsOnFirstSheet: 1,
     photoWidth: "66.6667%",
     instruction: { lines: 7, charsPerLine: 29 },
     continuation: { lines: 7, charsPerLine: 29 },

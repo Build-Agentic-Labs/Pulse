@@ -6,9 +6,9 @@ import { releasedPrintLayout, WORK_INSTRUCTION_LAYOUTS } from "./schema";
 import { fingerprintWorkInstruction, snapshotForRelease } from "./release";
 
 describe("Letter print layout", () => {
-  it("uses at most two steps on every page", () => {
+  it("uses one step on the first page and at most two on later pages", () => {
     const doc = sampleWorkInstruction();
-    expect(paginateWorkInstruction({...doc, cards:doc.cards.slice(0,8)}, WORK_INSTRUCTION_LAYOUTS.letter).map(p=>p.cards.length)).toEqual([2,2,2,2]);
+    expect(paginateWorkInstruction({...doc, cards:doc.cards.slice(0,8)}, WORK_INSTRUCTION_LAYOUTS.letter).map(p=>p.cards.length)).toEqual([1,2,2,2,1]);
   });
   it("preserves legacy releases and records letter on new snapshots without altering the hash", () => {
     const doc = sampleWorkInstruction();
@@ -47,7 +47,7 @@ describe("measured Letter pagination", () => {
     expect(letterPageCounts([500, 260, 280, 300], 550, 850)).toEqual([1, 2, 1]);
   });
   it("fits two differently sized steps using their combined height", () => {
-    expect(letterPageCounts([500, 300, 450, 350], 800, 850)).toEqual([2, 2]);
+    expect(letterPageCounts([500, 300, 450, 350], 800, 850)).toEqual([1, 2, 1]);
   });
   it("moves a whole step past a full setup page and retains oversized steps", () => {
     expect(letterPageCounts([900, 250, 250], 100, 850)).toEqual([0, 1, 2]);

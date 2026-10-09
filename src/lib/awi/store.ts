@@ -5,6 +5,14 @@ import { throwIfError } from "@/lib/supabase-errors";
 import { readAllPages } from "@/lib/supabase/read-all-pages";
 
 export type AwiMaster = Database["public"]["Tables"]["awi_masters"]["Row"];
+export async function updateAwiMetadata(master: AwiMaster, documentNumber: string, category: string) {
+  const { error } = await createPlannerSupabaseClient().rpc("update_awi_metadata", {
+    p_master_id: master.id, p_document_number: documentNumber.trim(), p_category: category.trim(),
+    p_expected_number: master.document_number, p_expected_category: master.category ?? "",
+  });
+  if (error?.code === "23505") throw new Error("That AWI number is already in use. Choose another number.");
+  if (error) throw new Error(error.message);
+}
 export function awiDraftStatus(master: AwiMaster) {
   if (!master.published_at) return "Draft";
   return new Date(master.draft_updated_at).getTime() > new Date(master.published_at).getTime() ? "Published · draft changes" : "Published";

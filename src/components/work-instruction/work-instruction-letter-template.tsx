@@ -6,13 +6,13 @@ import type { WorkInstruction } from "@/domain/work-instruction/schema";
 /** Print-review prototype. Uses the WI contract, without changing released layouts or live data. */
 export function WorkInstructionLetterTemplate({ example, blankOnly = false }: { example: WorkInstruction; blankOnly?: boolean }) {
   const blank = blankOnly;
-  const pages = [[0, 1], [2, 3, 4]];
+  const pages = [[0], [1, 2], [3, 4]];
   return (
     <div className="wil-preview">
       <style>{LETTER_TEMPLATE_STYLES}</style>
       <div className="wil-toolbar">
         <div><strong>Letter portrait template</strong><span>Layout review · first page and continuation</span></div>
-        <a className="ui-btn-primary" href="/templates/work-instruction-letter-template.pdf">Open printable PDF</a>
+        <button type="button" className="ui-btn-primary" onClick={() => window.print()}>Print / Save PDF</button>
       </div>
       <div className="wil-pages">
         {pages.map((steps, pageIndex) => (

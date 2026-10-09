@@ -3,7 +3,7 @@ import type { GeneralWorkInstruction } from "@/domain/quality/work-instruction-t
 import { WI_TEMPLATE_CONFIDENTIAL_LINE } from "@/domain/quality/work-instruction-template";
 import type { WiStep } from "@/domain/quality-wi/schema";
 import { wiImageToPng, fetchWiImageBlob } from "./render-image";
-import { wrapWiPdfText } from "./pdf-layout";
+import { fillWiPhotoRows, wrapWiPdfText } from "./pdf-layout";
 
 const WIDTH = 816,
   HEIGHT = 1056,
@@ -137,18 +137,39 @@ export async function buildQualityWiPdf(
     y += height;
     rule(LEFT, y, RIGHT);
   }
+  let pageStart = y;
+  let pending: { height: number; hasPhoto: boolean; maxHeight?: number; draw: (top: number, height: number) => void }[] = [];
+  function finishStepsPage() {
+    const heights = fillWiPhotoRows(pending, BOTTOM - pageStart);
+    y = pageStart;
+    pending.forEach((row, index) => {
+      row.draw(y, heights[index]);
+      y += heights[index];
+    });
+    pending = [];
+  }
   for (let index = 0; index < model.steps.length; index++) {
     const step = model.steps[index];
-    const showPhoto = step.showPhoto !== false;
-    const textX = showPhoto ? 538 : LEFT + 12;
-    const titleX = showPhoto ? 563 : LEFT + 37;
-    const instruction = lines(step.instruction, showPhoto ? 230 : RIGHT - textX - 12, 12);
-    const heading = lines(step.title, showPhoto ? 206 : RIGHT - titleX - 12, 12, true);
+    const image = step.showPhoto !== false && step.image ? images.get(step.image) : undefined;
+    const showPhoto = Boolean(image);
+    const divider = LEFT + (RIGHT - LEFT) * 0.6;
+    const textX = showPhoto ? divider + 12 : LEFT + 12;
+    const titleX = textX + 25;
+    const instruction = lines(step.instruction, RIGHT - titleX - 12, 12);
+    const heading = lines(step.title, RIGHT - titleX - 12, 12, true);
     const headingHeight = heading.length * 16 + 24;
+    // Wide reference screenshots need less height than portrait photographs.
+    const minimumHeight = image
+      ? Math.max(80, Math.min(220, (divider - LEFT - 6) * image.height / image.width + 6))
+      : 80;
     let offset = 0,
       part = 0;
     do {
-      if (BOTTOM - y < Math.max(showPhoto ? 220 : 80, headingHeight + 30)) newPage();
+      if (BOTTOM - y < Math.max(minimumHeight, headingHeight + 30)) {
+        finishStepsPage();
+        newPage();
+        pageStart = y;
+      }
       const capacity = Math.floor((BOTTOM - y - headingHeight - 20) / 17);
       if (capacity < 1)
         throw new Error(
@@ -157,38 +178,41 @@ export async function buildQualityWiPdf(
       const chunk = instruction.slice(offset, offset + capacity);
       const rowHeight = Math.min(
         BOTTOM - y,
-        Math.max(showPhoto ? 220 : 80, headingHeight + chunk.length * 17 + 20),
+        Math.max(minimumHeight, headingHeight + chunk.length * 17 + 20),
       );
-      rule(LEFT, y, RIGHT);
-      if (showPhoto) rule(526, y, 526, y + rowHeight);
-      text([String(index + 1)], textX, y + 22, 12, true);
-      text(heading, titleX, y + 22, 12, true);
-      if (part) text(["(continued)"], textX, y + headingHeight - 3, 9);
-      text(chunk, textX, y + headingHeight + 12, 12, false, 17);
-      const image = showPhoto && step.image ? images.get(step.image) : undefined;
-      if (image) {
-        const scale = Math.min(
-          462 / image.width,
-          (rowHeight - 24) / image.height,
-        );
-        const width = image.width * scale,
-          height = image.height * scale;
-        context.drawImage(
-          image,
-          LEFT + (486 - width) / 2,
-          y + (rowHeight - height) / 2,
-          width,
-          height,
-        );
-      } else if (showPhoto) {
-        text(["Image / reference view"], LEFT + 180, y + rowHeight / 2, 10);
-      }
+      const continued = part > 0;
+      pending.push({ height: rowHeight, hasPhoto: showPhoto,
+        maxHeight: image ? Math.max(rowHeight, (divider - LEFT - 6) * image.height / image.width + 6) : rowHeight,
+        draw(top, height) {
+        rule(LEFT, top, RIGHT);
+        if (showPhoto) rule(divider, top, divider, top + height);
+        text([String(index + 1)], textX, top + 22, 12, true);
+        text(heading, titleX, top + 22, 12, true);
+        if (continued) text(["(continued)"], textX, top + headingHeight - 3, 9);
+        text(chunk, titleX, top + headingHeight + 12, 12, false, 17);
+        if (image) {
+          const scale = Math.min(
+            (divider - LEFT - 6) / image.width,
+            (height - 6) / image.height,
+          );
+          const width = image.width * scale,
+            imageHeight = image.height * scale;
+          context.drawImage(
+            image,
+            LEFT + (divider - LEFT - width) / 2,
+            top + (height - imageHeight) / 2,
+            width,
+            imageHeight,
+          );
+        }
+        rule(LEFT, top + height, RIGHT);
+      }});
       y += rowHeight;
-      rule(LEFT, y, RIGHT);
       offset += chunk.length;
       part++;
     } while (offset < instruction.length);
   }
+  finishStepsPage();
   function historyPage() {
     newPage(); y += 30;
     text(["Revision history"], LEFT, y, 16, true); y += 22;

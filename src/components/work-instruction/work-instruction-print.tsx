@@ -40,10 +40,12 @@ import {
   listWorkInstructionReleases,
 } from "@/lib/work-instruction/store";
 import { WorkInstructionDocument } from "./work-instruction-document";
+import { DocumentPreviewToolbar } from "../sop/document-preview-toolbar";
 
 type LoadStatus = "loading" | "ready" | "empty" | "error";
 
 export interface WorkInstructionPrintPreviewProps {
+  sopViewer?: boolean;
   projectId: string;
   scenarioId?: string;
   taskIds: string[];
@@ -346,6 +348,7 @@ export function WorkInstructionPrintPreview({
   onReady,
   onClose,
   pinnedReleaseId,
+  sopViewer = false,
 }: WorkInstructionPrintPreviewProps) {
   const [layout, setLayout] = useState(initialLayout.id === "letter" ? initialLayout : DEFAULT_WORK_INSTRUCTION_PRINT_LAYOUT);
   const seeded = blank
@@ -645,7 +648,16 @@ export function WorkInstructionPrintPreview({
       aria-modal={onClose ? "true" : undefined}
       aria-label={onClose ? "Work instruction document preview" : undefined}
     >
-      <PrintToolbar
+      {sopViewer && onClose ? <div className="wi-print-chrome">
+        <DocumentPreviewToolbar onClose={onClose} actions={
+          <button type="button" className="ui-btn-primary inline-flex h-9 items-center gap-2 px-4" disabled={effectiveStatus !== "ready" || printBlocked} onClick={() => window.print()}>
+            <Printer size={15} />Save as PDF
+          </button>
+        }>
+          <span className="min-w-0 truncate text-sm" title={label}>{documents[0]?.instruction.meta.documentNumber} {label}</span>
+          <span className="shrink-0 text-xs text-ink-tertiary">{controlNote}</span>
+        </DocumentPreviewToolbar>
+      </div> : <PrintToolbar
         backHref={`/projects/${projectId}/planner`}
         label={blank ? "Blank template" : label}
         layout={displayLayout}
@@ -657,7 +669,7 @@ export function WorkInstructionPrintPreview({
         controlNote={controlNote}
         view={!pinnedReleaseId && modifiedStates.length > 0 ? view : undefined}
         onViewChange={setView}
-      />
+      />}
       {/* wi-print-body: the print stylesheet zeroes this padding, which would
           otherwise spill past the last sheet and print a blank trailing page. */}
       <div

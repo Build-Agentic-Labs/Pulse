@@ -866,11 +866,11 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
     <style>{PRINT_STYLES}</style>
     <style>{LETTER_TEMPLATE_STYLES}{`
       .wil-pages.wi-pages { padding:0; min-width:0; }
-      .wil-sheet .wil-image { flex-direction:column; padding:10px; min-width:0; min-height:0; overflow:hidden; }
+      .wil-sheet .wil-image { flex-direction:column; padding:3px; min-width:0; min-height:0; overflow:hidden; }
       .wil-image .wi-card-photo { flex:1; width:100%; min-height:0; border:0; background:transparent; }
       .wil-image .wi-card-photo img { height:100%; width:100%; object-fit:contain; }
       .wil-image .wi-card-caption { height:auto; max-width:100%; white-space:normal; font-size:7pt; }
-      .wil-instructions { font-size:10pt; padding:9px 0; overflow-wrap:anywhere; }
+      .wil-instructions { font-size:10pt; padding:9px 0 9px 34px; overflow-wrap:anywhere; }
       .wil-step-heading { align-items:flex-start; flex:none; }
       .wil-step-heading h2 { overflow-wrap:anywhere; }
       .wil-step-body .wi-card-parts { margin-top:5px; }
@@ -912,8 +912,8 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
           </div>
           {(setup.references?.length || setup.drawingLink || setup.sopLink) ? <div className="wil-reference"><strong>References: </strong>{setup.references?.length ? setup.references.map((reference,i)=><Fragment key={i}>{i > 0 ? " · " : ""}<a href={reference.url}>{referenceLine(reference)}</a></Fragment>) : [setup.drawingLink,setup.sopLink].filter(Boolean).join(" · ")}</div> : null}
         </div>}
-        <main className="wil-steps" style={{gridTemplateRows: sheet.cards.length && capacity.heights.length ? sheet.cards.map(card => `minmax(${capacity.heights[cards.findIndex(item => item.stepId === card.stepId)] ?? 0}px,1fr)`).join(" ") : "repeat(2,minmax(0,1fr))"}}>
-          {Array.from({length:instruction.blank ? 2 : sheet.cards.length},(_,index)=>{
+        <main className="wil-steps" style={{gridTemplateRows: sheet.cards.length && capacity.heights.length ? sheet.cards.map(card => `minmax(${capacity.heights[cards.findIndex(item => item.stepId === card.stepId)] ?? 0}px,1fr)`).join(" ") : `repeat(${sheet.kind === "setup" ? 1 : 2},minmax(0,1fr))`}}>
+          {Array.from({length:instruction.blank ? (sheet.kind === "setup" ? 1 : 2) : sheet.cards.length},(_,index)=>{
             const card=sheet.cards[index];
             return <section className="wil-step wi-letter-card" key={index}>
               <div className="wil-image">{card?.photo ? <><div className="wi-card-photo wi-card-photo-populated"><WorkInstructionPhotoMedia photo={card.photo} sequence={card.sequence}/></div><div className="wi-card-caption">{card.photo.caption}</div></> : <span>{card ? "No photo" : "Image / reference view"}</span>}</div>
@@ -927,7 +927,7 @@ function LetterDocument({ instruction, layout }: { instruction: WorkInstruction;
             </section>;
           })}
         </main>
-        <footer className="wil-footer"><div><span>Rev. {meta.revision || "Draft"}</span><span>Page {sheet.page} of {sheet.total}</span></div><p>{CONFIDENTIAL_LINE}</p></footer>
+        <footer className="wil-footer"><div><strong>{meta.documentNumber}</strong><span>Rev. {meta.revision || "Draft"}</span><span>Page {sheet.page} of {sheet.total}</span></div><p>{CONFIDENTIAL_LINE}</p></footer>
       </article>)}
     </div>
   </>;

@@ -1,6 +1,6 @@
 "use client";
 
-import { AwiSaveStatus } from "./awi-editor-actions";
+import { AwiEditorActions } from "./awi-editor-actions";
 import { settleWriteBatch } from "@/domain/workspace-save-status";
 import { useProcedureDrafts } from "./line-workspace/use-procedure-drafts";
 import { createProcedureSaveQueueStore, useProcedureSaveQueue } from "./line-workspace/use-procedure-save-queue";
@@ -3307,7 +3307,10 @@ export function LineWorkspace({
         <TopNav
           context={displayedPlannerChromeContext}
           presence={presencePeers}
-          actions={awiMaster ? <AwiSaveStatus saveState={saveState} /> : undefined}
+          actions={awiMaster ? <AwiEditorActions key={awiMaster.id} master={awiMaster} saveState={saveState}
+            state={hydratedTaskIds.has(awiMaster.task_id) ? derivedState : undefined}
+            readOnly={isViewOnlyAccess} ready={hasConfirmedRemoteState}
+            beforeSave={() => ensureSavedBeforeScenarioAction("AWI is still saving", "Resolve the save issue before changing AWI details.")} /> : undefined}
         />
 
         <CommandPalette

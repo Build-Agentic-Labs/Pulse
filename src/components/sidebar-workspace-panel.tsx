@@ -4,6 +4,7 @@ import { BookOpen, Check, ChevronDown, FolderKanban, GripVertical, MoreHorizonta
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import {
   createPlannerSupabaseClient,
   createProjectWithStarterPlan,
@@ -169,9 +170,27 @@ export function SidebarWorkspacePanel({
   );
   const [isAdding, setIsAdding] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [inlineCategory, setInlineCategory] = useState<string | null>(null);
+  const newProjectInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (isAdding) newProjectInputRef.current?.focus();
+  }, [isAdding, newCategory, inlineCategory, expandedCategories]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const createPendingRef = useRef(false);
   const [createError, setCreateError] = useState("");
+  const inlineProductFormRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (!isAdding || inlineCategory === null || isSubmitting || newProjectName.trim()) return;
+    function dismissEmptyProduct(event: PointerEvent) {
+      if (event.target instanceof Node && !inlineProductFormRef.current?.contains(event.target)) {
+        setIsAdding(false);
+        setNewProjectName("");
+        setCreateError("");
+      }
+    }
+    document.addEventListener("pointerdown", dismissEmptyProduct);
+    return () => document.removeEventListener("pointerdown", dismissEmptyProduct);
+  }, [isAdding, inlineCategory, isSubmitting, newProjectName]);
+  const createPendingRef = useRef(false);
   const [deleteError, setDeleteError] = useState("");
   const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
   const [contextMenu, setContextMenu] = useState<{ project: Project; anchorRect: DOMRect } | null>(null);
@@ -180,6 +199,7 @@ export function SidebarWorkspacePanel({
   const [selectedProjectId, setSelectedProjectId] = useState(() => activeProject?.projectId);
 
   const [draggedProductId, setDraggedProductId] = useState<string | null>(null);
+  const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
   const dragProductRef = useRef<string | null>(null);
   const pointerDragRef = useRef<{ id: string; pointerId: number; x: number; y: number; started: boolean } | null>(null);
   const [dropTarget, setDropTarget] = useState<{ category: string; productId?: string; after?: boolean } | null>(null);
@@ -193,6 +213,7 @@ export function SidebarWorkspacePanel({
     pointerDragRef.current = null;
     dragProductRef.current = null;
     setDraggedProductId(null);
+    setDragPointer(null);
     setDropTarget(null);
     dropTargetRef.current = null;
     if (expandTimerRef.current) clearTimeout(expandTimerRef.current);
@@ -237,6 +258,7 @@ export function SidebarWorkspacePanel({
         setContextMenu(null);
       }
       event.preventDefault();
+      setDragPointer({ x: event.clientX, y: event.clientY });
       const source = projects.find((item) => item.id === pending.id);
       const element = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-product-id], [data-portfolio-category]");
       const target = element?.dataset.productId ? projects.find((item) => item.id === element.dataset.productId) : undefined;
@@ -601,6 +623,7 @@ export function SidebarWorkspacePanel({
               type="button"
               className="ui-btn-ghost h-8 w-8 shrink-0 px-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
               onClick={() => {
+                setInlineCategory(null);
                 setIsAdding((open) => !open);
                 setCreateError("");
               }}
@@ -639,19 +662,76 @@ export function SidebarWorkspacePanel({
         {[...PRODUCT_CATEGORIES, ...(projects.some((item) => !item.portfolioCategory) ? [{ id: "uncategorized", label: "Uncategorized" }] : [])].map((category) => {
           const categoryProducts = sortPortfolioProducts(projects.filter((item) => (item.portfolioCategory ?? "uncategorized") === category.id));
           const expanded = Boolean(expandedCategories[category.id]);
-          return <div key={category.id} className="mt-0.5">
+          const addingHere = isAdding && inlineCategory === category.id;
+          return <div key={category.id} data-portfolio-category={category.id} className={`mt-0.5 rounded-md ${dropTarget?.category === category.id && !dropTarget.productId ? "bg-surface-hover ring-1 ring-inset ring-border-strong" : ""}`}>
+            <div className="group/category relative">
             <button type="button" className={`ui-nav-item ui-nav-item-idle ${dropTarget?.category === category.id && !dropTarget.productId ? "bg-surface-hover text-ink ring-1 ring-inset ring-border-strong" : ""}`} aria-expanded={expanded}
               data-portfolio-category={category.id}
               aria-controls={`portfolio-${category.id}`} onClick={() => toggleCategory(category.id)}>
               <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />
-              <span className="min-w-0 flex-1 truncate">{category.label}</span>
+              <span className={`min-w-0 flex-1 truncate ${status === "ready" && canEdit(role) ? "pr-6" : ""}`}>{category.label}</span>
               <ChevronDown size={13} className={`shrink-0 transition-transform duration-200 motion-reduce:transition-none ${expanded ? "rotate-180" : ""}`} />
             </button>
+            {status === "ready" && canEdit(role) ? (
+              <button
+                type="button"
+                className="ui-btn-ghost absolute right-7 top-1/2 h-6 w-6 -translate-y-1/2 px-0 text-ink-tertiary opacity-0 transition-opacity duration-150 hover:text-ink group-hover/category:opacity-100 group-focus-within/category:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
+                title={`Add product to ${category.label}`}
+                aria-label={`Add product to ${category.label}`}
+                disabled={isSubmitting}
+                onClick={() => {
+                  setInlineCategory(category.id);
+                  setNewCategory(category.id === "uncategorized" ? "" : category.id as PortfolioCategory);
+                  setExpandedCategories((current) => ({ ...current, [category.id]: true }));
+                  setCreateError("");
+                  setIsAdding(true);
+                  newProjectInputRef.current?.focus();
+                }}
+              >
+                <Plus size={14} strokeWidth={1.75} />
+              </button>
+            ) : null}
+            </div>
             <div id={`portfolio-${category.id}`} className="ui-setup-accordion" data-open={expanded} inert={!expanded} aria-hidden={!expanded}>
               <div className="min-h-0 overflow-hidden">
                 <NavSelectionTrack activeIndex={pathname !== "/awi" ? categoryProducts.findIndex((item) => item.id === selectedProjectId) : -1}
                   className="ui-portfolio-product-track ml-3 space-y-0.5 border-l border-line pl-2 pt-1">
-                  {status === "ready" && !categoryProducts.length ? <div className="px-2 py-1.5 text-[11px] text-ink-tertiary">No products yet</div> : null}
+                  {addingHere ? (
+                    <form ref={inlineProductFormRef} className="ui-nav-item gap-1" onSubmit={handleCreate}>
+                      <FolderKanban size={15} strokeWidth={1.75} className="shrink-0 text-ink-tertiary" />
+                      <input
+                        ref={newProjectInputRef}
+                        aria-label={`New product in ${category.label}`}
+                        placeholder="Product name"
+                        className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none placeholder:text-ink-tertiary"
+                        value={newProjectName}
+                        onChange={(event) => setNewProjectName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape" && !isSubmitting) {
+                            setIsAdding(false);
+                            setNewProjectName("");
+                            setCreateError("");
+                          }
+                        }}
+                        disabled={isSubmitting}
+                        autoFocus
+                      />
+                      <button type="submit" className="ui-btn-ghost h-5 w-5 shrink-0 px-0 disabled:opacity-40"
+                        disabled={isSubmitting || !newProjectName.trim()} aria-label="Create product" title="Create product">
+                        <Check size={12} />
+                      </button>
+                      <button type="button" className="ui-btn-ghost h-5 w-5 shrink-0 px-0"
+                        disabled={isSubmitting} aria-label="Cancel new product" title="Cancel"
+                        onClick={() => {
+                          setIsAdding(false);
+                          setNewProjectName("");
+                          setCreateError("");
+                        }}>
+                        <X size={12} />
+                      </button>
+                    </form>
+                  ) : null}
+                  {status === "ready" && !categoryProducts.length && !addingHere ? <div className="px-2 py-1.5 text-[11px] text-ink-tertiary">No products yet</div> : null}
                   {status === "ready"
             ? categoryProducts.map((project) => {
                 const active = pathname !== "/awi" && project.id === selectedProjectId;
@@ -758,7 +838,7 @@ export function SidebarWorkspacePanel({
           </div>;
         })}
 
-        {isAdding ? (
+        {isAdding && inlineCategory === null ? (
           <form className="mt-1 space-y-1" onSubmit={handleCreate}>
             <select className="ui-field-standalone h-7 w-full rounded-md px-2 text-[11px]" aria-label="Product category" value={newCategory} disabled={isSubmitting} onChange={(event) => setNewCategory(event.target.value as PortfolioCategory | "")}>
               <option value="">Uncategorized</option>
@@ -768,6 +848,8 @@ export function SidebarWorkspacePanel({
             <input
               className="ui-field-standalone h-7 min-w-0 flex-1 rounded-md px-2 text-[11px] font-normal"
               placeholder="Product name"
+              aria-label="Product name"
+              ref={newProjectInputRef}
               value={newProjectName}
               onChange={(event) => setNewProjectName(event.target.value)}
               disabled={isSubmitting}
@@ -803,6 +885,14 @@ export function SidebarWorkspacePanel({
         {createError ? <div className="mt-1 px-2 text-[10px] leading-snug text-danger">{createError}</div> : null}
         {deleteError ? <div className="mt-1 px-2 text-[10px] leading-snug text-danger">{deleteError}</div> : null}
       </NavSelectionTrack>
+
+      {draggedProductId && dragPointer ? createPortal(
+        <div aria-hidden="true" className="pointer-events-none fixed z-[100] flex max-w-64 items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-xs text-ink shadow-lg"
+          style={{ left: dragPointer.x + 12, top: dragPointer.y + 12 }}>
+          <FolderKanban size={15} className="shrink-0" />
+          <span className="truncate">{projects.find((project) => project.id === draggedProductId)?.name}</span>
+        </div>, document.body,
+      ) : null}
 
       <ThemedFeedbackLayer
         confirm={feedbackConfirm}

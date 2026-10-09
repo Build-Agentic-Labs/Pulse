@@ -131,6 +131,7 @@ function buildAwiMaster(projectId = PROJECT_ID, taskId = TASK_ID): AwiMaster {
     project_id: projectId,
     task_id: taskId,
     title: "Lifecycle AWI",
+    category: "",
     document_number: "AWI-LIFE-001",
     created_at: "2026-10-01T00:00:00.000Z",
     draft_updated_at: "2026-10-01T00:00:00.000Z",

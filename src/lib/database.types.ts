@@ -100,6 +100,7 @@ export type Database = {
       }
       awi_masters: {
         Row: {
+          category: string
           created_at: string
           document_number: string
           draft_updated_at: string
@@ -112,6 +113,7 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          category?: string
           created_at?: string
           document_number: string
           draft_updated_at?: string
@@ -124,6 +126,7 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          category?: string
           created_at?: string
           document_number?: string
           draft_updated_at?: string
@@ -4340,6 +4343,10 @@ export type Database = {
       }
     }
     Functions: {
+      update_awi_metadata: {
+        Args: { p_master_id: string; p_document_number: string; p_category: string; p_expected_number: string; p_expected_category: string }
+        Returns: undefined
+      }
       acquire_sop_submission_lock: {
         Args: { p_sop_id: string }
         Returns: string

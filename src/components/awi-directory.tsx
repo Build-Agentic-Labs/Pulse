@@ -8,6 +8,7 @@ import { awiDraftStatus, createAwiMaster, listAwiMasters, type AwiMaster } from 
 import type { PlannerProjectContext, WorkspaceProjectGroup } from "@/domain/types";
 import { AwiDirectoryShell } from "./awi-directory-shell";
 import { AwiDirectoryColumns, AwiDirectoryLoadingContent } from "./awi-directory-loading";
+import { groupAwiMasters } from "@/domain/awi-categories";
 
 export function AwiDirectory({ project, groups, workspaceId, initialMasters }: { project?: PlannerProjectContext; groups?: WorkspaceProjectGroup[]; workspaceId?: string; initialMasters?: AwiMaster[] }) {
   const router = useRouter();
@@ -65,11 +66,14 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
         {masters.length ? (
           <div className="mt-5">
             <AwiDirectoryColumns />
-            {masters.map((master) => <Link key={master.id} href={`/awi/${master.id}?view=procedure&task=${encodeURIComponent(master.task_id)}`}
+            {groupAwiMasters(masters).map((group) => <section key={group.category} aria-label={group.category}>
+              <h2 className="border-b border-line bg-surface-hover px-2 py-3 text-xs font-semibold">{group.category}<span className="ml-2 font-normal text-ink-tertiary">{group.masters.length}</span></h2>
+            {group.masters.map((master) => <Link key={master.id} href={`/awi/${master.id}?view=procedure&task=${encodeURIComponent(master.task_id)}`}
               className="grid grid-cols-[minmax(110px,0.5fr)_minmax(0,2fr)_minmax(100px,1fr)_24px] items-center gap-4 border-b border-line px-2 py-4 text-xs transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover">
               <span className="truncate font-mono text-ink-secondary">{master.document_number}</span><span className="truncate font-medium">{master.title}</span>
               <span className="text-ink-secondary">{awiDraftStatus(master)}</span><ArrowRight size={14} className="text-ink-tertiary" />
             </Link>)}
+            </section>)}
           </div>
         ) : <div className="flex min-h-64 flex-col items-center justify-center gap-3 text-center">
           <BookOpen size={24} strokeWidth={1.5} className="text-ink-tertiary" />

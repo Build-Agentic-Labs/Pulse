@@ -25,7 +25,7 @@ export const LETTER_TEMPLATE_STYLES = `
 .wil-summary { display:grid; grid-template-columns:1.05in 1fr; gap:8px; padding:9px 0; min-height:.5in; border-bottom:1px solid #96999b; }
 .wil-summary p { font-size:8.5pt; }
 .wil-safety { min-height:.58in; }
-.wil-preparation { display:grid; grid-template-columns:minmax(0, 2fr) minmax(0, 1fr); border-bottom:1px solid #737779; min-height:1.27in; }
+.wil-preparation { display:grid; grid-template-columns:minmax(0, 3fr) minmax(0, 2fr); border-bottom:1px solid #737779; min-height:1.27in; }
 .wil-preparation section { padding:8px 10px 8px 0; min-width:0; }
 .wil-preparation section:first-child { border-right:1px solid #96999b; }
 .wil-preparation section + section { padding-left:12px; padding-right:0; }
@@ -39,12 +39,12 @@ export const LETTER_TEMPLATE_STYLES = `
 .wil-preparation ul { margin:0; padding:0; list-style:none; font-size:8.5pt; }
 .wil-preparation li { min-height:19px; border-bottom:1px solid #e0e1e2; padding:2px 0; }
 .wil-steps { flex:1; min-height:0; display:grid; grid-template-rows:1fr 1fr; }
-.wil-step { display:grid; grid-template-columns:minmax(0, 2fr) minmax(0, 1fr); border-bottom:1px solid #96999b; min-height:0; }
+.wil-step { display:grid; grid-template-columns:minmax(0, 3fr) minmax(0, 2fr); border-bottom:1px solid #96999b; min-height:0; }
 .wil-image { display:flex; justify-content:center; align-items:center; color:#8a8e91; font-size:8pt; letter-spacing:.025em; border-right:1px solid #96999b; }
 .wil-step-body { padding:12px; display:flex; flex-direction:column; min-width:0; }
 .wil-step-heading { display:flex; align-items:center; gap:9px; }
-.wil-number { width:25px; height:25px; display:flex; align-items:center; justify-content:center; border:1px solid #737779; font-size:11pt; font-weight:700; flex:none; }
-.wil-instructions { flex:1; padding:12px 0; white-space:pre-wrap; font-size:10pt; line-height:1.5; }
+.wil-number { width:25px; height:25px; display:flex; align-items:center; justify-content:center; border:0; font-size:11pt; font-weight:700; flex:none; }
+.wil-instructions { flex:1; padding:12px 0 12px 34px; white-space:pre-wrap; font-size:10pt; line-height:1.5; }
 .wil-tools { border-top:1px solid #c3c5c6; min-height:.52in; padding-top:7px; }
 .wil-tools h3 { font-size:8pt; margin-bottom:4px; }
 .wil-tools p { font-size:8.5pt; }

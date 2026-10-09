@@ -197,3 +197,23 @@ describe("Photo-switch, pointer-cancel and draft-write audit",()=>{
   } finally {setItem.mockRestore();vi.useRealTimers();}
  });
 });
+
+describe("Recovery draft merge base",()=>{
+ beforeAll(stubResizeObserver);
+ it("records the latest incoming document as the draft base when a remote update lands mid-save",()=>{
+  vi.useFakeTimers();
+  try {
+   const taskId="draft-base-test";
+   const p={...props(),taskId};const {container,rerender,unmount}=render(<StepPhotoViewer {...p}/>);const overlay=prepareOverlay(container);expandToolbar();
+   fireEvent.pointerDown(container.querySelector(".ui-photo-annotation-item line[stroke='transparent']")!,{clientX:80,clientY:60,pointerId:1});
+   fireEvent.pointerMove(overlay,{clientX:160,clientY:120,pointerId:1});
+   fireEvent.pointerUp(overlay,{clientX:160,clientY:120,pointerId:1});
+   const remote={...arrow,id:"remote",x1:0.6,y1:0.6,x2:0.9,y2:0.9};
+   const updated={...marked,annotations:{version:2 as const,items:[arrow,remote]}};
+   rerender(<StepPhotoViewer {...p} photo={updated} photos={[updated,photos[1]]}/>);
+   act(()=>{vi.advanceTimersByTime(350);});
+   expect(readAnnotationDraft(taskId,marked.id)?.base.items.map((item)=>item.id)).toEqual(["a","remote"]);
+   unmount();
+  } finally {vi.useRealTimers();}
+ });
+});

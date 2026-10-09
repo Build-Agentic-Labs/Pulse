@@ -215,8 +215,8 @@ function annotationDocumentFromPhoto(photo: StepPhotoAttachment) {
 type PendingAnnotationSave = {
   photoId: string;
   items: PhotoAnnotation[];
-  /** Present when the save should also be recorded as a local recovery draft. */
-  draft?: { taskId: string; base: PhotoAnnotationDocument };
+  /** Present when the save should also be recorded as a local recovery draft for this task. */
+  draftTaskId?: string;
 };
 
 /** Size legacy text callouts saved without a height; null when nothing needs measuring. */
@@ -410,8 +410,9 @@ export function StepPhotoViewer({
       }
       // The recovery draft is written once per save (debounce, unload, unmount, photo switch)
       // rather than per pointermove, and always before the parent hears about the change.
-      if (pending.draft) {
-        writeAnnotationDraft(pending.draft.taskId, pending.photoId, pending.draft.base, {
+      // The base is the latest incoming document, exactly what the old per-move write used.
+      if (pending.draftTaskId !== undefined && pending.photoId === incomingRef.current.id) {
+        writeAnnotationDraft(pending.draftTaskId, pending.photoId, incomingRef.current.document, {
           version: PHOTO_ANNOTATION_VERSION, items: pending.items,
         });
       }
@@ -437,11 +438,7 @@ export function StepPhotoViewer({
         return;
       }
 
-      const previous = pendingSaveRef.current;
-      const draft = previous?.photoId === photo.id && previous.draft?.taskId === taskId
-        ? previous.draft
-        : { taskId, base: incomingRef.current.document };
-      pendingSaveRef.current = { photoId: photo.id, items: nextItems, draft };
+      pendingSaveRef.current = { photoId: photo.id, items: nextItems, draftTaskId: taskId };
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
       }
@@ -652,7 +649,7 @@ export function StepPhotoViewer({
       const pending = pendingSaveRef.current;
       if (pending?.photoId === photo.id) {
         pendingSaveRef.current = { ...pending, items: merged.items };
-        writeAnnotationDraft(taskId, photo.id, pending.draft?.base ?? incoming, merged);
+        writeAnnotationDraft(taskId, photo.id, incoming, merged);
       }
     }
   }, [incomingAnnotations, photo.id, taskId]);

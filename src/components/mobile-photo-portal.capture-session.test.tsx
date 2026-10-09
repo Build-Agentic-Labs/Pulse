@@ -130,6 +130,27 @@ describe("capture timer: start, stop and lap", () => {
     await act(async () => {});
     expect(saveMobileStepToSupabase).not.toHaveBeenCalled();
   });
+
+  it("stopping the timer while Save & start next lap is in flight does not re-arm a lap on the stopped timer", async () => {
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={state} />);
+    await openTask(/Alpha process 0 steps/);
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    await screen.findByRole("textbox", { name: "New step name" });
+    fireEvent.change(screen.getByRole("textbox", { name: "New step name" }), { target: { value: "Timed step" } });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved"));
+    startTimer();
+    let releaseSave: () => void = () => undefined;
+    vi.mocked(saveMobileStepToSupabase).mockImplementationOnce((_task, step) =>
+      new Promise((resolve) => { releaseSave = () => resolve({ ...step, version: 2 }); }));
+    fireEvent.click(screen.getByRole("button", { name: "Save & start next lap" }));
+    stopTimer();
+    expect(session().captureTimer).toMatchObject({ running: false, taskId: null, activeStepId: null });
+    await waitFor(() => expect(saveMobileStepToSupabase).toHaveBeenCalledTimes(2)); // the held Save & next write
+    await act(async () => { releaseSave(); });
+    await screen.findByPlaceholderText("New step 2");
+    // The stopped timer stays cleared: no step-bound lap on a timer that belongs to no task.
+    expect(session().captureTimer).toMatchObject({ running: false, taskId: null, activeStepId: null });
+  });
 });
 
 describe("capture timer: park on task switch and resume", () => {

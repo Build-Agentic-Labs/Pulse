@@ -5,7 +5,8 @@ import { emptyPlannerState } from "@/domain/empty-planner-state";
 import type { ManufacturingStep, PlannerState, Task } from "@/domain/types";
 import { mobileAuth } from "@/test-support/mobile-auth";
 import { MobilePhotoPortal } from "./mobile-photo-portal";
-import { deletePlannerTask, loadPlannerStateFromSupabase, loadTaskFromSupabase, subscribePlannerStateChanges, saveMobileStepToSupabase, saveTaskToSupabase } from "@/domain/supabase-planner";
+import type { StepPhotoAttachment } from "@/domain/step-photos";
+import { deletePlannerTask, loadPlannerStateFromSupabase, loadTaskFromSupabase, subscribePlannerStateChanges, saveMobileStepToSupabase, saveTaskToSupabase, uploadStepPhotoAttachment } from "@/domain/supabase-planner";
 
 vi.mock("@/components/app-flow-panels", () => ({ AppLoadingShell: () => <div>Loading</div> }));
 vi.mock("@/domain/supabase-planner", async (original) => ({
@@ -19,6 +20,12 @@ vi.mock("@/domain/supabase-planner", async (original) => ({
   syncStepToolsForStepToSupabase: vi.fn(async () => undefined),
   saveTaskToSupabase: vi.fn(),
   deletePlannerTask: vi.fn(async () => undefined),
+  uploadStepPhotoAttachment: vi.fn(),
+}));
+vi.mock("./mobile-photo-portal/photo-preparation", () => ({
+  buildPhotoAttachment: vi.fn(async (file: File): Promise<StepPhotoAttachment> => ({
+    id: `local-${file.name}`, name: file.name, dataUrl: "data:image/jpeg;base64,AA", capturedAt: "2026-10-01T10:00:00Z",
+  })),
 }));
 const task: Task = {
   id: "task-test", scenarioId: "scenario-empty", stationId: "", wbs: "1", rowType: "task", name: "Test process",
@@ -148,5 +155,33 @@ describe("phone step authoring", () => {
     await screen.findByText("Process save failed");
     expect(screen.queryByRole("button", { name: /Unsaved process 0 steps/ })).toBeNull();
     expect(screen.getByPlaceholderText("Process name")).toBeTruthy();
+  });
+  it("rolls back a failed photo batch only after every upload in it has settled", async () => {
+    const existingStep: ManufacturingStep = { id: "step-1", sequence: 1, name: "Bracket", instruction: "", durationMinutes: 5 } as ManufacturingStep;
+    const stepState: PlannerState = { ...state, tasks: [{ ...task, manufacturingSteps: [existingStep] }] };
+    vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(stepState);
+    let resolveSecond: (photo: StepPhotoAttachment) => void = () => undefined;
+    vi.mocked(uploadStepPhotoAttachment)
+      .mockRejectedValueOnce(new Error("Upload failed"))
+      .mockImplementationOnce((_taskId, _stepId, photo) => new Promise((resolve) => { resolveSecond = () => resolve({ ...photo, storagePath: "p/2.jpg" }); }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={stepState} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Test process 1 steps?/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand step 1" }));
+    const upload = screen.getByText("Upload").closest("label")!.querySelector("input") as HTMLInputElement;
+    const files = [new File(["a"], "a.jpg", { type: "image/jpeg" }), new File(["b"], "b.jpg", { type: "image/jpeg" })];
+    await act(async () => { fireEvent.change(upload, { target: { files } }); });
+    await waitFor(() => expect(uploadStepPhotoAttachment).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+    // The second upload is still in flight: the batch has not settled, so nothing is rolled back yet
+    // and the write lock is still held.
+    expect(screen.getByText("Photos · 2")).toBeInTheDocument();
+    expect(screen.getByRole("status").textContent).toBe("Saving…");
+    expect(screen.queryByText("Upload failed")).toBeNull();
+    await act(async () => { resolveSecond({} as StepPhotoAttachment); });
+    await screen.findByText("Upload failed");
+    // Existing rollback semantics: the whole failed batch is removed locally, once, after settling;
+    // the no-retry policy holds (no re-upload).
+    expect(screen.getByText("Photos · 0")).toBeInTheDocument();
+    expect(uploadStepPhotoAttachment).toHaveBeenCalledTimes(2);
   });
 });

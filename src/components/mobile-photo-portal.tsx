@@ -41,6 +41,7 @@ import { EMPTY_CAPTURE_TIMER, buildMobileCaptureSessionSnapshot, collectHeaderCa
 import { loadMobileNewStepRecoveryDraft, isMobileRecoveryPayload, type MobileNewStepDraftRecord, createMobileRecoveryDraftStore, type ScopedRecoveryDraft, recoveryDraftKey } from "@/components/mobile-photo-portal/recovery-draft-store";
 
 import { buildPhotoAttachment } from "./mobile-photo-portal/photo-preparation";
+import { settleWriteBatch } from "@/domain/workspace-save-status";
 
 import { LegacyDraftReview } from "./mobile-photo-portal/legacy-draft-review";
 
@@ -1442,7 +1443,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
         if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
         failedDraftToolSyncRef.current.delete(stepId);
       }
-      const uploadedPhotos = await Promise.all(
+      const uploadedPhotos = await settleWriteBatch(
         snapshot.photos.map((photo) => {
           if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
           return uploadStepPhotoAttachment(taskId, stepId, photo, activeProjectContext, assertCaptureCurrent);
@@ -1897,7 +1898,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
       localPhotos = await Promise.all(files.map(buildPhotoAttachment));
       updateLocalTask(taskId, (task) => upsertStepPhotoAttachments(task, stepId, localPhotos));
 
-      const uploadedPhotos = await Promise.all(
+      const uploadedPhotos = await settleWriteBatch(
         localPhotos.map((photo) => uploadStepPhotoAttachment(taskId, stepId, photo, activeProjectContext)),
       );
       updateLocalTask(taskId, (task) => upsertStepPhotoAttachments(task, stepId, uploadedPhotos));
@@ -2033,7 +2034,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
             if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
             failedDraftToolSyncRef.current.delete(stepId);
           }
-          const photos = await Promise.all(getStepPhotoAttachments(task, stepId).map((photo) => uploadStepPhotoAttachment(task.id, stepId, photo, activeProjectContext, assertCaptureCurrent)));
+          const photos = await settleWriteBatch(getStepPhotoAttachments(task, stepId).map((photo) => uploadStepPhotoAttachment(task.id, stepId, photo, activeProjectContext, assertCaptureCurrent)));
           if (!isEditorCurrent()) throw new Error("Capture account changed; draft retained.");
           updateLocalTask(task.id, (current) => upsertStepPhotoAttachments({ ...current, manufacturingSteps: current.manufacturingSteps?.map((local) => local.id === stepId ? { ...local, version: savedStep.version, sequence: savedStep.sequence } : local) }, stepId, photos));
           failedDraftPatchesRef.current.delete(stepId);
@@ -2689,7 +2690,9 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
         const nextStepId = taskId ? buildNewStepId(taskId) : null;
         resetNewStepDraft("5", nextStepId);
         setShowNewStepForm(true);
-        if (captureTimer.running) advanceCaptureTimerLap(nextStepId);
+        // Read the live timer: it may have been stopped while this save was in flight.
+        const liveTimer = captureTimerRef.current;
+        if (liveTimer.running && liveTimer.taskId === taskId) advanceCaptureTimerLap(nextStepId);
       }),
     });
   }

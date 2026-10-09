@@ -37,3 +37,7 @@ The initial inventory's literal role scan missed conditional document-preview ma
 [Before/after gallery](comparison.html) contains eleven pairs. It distinguishes real local SOP screens from synthetic fixtures. The modal rollout has representative screenshots, not one capture for every migrated caller. Similar-looking pairs demonstrate preserved visuals; keyboard focus, Escape layering and request counters provide the behavior evidence.
 
 Temporary app fixture routes were removed; their source is saved as text beside this report. No test route ships in the build. Changes remain uncommitted on codex/ui-component-audit, with no merge, push or deployment.
+
+## Integration validation
+
+On October 9, this branch was integrated with main's Product module access change (87ce032). The AWI import conflict was resolved by preserving both effectiveProductAccess and ModalSurface; access rules were retained. The combined full suite passed 301 files / 2,488 tests. The earlier uncommitted status above records the audit checkpoint before the user authorized publication.

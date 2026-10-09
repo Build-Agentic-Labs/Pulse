@@ -16,6 +16,9 @@ insert into public.workspace_members (workspace_id, user_id, role) values
   ('ws_project_create', 'f1000000-0000-0000-0000-000000000001', 'editor'),
   ('ws_project_create', 'f1000000-0000-0000-0000-000000000002', 'viewer');
 
+insert into public.product_module_access(workspace_id,user_id,level) values
+('ws_project_create','f1000000-0000-0000-0000-000000000001','edit'),
+('ws_project_create','f1000000-0000-0000-0000-000000000002','view');
 create or replace function test_as(p_uid text) returns void language plpgsql as $$
 begin
   perform set_config('request.jwt.claims', json_build_object('sub', p_uid, 'role', 'authenticated')::text, true);
@@ -64,16 +67,7 @@ select is(
   'the transaction creates the four standard document types'
 );
 
-select is(
-  (select pa.level::text
-   from public.project_access pa
-   join public.projects p on p.id = pa.project_id
-   where p.workspace_id = 'ws_project_create'
-     and p.name = 'Prep Accessories'
-     and pa.user_id = 'f1000000-0000-0000-0000-000000000001'),
-  'edit',
-  'the creator receives edit access before project-scoped rows are inserted'
-);
+select is(public.product_access_level('ws_project_create'),'edit'::public.access_level,'module grant supplies authoring access');
 
 select is(
   (select pr.net_available_minutes::numeric

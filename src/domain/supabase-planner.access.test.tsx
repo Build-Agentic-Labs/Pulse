@@ -112,7 +112,7 @@ describe("project context (via project creation)", () => {
   const project = { id: "proj-1", workspace_id: "ws-1", name: "FlexBoost", is_awi_master: false };
   const workspace = { id: "ws-1", name: "ANA" };
 
-  function contextClient(options: { member?: unknown; superAdmin?: boolean; projectAccess?: ScriptedReply; userId?: string | null } = {}) {
+  function contextClient(options: { member?: unknown; superAdmin?: boolean; productAccess?: ScriptedReply; userId?: string | null } = {}) {
     return createRecordingSupabase({
       userId: options.userId === undefined ? "user-1" : options.userId,
       reply: (r) => {
@@ -121,7 +121,7 @@ describe("project context (via project creation)", () => {
         if (r.target === "workspaces") return { data: workspace };
         if (r.target === "workspace_members") return { data: options.member ?? null };
         if (r.target === "is_super_admin") return { data: options.superAdmin ?? false };
-        if (r.target === "project_access") return options.projectAccess ?? { data: null };
+        if (r.target === "product_access_level") return options.productAccess ?? { data: null };
         return undefined;
       },
     });
@@ -159,28 +159,26 @@ describe("project context (via project creation)", () => {
     expect(superDb.lines().some((line) => line.startsWith("project_access"))).toBe(false);
   });
 
-  it("maps a non-manager's per-project level onto role gating", async () => {
-    for (const [level, role] of [["edit", "editor"], ["view", "viewer"], ["none", undefined]] as const) {
-      const db = contextClient({ member: { role: "editor" }, projectAccess: { data: { level } } });
+  it("maps a non-manager's Product level onto role gating", async () => {
+    for (const [level, role] of [["edit", "editor"], ["view", "viewer"]] as const) {
+      const db = contextClient({ member: { role: "editor" }, productAccess: { data: level } });
       const context = await createProjectWithStarterPlan("ws-1", "X", asClient(db.client));
       expect(context).toMatchObject({ accessLevel: level });
       expect(context.role).toBe(role);
-      expect(db.lines().at(-1)).toBe("project_access.select(level) project_id=proj-1 user_id=user-1 | maybeSingle");
+      expect(db.lines().at(-1)).toBe("rpc:product_access_level");
     }
   });
 
-  it("falls back to the legacy workspace role before the access table exists", async () => {
-    const db = contextClient({ member: { role: "viewer" }, projectAccess: { error: { message: "missing", code: "PGRST205" } } });
-    const context = await createProjectWithStarterPlan("ws-1", "X", asClient(db.client));
-    expect(context.role).toBe("viewer");
-    expect(context.accessLevel).toBeUndefined();
+  it("fails closed when Product permission cannot be loaded", async () => {
+    const db = contextClient({ member: { role: "viewer" }, productAccess: { error: { message: "missing", code: "PGRST202" } } });
+    await expect(createProjectWithStarterPlan("ws-1", "X", asClient(db.client))).rejects.toThrow("missing");
   });
 
-  it("skips the membership and per-project reads when signed out", async () => {
-    const db = contextClient({ userId: null });
-    const context = await createProjectWithStarterPlan("ws-1", "X", asClient(db.client));
-    expect(context).toMatchObject({ role: undefined, accessLevel: undefined });
-    expect(db.lines().filter((line) => line.startsWith("workspace_members") || line.startsWith("project_access"))).toEqual([]);
+  it("rejects signed-out and no-access callers even if a stale project row is returned", async () => {
+    for (const userId of [null, "user-1"]) {
+      const db = contextClient({ userId, productAccess: { data: "none" } });
+      await expect(createProjectWithStarterPlan("ws-1", "X", asClient(db.client))).rejects.toThrow("Product access is required");
+    }
   });
 
   it("names the missing project or organization", async () => {

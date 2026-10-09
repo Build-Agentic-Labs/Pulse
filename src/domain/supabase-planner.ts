@@ -41,6 +41,8 @@ export type { ToolLibraryItem } from "@/lib/planner/tool-store";
 export {
   fetchIsSuperAdmin,
   fetchOrgToolAccess,
+  fetchProductAccess,
+  setProductAccessInSupabase,
   loadAuditLogFromSupabase,
   setProjectAccessInSupabase,
   setOrgToolAccessInSupabase,

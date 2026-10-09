@@ -33,6 +33,7 @@ test('a zero-zone product with a saved Unzoned station keeps saving product and 
   if (error) throw error;
   const user = data.user.id;
   await db.query('insert into workspace_members(workspace_id,user_id,role) values($1,$2,$3) on conflict(workspace_id,user_id) do update set role=excluded.role', [workspace, user, 'editor']);
+  await db.query("insert into product_module_access(workspace_id,user_id,level) values($1,$2,'edit')", [workspace, user]);
   const auth = createServerClient(api, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       getAll: () => [],

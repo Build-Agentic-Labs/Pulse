@@ -66,6 +66,7 @@ export interface MemberAccess {
   // projectId -> level (absent = "none")
   projectLevels: Record<string, AccessLevel>;
   orgTools: AccessLevel;
+  productAccess?: AccessLevel;
 }
 
 export interface ManufacturingStep {
@@ -150,6 +151,7 @@ export interface WorkspaceAccessGrant {
   email: string;
   role: WorkspaceRole;
   qualityAccess: AccessLevel;
+  productAccess?: AccessLevel;
   accessPackage: string;
   planningAccess: boolean;
   projectAccess: Array<{ projectId: string; level: Exclude<AccessLevel, "none"> }>;
@@ -198,6 +200,7 @@ export interface WorkspaceProjectGroup {
   workspace: Workspace;
   role: WorkspaceRole;
   isSuperAdmin?: boolean;
+  productAccess?: AccessLevel;
   projects: Project[];
 }
 

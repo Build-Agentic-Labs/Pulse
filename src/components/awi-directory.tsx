@@ -1,6 +1,7 @@
 "use client";
 
 import { ModalSurface } from "@/components/ui/modal-surface";
+import { effectiveProductAccess } from "@/domain/product-access";
 
 import { BookOpen, Plus, ArrowRight, X } from "lucide-react";
 import { useState, useEffect, useRef, type FormEvent } from "react";
@@ -22,7 +23,7 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const listWorkspaceRef = useRef(workspaceId);
-  const canCreate = groups?.some((group) => group.workspace.id === workspaceId && ["owner", "admin", "editor"].includes(group.role));
+  const canCreate = groups?.some((group) => group.workspace.id === workspaceId && effectiveProductAccess(group) === "edit");
   useEffect(() => {
     const workspaceChanged = listWorkspaceRef.current !== workspaceId;
     listWorkspaceRef.current = workspaceId;
@@ -57,7 +58,7 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
       router.push(`/awi/${master.id}?view=procedure&task=${encodeURIComponent(master.task_id)}`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to create AWI."); setPending(false); }
   }
-  return <AwiDirectoryShell project={project} groups={groups} loading={loading}>
+  return <AwiDirectoryShell project={project} groups={groups} workspaceId={workspaceId} loading={loading}>
         {loading ? <AwiDirectoryLoadingContent /> : <>
         <div className="flex items-start justify-between gap-4 border-b border-line pb-5">
           <div><h1 className="ui-section-title">AWI Master List</h1>
@@ -79,8 +80,8 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
           </div>
         ) : <div className="flex min-h-64 flex-col items-center justify-center gap-3 text-center">
           <BookOpen size={24} strokeWidth={1.5} className="text-ink-tertiary" />
-          <p className="text-sm font-medium">Create your first master AWI</p>
-          <p className="max-w-sm text-xs leading-relaxed text-ink-secondary">Add an instruction to open the full procedure builder. Your work is saved as a draft until you publish it.</p>
+          <p className="text-sm font-medium">{canCreate ? "Create your first master AWI" : "No master AWIs yet"}</p>
+          <p className="max-w-sm text-xs leading-relaxed text-ink-secondary">{canCreate ? "Add an instruction to open the full procedure builder. Your work is saved as a draft until you publish it." : "Instructions created by your team will appear here."}</p>
         </div>}
         {adding ? <ModalSurface labelledBy="new-awi-title" onCancel={() => { if (!pending) setAdding(false); }}><div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 p-4" role="presentation">
           <form onSubmit={create} className="w-full max-w-md rounded-xl border border-line bg-surface-raised p-6 shadow-lg"   >

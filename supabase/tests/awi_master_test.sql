@@ -11,6 +11,10 @@ insert into public.workspace_members(workspace_id,user_id,role) values
  ('ws_awi_ci','a7100000-0000-0000-0000-000000000001','editor'),
  ('ws_awi_ci','a7100000-0000-0000-0000-000000000002','editor'),
  ('ws_awi_ci','a7100000-0000-0000-0000-000000000003','viewer');
+insert into public.product_module_access(workspace_id,user_id,level) values
+('ws_awi_ci','a7100000-0000-0000-0000-000000000001','edit'),
+('ws_awi_ci','a7100000-0000-0000-0000-000000000002','edit'),
+('ws_awi_ci','a7100000-0000-0000-0000-000000000003','view');
 create or replace function test_as(p_uid text) returns void language plpgsql as $$
 begin
  perform set_config('request.jwt.claims',json_build_object('sub',p_uid,'role','authenticated')::text,true);
@@ -33,9 +37,9 @@ update public.manufacturing_steps set instruction='New draft' where task_id=(sel
 select ok((select draft_updated_at>published_at from public.awi_masters where workspace_id='ws_awi_ci'),'later changes remain a draft');
 select is((select r.content->>'instruction' from public.work_instruction_releases r join public.awi_masters m on m.published_release_id=r.id where m.workspace_id='ws_awi_ci'),'Original instruction','published copy does not change with the draft');
 select test_as('a7100000-0000-0000-0000-000000000002');
-select is((select count(*) from public.awi_masters where workspace_id='ws_awi_ci'),0::bigint,'other editor cannot read a private source without project access');
+select is((select count(*) from public.awi_masters where workspace_id='ws_awi_ci'),1::bigint,'another Product editor sees the shared master');
 select lives_ok($$select public.create_awi_master('ws_awi_ci','Other install','')$$,'second editor creates despite hidden first master');
-select is((select document_number from public.awi_masters where workspace_id='ws_awi_ci'),'AWI-0002','number allocation includes hidden masters');
+select is((select document_number from public.awi_masters where workspace_id='ws_awi_ci' and title='Other install'),'AWI-0002','number allocation includes hidden masters');
 select test_as('a7100000-0000-0000-0000-000000000003');
 select throws_ok($$select public.create_awi_master('ws_awi_ci','Viewer install','')$$,'P0001','You do not have permission to create AWIs in this organization.','viewer cannot create a master');
 select ok(not has_table_privilege('authenticated','public.sop_approver_delivery_payloads','SELECT'),'seed preserves private delivery payload revokes');

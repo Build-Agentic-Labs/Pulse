@@ -13,5 +13,5 @@ export default async function MobilePhotosPage({ searchParams }: { searchParams:
     const { groups, plannerState } = await fetchInitialPlannerData(project);
     return <MobilePhotoRouteShell projectId={project} initialGroups={groups} initialPlannerState={plannerState} />;
   }
-  return <MobilePhotoRouteShell initialGroups={await fetchInitialWorkspaceGroups()} />;
+  return <MobilePhotoRouteShell initialGroups={await fetchInitialWorkspaceGroups("product")} />;
 }

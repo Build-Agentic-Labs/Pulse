@@ -16,7 +16,7 @@ import {
   loadWorkspaceProjectGroups,
   removeWorkspaceMemberInSupabase,
   setOrgToolAccessInSupabase,
-  setProjectAccessInSupabase,
+  setProductAccessInSupabase,
   updateWorkspaceMemberRoleInSupabase,
   upsertWorkspaceAccessGrantInSupabase,
 } from "@/domain/supabase-planner";
@@ -168,18 +168,13 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.workspaceId]);
 
-  async function changeProjectAccess(projectId: string, userId: string, level: AccessLevel) {
-    setMembers((current) =>
-      current.map((member) =>
-        member.userId === userId
-          ? { ...member, projectLevels: { ...member.projectLevels, [projectId]: level } }
-          : member,
-      ),
-    );
+  async function changeProductAccess(userId: string, level: AccessLevel) {
+    if (!workspaceId) return;
+    setMembers((current) => current.map((member) => member.userId === userId ? { ...member, productAccess: level } : member));
     try {
-      await setProjectAccessInSupabase(projectId, userId, level);
+      await setProductAccessInSupabase(workspaceId, userId, level);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to update access.");
+      setMessage(error instanceof Error ? error.message : "Unable to update Product access.");
       await load();
     }
   }
@@ -538,7 +533,7 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
           description={
             isManagerRole(selected.role)
               ? "Owners and admins automatically have full module and project access."
-              : "Set this Member's module and project access. SOP workflow duties remain department-specific."
+              : "Set this Member's module access. Product covers all products and AWIs; SOP workflow duties remain department-specific."
           }
         >
           <Row label="Organization role" description={ROLE_DESCRIPTIONS[selected.role]}>
@@ -581,17 +576,11 @@ export function WorkspaceMembersSettings({ project }: { project?: PlannerProject
             </div>
           ) : (
             <>
-              {projects.map((proj) => (
-                <Row key={proj.id} label={proj.name}>
-                  <ThemedSelect
-                    triggerClassName="h-9 px-3"
-                    value={selected.projectLevels[proj.id] ?? "none"}
-                    options={accessLevelOptions}
-                    onChange={(value) => void changeProjectAccess(proj.id, selected.userId, value as AccessLevel)}
-                    disabled={isSubmitting}
-                  />
-                </Row>
-              ))}
+              <Row label="Product" description="All products, sections and AWI instructions in this organization">
+                <ThemedSelect triggerClassName="h-9 px-3" ariaLabel="Product access"
+                  value={selected.productAccess ?? "none"} options={accessLevelOptions}
+                  onChange={(value) => void changeProductAccess(selected.userId, value as AccessLevel)} disabled={isSubmitting} />
+              </Row>
               <Row label="Quality Module" description="SOPs, reviews and controlled documents">
                 <ThemedSelect
                   triggerClassName="h-9 px-3"

@@ -1095,6 +1095,41 @@ export type Database = {
           },
         ]
       }
+      product_module_access: {
+        Row: {
+          created_at: string
+          granted_by: string | null
+          level: Database["public"]["Enums"]["access_level"]
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          granted_by?: string | null
+          level?: Database["public"]["Enums"]["access_level"]
+          updated_at?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          granted_by?: string | null
+          level?: Database["public"]["Enums"]["access_level"]
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_module_access_workspace_id_user_id_fkey"
+            columns: ["workspace_id", "user_id"]
+            isOneToOne: true
+            referencedRelation: "workspace_members"
+            referencedColumns: ["workspace_id", "user_id"]
+          },
+        ]
+      }
       products: {
         Row: {
           active_takt_minutes: number
@@ -3945,6 +3980,7 @@ export type Database = {
           granted_by: string | null
           modules: string[] | null
           planning_access: boolean
+          product_access: Database["public"]["Enums"]["access_level"]
           project_access: Json
           quality_access: Database["public"]["Enums"]["access_level"]
           redeemed_at: string | null
@@ -3962,6 +3998,7 @@ export type Database = {
           granted_by?: string | null
           modules?: string[] | null
           planning_access?: boolean
+          product_access?: Database["public"]["Enums"]["access_level"]
           project_access?: Json
           quality_access?: Database["public"]["Enums"]["access_level"]
           redeemed_at?: string | null
@@ -3979,6 +4016,7 @@ export type Database = {
           granted_by?: string | null
           modules?: string[] | null
           planning_access?: boolean
+          product_access?: Database["public"]["Enums"]["access_level"]
           project_access?: Json
           quality_access?: Database["public"]["Enums"]["access_level"]
           redeemed_at?: string | null
@@ -4343,10 +4381,6 @@ export type Database = {
       }
     }
     Functions: {
-      update_awi_metadata: {
-        Args: { p_master_id: string; p_document_number: string; p_category: string; p_expected_number: string; p_expected_category: string }
-        Returns: undefined
-      }
       acquire_sop_submission_lock: {
         Args: { p_sop_id: string }
         Returns: string
@@ -4468,6 +4502,20 @@ export type Database = {
         }
         Returns: boolean
       }
+      has_product_access: {
+        Args: {
+          min_level: Database["public"]["Enums"]["access_level"]
+          p_workspace_id: string
+        }
+        Returns: boolean
+      }
+      has_product_project_access: {
+        Args: {
+          min_level: Database["public"]["Enums"]["access_level"]
+          target_project_id: string
+        }
+        Returns: boolean
+      }
       has_project_access: {
         Args: {
           min_level: Database["public"]["Enums"]["access_level"]
@@ -4555,6 +4603,10 @@ export type Database = {
       prepare_quality_wi_conversion: {
         Args: { p_id: string; p_payload: Json }
         Returns: undefined
+      }
+      product_access_level: {
+        Args: { p_workspace_id: string }
+        Returns: Database["public"]["Enums"]["access_level"]
       }
       product_project_id: {
         Args: { target_product_id: string }
@@ -4718,6 +4770,16 @@ export type Database = {
       }
       task_project_id: { Args: { target_task_id: string }; Returns: string }
       task_workspace_id: { Args: { target_task_id: string }; Returns: string }
+      update_awi_metadata: {
+        Args: {
+          p_category: string
+          p_document_number: string
+          p_expected_category: string
+          p_expected_number: string
+          p_master_id: string
+        }
+        Returns: undefined
+      }
       work_instruction_revision_letter: {
         Args: { p_index: number }
         Returns: string
@@ -4769,7 +4831,7 @@ export type Database = {
         | "status"
         | "rating"
         | "risk_score"
-      demand_period: "shift" | "day" | "week" | "month" | "custom" | "year"
+      demand_period: "shift" | "day" | "week" | "month" | "year" | "custom"
       department_sop_role: "author" | "reviewer" | "approver"
       dependency_type:
         | "finish_to_start"
@@ -4827,12 +4889,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
+  TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never) = never,
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4856,11 +4918,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
+  TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never) = never,
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4881,11 +4943,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
+  TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never) = never,
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4906,11 +4968,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never) = never,
+    : never = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4923,11 +4985,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never) = never,
+    : never = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -4983,7 +5045,7 @@ export const Constants = {
         "rating",
         "risk_score",
       ],
-      demand_period: ["shift", "day", "week", "month", "custom", "year"],
+      demand_period: ["shift", "day", "week", "month", "year", "custom"],
       department_sop_role: ["author", "reviewer", "approver"],
       dependency_type: [
         "finish_to_start",

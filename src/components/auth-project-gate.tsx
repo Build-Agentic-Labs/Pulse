@@ -1,5 +1,8 @@
 "use client";
 
+import { effectiveProductAccess, productAuthorRole } from "@/domain/product-access";
+import { clearCachedPlannerState } from "@/lib/planner-state-cache";
+
 import type { Session } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -25,6 +28,7 @@ export type DashboardHomeContext = {
 };
 
 type AuthProjectGateProps = {
+  directoryScope?: "project" | "product";
   children: (project: PlannerProjectContext | undefined, onReady: () => void) => ReactNode;
   projectId?: string;
   routeKind?: ProjectRouteKind;
@@ -34,11 +38,8 @@ type AuthProjectGateProps = {
    */
   renderHome?: (home: DashboardHomeContext) => ReactNode;
   /**
-   * Server-fetched workspace groups (refactor plan, Stage 5): authoritative
-   * first paint through the same slot the localStorage cache-then-revalidate
-   * uses, so the shell renders content on the first frame. The session resolve
-   * and the client bootstrap (including its writes) still run and background-
-   * refresh as before.
+   * Authenticated server-fetched groups supply the first paint. Session
+   * resolution and client membership bootstrap still revalidate access.
    */
   initialGroups?: WorkspaceProjectGroup[];
   /** Destination-shaped fallback used while auth and workspace access resolve. */
@@ -46,7 +47,6 @@ type AuthProjectGateProps = {
 };
 
 const LAST_PROJECT_STORAGE_KEY = "pulse:last-project-id";
-const WORKSPACE_GROUPS_CACHE_KEY = "pulse:workspace-groups-cache-v1";
 const WORKSPACE_LOADING_TITLE = "Loading organization";
 const PROJECT_SWITCH_SESSION_KEY = "pulse:project-switch-started-at";
 const PROJECT_SWITCH_TARGET_SESSION_KEY = "pulse:project-switch-target-v1";
@@ -98,7 +98,7 @@ function buildProjectContext(groups: WorkspaceProjectGroup[], projectId: string)
         projectName: project.name,
         workspaceId: group.workspace.id,
         workspaceName: group.workspace.name,
-        role: group.role,
+        role: group.productAccess === undefined ? group.role : productAuthorRole(group),
         // Per-project level for view-only gating; managers always edit.
         accessLevel:
           group.isSuperAdmin || group.role === "owner" || group.role === "admin" ? "edit" : project.accessLevel,
@@ -164,47 +164,6 @@ function hasLocalSupabaseSession() {
   }
 }
 
-function readWorkspaceGroupsCache(): WorkspaceProjectGroup[] {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const raw = window.localStorage.getItem(WORKSPACE_GROUPS_CACHE_KEY);
-    if (!raw) {
-      return [];
-    }
-
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as WorkspaceProjectGroup[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeWorkspaceGroupsCache(groups: WorkspaceProjectGroup[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(WORKSPACE_GROUPS_CACHE_KEY, JSON.stringify(groups));
-  } catch {
-    // Ignore storage failures in private browsing.
-  }
-}
-
-function clearWorkspaceGroupsCache() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(WORKSPACE_GROUPS_CACHE_KEY);
-  } catch {
-    // Ignore storage failures in private browsing.
-  }
-}
 
 function fallbackProjectContext(projectId: string): PlannerProjectContext {
   return {
@@ -225,6 +184,7 @@ function resolveDisplayName(session: Session | null): string {
 
 export function AuthProjectGate({
   children,
+  directoryScope = "product",
   projectId,
   routeKind = "planner",
   renderHome,
@@ -235,13 +195,22 @@ export function AuthProjectGate({
   const supabase = useMemo(() => createPlannerSupabaseClient(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
-  // Server-seeded groups take the same fast-paint path as the localStorage cache
-  // below (hasCachedPaint) — but they are authoritative rather than possibly stale.
+  // Seed the first paint from this request's authenticated server read.
   const seededFromServer = (initialGroups?.length ?? 0) > 0;
   const [groups, setGroups] = useState<WorkspaceProjectGroup[]>(initialGroups ?? []);
   const [status, setStatus] = useState<"loading" | "ready" | "auth" | "error">(
     seededFromServer ? "ready" : "loading",
   );
+  const previousGroups = useRef<WorkspaceProjectGroup[]>([]);
+  useEffect(() => {
+    if (directoryScope === "product") {
+      const nextAccess = new Map(groups.flatMap((group) => group.projects.map((project) => [project.id, project.accessLevel])));
+      for (const group of previousGroups.current) for (const project of group.projects) {
+        if (!nextAccess.has(project.id) || nextAccess.get(project.id) !== project.accessLevel) void clearCachedPlannerState(project.id);
+      }
+    }
+    previousGroups.current = groups;
+  }, [groups, directoryScope]);
   const [message, setMessage] = useState("");
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [inviteSetupMode, setInviteSetupMode] = useState(false);
@@ -270,7 +239,7 @@ export function AuthProjectGate({
         .map((project) => ({
           project,
           workspace: group.workspace,
-          role: group.role,
+          role: group.productAccess === undefined ? group.role : productAuthorRole(group),
         })),
     ),
     [groups],
@@ -281,7 +250,7 @@ export function AuthProjectGate({
       if (!nextSession) {
         setGroups([]);
         setStatus("auth");
-        clearWorkspaceGroupsCache();
+        void clearCachedPlannerState();
         return;
       }
 
@@ -292,16 +261,16 @@ export function AuthProjectGate({
       setMessage("");
 
       try {
-        const nextGroups = await ensureDefaultWorkspaceMembership();
+        const nextGroups = await ensureDefaultWorkspaceMembership(undefined, directoryScope);
         setGroups(nextGroups);
-        writeWorkspaceGroupsCache(nextGroups);
+
         setStatus("ready");
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Unable to load organization workspaces.");
         setStatus("error");
       }
     },
-    [projectId],
+    [projectId, directoryScope],
   );
 
   // An admin may change this user's role or project access from another session. RLS enforces
@@ -309,15 +278,13 @@ export function AuthProjectGate({
   // Silent: no loading shell, a failed read keeps the current groups, and an unchanged result
   // keeps the current object so the open workspace does not re-render.
   const refreshAccessInBackground = useCallback(async () => {
-    const nextGroups = await ensureDefaultWorkspaceMembership();
+    const nextGroups = await ensureDefaultWorkspaceMembership(undefined, directoryScope);
     setGroups((current) => (sameSnapshot(current, nextGroups) ? current : nextGroups));
-    writeWorkspaceGroupsCache(nextGroups);
-  }, []);
+
+  }, [directoryScope]);
   useRefreshOnReturn(refreshAccessInBackground, status === "ready" && session !== null);
 
-  // Cache-then-revalidate (same pattern as the sidebar's project cache): paint the last
-  // known workspace groups immediately while the session resolve + fresh load below run.
-  // Runs before the session effect so the cached paint lands on the first client frame.
+  // Show sign-in immediately when there is no persisted session or callback.
   useEffect(() => {
     if (!hasLocalSupabaseSession()) {
       // No persisted session in this browser: the async resolve below is guaranteed to
@@ -334,11 +301,6 @@ export function AuthProjectGate({
       return;
     }
 
-    const cached = readWorkspaceGroupsCache();
-    if (cached.length > 0) {
-      setGroups((current) => (current.length > 0 ? current : cached));
-      setStatus((current) => (current === "loading" ? "ready" : current));
-    }
   }, []);
 
   useEffect(() => {
@@ -437,9 +399,8 @@ export function AuthProjectGate({
     return <>{children(fallbackProjectContext(projectId), () => setChildReady(true))}</>;
   }
 
-  // While the session is still resolving, cached groups (guarded on a persisted local
-  // session) are good enough to paint with — the resolve lands right after and either
-  // confirms via the background refresh or drops to the auth panel.
+  // Server-seeded groups can paint while the browser session resolves. The
+  // background refresh confirms current access or returns to the auth panel.
   const hasCachedPaint = status === "ready" && groups.length > 0;
 
   if (!sessionReady && !hasCachedPaint) {
@@ -523,7 +484,7 @@ export function AuthProjectGate({
     // Members who can create a project get the app shell (it has the create flow).
     // Viewers with no project grants get an explanation instead of an empty planner.
     const canCreateProjects = groups.some(
-      (group) => group.isSuperAdmin || group.role === "owner" || group.role === "admin" || group.role === "editor",
+      (group) => effectiveProductAccess(group) !== "none",
     );
 
     if (canCreateProjects) {
@@ -533,11 +494,11 @@ export function AuthProjectGate({
     return (
       <main className="grid h-[100dvh] place-items-center overflow-y-auto bg-canvas px-4 py-8 text-ink">
         <section className="w-full max-w-lg ui-panel p-6">
-          <p className="text-xs ui-mono-label tracking-wide text-ink-tertiary">No project access yet</p>
-          <h1 className="mt-2 text-2xl font-medium">You&apos;re in, but nothing is shared with you yet.</h1>
+          <p className="text-xs ui-mono-label tracking-wide text-ink-tertiary">Product access required</p>
+          <h1 className="mt-2 text-2xl font-medium">Product isn&apos;t available for your account yet.</h1>
           <p className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
-            Your account ({session?.user.email ?? "unknown"}) is part of the organization, but no projects have
-            been shared with it. Ask an organization owner or admin to grant you access from Settings &rarr;
+            Your account ({session?.user.email ?? "unknown"}) is part of the organization, but Product access has not
+            been granted. Ask an organization owner or admin to grant you access from Settings &rarr;
             Organization &rarr; Members.
           </p>
           <div className="mt-5 flex gap-2">

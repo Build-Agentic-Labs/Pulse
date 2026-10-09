@@ -123,6 +123,13 @@ beforeEach(() => {
 });
 
 describe("workspace invite route", () => {
+  it("rejects invalid Product permission before storing or sending an invite", async () => {
+    const response = await POST(inviteRequest({ productAccess: "owner" }));
+    expect(response.status).toBe(400);
+    expect(mocks.grantUpsert).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
 
   it("stores the reviewed entitlement snapshot and emails the secure action link", async () => {
     mocks.generateLink.mockResolvedValue({
@@ -136,7 +143,7 @@ describe("workspace invite route", () => {
     });
     mocks.send.mockResolvedValue({ ok: true, id: "email-1" });
 
-    const response = await POST(inviteRequest());
+    const response = await POST(inviteRequest({ productAccess: "view" }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ granted: true, emailSent: true });
@@ -147,6 +154,7 @@ describe("workspace invite route", () => {
         department_access: [
           { department_id: "department-1", role: "author", position_title: "Industrial Engineer" },
         ],
+        product_access: "view",
         planning_access: true,
         project_access: [{ project_id: "project-1", level: "edit" }],
         quality_access: "edit",

@@ -1,7 +1,11 @@
 "use client";
 
-import { useRef, useState, type PointerEvent } from "react";
+import { ModalSurface } from "@/components/ui/modal-surface";
+
+import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { PhotoImageAnnotation } from "@/domain/photo-annotations";
+
+import { adjustPhotoCrop } from "@/domain/photo-crop-controls";
 
 type Crop = PhotoImageAnnotation["crop"];
 export function PhotoOverlayCropEditor({ image, onDone, onCancel }: {
@@ -22,39 +26,35 @@ export function PhotoOverlayCropEditor({ image, onDone, onCancel }: {
     if (!current || !bounds?.width || !bounds.height) return;
     const dx = (event.clientX - current.x) / bounds.width;
     const dy = (event.clientY - current.y) / bounds.height;
-    const c = current.crop;
-    const next = { ...c };
-    if (current.handle === "move") {
-      const x = Math.max(-c.left, Math.min(c.right, dx));
-      const y = Math.max(-c.top, Math.min(c.bottom, dy));
-      next.left += x; next.right -= x; next.top += y; next.bottom -= y;
-    } else {
-      if (current.handle.includes("w")) next.left = Math.max(0, Math.min(1 - c.right - .05, c.left + dx));
-      if (current.handle.includes("e")) next.right = Math.max(0, Math.min(1 - c.left - .05, c.right - dx));
-      if (current.handle.includes("n")) next.top = Math.max(0, Math.min(1 - c.bottom - .05, c.top + dy));
-      if (current.handle.includes("s")) next.bottom = Math.max(0, Math.min(1 - c.top - .05, c.bottom - dy));
-    }
-    setCrop(next);
+    setCrop(adjustPhotoCrop(current.crop, current.handle, dx, dy));
   }
-  return <div className="ui-overlay-crop-modal" role="dialog" aria-modal="true" aria-label="Crop overlay image"
+  function adjustWithKeyboard(event: KeyboardEvent<HTMLElement>, handle: string) {
+    const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+    if (!direction) return;
+    event.preventDefault(); event.stopPropagation();
+    const step = event.shiftKey ? 0.1 : 0.01;
+    setCrop(current => adjustPhotoCrop(current, handle, direction[0] * step, direction[1] * step));
+  }
+
+  return <ModalSurface label="Crop overlay image" onCancel={onCancel}><div className="ui-overlay-crop-modal"
     onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}
     onKeyDown={e => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}>
     <div className="ui-overlay-crop-actions">
-      <span>Drag the crop area or its edges</span>
+      <span>Drag the crop area or its edges. Use arrow keys when focused; Shift moves faster.</span>
       <button type="button" onClick={() => setCrop({ left: 0, top: 0, right: 0, bottom: 0 })}>Reset</button>
       <button type="button" onClick={onCancel}>Cancel</button>
-      <button type="button" autoFocus onClick={() => onDone(crop)}>Done</button>
+      <button type="button" data-modal-initial-focus onClick={() => onDone(crop)}>Done</button>
     </div>
     <div ref={frame} className="ui-overlay-crop-frame" style={{ width: `min(85vw, ${65 * image.sourceWidth / image.sourceHeight}vh)`, aspectRatio: `${image.sourceWidth} / ${image.sourceHeight}` }}>
       {/* The original embedded image stays intact; only crop coordinates are saved. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={image.dataUrl} alt="Overlay to crop" draggable={false} />
-      <div className="ui-overlay-crop-selection" tabIndex={-1} aria-label="Crop selection" style={{ left: `${crop.left * 100}%`, top: `${crop.top * 100}%`, right: `${crop.right * 100}%`, bottom: `${crop.bottom * 100}%` }}
+      <div className="ui-overlay-crop-selection" tabIndex={0} aria-label="Crop selection" onKeyDown={e => adjustWithKeyboard(e, "move")} style={{ left: `${crop.left * 100}%`, top: `${crop.top * 100}%`, right: `${crop.right * 100}%`, bottom: `${crop.bottom * 100}%` }}
         onPointerDown={e => start(e, "move")} onPointerMove={move} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
         {(["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const).map(handle =>
           <button type="button" key={handle} className={`ui-overlay-crop-handle crop-${handle}`} aria-label={`Resize crop ${handle}`}
-            onPointerDown={e => start(e, handle)} />)}
+            onKeyDown={e => adjustWithKeyboard(e, handle)} onPointerDown={e => start(e, handle)} />)}
       </div>
     </div>
-  </div>;
+  </div></ModalSurface>;
 }

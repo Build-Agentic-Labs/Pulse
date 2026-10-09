@@ -131,7 +131,7 @@ describe("WorkInstructionsPanel", () => {
 
     const previewDialog = screen.getByRole("dialog", { name: "Work instruction document preview" });
     expect(previewDialog.parentElement).toBe(document.body);
-    expect(previewDialog.classList.contains("wi-print-modal")).toBe(true);
+    expect(Boolean(previewDialog.querySelector(".wi-print-modal"))).toBe(true);
     expect(screen.getByRole("status", { name: "Loading work instruction preview" })).toBeTruthy();
     expect(previewDialog.querySelectorAll(".ui-skeleton-line").length).toBeGreaterThan(10);
     expect(screen.getByRole("button", { name: "Print / Save PDF" }).hasAttribute("disabled")).toBe(true);
@@ -150,7 +150,8 @@ describe("WorkInstructionsPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-    fireEvent.keyDown(window, { key: "Escape" });
+    // Browsers translate Escape into the native dialog cancel event; jsdom does not.
+    fireEvent(screen.getByRole("dialog", { name: "Work instruction document preview" }), new Event("cancel", { bubbles: false, cancelable: true }));
 
     expect(screen.queryByRole("dialog", { name: "Work instruction document preview" })).toBeNull();
   });

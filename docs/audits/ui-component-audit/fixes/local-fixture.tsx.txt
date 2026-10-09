@@ -1,0 +1,15 @@
+"use client";
+import { useEffect, useState } from "react";
+import { BackupSettings } from "@/components/backup-settings";
+import { ThemedSelect } from "@/components/themed-select";
+import { PhotoOverlayCropEditor } from "@/components/photo-overlay-crop-editor";
+import "@/components/photo-overlay.css";
+export default function AuditFixture() {
+ const [ready,setReady]=useState(false),[shown,setShown]=useState(true),[count,setCount]=useState(0),[mode,setMode]=useState('backup'),[value,setValue]=useState(''),[crop,setCrop]=useState(false);
+ useEffect(()=>{const original=window.fetch;window.fetch=async(input,options)=>{if(String(input)==='/api/backups'){setCount(n=>n+1);return Response.json({ready:false,problems:['Synthetic audit fixture — no real backup is running'],backups:[{id:'fixture',state:'running',phase:'Test progress',updatedAt:'2026-10-09T12:00:00Z'}]});}return original(input,options)};setReady(true);return()=>{window.fetch=original}},[]);
+ return <main style={{padding:32}}><h1>Local UI audit fixture</h1><p>Mock data only. No backup or crop is saved.</p><div style={{display:'flex',gap:20,margin:'20px 0'}}>{['backup','select','crop'].map(m=><button className="ui-btn-secondary" key={m} onClick={()=>setMode(m)}>{m}</button>)}</div>
+ {mode==='backup'&&<><p>Observed backup reads: {count}</p><p>Panel: {shown?'visible':'hidden'}</p><button className="ui-btn-secondary" onClick={()=>setShown(s=>!s)}>Toggle panel</button><div hidden={!shown}>{ready&&<BackupSettings {...{active:shown}}/>}</div></>}
+ {mode==='select'&&<><p>Picker near viewport bottom; options should remain reachable.</p><div style={{position:'fixed',bottom:28,left:40,width:250}}><ThemedSelect ariaLabel="Fixture role" value={value} onChange={setValue} options={Array.from({length:8},(_,i)=>({value:String(i),label:'Role '+(i+1)}))}/></div></>}
+ {mode==='crop'&&<><button className="ui-btn-secondary" onClick={()=>setCrop(true)}>Open crop fixture</button>{crop&&<PhotoOverlayCropEditor image={{type:'image',id:'fixture',x:0,y:0,width:400,height:300,color:'#000',strokeWidth:1,sourceWidth:400,sourceHeight:300,dataUrl:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#397a8e"/><path d="M0 150H400M200 0V300" stroke="white"/><text x="120" y="100" fill="white" font-size="22">Crop test image</text></svg>'),crop:{left:0,top:0,right:0,bottom:0}}} onDone={()=>setCrop(false)} onCancel={()=>setCrop(false)}/>}</>}
+ </main>
+}

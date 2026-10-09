@@ -136,7 +136,7 @@ describe("StepPhotoViewer toolbar", () => {
     prepareOverlay(container);
     fireEvent.pointerDown(container.querySelector('[data-annotation-type="image"]')!, { pointerId: 1, clientX: 100, clientY: 100 });
     fireEvent.click(screen.getByRole("button", { name: "Crop" }));
-    const frame = container.querySelector(".ui-overlay-crop-frame")!;
+    const frame = document.querySelector(".ui-overlay-crop-frame")!;
     Object.defineProperty(frame, "getBoundingClientRect", { value: () => ({ width: 400, height: 300 }) });
     const handle = screen.getByRole("button", { name: "Resize crop w" });
     Object.defineProperty(handle, "setPointerCapture", { value: vi.fn() });

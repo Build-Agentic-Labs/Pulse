@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { BookOpen, Plus, ArrowRight, X } from "lucide-react";
 import { useState, useEffect, useRef, type FormEvent } from "react";
 import Link from "next/link";
@@ -80,16 +82,16 @@ export function AwiDirectory({ project, groups, workspaceId, initialMasters }: {
           <p className="text-sm font-medium">Create your first master AWI</p>
           <p className="max-w-sm text-xs leading-relaxed text-ink-secondary">Add an instruction to open the full procedure builder. Your work is saved as a draft until you publish it.</p>
         </div>}
-        {adding ? <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 p-4" role="presentation">
-          <form onSubmit={create} className="w-full max-w-md rounded-xl border border-line bg-surface-raised p-6 shadow-lg" role="dialog" aria-modal="true" aria-labelledby="new-awi-title">
+        {adding ? <ModalSurface labelledBy="new-awi-title" onCancel={() => { if (!pending) setAdding(false); }}><div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 p-4" role="presentation">
+          <form onSubmit={create} className="w-full max-w-md rounded-xl border border-line bg-surface-raised p-6 shadow-lg"   >
             <div className="mb-5 flex items-center justify-between"><h2 id="new-awi-title" className="ui-section-title">Add AWI</h2><button type="button" className="ui-btn-ghost h-8 w-8 px-0" aria-label="Cancel new AWI" disabled={pending} onClick={() => setAdding(false)}><X size={15} /></button></div>
-            <label className="block text-xs text-ink-secondary">Instruction title<input className="ui-field-standalone mt-2 h-9 w-full rounded-md px-3" autoFocus required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} disabled={pending} /></label>
+            <label className="block text-xs text-ink-secondary">Instruction title<input className="ui-field-standalone mt-2 h-9 w-full rounded-md px-3" data-modal-initial-focus required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} disabled={pending} /></label>
             <label className="mt-4 block text-xs text-ink-secondary">Document number<input className="ui-field-standalone mt-2 h-9 w-full rounded-md px-3" placeholder="Assigned automatically, or enter your own" maxLength={64} value={number} onChange={(event) => setNumber(event.target.value)} disabled={pending} /></label>
             <p className="mt-2 text-[11px] text-ink-tertiary">Leave blank for the next AWI number.</p>
             {error ? <p role="alert" className="mt-3 text-xs text-danger">{error}</p> : null}
             <div className="mt-6 flex justify-end gap-2"><button type="button" className="ui-btn-ghost h-9 px-3" disabled={pending} onClick={() => setAdding(false)}>Cancel</button><button type="submit" className="ui-btn-primary h-9 px-4" disabled={pending || !title.trim()}>{pending ? "Creating…" : "Create draft"}</button></div>
           </form>
-        </div> : null}
+        </div></ModalSurface> : null}
         </>}
   </AwiDirectoryShell>;
 }

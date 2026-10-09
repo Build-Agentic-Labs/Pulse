@@ -1,0 +1,1603 @@
+[
+  {
+    "file": "src/components/account-settings.tsx",
+    "lines": 282,
+    "native_tags": {
+      "input": 4,
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/app-flow-panels.tsx",
+    "lines": 575,
+    "native_tags": {
+      "button": 9,
+      "input": 6
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/app-settings-panel.tsx",
+    "lines": 620,
+    "native_tags": {
+      "button": 5
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 4
+  },
+  {
+    "file": "src/components/auth-project-gate.tsx",
+    "lines": 565,
+    "native_tags": {
+      "button": 3
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/awi-directory-loading.tsx",
+    "lines": 31,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/awi-directory-shell.tsx",
+    "lines": 37,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/awi-directory.tsx",
+    "lines": 95,
+    "native_tags": {
+      "button": 4,
+      "input": 2
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/awi-editor-actions.tsx",
+    "lines": 73,
+    "native_tags": {
+      "button": 6,
+      "input": 2
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/backup-settings.tsx",
+    "lines": 62,
+    "native_tags": {
+      "input": 2,
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/bom-part-search.tsx",
+    "lines": 221,
+    "native_tags": {
+      "button": 1,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/bulk-task-editor.tsx",
+    "lines": 228,
+    "native_tags": {
+      "input": 1,
+      "button": 5
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/clearable-number-input.tsx",
+    "lines": 128,
+    "native_tags": {
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/command-palette.tsx",
+    "lines": 200,
+    "native_tags": {
+      "input": 1,
+      "button": 1
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/company-dashboard.tsx",
+    "lines": 201,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/company-top-nav.tsx",
+    "lines": 43,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/confirm-provider.tsx",
+    "lines": 87,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/credential-link-panel.tsx",
+    "lines": 166,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/deployment-banner.tsx",
+    "lines": 16,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/display-name-prompt.tsx",
+    "lines": 429,
+    "native_tags": {
+      "button": 4,
+      "input": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/gantt-timeline.tsx",
+    "lines": 2757,
+    "native_tags": {
+      "button": 26,
+      "textarea": 1,
+      "input": 10
+    },
+    "role_dialogs": 2,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/analytics.tsx",
+    "lines": 687,
+    "native_tags": {
+      "button": 6
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/checklist-pdf-viewer.tsx",
+    "lines": 82,
+    "native_tags": {
+      "dialog": 1,
+      "button": 4
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/drawer.tsx",
+    "lines": 1033,
+    "native_tags": {
+      "button": 10,
+      "input": 8,
+      "textarea": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/instruction-format-toolbar.tsx",
+    "lines": 18,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/nav.tsx",
+    "lines": 197,
+    "native_tags": {
+      "button": 7
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/pfmea-workspace.tsx",
+    "lines": 1102,
+    "native_tags": {
+      "textarea": 2,
+      "input": 12,
+      "button": 24,
+      "select": 5,
+      "table": 2
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/phone-portal-qr-button.tsx",
+    "lines": 112,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/planner-foundation-pages.tsx",
+    "lines": 31,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 1
+  },
+  {
+    "file": "src/components/line-workspace/procedure.tsx",
+    "lines": 1309,
+    "native_tags": {
+      "button": 9,
+      "input": 2,
+      "textarea": 2,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/setup-panels.tsx",
+    "lines": 1048,
+    "native_tags": {
+      "input": 15,
+      "button": 13
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/shared.tsx",
+    "lines": 120,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/step-editors.tsx",
+    "lines": 1209,
+    "native_tags": {
+      "button": 14,
+      "input": 4,
+      "table": 1,
+      "textarea": 2
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace/step-photo-clipboard-provider.tsx",
+    "lines": 239,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/line-workspace.tsx",
+    "lines": 3655,
+    "native_tags": {
+      "button": 12,
+      "textarea": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 5
+  },
+  {
+    "file": "src/components/member-access-drawer.tsx",
+    "lines": 40,
+    "native_tags": {
+      "dialog": 1,
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/mobile-photo-portal/legacy-draft-review.tsx",
+    "lines": 33,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/mobile-photo-portal/mobile-new-step-editor.tsx",
+    "lines": 338,
+    "native_tags": {
+      "input": 4,
+      "button": 4,
+      "textarea": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/mobile-photo-portal/mobile-process-list.tsx",
+    "lines": 422,
+    "native_tags": {
+      "button": 5,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/mobile-photo-portal/mobile-step-editor.tsx",
+    "lines": 365,
+    "native_tags": {
+      "input": 4,
+      "button": 5,
+      "textarea": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/mobile-photo-portal/mobile-step-summary.tsx",
+    "lines": 65,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/mobile-photo-portal/mobile-step-tools.tsx",
+    "lines": 70,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/mobile-photo-portal.tsx",
+    "lines": 3173,
+    "native_tags": {
+      "button": 12,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/nav-selection-track.tsx",
+    "lines": 106,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/nothing-design-showcase.tsx",
+    "lines": 327,
+    "native_tags": {
+      "button": 11,
+      "input": 1,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/nothing-ui.tsx",
+    "lines": 67,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/notification-admin-settings.tsx",
+    "lines": 364,
+    "native_tags": {
+      "table": 4,
+      "button": 4,
+      "input": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/notification-bell.tsx",
+    "lines": 396,
+    "native_tags": {
+      "button": 6
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/notification-preferences-settings.tsx",
+    "lines": 195,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/operator-utilization-panel.tsx",
+    "lines": 101,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/organization-settings.tsx",
+    "lines": 18,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/phone-photo-portal-panel.tsx",
+    "lines": 77,
+    "native_tags": {
+      "input": 1,
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/photo-image-overlay.tsx",
+    "lines": 12,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/photo-overlay-crop-editor.tsx",
+    "lines": 60,
+    "native_tags": {
+      "button": 4
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planner-dashboard-panel.tsx",
+    "lines": 245,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planner-top-nav.tsx",
+    "lines": 101,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/configuration-workspace.tsx",
+    "lines": 583,
+    "native_tags": {
+      "button": 6,
+      "table": 2,
+      "input": 4
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/export-column-panel.tsx",
+    "lines": 92,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/planning-nav.tsx",
+    "lines": 74,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/planning-part-search.tsx",
+    "lines": 160,
+    "native_tags": {
+      "input": 1,
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/planning-route.tsx",
+    "lines": 37,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/planning-settings.tsx",
+    "lines": 249,
+    "native_tags": {
+      "button": 2,
+      "input": 1,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/planning-shell.tsx",
+    "lines": 93,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/planning-workspace-provider.tsx",
+    "lines": 154,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/sales-orders-workspace.tsx",
+    "lines": 300,
+    "native_tags": {
+      "button": 3,
+      "table": 3
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/schedule-upload.tsx",
+    "lines": 389,
+    "native_tags": {
+      "button": 6,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/standalone-work-order-form.tsx",
+    "lines": 174,
+    "native_tags": {
+      "button": 3,
+      "input": 4
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/trailer-configs-settings.tsx",
+    "lines": 263,
+    "native_tags": {
+      "input": 3,
+      "button": 3
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/work-order-board.tsx",
+    "lines": 553,
+    "native_tags": {
+      "button": 9,
+      "input": 2,
+      "table": 1
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/work-order-detail.tsx",
+    "lines": 636,
+    "native_tags": {
+      "button": 5,
+      "input": 4,
+      "textarea": 1,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/work-order-line-row.tsx",
+    "lines": 364,
+    "native_tags": {
+      "input": 5,
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/work-order-new.tsx",
+    "lines": 457,
+    "native_tags": {
+      "button": 2,
+      "input": 2,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/planning/work-order-print.tsx",
+    "lines": 554,
+    "native_tags": {
+      "table": 1,
+      "button": 3
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/problem-solving/problem-case-form.tsx",
+    "lines": 84,
+    "native_tags": {
+      "button": 6,
+      "input": 9,
+      "select": 2,
+      "textarea": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/problem-solving/problem-pilot-link.tsx",
+    "lines": 51,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/problem-solving/problem-workspace.tsx",
+    "lines": 110,
+    "native_tags": {
+      "button": 10,
+      "input": 2,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/procedure-step-tool-table.tsx",
+    "lines": 118,
+    "native_tags": {
+      "table": 2,
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/procedure-tool-picker.tsx",
+    "lines": 264,
+    "native_tags": {
+      "button": 2,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/project-catalog-setup-panel.tsx",
+    "lines": 735,
+    "native_tags": {
+      "button": 8,
+      "input": 3,
+      "table": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/project-route-shells.tsx",
+    "lines": 266,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 8
+  },
+  {
+    "file": "src/components/project-settings.tsx",
+    "lines": 309,
+    "native_tags": {
+      "button": 5,
+      "input": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-conversion-source.tsx",
+    "lines": 41,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-convert-dialog.tsx",
+    "lines": 490,
+    "native_tags": {
+      "dialog": 1,
+      "button": 6,
+      "input": 2,
+      "textarea": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-details.tsx",
+    "lines": 54,
+    "native_tags": {
+      "input": 1,
+      "textarea": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-editor-route.tsx",
+    "lines": 111,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-editor.tsx",
+    "lines": 229,
+    "native_tags": {
+      "button": 3,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-image-view.tsx",
+    "lines": 44,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-library.tsx",
+    "lines": 416,
+    "native_tags": {
+      "button": 7,
+      "input": 1,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 1
+  },
+  {
+    "file": "src/components/quality-wi/wi-photos.tsx",
+    "lines": 204,
+    "native_tags": {
+      "button": 3,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 1
+  },
+  {
+    "file": "src/components/quality-wi/wi-preview.tsx",
+    "lines": 186,
+    "native_tags": {
+      "dialog": 1,
+      "button": 4
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-route-loading-state.tsx",
+    "lines": 24,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quality-wi/wi-step-editor.tsx",
+    "lines": 197,
+    "native_tags": {
+      "button": 6,
+      "input": 2,
+      "textarea": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/quiet-loading.tsx",
+    "lines": 24,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/recovering-photo.tsx",
+    "lines": 17,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/route-error-state.tsx",
+    "lines": 71,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/scenario-tabs.tsx",
+    "lines": 241,
+    "native_tags": {
+      "input": 2,
+      "button": 4,
+      "select": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/settings-navigation.tsx",
+    "lines": 95,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/settings-workspace.tsx",
+    "lines": 77,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sidebar-workspace-panel.tsx",
+    "lines": 951,
+    "native_tags": {
+      "button": 12,
+      "input": 3,
+      "select": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/attachment-comment-button.tsx",
+    "lines": 5,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/auto-textarea.tsx",
+    "lines": 51,
+    "native_tags": {
+      "textarea": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/converted-approvals-notice.tsx",
+    "lines": 263,
+    "native_tags": {
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/departments-admin.tsx",
+    "lines": 838,
+    "native_tags": {
+      "button": 8,
+      "table": 1,
+      "input": 5
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/document-pdf-pages.tsx",
+    "lines": 117,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/document-preview-status.tsx",
+    "lines": 13,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/document-preview-toolbar.tsx",
+    "lines": 21,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/annexes-editor.tsx",
+    "lines": 324,
+    "native_tags": {
+      "input": 4,
+      "button": 5
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/approvals-section.tsx",
+    "lines": 100,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/document-section.tsx",
+    "lines": 176,
+    "native_tags": {
+      "input": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/editor-controls.tsx",
+    "lines": 40,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/editor-fields.tsx",
+    "lines": 265,
+    "native_tags": {
+      "input": 3
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/overview-section.tsx",
+    "lines": 53,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/procedure-section.tsx",
+    "lines": 92,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/quality-section.tsx",
+    "lines": 253,
+    "native_tags": {
+      "button": 5
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/editor/reference-library-editor.tsx",
+    "lines": 376,
+    "native_tags": {
+      "input": 4,
+      "button": 6
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/effective-library.tsx",
+    "lines": 219,
+    "native_tags": {
+      "button": 1,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/job-titles-admin.tsx",
+    "lines": 146,
+    "native_tags": {
+      "input": 1,
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/print-blocks.tsx",
+    "lines": 483,
+    "native_tags": {
+      "table": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/process-flowchart.tsx",
+    "lines": 687,
+    "native_tags": {
+      "button": 7,
+      "table": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/quality-nav-selection.tsx",
+    "lines": 8,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/quality-skeleton.tsx",
+    "lines": 35,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/rasic-roles-admin.tsx",
+    "lines": 162,
+    "native_tags": {
+      "input": 1,
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/reference-pdf-preview.tsx",
+    "lines": 188,
+    "native_tags": {
+      "button": 7
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/responsible-persons-field.tsx",
+    "lines": 56,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/retired-sops.tsx",
+    "lines": 168,
+    "native_tags": {
+      "button": 1,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/review-queue.tsx",
+    "lines": 469,
+    "native_tags": {
+      "table": 2,
+      "button": 3
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/reviewer-invite-form.tsx",
+    "lines": 122,
+    "native_tags": {
+      "input": 1,
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/reviewer-remind-button.tsx",
+    "lines": 95,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/signature-input.tsx",
+    "lines": 30,
+    "native_tags": {
+      "button": 1,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/signature-pad.tsx",
+    "lines": 136,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-convert-overlay.tsx",
+    "lines": 138,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-dashboard.tsx",
+    "lines": 393,
+    "native_tags": {
+      "button": 3
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-detail-client.tsx",
+    "lines": 124,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-detail-loading-state.tsx",
+    "lines": 12,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-detail-loading-surface.tsx",
+    "lines": 93,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-editor.tsx",
+    "lines": 1979,
+    "native_tags": {
+      "button": 19
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-feedback-panel.tsx",
+    "lines": 93,
+    "native_tags": {
+      "button": 4
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-final-approval-workspace.tsx",
+    "lines": 165,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-list.tsx",
+    "lines": 941,
+    "native_tags": {
+      "input": 2,
+      "button": 8,
+      "table": 1
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-margin-notes.tsx",
+    "lines": 85,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-new-client.tsx",
+    "lines": 101,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-print-preview.tsx",
+    "lines": 1564,
+    "native_tags": {
+      "button": 7,
+      "table": 4
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-quality-approval-workspace.tsx",
+    "lines": 194,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-review-comment.tsx",
+    "lines": 100,
+    "native_tags": {
+      "button": 8,
+      "textarea": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-review-loading.tsx",
+    "lines": 17,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-review-workspace.tsx",
+    "lines": 346,
+    "native_tags": {
+      "textarea": 1,
+      "button": 4,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-roster-editor.tsx",
+    "lines": 335,
+    "native_tags": {
+      "button": 3,
+      "table": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-route-loading-state.tsx",
+    "lines": 26,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-search.tsx",
+    "lines": 174,
+    "native_tags": {
+      "button": 4,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-shell.tsx",
+    "lines": 111,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-step-nav-icon.tsx",
+    "lines": 49,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-tab-nav.tsx",
+    "lines": 118,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-workspace-provider.tsx",
+    "lines": 429,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/sop/sop-workspace.tsx",
+    "lines": 291,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 6
+  },
+  {
+    "file": "src/components/space-loading-states.tsx",
+    "lines": 372,
+    "native_tags": {
+      "table": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/space-placeholder.tsx",
+    "lines": 51,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/space-top-nav.tsx",
+    "lines": 81,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/spaces.tsx",
+    "lines": 109,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/static-photo-annotation.tsx",
+    "lines": 172,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/step-exploded-view-gallery.tsx",
+    "lines": 241,
+    "native_tags": {
+      "button": 4
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/step-photo-viewer.tsx",
+    "lines": 2315,
+    "native_tags": {
+      "textarea": 1,
+      "button": 24,
+      "input": 1
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/task-video-gallery.tsx",
+    "lines": 215,
+    "native_tags": {
+      "button": 4
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/theme-provider.tsx",
+    "lines": 173,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/themed-feedback.tsx",
+    "lines": 325,
+    "native_tags": {
+      "button": 9
+    },
+    "role_dialogs": 2,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/themed-select.tsx",
+    "lines": 370,
+    "native_tags": {
+      "button": 3,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/ui-context-menu.tsx",
+    "lines": 101,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/user-nav.tsx",
+    "lines": 411,
+    "native_tags": {
+      "button": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/web-vitals-reporter.tsx",
+    "lines": 36,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/work-instruction/work-instruction-control.tsx",
+    "lines": 638,
+    "native_tags": {
+      "button": 14,
+      "input": 5,
+      "textarea": 1
+    },
+    "role_dialogs": 1,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/work-instruction/work-instruction-document.tsx",
+    "lines": 934,
+    "native_tags": {
+      "table": 5
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/work-instruction/work-instruction-letter-template.tsx",
+    "lines": 54,
+    "native_tags": {
+      "button": 1,
+      "table": 2
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/work-instruction/work-instruction-print.tsx",
+    "lines": 714,
+    "native_tags": {
+      "button": 5
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/worker-icon.tsx",
+    "lines": 51,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/workspace-activity-settings.tsx",
+    "lines": 226,
+    "native_tags": {
+      "button": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/workspace-invite-acceptance.tsx",
+    "lines": 8,
+    "native_tags": {},
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/workspace-invite-composer.tsx",
+    "lines": 484,
+    "native_tags": {
+      "button": 6,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/workspace-list-settings.tsx",
+    "lines": 186,
+    "native_tags": {
+      "button": 2,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  },
+  {
+    "file": "src/components/workspace-members-settings.tsx",
+    "lines": 653,
+    "native_tags": {
+      "button": 11,
+      "input": 1
+    },
+    "role_dialogs": 0,
+    "dynamic_imports": 0
+  }
+]

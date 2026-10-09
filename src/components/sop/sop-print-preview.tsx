@@ -1,5 +1,7 @@
 "use client";
 
+import { ModalSurface } from "@/components/ui/modal-surface";
+
 import { DocumentPreviewToolbar } from "./document-preview-toolbar";
 
 import { SopReviewLoading } from "./sop-review-loading";
@@ -53,7 +55,6 @@ function isPdf(file: SopAnnexFile): boolean {
 function isImage(file: SopAnnexFile): boolean {
   return file.contentType.startsWith("image/");
 }
-
 
 function DocumentHeader({ sop, reviewCategory }: { sop: Sop; reviewCategory?: string }) {
   return (
@@ -136,7 +137,6 @@ function DocumentPage({
     </article>
   );
 }
-
 
 /**
  * Screen-only highlight for flagged review sections: a warm band with a left rule, so a remark's
@@ -430,31 +430,28 @@ export function SopPrintPreview({
   const [flowRendererReady, setFlowRendererReady] = useState(false);
   const [approvalDetailsReady, setApprovalDetailsReady] = useState(false);
   const [initialPagesReady, setInitialPagesReady] = useState(false);
+  useEffect(() => {
+    // Loading controls unmount when pages are ready. Keep focus inside the preview.
+    if (initialPagesReady && !embedded && document.activeElement === document.body) {
+      previewRootRef.current?.querySelector<HTMLButtonElement>('button[aria-label="Close preview"]')?.focus({ preventScroll: true });
+    }
+  }, [initialPagesReady, embedded]);
   // Block ids already warned about this mount — re-measures (debounced edits,
   // resize) repeat the same overflowing block on every pass otherwise.
   const warnedOverflowBlockIds = useRef<Set<string>>(new Set());
   const canDownloadPdf = mode === "export" && sop.status === "effective";
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (commentBusy) return;
-      if (commentSelection) {
-        setCommentSelection(null);
-        onDismissReviewComment?.();
-        return;
-      }
-      // An inline referenced document sits on top: Escape peels that layer
-      // first and returns to the SOP, a second Escape closes the preview.
-      setInlineDoc((current) => {
-        if (current) return null;
-        onClose();
-        return current;
-      });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, commentSelection, onDismissReviewComment, commentBusy]);
+  function dismissPreviewLayer() {
+    if (commentBusy) return;
+    if (commentSelection) {
+      setCommentSelection(null);
+      onDismissReviewComment?.();
+    } else if (inlineDoc) {
+      setInlineDoc(null);
+    } else {
+      onClose();
+    }
+  }
 
   useEffect(() => () => {
     if (reviewScrollFrame.current !== null) window.cancelAnimationFrame(reviewScrollFrame.current);
@@ -693,7 +690,6 @@ export function SopPrintPreview({
     return () => cancelAnimationFrame(frame);
   }, [flowRendererReady, approvalDetailsReady, measuring]);
 
-
   // The measurement layer cannot prove the render layer honest on its own: a
   // leak it hasn't imagined (the :first-child scoping above was exactly such a
   // leak) under-budgets pages silently. This post-paint guard re-checks every
@@ -886,11 +882,15 @@ export function SopPrintPreview({
   }, [formFiles]);
 
   return (
-    <div
+    <ModalSurface modal={!embedded} label="SOP document preview" onCancel={dismissPreviewLayer}><div
       ref={previewRootRef}
+      onKeyDown={(event) => {
+        if (embedded && event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault(); event.stopPropagation(); dismissPreviewLayer();
+        }
+      }}
       className={`sop-preview-overlay${embedded ? " sop-preview-embedded" : ""}${!initialPagesReady ? " sop-preview-preparing" : ""}`}
-      role={embedded ? "region" : "dialog"}
-      aria-modal={embedded ? undefined : true}
+      role={embedded ? "region" : undefined}
       aria-label="SOP document preview"
     >
       {!initialPagesReady ? <SopReviewLoading inline label={taskLabel ?? (mode === "approval" ? "Final approval" : mode === "review" ? "Review document" : "Document preview")} onClose={onClose} /> : null}
@@ -1559,6 +1559,6 @@ export function SopPrintPreview({
       {inlineDoc ? (
         <ReferencePdfPreview {...inlineDoc} onClose={() => setInlineDoc(null)} />
       ) : null}
-    </div>
+    </div></ModalSurface>
   );
 }

@@ -13,7 +13,7 @@
 import { ArrowLeft, Printer, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { ModalSurface } from "@/components/ui/modal-surface";
 import { loadPlannerStateFromSupabase } from "@/domain/supabase-planner";
 import type { PlannerState } from "@/domain/types";
 import { buildWorkInstruction } from "@/domain/work-instruction/build";
@@ -568,15 +568,6 @@ export function WorkInstructionPrintPreview({
     if (effectiveStatus === "ready") onReady?.();
   }, [effectiveStatus, onReady]);
 
-  useEffect(() => {
-    if (!onClose) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const displayLayout = documents[0]?.layout ?? layout;
   const paperWidth = displayLayout.id === "letter" ? 8.5 : 17;
 
@@ -644,9 +635,6 @@ export function WorkInstructionPrintPreview({
           ? "wi-print-modal fixed inset-0 z-[60] flex flex-col bg-black/60"
           : "h-[100dvh] overflow-y-auto bg-canvas"
       }`}
-      role={onClose ? "dialog" : undefined}
-      aria-modal={onClose ? "true" : undefined}
-      aria-label={onClose ? "Work instruction document preview" : undefined}
     >
       {sopViewer && onClose ? <div className="wi-print-chrome">
         <DocumentPreviewToolbar onClose={onClose} actions={
@@ -710,5 +698,5 @@ export function WorkInstructionPrintPreview({
   // The planner panel uses space-y utilities between its children. Portaling
   // the fixed overlay prevents that parent spacing from offsetting the dialog
   // and exposing the global header above it.
-  return onClose && typeof document !== "undefined" ? createPortal(preview, document.body) : preview;
+  return onClose ? <ModalSurface label="Work instruction document preview" onCancel={onClose}>{preview}</ModalSurface> : preview;
 }

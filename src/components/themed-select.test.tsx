@@ -192,3 +192,15 @@ describe("ThemedSelect inside a modal dialog", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 });
+
+it("flips a low trigger above the viewport edge and keeps options selectable", () => {
+  const onChange = vi.fn();
+  render(<ThemedSelect value="" options={OPTIONS} onChange={onChange} ariaLabel="Role" />);
+  vi.spyOn(trigger(), "getBoundingClientRect").mockReturnValue({ top: 700, bottom: 736, left: 10, right: 210, width: 200, height: 36, x: 10, y: 700, toJSON() {} });
+  fireEvent.click(trigger());
+  const menu = screen.getByRole("listbox", {name:"Role"});
+  expect(menu.style.translate).toBe("0 -100%");
+  expect(menu.style.top).toBe("694px");
+  fireEvent.click(screen.getByRole("option",{name:"Operator"}));
+  expect(onChange).toHaveBeenCalledWith("Operator");
+});

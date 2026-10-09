@@ -1,0 +1,27 @@
+.ui-modal-surface {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+}
+
+/* The caller paints its existing backdrop, including transparent anchored confirms. */
+.ui-modal-surface::backdrop {
+  background: transparent;
+}
+
+@media print {
+  .ui-modal-surface[open] {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+  }
+}

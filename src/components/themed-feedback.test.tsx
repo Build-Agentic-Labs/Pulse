@@ -42,7 +42,6 @@ describe("ThemedFeedbackLayer auto-dismiss", () => {
   });
 });
 
-
 describe("ThemedFeedbackLayer persistent notices", () => {
   it("keeps actionable notices until dismissed and preserves the content", () => {
     vi.useFakeTimers();
@@ -54,5 +53,34 @@ describe("ThemedFeedbackLayer persistent notices", () => {
     expect(dismiss).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
     expect(dismiss).toHaveBeenCalledWith(9);
+  });
+});
+
+describe("ThemedFeedbackLayer modal contract", () => {
+  it.each(["center", "anchor"] as const)("opens %s confirmations as a modal and restores the opener", (placement) => {
+    const show = vi.fn(function (this: HTMLDialogElement) { this.open = true; });
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value: show });
+    const close = vi.fn(function (this: HTMLDialogElement) { this.open = false; });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value: close });
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    const cancel = vi.fn();
+    const accept = vi.fn();
+    const result = render(<ThemedFeedbackLayer confirm={{ title: "Remove item?", tone: "danger", placement, anchorRect: { top: 10, bottom: 30, left: 10, right: 90, width: 80, height: 20 }, onConfirm: accept }} toasts={[]} onDismissToast={vi.fn()} onCancelConfirm={cancel} onConfirm={accept} />);
+    expect(show).toHaveBeenCalledOnce();
+    const dialog = screen.getByRole("dialog", { name: "Remove item?" });
+    expect(screen.getByRole("button", { name: /^Cancel$/ })).toHaveFocus();
+    expect(screen.queryByText("Blocked")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(accept).toHaveBeenCalledOnce();
+    const event = new Event("cancel", { cancelable: true });
+    fireEvent(dialog, event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+    result.unmount();
+    expect(close).toHaveBeenCalledOnce();
+    expect(opener).toHaveFocus();
+    opener.remove();
   });
 });

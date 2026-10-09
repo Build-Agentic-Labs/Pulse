@@ -582,7 +582,7 @@ export function StepPartReferenceEditor({
           {hasMasterBom && masterBom ? (
             <BomPartSearch masterBom={masterBom} onSelect={onAddFromBom} compact />
           ) : (
-            <span className="text-[10px] font-semibold text-ink-tertiary">Upload a master BOM in Setup to add parts.</span>
+            <span className="text-[10px] font-semibold text-ink-tertiary">Upload a master BOM to add parts.</span>
           )}
         </div>
 
@@ -662,7 +662,7 @@ export function StepPartReferenceEditor({
           <BomPartSearch masterBom={masterBom} onSelect={onAddFromBom} />
         </div>
       ) : (
-        <div className="mb-2 text-xs font-semibold text-ink-tertiary">Upload a master BOM in Setup to add parts.</div>
+        <div className="mb-2 text-xs font-semibold text-ink-tertiary">Upload a master BOM to add parts.</div>
       )}
       {availableParts.length > 0 ? (
         <div className="flex justify-end">
@@ -1000,7 +1000,7 @@ export function StepPartMentionEditor({
         />
       ) : (
         <div className="text-[10px] font-semibold text-ink-tertiary">
-          Upload a master BOM in Setup before linking text.
+          Upload a master BOM before linking text.
         </div>
       )}
 

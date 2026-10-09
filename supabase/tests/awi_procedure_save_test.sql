@@ -71,7 +71,7 @@ select lives_ok($$select public.test_awi_save_apply((select payload from awi_sav
 select is(public.test_awi_save_snapshot((select payload#>>'{}' from awi_save_inputs where name='task')),
  (select payload from awi_save_inputs where name='before_retry'),'retry does not rewrite unchanged rows or timestamps');
 select throws_ok($$select public.test_awi_save_apply(jsonb_set((select payload from awi_save_inputs where name='base'),'{p_task_patch,name}','"Stale rename"'))$$,
- '40001',null,'stale task version is rejected');
+ 'PT409',null,'stale task version is rejected');
 select is(public.test_awi_save_snapshot((select payload#>>'{}' from awi_save_inputs where name='task')),
  (select payload from awi_save_inputs where name='before_retry'),'conflict changes no task, steps, parts, or master metadata');
 
@@ -88,17 +88,17 @@ select is(public.test_awi_save_snapshot((select payload#>>'{}' from awi_save_inp
 -- A direct mobile/step edit need not bump the task version: the step baseline still protects it.
 update public.manufacturing_steps set instruction='Other device edit' where id='awi-save-second';
 select throws_ok($$select public.test_awi_save_apply(jsonb_set((select payload from awi_save_inputs where name='base'),'{p_task_patch,description}','"Stale snapshot"'))$$,
- '40001',null,'changed step version is rejected even with a current task version');
+ 'PT409',null,'changed step version is rejected even with a current task version');
 select is((select instruction from public.manufacturing_steps where id='awi-save-second'),'Other device edit','conflict keeps the other device edit');
 -- Omitting an unseen row cannot delete it, even when its version was not present in the browser.
 select throws_ok($$select public.test_awi_save_apply(jsonb_set(jsonb_set((select payload from awi_save_inputs where name='base'),'{p_steps}',jsonb_build_array((select payload->'p_steps'->0 from awi_save_inputs where name='base'))),'{p_expected_step_versions}','{}'))$$,
- '40001',null,'incomplete step baseline cannot remove unseen rows');
+ 'PT409',null,'incomplete step baseline cannot remove unseen rows');
 select is((select count(*) from public.manufacturing_steps where task_id=(select payload#>>'{}' from awi_save_inputs where name='task')),2::bigint,'both steps survive incomplete input');
 
 update awi_save_inputs set payload=public.test_awi_save_payload((select payload#>>'{}' from awi_save_inputs where name='task')) where name='base';
 update public.part_references set quantity=3 where id='awi-save-part';
 select throws_ok($$select public.test_awi_save_apply(jsonb_set((select payload from awi_save_inputs where name='base'),'{p_task_patch,description}','"Part conflict"'))$$,
- '40001',null,'unversioned part edits are protected by the confirmed baseline');
+ 'PT409',null,'unversioned part edits are protected by the confirmed baseline');
 select is((select quantity from public.part_references where id='awi-save-part'),3::numeric,'part conflict keeps newer quantity');
 update awi_save_inputs set payload=public.test_awi_save_payload((select payload#>>'{}' from awi_save_inputs where name='task')) where name='base';
 select lives_ok($$select public.test_awi_save_apply(jsonb_set(jsonb_set((select payload from awi_save_inputs where name='base'),'{p_steps,0,sequence}','20'),'{p_steps,1,sequence}','10'))$$,

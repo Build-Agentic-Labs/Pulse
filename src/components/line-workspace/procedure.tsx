@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { calculateTaskManHours, formatMinutes } from "@/domain/calculations";
@@ -181,6 +182,7 @@ export function ProcedureWorkspace({
   zones,
   selectedTask,
   isAwiMaster = false,
+  publishAction,
   readOnly = false,
   isTaskHydrating = false,
   focusedStepId,
@@ -208,6 +210,7 @@ export function ProcedureWorkspace({
   zones: Zone[];
   selectedTask?: Task;
   isAwiMaster?: boolean;
+  publishAction?: ReactNode;
   readOnly?: boolean;
   isTaskHydrating?: boolean;
   focusedStepId?: string;
@@ -756,7 +759,7 @@ export function ProcedureWorkspace({
 
   return (
     <section className="ui-workspace-content ui-procedure-workspace flex h-full min-h-0 overflow-hidden">
-      <aside
+      {!isAwiMaster && <aside
         style={procedureGridStyle}
         className="ui-procedure-sidebar relative shrink-0 overflow-x-hidden overflow-y-auto"
       >
@@ -812,7 +815,7 @@ export function ProcedureWorkspace({
             }`}
           />
         </button>
-      </aside>
+      </aside>}
 
       <main
         className="ui-procedure-main min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 md:px-6"
@@ -821,12 +824,12 @@ export function ProcedureWorkspace({
         <div className="mx-auto max-w-[1500px] space-y-5">
           <section>
             <div className="flex items-start justify-between gap-3">
-              <h1 className="ui-section-title ui-procedure-title min-w-0 flex-1">
+              <h1 className={`ui-section-title ui-procedure-title min-w-0 flex-1${isAwiMaster ? " ui-awi-process-title" : ""}`}>
                 {isAwiMaster && !readOnly ? editingName ? (
                   <input
                     autoFocus
                     aria-label="AWI name"
-                    className="w-full rounded border border-line bg-transparent px-2 py-1 text-sm font-medium text-ink outline-none focus:border-accent"
+                    className="w-full rounded border border-line bg-transparent px-2 py-1 text-inherit font-semibold text-ink outline-none focus:border-accent"
                     value={nameDraft}
                     maxLength={200}
                     onFocus={(event) => event.currentTarget.select()}
@@ -844,14 +847,15 @@ export function ProcedureWorkspace({
                   />
                 ) : (
                   <button type="button" aria-label="Edit AWI name" title="Edit AWI name"
-                    className="group inline-flex max-w-full items-center gap-2 rounded px-1 py-1 -ml-1 text-left transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                    className="group inline-flex max-w-full items-center gap-2 rounded px-1 py-1 -ml-1 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
                     onClick={() => { cancelNameEdit.current = false; setNameDraft(task.name); setEditingName(true); }}>
                     <span className="truncate">{task.name || "Untitled AWI"}</span>
-                    <Pencil size={12} className="shrink-0 text-ink-tertiary opacity-60 group-hover:opacity-100" />
+                    <Pencil size={16} className="shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
                   </button>
                 ) : task.name || "Untitled task"}
               </h1>
               <div className="flex shrink-0 items-center gap-3">
+                {publishAction}
                 {isTaskHydrating ? (
                   <span className="ui-transition-status" role="status" aria-live="polite">
                     Loading media

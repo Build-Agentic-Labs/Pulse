@@ -86,7 +86,9 @@ export function Sidebar({
   project?: PlannerProjectContext;
 }) {
   const isAwiMaster = project?.isAwiMaster === true;
-  const visibleModules = isAwiMaster ? mainModules.filter((module) => ["procedure", "work-instructions"].includes(module.id)) : mainModules;
+  const visibleModules = isAwiMaster ? [mainModules.find(module => module.id === "procedure")!, { id: "bom", label: "BOM", icon: Boxes }] : mainModules;
+  const selectedModule = isAwiMaster && activeModule === "setup" && setupSection === "bom" ? "bom" : activeModule;
+  const visibleSetupSections = isAwiMaster ? setupSections.filter(section => section.id !== "bom") : setupSections;
   const isSettingsModule = activeModule === "settings";
   const isSetupModule = activeModule === "setup";
   const [setupExpanded, setSetupExpanded] = useState(isSetupModule);
@@ -145,18 +147,18 @@ export function Sidebar({
           <>
             <div className="ui-nav-section">{isAwiMaster ? "AWI Builder" : "Planner"}</div>
             <NavSelectionTrack
-              activeIndex={visibleModules.findIndex((module) => module.id === activeModule)}
+              activeIndex={visibleModules.findIndex((module) => module.id === selectedModule)}
               className="space-y-0.5"
             >
               {visibleModules.map((module) => {
                 const Icon = module.icon;
-                const active = activeModule === module.id;
+                const active = selectedModule === module.id;
                 return (
                   <button
                     key={module.id}
                     type="button"
                     title={module.label}
-                    onClick={() => onChange(module.id)}
+                    onClick={() => { if (module.id === "bom") { onChange("setup"); onSetupSectionChange("bom"); } else onChange(module.id); }}
                     className={`ui-nav-item ${active ? "ui-nav-item-active" : "ui-nav-item-idle"}`}
                   >
                     <Icon size={15} strokeWidth={1.75} />
@@ -172,8 +174,8 @@ export function Sidebar({
               </button>
               <div id="planner-setup-sections" className="ui-setup-accordion" data-open={setupExpanded} inert={!setupExpanded} aria-hidden={!setupExpanded}>
                 <div className="min-h-0 overflow-hidden">
-                  <NavSelectionTrack activeIndex={isSetupModule ? setupSections.findIndex(item => item.id === setupSection) : -1} className="ml-3 space-y-0.5 border-l border-line pl-2 pt-1">
-                    {setupSections.map(item => <button key={item.id} type="button" title={item.label} onClick={() => { if (!isSetupModule) onChange("setup"); onSetupSectionChange(item.id); }} className={`ui-nav-item ${isSetupModule && setupSection === item.id ? "ui-nav-item-active" : "ui-nav-item-idle"}`}><span>{item.label}</span></button>)}
+                  <NavSelectionTrack activeIndex={isSetupModule ? visibleSetupSections.findIndex(item => item.id === setupSection) : -1} className="ml-3 space-y-0.5 border-l border-line pl-2 pt-1">
+                    {visibleSetupSections.map(item => <button key={item.id} type="button" title={item.label} onClick={() => { if (!isSetupModule) onChange("setup"); onSetupSectionChange(item.id); }} className={`ui-nav-item ${isSetupModule && setupSection === item.id ? "ui-nav-item-active" : "ui-nav-item-idle"}`}><span>{item.label}</span></button>)}
                   </NavSelectionTrack>
                 </div>
               </div>

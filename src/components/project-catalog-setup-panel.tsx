@@ -3,7 +3,7 @@
 import { ChevronDown, ChevronRight, FileSpreadsheet, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
-import { detectBomFieldColumns, type MasterBom } from "@/domain/master-bom";
+import { buildBomHierarchy, detectBomFieldColumns, type MasterBom } from "@/domain/master-bom";
 import {
   buildProjectToolCatalog,
   groupToolCatalogByType,
@@ -53,10 +53,13 @@ export function MasterBomPanel({
   const [error, setError] = useState<string>();
   const [retryRequest, setRetryRequest] = useState<{ bom: MasterBom | undefined }>();
   const [searchQuery, setSearchQuery] = useState("");
+  const [collapsedBom, setCollapsedBom] = useState<{ source: MasterBom; rows: Set<number> }>();
+  const hierarchy = useMemo(() => masterBom ? buildBomHierarchy(masterBom) : undefined, [masterBom]);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const columnDrag = useRef<{ key: string; x: number; width: number } | null>(null);
   const columnWidth = (column: MasterBomTableColumn) => columnWidths[column.key] ??
-    (column.kind === "source" && /description/i.test(column.name) ? 352 :
+    (column.kind === "source" && hierarchy && /^(part number|part no|no\.|item no)$/i.test(column.name.trim()) ? 200 :
+      column.kind === "source" && /description/i.test(column.name) ? 352 :
       Math.max(100, (column.kind === "source" ? column.name.length : 9) * 7 + 28));
 
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
@@ -66,6 +69,11 @@ export function MasterBomPanel({
     [masterBom],
   );
   const bomFieldColumns = useMemo(() => detectBomFieldColumns(masterBom?.columns ?? []), [masterBom]);
+  const assemblyRows = useMemo(() => {
+    const column = masterBom?.columns.find(name => name.trim().toLowerCase() === "replenishment system");
+    return new Set(masterBom?.rows.flatMap((row, index) =>
+      column && row[column]?.trim().toLowerCase() === "assembly" ? [index] : []) ?? []);
+  }, [masterBom]);
   const allocationByPartNumber = useMemo(() => {
     const labelsByPartNumber = new Map<string, Map<string, string>>();
 
@@ -118,7 +126,7 @@ export function MasterBomPanel({
     }
 
     const searchTerms = normalizedSearchQuery ? normalizedSearchQuery.split(/\s+/) : [];
-    return masterBom.rows
+    const matches = masterBom.rows
       .map((row, rowIndex) => {
         const partNumber = bomFieldColumns.partNumber ? row[bomFieldColumns.partNumber] ?? "" : "";
         const allocationLabels = allocationByPartNumber.get(normalizePartNumber(partNumber)) ?? [];
@@ -135,7 +143,14 @@ export function MasterBomPanel({
           .toLocaleLowerCase();
         return searchTerms.every((term) => searchableText.includes(term));
       });
-  }, [allocationByPartNumber, bomFieldColumns.partNumber, masterBom, normalizedSearchQuery, visibleBomColumns]);
+    if (!hierarchy) return matches;
+    if (searchTerms.length) {
+      const visible = new Set(matches.flatMap(({ rowIndex }) => [rowIndex, ...hierarchy[rowIndex].ancestors]));
+      return masterBom.rows.flatMap((row, rowIndex) => visible.has(rowIndex) ? [{ row, rowIndex,
+        allocationLabels: allocationByPartNumber.get(normalizePartNumber(bomFieldColumns.partNumber ? row[bomFieldColumns.partNumber] ?? "" : "")) ?? [] }] : []);
+    }
+    return matches.filter(({ rowIndex }) => !hierarchy[rowIndex].ancestors.some(parent => collapsedBom?.source === masterBom && collapsedBom.rows.has(parent)));
+  }, [allocationByPartNumber, bomFieldColumns.partNumber, masterBom, normalizedSearchQuery, visibleBomColumns, hierarchy, collapsedBom]);
 
   useEffect(
     () => () => {
@@ -292,6 +307,7 @@ export function MasterBomPanel({
 
       {masterBom ? (
         <>
+          {assemblyRows.size > 0 ? <p className="mb-2 text-xs text-ink-secondary">{assemblyRows.size} assembly rows highlighted{hierarchy ? " · Expand or collapse assemblies using the arrows" : ""}</p> : null}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="relative min-w-[16rem] flex-1 sm:max-w-md">
               <Search
@@ -332,7 +348,7 @@ export function MasterBomPanel({
               className="text-xs font-medium tabular-nums text-ink-tertiary"
               aria-live="polite"
             >
-              {hasSearchQuery
+              {hasSearchQuery || filteredBomRows.length !== masterBom.rows.length
                 ? `${filteredBomRows.length} of ${masterBom.rows.length} rows`
                 : `${masterBom.rows.length} row${masterBom.rows.length === 1 ? "" : "s"}`}
             </span>
@@ -385,7 +401,8 @@ export function MasterBomPanel({
               <tbody>
                 {filteredBomRows.length > 0 ? (
                   filteredBomRows.map(({ row, rowIndex, allocationLabels }) => (
-                    <tr key={rowIndex} className="border-b border-line/60 last:border-b-0 hover:bg-surface-raised/50">
+                    <tr key={rowIndex} data-bom-level={hierarchy?.[rowIndex].depth} data-bom-assembly={assemblyRows.has(rowIndex) || undefined}
+                      className={`border-b border-line/60 last:border-b-0 hover:bg-surface-raised/50 ${assemblyRows.has(rowIndex) || hierarchy?.[rowIndex].hasChildren ? "bg-surface-hover font-semibold" : ""}`}>
                       {tableColumns.map((column) =>
                         column.kind === "allocation" ? (
                           <td key={column.key} className="whitespace-nowrap px-3 py-1.5">
@@ -410,7 +427,21 @@ export function MasterBomPanel({
                             className="truncate px-3 py-1.5 text-ink"
                             title={row[column.name]}
                           >
-                            {row[column.name]}
+                            {hierarchy && column.name === bomFieldColumns.partNumber ? <div className="flex items-center gap-1" style={{ paddingLeft: hierarchy[rowIndex].depth * 16 }}>
+                              {hierarchy[rowIndex].hasChildren ? <button type="button"
+                                className="flex h-5 w-5 shrink-0 items-center justify-center rounded focus-visible:outline focus-visible:outline-1"
+                                aria-label={`${!hasSearchQuery && collapsedBom?.source === masterBom && collapsedBom.rows.has(rowIndex) ? "Expand" : "Collapse"} ${row[column.name]}`}
+                                aria-expanded={hasSearchQuery || !(collapsedBom?.source === masterBom && collapsedBom.rows.has(rowIndex))}
+                                disabled={hasSearchQuery}
+                                onClick={() => setCollapsedBom(current => {
+                                  const rows = new Set(current?.source === masterBom ? current.rows : []);
+                                  if (rows.has(rowIndex)) rows.delete(rowIndex); else rows.add(rowIndex);
+                                  return { source: masterBom, rows };
+                                })}>
+                                {!hasSearchQuery && collapsedBom?.source === masterBom && collapsedBom.rows.has(rowIndex) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                              </button> : <span className="w-5 shrink-0" />}
+                              <span className="truncate">{row[column.name]}</span>
+                            </div> : row[column.name]}
                           </td>
                         ),
                       )}

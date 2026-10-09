@@ -3307,7 +3307,8 @@ export function LineWorkspace({
         <TopNav
           context={displayedPlannerChromeContext}
           presence={presencePeers}
-          actions={awiMaster ? <AwiEditorActions key={awiMaster.id} master={awiMaster} saveState={saveState}
+          actions={awiMaster ? <AwiEditorActions key={awiMaster.id} master={awiMaster} saveState={saveState} saveError={saveError}
+            recoveryDrafts={procedureDraftsRef.current}
             state={hydratedTaskIds.has(awiMaster.task_id) ? derivedState : undefined}
             readOnly={isViewOnlyAccess} ready={hasConfirmedRemoteState}
             beforeSave={() => ensureSavedBeforeScenarioAction("AWI is still saving", "Resolve the save issue before changing AWI details.")} /> : undefined}
@@ -3368,6 +3369,13 @@ export function LineWorkspace({
             <div className="contents" inert={Boolean(awiMaster && !hasConfirmedRemoteState)} aria-busy={Boolean(awiMaster && !hasConfirmedRemoteState)}>
             <ProcedureWorkspace
               isAwiMaster={Boolean(awiMaster)}
+              publishAction={awiMaster ? <WorkInstructionsPanel compact isAwiMaster
+                tasks={derivedState.tasks.filter(task => task.id === awiMaster.task_id)}
+                zones={derivedState.zones} product={derivedState.product}
+                initialPlannerState={derivedState} hydratedTaskIds={hydratedTaskIds}
+                readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
+                onBeforeRelease={() => ensureSavedBeforeScenarioAction("AWI is still saving", "Resolve the save issue before publishing this AWI.")}
+                onOpenTask={selectTask} /> : undefined}
               readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
               project={activeProjectContext}
               product={derivedState.product}

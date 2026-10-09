@@ -15,7 +15,7 @@ describe("master AWI transactional save", () => {
     expect(client.from).not.toHaveBeenCalled();
   });
 
-  it.each(["40001", "23505"])("does not retry or fall back after conflict %s", async (code) => {
+  it.each(["PT409", "40001", "23505"])("does not retry or fall back after conflict %s", async (code) => {
     const client = { rpc: vi.fn().mockResolvedValue({ error: { code, message: "Conflict" } }), from: vi.fn() };
     await expect(saveAwiProcedure(payload, client as never)).rejects.toThrow("AWI save conflict. Your local draft is preserved");
     expect(client.rpc).toHaveBeenCalledTimes(1);

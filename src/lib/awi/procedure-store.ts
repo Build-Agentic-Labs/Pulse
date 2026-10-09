@@ -8,7 +8,7 @@ export type AwiProcedureSave = Database["public"]["Functions"]["save_awi_procedu
 export async function saveAwiProcedure(payload: AwiProcedureSave, client?: SupabaseClient<Database>) {
   const { data, error } = await (client ?? createPlannerSupabaseClient()).rpc("save_awi_procedure", payload);
   if (!error) return data;
-  if (error.code === "40001" || error.code === "23505") {
+  if (error.code === "PT409" || error.code === "40001" || error.code === "23505") {
     throw new Error("AWI save conflict. Your local draft is preserved; reload this AWI before saving again.");
   }
   throw new Error(error.message);

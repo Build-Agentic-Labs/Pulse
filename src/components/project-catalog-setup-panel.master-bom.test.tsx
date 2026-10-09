@@ -22,6 +22,23 @@ function selectBomFile() {
 }
 
 describe("MasterBomPanel", () => {
+  it("collapses only descendants and includes their ancestors when searching", () => {
+    const bom: MasterBom = { columns: ["No.", "Level", "Description"], rows: [
+      { "No.": "ROOT", Level: "0", Description: "Trailer" },
+      { "No.": "ASSY", Level: "1", Description: "Fender" },
+      { "No.": "CHILD", Level: "2", Description: "Insert" },
+      { "No.": "SIBLING", Level: "1", Description: "Wheel" },
+    ] };
+    render(<MasterBomPanel masterBom={bom} onChange={vi.fn()} onConfirmAction={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse ASSY" }));
+    expect(screen.queryByText("CHILD")).toBeNull();
+    expect(screen.getByText("SIBLING")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Insert" } });
+    expect(screen.getByText("CHILD")).toBeInTheDocument();
+    expect(screen.getByText("ASSY")).toBeInTheDocument();
+    expect(screen.getByText("ROOT")).toBeInTheDocument();
+    expect(screen.queryByText("SIBLING")).toBeNull();
+  });
   beforeEach(() => {
     vi.mocked(parseBomFile).mockReset();
     vi.mocked(parseBomFile).mockResolvedValue(uploadedBom);

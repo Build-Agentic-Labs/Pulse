@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { detectBomFieldColumns, getMasterBom, PRODUCT_MASTER_BOM_FIELD } from "./master-bom";
+import { buildBomHierarchy, detectBomFieldColumns, getMasterBom, PRODUCT_MASTER_BOM_FIELD } from "./master-bom";
+
+describe("BOM hierarchy", () => {
+  const bom = (levels: string[]) => ({ columns: ["Low-Level Code"], rows: levels.map(level => ({ "Low-Level Code": level })) });
+  it("keeps sibling order and closes the previous assembly at its next sibling", () => {
+    expect(buildBomHierarchy(bom(["0", "1", "1", "2", "1"]))).toEqual([
+      { depth: 0, ancestors: [], hasChildren: true },
+      { depth: 1, ancestors: [0], hasChildren: false },
+      { depth: 1, ancestors: [0], hasChildren: true },
+      { depth: 2, ancestors: [0, 2], hasChildren: false },
+      { depth: 1, ancestors: [0], hasChildren: false },
+    ]);
+  });
+  it("does not invent a hierarchy for missing or malformed levels", () => {
+    for (const levels of [["0", ""], ["0", "2"], ["1", "0"], ["0", "-1"]]) expect(buildBomHierarchy(bom(levels))).toBeUndefined();
+    expect(buildBomHierarchy({ columns: ["No."], rows: [{ "No.": "123" }] })).toBeUndefined();
+  });
+});
 
 describe("detectBomFieldColumns", () => {
   it("maps a real-world BOM header layout", () => {

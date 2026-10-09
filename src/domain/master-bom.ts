@@ -11,6 +11,23 @@ export interface MasterBom {
   rows: Array<Record<string, string>>; // each row: column name -> cell text
 }
 
+/** Source-order outline; invalid/missing levels remain flat rather than guessing parents. */
+export function buildBomHierarchy(bom: MasterBom) {
+  const column = bom.columns.find(name => ["level", "bom level", "depth", "low-level code"].includes(name.trim().toLowerCase()));
+  if (!column || !bom.rows.length) return undefined;
+  const levels = bom.rows.map(row => /^\d+$/.test(row[column]?.trim() ?? "") ? Number(row[column]) : NaN);
+  const base = levels[0];
+  if (!levels.every((level, index) => Number.isSafeInteger(level) && level >= base && (index === 0 || level <= levels[index - 1] + 1))) return undefined;
+  const stack: number[] = [];
+  return levels.map((level, index) => {
+    const depth = level - base;
+    stack.length = depth;
+    const ancestors = [...stack];
+    stack.push(index);
+    return { depth, ancestors, hasChildren: levels[index + 1] > level };
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

@@ -18,6 +18,20 @@
     padding-top: 1.65rem;
   }
 
+.ui-procedure-main .ui-procedure-title.ui-awi-process-title {
+    padding-top: 0;
+    font-size: 24px;
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: normal;
+    text-transform: none;
+  }
+
+.ui-procedure-main .ui-awi-process-title input {
+    font-size: inherit;
+    line-height: inherit;
+  }
+
 .ui-workspace-content {
     @apply min-h-0 min-w-0 overflow-auto rounded-l-xl bg-canvas transition-[border-radius] duration-300 ease-out;
   }

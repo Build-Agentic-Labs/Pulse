@@ -8,9 +8,11 @@ import type { PlannerState } from "@/domain/types";
 import { updateAwiMetadata, type AwiMaster } from "@/lib/awi/store";
 import { WorkInstructionPrintPreview } from "./work-instruction/work-instruction-print";
 
-export function AwiEditorActions({ master, state, saveState, readOnly, ready, beforeSave }: {
+export function AwiEditorActions({ master, state, saveState, saveError, recoveryDrafts, readOnly, ready, beforeSave }: {
   master: AwiMaster; state?: PlannerState; saveState: SaveState; readOnly: boolean; ready: boolean;
   beforeSave: () => Promise<boolean>;
+  saveError?: string;
+  recoveryDrafts?: unknown;
 }) {
   const [preview, setPreview] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -30,7 +32,16 @@ export function AwiEditorActions({ master, state, saveState, readOnly, ready, be
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to save AWI details."); setPending(false); }
   }
   return <>
-    <AwiSaveStatus saveState={saveState} />
+    <AwiSaveStatus saveState={saveState} saveError={saveError} />
+    {(saveState === "error" || saveState === "retrying" || saveState === "conflict") && state ?
+      <button type="button" className="ui-btn-ghost h-8 px-2" onClick={() => {
+        const url = URL.createObjectURL(new Blob([JSON.stringify({ master, state, recoveryDrafts, saveError, exportedAt: new Date().toISOString() }, null, 2)], { type: "application/json" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${master.document_number}-recovery.json`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }}>Download draft</button> : null}
     {!readOnly ? <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-2" disabled={!ready}
       onClick={() => { setNumber(master.document_number); setCategory(master.category ?? ""); setError(""); setEditing(true); }}>
       <Pencil size={14} />AWI details
@@ -54,9 +65,9 @@ export function AwiEditorActions({ master, state, saveState, readOnly, ready, be
   </>;
 }
 
-export function AwiSaveStatus({ saveState }: { saveState: SaveState }) {
+export function AwiSaveStatus({ saveState, saveError }: { saveState: SaveState; saveError?: string }) {
   const status = saveState === "error" || saveState === "retrying" ? "Save pending — keep this draft open"
     : saveState === "conflict" ? "Conflicting edit — keep this draft open"
     : saveState === "loading" ? "Loading…" : saveState === "saving" || saveState === "draft" ? "Saving…" : "Saved";
-  return <span role="status" className="hidden text-[11px] text-ink-secondary sm:inline">{status}</span>;
+  return <span role="status" title={saveError} className="hidden text-[11px] text-ink-secondary sm:inline">{status}</span>;
 }

@@ -423,6 +423,7 @@ export function WorkInstructionsPanel({
   hydratedTaskIds,
   readOnly = false,
   isAwiMaster = false,
+  compact = false,
   onBeforeRelease,
   onOpenTask,
   onUpdateTask,
@@ -435,6 +436,7 @@ export function WorkInstructionsPanel({
   /** View-only project access: releases and references are visible but cannot be changed. */
   readOnly?: boolean;
   isAwiMaster?: boolean;
+  compact?: boolean;
   onBeforeRelease?: () => Promise<boolean>;
   onOpenTask: (taskId: string) => void;
   onUpdateTask?: (taskId: string, patch: Partial<Task>) => void;
@@ -574,7 +576,15 @@ export function WorkInstructionsPanel({
   const canPreviewAll = workTasks.length > 0;
 
   return (
-    <div className="mx-auto max-w-[1100px] space-y-6">
+    <div className={compact ? "relative" : "mx-auto max-w-[1100px] space-y-6"}>
+      {compact ? <>
+        <button type="button" className="ui-btn-primary h-9 gap-2 px-3" aria-haspopup="dialog"
+          disabled={readOnly || !projectId || !workTasks.length || preparingTaskId !== null}
+          onClick={() => { const task = workTasks[0]; if (task) void openControl(task); }}>
+          <FileCheck2 size={14} />{preparingTaskId ? "Preparing…" : "Publish"}
+        </button>
+        {controlError ? <p role="alert" className="absolute right-0 top-full z-20 mt-2 w-72 rounded border border-line bg-surface p-3 text-xs text-danger">{controlError}</p> : null}
+      </> : <>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="ui-section-title">Work Instructions</h2>
@@ -715,6 +725,7 @@ export function WorkInstructionsPanel({
         </div>
       )}
 
+      </>}
       {projectId && previewSelection ? (
         <WorkInstructionPrintPreview
           projectId={projectId}

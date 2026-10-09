@@ -303,9 +303,11 @@ export function mapPartReferenceRecord(row: Record<string, unknown>): PartRefere
   return {
     id: String(row.id),
     partNumber: String(row.partNumber ?? row.part_number ?? ""),
-    description: maybeText(row.description),
+    // These values also form the optimistic-save baseline. Trimming or dropping
+    // an empty string would turn an unchanged persisted part into a conflict.
+    description: typeof row.description === "string" ? row.description : undefined,
     quantity: maybeNum(row.quantity),
-    disposition: maybeText(row.disposition),
+    disposition: typeof row.disposition === "string" ? row.disposition : undefined,
   };
 }
 

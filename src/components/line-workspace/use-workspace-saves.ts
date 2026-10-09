@@ -243,7 +243,7 @@ export function useWorkspaceSaves({
   // behind it through persistPlannerState -- the same drain the BOM save uses. While this hook's own save
   // loop runs, the lock is the loop's: it releases the lock and drains the queue itself when it exits, and
   // freeing it here would let a second, concurrent shell save start.
-  function releaseShellLock() {
+  function releaseShellLock(reconcileQueuedState?: (state: PlannerState) => PlannerState) {
     if (shellSaveLoopActiveRef.current) {
       return;
     }
@@ -253,7 +253,7 @@ export function useWorkspaceSaves({
       return;
     }
     queuedSaveStateRef.current = null;
-    void persistPlannerState(queuedState);
+    void persistPlannerState(reconcileQueuedState ? reconcileQueuedState(queuedState) : queuedState);
   }
 
   async function updateMasterBom(bom: MasterBom | undefined): Promise<void> {

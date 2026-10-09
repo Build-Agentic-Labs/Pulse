@@ -318,6 +318,27 @@ describe("shell lock release and restore autosave", () => {
     fireEvent.drop(groupRow(targetWbs), { dataTransfer, clientY: 0 });
   }
 
+  it("saves unrelated edits with the rolled-back order when a reorder fails", async () => {
+    vi.mocked(loadPlannerCoreStateFromSupabase).mockImplementation(async (projectId) => twoGroupState(projectId ?? PROJECT_A));
+    const reorder = deferred<Awaited<ReturnType<typeof reorderTasksInSupabase>>>();
+    vi.mocked(reorderTasksInSupabase).mockReturnValueOnce(reorder.promise);
+    await mountPlanner(PROJECT_A);
+    await openGanttTimeline();
+    dragGroupOnto("1", "2");
+    await advance(240);
+    expect(reorderTasksInSupabase).toHaveBeenCalledTimes(1);
+    addTaskInGantt();
+    await advance(SHELL_AUTOSAVE_MS);
+    expect(savePlannerShellToSupabase).not.toHaveBeenCalled();
+    await act(async () => { reorder.reject(new Error("Reorder rejected")); });
+    await flushMicrotasks();
+    expect(savePlannerShellToSupabase).toHaveBeenCalledTimes(1);
+    const saved = vi.mocked(savePlannerShellToSupabase).mock.calls[0]![0];
+    expect(saved.tasks).toHaveLength(3);
+    expect(saved.tasks.find(task => task.id === `${PROJECT_A}-first`)?.wbs).toBe("1");
+    expect(saved.tasks.find(task => task.id === `${PROJECT_A}-second`)?.wbs).toBe("2");
+  });
+
   it("releases the shell lock when the product switches while a Gantt reorder is in flight", async () => {
     vi.mocked(loadPlannerCoreStateFromSupabase).mockImplementation(async (projectId) => twoGroupState(projectId ?? PROJECT_A));
     const reorder = deferred<Awaited<ReturnType<typeof reorderTasksInSupabase>>>();

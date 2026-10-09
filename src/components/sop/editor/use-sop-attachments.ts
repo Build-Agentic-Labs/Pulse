@@ -41,8 +41,8 @@ export function useSopAttachments({
   const [annexFiles, setAnnexFiles] = useState<SopAnnexFile[]>([]);
   // Counts local writes to `annexFiles`. A list response that started before a local write
   // (e.g. the first save of a new SOP starts the list, then the upload appends) is stale and
-  // is dropped: the later write already reflects the server. Never merge — that would re-add
-  // a file removed after the list started.
+  // is retried so unrelated existing files are still loaded. Never merge a stale response —
+  // that would re-add a file removed after the list started.
   const localWritesRef = useRef(0);
   const [annexFileError, setAnnexFileError] = useState("");
   const [referenceDocError, setReferenceDocError] = useState("");
@@ -267,19 +267,25 @@ export function useSopAttachments({
       return;
     }
     let active = true;
-    const seenWrites = localWritesRef.current;
-    listSopAnnexFiles(sopId)
-      .then((files) => {
-        if (active && localWritesRef.current === seenWrites) setAnnexFiles(files);
-      })
-      .catch((error: unknown) => {
-        if (active)
-          setAnnexFileError(
-            error instanceof Error
-              ? error.message
-              : "Could not load attached forms.",
-          );
-      });
+    async function loadFiles() {
+      try {
+        while (active) {
+          const seenWrites = localWritesRef.current;
+          const files = await listSopAnnexFiles(sopId);
+          if (!active) return;
+          // A write can overtake the initial read before any existing files were loaded.
+          // Retry against the server instead of leaving only that write's result in state.
+          if (localWritesRef.current !== seenWrites) continue;
+          setAnnexFiles(files);
+          return;
+        }
+      } catch (error: unknown) {
+        if (active) setAnnexFileError(
+          error instanceof Error ? error.message : "Could not load attached forms.",
+        );
+      }
+    }
+    void loadFiles();
     return () => {
       active = false;
     };

@@ -168,7 +168,7 @@ describe("SOP attachment list refetch", () => {
   });
   it("keeps a first upload when the list response started by the first save lands after it", async () => {
     let resolveList!: (files: SopAnnexFile[]) => void;
-    vi.mocked(listSopAnnexFiles).mockImplementation(
+    vi.mocked(listSopAnnexFiles).mockResolvedValue([file]).mockImplementationOnce(
       () => new Promise<SopAnnexFile[]>((resolve) => { resolveList = resolve; }),
     );
     const base = {
@@ -214,4 +214,17 @@ describe("SOP attachment list refetch", () => {
     await act(async () => {});
     expect(result.current.annexFiles).toEqual([file]);
   });
+});
+
+it("reloads unrelated existing files when an upload overtakes initial loading", async () => {
+  let resolveList!: (files: SopAnnexFile[]) => void;
+  const existing = { ...file, id: "existing", annexId: "existing-annex" };
+  vi.mocked(listSopAnnexFiles)
+    .mockResolvedValue([existing, file])
+    .mockImplementationOnce(() => new Promise(resolve => { resolveList = resolve; }));
+  const { result } = setup({ hasPersistedSop: true, isAnnexPersisted: () => true });
+  await act(async () => { await result.current.handleAnnexUpload(0, new File(["x"], "form.csv")); });
+  await act(async () => { resolveList([existing]); });
+  expect(result.current.annexFiles).toEqual(expect.arrayContaining([existing, file]));
+  expect(listSopAnnexFiles).toHaveBeenCalledTimes(2);
 });

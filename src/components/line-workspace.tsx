@@ -2119,17 +2119,26 @@ export function LineWorkspace({
     const finishWrite = writeTracker.begin("gantt-order");
 
     void (async () => {
+      let reconcileQueuedState: ((state: PlannerState) => PlannerState) | undefined;
+      const inReorderScope = (state: PlannerState) =>
+        state.product.projectId === scope.projectId && state.scenario.id === scope.scenarioId;
       try {
         const order = await reorderTasksInSupabase(
           String(projectId ?? ""), scope.scenarioId, beforeState.tasks, reorderedTasks, undefined, assertCurrent,
         );
         if (!isCurrent()) return;
-        setPlannerState((current) => ({ ...current, tasks: mergeTaskOrder(current.tasks, order) }));
+        reconcileQueuedState = (current) => inReorderScope(current)
+          ? { ...current, tasks: mergeTaskOrder(current.tasks, order) }
+          : current;
+        setPlannerState(reconcileQueuedState);
         setSaveState("saved");
       } catch (error) {
         finishWrite(error);
         if (!isCurrent()) return;
-        setPlannerState((current) => ({ ...current, tasks: rollbackTaskOrder(current.tasks, beforeState.tasks, reorderedTasks) }));
+        reconcileQueuedState = (current) => inReorderScope(current)
+          ? { ...current, tasks: rollbackTaskOrder(current.tasks, beforeState.tasks, reorderedTasks) }
+          : current;
+        setPlannerState(reconcileQueuedState);
         const message = error instanceof Error ? error.message : "Unable to save Gantt order.";
         setSaveError(message);
         setSaveState("error");
@@ -2142,7 +2151,9 @@ export function LineWorkspace({
         taskReorderInFlightRef.current = false;
         // Always release (and drain) the lock: a scope change mid-request must not leave it held for the
         // mount. isCurrent() gates only state updates and notices.
-        releaseShellLock();
+        // The queued snapshot predates the response. Apply the same order reconciliation as
+        // the UI before saving it, preserving unrelated edits and other project/scenario queues.
+        releaseShellLock(reconcileQueuedState);
         finishWrite();
         if (isCurrent()) flushDeferredRemoteRefresh();
       }

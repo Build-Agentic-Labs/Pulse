@@ -10,6 +10,9 @@ export default defineConfig({
     },
   },
   test: {
+    env: {
+      TZ: "America/Los_Angeles",
+    },
     projects: [
       {
         extends: true,

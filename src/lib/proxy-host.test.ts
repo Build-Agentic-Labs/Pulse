@@ -7,7 +7,7 @@ vi.mock("@supabase/ssr", () => ({
   createServerClient: () => ({ auth: { getUser: mocks.getUser } }),
 }));
 
-import { proxy } from "./proxy";
+import { proxy } from "../../proxy";
 
 describe("proxy host handling", () => {
   beforeEach(() => {

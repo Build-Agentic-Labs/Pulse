@@ -86,10 +86,15 @@ describe("formatRelativeFromBounds", () => {
 
 // A bare YYYY-MM-DD is a calendar day, not an instant. `new Date("2026-07-15")` parses as UTC
 // midnight, which renders as 07/14 anywhere west of Greenwich. The expectations below are built
-// from a LOCAL-constructed date so they fail on the old parse in any timezone west of UTC, and the
-// controlled literal fails there too; in UTC (CI) the local and UTC days coincide.
+// from a LOCAL-constructed date. Vitest pins America/Los_Angeles so the old parse fails west of
+// UTC on every machine, including CI, where UTC would otherwise hide this regression.
 describe("date-only input parses as a local calendar day", () => {
   const localJuly15 = new Date(2026, 6, 15).toISOString();
+
+  it("runs in the pinned timezone west of UTC", () => {
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe("America/Los_Angeles");
+    expect(new Date(2026, 6, 15).getTimezoneOffset()).toBe(420);
+  });
 
   it("formatDateControlled renders the chosen day", () => {
     expect(formatDateControlled("2026-07-15")).toBe(formatDateControlled(localJuly15));

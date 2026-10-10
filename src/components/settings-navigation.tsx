@@ -1,13 +1,13 @@
 "use client";
 
-import { CircleUserRound, HardDrive, FolderKanban, Palette, Settings, UsersRound } from "lucide-react";
+import { CircleUserRound, HardDrive, Smartphone, Palette, Settings, UsersRound } from "lucide-react";
 import { NavSelectionTrack } from "@/components/nav-selection-track";
 
 export const settingsSections = [
   { id: "account", label: "Account", icon: CircleUserRound },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "organization", label: "Organization", icon: UsersRound },
-  { id: "projects", label: "Projects", icon: FolderKanban },
+  { id: "phone-portal", label: "Phone portal", icon: Smartphone },
   { id: "planning", label: "Planning", icon: Settings },
   { id: "backups", label: "Backups", icon: HardDrive },
 ] as const;

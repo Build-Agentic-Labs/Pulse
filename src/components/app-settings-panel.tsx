@@ -31,8 +31,8 @@ const OrganizationSettings = dynamic(
   { loading: () => <SettingsSectionLoadingContent /> },
 );
 
-const ProjectSettings = dynamic(
-  () => import("@/components/project-settings").then((module) => module.ProjectSettings),
+const PhonePhotoPortalPanel = dynamic(
+  () => import("@/components/phone-photo-portal-panel").then((module) => module.PhonePhotoPortalPanel),
   { loading: () => <SettingsSectionLoadingContent /> },
 );
 
@@ -568,7 +568,7 @@ export function AppSettingsPanel({
 
           <div hidden={activeSection !== "organization"} aria-hidden={activeSection !== "organization"}>
 
-          <SettingsPage title="Organization" description="Rename the organization, manage members, and control who can access each project.">
+          <SettingsPage title="Organization" description="Rename the organization, manage members, and control who can access each module.">
             <OrganizationSettings project={project} />
 
           </SettingsPage>
@@ -579,13 +579,13 @@ export function AppSettingsPanel({
 
 
 
-        {mountedSections.has("projects") ? (
+        {mountedSections.has("phone-portal") ? (
 
-          <div hidden={activeSection !== "projects"} aria-hidden={activeSection !== "projects"}>
+          <div hidden={activeSection !== "phone-portal"} aria-hidden={activeSection !== "phone-portal"}>
 
-          <SettingsPage title="Projects" description="Manage projects and project-specific tools.">
+          <SettingsPage title="Phone portal" description="Scan or share the link that opens photo capture on a phone.">
 
-            <ProjectSettings groups={groups} activeProject={project} embedded />
+            <PhonePhotoPortalPanel />
 
           </SettingsPage>
 

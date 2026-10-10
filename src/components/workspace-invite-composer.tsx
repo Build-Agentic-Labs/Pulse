@@ -167,7 +167,7 @@ export function WorkspaceInviteComposer({
         <div>
           <p className="text-[13px] font-medium text-ink">Invite with the right access on day one</p>
           <p className="mt-1 text-[12px] leading-5 text-ink-secondary">
-            Choose an organization role, then grant only the modules, projects, and SOP duties they need.
+            Choose an organization role, then grant only the modules and SOP duties they need.
           </p>
         </div>
         <button type="button" className="ui-btn-primary h-9 shrink-0 gap-1.5 px-3" onClick={() => setOpen(true)}>

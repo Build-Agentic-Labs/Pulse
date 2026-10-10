@@ -111,7 +111,7 @@ export function GatedPlanningRouteShell({ initialGroups }: ShellProps = {}) {
 export function SettingsRouteShell({ initialGroups }: ShellProps = {}) {
   return (
     <AuthProjectGate
-      directoryScope="project"
+      directoryScope="product"
       initialGroups={initialGroups}
       loadingFallback={<SettingsLoadingState />}
       renderHome={(home) => <SettingsWorkspace {...home} />}

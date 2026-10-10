@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Local implementation status (2026-10-10):** Tasks 1–10 and Task 11 local checks are complete. Push, merge, and production steps remain pending owner approval. See the [verification report](../../audits/2026-10-10-phase0-verification.md) for commits, test counts, browser evidence, and the measured 0.4 KiB planner bundle increase.
+**Local implementation status (2026-10-10):** Tasks 1–10 and Task 11 local checks are complete. All five branches passed CI and were fast-forwarded into main with owner approval. Production steps remain pending separate owner approval. See the [verification report](../../audits/2026-10-10-phase0-verification.md) for commits, test counts, browser evidence, and the measured 0.4 KiB planner bundle increase.
 
 **Goal:** Close the planner data-loss paths and the AWI-link defects found by the 2026-10-10 audit, apply the owner's three decisions (Settings lifecycle removal, linked duration from the master, dead smart-allocation deletion), and add the CI safety net that makes the date and proxy regressions catchable.
 
@@ -2328,7 +2328,7 @@ Use the retained **`pulse-e2e`** stack exactly as in Task 6 Step 3 (identity che
 
 Capture a screenshot per check, and record any failure as a fix commit on the owning branch. Afterwards, return `pulse-e2e` to the running or stopped state it was in before (a plain `stop --workdir scratch/browser-db` keeps its volumes).
 
-- [ ] **Step 3: Push and merge (owner approval required in chat before the first push)**
+- [x] **Step 3: Push and merge (owner approval required in chat before the first push)**
 
 Push each branch (the push account note is in memory `pulse-github-push-account`). Let CI run, and fast-forward `main` through A → B → C → D → E, only on green (`checks` and `database` jobs). Delete each merged branch.
 

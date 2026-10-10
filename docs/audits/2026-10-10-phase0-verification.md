@@ -1,6 +1,6 @@
 # Structure audit Phase 0 — local verification
 
-Implemented on 2026-10-10 in the existing checkout. All five branches are local and stacked from `main` at `e9dd1a3`. No push, merge, production query, or production migration has been performed. Release remains subject to the approval steps in the [implementation plan](../superpowers/plans/2026-10-10-structure-audit-phase-0.md#task-11-gate-live-verification-merge-production-migration).
+Implemented on 2026-10-10 in the existing checkout. All five branches were stacked from `main` at `e9dd1a3`, pushed, and passed both CI jobs (`checks` and `database`). With owner approval, main was then fast-forwarded through A → B → C → D → E, preserving the reviewed code tip `512b4d3`. No production query or production migration has been performed. Production work remains subject to the approval steps in the [implementation plan](../superpowers/plans/2026-10-10-structure-audit-phase-0.md#task-11-gate-live-verification-merge-production-migration).
 
 ## Changes and branch gates
 
@@ -59,8 +59,19 @@ The planner grew by 0.4 KiB (about 0.14%) from the 291.3 KiB baseline, so the pl
 
 No package-lock or CI workflow changes were made; browser CI jobs remain disabled. Successor rescheduling after master duration changes and broader mobile draft recovery remain outside this plan. Logs are retained at `/tmp/pulse-phase0-{A,B,C,D,E}-*.log`.
 
+## Branch CI and merge
+
+All five reviewed branch heads passed both required jobs before the owner-approved merge:
+
+- [Test safety net CI](https://github.com/Build-Agentic-Labs/Pulse/actions/runs/38078103014)
+- [Scenario switch-back CI](https://github.com/Build-Agentic-Labs/Pulse/actions/runs/38078103732)
+- [Linked AWI integrity CI](https://github.com/Build-Agentic-Labs/Pulse/actions/runs/38078103503)
+- [Settings phone portal CI](https://github.com/Build-Agentic-Labs/Pulse/actions/runs/38078103418)
+- [Dead allocation cleanup CI](https://github.com/Build-Agentic-Labs/Pulse/actions/runs/38078103498)
+
+The merge introduced no conflicts or application changes beyond the reviewed branches. This follow-up records the release status in documentation only.
+
 ## Release remaining
 
-1. Owner approval before the first push; then green CI checks and database jobs before each fast-forward merge A → B → C → D → E.
-2. Separate owner approvals for the production orphan query, migration and ledger entry, post-apply type generation, and deployment environment cleanup. No orphan cleanup is bundled into this migration.
-3. Record release results after those steps; no memory update has been made during local implementation.
+1. Separate owner approvals for the production orphan query, migration and ledger entry, post-apply type generation, and deployment environment cleanup. No orphan cleanup is bundled into this migration.
+2. Record release results after those steps; no memory update has been made during local implementation.

@@ -170,7 +170,7 @@ describe("filters", () => {
 });
 
 describe("linked master AWI reads", () => {
-  it("reloads the current master procedure without replacing product scheduling", async () => {
+  it("reloads the current master procedure and derives the linked duration", async () => {
     let text = "First master instruction";
     const db = createRecordingSupabase({reply:r=>{
       const source = r.filters.includes("id=master-task");
@@ -182,7 +182,8 @@ describe("linked master AWI reads", () => {
     }});
     const client = db.client as unknown as Client;
     const loaded = await loadTaskFromSupabase("task-1", PROJECT, client);
-    expect(loaded?.plannedDurationMinutes).toBe(30);
+    // The master's existing step has no duration, so its derived task duration is zero.
+    expect(loaded?.plannedDurationMinutes).toBe(0);
     expect(loaded?.manufacturingSteps?.[0].instruction).toBe(text);
     text = "Updated master instruction";
     expect((await loadTaskFromSupabase("task-1", PROJECT, client))?.manufacturingSteps?.[0].instruction).toBe(text);

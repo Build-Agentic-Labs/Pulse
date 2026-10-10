@@ -341,6 +341,8 @@ export interface Task {
   version?: number;
   /** Explicit step removals requested by the editor, with the version the user saw. Never persisted. */
   procedureStepDeletions?: Record<string, number>;
+  /** Runtime only, never persisted: the linked master AWI could not be resolved on this load. */
+  awiMasterStatus?: "unavailable";
   /** Last complete master-AWI read; carried through local edits for safe removal checks. */
   procedureSaveBaseline?: {
     stepVersions: Record<string, number>;

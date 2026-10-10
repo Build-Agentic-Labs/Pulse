@@ -2,20 +2,20 @@ import { act, renderHook } from "@testing-library/react";
 import { useEffect, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
-import { loadPlannerStateFromSupabase, savePlannerShellToSupabase, type SaveState } from "@/domain/supabase-planner";
+import { deleteScenario, loadPlannerStateFromSupabase, loadScenariosForProduct, savePlannerShellToSupabase, type SaveState } from "@/domain/supabase-planner";
 import type { PlannerState, ScenarioSummary, Task } from "@/domain/types";
 import { assertSaneStateDeletion } from "@/lib/planner/shell-store";
+import type { FeedbackConfirm } from "../themed-feedback";
 import { procedureTestTask } from "./procedure-test-fixtures";
 import { createProcedureSaveQueueStore } from "./use-procedure-save-queue";
 import { usePlannerShellAutosave, useWorkspaceSaves } from "./use-workspace-saves";
 import { useWorkspaceScenarios } from "./use-workspace-scenarios";
 
-// CHARACTERIZATION ONLY (structure audit D5). Records how a switch back to a cached scenario behaves
-// today; it does not assert the desired behavior. The fix is deferred to the owner.
-
 vi.mock("@/domain/supabase-planner", async (original) => ({
   ...await original<typeof import("@/domain/supabase-planner")>(),
+  deleteScenario: vi.fn(),
   loadPlannerStateFromSupabase: vi.fn(),
+  loadScenariosForProduct: vi.fn(),
   savePlannerShellToSupabase: vi.fn(),
 }));
 vi.mock("@/lib/planner-state-cache", async (original) => ({
@@ -29,6 +29,8 @@ const SCENARIO_A = "scenario-a";
 const SCENARIO_B = "scenario-b";
 const loadScenario = vi.mocked(loadPlannerStateFromSupabase);
 const saveShell = vi.mocked(savePlannerShellToSupabase);
+const deleteScenarioMock = vi.mocked(deleteScenario);
+const loadScenarioList = vi.mocked(loadScenariosForProduct);
 
 function scenarioTask(id: string, scenarioId: string): Task {
   return { ...procedureTestTask(`${id} text`, 1, { id, name: id }), scenarioId };
@@ -64,6 +66,7 @@ function renderScenarioWorkspace() {
     const [reportedSaveState, setSaveState] = useState<SaveState>("saved");
     const [reportedSaveError, setSaveError] = useState<string>();
     const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
+    const [feedbackConfirm, setFeedbackConfirm] = useState<FeedbackConfirm>();
     const fullyHydratedScenarioIdsRef = useRef(new Set<string>());
     const taskDetailHydrationRequestsRef = useRef(new Set<string>());
 
@@ -121,7 +124,7 @@ function renderScenarioWorkspace() {
       setSelectedStationId: vi.fn(),
       setActiveZoneId: vi.fn(),
       setFocusedProcedureStepId: vi.fn(),
-      setFeedbackConfirm: vi.fn(),
+      setFeedbackConfirm,
       notifyFeedback: vi.fn(),
       resetProcedureDrafts: vi.fn(),
       hasDirtyProcedureDrafts: () => false,
@@ -129,7 +132,7 @@ function renderScenarioWorkspace() {
       flushPendingPlannerSave: saves.flushPendingPlannerSave,
       waitForLocalSavesToSettle: () => saves.waitForLocalSavesToSettle(),
     });
-    return { plannerState, setPlannerState, saves, scenarioActions };
+    return { plannerState, setPlannerState, saves, scenarioActions, scenarioCacheRef, setScenarios, feedbackConfirm };
   });
 }
 
@@ -137,6 +140,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   loadScenario.mockReset();
   saveShell.mockReset();
+  deleteScenarioMock.mockReset().mockResolvedValue(undefined);
+  loadScenarioList.mockReset();
   serverTaskIds = { [SCENARIO_A]: ["task-a1"], [SCENARIO_B]: ["task-b1"] };
   wouldDelete = [];
   loadScenario.mockImplementation(async (_projectId, scenarioId) =>
@@ -163,24 +168,23 @@ async function switchTo(result: ReturnType<typeof renderScenarioWorkspace>["resu
   });
 }
 
-describe("switching back to a cached scenario (D5 characterization)", () => {
+describe("scenario switching cache freshness", () => {
   it(
-    "OBSERVED: the cached snapshot is applied without a reload, so the first edit's shell save would delete " +
-      "a task inserted server-side while another scenario was open (the deletion tripwire does not trip)",
+    "reloads a revisited scenario so its first shell save preserves tasks inserted remotely while away",
     async () => {
       const { result } = renderScenarioWorkspace();
 
       await switchTo(result, SCENARIO_B); // A -> B: first visit loads B from the server and caches it.
       expect(loadScenario).toHaveBeenCalledTimes(1);
-      await switchTo(result, SCENARIO_A); // B -> A: A is cached (mirror effect), no reload.
+      await switchTo(result, SCENARIO_A); // B -> A: reload Main after leaving it.
       expect(result.current.plannerState.scenario.id).toBe(SCENARIO_A);
 
       // While A is open, a teammate inserts a task into B. A's realtime scope does not cover B.
       serverTaskIds = { ...serverTaskIds, [SCENARIO_B]: [...serverTaskIds[SCENARIO_B]!, "task-b2-remote"] };
 
-      await switchTo(result, SCENARIO_B); // A -> B: B is cached, applied as is.
-      expect(loadScenario).toHaveBeenCalledTimes(1);
-      expect(result.current.plannerState.tasks.map((task) => task.id)).toEqual(["task-b1"]);
+      await switchTo(result, SCENARIO_B); // A -> B: reload B with the remote insertion.
+      expect(loadScenario).toHaveBeenCalledTimes(3);
+      expect(result.current.plannerState.tasks.map((task) => task.id)).toEqual(["task-b1", "task-b2-remote"]);
 
       // One shell edit on B, then the 900 ms autosave.
       act(() => {
@@ -194,8 +198,63 @@ describe("switching back to a cached scenario (D5 characterization)", () => {
 
       expect(saveShell).toHaveBeenCalledTimes(1);
       expect(saveShell.mock.calls[0]?.[0].scenario.id).toBe(SCENARIO_B);
-      expect(saveShell.mock.calls[0]?.[0].tasks.map((task) => task.id)).toEqual(["task-b1"]);
-      expect(wouldDelete).toEqual([["task-b2-remote"]]);
+      expect(saveShell.mock.calls[0]?.[0].tasks.map((task) => task.id)).toEqual(["task-b1", "task-b2-remote"]);
+      expect(wouldDelete).toEqual([[]]);
     },
   );
+
+  it("keeps only the active scenario cached after ordinary switches", async () => {
+    const { result } = renderScenarioWorkspace();
+    expect([...result.current.scenarioCacheRef.current.keys()]).toEqual([SCENARIO_A]);
+
+    await switchTo(result, SCENARIO_B);
+    expect([...result.current.scenarioCacheRef.current.keys()]).toEqual([SCENARIO_B]);
+
+    await switchTo(result, SCENARIO_A);
+    expect([...result.current.scenarioCacheRef.current.keys()]).toEqual([SCENARIO_A]);
+  });
+
+  it("uses a freshly written optimizer seed without reloading it", async () => {
+    const { result } = renderScenarioWorkspace();
+    const optimizedState = scenarioState("scenario-optimized", [scenarioTask("task-optimized", "scenario-optimized")]);
+    // The optimizer caches its freshly persisted result immediately before loading it into view.
+    result.current.scenarioCacheRef.current.set(optimizedState.scenario.id, optimizedState);
+
+    await act(async () => {
+      await result.current.scenarioActions.loadScenarioIntoView(optimizedState.scenario.id);
+    });
+
+    expect(loadScenario).not.toHaveBeenCalled();
+    expect(result.current.plannerState.scenario.id).toBe(optimizedState.scenario.id);
+    expect(result.current.plannerState.tasks.map((task) => task.id)).toEqual(["task-optimized"]);
+  });
+
+  it("reloads Main with remote tasks after confirming deletion of the active scenario", async () => {
+    const { result } = renderScenarioWorkspace();
+    const scenarioList: ScenarioSummary[] = [SCENARIO_A, SCENARIO_B].map((id) => ({
+      id,
+      name: id === SCENARIO_A ? "Main Plan" : "Projection B",
+      targetOutput: 1,
+      targetOutputPeriod: "day",
+      createdAt: "2026-10-10T00:00:00Z",
+    }));
+    act(() => { result.current.setScenarios(scenarioList); });
+    loadScenarioList.mockResolvedValue([scenarioList[0]!]);
+
+    await switchTo(result, SCENARIO_B);
+    serverTaskIds[SCENARIO_A]!.push("task-a2-remote");
+
+    act(() => { result.current.scenarioActions.requestDeleteScenario(SCENARIO_B); });
+    expect(result.current.feedbackConfirm?.confirmLabel).toBe("Delete");
+    expect(deleteScenarioMock).not.toHaveBeenCalled();
+    await act(async () => { result.current.feedbackConfirm!.onConfirm(); });
+
+    expect(deleteScenarioMock).toHaveBeenCalledWith(SCENARIO_B);
+    expect(loadScenarioList).toHaveBeenCalledWith("product-scenarios");
+    expect(result.current.feedbackConfirm).toBeUndefined();
+    expect(loadScenario).toHaveBeenCalledTimes(2);
+    expect(result.current.plannerState.scenario.id).toBe(SCENARIO_A);
+    expect(result.current.plannerState.tasks.map((task) => task.id)).toEqual(["task-a1", "task-a2-remote"]);
+    expect([...result.current.scenarioCacheRef.current.keys()]).toEqual([SCENARIO_A]);
+  });
 });

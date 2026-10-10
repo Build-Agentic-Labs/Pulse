@@ -230,9 +230,9 @@ export function LineWorkspace({
   // The "active" scenario is always derivedState.scenario.id (the currently loaded one), so we don't
   // track a separate id that could drift out of sync with the loaded planner state.
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
-  // In-memory cache of loaded scenarios, keyed by scenario id, for INSTANT switching (no DB reload).
-  // The active scenario's latest state is mirrored here continuously (see the effect below), so the
-  // cache always matches what's saved; switching to a cached scenario is a pure in-memory setState.
+  // In-memory cache of the active scenario and freshly written optimizer seeds, keyed by scenario id.
+  // Switching away evicts the departing scenario so revisits load remote changes; fresh optimizer
+  // seeds can be applied immediately without another database load.
   const scenarioCacheRef = useRef<Map<string, PlannerState>>(new Map());
   const [activeModule, setActiveModule] = useState(() => urlWorkspaceSnapshot.activeModule ?? (awiMaster ? "procedure" : "dashboard"));
   const restoringWorkspaceHistoryRef = useRef(false);
@@ -336,8 +336,8 @@ export function LineWorkspace({
     scenarioCacheRef.current.clear();
   }, [projectId]);
 
-  // Keep the active scenario's latest state mirrored in the cache so a later switch back is instant
-  // and reflects any edits made while it was active.
+  // Mirror the active scenario's latest state while it is open. The scenario switch evicts this entry
+  // when leaving, because realtime no longer keeps an inactive scenario current.
   useEffect(() => {
     if (hasLoadedRemoteState && derivedState.scenario.id !== emptyPlannerState.scenario.id) {
       scenarioCacheRef.current.set(derivedState.scenario.id, derivedState);

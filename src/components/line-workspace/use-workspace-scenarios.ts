@@ -88,6 +88,10 @@ export function useWorkspaceScenarios({
   // procedure drafts from the previous scenario are stale and must be dropped (never carried across).
   function applyScenarioSwitch(loaded: PlannerState) {
     const normalized = ensureNomenclatureCollections(loaded);
+    const leavingScenarioId = latestDerivedStateRef.current.scenario.id;
+    if (leavingScenarioId !== normalized.scenario.id) {
+      scenarioCacheRef.current.delete(leavingScenarioId);
+    }
     resetProcedureDrafts(latestDerivedStateRef.current.tasks.map((task) => task.id));
     // Unsaved drafts recovered for this scenario's tasks (from storage at project load, or kept from an
     // earlier visit) are re-saved the same way project load re-saves them.
@@ -134,8 +138,9 @@ export function useWorkspaceScenarios({
     return true;
   }
 
-  // Load a scenario into the active view: instant from the in-memory cache, else load once and cache
-  // it. Throws if it can't be loaded. The caller owns the surrounding save-state / busy messaging.
+  // The cache holds the active scenario and freshly written optimizer seeds. Leaving a scenario
+  // evicts it, so revisits reload remote changes; a fresh seed can still be applied instantly.
+  // Throws if it can't be loaded. The caller owns the surrounding save-state / busy messaging.
   async function loadScenarioIntoView(scenarioId: string) {
     const cached = scenarioCacheRef.current.get(scenarioId);
     if (cached) {
@@ -249,7 +254,7 @@ export function useWorkspaceScenarios({
       scenarioCacheRef.current.delete(scenarioId);
       const list = await refreshScenarioList();
 
-      // If the deleted scenario was the one on screen, fall back to Main (instant from cache).
+      // If the deleted scenario was the one on screen, reload Main with its latest remote state.
       if (wasActive && list[0]?.id) {
         await loadScenarioIntoView(list[0].id);
       }

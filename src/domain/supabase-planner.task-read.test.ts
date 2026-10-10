@@ -170,23 +170,51 @@ describe("filters", () => {
 });
 
 describe("linked master AWI reads", () => {
-  it("reloads the current master procedure and derives the linked duration", async () => {
-    let text = "First master instruction";
-    const db = createRecordingSupabase({reply:r=>{
-      const source = r.filters.includes("id=master-task");
-      if (r.target === "task_project_id") return {data:(r.payload as {target_task_id?:string})?.target_task_id === "master-task" ? "master-project" : PROJECT};
-      if (r.target === "tasks") return {data:source ? {...TASK,id:"master-task",description:"Master scope",custom_fields:{},planned_duration_minutes:90} : {...TASK,planned_duration_minutes:30,custom_fields:{awiMasterLink:{masterId:"master",projectId:"master-project",taskId:"master-task",documentNumber:"AWI-001"}}}};
-      if (r.target === "awi_masters") return {data:{project_id:"master-project",task_id:"master-task"}};
-      if (r.target === "manufacturing_steps") return {data:r.filters.includes("task_id=master-task") ? [{...STEP,id:"master-step",task_id:"master-task",instruction:text}] : []};
-      return {data:[]};
-    }});
-    const client = db.client as unknown as Client;
+  const link = { masterId: "master", projectId: "master-project", taskId: "master-task", documentNumber: "AWI-001" };
+  const unavailable = "The linked master AWI is unavailable. Check the master list and your access.";
+
+  function linkedWorld() {
+    let instruction = "First master instruction";
+    let description = "First master scope";
+    let failMaster = false;
+    const db = createRecordingSupabase({ reply: (r) => {
+      if (r.target === "task_project_id") return { data: PROJECT };
+      if (r.target === "tasks") {
+        if (r.columns?.includes("awi_link:")) return { data: { id: TASK.id, awi_link: link } };
+        return { data: r.filters.includes("id=master-task")
+          ? { ...TASK, id: "master-task", description, custom_fields: {}, planned_duration_minutes: 90 }
+          : { ...TASK, planned_start: "2026-10-10T08:00:00.000Z", planned_finish: "2026-10-10T08:30:00.000Z", planned_duration_minutes: 30, custom_fields: { awiMasterLink: link } } };
+      }
+      if (r.target === "awi_masters") return failMaster ? { error: { message: "Master lookup failed" } } : { data: [{ id: "master", project_id: "master-project", task_id: "master-task" }] };
+      if (r.target === "manufacturing_steps") return { data: r.filters.includes("task_id=master-task") ? [{ ...STEP, id: "master-step", task_id: "master-task", instruction, duration_minutes: 12 }] : [] };
+      return { data: [] };
+    } });
+    return { db, client: db.client as unknown as Client,
+      update: () => { instruction = "Updated master instruction"; description = "Updated master scope"; },
+      fail: () => { failMaster = true; },
+    };
+  }
+
+  it("reloads the current master procedure and derives linked duration and finish without writes or master project RPCs", async () => {
+    const { db, client, update } = linkedWorld();
     const loaded = await loadTaskFromSupabase("task-1", PROJECT, client);
-    // The master's existing step has no duration, so its derived task duration is zero.
-    expect(loaded?.plannedDurationMinutes).toBe(0);
-    expect(loaded?.manufacturingSteps?.[0].instruction).toBe(text);
-    text = "Updated master instruction";
-    expect((await loadTaskFromSupabase("task-1", PROJECT, client))?.manufacturingSteps?.[0].instruction).toBe(text);
-    expect(db.requests.every(r=>!r.modifiers.some(m=>m.startsWith("upsert")))).toBe(true);
+    expect(loaded).toMatchObject({ plannedDurationMinutes: 12, plannedFinish: "2026-10-10T08:12:00.000Z", description: "First master scope", manufacturingSteps: [{ instruction: "First master instruction" }] });
+    update();
+    expect(await loadTaskFromSupabase("task-1", PROJECT, client)).toMatchObject({ description: "Updated master scope", manufacturingSteps: [{ instruction: "Updated master instruction" }] });
+    expect(db.requests.filter(r => r.target === "task_project_id").map(r => r.payload)).toEqual([{ target_task_id: "task-1" }, { target_task_id: "task-1" }]);
+    expect(db.requests.filter(r => r.kind === "from").every(r => r.op === "select")).toBe(true);
+  });
+
+  it("rejects an unavailable master in the strict single-task loader", async () => {
+    const { client, fail } = linkedWorld();
+    fail();
+    await expect(loadTaskFromSupabase("task-1", PROJECT, client)).rejects.toThrow(unavailable);
+  });
+
+  it("rejects a failed private-media refresh after a successful load so it remains retryable", async () => {
+    const { client, fail } = linkedWorld();
+    expect(await loadTaskFromSupabase("task-1", PROJECT, client)).not.toBeNull();
+    fail();
+    await expect(loadTaskPrivateMediaFromSupabase("task-1", PROJECT, client)).rejects.toThrow(unavailable);
   });
 });

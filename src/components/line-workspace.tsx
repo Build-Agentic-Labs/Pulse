@@ -2573,7 +2573,9 @@ export function LineWorkspace({
             <div className="contents" inert={Boolean(awiMaster && !hasConfirmedRemoteState)} aria-busy={Boolean(awiMaster && !hasConfirmedRemoteState)}>
             <ProcedureWorkspace
               isAwiMaster={Boolean(awiMaster)}
-              publishAction={selectedTask && awiTaskLink(selectedTask) ? <a className="ui-btn-ghost h-9" href={`/awi/${awiTaskLink(selectedTask)!.masterId}?view=procedure&task=${encodeURIComponent(awiTaskLink(selectedTask)!.taskId)}`}>Open master AWI</a> : awiMaster ? <WorkInstructionsPanel compact isAwiMaster
+              publishAction={selectedTask && awiTaskLink(selectedTask) ? <>
+                {selectedTask.awiMasterStatus === "unavailable" && <span role="status" className="text-xs text-danger">Master AWI unavailable. Reload to retry.</span>}
+                <a className="ui-btn-ghost h-9" href={`/awi/${awiTaskLink(selectedTask)!.masterId}?view=procedure&task=${encodeURIComponent(awiTaskLink(selectedTask)!.taskId)}`}>Open master AWI</a></> : awiMaster ? <WorkInstructionsPanel compact isAwiMaster
                 tasks={derivedState.tasks.filter(task => task.id === awiMaster.task_id)}
                 zones={derivedState.zones} product={derivedState.product}
                 initialPlannerState={derivedState} hydratedTaskIds={hydratedTaskIds}

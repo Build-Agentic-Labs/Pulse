@@ -1,4 +1,4 @@
-import { awiTaskLink, withLinkedAwiProcedure } from "@/domain/awi-task-link";
+import { applyLinkedAwiMasters, awiTaskLink, type LinkedAwiMaster } from "@/domain/awi-task-link";
 // Planner reads: the full and editable-core planner graph (paged, ID-batched child reads; media signed
 // only for full loads), the narrow dashboard summary, a single task with its children and media, a
 // task's private media alone, and the SolidWorks task-target feed. Read-only. Moved verbatim from
@@ -240,7 +240,7 @@ export async function loadPlannerStateWithProjectFromSupabase(
     customColumns: (customColumns ?? []).map(mapCustomColumn),
   };
 
-  state.tasks = await Promise.all(state.tasks.map(task => resolveLinkedAwiTask(task, supabase)));
+  state.tasks = await resolveLinkedAwiTasks(state.tasks, supabase, { includeTaskMedia });
   return { state, project: projectContext };
 }
 
@@ -521,14 +521,11 @@ export async function loadTaskPrivateMediaFromSupabase(
   );
 }
 
-export async function loadTaskFromSupabase(
+async function loadTaskGraph(
+  supabase: ReturnType<typeof plannerClient>,
   taskId: string,
-  projectId?: string,
-  client?: ReturnType<typeof plannerClient>,
-  resolveLinks = true,
+  includeTaskMedia: boolean,
 ): Promise<Task | null> {
-  const supabase = client ?? plannerClient();
-  await assertTaskInProject(supabase, taskId, projectId);
   const task = await throwIfError(supabase.from("tasks").select("*").eq("id", taskId).maybeSingle());
 
   if (!task) {
@@ -542,14 +539,21 @@ export async function loadTaskFromSupabase(
     readAllPages((from, to) => throwIfError(supabase.from("task_dependencies").select("*").eq("successor_task_id", taskId).order("id").range(from, to))),
     readAllPages((from, to) => throwIfError(supabase.from("manufacturing_steps").select("*").eq("task_id", taskId).order("sequence").order("id").range(from, to))),
     readAllPages((from, to) => throwIfError(supabase.from("part_references").select("*").eq("task_id", taskId).order("created_at").order("id").range(from, to))),
-    readAllPages((from, to) => throwIfError(supabase.from("step_photos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
+    includeTaskMedia
+      ? readAllPages((from, to) => throwIfError(supabase.from("step_photos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to)))
+      : Promise.resolve([]),
     readAllPages((from, to) => throwIfError(supabase.from("step_tools").select("*").eq("task_id", taskId).order("sequence").order("id").range(from, to))),
-    readAllPages((from, to) => throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
-    readAllPages((from, to) => throwIfError(supabase.from("task_videos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to))),
+    includeTaskMedia
+      ? readAllPages((from, to) => throwIfError(supabase.from("step_exploded_views").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to)))
+      : Promise.resolve([]),
+    includeTaskMedia
+      ? readAllPages((from, to) => throwIfError(supabase.from("task_videos").select("*").eq("task_id", taskId).is("deleted_at", null).order("captured_at").order("id").range(from, to)))
+      : Promise.resolve([]),
   ]);
 
   const mappedTask = mapTask({
     ...task,
+    custom_fields: includeTaskMedia ? task.custom_fields : customFieldsRow(jsonObject(task.custom_fields)),
     dependency_ids: (dependencies ?? []).map((dependency) => String(dependency.predecessor_task_id)),
     manufacturing_steps: normalizeManufacturingStepSequences((manufacturingSteps ?? []).map(mapManufacturingStepRecord)),
     part_references: (partReferences ?? []).map(mapPartReferenceRecord),
@@ -561,22 +565,77 @@ export async function loadTaskFromSupabase(
     withSignedTaskVideoRows(supabase, (taskVideos ?? []) as TaskVideoRow[]),
   ]);
 
-  const normalizedTask = withNormalizedStepAssets(
+  return withNormalizedStepAssets(
     mappedTask,
     indexStepPhotos(signedStepPhotos),
     indexStepTools((stepTools ?? []) as StepToolRow[]),
     indexExplodedViews(signedExplodedViews),
     indexTaskVideos(signedTaskVideos),
   );
-  return resolveLinks ? resolveLinkedAwiTask(normalizedTask, supabase) : normalizedTask;
 }
 
-async function resolveLinkedAwiTask(task: Task, client: ReturnType<typeof plannerClient>): Promise<Task> {
-  const link = awiTaskLink(task);
-  if (!link) return task;
-  const master = await throwIfError(client.from("awi_masters").select("project_id,task_id").eq("id", link.masterId).maybeSingle());
-  if (!master || master.task_id !== link.taskId || master.project_id !== link.projectId || master.task_id === task.id) throw new Error("The linked master AWI is unavailable. Check the master list and your access.");
-  const source = await loadTaskFromSupabase(master.task_id, master.project_id, client, false);
-  if (!source || awiTaskLink(source)) throw new Error("Unable to load the linked master AWI.");
-  return withLinkedAwiProcedure(task, source);
+/** Resolve each visible master once per read; unavailable rows and graphs remain retryable. */
+export async function loadLinkedAwiMasters(
+  tasks: Task[],
+  client?: ReturnType<typeof plannerClient>,
+  options: { includeTaskMedia?: boolean } = {},
+): Promise<Map<string, LinkedAwiMaster>> {
+  const masterIds = [...new Set(tasks.flatMap(task => {
+    const link = awiTaskLink(task);
+    return link ? [link.masterId] : [];
+  }))];
+  const masters = new Map<string, LinkedAwiMaster>();
+  if (!masterIds.length) return masters;
+
+  const supabase = client ?? plannerClient();
+  let rows;
+  try {
+    rows = await readRowsByIds(masterIds, (ids, from, to) => throwIfError(
+      supabase.from("awi_masters").select("id,project_id,task_id").in("id", ids).order("id").range(from, to),
+    ));
+  } catch {
+    return masters;
+  }
+
+  // awi_masters policies bind each task to its project. The caller-scoped reads enforce access;
+  // no extra project RPC is needed for every link that references the same source task.
+  const taskIds = [...new Set(rows.map(row => String(row.task_id)))];
+  const sources = new Map(await Promise.all(taskIds.map(async taskId => {
+    try {
+      const source = await loadTaskGraph(supabase, taskId, options.includeTaskMedia !== false);
+      return [taskId, source ?? undefined] as const;
+    } catch {
+      return [taskId, undefined] as const;
+    }
+  })));
+  for (const row of rows) {
+    const taskId = String(row.task_id);
+    masters.set(String(row.id), { projectId: String(row.project_id), taskId, source: sources.get(taskId) });
+  }
+  return masters;
+}
+
+async function resolveLinkedAwiTasks(
+  tasks: Task[],
+  client: ReturnType<typeof plannerClient>,
+  options: { includeTaskMedia?: boolean } = {},
+): Promise<Task[]> {
+  if (!tasks.some(task => awiTaskLink(task))) return tasks;
+  return applyLinkedAwiMasters(tasks, await loadLinkedAwiMasters(tasks, client, options));
+}
+
+export async function loadTaskFromSupabase(
+  taskId: string,
+  projectId?: string,
+  client?: ReturnType<typeof plannerClient>,
+): Promise<Task | null> {
+  const supabase = client ?? plannerClient();
+  await assertTaskInProject(supabase, taskId, projectId);
+  const task = await loadTaskGraph(supabase, taskId, true);
+  if (!task) return null;
+  const [resolved] = await resolveLinkedAwiTasks([task], supabase);
+  if (resolved.awiMasterStatus === "unavailable") {
+    throw new Error("The linked master AWI is unavailable. Check the master list and your access.");
+  }
+  return resolved;
 }

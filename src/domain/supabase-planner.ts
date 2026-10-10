@@ -74,6 +74,7 @@ export {
   loadProjectTaskTargetsFromSupabase,
   loadTaskPrivateMediaFromSupabase,
   loadTaskFromSupabase,
+  loadLinkedAwiMasters,
 } from "@/lib/planner/read-store";
 export type { ProjectTaskTarget } from "@/lib/planner/read-store";
 export {

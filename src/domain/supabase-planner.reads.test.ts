@@ -232,3 +232,60 @@ describe("SolidWorks task targets", () => {
     expect(none.lines()).toEqual(["products.select(id) project_id=proj-1"]);
   });
 });
+
+
+describe("linked master planner reads", () => {
+  const link = { masterId: "master", projectId: "master-project", taskId: "master-task", documentNumber: "AWI-001" };
+  const linkedRows = [1, 2, 3].map(n => ({ id: `linked-${n}`, scenario_id: "scenario-1", name: `Linked ${n}`, planned_duration_minutes: 30, custom_fields: { awiMasterLink: link } }));
+  const master = { id: "master-task", description: "Current master scope", planned_duration_minutes: 90, custom_fields: {
+    stepPhotoAttachments: { "master-step": [{ id: "legacy", storagePath: "legacy/photo.jpg" }] },
+    taskExplodedViews: [{ storagePath: "legacy/view.png" }], taskVideos: [{ storagePath: "legacy/video.webm" }],
+  } };
+
+  function linkedWorld(failMaster = false) {
+    return createRecordingSupabase({ userId: "user-1", reply: replyFrom({ ...graph, tasks: [...linkedRows, (graph.tasks as Row[])[0]] }, r => {
+      if (r.target === "awi_masters") return failMaster ? { error: { message: "Master lookup failed" } } : { data: [{ id: "master", project_id: "master-project", task_id: "master-task" }] };
+      if (r.target === "tasks" && r.filters.includes("id=master-task")) return { data: master };
+      if (r.filters.includes("task_id=master-task") || r.filters.includes("successor_task_id=master-task")) {
+        if (r.target === "manufacturing_steps") return { data: [{ id: "master-step", task_id: "master-task", sequence: 1, instruction: "Use current master", duration_minutes: 7 }] };
+        if (r.target === "part_references") return { data: [{ id: "master-part", task_id: "master-task", part_number: "ABC", quantity: 2 }] };
+        if (r.target === "step_tools") return { data: [{ id: "master-tool", task_id: "master-task", step_id: "master-step", tool_name: "Wrench", sequence: 1 }] };
+        return { data: [] };
+      }
+      return undefined;
+    }) });
+  }
+
+  it("batches three links to the same master and loads its task graph once", async () => {
+    const db = linkedWorld();
+    const state = await loadPlannerStateFromSupabase("proj-1", undefined, client(db));
+    const linked = state!.tasks.slice(0, 3);
+    expect(linked.map(t => t.plannedDurationMinutes)).toEqual([7, 7, 7]);
+    expect(linked[0].manufacturingSteps).toBe(linked[1].manufacturingSteps);
+    expect(linked[1].manufacturingSteps).toBe(linked[2].manufacturingSteps);
+    expect(db.lines().filter(line => line.startsWith("awi_masters."))).toEqual(["awi_masters.select(id,project_id,task_id) id in [master] | order(id) range(0,499)"]);
+    expect(db.requests.filter(r => r.target === "tasks" && r.filters.includes("id=master-task"))).toHaveLength(1);
+    expect(db.requests.filter(r => r.target === "task_project_id")).toEqual([]);
+  });
+
+  it("keeps the planner available with unavailable links when the master lookup fails", async () => {
+    const db = linkedWorld(true);
+    const state = await loadPlannerStateFromSupabase("proj-1", undefined, client(db));
+    expect(state!.tasks.slice(0, 3).map(t => t.awiMasterStatus)).toEqual(["unavailable", "unavailable", "unavailable"]);
+    expect(state!.tasks.slice(0, 3).map(t => t.plannedDurationMinutes)).toEqual([30, 30, 30]);
+    expect(state!.tasks[3].awiMasterStatus).toBeUndefined();
+    expect(state!.tasks[3].manufacturingSteps?.[0].id).toBe("step-1");
+  });
+
+  it("keeps the core master graph's steps, parts and tools without querying, signing or leaking media", async () => {
+    const db = linkedWorld();
+    const state = await loadPlannerCoreStateFromSupabase("proj-1", undefined, client(db));
+    expect(state!.tasks[0]).toMatchObject({ plannedDurationMinutes: 7, manufacturingSteps: [{ id: "master-step" }], partReferences: [{ id: "master-part" }], customFields: { stepToolLists: { "master-step": ["Wrench"] } } });
+    expect(db.requests.some(r => ["step_photos", "step_exploded_views", "task_videos"].includes(r.target) || r.kind === "storage")).toBe(false);
+    for (const task of state!.tasks.slice(0, 3)) {
+      expect(task.customFields).not.toHaveProperty("stepPhotoAttachments");
+      expect(task.customFields).not.toHaveProperty("taskExplodedViews");
+      expect(task.customFields).not.toHaveProperty("taskVideos");
+    }
+  });
+});

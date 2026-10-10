@@ -1,6 +1,7 @@
 "use client";
 
 import { ModalSurface } from "@/components/ui/modal-surface";
+import { awiTaskLink } from "@/domain/awi-task-link";
 
 import { taskDependsOn } from "@/domain/task-scheduling";
 
@@ -1477,6 +1478,8 @@ export function GanttTimeline({
                 const primaryTask = row.group.tasks[0];
                 const editableTask = row.group.tasks.find((task) => task.wbs === row.group.wbs);
                 const stepCount = groupManufacturingStepCount(row.group);
+                const durationFromMaster = row.group.tasks.some(awiTaskLink);
+                const durationLocked = stepCount > 0 || durationFromMaster;
                 const highlighted = dependencyHighlightRowIds.has(row.id);
                 const groupDurationOverTakt = exceedsTaktLimit(row.group.durationMinutes, taktLimitMinutes);
                 const groupDurationFlag = groupDurationOverTakt
@@ -1613,11 +1616,11 @@ export function GanttTimeline({
                           aria-label={`${row.group.wbs} duration hours${groupDurationOverTakt ? " over takt" : ""}`}
                           min={0}
                           step={0.05}
-                          readOnly={stepCount > 0}
+                          readOnly={durationLocked}
                           className={`number-input h-9 w-full min-w-0 rounded border px-1 text-center font-bold outline-none ${
                             groupDurationOverTakt
                               ? TAKT_FLAG_INPUT_CLASS
-                              : stepCount > 0
+                              : durationLocked
                                 ? "border-line bg-surface-sunken text-ink-secondary"
                                 : "border-line bg-surface text-ink"
                           }`}
@@ -1627,7 +1630,7 @@ export function GanttTimeline({
                           onClick={(event) => event.stopPropagation()}
                           onFocus={() => selectTaskForEditing(primaryTask.id)}
                           onValueChange={(value) => {
-                            if (stepCount === 0) {
+                            if (!durationLocked) {
                               updateTaskDuration(primaryTask, value);
                             }
                           }}

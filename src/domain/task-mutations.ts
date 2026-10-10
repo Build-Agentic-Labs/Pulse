@@ -1,3 +1,4 @@
+import { awiTaskLink } from "./awi-task-link";
 import { defaultDocumentTypeCodes, generateTaskCode } from "./nomenclature";
 import { STEP_PART_MENTIONS_FIELD } from "./step-part-mentions";
 import { STEP_PHOTO_ATTACHMENTS_FIELD } from "./step-photos";
@@ -51,7 +52,7 @@ export function enforceStepDerivedDuration(task: Task, patch: Partial<Task>) {
   if (
     patch.plannedDurationMinutes === undefined ||
     patch.manufacturingSteps !== undefined ||
-    (task.manufacturingSteps ?? []).length === 0
+    ((task.manufacturingSteps ?? []).length === 0 && !awiTaskLink(task))
   ) {
     return patch;
   }

@@ -1,4 +1,4 @@
-import { awiTaskLink } from "@/domain/awi-task-link";
+import { assertTaskOwnsProcedure, awiTaskLink } from "@/domain/awi-task-link";
 // Granular task and step writes: task rows (with batched step-tool sync), custom fields, photo markup
 // merge, step sets with collision-safe sequence parking, single phone-step edits, field patches and
 // procedure steps under version checks, the procedure save (AWI through its single transaction;
@@ -166,7 +166,7 @@ export async function saveTaskCustomFieldsToSupabase(taskId: string, customField
 }
 
 export async function saveTaskWithManufacturingStepsToSupabase(task: Task, projectId?: string) {
-  if (awiTaskLink(task)) throw new Error("Edit these instructions in the linked master AWI.");
+  assertTaskOwnsProcedure(task);
   const supabase = plannerClient();
   await assertTaskInProject(supabase, task.id, projectId);
   await throwIfError(supabase.from("tasks").upsert(taskRow(task)));
@@ -196,7 +196,7 @@ export async function saveTaskWithManufacturingStepsToSupabase(task: Task, proje
 }
 
 export async function saveTaskAndManufacturingStepToSupabase(task: Task, step: ManufacturingStep, projectId?: string) {
-  if (awiTaskLink(task)) throw new Error("Edit these instructions in the linked master AWI.");
+  assertTaskOwnsProcedure(task);
   const supabase = plannerClient();
   await assertTaskInProject(supabase, task.id, projectId);
   await throwIfError(supabase.from("tasks").upsert(taskRow(task)));
@@ -213,6 +213,7 @@ export async function saveMobileStepToSupabase(
   assertCurrent?: () => void,
 ): Promise<ManufacturingStep> {
   assertCurrent?.();
+  assertTaskOwnsProcedure(task);
   const supabase = providedClient ?? plannerClient();
   await assertTaskRowInProject(supabase, task, projectId);
   const parent = await throwIfError(supabase.from("tasks").select("id").eq("id", task.id).maybeSingle());
@@ -477,7 +478,7 @@ export async function saveProcedureTaskUpdateToSupabase(
   client?: ReturnType<typeof plannerClient>,
 ) {
   const supabase = client ?? plannerClient();
-  if (awiTaskLink(task)) throw new Error("Edit these instructions in the linked master AWI.");
+  assertTaskOwnsProcedure(task);
   const normalizedSteps = normalizeManufacturingStepSequences(task.manufacturingSteps ?? []);
   const taskToSave = { ...task, manufacturingSteps: normalizedSteps };
   const taskProcedurePatch = procedureTaskUpdateRow(taskToSave);
@@ -624,6 +625,8 @@ export async function moveManufacturingStepToTaskInSupabase(
   scheduledTasks: Task[],
   projectId?: string,
 ) {
+  assertTaskOwnsProcedure(sourceTask);
+  assertTaskOwnsProcedure(targetTask);
   const supabase = plannerClient();
   await assertTaskInProject(supabase, sourceTask.id, projectId);
   await assertTaskInProject(supabase, targetTask.id, projectId);

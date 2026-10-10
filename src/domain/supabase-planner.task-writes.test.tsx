@@ -13,6 +13,7 @@ import {
   moveManufacturingStepToTaskInSupabase,
   reorderProcedureSteps,
   saveManufacturingStepToSupabase,
+  saveMobileStepToSupabase,
   saveProcedureTaskUpdateToSupabase,
   saveTaskAndManufacturingStepToSupabase,
   saveTaskCustomFieldsToSupabase,
@@ -32,6 +33,9 @@ vi.hoisted(() => {
 type Reply = (request: RecordedRequest) => ScriptedReply | undefined;
 const scope = globalThis as { __buildlogicPlannerSupabaseClient?: unknown };
 const PROJECT = "proj-1";
+const linkedFields = {
+  awiMasterLink: { masterId: "master-1", projectId: "master-project", taskId: "master-task", documentNumber: "AWI-001" },
+};
 
 /** Resolves every task/scenario to PROJECT unless `reply` answers first. */
 function install(reply?: Reply) {
@@ -492,6 +496,36 @@ describe("procedure save (non-AWI)", () => {
 });
 
 describe("composite step operations", () => {
+  it("rejects a move into a linked task before any request", async () => {
+    const db = install();
+    const source = task({ manufacturingSteps: [] });
+    const target = task({ id: "task-2", customFields: linkedFields, manufacturingSteps: [step("moved", 1)] });
+
+    await expect(moveManufacturingStepToTaskInSupabase(source, target, "moved", [], PROJECT))
+      .rejects.toThrow(new Error("Edit these instructions in the linked master AWI."));
+    expect(db.requests).toEqual([]);
+  });
+
+  it("rejects a move out of a linked task before any request", async () => {
+    const db = install();
+    const source = task({ customFields: linkedFields, manufacturingSteps: [] });
+    const target = task({ id: "task-2", manufacturingSteps: [step("moved", 1)] });
+
+    await expect(moveManufacturingStepToTaskInSupabase(source, target, "moved", [], PROJECT))
+      .rejects.toThrow(new Error("Edit these instructions in the linked master AWI."));
+    expect(db.requests).toEqual([]);
+  });
+
+  it("rejects a mobile step save on a linked task before any request", async () => {
+    const db = install();
+    const mobileStep = step("mobile-step", 1);
+    const linkedTask = task({ customFields: linkedFields, manufacturingSteps: [mobileStep] });
+
+    await expect(saveMobileStepToSupabase(linkedTask, mobileStep, { instruction: "Changed" }, PROJECT))
+      .rejects.toThrow(new Error("Edit these instructions in the linked master AWI."));
+    expect(db.requests).toEqual([]);
+  });
+
   it("moves a step: asserts both tasks, parks the target's steps, reparents the step with its tools and photos, then saves both procedures with version checks", async () => {
     // Server: the target already holds "t-step"; after the reparent it also holds "moved" (sequence 200000).
     const targetSteps = () => [{ id: "t-step", sequence: 100002, version: 2 }, { id: "moved", sequence: 200000, version: 4 }];

@@ -2,6 +2,7 @@
 
 import { NavSelectionTrack } from "@/components/nav-selection-track";
 import { PhonePortalQrButton } from "@/components/line-workspace/phone-portal-qr-button";
+import { stepMoveTargets } from "@/domain/awi-task-link";
 import {
   ChevronDown,
   ImageIcon,
@@ -337,7 +338,7 @@ export function ProcedureWorkspace({
     [task?.manufacturingSteps],
   );
   const moveTargetTasks = useMemo(
-    () => tasks.filter((candidate) => candidate.rowType === "task" && candidate.id !== task?.id),
+    () => stepMoveTargets(tasks, task?.id),
     [task?.id, tasks],
   );
   const partReferences = task?.partReferences ?? [];

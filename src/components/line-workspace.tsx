@@ -1,7 +1,7 @@
 "use client";
 
 import { AddTaskMenu } from "./line-workspace/add-task-menu";
-import { AWI_TASK_LINK_FIELD, awiTaskLink, withLinkedAwiProcedure } from "@/domain/awi-task-link";
+import { AWI_TASK_LINK_FIELD, LINKED_AWI_EDIT_MESSAGE, awiTaskLink, withLinkedAwiProcedure } from "@/domain/awi-task-link";
 import { AwiEditorActions } from "./awi-editor-actions";
 import { settleWriteBatch } from "@/domain/workspace-save-status";
 import { useProcedureDrafts } from "./line-workspace/use-procedure-drafts";
@@ -1652,6 +1652,14 @@ export function LineWorkspace({
   function moveProcedureStepToTask(sourceTaskId: string, targetTaskId: string, stepId: string) {
     const sourceTask = plannerState.tasks.find((task) => task.id === sourceTaskId);
     const targetTask = plannerState.tasks.find((task) => task.id === targetTaskId);
+    if ((sourceTask && awiTaskLink(sourceTask)) || (targetTask && awiTaskLink(targetTask))) {
+      notifyFeedback({
+        title: "Step move failed",
+        body: LINKED_AWI_EDIT_MESSAGE,
+        tone: "danger",
+      });
+      return;
+    }
     const movedTasks = moveManufacturingStepBetweenTasks(plannerState.tasks, sourceTaskId, targetTaskId, stepId);
 
     if (!sourceTask || !targetTask || !movedTasks) {

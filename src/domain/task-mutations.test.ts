@@ -93,6 +93,17 @@ describe("taskPatchChangesSchedule", () => {
 });
 
 describe("enforceStepDerivedDuration", () => {
+  it("strips typed duration from a linked task with no steps while keeping its name", () => {
+    const task = makeTask({
+      manufacturingSteps: [],
+      customFields: {
+        awiMasterLink: { masterId: "master-1", projectId: "master-project", taskId: "master-task", documentNumber: "AWI-001" },
+      },
+    });
+    expect(enforceStepDerivedDuration(task, { name: "Renamed", plannedDurationMinutes: 30, plannedFinish: "x" }))
+      .toEqual({ name: "Renamed" });
+  });
+
   it("passes the patch through when there are no manufacturing steps", () => {
     const task = makeTask({ manufacturingSteps: [] });
     const patch = { plannedDurationMinutes: 30 };

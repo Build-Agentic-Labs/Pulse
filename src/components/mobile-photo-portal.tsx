@@ -14,6 +14,7 @@ import { ChevronLeft, ClipboardList, Plus, Timer } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { applyCalculatedFields, formatMinutes, getTopLevelTasks } from "@/domain/calculations";
+import { awiTaskLink } from "@/domain/awi-task-link";
 import { emptyPlannerState } from "@/domain/empty-planner-state";
 import { getManufacturingStepCheckSet, getManufacturingStepCheckDefinitions, getManufacturingStepCheckState, serializeManufacturingStepCheckState, type ManufacturingStepCheckValue } from "@/domain/manufacturing-step-checks";
 import { generateTaskCode, nextTaskNumberForComponent, stepDisplayCode, taskDisplayCode } from "@/domain/nomenclature";
@@ -37,7 +38,7 @@ import { MobileStepTools } from "./mobile-photo-portal/mobile-step-tools";
 
 
 
-import { EMPTY_CAPTURE_TIMER, buildMobileCaptureSessionSnapshot, collectHeaderCaptureTimers, elapsedMinutesFromTimer, formatElapsedTimer, freezeCaptureTimer, getCaptureTimerElapsed, getCaptureTimerLapElapsed, isRecord, preserveRunningCaptureTimer, readMobileCaptureSession, restoreRunningCaptureTimer, writeMobileCaptureSession, type CaptureTimerState, type ParkedTaskCaptureState } from "@/components/mobile-photo-portal/capture-session";
+import { EMPTY_CAPTURE_TIMER, buildMobileCaptureSessionSnapshot, collectHeaderCaptureTimers, elapsedMinutesFromTimer, formatElapsedTimer, freezeCaptureTimer, getCaptureTimerElapsed, getCaptureTimerLapElapsed, isRecord, preserveRunningCaptureTimer, readMobileCaptureSession, restoreRunningCaptureTimer, settleLinkedCaptureTimer, settleLinkedParkedCaptures, writeMobileCaptureSession, type CaptureTimerState, type ParkedTaskCaptureState } from "@/components/mobile-photo-portal/capture-session";
 import { loadMobileNewStepRecoveryDraft, isMobileRecoveryPayload, type MobileNewStepDraftRecord, createMobileRecoveryDraftStore, type ScopedRecoveryDraft, recoveryDraftKey } from "@/components/mobile-photo-portal/recovery-draft-store";
 
 import { buildPhotoAttachment } from "./mobile-photo-portal/photo-preparation";
@@ -245,6 +246,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
   const [dragTargetPlacement, setDragTargetPlacement] = useState<"before" | "after">("after");
   const [dragPreview, setDragPreview] = useState<{ x: number; y: number; width: number } | null>(null);
   const [showNewStepForm, setShowNewStepForm] = useState(false);
+  const [keptLinkedDraft, setKeptLinkedDraft] = useState<{ taskId: string; name: string; instruction: string } | null>(null);
   // Steps render collapsed by default: fully expanded, one step runs ~750px on a 812px phone, so a
   // nine-step task was ~8.7 screens of mostly-empty form to scroll past. Expansion is per step and
   // additive -- opening one never closes another, because comparing two steps is a real task here.
@@ -371,6 +373,21 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     return taskRows.find((task) => task.id === selectedTaskId) ?? taskRows[0];
   }, [selectedTaskId, taskRows]);
 
+  const selectedTaskLink = selectedTask ? awiTaskLink(selectedTask) : undefined;
+  const linkedTaskIds = useMemo(() => new Set(plannerState?.tasks.filter((task) => awiTaskLink(task)).map((task) => task.id) ?? []), [plannerState?.tasks]);
+  function isLinkedTaskId(taskId: string) {
+    const task = plannerStateRef.current?.tasks.find((candidate) => candidate.id === taskId);
+    return Boolean(task && awiTaskLink(task));
+  }
+  const parkedSelectedDraft = selectedTask ? parkedCaptureByTaskId[selectedTask.id] : undefined;
+  const keptDraftText = selectedTaskLink && selectedTask
+    ? keptLinkedDraft?.taskId === selectedTask.id
+      ? keptLinkedDraft
+      : parkedSelectedDraft && (parkedSelectedDraft.draftName?.trim() || parkedSelectedDraft.draftInstruction.trim())
+        ? { name: parkedSelectedDraft.draftName ?? "", instruction: parkedSelectedDraft.draftInstruction }
+        : null
+    : null;
+
   const selectedTaskSteps = useMemo(
     () => sortManufacturingSteps(selectedTask?.manufacturingSteps ?? []),
     [selectedTask],
@@ -385,10 +402,10 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
   realtimeTaskIdSetRef.current = realtimeTaskIdSet;
   const visibleSelectedTaskSteps = useMemo(
     () =>
-      showNewStepForm && newStepId
+      showNewStepForm && !selectedTaskLink && newStepId
         ? selectedTaskSteps.filter((step) => step.id !== newStepId)
         : selectedTaskSteps,
-    [newStepId, selectedTaskSteps, showNewStepForm],
+    [newStepId, selectedTaskSteps, showNewStepForm, selectedTaskLink],
   );
   const draftStepSequence = useMemo(() => {
     if (!selectedTask) {
@@ -413,7 +430,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
   const captureTimerElapsedMs = getCaptureTimerElapsed(captureTimer, timerNow);
   const captureTimerLapElapsedMs = getCaptureTimerLapElapsed(captureTimer, timerNow);
   const headerCaptureTimers = useMemo(() => {
-    const entries = collectHeaderCaptureTimers(captureTimer, parkedCaptureByTaskId);
+    const entries = collectHeaderCaptureTimers(captureTimer, parkedCaptureByTaskId).filter((entry) => !linkedTaskIds.has(entry.taskId));
 
     return entries.sort((left, right) => {
       if (activeScreen === "detail") {
@@ -431,14 +448,14 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
 
       return left.taskName.localeCompare(right.taskName);
     });
-  }, [activeScreen, captureTimer, parkedCaptureByTaskId, selectedTaskId]);
+  }, [activeScreen, captureTimer, parkedCaptureByTaskId, selectedTaskId, linkedTaskIds]);
   const viewingHeaderCapture = useMemo(
     () => headerCaptureTimers.find((entry) => activeScreen === "detail" && entry.taskId === selectedTaskId) ?? null,
     [activeScreen, headerCaptureTimers, selectedTaskId],
   );
   const isViewingCaptureTask = Boolean(viewingHeaderCapture?.timer.running);
   const canStartCaptureTimer = Boolean(
-    selectedTask &&
+    selectedTask && !selectedTaskLink &&
       activeScreen === "detail" &&
       !(
         captureTimer.taskId === selectedTask.id &&
@@ -1046,11 +1063,17 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
           parkedCaptureByTaskIdRef.current = restoredParked;
         }
 
+        const linkedIds = new Set(savedState.tasks.filter((task) => awiTaskLink(task)).map((task) => task.id));
+        const isLinked = (taskId: string) => linkedIds.has(taskId);
+        const now = Date.now();
+        setCaptureTimer((current) => settleLinkedCaptureTimer(current, isLinked, now));
+        setParkedCaptureByTaskId((current) => settleLinkedParkedCaptures(current, isLinked, now));
+
         if (session?.activeScreen === "detail" && resolvedTaskId) {
           setActiveScreen("detail");
         }
 
-        if (session?.showNewStepForm && resolvedTaskId === preferredTaskId) {
+        if (session?.showNewStepForm && resolvedTaskId === preferredTaskId && !linkedIds.has(resolvedTaskId)) {
           setShowNewStepForm(true);
           const restoredStepId = session.newStepId ?? session.captureTimer.activeStepId;
           if (restoredStepId) {
@@ -1122,6 +1145,10 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     if (!isEditorCurrent() || selectedTaskIdRef.current !== draft.taskId) return false;
     const snapshot = { stepId: draft.stepId, name: draft.name ?? "", instruction: draft.instruction, durationText: draft.durationText, tools: draft.tools, photos: draft.photos, checks: new Set(draft.checks), checkValues: draft.checkValues ?? {} };
     if (!hasDraftStepContentRef.current(snapshot)) return false; // Preserve even empty records.
+    if (isLinkedTaskId(draft.taskId)) {
+      setKeptLinkedDraft({ taskId: draft.taskId, name: draft.name ?? "", instruction: draft.instruction });
+      return false;
+    }
     recoverableSnapshotsRef.current.set(draft.taskId, { fingerprint: draftFingerprint(snapshot), record: draft, stored: Promise.resolve(true) });
     setActiveScreen("detail"); setShowNewStepForm(true); setDraftStepId(draft.stepId);
     setNewStepName(draft.name ?? ""); setNewStepInstruction(draft.instruction);
@@ -1390,6 +1417,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     if (!currentTask) {
       return null;
     }
+
+    if (awiTaskLink(currentTask)) return null;
 
     const recovery = saveRecoverableNewStepDraft(snapshot, { taskId });
 
@@ -1888,6 +1917,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
       return;
     }
 
+    if (awiTaskLink(selectedTask)) return;
+
     const taskId = selectedTask.id;
     let localPhotos: StepPhotoAttachment[] = [];
     updateStepPhotoUploadCount(stepId, 1);
@@ -1925,6 +1956,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     if (!plannerState || !selectedTask) {
       return;
     }
+
+    if (awiTaskLink(selectedTask)) return;
 
     const taskId = selectedTask.id;
     const currentTask = plannerState.tasks.find((task) => task.id === selectedTask.id) ?? selectedTask;
@@ -1978,6 +2011,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
       return;
     }
 
+    if (isLinkedTaskId(taskId)) return;
+
     updateLocalTask(taskId, (task) => addStepTool(task, stepId, toolName));
     beginLocalWrite();
 
@@ -1999,6 +2034,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     if (!plannerState || !selectedTask) {
       return;
     }
+
+    if (awiTaskLink(selectedTask)) return;
 
     const taskId = selectedTask.id;
     updateLocalTask(taskId, (task) => removeStepTool(task, stepId, toolToRemove));
@@ -2067,6 +2104,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     if (!currentTask) {
       return;
     }
+
+    if (awiTaskLink(currentTask)) return;
 
     const nextSteps = sortManufacturingSteps(currentTask.manufacturingSteps ?? []).map((step) =>
       step.id === stepId ? { ...step, ...patch } : step,
@@ -2188,6 +2227,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
   }
 
   function restoreParkedTaskCapture(taskId: string) {
+    if (isLinkedTaskId(taskId)) return false;
     const parked = parkedCaptureByTaskIdRef.current[taskId];
     if (!parked) {
       return false;
@@ -2210,6 +2250,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
   }
 
   function resumeCaptureTimerForTask(taskId: string) {
+    if (isLinkedTaskId(taskId)) return;
     const timer = captureTimerRef.current;
     if (timer.taskId !== taskId || !timer.activeStepId || timer.running) {
       return;
@@ -2272,6 +2313,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
   }
 
   function restoreTimedStepDraft(taskId: string, stepId: string) {
+    if (isLinkedTaskId(taskId)) return;
     if (restoreParkedTaskCapture(taskId)) {
       return;
     }
@@ -2326,6 +2368,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     if (!plannerState || !selectedTask) {
       return;
     }
+
+    if (awiTaskLink(selectedTask)) return;
 
     const previousState = plannerState;
     const taskId = selectedTask.id;
@@ -2461,6 +2505,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
       return;
     }
 
+    if (awiTaskLink(selectedTask)) return;
+
     if (userId && projectId) {
       const taskId = selectedTask.id;
       const draft = await recoveryStore.load({ userId, projectId, taskId }).catch(() => null);
@@ -2535,6 +2581,8 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
     if (!selectedTask || activeScreen !== "detail") {
       return;
     }
+
+    if (awiTaskLink(selectedTask)) return;
 
     setErrorMessage(null);
 
@@ -3032,7 +3080,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
                   onReview={() => setLegacyReviewing(true)} onBack={() => setLegacyReviewing(false)}
                   onDismiss={() => { legacyDismissedRef.current = true; setLegacyDraft(null); }}
                   onUse={() => void adoptReviewedLegacyDraft()} /> : null}
-                {showNewStepForm ? (
+                {showNewStepForm && !selectedTaskLink ? (
                   <MobileNewStepEditor key={newStepId ?? "new-step-draft"}
                     draft={{
                       values: { name: newStepName, instruction: newStepInstruction, durationText: newStepDurationText },
@@ -3068,6 +3116,13 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
                     updateNewStepDraftChecks={updateNewStepDraftChecks}
                     goToNextManufacturingStep={goToNextManufacturingStep}
                   />
+                ) : selectedTaskLink ? (
+                  <div role="note" className="ui-photo-mobile-body-secondary rounded-md border border-line bg-surface-raised p-4">
+                    <p>{selectedTask.awiMasterStatus === "unavailable"
+                      ? `The linked master AWI ${selectedTaskLink.documentNumber} is unavailable right now. Edit these steps in the AWI.`
+                      : `These steps come from master AWI ${selectedTaskLink.documentNumber}. Edit them in the AWI.`}</p>
+                    {keptDraftText ? <p className="mt-2">{`An unsaved step from this phone is kept here: "${keptDraftText.name.trim() || "Untitled step"}"${keptDraftText.instruction ? ` (${keptDraftText.instruction})` : ""}. Add it in the master AWI; it stays on this phone until then.`}</p> : null}
+                  </div>
                 ) : (
                   <button
                     type="button"
@@ -3078,7 +3133,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
                     Add step
                   </button>
                 )}
-                {selectedTaskSteps.length === 0 && !showNewStepForm ? (
+                {selectedTaskSteps.length === 0 && !showNewStepForm && !selectedTaskLink ? (
                   <div className="rounded-md border border-dashed border-line bg-surface-raised p-5 text-center">
                     <ClipboardList className="mx-auto mb-3 h-7 w-7 text-steel" />
                     <div className="ui-photo-mobile-body">No manufacturing steps yet</div>
@@ -3099,18 +3154,19 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
                   const isUploading = uploadCount > 0;
                   const confirmingDelete = confirmDeleteStepId === step.id;
                   const stepCode = stepDisplayCode(selectedTask, step);
-                  const isExpanded = expandedStepIds.has(step.id) || confirmingDelete;
+                  const isExpanded = !selectedTaskLink && (expandedStepIds.has(step.id) || confirmingDelete);
 
                   if (!isExpanded) {
                     return (
                       <MobileStepSummary key={step.id}
-                    step={step}
-                    toggleStepExpanded={toggleStepExpanded}
-                    stepCode={stepCode}
-                    photos={photos}
-                    stepTools={stepTools}
-                    selectedChecks={selectedChecks}
-                  />
+                        readOnly={Boolean(selectedTaskLink)}
+                        step={step}
+                        toggleStepExpanded={toggleStepExpanded}
+                        stepCode={stepCode}
+                        photos={photos}
+                        stepTools={stepTools}
+                        selectedChecks={selectedChecks}
+                      />
                     );
                   }
 

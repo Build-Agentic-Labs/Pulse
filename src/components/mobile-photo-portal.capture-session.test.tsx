@@ -429,3 +429,39 @@ describe("capture session: lifecycle around task switches and unmount", () => {
     expect(lastCall[2]).toMatchObject({ durationMinutes: 2 });
   });
 });
+
+
+describe("linked AWI restored capture sessions", () => {
+  const link = { awiMasterLink: { masterId: "m", projectId: "master-project", taskId: "master-task", documentNumber: "AWI-42" } };
+  it("freezes a linked active timer without restoring its editor or header chip", async () => {
+    const linkedState = { ...state, tasks: [{ ...baseTask, customFields: link }, taskB] };
+    vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(linkedState);
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ captureTimer: { running: true, startedAt: null, storedElapsedMs: 30_000, lapMarkerMs: 0, activeStepId: "linked-step", taskId: "task-a", taskName: "Alpha process" }, parkedCaptureByTaskId: {}, activeScreen: "detail", selectedTaskId: "task-a", showNewStepForm: true, newStepId: "linked-step" }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={linkedState} />);
+    await screen.findByText(/These steps come from master AWI AWI-42/);
+    expect(screen.queryByTitle(/Open Alpha process/)).toBeNull();
+    expect(screen.queryByTitle(/^Stop timer/)).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+    advance(5_000);
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(session().captureTimer).toMatchObject({ running: false, startedAt: null, storedElapsedMs: 30_000, taskId: "task-a", activeStepId: "linked-step" });
+    expect(saveMobileStepToSupabase).not.toHaveBeenCalled();
+  });
+  it("keeps linked parked text and frozen time when opening its task", async () => {
+    const linkedState = { ...state, tasks: [baseTask, { ...taskB, customFields: link }] };
+    vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(linkedState);
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ captureTimer: { running: false, startedAt: null, storedElapsedMs: 0, lapMarkerMs: 0, activeStepId: null, taskId: null, taskName: "" }, parkedCaptureByTaskId: { "task-b": { timer: { running: true, startedAt: null, storedElapsedMs: 120_000, lapMarkerMs: 0, activeStepId: "parked-step", taskId: "task-b", taskName: "Beta process" }, showNewStepForm: true, newStepId: "parked-step", draftName: "Parked draft", draftInstruction: "Keep me", draftDurationText: "5", draftTools: [], draftPhotos: [], draftChecks: [] } }, activeScreen: "list", selectedTaskId: "task-a", showNewStepForm: false, newStepId: null }));
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={linkedState} />);
+    await screen.findByRole("button", { name: /Beta process 0 steps/ });
+    expect(screen.queryByTitle(/Open Beta process/)).toBeNull();
+    advance(5_000);
+    await openTask(/Beta process 0 steps/);
+    await screen.findByText(/An unsaved step from this phone is kept here:.*Parked draft.*Keep me/);
+    expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+    expect(screen.queryByTitle(/^Stop timer/)).toBeNull();
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(session().parkedCaptureByTaskId["task-b"]).toMatchObject({ draftName: "Parked draft", draftInstruction: "Keep me", timer: { running: false, startedAt: null, storedElapsedMs: 120_000, activeStepId: "parked-step" } });
+    expect(session().captureTimer.taskId).toBeNull();
+    expect(saveMobileStepToSupabase).not.toHaveBeenCalled();
+  });
+});

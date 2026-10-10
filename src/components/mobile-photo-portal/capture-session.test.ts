@@ -19,6 +19,8 @@ import {
   readMobileCaptureSession,
   restoreRunningCaptureTimer,
   shouldPersistMobileCaptureSession,
+  settleLinkedCaptureTimer,
+  settleLinkedParkedCaptures,
   writeMobileCaptureSession,
   type CaptureTimerState,
   type MobileCaptureSessionSnapshot,
@@ -233,5 +235,28 @@ describe("localStorage session persistence", () => {
   it("returns null when storage access itself throws", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     expect(readMobileCaptureSession("p1")).toBeNull();
+  });
+});
+
+
+describe("settling linked AWI capture timers", () => {
+  it("freezes a linked running timer with elapsed time and preserves its step binding", () => {
+    const linked = timer({ running: true, startedAt: 1_000, storedElapsedMs: 30_000 });
+    expect(settleLinkedCaptureTimer(linked, (id) => id === "task-a", 11_000)).toEqual({ ...linked, running: false, startedAt: null, storedElapsedMs: 40_000 });
+    expect(settleLinkedCaptureTimer(linked, () => false, 11_000)).toBe(linked);
+    const stopped = timer({ storedElapsedMs: 30_000 });
+    expect(settleLinkedCaptureTimer(stopped, () => true, 11_000)).toBe(stopped);
+    const unbound = timer({ running: true, taskId: null });
+    expect(settleLinkedCaptureTimer(unbound, () => true, 11_000)).toBe(unbound);
+  });
+  it("keeps parked drafts and ordinary timer references while freezing linked entries", () => {
+    const linked = parked({ timer: timer({ running: true, startedAt: 1_000, storedElapsedMs: 120_000 }), draftName: "Parked draft", draftInstruction: "Keep me" });
+    const ordinary = parked({ timer: timer({ taskId: "task-b", running: true, startedAt: 1_000 }) });
+    const entries = { "task-a": linked, "task-b": ordinary };
+    const result = settleLinkedParkedCaptures(entries, (id) => id === "task-a", 11_000);
+    expect(result["task-a"]).toEqual({ ...linked, timer: { ...linked.timer, running: false, startedAt: null, storedElapsedMs: 130_000 } });
+    expect(result["task-b"]).toBe(ordinary);
+    expect(settleLinkedParkedCaptures(result, (id) => id === "task-a", 21_000)).toBe(result);
+    expect(settleLinkedParkedCaptures(entries, () => false, 11_000)).toBe(entries);
   });
 });

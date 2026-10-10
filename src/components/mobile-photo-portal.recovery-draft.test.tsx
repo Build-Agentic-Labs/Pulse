@@ -299,3 +299,19 @@ describe("explicit legacy recovery", () => {
     await waitFor(() => expect(records()).toEqual([legacy]));
   });
 });
+
+
+it("keeps a linked task recovery record and displays its text without autosaving", async () => {
+  seedRecord({ taskId: "task-a", stepId: "step-r", name: "Kept phone step", instruction: "Keep this instruction", durationText: "7", tools: [], photos: [], checks: [], updatedAt: "2026-10-04T10:00:00.000Z" });
+  const linkedState = { ...state, tasks: [{ ...taskA, customFields: { awiMasterLink: { masterId: "m", projectId: "master-project", taskId: "master-task", documentNumber: "AWI-42" } } }] };
+  vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(linkedState);
+  render(<MobilePhotoPortal projectId="p" initialPlannerState={linkedState} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Alpha process 0 steps/ }));
+  expect(await screen.findByText(/An unsaved step from this phone is kept here:.*Kept phone step.*Keep this instruction/)).toBeInTheDocument();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+  expect(screen.queryByRole("textbox", { name: "New step name" })).toBeNull();
+  expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull();
+  expect(saveMobileStepToSupabase).not.toHaveBeenCalled();
+  expect(records()).toHaveLength(1);
+  expect(records()[0]).toMatchObject({ name: "Kept phone step", instruction: "Keep this instruction" });
+});

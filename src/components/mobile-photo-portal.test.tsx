@@ -185,3 +185,35 @@ describe("phone step authoring", () => {
     expect(uploadStepPhotoAttachment).toHaveBeenCalledTimes(2);
   });
 });
+
+
+describe("linked AWI phone steps", () => {
+  it.each([false, true])("shows the master procedure read-only (unavailable: %s)", async (unavailable) => {
+    const linkedState: PlannerState = { ...state, tasks: [{ ...task,
+      customFields: { awiMasterLink: { masterId: "m", projectId: "master-project", taskId: "master-task", documentNumber: "AWI-42" } },
+      awiMasterStatus: unavailable ? "unavailable" : undefined,
+      manufacturingSteps: unavailable ? [] : [{ id: "master-step", sequence: 1, name: "Master step", instruction: "Master instruction", durationMinutes: 5 } as ManufacturingStep],
+    }] };
+    vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(linkedState);
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={linkedState} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Test process \d+ steps?/ }));
+    expect(await screen.findByText(unavailable ? /master AWI AWI-42.*unavailable right now/ : /These steps come from master AWI AWI-42/)).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("AWI-42");
+    if (!unavailable) expect(screen.getByText("Master step")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add step" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Expand step/ })).toBeNull();
+    expect(screen.queryByTitle(/^Start timer/)).toBeNull();
+    expect(screen.queryByText("No manufacturing steps yet")).toBeNull();
+    expect(saveMobileStepToSupabase).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary step expansion and Add step available", async () => {
+    const plainState = { ...state, tasks: [{ ...task, manufacturingSteps: [{ id: "s", sequence: 1, name: "Ordinary step", instruction: "", durationMinutes: 5 } as ManufacturingStep] }] };
+    vi.mocked(loadPlannerStateFromSupabase).mockResolvedValue(plainState);
+    render(<MobilePhotoPortal projectId="p" initialPlannerState={plainState} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Test process 1 step/ }));
+    expect(screen.getByRole("button", { name: "Add step" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand step 1" }));
+    expect(screen.getByRole("textbox", { name: "Step 1 description" })).toBeInTheDocument();
+  });
+});

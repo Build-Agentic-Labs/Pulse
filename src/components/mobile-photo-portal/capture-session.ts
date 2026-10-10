@@ -297,6 +297,29 @@ export function freezeCaptureTimer(timer: CaptureTimerState, now: number): Captu
   };
 }
 
+/** Stop captures whose task now reads a master AWI, without discarding their draft or timing. */
+export function settleLinkedCaptureTimer(
+  timer: CaptureTimerState,
+  isLinkedTask: (taskId: string) => boolean,
+  now: number,
+): CaptureTimerState {
+  return timer.running && timer.taskId && isLinkedTask(timer.taskId) ? freezeCaptureTimer(timer, now) : timer;
+}
+
+export function settleLinkedParkedCaptures(
+  parked: Record<string, ParkedTaskCaptureState>,
+  isLinkedTask: (taskId: string) => boolean,
+  now: number,
+): Record<string, ParkedTaskCaptureState> {
+  let next = parked;
+  for (const [taskId, capture] of Object.entries(parked)) {
+    if (!capture.timer.running || !isLinkedTask(taskId)) continue;
+    if (next === parked) next = { ...parked };
+    next[taskId] = { ...capture, timer: freezeCaptureTimer(capture.timer, now) };
+  }
+  return next;
+}
+
 export function preserveRunningCaptureTimer(timer: CaptureTimerState, now: number): CaptureTimerState {
   if (!timer.running) {
     return timer;

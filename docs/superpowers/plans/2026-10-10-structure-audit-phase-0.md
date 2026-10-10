@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Local implementation status (2026-10-10):** Tasks 1–10 and Task 11 local checks are complete. Push, merge, and production steps remain pending owner approval. See the [verification report](../../audits/2026-10-10-phase0-verification.md) for commits, test counts, browser evidence, and the measured 0.4 KiB planner bundle increase.
+
 **Goal:** Close the planner data-loss paths and the AWI-link defects found by the 2026-10-10 audit, apply the owner's three decisions (Settings lifecycle removal, linked duration from the master, dead smart-allocation deletion), and add the CI safety net that makes the date and proxy regressions catchable.
 
 **Architecture:** The work lands as five stacked branches, each small enough to verify on its own:
@@ -70,7 +72,7 @@ No new save paths. Every fix narrows or guards an existing one.
 - Consumes: nothing.
 - Produces: every later test run executes in `America/Los_Angeles`.
 
-- [ ] **Step 1: Branch and commit the audit and this plan**
+- [x] **Step 1: Branch and commit the audit and this plan**
 
 ```bash
 git switch -c fix/test-safety-net main
@@ -80,7 +82,7 @@ git commit -m "docs: 2026-10-10 structure audit and phase 0 plan
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 2: Write the failing canary test**
+- [x] **Step 2: Write the failing canary test**
 
 In `src/domain/formatting.test.ts`, replace the comment block at lines 87-90 with:
 
@@ -101,12 +103,12 @@ describe("test timezone pin", () => {
 });
 ```
 
-- [ ] **Step 3: Run it under UTC to see RED**
+- [x] **Step 3: Run it under UTC to see RED**
 
 Run: `TZ=UTC npx vitest run src/domain/formatting.test.ts`
 Expected: FAIL. `test timezone pin` reports `expected 'UTC' to be 'America/Los_Angeles'`. The shell prefix is for this demonstration only. Never add it to `package.json`.
 
-- [ ] **Step 4: Pin the timezone**
+- [x] **Step 4: Pin the timezone**
 
 In `vitest.config.ts`, change the `test:` object so `env` sits beside `projects`:
 
@@ -118,18 +120,18 @@ In `vitest.config.ts`, change the `test:` object so `env` sits beside `projects`
     projects: [
 ```
 
-- [ ] **Step 5: Run under UTC again to see GREEN**
+- [x] **Step 5: Run under UTC again to see GREEN**
 
 Run: `TZ=UTC npx vitest run src/domain/formatting.test.ts`
 Expected: PASS (all tests, including the canary).
 
-- [ ] **Step 6: Prove the date test now has teeth**
+- [x] **Step 6: Prove the date test now has teeth**
 
 Temporarily make `parseIsoDateInput` in `src/domain/formatting.ts` `return new Date(iso);` as its first line. Run `TZ=UTC npx vitest run src/domain/formatting.test.ts`.
 Expected: 3 FAIL (`formatDateControlled renders the chosen day`, `formatDate renders the chosen day`, `formatDateTime renders the chosen day at local midnight`).
 Then revert the temporary line (`git checkout src/domain/formatting.ts`) and re-run. Expected: PASS.
 
-- [ ] **Step 7: Move the root proxy test so a project collects it**
+- [x] **Step 7: Move the root proxy test so a project collects it**
 
 ```bash
 git mv proxy.test.ts src/lib/proxy-host.test.ts
@@ -140,12 +142,12 @@ In `src/lib/proxy-host.test.ts`, change `import { proxy } from "./proxy";` to `i
 Run: `npx vitest run src/lib/proxy-host.test.ts`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 8: Prove the moved test has teeth**
+- [x] **Step 8: Prove the moved test has teeth**
 
 Temporarily delete line 24 of `proxy.ts` (the canonical-host / `x-forwarded-host` handling line added in f01b66b). Run `npx vitest run src/lib/proxy-host.test.ts`.
 Expected: 2 FAIL with `expected 200 to be 308`. Revert with `git checkout proxy.ts`, then re-run. Expected: PASS.
 
-- [ ] **Step 9: Lint `proxy.ts`**
+- [x] **Step 9: Lint `proxy.ts`**
 
 In `package.json:9` set:
 
@@ -156,7 +158,7 @@ In `package.json:9` set:
 Run: `npx eslint proxy.ts --max-warnings=0`
 Expected: no output, exit 0. If it reports problems, fix them in `proxy.ts` without changing behaviour, and re-run Steps 7-8.
 
-- [ ] **Step 10: Full suite and commit**
+- [x] **Step 10: Full suite and commit**
 
 Run: `npm test`
 Expected: PASS. The file count goes up by 1 (the moved proxy test) and the test count by 5 (4 proxy cases + 1 canary).
@@ -189,13 +191,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: none from earlier tasks.
 - Produces: no signature changes. `scenarioCacheRef` semantics become "active scenario + fresh seeds".
 
-- [ ] **Step 1: Branch**
+- [x] **Step 1: Branch**
 
 ```bash
 git switch -c fix/scenario-switch-back
 ```
 
-- [ ] **Step 2: Rewrite the D5 characterization as the regression test (RED)**
+- [x] **Step 2: Rewrite the D5 characterization as the regression test (RED)**
 
 In `use-workspace-scenarios.test.tsx`:
 
@@ -316,7 +318,7 @@ describe("switching back to a scenario that was left (DRIFT-2)", () => {
 
 `requestDeleteScenario` (returned by the hook) looks the scenario up in `scenarios` and opens a confirm via `setFeedbackConfirm`, and the confirm's `onConfirm` runs the delete. If its signature differs from `(scenarioId: string)`, read it at `use-workspace-scenarios.ts` (just above `deleteScenarioById`) and match it. Do not export a new function just for the test.
 
-- [ ] **Step 3: Run to see RED**
+- [x] **Step 3: Run to see RED**
 
 Run: `npx vitest run src/components/line-workspace/use-workspace-scenarios.test.tsx`
 Expected: FAIL.
@@ -325,7 +327,7 @@ Expected: FAIL.
 - The fourth test: one load.
 - The third test passes already (positive control).
 
-- [ ] **Step 4: Evict on leave**
+- [x] **Step 4: Evict on leave**
 
 In `src/components/line-workspace/use-workspace-scenarios.ts`, change the start of `applyScenarioSwitch` to:
 
@@ -350,7 +352,7 @@ Replace the comment above `loadScenarioIntoView` (lines 137-138) with:
   // scenario being left; anything else is loaded from the database. Throws if it can't be loaded.
 ```
 
-- [ ] **Step 5: Update the stale LineWorkspace comments (no behaviour change)**
+- [x] **Step 5: Update the stale LineWorkspace comments (no behaviour change)**
 
 In `src/components/line-workspace.tsx`, replace lines 233-235 with:
 
@@ -367,12 +369,12 @@ Replace the two-line comment above the mirror effect (lines 339-340) with:
   // active scenario starts from what is on screen. Left scenarios are evicted on switch (DRIFT-2).
 ```
 
-- [ ] **Step 6: Run to see GREEN, plus the neighbours**
+- [x] **Step 6: Run to see GREEN, plus the neighbours**
 
 Run: `npx vitest run src/components/line-workspace/use-workspace-scenarios.test.tsx src/components/line-workspace/use-workspace-saves.test.tsx src/components/line-workspace.sync.test.tsx src/components/line-workspace.lifecycle.test.tsx`
 Expected: PASS. If a sync or lifecycle test asserted an instant (no-load) switch-back, update its expected load count. Note it in the commit body: it pinned the defect.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/components/line-workspace/use-workspace-scenarios.ts src/components/line-workspace/use-workspace-scenarios.test.tsx src/components/line-workspace.tsx
@@ -409,13 +411,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     - `refreshLinkedAwiTasks(tasks: Task[], masters: ReadonlyMap<string, LinkedAwiMaster>, startedFrom: readonly Task[]): { tasks: Task[]; changed: boolean }`. It only replaces a task that existed in `startedFrom` with an unchanged procedure, so a response that lost a race to a fresher load or a navigation is dropped.
   - `Task.awiMasterStatus?: "unavailable"`
 
-- [ ] **Step 1: Branch**
+- [x] **Step 1: Branch**
 
 ```bash
 git switch -c fix/awi-link-integrity
 ```
 
-- [ ] **Step 2: Write the failing domain tests**
+- [x] **Step 2: Write the failing domain tests**
 
 Create `src/domain/step-duration.test.ts`:
 
@@ -573,12 +575,12 @@ describe("resolving and refreshing links", () => {
 });
 ```
 
-- [ ] **Step 3: Run to see RED**
+- [x] **Step 3: Run to see RED**
 
 Run: `npx vitest run src/domain/awi-task-link.test.ts src/domain/step-duration.test.ts`
 Expected: FAIL: `Cannot find module './step-duration'`, and the missing exports from `./awi-task-link`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 Create `src/domain/step-duration.ts`:
 
@@ -717,7 +719,7 @@ export function refreshLinkedAwiTasks(
 }
 ```
 
-- [ ] **Step 5: Run to see GREEN**
+- [x] **Step 5: Run to see GREEN**
 
 Run: `npx vitest run src/domain/awi-task-link.test.ts src/domain/step-duration.test.ts`
 Expected: PASS.
@@ -725,7 +727,7 @@ Expected: PASS.
 Then run: `npx vitest run src/domain/supabase-planner.task-read.test.ts`
 Expected: the linked test FAILS on `expected 0 to be 30`. That is correct, because the duration now comes from the master and that fixture's master step has no duration. Task 7 rewrites this test. Leave it red only until Task 7. Do not commit a red suite: run `npm test` before this task's commit, and if that test is the only failure, add `.skip` with the comment `// Rewritten in Task 7 (linked duration from master).` Task 7 Step 2 removes the skip.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/domain/step-duration.ts src/domain/step-duration.test.ts src/domain/awi-task-link.ts src/domain/awi-task-link.test.ts src/domain/types.ts src/domain/supabase-planner.task-read.test.ts
@@ -748,7 +750,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes (Task 3): `assertTaskOwnsProcedure`, `stepMoveTargets`, `awiTaskLink`, `LINKED_AWI_EDIT_MESSAGE` from `@/domain/awi-task-link`.
 - Produces: no new exports.
 
-- [ ] **Step 1: Write the failing store tests**
+- [x] **Step 1: Write the failing store tests**
 
 In `src/domain/supabase-planner.task-writes.test.tsx`, add `saveMobileStepToSupabase` to the import list from `./supabase-planner`. Append:
 
@@ -800,7 +802,7 @@ describe("enforceStepDerivedDuration for linked master AWI tasks", () => {
 });
 ```
 
-- [ ] **Step 2: Run to see RED**
+- [x] **Step 2: Run to see RED**
 
 Run: `npx vitest run src/domain/supabase-planner.task-writes.test.tsx src/domain/task-mutations.test.ts`
 Expected:
@@ -809,7 +811,7 @@ Expected:
 - The phone test FAILS because it does not throw.
 - The linked `enforceStepDerivedDuration` test FAILS (the duration is kept).
 
-- [ ] **Step 3: Implement the store guards**
+- [x] **Step 3: Implement the store guards**
 
 In `src/lib/planner/task-store.ts`:
 1. Add `assertTaskOwnsProcedure` to the existing `@/domain/awi-task-link` import (keep `awiTaskLink`; line 117 still uses it).
@@ -823,7 +825,7 @@ In `src/lib/planner/task-store.ts`:
   assertTaskOwnsProcedure(targetTask);
 ```
 
-- [ ] **Step 4: Implement the duration rule**
+- [x] **Step 4: Implement the duration rule**
 
 In `src/domain/task-mutations.ts`, import `awiTaskLink` from `./awi-task-link`, and change the guard in `enforceStepDerivedDuration` to:
 
@@ -839,12 +841,12 @@ In `src/domain/task-mutations.ts`, import `awiTaskLink` from `./awi-task-link`, 
 
 (A linked task's time always comes from its master, so a typed duration is stripped even when the master is unavailable and the task shows no steps.)
 
-- [ ] **Step 5: Run to see GREEN**
+- [x] **Step 5: Run to see GREEN**
 
 Run: `npx vitest run src/domain/supabase-planner.task-writes.test.tsx src/domain/task-mutations.test.ts src/domain/awi-task-link.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Wire the UI guards (no new tests: the domain and store tests above own the rules)**
+- [x] **Step 6: Wire the UI guards (no new tests: the domain and store tests above own the rules)**
 
 `src/components/line-workspace/procedure.tsx`: import `stepMoveTargets` from `@/domain/awi-task-link`, and replace the `moveTargetTasks` memo with:
 
@@ -875,12 +877,12 @@ In the duration `ClearableNumberInput`:
 - in the className, replace `: stepCount > 0` with `: durationLocked`
 - change the `onValueChange` guard to `if (!durationLocked) {`
 
-- [ ] **Step 7: Typecheck, lint and focused tests**
+- [x] **Step 7: Typecheck, lint and focused tests**
 
 Run: `npm run typecheck && npx eslint src/components/gantt-timeline.tsx src/components/line-workspace.tsx src/components/line-workspace/procedure.tsx src/lib/planner/task-store.ts src/domain --max-warnings=0 && npx vitest run src/domain src/components/line-workspace`
 Expected: PASS. If `npm run typecheck` complains about `.next/types`, run `npm run build` first (see Global Constraints).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/planner/task-store.ts src/domain/task-mutations.ts src/domain/task-mutations.test.ts src/domain/supabase-planner.task-writes.test.tsx src/components/line-workspace/procedure.tsx src/components/line-workspace.tsx src/components/gantt-timeline.tsx
@@ -924,7 +926,7 @@ Make the selected linked task read-only:
     - `settleLinkedParkedCaptures(parked: Record<string, ParkedTaskCaptureState>, isLinkedTask: (taskId: string) => boolean, now: number): Record<string, ParkedTaskCaptureState>`
     - Both return the same reference when nothing changed.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `src/components/mobile-photo-portal.test.tsx`:
 
@@ -1070,7 +1072,7 @@ describe("capture session: tasks linked to a master AWI", () => {
 });
 ```
 
-- [ ] **Step 2: Run to see RED**
+- [x] **Step 2: Run to see RED**
 
 Run: `npx vitest run src/components/mobile-photo-portal.test.tsx src/components/mobile-photo-portal.recovery-draft.test.tsx src/components/mobile-photo-portal/capture-session.test.ts src/components/mobile-photo-portal.capture-session.test.tsx`
 Expected:
@@ -1079,7 +1081,7 @@ Expected:
 - The helper tests FAIL (`settleLinkedCaptureTimer` is not exported).
 - Both linked timer tests FAIL (the restored timer is running, and its chip or Stop control shows).
 
-- [ ] **Step 3: Read-only summary**
+- [x] **Step 3: Read-only summary**
 
 In `src/components/mobile-photo-portal/mobile-step-summary.tsx`:
 - Add `readOnly = false` to the destructured props and `readOnly?: boolean;` to the props type.
@@ -1110,7 +1112,7 @@ In `src/components/mobile-photo-portal/mobile-step-summary.tsx`:
   );
 ```
 
-- [ ] **Step 4: Gate the portal**
+- [x] **Step 4: Gate the portal**
 
 In `src/components/mobile-photo-portal.tsx`:
 
@@ -1269,12 +1271,12 @@ Then, in `src/components/mobile-photo-portal.tsx`:
 
    - Never resume a linked task's capture. Add `if (isLinkedTaskId(taskId)) return false;` as the first statement of `restoreParkedTaskCapture` (~2190). This keeps the parked entry, and with it the draft. Add `if (isLinkedTaskId(taskId)) return;` as the first statement of `resumeCaptureTimerForTask` (~2212). (`restoreTimedStepDraft` is already guarded by item 8.) These three cover task selection, the header chip (`openCaptureTaskFromHeader`) and the Timer button.
 
-- [ ] **Step 5: Run to see GREEN, plus the other mobile suites**
+- [x] **Step 5: Run to see GREEN, plus the other mobile suites**
 
 Run: `npx vitest run src/components/mobile-photo-portal.test.tsx src/components/mobile-photo-portal.capture-session.test.tsx src/components/mobile-photo-portal.recovery-draft.test.tsx src/components/mobile-photo-portal`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/mobile-photo-portal.tsx src/components/mobile-photo-portal/mobile-step-summary.tsx src/components/mobile-photo-portal.test.tsx src/components/mobile-photo-portal.recovery-draft.test.tsx src/components/mobile-photo-portal/capture-session.ts src/components/mobile-photo-portal/capture-session.test.ts src/components/mobile-photo-portal.capture-session.test.tsx
@@ -1293,7 +1295,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: the exact message `Edit these instructions in the linked master AWI.` (Task 3).
 - Produces: trigger `awi_link_child_guard` on `manufacturing_steps`, `part_references`, `step_tools`, `step_photos`, `step_exploded_views` and `task_videos`.
 
-- [ ] **Step 1: Write the pgTAP test (RED in CI until the migration exists)**
+- [x] **Step 1: Write the pgTAP test (RED in CI until the migration exists)**
 
 Create `supabase/tests/awi_task_link_guard_test.sql`:
 
@@ -1345,7 +1347,7 @@ rollback;
 
 If an insert fails on a NOT NULL column that this fixture omits, copy that column's value from `supabase/tests/task_reorder_test.sql:4-33`. That file inserts the same tables and is known to pass.
 
-- [ ] **Step 2: Write the migration**
+- [x] **Step 2: Write the migration**
 
 Create `supabase/migrations/20261010190000_awi_link_child_guard.sql`:
 
@@ -1383,7 +1385,7 @@ create trigger awi_link_child_guard before insert or update of task_id on public
   for each row execute function private.refuse_linked_awi_task_child();
 ```
 
-- [ ] **Step 3: Run pgTAP locally when a local stack is available (CI's database job is authoritative)**
+- [x] **Step 3: Run pgTAP locally when a local stack is available (CI's database job is authoritative)**
 
 Target the retained **`pulse-e2e`** stack explicitly, every time.
 - It is workdir `scratch/browser-db`, API port 56321, DB port 56322.
@@ -1405,11 +1407,11 @@ npx --yes supabase@2.119.0 stop --workdir scratch/browser-db
 
 Expected: step 2 reports every pre-existing table unchanged, and step 3 prints `ok 1` through `ok 12`. If the stack cannot be started, record that the pgTAP run is deferred to CI's database job (authoritative), and say so in the hand-off.
 
-- [ ] **Step 4: Types**
+- [x] **Step 4: Types**
 
 This migration adds no columns or functions in `public`, so `src/lib/database.types.ts` does not change. Do not run `npm run gen:types` now: it reads the production schema. Task 11 handles the post-apply check.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add supabase/migrations/20261010190000_awi_link_child_guard.sql supabase/tests/awi_task_link_guard_test.sql
@@ -1447,7 +1449,7 @@ The single-task `loadTaskFromSupabase` stays **strict**: an unresolvable link th
   - `loadLinkedAwiMasters(tasks: Task[], client?: ReturnType<typeof plannerClient>, options?: { includeTaskMedia?: boolean }): Promise<Map<string, LinkedAwiMaster>>`, exported from `@/lib/planner/read-store` and re-exported by `@/domain/supabase-planner`.
   - `loadTaskFromSupabase` loses its unused fourth parameter and keeps throwing `The linked master AWI is unavailable. Check the master list and your access.` for an unresolvable link.
 
-- [ ] **Step 1: Rewrite the single-task linked tests (RED)**
+- [x] **Step 1: Rewrite the single-task linked tests (RED)**
 
 In `src/domain/supabase-planner.task-read.test.ts`, replace the whole `describe("linked master AWI reads", ...)` block (and remove the Task 3 `.skip` if one was added) with:
 
@@ -1512,7 +1514,7 @@ describe("linked master AWI reads", () => {
 
 The second test is the boundary the review flagged. `use-workspace-data.ts:420-445` marks media `"loaded"` for any non-null result, so a rejection is what keeps its error notice and focus/online/visibility retry working.
 
-- [ ] **Step 2: Add the planner-level tests (RED)**
+- [x] **Step 2: Add the planner-level tests (RED)**
 
 Append to `src/domain/supabase-planner.reads.test.ts`:
 
@@ -1558,7 +1560,7 @@ describe("linked master AWIs", () => {
 
 The existing `full planner load` test in this file has no linked tasks. It pins that a product without links sends no `awi_masters` request. Do not edit it.
 
-- [ ] **Step 3: Run to see RED**
+- [x] **Step 3: Run to see RED**
 
 Run: `npx vitest run src/domain/supabase-planner.task-read.test.ts src/domain/supabase-planner.reads.test.ts`
 Expected:
@@ -1568,7 +1570,7 @@ Expected:
 - The linked single-task test FAILS (an RPC for the master task; the old `.maybeSingle()` read cannot use the batched array reply).
 - The two strict single-task tests FAIL (wrong error text: `masters offline` instead of the unavailable message, or the first load already throwing).
 
-- [ ] **Step 4: Implement in `read-store.ts`**
+- [x] **Step 4: Implement in `read-store.ts`**
 
 1. Change the import on line 1 to `import { applyLinkedAwiMasters, awiTaskLink, type LinkedAwiMaster } from "@/domain/awi-task-link";`.
 2. Replace `loadTaskFromSupabase` and `resolveLinkedAwiTask` (lines 524-582) with:
@@ -1709,11 +1711,11 @@ async function resolveLinkedAwiTasks(
 
 4. `loadTaskPrivateMediaFromSupabase`'s `awi_link` branch keeps calling `loadTaskFromSupabase(taskId, projectId, supabase)`. Because that loader stays strict, an unavailable master rejects here, and the hydration caller's error and retry path runs. Do not catch it in this function.
 
-- [ ] **Step 5: Re-export through the facade**
+- [x] **Step 5: Re-export through the facade**
 
 In `src/domain/supabase-planner.ts`, add `loadLinkedAwiMasters` to the existing re-export list for `@/lib/planner/read-store`.
 
-- [ ] **Step 6: Show "master unavailable" on desktop**
+- [x] **Step 6: Show "master unavailable" on desktop**
 
 In `src/components/line-workspace.tsx:2568`, replace the linked branch of `publishAction` (`selectedTask && awiTaskLink(selectedTask) ? <a …>Open master AWI</a> : …`) with:
 
@@ -1726,14 +1728,14 @@ In `src/components/line-workspace.tsx:2568`, replace the linked branch of `publi
 
 (The rest of the expression is unchanged.)
 
-- [ ] **Step 7: Run to see GREEN, plus every planner read test**
+- [x] **Step 7: Run to see GREEN, plus every planner read test**
 
 Run: `npx vitest run src/domain/supabase-planner.task-read.test.ts src/domain/supabase-planner.reads.test.ts src/domain/supabase-planner.core-load.test.ts src/domain src/components/line-workspace.sync.test.tsx`
 Expected: PASS. The `full planner load` request list is unchanged. The sync "read counts" snapshot is unchanged.
 
 Then: `npm run typecheck`. Expected: PASS. If a caller passed a fourth argument to `loadTaskFromSupabase`, remove it.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/planner/read-store.ts src/domain/supabase-planner.ts src/domain/supabase-planner.task-read.test.ts src/domain/supabase-planner.reads.test.ts src/components/line-workspace.tsx
@@ -1765,7 +1767,7 @@ Successor tasks are not rescheduled on refresh, which is the same as on load: th
 - Consumes: `loadLinkedAwiMasters` (Task 7, via the facade `@/domain/supabase-planner`), `awiTaskLink` and `refreshLinkedAwiTasks` (Task 3), `useRefreshOnReturn` from `@/lib/use-refresh-on-return`.
 - Produces: `useLinkedAwiRefresh(options: { plannerState: PlannerState; setPlannerState: Dispatch<SetStateAction<PlannerState>> }): { refreshLinkedAwi: () => Promise<void> }`.
 
-- [ ] **Step 1: Write the failing hook tests**
+- [x] **Step 1: Write the failing hook tests**
 
 Create `src/components/line-workspace/use-linked-awi-refresh.test.tsx`:
 
@@ -1874,12 +1876,12 @@ describe("useLinkedAwiRefresh", () => {
 });
 ```
 
-- [ ] **Step 2: Run to see RED**
+- [x] **Step 2: Run to see RED**
 
 Run: `npx vitest run src/components/line-workspace/use-linked-awi-refresh.test.tsx`
 Expected: FAIL with `Cannot find module './use-linked-awi-refresh'`.
 
-- [ ] **Step 3: Implement the hook**
+- [x] **Step 3: Implement the hook**
 
 Create `src/components/line-workspace/use-linked-awi-refresh.ts`:
 
@@ -1928,12 +1930,12 @@ export function useLinkedAwiRefresh({ plannerState, setPlannerState }: UseLinked
 }
 ```
 
-- [ ] **Step 4: Run to see GREEN**
+- [x] **Step 4: Run to see GREEN**
 
 Run: `npx vitest run src/components/line-workspace/use-linked-awi-refresh.test.tsx src/domain/awi-task-link.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Replace the focus effect in LineWorkspace**
+- [x] **Step 5: Replace the focus effect in LineWorkspace**
 
 Delete the `linkedAwiSources` memo, `linkedAwiSourceKey` and the `useEffect` at `line-workspace.tsx:1253-1273`. Insert in their place:
 
@@ -1943,7 +1945,7 @@ Delete the `linkedAwiSources` memo, `linkedAwiSourceKey` and the `useEffect` at 
 
 Add `import { useLinkedAwiRefresh } from "./line-workspace/use-linked-awi-refresh";` next to the other `./line-workspace/use-*` imports. Remove any import that is now unused. Lint will name it: `withLinkedAwiProcedure` stays (creation path), and `loadTaskFromSupabase` stays (picker).
 
-- [ ] **Step 6: Update the picker copy**
+- [x] **Step 6: Update the picker copy**
 
 In `src/components/line-workspace/add-task-menu.tsx:31`, change the paragraph text to:
 
@@ -1951,12 +1953,12 @@ In `src/components/line-workspace/add-task-menu.tsx:31`, change the paragraph te
       <p className="mt-2 text-xs text-ink-secondary">Instructions and timing come from the master. Plan this task’s operators here.</p>
 ```
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 Run: `npx vitest run src/components/line-workspace src/components/line-workspace.sync.test.tsx src/components/line-workspace.lifecycle.test.tsx src/domain/awi-task-link.test.ts && npm run typecheck && npx eslint src/components/line-workspace.tsx src/components/line-workspace --max-warnings=0`
 Expected: PASS. The sync test's focus and visibility call counts for media retry are unchanged, because a planner with no linked tasks registers no listener (`useRefreshOnReturn` is disabled).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/components/line-workspace/use-linked-awi-refresh.ts src/components/line-workspace/use-linked-awi-refresh.test.tsx src/components/line-workspace.tsx src/components/line-workspace/add-task-menu.tsx
@@ -1986,7 +1988,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `SettingsSection` id `"phone-portal"` replaces `"projects"`.
 
-- [ ] **Step 1: Branch and write the failing tests**
+- [x] **Step 1: Branch and write the failing tests**
 
 ```bash
 git switch -c fix/settings-phone-portal
@@ -2047,12 +2049,12 @@ it("seeds Settings with the Product-scope directory", async () => {
 });
 ```
 
-- [ ] **Step 2: Run to see RED**
+- [x] **Step 2: Run to see RED**
 
 Run: `npx vitest run src/components/settings-navigation.test.ts src/components/project-route-shells.test.tsx app/settings/page.test.tsx`
 Expected: all three FAIL (`projects` is present; scope is `"project"`; called with no argument).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/components/settings-navigation.tsx`:
 - In the lucide import, replace `FolderKanban` with `Smartphone`.
@@ -2093,12 +2095,12 @@ Delete the lifecycle component:
 git rm src/components/project-settings.tsx
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `npx vitest run src/components/settings-navigation.test.ts src/components/project-route-shells.test.tsx app/settings/page.test.tsx && npm run typecheck && npx eslint src/components app/settings --max-warnings=0`
 Expected: PASS. Typecheck flags every leftover `"projects"` section reference. Fix each by switching it to `"phone-portal"`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A src/components/settings-navigation.tsx src/components/settings-navigation.test.ts src/components/app-settings-panel.tsx src/components/workspace-invite-composer.tsx src/components/project-route-shells.tsx src/components/project-route-shells.test.tsx app/settings/page.tsx app/settings/page.test.tsx src/components/project-settings.tsx
@@ -2132,7 +2134,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Line numbers are at `e9dd1a3`. Earlier branches do not touch these files, but re-locate each block by its symbol before deleting.
 
-- [ ] **Step 1: Branch and port the characterization tests (GREEN first: they describe live code)**
+- [x] **Step 1: Branch and port the characterization tests (GREEN first: they describe live code)**
 
 ```bash
 git switch -c chore/delete-smart-allocation
@@ -2214,7 +2216,7 @@ Expected:
 - The three runtime tests PASS. If one does not, read `buildUnassignedTaskIssue` (`operator-allocation.ts` ~442-450) and `buildUnallocatedWorkReviews` (`smart-allocation-report.ts` ~105-115), and correct the expectation to the live behaviour. These tests characterize the code; they do not change it.
 - The `expectTypeOf` line fails typecheck only if the two result types differ today. If it fails, it turns green in Step 2, which is the point of the re-point.
 
-- [ ] **Step 2: Re-point `SmartAllocationResult` before deleting its source**
+- [x] **Step 2: Re-point `SmartAllocationResult` before deleting its source**
 
 Replace `src/domain/smart-allocation-report.ts` lines 1-26 with:
 
@@ -2238,7 +2240,7 @@ Then delete lines 165-372 (`buildMarkdownTable` and `buildSmartAllocationReviewT
 
 Run: `npm run typecheck`. Expected: errors only in files this task deletes next (the route, the solver, the smoke script).
 
-- [ ] **Step 3: Delete the dead files and blocks**
+- [x] **Step 3: Delete the dead files and blocks**
 
 ```bash
 git rm app/api/smart-allocation/route.ts src/domain/ie-smart-allocation-solver.ts src/domain/ie-smart-allocation-solver.test.ts src/domain/playback.ts src/domain/playback.test.ts scripts/smart-allocation-smoke.ts smart-allocation-status.md
@@ -2269,7 +2271,7 @@ export interface IeSmartAllocationAssignment {
 - `scripts/backup-complete-app.mjs:34`: delete the `"smart-allocation-status.md",` entry.
 - `src/components/line-workspace/analytics.tsx:501`: change `{hiddenCount} more in the Smart Allocation audit packet.` to `{hiddenCount} more not shown.`
 
-- [ ] **Step 4: Prove nothing dead remains and nothing live broke**
+- [x] **Step 4: Prove nothing dead remains and nothing live broke**
 
 Run:
 
@@ -2280,13 +2282,13 @@ grep -rInE "smart-allocation/|ie-smart-allocation-solver|buildSmartOperatorAssig
 Expected: no output.
 Then: `rm -rf .next tsconfig.tsbuildinfo && npm run typecheck && npm run lint && npm test`. Expected: PASS.
 
-- [ ] **Step 5: Docs**
+- [x] **Step 5: Docs**
 
 - `docs/audits/2026-10-08-structure-audit.md`: strike Phase 2 item 10 and the §2 row 20 "golden tests" text with `~~…~~`, and add `(obsolete 2026-10-10: targets deleted; see 2026-10-10 audit DOM-3)`.
 - `docs/edit-operation-inventory.md:1048` and `docs/tool-catalog-consistency-design.md:310`: append ` (deleted 2026-10-10)` to the smart-allocation mention.
 - Leave dated history docs (`docs/nextjs-refactor-plan.md`, `docs/history/*`, earlier plans) unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -2301,7 +2303,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:** none (verification and release).
 
-- [ ] **Step 1: Full gate on the tip of E**
+- [x] **Step 1: Full gate on the tip of E**
 
 Run: `npm run build && npm run typecheck && npm run lint && npm test && npm run check:bundles`
 Expected:
@@ -2309,7 +2311,7 @@ Expected:
 - `check:bundles` still reports the 5 gated routes under 350 KiB. The SOP editor overage (PLAT-1) is a known, separate item.
 - The planner entry should not grow. Note its size against the audit's 291.3 KiB.
 
-- [ ] **Step 2: Live verification on a local stack (CLAUDE.md step 6; owner said browser CI stays off, not manual checks)**
+- [x] **Step 2: Live verification on a local stack (CLAUDE.md step 6; owner said browser CI stays off, not manual checks)**
 
 Use the retained **`pulse-e2e`** stack exactly as in Task 6 Step 3 (identity check, start without reset, `verify-local-migration.mjs`, then `test db --db-url postgresql://postgres:postgres@127.0.0.1:56322/postgres`). Skip the apply if Task 6 already applied it, since the script refuses an applied version. Never a bare `--local` from the repo root (that is the separate `pulse` project on 55322).
 1. Point the app at the same stack:

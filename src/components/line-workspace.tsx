@@ -11,6 +11,7 @@ import type { SaveScope } from "./line-workspace/workspace-controller-types";
 import { installProcedureAutosaveHarness } from "./line-workspace/procedure-autosave-harness";
 import { useWorkspaceData } from "./line-workspace/use-workspace-data";
 import { useWorkspaceRealtime } from "./line-workspace/use-workspace-realtime";
+import { useLinkedAwiRefresh } from "./line-workspace/use-linked-awi-refresh";
 import { useWorkspaceScenarios } from "./line-workspace/use-workspace-scenarios";
 import { useWorkspaceTools } from "./line-workspace/use-workspace-tools";
 import { useWorkspaceMedia } from "./line-workspace/use-workspace-media";
@@ -1250,27 +1251,7 @@ export function LineWorkspace({
     : plannerChromeContext;
   const showsSchedulingWorkspace = activeModule === "gantt";
   const selectedTask = derivedState.tasks.find((task) => task.id === selectedTaskId) ?? derivedState.tasks[0];
-  const linkedAwiSources = useMemo(() => plannerState.tasks.flatMap(task => {
-    const link = awiTaskLink(task);
-    return link ? [{id:task.id, ...link}] : [];
-  }), [plannerState.tasks]);
-  const linkedAwiSourceKey = JSON.stringify(linkedAwiSources);
-  useEffect(() => {
-    const links = JSON.parse(linkedAwiSourceKey) as typeof linkedAwiSources;
-    if (!links.length) return;
-    let active = true;
-    const refresh = async () => {
-      const sources = await Promise.all(links.map(async link => ({link, source:await loadTaskFromSupabase(link.taskId, link.projectId)})));
-      if (!active) return;
-      setPlannerState(current => ({...current, tasks:current.tasks.map(task => {
-        const result = sources.find(item => item.link.id === task.id && item.link.masterId === awiTaskLink(task)?.masterId);
-        return result?.source ? withLinkedAwiProcedure(task, result.source) : task;
-      })}));
-    };
-    const onFocus = () => { void refresh().catch(() => setWorkspaceNotice({tone:"danger", title:"Unable to refresh linked AWI", body:"Reload to try again. Your task planning is preserved."})); };
-    window.addEventListener("focus", onFocus);
-    return () => {active=false; window.removeEventListener("focus", onFocus);};
-  }, [linkedAwiSourceKey]);
+  useLinkedAwiRefresh({ plannerState, setPlannerState });
 
   const selectedProcedureTaskHydrationStatus = selectedTask
     ? taskDetailHydrationStatus[selectedTask.id]

@@ -105,7 +105,7 @@ function cookieScopedSupabase(request: Request, supabaseUrl: string, supabaseAno
 }
 
 /**
- * Per-instance in-memory limiter (same approach as /api/smart-allocation). Good enough
+ * Per-instance in-memory limiter. Good enough
  * to stop a single user hammering an expensive endpoint; not a distributed quota.
  */
 export function createApiRateLimiter({ windowMs, maxRequests }: { windowMs: number; maxRequests: number }) {

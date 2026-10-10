@@ -428,10 +428,3 @@ export interface ProductKpis {
   peakManpower: number;
   crewUtilizationPercent: number;
 }
-
-export interface PlaybackEvent {
-  time: number;
-  label: string;
-  taskId?: string;
-  stationId?: string;
-}

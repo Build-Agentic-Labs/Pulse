@@ -6,8 +6,6 @@ import {
   formatDateTime,
   formatManHours,
   formatRelativeFromBounds,
-  formatSignedMinutes,
-  markdownCell,
   periodLabel,
   safeNumber,
   statusLabel,
@@ -49,28 +47,6 @@ describe("periodLabel", () => {
   });
   it("falls back to 'period' for custom", () => {
     expect(periodLabel("custom")).toBe("period");
-  });
-});
-
-describe("markdownCell", () => {
-  it("escapes pipes and flattens newlines", () => {
-    expect(markdownCell("a | b\nc")).toBe("a \\| b c");
-  });
-  it("stringifies nullish to empty", () => {
-    expect(markdownCell(null)).toBe("");
-    expect(markdownCell(undefined)).toBe("");
-    expect(markdownCell(0)).toBe("0");
-  });
-});
-
-describe("formatSignedMinutes", () => {
-  it("renders 0m within +/- 1 minute", () => {
-    expect(formatSignedMinutes(0)).toBe("0m");
-    expect(formatSignedMinutes(0.4)).toBe("0m");
-  });
-  it("prefixes sign for positive and negative", () => {
-    expect(formatSignedMinutes(90)).toBe("+1h 30m");
-    expect(formatSignedMinutes(-45)).toBe("-45m");
   });
 });
 

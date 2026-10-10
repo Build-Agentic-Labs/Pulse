@@ -31,7 +31,6 @@ const ROOT_FILES = [
   "tailwind.config.ts",
   "tsconfig.json",
   "manufacturing_line_gantt_app_spec.md",
-  "smart-allocation-status.md",
 ];
 
 const ROOT_DIRS = ["app", "src", "public", "scripts", "supabase", "office", "certificates"];

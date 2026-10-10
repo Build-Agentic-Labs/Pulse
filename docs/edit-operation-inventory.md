@@ -1046,7 +1046,7 @@ no suppression writes), then `email_suppressions` upsert per address. **Partial-
 **Read-only / non-DB routes:** `notifications/health` (CRON secret, reads), `performance` (log only,
 same-origin + 4 KB cap, unauthenticated, no limiter), `phone-portal-url` (auth, enumerates host NICs,
 **no limiter**), `smart-allocation` (auth, RLS project check, limiter 10/min, external OpenAI, DB
-read-only; route untested), `solidworks/targets` (auth, **no limiter**, no test).
+read-only; route untested) (deleted 2026-10-10), `solidworks/targets` (auth, **no limiter**, no test).
 
 ### 8.2 SolidWorks plugin integration
 Contract per `docs/solidworks-integration.md:28-30, 44, 106-115`: bearer Supabase access token,

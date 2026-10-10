@@ -498,7 +498,7 @@ function PlanningRecommendationsPanel({
 
         {hiddenCount > 0 ? (
           <p className="ui-planner-recommendations-more">
-            {hiddenCount} more in the Smart Allocation audit packet.
+            {hiddenCount} more not shown.
           </p>
         ) : null}
       </div>

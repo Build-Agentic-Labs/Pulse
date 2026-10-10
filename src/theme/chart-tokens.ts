@@ -46,30 +46,6 @@ export const TAKT_EXCEEDED_TONE: ChartTone = {
 export const TAKT_FLAG_INPUT_CLASS =
   "border-danger bg-danger-muted text-danger";
 
-export function taskTone(state: string, task: { rowType?: string }): ChartTone {
-  if (state === "complete") {
-    return { fill: chartPalette.accent, stroke: chartPalette.accentStroke, text: chartPalette.canvas };
-  }
-
-  if (state === "in_progress") {
-    return { fill: chartPalette.accentLight, stroke: chartPalette.accentStroke, text: chartPalette.white };
-  }
-
-  if (state === "blocked") {
-    return { fill: chartPalette.dangerFill, stroke: chartPalette.danger, text: chartPalette.dangerText };
-  }
-
-  if (state === "ready") {
-    return { fill: chartPalette.accentSubtle, stroke: chartPalette.accentMuted, text: chartPalette.accent };
-  }
-
-  if (task.rowType === "milestone") {
-    return { fill: chartPalette.steel, stroke: chartPalette.neutralStroke, text: chartPalette.white };
-  }
-
-  return { fill: chartPalette.neutral, stroke: chartPalette.neutralStroke, text: chartPalette.ink };
-}
-
 export function groupTone(state: string): ChartTone {
   if (state === "complete") {
     return { fill: chartPalette.accent, stroke: chartPalette.accentStroke, text: chartPalette.canvas };

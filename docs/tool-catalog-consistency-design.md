@@ -307,7 +307,7 @@ The IndexedDB planner cache does **not** recover edits: a cache-sourced load can
 |---|---|---|---|
 | Desktop | Product fields, demand/takt, procedure-check setup, PFMEA | shell save (about 11–19 separate requests) | **no** |
 | Desktop | Zones, components, document types; task→zone moves | shell save | **no** |
-| Desktop | Gantt: durations, bar drags, names, operators, code mapping, dependencies, smart-allocation apply, undo/redo | shell save | **no** |
+| Desktop | Gantt: durations, bar drags, names, operators, code mapping, dependencies, smart-allocation apply (deleted 2026-10-10), undo/redo | shell save | **no** |
 | Desktop | Add or delete task | shell save (deletes cascade) | **no** |
 | Desktop | Drag-reorder Gantt groups | two task upserts (temporary, then real WBS), each with a full-list tool sync | **no** |
 | Desktop | Procedure step **name and instruction** | procedure queue | **yes** (localStorage; re-saved on reload) |

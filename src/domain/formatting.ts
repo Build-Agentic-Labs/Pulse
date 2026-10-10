@@ -33,22 +33,6 @@ export function periodLabel(period: DemandPeriod) {
             : "period";
 }
 
-export function markdownCell(value: unknown) {
-  return String(value ?? "")
-    .replaceAll("|", "\\|")
-    .replaceAll("\n", " ")
-    .trim();
-}
-
-export function formatSignedMinutes(minutes: number) {
-  if (Math.abs(minutes) < 1) {
-    return "0m";
-  }
-
-  const prefix = minutes > 0 ? "+" : "-";
-  return `${prefix}${formatMinutes(Math.abs(minutes))}`;
-}
-
 export function formatRelativeFromBounds(iso: string, startMs: number) {
   const valueMs = Date.parse(iso);
   if (!Number.isFinite(valueMs)) {

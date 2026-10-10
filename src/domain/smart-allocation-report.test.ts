@@ -1,22 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { buildMarkdownTable, issueReviewLabel } from "./smart-allocation-report";
+import { issueReviewLabel } from "./smart-allocation-report";
 
 type Issue = Parameters<typeof issueReviewLabel>[0];
 
 function issue(partial: Record<string, unknown>): Issue {
   return partial as unknown as Issue;
 }
-
-describe("buildMarkdownTable", () => {
-  it("returns a placeholder when there are no rows", () => {
-    expect(buildMarkdownTable(["A", "B"], [])).toBe("_No rows._");
-  });
-  it("renders a header, divider, and escaped cells", () => {
-    const table = buildMarkdownTable(["A", "B"], [[1, 2], ["x|y", "z"]]);
-    expect(table).toBe(["| A | B |", "| --- | --- |", "| 1 | 2 |", "| x\\|y | z |"].join("\n"));
-  });
-});
 
 describe("issueReviewLabel", () => {
   it("labels unassigned_task reasons", () => {

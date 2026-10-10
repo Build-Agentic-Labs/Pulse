@@ -69,7 +69,7 @@ Priority is value ÷ (effort × regression risk), with confirmed defects weighte
 | 17 | Mobile list-owned drag/swipe + pure reorder computation | `mobile-photo-portal.tsx:238-252, 1673-1754, 1793-1883` | Structural | P3 | S | Low | Extract |
 | 18 | Planner command palette + undo/redo hooks | `line-workspace.tsx:789-792, 1110-1131, 1338-1545, 1642-1672` | Structural | P3 | S | Low | Extract |
 | 19 | Navigation-storage module (keys, last project, workspace pick) | 5 files, see §6 | Duplication | P3 | S | Low | Consolidate |
-| 20 | Operator allocation / IE solver | `domain/operator-allocation.ts`, `domain/ie-smart-allocation-solver.ts` | — | P3 | M | Med | **Leave together**; golden tests first, then dedupe 3 helpers |
+| 20 | Operator allocation / IE solver | `domain/operator-allocation.ts`, `domain/ie-smart-allocation-solver.ts` | — | P3 | M | Med | ~~**Leave together**; golden tests first, then dedupe 3 helpers~~ (obsolete 2026-10-10: targets deleted; see 2026-10-10 audit DOM-3) |
 | — | `use-sop-draft.ts`, `use-sop-attachments.ts` boundary | | | | | | **Leave as is** (one effect-key fix, §4.1 D3) |
 | — | `step-editors.tsx`, `pfmea-workspace.tsx`, `analytics.tsx`, `use-workspace-media.ts`, `use-procedure-save-queue.ts` | | | | | | **Leave as is** |
 | — | Print preview offscreen measurement tree + visible render | `sop-print-preview.tsx:992-998, 1495-1558` | | | | | **Leave together** (documented CSS invariants) |
@@ -237,7 +237,7 @@ Each phase lands on its own branch, CI green, verified in the browser where beha
 7. Mobile: characterization of typing during slow photo preparation, overlapping photo picks, and `hydrate` parity across the four draft-hydration copies.
 8. Gantt: layout tests (zone order, deleted-zone fallback, step windows with sequential/step→step/step→task/two-step-cycle) and link-mode matrix (`"="`, `1.5h`/`2 hrs`/`2`, `canUseFinishAsLinkSource`, finish-click on step vs group, Escape).
 9. Photo viewer: recorded pointer sequences per tool (arrow thresholds, shape thresholds + reversed drag, freehand single-point/sampling/cap, callout click vs drag, select-tool handles, textarea pending drag, 350 ms debounce, photo switch mid-gesture).
-10. Allocation: golden tests for `buildSmartOperatorAssignments`, `repairPlanDeterministically`, `buildDeterministicCoveragePlan`.
+10. ~~Allocation: golden tests for `buildSmartOperatorAssignments`, `repairPlanDeterministically`, `buildDeterministicCoveragePlan`.~~ (obsolete 2026-10-10: targets deleted; see 2026-10-10 audit DOM-3)
 
 **Phase 3 — the two boundary extractions (1–2 weeks total)**
 11. `useMobileWrites` (candidate 3), then convert the eleven status writers.

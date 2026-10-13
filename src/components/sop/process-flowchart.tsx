@@ -465,7 +465,12 @@ function MatrixView({
   const minTableWidth = Math.max(760, 472 + roles.length * 96);
 
   return (
-    <div className="overflow-x-auto">
+    <div
+      className="ui-table-scroll max-w-full rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      role="region"
+      aria-label="RASIC assignments"
+      tabIndex={0}
+    >
       <table
         className="w-full table-fixed border-collapse text-[12px]"
         style={{ minWidth: `${minTableWidth}px` }}

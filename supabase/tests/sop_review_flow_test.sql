@@ -83,10 +83,11 @@ end $$;
 
 -- Exercise the real feedback -> edit -> signatures -> Quality release path.
 select test_as('e0000000-0000-0000-0000-000000000001');
-select throws_ok($$update public.sop_review_seats set department_id='dept_z_b' where sop_id='sop_z1' and department_id='dept_z_a'$$,
- '23505',null,'moving to an already seated department fails atomically');
-select is((select signer_id::text from public.sop_review_seats where sop_id='sop_z1' and department_id='dept_z_a'),
- 'e0000000-0000-0000-0000-000000000002','failed department move preserves the original reviewer');
+select lives_ok($$update public.sop_review_seats set department_id='dept_z_b' where sop_id='sop_z1' and department_id='dept_z_a'$$,
+ 'moving an individual into an already represented department preserves both approvers');
+select is((select count(*) from public.sop_review_seats where sop_id='sop_z1' and department_id='dept_z_b'),
+ 2::bigint,'two approvers remain independently assigned in the same department');
+update public.sop_review_seats set department_id='dept_z_a' where sop_id='sop_z1' and signer_id='e0000000-0000-0000-0000-000000000002';
 select lives_ok($$update public.sop_review_seats set department_id='dept_z_qa' where sop_id='sop_z1' and department_id='dept_z_c'$$,
  'author can atomically move a draft seat to another department');
 update public.sop_review_seats set department_id='dept_z_c' where sop_id='sop_z1' and department_id='dept_z_qa';

@@ -85,7 +85,7 @@ export async function buildApprovalEntries(
         isSignatureCurrent(item, control),
     );
     entries.push({
-      key: `seat-${seat.departmentId}`,
+      key: `seat-${seat.id ?? `${seat.departmentId}:${seat.signerId}`}`,
       approval: "Department approval",
       name: signature?.signerName || (seat.signerId ? names.get(seat.signerId) : "") || "Assigned approver",
       position:

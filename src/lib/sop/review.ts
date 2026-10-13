@@ -102,8 +102,10 @@ export interface UserSignatureProfile {
   updatedAt: string;
 }
 
-/** One responsible department and the single person designated to sign for it. */
+/** One required approver; a department may have several independent assignments. */
 export interface SopReviewSeat {
+  /** Present on persisted assignments; omitted when adding a new approver. */
+  id?: string;
   nomination?: { email: string; positionTitle: string; deliveredAt: string | null };
   sopId: string;
   departmentId: string;
@@ -446,23 +448,24 @@ export async function listProfileNames(
   );
 }
 
-/** The required departmental approval roster and each department's designated approver. */
+/** The required approval roster, including every person assigned within a department. */
 export async function listSeats(
   sopId: string,
   client?: SupabaseClient<Database>,
 ): Promise<SopReviewSeat[]> {
   const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
-    supabase.from("sop_review_seats").select("sop_id, department_id, rasic, signer_id").eq("sop_id", sopId),
+    supabase.from("sop_review_seats").select("id, sop_id, department_id, rasic, signer_id").eq("sop_id", sopId),
   );
-  const nominations = await throwIfError(supabase.from("sop_approver_nominations").select("department_id,email,position_title,delivered_at").eq("sop_id", sopId));
+  const nominations = await throwIfError(supabase.from("sop_approver_nominations").select("seat_id,email,position_title,delivered_at").eq("sop_id", sopId));
   return (rows ?? []).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
     sopId: String(row.sop_id),
     departmentId: String(row.department_id),
     rasic: row.rasic as SopRasic,
     signerId: (row.signer_id as string | null) ?? null,
     nomination: (() => {
-      const nomination = nominations?.find((item) => item.department_id === row.department_id);
+      const nomination = nominations?.find((item) => item.seat_id === row.id);
       return nomination ? { email: nomination.email, positionTitle: nomination.position_title, deliveredAt: nomination.delivered_at } : undefined;
     })(),
   }));
@@ -477,9 +480,10 @@ export async function listSeatsForSops(
   if (unique.length === 0) return [];
   const supabase = client ?? createPlannerSupabaseClient();
   const rows = await throwIfError(
-    supabase.from("sop_review_seats").select("sop_id, department_id, rasic, signer_id").in("sop_id", unique),
+    supabase.from("sop_review_seats").select("id, sop_id, department_id, rasic, signer_id").in("sop_id", unique),
   );
   return (rows ?? []).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
     sopId: String(row.sop_id),
     departmentId: String(row.department_id),
     rasic: row.rasic as SopRasic,
@@ -490,24 +494,25 @@ export async function listSeatsForSops(
 /** Add or update a required approval seat. Only legal while the SOP is a draft. */
 export async function upsertSeat(seat: SopReviewSeat): Promise<void> {
   const supabase = createPlannerSupabaseClient();
-  await throwIfError(
-    supabase.from("sop_review_seats").upsert(
-      {
-        sop_id: seat.sopId,
-        department_id: seat.departmentId,
-        // The column keeps its legacy enum, but the approval roster now has one duty only.
-        rasic: "responsible",
-        signer_id: seat.signerId,
-      },
-      { onConflict: "sop_id,department_id" },
-    ),
-  );
+  const values = {
+    sop_id: seat.sopId,
+    department_id: seat.departmentId,
+    rasic: "responsible" as const,
+    signer_id: seat.signerId,
+  };
+  if (seat.id) {
+    const row = await throwIfError(supabase.from("sop_review_seats").update(values)
+      .eq("sop_id", seat.sopId).eq("id", seat.id).select("id").maybeSingle());
+    if (!row) throw new Error("This approver assignment changed. Reload the roster and try again.");
+  } else {
+    await throwIfError(supabase.from("sop_review_seats").insert(values));
+  }
 }
 
 /** Move a draft seat atomically: a rejected destination must not erase its original routing. */
 export async function moveSeat(
   sopId: string,
-  departmentId: string,
+  seatId: string,
   nextDepartmentId: string,
   signerId: string | null,
 ): Promise<void> {
@@ -516,17 +521,17 @@ export async function moveSeat(
     supabase.from("sop_review_seats")
       .update({ department_id: nextDepartmentId, signer_id: signerId })
       .eq("sop_id", sopId)
-      .eq("department_id", departmentId)
+      .eq("id", seatId)
       .select("department_id")
       .maybeSingle(),
   );
   if (!row) throw new Error("The approval roster changed. Reload it before moving this department.");
 }
 
-export async function removeSeat(sopId: string, departmentId: string): Promise<void> {
+export async function removeSeat(sopId: string, seatId: string): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   await throwIfError(
-    supabase.from("sop_review_seats").delete().eq("sop_id", sopId).eq("department_id", departmentId),
+    supabase.from("sop_review_seats").delete().eq("sop_id", sopId).eq("id", seatId),
   );
 }
 
@@ -534,13 +539,14 @@ export async function removeSeat(sopId: string, departmentId: string): Promise<v
  * Move a seat to another member of the same department when its reviewer is unavailable.
  * Admin-only, never to yourself, never a seat that has already signed. Logged to audit_log.
  */
-export async function reassignSeat(sopId: string, departmentId: string, newSignerId: string): Promise<void> {
+export async function reassignSeat(sopId: string, departmentId: string, newSignerId: string, seatId?: string): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   await throwIfError(
     supabase.rpc("reassign_sop_seat", {
       p_sop: sopId,
       p_department: departmentId,
       p_new_signer: newSignerId,
+      p_seat_id: seatId,
     }),
   );
   kickSopNotifications();

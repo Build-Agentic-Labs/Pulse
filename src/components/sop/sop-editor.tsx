@@ -1767,7 +1767,7 @@ export function SopEditor({
                   node: <section className="space-y-3">
                     <p className="text-[11px] font-medium text-ink-secondary">Required signatures</p>
                     {finalApprovalStakeholders.map(({ seat, department, name, signature }) => (
-                      <div key={seat.departmentId} className="flex items-center gap-2 border-b border-line pb-3 last:border-0">
+                      <div key={seat.id ?? `${seat.departmentId}:${seat.signerId}`} className="flex items-center gap-2 border-b border-line pb-3 last:border-0">
                         <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${signature ? "bg-accent" : "bg-ink-tertiary"}`} />
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium text-ink">{name}</p>

@@ -1920,6 +1920,7 @@ export type Database = {
       }
       sop_approver_nominations: {
         Row: {
+          seat_id: string
           created_by: string
           delivered_at: string | null
           delivery_id: string
@@ -1930,6 +1931,7 @@ export type Database = {
           sop_id: string
         }
         Insert: {
+          seat_id: string
           created_by?: string
           delivered_at?: string | null
           delivery_id?: string
@@ -1940,6 +1942,7 @@ export type Database = {
           sop_id: string
         }
         Update: {
+          seat_id?: string
           created_by?: string
           delivered_at?: string | null
           delivery_id?: string
@@ -1951,11 +1954,11 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "sop_approver_nominations_sop_id_department_id_fkey"
-            columns: ["sop_id", "department_id"]
+            foreignKeyName: "sop_approver_nominations_seat_fkey"
+            columns: ["seat_id", "sop_id", "department_id"]
             isOneToOne: true
             referencedRelation: "sop_review_seats"
-            referencedColumns: ["sop_id", "department_id"]
+            referencedColumns: ["id", "sop_id", "department_id"]
           },
         ]
       }
@@ -2304,6 +2307,7 @@ export type Database = {
       }
       sop_review_seats: {
         Row: {
+          id: string
           created_by: string | null
           department_id: string
           rasic: Database["public"]["Enums"]["sop_rasic"]
@@ -2312,6 +2316,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          id?: string
           created_by?: string | null
           department_id: string
           rasic: Database["public"]["Enums"]["sop_rasic"]
@@ -2320,6 +2325,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          id?: string
           created_by?: string | null
           department_id?: string
           rasic?: Database["public"]["Enums"]["sop_rasic"]
@@ -4647,7 +4653,7 @@ export type Database = {
         Returns: boolean
       }
       reassign_sop_seat: {
-        Args: { p_department: string; p_new_signer: string; p_sop: string }
+        Args: { p_department: string; p_new_signer: string; p_sop: string; p_seat_id?: string }
         Returns: undefined
       }
       redeem_workspace_access_grants: { Args: never; Returns: number }

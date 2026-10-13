@@ -73,7 +73,7 @@ export async function POST(request: Request) {
           nomination.delivered_at = new Date().toISOString();
         }
         if (!userId) throw new Error("The approver has no account.");
-        const { data: seat, error: seatError } = await db.from("sop_review_seats").update({ signer_id:userId }).eq("sop_id",doc.id).eq("department_id",nomination.department_id).select("department_id").maybeSingle();
+        const { data: seat, error: seatError } = await db.from("sop_review_seats").update({ signer_id:userId }).eq("sop_id",doc.id).eq("id",nomination.seat_id).select("department_id").maybeSingle();
         if (seatError || !seat) throw new Error(seatError?.message ?? "The approver was removed. Check the roster before submitting.");
       }
       // Database transition guards validate authorship, complete roster and independent approvers.

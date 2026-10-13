@@ -40,6 +40,7 @@ const departments: Department[] = [
 ];
 
 const qualitySeat: SopReviewSeat = {
+  id: "seat-quality",
   sopId: "sop-1",
   departmentId: "dept-quality",
   rasic: "responsible",
@@ -47,6 +48,7 @@ const qualitySeat: SopReviewSeat = {
 };
 
 const manufacturingSeat: SopReviewSeat = {
+  id: "seat-mfg",
   sopId: "sop-1",
   departmentId: "dept-mfg",
   rasic: "responsible",
@@ -63,6 +65,33 @@ describe("SopRosterEditor", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("adds another plant manager in the same department and removes only that assignment", async () => {
+    vi.mocked(upsertSeat).mockReset();
+    vi.mocked(removeSeat).mockReset();
+    vi.mocked(listMembersForDepartments).mockResolvedValue([
+      { departmentId: "dept-mfg", userId: "reviewer-member", deptRole: "author", positionTitle: "Plant Manager" },
+      { departmentId: "dept-mfg", userId: "second-manager", deptRole: "author", positionTitle: "Plant Manager" },
+    ]);
+    vi.mocked(listProfileNames).mockResolvedValue(new Map([["reviewer-member", "Alex Rivera"], ["second-manager", "Sam Lee"]]));
+    const onChanged = vi.fn();
+    const props = { sopId: "sop-1", departments: [departments[0]], onChanged };
+    const { rerender } = render(<SopRosterEditor {...props} seats={[manufacturingSeat]} />);
+    await screen.findByText("Alex Rivera");
+    fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
+    fireEvent.click(screen.getByRole("button", { name: "Required departmental approver" }));
+    expect(screen.queryByRole("option", { name: /Alex Rivera/ })).toBeNull();
+    fireEvent.click(screen.getByRole("option", { name: /Sam Lee/ }));
+    expect(screen.getByText("Alex Rivera")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Add departmental approver" }));
+    await waitFor(() => expect(upsertSeat).toHaveBeenCalledWith({ sopId: "sop-1", departmentId: "dept-mfg", signerId: "second-manager", rasic: "responsible" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    rerender(<SopRosterEditor {...props} seats={[manufacturingSeat, { ...manufacturingSeat, id: "seat-second", signerId: "second-manager" }]} />);
+    const secondRow = (await screen.findByText("Sam Lee")).closest("tr")!;
+    fireEvent.click(within(secondRow).getByRole("button", { name: "Remove MFG from the roster" }));
+    await waitFor(() => expect(removeSeat).toHaveBeenCalledWith("sop-1", "seat-second"));
+    expect(screen.getByText("Alex Rivera")).toBeVisible();
   });
 
   it("derives the department from the selected person without a department picker", async () => {

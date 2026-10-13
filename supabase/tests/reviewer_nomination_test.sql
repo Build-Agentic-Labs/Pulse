@@ -209,8 +209,8 @@ insert into public.workspace_access_grants
 values ('ws_nom','nom-second@anacorp.com','editor','edit',
   '[{"department_id":"dept_nom_eng","role":"reviewer","position_title":"Engineer"}]',
   'd0000000-0000-0000-0000-000000000001',now()+interval '30 days');
-insert into public.sop_approver_nominations (sop_id,department_id,email,position_title,created_by)
-values ('sop_nom_1','dept_nom_eng','nom-second@anacorp.com','Engineer',
+insert into public.sop_approver_nominations (seat_id,sop_id,department_id,email,position_title,created_by)
+values ((select id from public.sop_review_seats where sop_id='sop_nom_1' and department_id='dept_nom_eng'), 'sop_nom_1','dept_nom_eng','nom-second@anacorp.com','Engineer',
   'd0000000-0000-0000-0000-000000000002');
 select test_as('d0000000-0000-0000-0000-000000000002');
 select lives_ok(

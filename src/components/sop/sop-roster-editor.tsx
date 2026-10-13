@@ -61,8 +61,8 @@ interface RosterEditorProps {
 }
 
 /**
- * Assign the departments whose approval is required. Each department names exactly one approver
- * who reviews the draft and later signs the formal departmental approval. Quality may also hold
+ * Assign each person whose approval is required, including multiple people in one department.
+ * Each reviews the draft and later signs their own formal approval. Quality may also hold
  * one of these normal review seats; its locked final-release gate remains separate and must be
  * completed by a different Quality approver. Procedure RASIC is a separate responsibility map and
  * is intentionally not part of this roster.
@@ -96,8 +96,6 @@ export function SopRosterEditor({
     () => seats.filter((seat) => isBlockingSeat(seat.rasic)),
     [seats],
   );
-  const seatedIds = new Set(workflowSeats.map((seat) => seat.departmentId));
-  const available = departments.filter((department) => !seatedIds.has(department.id));
 
   // One batched pass for any number of departments: a single department_members
   // query + a single profiles query, instead of 2 round trips per seat (N+1).
@@ -213,7 +211,7 @@ export function SopRosterEditor({
   const newApproverMembers = allMembers.filter((member) =>
     !workflowSeats.some((seat) => seat.signerId === member.userId),
   );
-  const inviteDepartments = available.filter((department) => canNominateInto(department.id));
+  const inviteDepartments = departments.filter((department) => canNominateInto(department.id));
   const memberDescription = (member: RosterMember | undefined) => member ? [
     member.positionTitle,
     ...member.departmentIds.map((id) => departments.find((department) => department.id === id)?.name),
@@ -226,7 +224,7 @@ export function SopRosterEditor({
     <section className="ui-data-table-frame">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
         <h2 className="ui-setup-section-title">Approvers</h2>
-        {available.length > 0 || adding ? <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-2" aria-expanded={adding}
+        {departments.length > 0 || adding ? <button type="button" className="ui-btn-ghost h-8 gap-1.5 px-2" aria-expanded={adding}
           onClick={() => { setAdding((current) => !current); setDraft({ departmentId: "", signerId: "" }); setInvitingFor(null); }}>
           {adding ? <X size={14} /> : <Plus size={14} />}{adding ? "Cancel" : "Add approver"}
         </button> : null}
@@ -239,13 +237,16 @@ export function SopRosterEditor({
           <th scope="col" className="px-2 py-3"><span className="sr-only">Actions</span></th>
         </tr></thead>
         <tbody>
-          {workflowSeats.filter((seat) => !(adding && draft.departmentId === seat.departmentId)).map((seat) => {
+          {workflowSeats.map((seat) => {
+            const seatKey = seat.id ?? `${seat.departmentId}:${seat.signerId ?? seat.nomination?.email ?? "unassigned"}`;
             const department = departments.find((item) => item.id === seat.departmentId);
             const people = members.get(seat.departmentId) ?? [];
             const selected = people.find((member) => member.userId === seat.signerId);
-            const options = personOptions(people, members.has(seat.departmentId) ? seat.signerId : null, "Choose an approver…");
+            const options = personOptions(people.filter((member) => member.userId === seat.signerId ||
+              !workflowSeats.some((assigned) => assigned.signerId === member.userId)),
+              members.has(seat.departmentId) ? seat.signerId : null, "Choose an approver…");
             const nominatable = canNominateInto(seat.departmentId);
-            return <Fragment key={seat.departmentId}>
+            return <Fragment key={seatKey}>
               <tr className="group border-b border-line/70">
                 <td className="px-5 py-3 align-middle">
                   {seat.signerId || seat.nomination ? <span className="block text-[13px] font-medium text-ink" aria-label={`Saved approver for ${department?.code ?? "department"}`}>
@@ -255,8 +256,8 @@ export function SopRosterEditor({
                     selectedLabel={selected?.name} disabled={busy !== null}
                     options={[...options, ...(nominatable ? [{ value: "__invite__", label: "Add an approver…", alwaysVisible: true, description: "Add someone who is not on the list", group: "New person" }] : [])]}
                     onChange={(value) => {
-                      if (value === "__invite__") { setInvitingFor(seat.departmentId); return; }
-                      void guarded(`approver-${seat.departmentId}`, () => upsertSeat({ ...seat, rasic: "responsible", signerId: value || null }));
+                      if (value === "__invite__") { setInvitingFor(seatKey); return; }
+                      void guarded(`approver-${seatKey}`, () => upsertSeat({ ...seat, rasic: "responsible", signerId: value || null }));
                     }} />}
                   {seat.nomination ? <p className="mt-1 text-[11px] text-ink-tertiary">{seat.nomination.positionTitle} · {department?.name}{!seat.nomination.deliveredAt ? " · Invitation pending · sent with review" : selected?.pendingInviteAt ? " · Invited · waiting to join" : ""}</p> : null}
                   {selected ? <p className="mt-1 text-[11px] leading-4 text-ink-tertiary">{memberDescription(selected)}</p> : null}
@@ -265,12 +266,15 @@ export function SopRosterEditor({
                 <td className="px-2 py-3 align-middle">
                   <button type="button" aria-label={`Remove ${department?.code ?? "department"} from the roster`} title="Remove approver"
                     className="ui-btn-ghost h-8 w-8 p-0 text-ink-tertiary hover:text-danger disabled:opacity-40" disabled={busy !== null}
-                    onClick={() => void guarded(`remove-${seat.departmentId}`, () => removeSeat(sopId, seat.departmentId))}>
-                    {busy === `remove-${seat.departmentId}` ? <Loader2 size={14} className="mx-auto animate-spin" /> : <Trash2 size={14} className="mx-auto" />}
+                    onClick={() => void guarded(`remove-${seatKey}`, async () => {
+                      if (!seat.id) throw new Error("Reload the roster before removing this approver.");
+                      await removeSeat(sopId, seat.id);
+                    })}>
+                    {busy === `remove-${seatKey}` ? <Loader2 size={14} className="mx-auto animate-spin" /> : <Trash2 size={14} className="mx-auto" />}
                   </button>
                 </td>
               </tr>
-              {invitingFor === seat.departmentId ? <tr className="border-b border-line/70"><td colSpan={2} className="px-5 pb-3">
+              {invitingFor === seatKey ? <tr className="border-b border-line/70"><td colSpan={2} className="px-5 pb-3">
                 <ReviewerInviteForm sopId={sopId} departmentId={seat.departmentId} departmentCode={department?.code ?? ""}
                   onNominated={(result) => handleNominated(seat, seat.departmentId, result)} onCancel={() => setInvitingFor(null)} />
               </td></tr> : null}
@@ -287,17 +291,12 @@ export function SopRosterEditor({
             <td colSpan={invitingFor === "__new__" ? 2 : 1} className="px-5 py-3 align-middle">
               {invitingFor !== "__new__" ? <ThemedSelect variant="sop" className="w-full" ariaLabel="Required departmental approver" searchable searchPlaceholder="Search by name…" value={draft.signerId}
                 disabled={busy !== null} selectedLabel={allMembers.find((member) => member.userId === draft.signerId)?.name}
-                options={[...personOptions(newApproverMembers, null, "Choose an approver…").map((option) => {
-                  const member = newApproverMembers.find((person) => person.userId === option.value);
-                  return member && !member.departmentIds.some((id) => available.some((department) => department.id === id))
-                    ? { ...option, disabled: true, description: "Their department already has a required approver" }
-                    : option;
-                }),
+                options={[...personOptions(newApproverMembers, null, "Choose an approver…"),
                   ...(inviteDepartments.length ? [{ value: "__invite__", label: "Add an approver…", alwaysVisible: true, description: "Add someone who is not on the list", group: "New person" }] : [])]}
                 onChange={(signerId) => {
                   if (signerId === "__invite__") { setInvitingFor("__new__"); setDraft({ departmentId: "", signerId: "" }); return; }
                   const member = newApproverMembers.find((person) => person.userId === signerId);
-                  const linkedDepartments = member?.departmentIds.filter((id) => available.some((department) => department.id === id)) ?? [];
+                  const linkedDepartments = member?.departmentIds ?? [];
                   const departmentId = linkedDepartments.includes(owningDepartmentId ?? "") ? owningDepartmentId! : linkedDepartments[0] ?? "";
                   setInvitingFor(null); setDraft({ departmentId, signerId });
                 }} /> : null}
@@ -312,7 +311,8 @@ export function SopRosterEditor({
             {invitingFor !== "__new__" ? <td className="px-2 py-3 align-middle">
               <button type="button" className="ui-btn-primary h-8 w-8 p-0 disabled:opacity-40" aria-label="Add departmental approver"
                 disabled={busy !== null || !draft.departmentId || !draft.signerId} onClick={() => void guarded("add", async () => {
-                  await upsertSeat({ sopId, departmentId: draft.departmentId, rasic: "responsible", signerId: draft.signerId });
+                  const emptySeat = workflowSeats.find((seat) => seat.departmentId === draft.departmentId && !seat.signerId && !seat.nomination);
+                  await upsertSeat({ ...(emptySeat ?? {}), sopId, departmentId: draft.departmentId, rasic: "responsible", signerId: draft.signerId });
                   setAdding(false); setDraft({ departmentId: "", signerId: "" }); setInvitingFor(null);
                 })}>{busy === "add" ? <Loader2 size={14} className="mx-auto animate-spin" /> : <Check size={14} className="mx-auto" />}</button>
             </td> : null}

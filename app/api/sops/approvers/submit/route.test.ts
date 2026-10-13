@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ require:vi.fn(), from:vi.fn(), rpc:vi.fn(), link:vi.fn(), deliver:vi.fn(), send:vi.fn(), calls:[] as string[], status:"draft", transitionError:false, nomination:{ sop_id:"sop",department_id:"dept",email:"new@anacorp.com",position_title:"Engineer",delivery_id:"delivery",delivered_at:null as string | null,delivery_started_at:null,created_by:"author" } }));
+const mocks = vi.hoisted(() => ({ require:vi.fn(), from:vi.fn(), rpc:vi.fn(), link:vi.fn(), deliver:vi.fn(), send:vi.fn(), seatFilter:vi.fn(), calls:[] as string[], status:"draft", transitionError:false, nomination:{ seat_id:"seat-new",sop_id:"sop",department_id:"dept",email:"new@anacorp.com",position_title:"Engineer",delivery_id:"delivery",delivered_at:null as string | null,delivery_started_at:null,created_by:"author" } }));
 vi.mock("@/lib/api-auth",()=>({ requireApiUser:mocks.require,createApiRateLimiter:()=>()=>true }));
 vi.mock("@supabase/supabase-js",()=>({ createClient:()=>({ from:mocks.from,rpc:mocks.rpc }) }));
 vi.mock("@/lib/workspace/invite-delivery",()=>({ generateSetupLink:mocks.link,deliverInvitationEmail:mocks.deliver,inviteRedirectTarget:()=>"https://pulse.example/invite" }));
@@ -17,6 +17,7 @@ beforeEach(()=>{
    let operation="select";let values:Record<string,unknown>={};
    const query: Record<string, unknown> = {};
    for(const method of ["select","eq","is","in","or","delete"]){ query[method]=()=>query; }
+   query.eq=(column:string,value:unknown)=>{if(table==="sop_review_seats")mocks.seatFilter(column,value);return query;};
    query.update=(value:Record<string,unknown>)=>{operation="update";values=value;return query;};query.insert=()=>{operation="insert";return query;};
    const result=()=>{
      if(table==="sops"){
@@ -32,6 +33,12 @@ beforeEach(()=>{
  });
 });
 describe("deferred approver submission",()=>{
+ it("fills only the nominated assignment, preserving other people in the department",async()=>{
+  expect((await POST(request())).status).toBe(200);
+  expect(mocks.seatFilter).toHaveBeenCalledWith("sop_id","sop");
+  expect(mocks.seatFilter).toHaveBeenCalledWith("id","seat-new");
+  expect(mocks.seatFilter).not.toHaveBeenCalledWith("department_id","dept");
+ });
  it("refuses overlapping account preparation before minting links", async()=>{
   const original = mocks.rpc.getMockImplementation()!;
   mocks.rpc.mockImplementation((name:string,...args:unknown[])=>name==="acquire_sop_submission_lock"?Promise.resolve({data:null,error:null}):original(name,...args));

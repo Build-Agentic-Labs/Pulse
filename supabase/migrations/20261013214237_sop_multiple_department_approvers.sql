@@ -1,5 +1,7 @@
 -- Each approval assignment has its own identity. Existing assignments and signatures
 -- retain their department/person routing; no review or signature history is rewritten.
+begin;
+
 -- Hold writes while comparing complete before/after rows in this transaction.
 lock table public.sops, public.sop_review_seats, public.sop_approver_nominations
   in share row exclusive mode;
@@ -140,3 +142,5 @@ begin
     raise exception 'Approval upgrade must preserve every existing SOP, assignment and invitation';
   end if;
 end $$;
+
+commit;

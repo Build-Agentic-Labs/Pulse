@@ -10,11 +10,10 @@ function messageFrom(caught: unknown, fallback: string): string {
 }
 
 /**
- * Curation for job titles the workspace typed itself.
+ * Curation for job titles saved by the workspace.
  *
- * Only typed titles appear here. Each department's standard titles ship in code and are not
- * editable — that is why they ship in code: the baseline cannot be broken, and cleanup applies
- * exactly where drift happens.
+ * Department standard options remain available from code even if their shared-list entry
+ * is renamed or removed here.
  *
  * Renaming or removing changes what the picker OFFERS. A member already holding the title keeps
  * it: the title is stored on the membership row, not as a reference to this list.

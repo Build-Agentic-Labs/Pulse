@@ -4756,6 +4756,7 @@ export type Database = {
         Returns: string
       }
       sop_author_display_name: { Args: { p_sop: string }; Returns: string }
+      sop_approver_candidate_names: { Args: { p_sop: string }; Returns: { user_id: string; display_name: string | null }[] }
       sop_approver_display_names: { Args: { p_sops: string[] }; Returns: { signer_id: string; display_name: string | null }[] }
       sop_doc_hash: { Args: { doc: Json }; Returns: string }
       sop_has_open_objection: { Args: { p_sop: string }; Returns: boolean }

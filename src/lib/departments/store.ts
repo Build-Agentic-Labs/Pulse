@@ -5,7 +5,7 @@
  */
 
 import type { Department, DepartmentMember, DeptRole } from "@/domain/departments";
-import { pickMemberDepartments } from "@/domain/departments";
+import { normalizeJobTitle, pickMemberDepartments } from "@/domain/departments";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import type { Database } from "@/lib/database.types";
@@ -176,11 +176,13 @@ export async function setMemberPosition(
   userId: string,
   positionTitle: string,
 ): Promise<void> {
+  const normalized = normalizeJobTitle(positionTitle);
+  if (!normalized) throw new Error("Enter a valid job title (60 characters max).");
   const supabase = createPlannerSupabaseClient();
   await throwIfError(
     supabase
       .from("department_members")
-      .update({ position_title: positionTitle.trim() })
+      .update({ position_title: normalized })
       .eq("department_id", departmentId)
       .eq("user_id", userId)
       .select(MEMBER_COLUMNS)

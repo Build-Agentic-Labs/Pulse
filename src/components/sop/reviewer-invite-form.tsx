@@ -3,10 +3,12 @@
 import { Loader2, MailPlus, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { ThemedSelect } from "@/components/themed-select";
-import { standardPositionTitlesForDepartment } from "@/domain/departments";
+import { jobTitleOptions, standardPositionTitlesForDepartment } from "@/domain/departments";
+import { useJobTitles } from "@/lib/sop/job-titles/use-job-titles";
 import { nominationOutcomeMessage, type NominationResponse } from "@/domain/workspace/reviewer-nomination";
 
 interface ReviewerInviteFormProps {
+  workspaceId?: string;
   sopId: string;
   departmentId: string;
   departmentCode: string;
@@ -39,7 +41,8 @@ export async function submitNomination(input: {
  * relays its answer. Authors reach it only for departments they belong to (the roster editor
  * hides the action elsewhere).
  */
-export function ReviewerInviteForm({ sopId, departmentId, departmentCode, onNominated, onCancel, departments, onDepartmentChange }: ReviewerInviteFormProps) {
+export function ReviewerInviteForm({ workspaceId, sopId, departmentId, departmentCode, onNominated, onCancel, departments, onDepartmentChange }: ReviewerInviteFormProps) {
+  const savedTitles = useJobTitles(workspaceId);
   const titles = standardPositionTitlesForDepartment(departmentCode);
   const [email, setEmail] = useState("");
   const [positionTitle, setPositionTitle] = useState(departmentId ? titles[0] ?? "Team Member" : "");
@@ -100,7 +103,7 @@ export function ReviewerInviteForm({ sopId, departmentId, departmentCode, onNomi
         disabled={busy || !departmentId}
         placeholder="Choose a position…"
         allowCustomValue
-        options={titles.map((title) => ({ value: title, label: title }))}
+        options={jobTitleOptions(departmentCode, savedTitles.titles.map((title) => title.name))}
         onChange={setPositionTitle}
       />
       </div>
@@ -115,6 +118,7 @@ export function ReviewerInviteForm({ sopId, departmentId, departmentCode, onNomi
         Add approver
       </button>
       </div>
+      {savedTitles.error ? <p role="alert" className="text-xs leading-4 text-danger">{savedTitles.error}</p> : null}
       {error ? <p role="alert" className="text-xs leading-4 text-danger">{error}</p> : null}
       {message ? <p role="status" className="text-xs leading-4 text-ink-secondary">{message}</p> : null}
     </form>

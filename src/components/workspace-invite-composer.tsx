@@ -5,7 +5,8 @@ import { useMemo, useState } from "react";
 import { ThemedSelect } from "@/components/themed-select";
 import type { AccessLevel, Project } from "@/domain/types";
 import type { Department, DeptRole } from "@/domain/departments";
-import { DEPT_ROLE_ACCESS, standardPositionTitlesForDepartment } from "@/domain/departments";
+import { DEPT_ROLE_ACCESS, jobTitleOptions, standardPositionTitlesForDepartment } from "@/domain/departments";
+import { useJobTitles } from "@/lib/sop/job-titles/use-job-titles";
 import {
   describeInviteEntitlements,
   entitlementsForPackage,
@@ -84,6 +85,7 @@ export function WorkspaceInviteComposer({
   projects: readonly Project[];
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const savedTitles = useJobTitles(open ? departments[0]?.workspaceId : undefined);
   const [step, setStep] = useState(0);
   const [email, setEmail] = useState("");
   const [personError, setPersonError] = useState("");
@@ -180,6 +182,7 @@ export function WorkspaceInviteComposer({
 
   return (
     <div className="p-3.5">
+      {savedTitles.error ? <p role="alert" className="text-xs text-danger">{savedTitles.error}</p> : null}
       <div className="overflow-x-auto pb-1" aria-label="Invitation progress">
         <ol className="flex min-w-[620px] items-center gap-1">
           {STEPS.map((label, index) => (
@@ -384,10 +387,7 @@ export function WorkspaceInviteComposer({
                             entitlements.departmentAccess.find((grant) => grant.departmentId === department.id)
                               ?.positionTitle ?? ""
                           }
-                          options={standardPositionTitlesForDepartment(department.code).map((title) => ({
-                            value: title,
-                            label: title,
-                          }))}
+                          options={jobTitleOptions(department.code, savedTitles.titles.map((title) => title.name))}
                           allowCustomValue
                           placeholder="Select or add job title"
                           onChange={(value) => setDepartmentPosition(department.id, value)}

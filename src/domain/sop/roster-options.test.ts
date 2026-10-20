@@ -30,8 +30,8 @@ describe("buildApproverOptions", () => {
       placeholder: "Choose an approver…",
       now: NOW,
     });
-    expect(options[1]).toEqual({ value: "p1", label: "Name", description: "Invited · not yet joined" });
-    expect(options[2]).toEqual({ value: "p2", label: "Name", description: "Invite expired · resend" });
+    expect(options[1]).toEqual({ value: "p1", label: "Name", description: "Title · Invited · not yet joined" });
+    expect(options[2]).toEqual({ value: "p2", label: "Name", description: "Title · Invite expired · resend" });
     expect(options.every((option) => !option.disabled)).toBe(true);
   });
 

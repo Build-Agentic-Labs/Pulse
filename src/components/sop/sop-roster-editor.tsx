@@ -12,7 +12,7 @@ import { ReviewerInviteForm } from "./reviewer-invite-form";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import {
   isBlockingSeat,
-  listProfileNames,
+  listSopApproverCandidateNames,
   removeSeat,
   upsertSeat,
   type SopReviewSeat,
@@ -98,13 +98,13 @@ export function SopRosterEditor({
   );
 
   // One batched pass for any number of departments: a single department_members
-  // query + a single profiles query, instead of 2 round trips per seat (N+1).
+  // query + a roster-authorized name-only lookup, instead of reading profiles.
   const loadMembersForDepartmentIds = useCallback(async (departmentIds: readonly string[]) => {
     const ids = [...new Set([...departmentIds, ...departments.map((department) => department.id)].filter(Boolean))];
     if (ids.length === 0) return;
     try {
       const rows = await listMembersForDepartments(ids);
-      const names = await listProfileNames(rows.map((row) => row.userId));
+      const names = await listSopApproverCandidateNames(sopId);
       setMembers((prev) => {
         const next = new Map(prev);
         for (const departmentId of ids) {
@@ -127,7 +127,7 @@ export function SopRosterEditor({
     } catch (caught) {
       setError(getErrorMessage(caught));
     }
-  }, [departments, authorId]);
+  }, [departments, authorId, sopId]);
 
   useEffect(() => {
     void loadMembersForDepartmentIds(workflowSeats.map((seat) => seat.departmentId));
@@ -275,7 +275,7 @@ export function SopRosterEditor({
                 </td>
               </tr>
               {invitingFor === seatKey ? <tr className="border-b border-line/70"><td colSpan={2} className="px-5 pb-3">
-                <ReviewerInviteForm sopId={sopId} departmentId={seat.departmentId} departmentCode={department?.code ?? ""}
+                <ReviewerInviteForm workspaceId={departments[0]?.workspaceId} sopId={sopId} departmentId={seat.departmentId} departmentCode={department?.code ?? ""}
                   onNominated={(result) => handleNominated(seat, seat.departmentId, result)} onCancel={() => setInvitingFor(null)} />
               </td></tr> : null}
             </Fragment>;
@@ -302,7 +302,7 @@ export function SopRosterEditor({
                 }} /> : null}
               {draft.signerId ? <p className="mt-1 text-[11px] text-ink-tertiary">{memberDescription(allMembers.find((member) => member.userId === draft.signerId))}</p> : null}
               {invitingFor === "__new__" ? <div className="py-2">
-                <ReviewerInviteForm sopId={sopId} departmentId={draft.departmentId}
+                <ReviewerInviteForm workspaceId={departments[0]?.workspaceId} sopId={sopId} departmentId={draft.departmentId}
                   departmentCode={departments.find((department) => department.id === draft.departmentId)?.code ?? ""}
                   departments={inviteDepartments} onDepartmentChange={(departmentId) => setDraft({ departmentId, signerId: "" })}
                   onNominated={(result) => handleNominated(null, draft.departmentId, result)} onCancel={() => setInvitingFor(null)} />

@@ -49,7 +49,7 @@ export function buildApproverOptions(input: {
       return {
         value: member.userId,
         label: member.name,
-        description: state === "none" ? member.positionTitle || "Position not assigned" : pendingInviteLabel(state),
+        description: [member.positionTitle || "Position not assigned", ...(state === "none" ? [] : [pendingInviteLabel(state)])].join(" · "),
       };
     }),
     ...(eligible.length === 0

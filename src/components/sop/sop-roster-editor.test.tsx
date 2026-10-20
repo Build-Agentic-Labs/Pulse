@@ -4,7 +4,7 @@ import { fireEvent, within, render, screen, waitFor } from "@testing-library/rea
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Department, DeptRole } from "@/domain/departments";
-import { listProfileNames, removeSeat, upsertSeat, type SopReviewSeat } from "@/lib/sop/review";
+import { listSopApproverCandidateNames, removeSeat, upsertSeat, type SopReviewSeat } from "@/lib/sop/review";
 import { listMembersForDepartments } from "@/lib/departments/store";
 import { SopRosterEditor } from "./sop-roster-editor";
 
@@ -14,7 +14,7 @@ vi.mock("@/lib/departments/store", () => ({
 
 vi.mock("@/lib/sop/review", () => ({
   isBlockingSeat: (rasic: string) => rasic === "responsible" || rasic === "accountable",
-  listProfileNames: vi.fn(async () => new Map()),
+  listSopApproverCandidateNames: vi.fn(async () => new Map()),
   removeSeat: vi.fn(),
   moveSeat: vi.fn(),
   upsertSeat: vi.fn(),
@@ -59,8 +59,8 @@ describe("SopRosterEditor", () => {
   beforeEach(() => {
     vi.mocked(listMembersForDepartments).mockReset();
     vi.mocked(listMembersForDepartments).mockResolvedValue([]);
-    vi.mocked(listProfileNames).mockReset();
-    vi.mocked(listProfileNames).mockResolvedValue(new Map());
+    vi.mocked(listSopApproverCandidateNames).mockReset();
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map());
   });
 
   afterEach(() => {
@@ -74,14 +74,17 @@ describe("SopRosterEditor", () => {
       { departmentId: "dept-mfg", userId: "reviewer-member", deptRole: "author", positionTitle: "Plant Manager" },
       { departmentId: "dept-mfg", userId: "second-manager", deptRole: "author", positionTitle: "Plant Manager" },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["reviewer-member", "Alex Rivera"], ["second-manager", "Sam Lee"]]));
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map([["reviewer-member", "Alex Rivera"], ["second-manager", "Sam Lee"]]));
     const onChanged = vi.fn();
     const props = { sopId: "sop-1", departments: [departments[0]], onChanged };
     const { rerender } = render(<SopRosterEditor {...props} seats={[manufacturingSeat]} />);
     await screen.findByText("Alex Rivera");
+    expect(listSopApproverCandidateNames).toHaveBeenCalledWith("sop-1");
     fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
     fireEvent.click(screen.getByRole("button", { name: "Required departmental approver" }));
     expect(screen.queryByRole("option", { name: /Alex Rivera/ })).toBeNull();
+    expect(screen.getByRole("option", { name: /Sam Lee/ })).toHaveTextContent("Plant Manager");
+    expect(screen.getByRole("option", { name: /Sam Lee/ })).toHaveTextContent("Manufacturing");
     fireEvent.click(screen.getByRole("option", { name: /Sam Lee/ }));
     expect(screen.getByText("Alex Rivera")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Add departmental approver" }));
@@ -97,9 +100,9 @@ describe("SopRosterEditor", () => {
   it("derives the department from the selected person without a department picker", async () => {
     vi.mocked(upsertSeat).mockClear();
     vi.mocked(listMembersForDepartments).mockResolvedValue([{ departmentId: "dept-mfg", userId: "member", deptRole: "author", positionTitle: "Engineer" }]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["member", "Alex"]]));
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map([["member", "Alex"]]));
     render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[]} onChanged={() => {}} />);
-    await waitFor(() => expect(listProfileNames).toHaveBeenCalled());
+    await waitFor(() => expect(listSopApproverCandidateNames).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
     expect(screen.queryByRole("button", { name: "Department to add" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Required departmental approver" }));
@@ -114,9 +117,9 @@ describe("SopRosterEditor", () => {
       { departmentId: "dept-mfg", userId: "alex", deptRole: "author", positionTitle: "Engineer" },
       { departmentId: "dept-mfg", userId: "sam", deptRole: "author", positionTitle: "Manager" },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["alex", "Alex Rivera"], ["sam", "Sam Lee"]]));
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map([["alex", "Alex Rivera"], ["sam", "Sam Lee"]]));
     render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[]} myDeptRoles={new Map<string, DeptRole>([["dept-mfg", "author"]])} onChanged={() => {}} />);
-    await waitFor(() => expect(listProfileNames).toHaveBeenCalled());
+    await waitFor(() => expect(listSopApproverCandidateNames).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
     fireEvent.click(screen.getByRole("button", { name: "Required departmental approver" }));
     const search = screen.getByRole("textbox", { name: "Required departmental approver — search" });
@@ -136,9 +139,9 @@ describe("SopRosterEditor", () => {
       { departmentId: "dept-mfg", userId: "member", deptRole: "author", positionTitle: "Engineer" },
       { departmentId: "dept-quality", userId: "member", deptRole: "author", positionTitle: "Engineer" },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["self", "SOP Author"], ["member", "Alex"]]));
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map([["self", "SOP Author"], ["member", "Alex"]]));
     render(<SopRosterEditor sopId="sop-1" authorId="self" departments={departments} seats={[]} onChanged={() => {}} />);
-    await waitFor(() => expect(listProfileNames).toHaveBeenCalled());
+    await waitFor(() => expect(listSopApproverCandidateNames).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
     fireEvent.click(screen.getByRole("button", { name: "Required departmental approver" }));
     expect(await screen.findAllByRole("option", { name: /Alex/ })).toHaveLength(1);
@@ -147,9 +150,9 @@ describe("SopRosterEditor", () => {
 
   it("offers a Quality member as a normal approver independently of final Quality approval", async () => {
     vi.mocked(listMembersForDepartments).mockResolvedValue([{ departmentId: "dept-quality", userId: "quality-reviewer", deptRole: "author", positionTitle: "Technician" }]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["quality-reviewer", "Quality Member"]]));
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map([["quality-reviewer", "Quality Member"]]));
     render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[]} onChanged={() => {}} />);
-    await waitFor(() => expect(listProfileNames).toHaveBeenCalled());
+    await waitFor(() => expect(listSopApproverCandidateNames).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Add approver" }));
     fireEvent.click(screen.getByRole("button", { name: "Required departmental approver" }));
     expect(await screen.findByRole("option", { name: /Quality Member/ })).toHaveTextContent("Quality");
@@ -199,7 +202,7 @@ describe("SopRosterEditor", () => {
         positionTitle: "VP Manufacturing",
       },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(
       new Map([
         ["author-member", "Author Member"],
         ["reviewer-member", "Reviewer Member"],
@@ -237,7 +240,7 @@ describe("SopRosterEditor", () => {
         positionTitle: "Process Engineer",
       },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(
       new Map([["author-member", "Author Member"]]),
     );
 
@@ -263,7 +266,7 @@ describe("SopRosterEditor", () => {
     vi.mocked(listMembersForDepartments).mockResolvedValue([
       { departmentId: "dept-mfg", userId: "pending-member", deptRole: "reviewer", positionTitle: "Line Lead", pendingInviteAt: new Date().toISOString() },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["pending-member", "pending@anacorp.com"]]));
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map([["pending-member", "pending@anacorp.com"]]));
 
     render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[{ ...manufacturingSeat, signerId: null }]} onChanged={() => {}} />);
 
@@ -308,7 +311,7 @@ describe("SopRosterEditor", () => {
 
   it("shows saved approvers as text with removal available, without a replacement picker", async () => {
     vi.mocked(listMembersForDepartments).mockResolvedValue([{ departmentId: "dept-mfg", userId: "reviewer-member", deptRole: "author", positionTitle: "Engineer" }]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["reviewer-member", "Alex"]]));
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map([["reviewer-member", "Alex"]]));
     render(<SopRosterEditor sopId="sop-1" departments={departments} seats={[manufacturingSeat]} onChanged={() => {}} />);
     await waitFor(() => expect(screen.getByLabelText("Saved approver for MFG")).toHaveTextContent("Alex"));
     expect(screen.queryByRole("button", { name: "Required approver for MFG" })).toBeNull();
@@ -362,7 +365,7 @@ describe("SopRosterEditor", () => {
     vi.mocked(listMembersForDepartments).mockResolvedValue([
       { departmentId: "dept-mfg", userId: "u-new", deptRole: "author", positionTitle: "Line Lead", pendingInviteAt: new Date().toISOString() },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["u-new", "new@anacorp.com"]]));
+    vi.mocked(listSopApproverCandidateNames).mockResolvedValue(new Map([["u-new", "new@anacorp.com"]]));
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ mode: "invite", userId: "u-new", emailSent: true, seated: true }), { status: 200 })));
     function Harness() {
       const [seats, setSeats] = useState<SopReviewSeat[]>([]);

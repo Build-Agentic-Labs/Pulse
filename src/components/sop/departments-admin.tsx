@@ -7,6 +7,7 @@ import { QualitySkeleton } from "./quality-skeleton";
 import { ThemedSelect } from "@/components/themed-select";
 import {
   jobTitleOptions,
+  normalizeJobTitle,
   type Department,
   type DepartmentMember,
   type DeptRole,
@@ -25,7 +26,7 @@ import {
   setMemberPosition,
 } from "@/lib/departments/store";
 import { SOP_DEMAND_UPDATED_EVENT } from "@/lib/sop/dashboard-events";
-import { addJobTitle, listJobTitles, type JobTitle } from "@/lib/sop/job-titles/store";
+import { listJobTitles, type JobTitle } from "@/lib/sop/job-titles/store";
 import { JobTitlesAdmin } from "./job-titles-admin";
 import { RasicRolesAdmin } from "./rasic-roles-admin";
 import { canManage, useSopWorkspace } from "./sop-workspace-provider";
@@ -76,35 +77,34 @@ export function DepartmentsAdmin({
   const confirm = useConfirm();
   const { workspaceId, role } = useSopWorkspace();
   const manage = canManage(role);
+  const [error, setError] = useState("");
   // Shared across every department's picker, so a title typed for one is offered to the rest.
   const [jobTitles, setJobTitles] = useState<JobTitle[]>([]);
 
   useEffect(() => {
-    if (!workspaceId) return;
-    let active = true;
-    listJobTitles(workspaceId)
+    if (!workspaceId || !active) return;
+    let current = true;
+    const refreshTitles = () => { void listJobTitles(workspaceId)
       .then((next) => {
-        if (active) setJobTitles(next);
+        if (current) setJobTitles(next);
       })
       // The standard titles still populate the picker, and typing still works.
-      .catch(() => undefined);
-    return () => {
-      active = false;
+      .catch(() => { if (current) setError("Saved job titles could not be loaded. Reload to try again."); });
     };
-  }, [workspaceId]);
+    refreshTitles();
+    window.addEventListener("focus", refreshTitles);
+    return () => {
+      current = false;
+      window.removeEventListener("focus", refreshTitles);
+    };
+  }, [workspaceId, active]);
 
-  function handleJobTitleAdded(name: string) {
+  function handleJobTitleAdded() {
     if (!workspaceId) return;
-    void addJobTitle(workspaceId, name)
-      .then((title) => {
-        setJobTitles((current) =>
-          current.some((existing) => existing.name.toLowerCase() === title.name.toLowerCase())
-            ? current
-            : [...current, title],
-        );
-      })
-      // The member keeps the title; only the sharing failed.
-      .catch(() => undefined);
+    // The database saved the vocabulary entry with the membership atomically.
+    void listJobTitles(workspaceId).then(setJobTitles).catch(() => {
+      setError("The title was saved, but the title list could not be refreshed. Reload to try again.");
+    });
   }
   const seeded =
     initialDepartments !== undefined &&
@@ -120,7 +120,6 @@ export function DepartmentsAdmin({
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     seeded ? "ready" : "loading",
   );
-  const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | undefined>(
     seeded ? initialDepartments[0]?.id : undefined,
   );
@@ -642,6 +641,12 @@ function MembersPanel({
   }
 
   async function handlePositionChange(userId: string, positionTitle: string) {
+    const normalized = normalizeJobTitle(positionTitle);
+    if (!normalized) {
+      onError("Enter a valid job title (60 characters max).");
+      return;
+    }
+    positionTitle = normalized;
     const previous = members;
     setBusyUserId(userId);
     onMembersChange(
@@ -650,9 +655,7 @@ function MembersPanel({
     );
     try {
       await setMemberPosition(department.id, userId, positionTitle);
-      // A title absent from every offered group was typed here; share it with the workspace so
-      // the next department can pick it. Failing to share must not fail the assignment — the
-      // member keeps the title either way.
+      // The database saved the title and vocabulary together; refresh newly added options.
       if (positionTitle && !positionOptions.some((option) => option.value === positionTitle)) {
         onJobTitleAdded(positionTitle);
       }

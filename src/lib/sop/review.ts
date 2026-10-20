@@ -443,6 +443,16 @@ export async function listSopApproverNames(
   return new Map((rows ?? []).filter((row) => Boolean(row.display_name)).map((row) => [row.signer_id, row.display_name!]));
 }
 
+/** Candidate names for callers authorized to manage this SOP's approval roster. */
+export async function listSopApproverCandidateNames(
+  sopId: string,
+  client?: SupabaseClient<Database>,
+): Promise<Map<string, string>> {
+  const supabase = client ?? createPlannerSupabaseClient();
+  const rows = await throwIfError(supabase.rpc("sop_approver_candidate_names", { p_sop: sopId }));
+  return new Map((rows ?? []).filter((row) => Boolean(row.display_name)).map((row) => [row.user_id, row.display_name!]));
+}
+
 /** Profile lookup for callers with profile access; do not use for SOP approvers. */
 export async function listProfileNames(
   userIds: readonly string[],

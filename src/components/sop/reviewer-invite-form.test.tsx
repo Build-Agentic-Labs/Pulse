@@ -3,6 +3,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReviewerInviteForm } from "./reviewer-invite-form";
+import { listJobTitles } from "@/lib/sop/job-titles/store";
+
+vi.mock("@/lib/sop/job-titles/store", () => ({ listJobTitles: vi.fn() }));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -13,6 +16,20 @@ function jsonResponse(status: number, body: unknown) {
 }
 
 describe("ReviewerInviteForm", () => {
+  it("offers workspace titles alongside standard titles", async () => {
+    vi.mocked(listJobTitles).mockResolvedValue([{ id: "title-1", name: "Calibration Lead" }]);
+    render(<ReviewerInviteForm workspaceId="ws-1" sopId="sop-1" departmentId="dept-prd" departmentCode="PRO" onNominated={() => {}} onCancel={() => {}} />);
+    await waitFor(() => expect(listJobTitles).toHaveBeenCalledWith("ws-1"));
+    fireEvent.click(screen.getByLabelText("Position title"));
+    expect(await screen.findByRole("option", { name: "Calibration Lead" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /^Process Engineer$/ })).toBeTruthy();
+  });
+
+  it("reports a failed shared-title load", async () => {
+    vi.mocked(listJobTitles).mockRejectedValue(new Error("Unavailable"));
+    render(<ReviewerInviteForm workspaceId="ws-1" sopId="sop-1" departmentId="dept-prd" departmentCode="PRO" onNominated={() => {}} onCancel={() => {}} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Saved job titles could not be loaded");
+  });
   it("posts the nomination and reports the outcome", async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(() =>
       jsonResponse(200, { mode: "invite", userId: "u-6", emailSent: true, seated: true }),

@@ -1,9 +1,9 @@
 /**
  * Data access for the workspace's job-title vocabulary.
  *
- * These are only the titles someone TYPED. Each department's standard titles ship in code as
- * STANDARD_POSITION_TITLES — `jobTitleOptions` assembles both into the dropdown. Nothing here
- * knows about that assembly; this layer only reads and writes the one table.
+ * Future membership and invitation writes publish their titles here atomically. Each
+ * department's standard titles ship in code; `jobTitleOptions` combines and deduplicates
+ * both sources. This layer reads and curates the shared vocabulary.
  *
  * Distinct from sop_rasic_roles by design: a job title names a person on a roster, a RASIC role
  * names an actor in a process and may be collective.

@@ -14,6 +14,10 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', actor, 'role', 'authenticated')::text, true);
   insert into public.workspaces(id, name) values(ws, 'Temporary title verification');
   insert into public.workspace_auto_join_domains(domain, workspace_id) values('title-check.invalid', ws);
+  -- Grant fixtures use the organization's work-email shape. A fresh CI database has
+  -- no approved domains; leave any existing production domain rule untouched.
+  insert into public.workspace_auto_join_domains(domain, workspace_id) values('anacorp.com', ws)
+    on conflict (domain) do nothing;
   if actor is null then
     actor := gen_random_uuid();
     insert into auth.users(id,aud,role,email) values(actor,'authenticated','authenticated','actor@title-check.invalid');

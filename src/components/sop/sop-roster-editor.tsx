@@ -254,7 +254,7 @@ export function SopRosterEditor({
                   </span> : <ThemedSelect variant="sop" className="w-full" triggerClassName="ui-sop-select-inline"
                     ariaLabel={`Required approver for ${department?.code ?? "department"}`} searchable searchPlaceholder="Search by name…" value={seat.signerId ?? ""}
                     selectedLabel={selected?.name} disabled={busy !== null}
-                    options={[...options, ...(nominatable ? [{ value: "__invite__", label: "Add an approver…", alwaysVisible: true, description: "Add someone who is not on the list", group: "New person" }] : [])]}
+                    options={[...(nominatable ? [{ value: "__invite__", label: "Add an approver…", alwaysVisible: true, description: "Add someone who is not on the list" }] : []), ...options]}
                     onChange={(value) => {
                       if (value === "__invite__") { setInvitingFor(seatKey); return; }
                       void guarded(`approver-${seatKey}`, () => upsertSeat({ ...seat, rasic: "responsible", signerId: value || null }));
@@ -291,8 +291,9 @@ export function SopRosterEditor({
             <td colSpan={invitingFor === "__new__" ? 2 : 1} className="px-5 py-3 align-middle">
               {invitingFor !== "__new__" ? <ThemedSelect variant="sop" className="w-full" ariaLabel="Required departmental approver" searchable searchPlaceholder="Search by name…" value={draft.signerId}
                 disabled={busy !== null} selectedLabel={allMembers.find((member) => member.userId === draft.signerId)?.name}
-                options={[...personOptions(newApproverMembers, null, "Choose an approver…"),
-                  ...(inviteDepartments.length ? [{ value: "__invite__", label: "Add an approver…", alwaysVisible: true, description: "Add someone who is not on the list", group: "New person" }] : [])]}
+                options={[
+                  ...(inviteDepartments.length ? [{ value: "__invite__", label: "Add an approver…", alwaysVisible: true, description: "Add someone who is not on the list" }] : []),
+                  ...personOptions(newApproverMembers, null, "Choose an approver…")]}
                 onChange={(signerId) => {
                   if (signerId === "__invite__") { setInvitingFor("__new__"); setDraft({ departmentId: "", signerId: "" }); return; }
                   const member = newApproverMembers.find((person) => person.userId === signerId);

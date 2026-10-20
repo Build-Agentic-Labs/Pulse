@@ -36,6 +36,8 @@ export interface SopDeletionContext {
   canEditSops: boolean;
   /** Workspace owner or admin — the `is_manager` branch of the transition guard. */
   isManager: boolean;
+  /** Verified platform Superadmin; may manage documents across departments. */
+  isSuperAdmin?: boolean;
   /** Does the SOP belong to a department? */
   hasDepartment: boolean;
   /** Is the user a member of that department? Irrelevant unless the SOP is a draft. */
@@ -46,6 +48,7 @@ export function canDeleteSop({
   status,
   canEditSops,
   isManager,
+  isSuperAdmin = false,
   hasDepartment,
   isDepartmentMember,
 }: SopDeletionContext): boolean {
@@ -53,6 +56,8 @@ export function canDeleteSop({
 
   // Terminal by design: an effective SOP is superseded by a new version, never removed.
   if (status === "effective") return false;
+
+  if (isSuperAdmin) return true;
 
   // POLICY, stricter than the database: an SOP belongs to its department, and that
   // department's authors own its lifecycle — at every status, not just draft. Being a

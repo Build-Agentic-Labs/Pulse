@@ -20,7 +20,7 @@ vi.mock("@/lib/departments/store", () => ({
 vi.mock("./review", () => ({
   getSopControl: vi.fn(),
   isSignatureCurrent: vi.fn(),
-  listProfileNames: vi.fn(),
+  listSopApproverNames: vi.fn(),
   listSeats: vi.fn(),
   listSignatures: vi.fn(),
   sendSopForSignatures: vi.fn(),

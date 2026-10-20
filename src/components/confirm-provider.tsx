@@ -11,6 +11,7 @@ export type ConfirmOptions = {
   tone?: FeedbackTone;
   confirmLabel?: string;
   cancelLabel?: string;
+  requiredText?: string;
 };
 
 type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>;
@@ -47,6 +48,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           tone: options.tone ?? "danger",
           confirmLabel: options.confirmLabel,
           cancelLabel: options.cancelLabel,
+          requiredText: options.requiredText,
           placement: "center",
           onConfirm: () => undefined,
         });
@@ -81,7 +83,12 @@ export function useConfirm(): ConfirmFn {
     if (ctx) {
       return ctx;
     }
-    return async ({ title, body }) =>
-      typeof window !== "undefined" && window.confirm(body ? `${title}\n\n${body}` : title);
+    return async ({ title, body, requiredText }) => {
+      if (typeof window === "undefined") return false;
+      if (requiredText !== undefined) {
+        return window.prompt(`${title}\n\n${body ?? ""}\n\nType exactly: ${requiredText}`) === requiredText;
+      }
+      return window.confirm(body ? `${title}\n\n${body}` : title);
+    };
   }, [ctx]);
 }

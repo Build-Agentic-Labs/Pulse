@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
-import { listProfileNames, listSeatsForSops } from "@/lib/sop/review";
+import { listSopApproverNames, listSeatsForSops } from "@/lib/sop/review";
 import {
   listSopReviewSubmissions,
   type SopReviewSubmission,
@@ -49,8 +49,8 @@ export async function fetchSopListReviewData(
     listSeatsForSops(sopIds, client),
     listReviewProgress(sopIds, client),
   ]);
-  const profileNames = await listProfileNames(
-    seats.flatMap((seat) => (seat.signerId ? [seat.signerId] : [])),
+  const profileNames = await listSopApproverNames(
+    sopIds,
     client,
   );
   const currentById = new Map(visibleInReview.map((sop) => [sop.id, sop]));

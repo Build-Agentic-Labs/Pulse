@@ -2,13 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "@/lib/database.types";
 import type { SopListItem } from "@/lib/sop/store";
-import { listProfileNames, listSeatsForSops } from "@/lib/sop/review";
+import { listSopApproverNames, listSeatsForSops } from "@/lib/sop/review";
 import { listSopReviewSubmissions } from "@/lib/sop/review-annotations";
 import { fetchSopListReviewData } from "./list-review-data";
 import { listReviewProgress } from "./list-review-progress";
 
 vi.mock("@/lib/sop/review", () => ({
-  listProfileNames: vi.fn(),
+  listSopApproverNames: vi.fn(),
   listSeatsForSops: vi.fn(),
 }));
 
@@ -50,7 +50,7 @@ function sop(
 
 describe("fetchSopListReviewData", () => {
   beforeEach(() => {
-    vi.mocked(listProfileNames).mockReset();
+    vi.mocked(listSopApproverNames).mockReset();
     vi.mocked(listSeatsForSops).mockReset();
     vi.mocked(listSopReviewSubmissions).mockReset();
     vi.mocked(listReviewProgress).mockResolvedValue({ signatures: [], comments: [] });
@@ -88,7 +88,7 @@ describe("fetchSopListReviewData", () => {
         submittedAt: "",
       },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(
+    vi.mocked(listSopApproverNames).mockResolvedValue(
       new Map([
         ["reviewer-1", "First Reviewer"],
         ["reviewer-2", "Other Reviewer"],
@@ -136,7 +136,7 @@ describe("fetchSopListReviewData", () => {
         submittedAt: "",
       },
     ]);
-    vi.mocked(listProfileNames).mockResolvedValue(new Map());
+    vi.mocked(listSopApproverNames).mockResolvedValue(new Map());
 
     const result = await fetchSopListReviewData(
       [sop("other-department", "another-author")],
@@ -153,7 +153,7 @@ describe("fetchSopListReviewData", () => {
     vi.mocked(listSeatsForSops).mockResolvedValue(["a", "b"].map(departmentId => ({
       sopId: "one", departmentId, signerId: "reviewer", rasic: "responsible" as const,
     })));
-    vi.mocked(listProfileNames).mockResolvedValue(new Map([["reviewer", "Reviewer"]]));
+    vi.mocked(listSopApproverNames).mockResolvedValue(new Map([["reviewer", "Reviewer"]]));
     vi.mocked(listSopReviewSubmissions).mockResolvedValue([]);
     const signature = { sop_id: "one", signer_id: "reviewer", seat_department_id: "a", review_cycle: 1, signed_content_hash: "hash" };
     const state = async () => (await fetchSopListReviewData([document], "user", client)).participantGroups[0].participants[0].status;

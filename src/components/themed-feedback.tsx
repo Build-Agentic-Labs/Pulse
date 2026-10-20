@@ -1,7 +1,7 @@
 "use client";
 
 import { CircleCheck, Info, TriangleAlert, CircleAlert, X } from "lucide-react";
-import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { ModalSurface } from "./ui/modal-surface";
 
@@ -34,6 +34,7 @@ export interface FeedbackConfirm {
   tone?: FeedbackTone;
   confirmLabel?: string;
   cancelLabel?: string;
+  requiredText?: string;
   placement?: "center" | "anchor";
   anchorRect?: FeedbackAnchorRect;
   onConfirm: () => void;
@@ -95,16 +96,42 @@ function anchorPopoverStyle(anchorRect: FeedbackAnchorRect): CSSProperties {
   };
 }
 
-function ConfirmActions({
+function ConfirmActions(props: {
+  confirm: FeedbackConfirm;
+  compact?: boolean;
+  onCancelConfirm: () => void;
+  onConfirm: () => void;
+}) {
+  const [text, setText] = useState("");
+  const inputId = useId();
+  const matches = props.confirm.requiredText === undefined || text === props.confirm.requiredText;
+  return (
+    <>
+      {props.confirm.requiredText !== undefined ? (
+        <div className="mt-4">
+          <label htmlFor={inputId} className="block text-sm text-ink-secondary">Type the exact SOP title to confirm</label>
+          <p className="mt-1 break-words text-sm font-medium text-ink">{props.confirm.requiredText}</p>
+          <input id={inputId} type="text" autoComplete="off" spellCheck={false} value={text}
+            onChange={(event) => setText(event.target.value)} className="ui-input mt-2 w-full" />
+        </div>
+      ) : null}
+      <ConfirmationButtons {...props} disabled={!matches} onConfirm={() => { if (matches) props.onConfirm(); }} />
+    </>
+  );
+}
+
+function ConfirmationButtons({
   confirm,
   compact = false,
   onCancelConfirm,
   onConfirm,
+  disabled,
 }: {
   confirm: FeedbackConfirm;
   compact?: boolean;
   onCancelConfirm: () => void;
   onConfirm: () => void;
+  disabled: boolean;
 }) {
   if (compact) {
     const confirmClass =
@@ -117,7 +144,7 @@ function ConfirmActions({
         <button type="button" data-modal-initial-focus onClick={onCancelConfirm} className="ui-btn-ghost h-8 px-2 text-xs">
           {confirm.cancelLabel ?? "Cancel"}
         </button>
-        <button type="button" onClick={onConfirm} className={confirmClass}>
+        <button type="button" onClick={onConfirm} disabled={disabled} className={confirmClass}>
           {confirm.confirmLabel ?? "Continue"}
         </button>
       </div>
@@ -132,6 +159,7 @@ function ConfirmActions({
       <button
         type="button"
         onClick={onConfirm}
+        disabled={disabled}
         className={confirm.tone === "danger" ? "ui-btn-destructive h-9 px-4" : "ui-btn-primary h-9 px-4"}
       >
         {confirm.confirmLabel ?? "Continue"}

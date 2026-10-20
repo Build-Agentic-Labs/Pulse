@@ -57,6 +57,27 @@ describe("ThemedFeedbackLayer persistent notices", () => {
 });
 
 describe("ThemedFeedbackLayer modal contract", () => {
+  it("requires an exact title and clears confirmation after closing", () => {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value: function (this: HTMLDialogElement) { this.open = true; } });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value: function (this: HTMLDialogElement) { this.open = false; } });
+    const onConfirm = vi.fn();
+    const props = { toasts: [], onDismissToast: vi.fn(), onCancelConfirm: vi.fn(), onConfirm };
+    const confirm = { title: "Delete SOP?", requiredText: "Supplier Quality", confirmLabel: "Delete SOP", onConfirm };
+    const { rerender } = render(<ThemedFeedbackLayer {...props} confirm={confirm} />);
+    const input = screen.getByLabelText("Type the exact SOP title to confirm");
+    const button = screen.getByRole("button", { name: "Delete SOP" });
+    expect(button).toBeDisabled();
+    fireEvent.change(input, { target: { value: "supplier quality" } });
+    fireEvent.click(button);
+    expect(onConfirm).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "Supplier Quality" } });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    rerender(<ThemedFeedbackLayer {...props} />);
+    rerender(<ThemedFeedbackLayer {...props} confirm={confirm} />);
+    expect(screen.getByRole("button", { name: "Delete SOP" })).toBeDisabled();
+  });
   it.each(["center", "anchor"] as const)("opens %s confirmations as a modal and restores the opener", (placement) => {
     const show = vi.fn(function (this: HTMLDialogElement) { this.open = true; });
     Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value: show });

@@ -6,7 +6,7 @@ import { fetchMyDeptRoles, listDepartments } from "@/lib/departments/store";
 import {
   getSopControl,
   isSignatureCurrent,
-  listProfileNames,
+  listSopApproverNames,
   listSeats,
   listSignatures,
   sendSopForSignatures,
@@ -32,8 +32,8 @@ export async function loadEditorApprovalRouting(
       getUserFromSession(supabase),
       fetchMyDeptRoles(workspaceId),
     ]);
-  const reviewerNames = await listProfileNames(
-    seats.flatMap((seat) => (seat.signerId ? [seat.signerId] : [])),
+  const reviewerNames = await listSopApproverNames(
+    persisted ? [sopId] : [],
   );
   return {
     departments,

@@ -431,7 +431,19 @@ export async function listMySignaturesFor(
   }));
 }
 
-/** Printed names for a set of users, so a pending seat can show who it is waiting on. */
+/** Only assigned approvers' names for SOPs the current caller may read. */
+export async function listSopApproverNames(
+  sopIds: readonly string[],
+  client?: SupabaseClient<Database>,
+): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(sopIds));
+  if (unique.length === 0) return new Map();
+  const supabase = client ?? createPlannerSupabaseClient();
+  const rows = await throwIfError(supabase.rpc("sop_approver_display_names", { p_sops: unique }));
+  return new Map((rows ?? []).filter((row) => Boolean(row.display_name)).map((row) => [row.signer_id, row.display_name!]));
+}
+
+/** Profile lookup for callers with profile access; do not use for SOP approvers. */
 export async function listProfileNames(
   userIds: readonly string[],
   client?: SupabaseClient<Database>,

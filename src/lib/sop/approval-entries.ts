@@ -20,7 +20,7 @@ import {
   getSopControl,
   isBlockingSeat,
   isSignatureCurrent,
-  listProfileNames,
+  listSopApproverNames,
   listSeats,
   listSignatures,
 } from "./review";
@@ -68,10 +68,8 @@ export async function buildApprovalEntries(
     memberPositionByDepartmentAndUser.set(`${member.departmentId}:${member.userId}`, member.positionTitle);
   });
 
-  const profileIds = seats.flatMap((seat) => (seat.signerId ? [seat.signerId] : []));
   const authorId = control.createdBy ?? control.submittedBy ?? control.finalApprovalRequestedBy;
-  if (authorId) profileIds.push(authorId);
-  const names = await listProfileNames(profileIds, client);
+  const names = await listSopApproverNames([sopId], client);
   const departmentById = new Map(departments.map((department) => [department.id, department]));
 
   const entries: ApprovalSignatureEntry[] = [];

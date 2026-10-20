@@ -85,7 +85,7 @@ const REVIEWER_STATUS_COLORS: Record<ReviewerStatus, string> = {
   reviewing: "bg-zinc-400 text-white",
   changes_requested: "bg-red-600 text-white",
   review_complete: "bg-emerald-600 text-white",
-  awaiting_signature: "bg-amber-500 text-white",
+  awaiting_signature: "bg-warn text-ink",
   signed: "bg-emerald-600 text-white",
 };
 
@@ -133,7 +133,8 @@ export function SopList({
 }) {
   const router = useRouter();
   const confirm = useConfirm();
-  const { workspaceId, canEditSops, role } = useSopWorkspace();
+  const { workspaceId, canEditSops, role, workspaces } = useSopWorkspace();
+  const isSuperAdmin = workspaces.some((group) => group.workspace.id === workspaceId && group.isSuperAdmin === true);
   const editable = canEditSops;
   // Workspace owners/admins: the `is_manager` branch of the database's delete guard.
   const isManager = canManage(role);
@@ -478,9 +479,10 @@ export function SopList({
     // confirm so a misclick on the row's trash icon can't silently remove a document.
     const ok = await confirm({
       title: `Delete "${label}"?`,
-      body: "It will be removed from the SOP list.",
+      body: `Status: ${SOP_PROCESS_STATE_LABELS[getSopProcessState(sop)]}.\nIt will be removed from the SOP list.`,
       tone: "danger",
       confirmLabel: "Delete SOP",
+      requiredText: isSuperAdmin ? label : undefined,
     });
     if (!ok) {
       return;
@@ -745,6 +747,7 @@ export function SopList({
                                 status: sop.status,
                                 canEditSops: editable,
                                 isManager,
+                                isSuperAdmin,
                                 hasDepartment: Boolean(sop.departmentId),
                                 isDepartmentMember:
                                   !sop.departmentId || memberDepartmentIds.has(sop.departmentId),

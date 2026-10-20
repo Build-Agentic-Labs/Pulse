@@ -7,7 +7,7 @@ import type { SopDetailInitialData } from "./detail-data";
 import {
   getSopControl,
   isBlockingSeat,
-  listProfileNames,
+  listSopApproverNames,
   listSeats,
   listSignatures,
 } from "./review";
@@ -50,8 +50,8 @@ export async function fetchSopDetailInitialData(sopId: string): Promise<SopDetai
 
   const reviewCycle = control?.reviewCycle ?? 0;
   const blockingSeats = seats.filter((seat) => isBlockingSeat(seat.rasic));
-  const reviewerNames = await listProfileNames(
-    blockingSeats.flatMap((seat) => seat.signerId ? [seat.signerId] : []),
+  const reviewerNames = await listSopApproverNames(
+    [sopId],
     supabase,
   );
   const workspaceDepartmentIds = new Set(departments.map((department) => department.id));

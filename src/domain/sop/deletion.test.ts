@@ -14,6 +14,13 @@ function ctx(over: Partial<SopDeletionContext> = {}): SopDeletionContext {
 }
 
 describe("canDeleteSop", () => {
+  it("lets verified Superadmins delete across departments except effective SOPs", () => {
+    for (const status of ["draft", "in_review", "approved", "obsolete"] as const) {
+      expect(canDeleteSop(ctx({ status, isSuperAdmin: true, isManager: false, isDepartmentMember: false }))).toBe(true);
+    }
+    expect(canDeleteSop(ctx({ status: "effective", isSuperAdmin: true, isDepartmentMember: false }))).toBe(false);
+    expect(canDeleteSop(ctx({ isSuperAdmin: true, canEditSops: false }))).toBe(false);
+  });
   it("refuses anyone who cannot write SOPs at all", () => {
     expect(canDeleteSop(ctx({ canEditSops: false }))).toBe(false);
     // Even a manager: the org-level write gate comes first.

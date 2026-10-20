@@ -76,12 +76,26 @@ export function NavSelectionTrack({
       }
     };
     measure();
-    // Child components can change their active item without rerendering the shell.
-    const mutations = new MutationObserver(measure);
-    mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "inert", "aria-hidden"] });
     const resize = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
-    resize?.observe(root);
-    for (const item of root.querySelectorAll(".ui-nav-item, .ui-settings-subnav-item")) resize?.observe(item);
+    const observed = new Set<Element>();
+    const observeLayout = () => {
+      // A capped/scrolling root can keep its size while accordions inside it expand.
+      // Observe each row's layout ancestors too, including rows loaded after mount.
+      const next = new Set<Element>([root]);
+      for (const item of root.querySelectorAll(".ui-nav-item, .ui-settings-subnav-item, .ui-nav-item-active, .ui-settings-subnav-item-active")) {
+        for (let element: Element | null = item; element && element !== root; element = element.parentElement) next.add(element);
+      }
+      for (const element of observed) {
+        if (!next.has(element)) { resize?.unobserve(element); observed.delete(element); }
+      }
+      for (const element of next) {
+        if (!observed.has(element)) { resize?.observe(element); observed.add(element); }
+      }
+    };
+    observeLayout();
+    // Child components can change their active item without rerendering the shell.
+    const mutations = new MutationObserver(() => { observeLayout(); measure(); });
+    mutations.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "inert", "aria-hidden"] });
     const reduceMotion = () => { if (motion?.matches) animation?.cancel(); };
     motion?.addEventListener("change", reduceMotion);
     return () => {

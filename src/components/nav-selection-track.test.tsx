@@ -5,9 +5,19 @@ import { NavSelectionTrack, NavSelectionProvider } from "./nav-selection-track";
 
 const animate = vi.fn< (frames: Keyframe[], options: KeyframeAnimationOptions) => { playState: string; cancel: ReturnType<typeof vi.fn> } >(() => ({ playState: "finished", cancel: vi.fn() }));
 let reducedMotion = false;
+let resizeCallback: () => void;
+const observe = vi.fn();
+const unobserve = vi.fn();
 beforeEach(() => {
   reducedMotion = false;
-  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  observe.mockClear();
+  unobserve.mockClear();
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: () => void) { resizeCallback = callback; }
+    observe = observe;
+    unobserve = unobserve;
+    disconnect() {}
+  });
   vi.stubGlobal("matchMedia", () => ({ matches: reducedMotion, addEventListener() {}, removeEventListener() {} }));
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     return { top: Number(this.dataset.top ?? 0), left: 0, width: 184, height: Number(this.dataset.height ?? 32), bottom: 0, right: 184, x: 0, y: 0, toJSON() {} };
@@ -75,4 +85,20 @@ it("keeps independent panels' saved selector positions separate", () => {
     <a className="ui-nav-item-active" data-top="32">Account</a>
   </NavSelectionTrack></NavSelectionProvider>);
   expect(animate).not.toHaveBeenCalled();
+});
+
+it("tracks accordion layout shifts inside a fixed-height sidebar and newly loaded rows", async () => {
+  const view = render(<NavSelectionTrack><section data-testid="category">
+    <a className="ui-nav-item-active" data-top="80">Product</a>
+  </section></NavSelectionTrack>);
+  expect(observe).toHaveBeenCalledWith(screen.getByTestId("category"));
+  // The root and row keep their sizes, but an ancestor's expansion moves the row.
+  screen.getByText("Product").dataset.top = "160";
+  resizeCallback();
+  expect(view.container.querySelector<HTMLElement>(".ui-nav-selection-indicator")?.style.transform).toBe("translate(0px, 160px)");
+  view.rerender(<NavSelectionTrack><section data-testid="category">
+    <div data-testid="loaded-group"><a className="ui-nav-item-active" data-top="200">Loaded product</a></div>
+  </section></NavSelectionTrack>);
+  await waitFor(() => expect(observe).toHaveBeenCalledWith(screen.getByTestId("loaded-group")));
+  expect(unobserve).toHaveBeenCalled();
 });

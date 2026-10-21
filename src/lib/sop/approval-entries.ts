@@ -21,6 +21,7 @@ import {
   isBlockingSeat,
   isSignatureCurrent,
   listSopApproverNames,
+  listProfileNames,
   listSeats,
   listSignatures,
 } from "./review";
@@ -46,7 +47,7 @@ const EMPTY: ApprovalEntriesResult = { entries: [], systemAuthorName: "System au
  * Build the approval rows for one SOP.
  *
  * Departmental approvals come first, in roster order, then the Quality release approval — which is
- * NOT a seat: Quality signs the release gate, and the transition guard forbids it holding one.
+ * separate from departmental seats. Its signer must be independent of the author and roster.
  */
 export async function buildApprovalEntries(
   sopId: string,
@@ -62,14 +63,28 @@ export async function buildApprovalEntries(
 
   const departments = await listDepartments(control.workspaceId, client);
   // One batched query for all departments' members instead of one per department.
-  const allMembers = await listMembersForDepartments(departments.map((department) => department.id));
+  const allMembers = await listMembersForDepartments(departments.map((department) => department.id), client);
   const memberPositionByDepartmentAndUser = new Map<string, string>();
   allMembers.forEach((member) => {
     memberPositionByDepartmentAndUser.set(`${member.departmentId}:${member.userId}`, member.positionTitle);
   });
 
+  const qualityDepartments = departments.filter((department) => department.isQualityGate);
+  const qualityMembers = allMembers.filter((member) =>
+    qualityDepartments.some((department) => department.id === member.departmentId) &&
+    member.deptRole === "approver" &&
+    !member.pendingInviteAt &&
+    member.userId !== control.createdBy &&
+    member.userId !== control.submittedBy &&
+    !seats.some((seat) => seat.signerId === member.userId) &&
+    !signatures.some((signature) => signature.signerId === member.userId &&
+      signature.meaning === "objection_overruled" && signature.reviewCycle === control.reviewCycle),
+  );
   const authorId = control.createdBy ?? control.submittedBy ?? control.finalApprovalRequestedBy;
-  const names = await listSopApproverNames([sopId], client);
+  const [names, qualityNames] = await Promise.all([
+    listSopApproverNames([sopId], client),
+    listProfileNames(qualityMembers.map((member) => member.userId), client),
+  ]);
   const departmentById = new Map(departments.map((department) => [department.id, department]));
 
   const entries: ApprovalSignatureEntry[] = [];
@@ -100,7 +115,7 @@ export async function buildApprovalEntries(
   if (qualityApproval) {
     entries.push({
       key: qualityApproval.id,
-      approval: "Quality approval",
+      approval: "Quality final approval",
       name: qualityApproval.signerName || "Quality approver",
       position:
         departments
@@ -111,6 +126,20 @@ export async function buildApprovalEntries(
           .find(Boolean) || "Quality release",
       signedAt: qualityApproval.signedAt,
       signatureStrokes: qualityApproval.signatureStrokes,
+    });
+  }
+
+  if (!qualityApproval) {
+    entries.push({
+      key: "quality-final-approval",
+      approval: "Quality final approval",
+      name: qualityMembers.map((member) => qualityNames.get(member.userId) || "Quality approver").join(" / ") ||
+        "No eligible Quality approver assigned",
+      position: qualityMembers.length === 1
+        ? qualityMembers[0].positionTitle || "Quality release"
+        : qualityMembers.length > 1 ? "Eligible Quality approvers" : "Quality release",
+      signedAt: null,
+      signatureStrokes: [],
     });
   }
 

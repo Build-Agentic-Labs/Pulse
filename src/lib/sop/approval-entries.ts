@@ -99,7 +99,7 @@ export async function buildApprovalEntries(
     );
     entries.push({
       key: `seat-${seat.id ?? `${seat.departmentId}:${seat.signerId}`}`,
-      approval: "Department approval",
+      approval: department?.name || department?.code || "Department approval",
       name: signature?.signerName || (seat.signerId ? names.get(seat.signerId) : "") || "Assigned approver",
       position:
         (seat.signerId ? memberPositionByDepartmentAndUser.get(`${seat.departmentId}:${seat.signerId}`) : "") ||

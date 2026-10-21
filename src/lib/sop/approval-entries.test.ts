@@ -11,12 +11,13 @@ beforeEach(() => {
   vi.mocked(review.getSopAuthorDisplayName).mockResolvedValue("Author");
   vi.mocked(review.listSopApproverNames).mockResolvedValue(new Map([["reviewer", "Reviewer"]]));
   vi.mocked(review.listProfileNames).mockResolvedValue(new Map([["quality", "Jane Quality"], ["reviewer", "Reviewer"]]));
-  vi.mocked(departments.listDepartments).mockResolvedValue([{ id: "q", isQualityGate: true }] as never);
+  vi.mocked(departments.listDepartments).mockResolvedValue([{ id: "q", isQualityGate: true }, { id: "sales", name: "Inside Sales", code: "INS" }] as never);
   vi.mocked(departments.listMembersForDepartments).mockResolvedValue(["quality", "author", "submitter", "reviewer"].map(userId => ({ userId, departmentId: "q", deptRole: "approver", positionTitle: "Quality Manager" })) as never);
 });
 it("always ends with the eligible Quality approver before signing", async () => {
   const { entries } = await buildApprovalEntries("sop");
   expect(entries).toHaveLength(2);
+  expect(entries[0].approval).toBe("Inside Sales");
   expect(entries.at(-1)).toMatchObject({ approval: "Quality final approval", name: "Jane Quality", position: "Quality Manager", signedAt: null, signatureStrokes: [] });
 });
 it("keeps the actual signed Quality approver last", async () => {

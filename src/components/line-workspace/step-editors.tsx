@@ -885,16 +885,9 @@ export function StepPartMentionEditor({
     : undefined;
 
   const dismissSelection = useCallback(() => {
-    if (selection) {
-      document.querySelectorAll<HTMLTextAreaElement>(`textarea[aria-label="Step ${step.sequence} instruction"]`)
-        .forEach((textarea) => {
-          if (textarea.value.slice(selection.start, selection.end) === selection.text) {
-            textarea.setSelectionRange(selection.end, selection.end);
-          }
-        });
-    }
+    // Dismissing the link popup must not override the browser's caret or selection.
     onCancelSelection();
-  }, [onCancelSelection, selection, step.sequence]);
+  }, [onCancelSelection]);
 
   useEffect(() => {
     const existingPart = selection?.partReferenceId

@@ -782,7 +782,7 @@ export function SidebarWorkspacePanel({
                         <span className="min-w-0 flex-1 truncate">{project.name}</span>
                       </button>
                     )}
-                    {canManage(projectRole) && !isRenaming ? (
+                    {(canManage(projectRole) || (canEdit(projectRole) && project.accessLevel !== "view" && project.accessLevel !== "none")) && !isRenaming ? (
                       <button
                         type="button"
                         data-product-actions
@@ -902,6 +902,7 @@ export function SidebarWorkspacePanel({
             {
               id: "rename",
               label: "Rename product",
+              disabled: isSubmitting || contextMenu.project.accessLevel === "view" || contextMenu.project.accessLevel === "none",
               onSelect: () => startRenameProject(contextMenu.project),
             },
             {
@@ -917,7 +918,7 @@ export function SidebarWorkspacePanel({
               disabled: isSubmitting,
               onSelect: () => requestDeleteProject(contextMenu.project, contextMenu.anchorRect),
             },
-          ]}
+          ].filter((item) => item.id === "rename" || canManage(roleByWorkspaceId[contextMenu.project.workspaceId] ?? role))}
         />
       ) : null}
     </>

@@ -102,7 +102,7 @@ export function ProcedureToolPicker({
   }
 
   useEffect(() => {
-    if (!open) {
+    if (!open || mobile) {
       return;
     }
 
@@ -114,7 +114,7 @@ export function ProcedureToolPicker({
       window.removeEventListener("scroll", handlePositionChange, true);
       window.removeEventListener("resize", handlePositionChange);
     };
-  }, [open, options.length]);
+  }, [mobile, open, options.length]);
 
   useEffect(() => {
     if (!open) {
@@ -172,17 +172,17 @@ export function ProcedureToolPicker({
   }
 
   const dropdown =
-    open && position && options.length > 0
-      ? createPortal(
+    open && (mobile || position) && options.length > 0
+      ? (
           <div
             ref={listRef}
-            style={{
+            style={mobile ? { maxHeight: 260 } : {
               position: "fixed",
-              left: position.left,
-              top: position.top,
-              bottom: position.bottom,
-              width: position.width,
-              maxHeight: position.maxHeight,
+              left: position!.left,
+              top: position!.top,
+              bottom: position!.bottom,
+              width: position!.width,
+              maxHeight: position!.maxHeight,
               zIndex: 60,
             }}
             className="overflow-y-auto overscroll-contain rounded-md border border-line bg-surface shadow-lg"
@@ -214,12 +214,12 @@ export function ProcedureToolPicker({
                 </li>
               ))}
             </ul>
-          </div>,
-          document.body,
+          </div>
         )
       : null;
 
   return (
+    <>
     <div
       ref={wrapRef}
       className={`relative flex min-w-0 flex-1 items-center gap-1.5 border-b border-line focus-within:border-accent ${
@@ -240,6 +240,7 @@ export function ProcedureToolPicker({
           setOpen(true);
           setActiveIndex(0);
         }}
+        onClick={() => setOpen(true)}
         onKeyDown={handleKeyDown}
         placeholder="Search or add tool…"
         aria-label={`Search or add tool for step ${stepSequence}`}
@@ -258,7 +259,8 @@ export function ProcedureToolPicker({
       >
         {typedTool && !exactMatch ? "Add new" : "Add"}
       </button>
-      {dropdown}
     </div>
+    {dropdown && (mobile ? dropdown : createPortal(dropdown, document.body))}
+    </>
   );
 }

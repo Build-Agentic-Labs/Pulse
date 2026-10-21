@@ -9,13 +9,16 @@ import { ProcedureToolPicker } from "./procedure-tool-picker";
 function PickerHarness({
   onAdd,
   assignedTools = [],
+  mobile = false,
 }: {
   onAdd: (toolName: string) => void;
   assignedTools?: string[];
+  mobile?: boolean;
 }) {
   const [value, setValue] = useState("");
   return (
     <ProcedureToolPicker
+      mobile={mobile}
       value={value}
       toolLibrary={["13mm Deep Socket", "3/8in Impact Gun", "Torque Wrench"]}
       assignedTools={assignedTools}
@@ -27,6 +30,21 @@ function PickerHarness({
 }
 
 describe("ProcedureToolPicker", () => {
+  it("opens mobile choices inline and reopens on a tap after dismissal", () => {
+    const onAdd = vi.fn();
+    const { container } = render(<PickerHarness onAdd={onAdd} mobile />);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    expect(container).toContainElement(screen.getByRole("listbox"));
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    fireEvent.click(input);
+    expect(container).toContainElement(screen.getByRole("listbox"));
+    fireEvent.click(screen.getByRole("option", { name: /Torque Wrench/ }));
+    expect(onAdd).toHaveBeenCalledWith("Torque Wrench");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
   it("filters library tools while typing and adds the selected existing tool", () => {
     const onAdd = vi.fn();
     render(<PickerHarness onAdd={onAdd} />);

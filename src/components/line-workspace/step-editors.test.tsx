@@ -478,7 +478,7 @@ describe("StepPartMentionEditor", () => {
     );
   });
 
-  it("closes the popup when the user clicks outside it", () => {
+  it.each(["outside", "instruction", "escape"])("dismisses via %s without moving the native text selection", (action) => {
     const onCancelSelection = vi.fn();
     const task = {
       id: "task-1",
@@ -503,9 +503,13 @@ describe("StepPartMentionEditor", () => {
 
     const textarea = screen.getByRole("textbox", { name: "Step 1 instruction" }) as HTMLTextAreaElement;
     textarea.setSelectionRange(8, 20);
-    fireEvent.pointerDown(document.body);
+    if (action === "escape") {
+      fireEvent.keyDown(textarea, { key: "Escape" });
+    } else {
+      fireEvent.pointerDown(action === "instruction" ? textarea : document.body);
+    }
     expect(onCancelSelection).toHaveBeenCalledTimes(1);
-    expect(textarea.selectionStart).toBe(20);
+    expect(textarea.selectionStart).toBe(8);
     expect(textarea.selectionEnd).toBe(20);
   });
 

@@ -38,7 +38,7 @@ const SOP_COLUMNS =
 // "Could not embed because more than one relationship was found for 'sops' and 'departments'".
 // Must stay a single string literal: supabase-js parses it at the type level.
 const SOP_LIST_COLUMNS =
-  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, submitted_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash, department:departments!sops_department_id_fkey(code)";
+  "id, sop_number, title, version, source, status, updated_at, department_id, effective_date, next_review_date, created_by, submitted_by, rejected_reason, review_cycle, content_hash, final_approval_requested_at, final_approval_content_hash, change_significance, effective_revision_id, released:sop_revisions!sops_effective_revision_id_fkey(version_label), department:departments!sops_department_id_fkey(code)";
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
@@ -51,6 +51,13 @@ export interface SopRecord {
 
 /** One row of the SOP list -- the promoted columns, cheap to fetch for every SOP at once. */
 export interface SopListItem {
+  changeSignificance?: "MINOR" | "MAJOR" | null;
+  releasedVersion?: string | null;
+  effectiveRevisionId?: string | null;
+  hasWorkingDraft?: boolean;
+  supportsControlledChanges?: boolean;
+  workingVersion?: string;
+
   id: string;
   sopNumber: string;
   title: string;
@@ -154,6 +161,9 @@ function embeddedDepartmentCode(row: Record<string, unknown>): string | null {
 
 function mapSopListItem(row: Record<string, unknown>): SopListItem {
   return {
+    changeSignificance: row.change_significance === "MINOR" || row.change_significance === "MAJOR" ? row.change_significance : null,
+    effectiveRevisionId: row.effective_revision_id as string | null,
+    releasedVersion: ((Array.isArray(row.released) ? row.released[0] : row.released) as { version_label?: string } | null)?.version_label ?? null,
     id: String(row.id),
     sopNumber: String(row.sop_number ?? ""),
     title: String(row.title ?? ""),

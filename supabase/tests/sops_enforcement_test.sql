@@ -247,9 +247,7 @@ select is(
 -- release edge hands it the stamped document explicitly. Without that the archived controlled
 -- copy would read SOP-PRD-###.
 select is(
-  (select r.document #>> '{meta,sopNumber}' from public.sop_revisions r
-     join public.sops s on s.effective_revision_id = r.id
-    where s.id = 'sop_1'),
+  (public.get_sop_effective_release('sop_1')->'document' #>> '{meta,sopNumber}'),
   'SOP-PRD-001',
   'the frozen revision carries the number it was released under'
 );
@@ -308,25 +306,10 @@ select is(
   'opening a revision keeps the number'
 );
 
-select public.sign_sop('sop_1', 'authorship');
-update public.sops set status = 'in_review' where id = 'sop_1';
-
--- The revision bumped review_cycle and the edit changed content_hash, so the draft-review
--- submissions must be made again for this cycle before final approval can be requested.
-reset role;
-insert into public.sop_review_submissions
-  (sop_id, review_cycle, reviewer_id, reviewer_name, no_changes, content_hash)
-select 'sop_1', s.review_cycle, seat.signer_id, 'Reviewer', true, s.content_hash
-  from public.sops s
-  join public.sop_review_seats seat on seat.sop_id = s.id
- where s.id = 'sop_1';
-select test_as('11111111-1111-1111-1111-111111111111');
-select public.request_sop_final_approval('sop_1');
-
-select test_as('22222222-2222-2222-2222-222222222222');
-select public.sign_sop('sop_1', 'dept_approval', p_seat_department => 'dept_prd');
-select test_as('44444444-4444-4444-4444-444444444444');
-select public.sign_sop('sop_1', 'dept_approval', p_seat_department => 'dept_eng');
+-- Minor corrections retain existing departmental approvals and still require a fresh Quality signature.
+select public.submit_sop_controlled_draft('sop_1',
+ (select content_hash from public.sops where id='sop_1'),
+ (select review_cycle from public.sops where id='sop_1'));
 select test_as('33333333-3333-3333-3333-333333333333');
 select public.sign_sop('sop_1', 'quality_approval');
 update public.sops set status = 'effective' where id = 'sop_1';

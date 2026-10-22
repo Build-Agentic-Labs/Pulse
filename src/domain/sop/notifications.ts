@@ -28,6 +28,7 @@ export const SOP_NOTIFIABLE_EVENT_TYPES = [
   "seat_reassigned",
   "remark_added",
   "reviewer_reminded",
+  "controlled_change_returned",
 ] as const;
 
 export type SopNotificationKind =
@@ -373,6 +374,11 @@ export function resolveEventRecipients(
       if (!reviewerId || reviewerId !== lastReturn?.reviewerId ||
           Date.parse(event.createdAt) < Date.parse(lastReturn.returnedAt)) return [];
       return authorRecipient(event, ctx, "review_complete");
+    }
+
+    case "controlled_change_returned": {
+      if (sop.status !== "draft") return [];
+      return authorRecipient(event, ctx, "sent_back");
     }
 
     case "review_recalled": {

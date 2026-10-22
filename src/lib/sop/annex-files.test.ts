@@ -61,9 +61,11 @@ describe("removeSopAnnexFile", () => {
   function makeClient(opts: {
     deleteError?: { message: string } | null;
     removeError?: { message: string } | null;
+    released?: boolean;
   }) {
     const state = { deletedBeforeRemove: false, rowDeleted: false, removedPaths: [] as string[][] };
     const client = {
+      rpc: async () => ({ data: "released" in opts ? opts.released : false, error: null }),
       from: () => ({
         delete: () => ({
           eq: () => {
@@ -96,6 +98,14 @@ describe("removeSopAnnexFile", () => {
     expect(state.removedPaths).toEqual([[sampleFile.storagePath]]);
   });
 
+  it("retains the immutable storage object when the working draft removes a released attachment", async () => {
+    const { client, state } = makeClient({ released: true });
+    mocks.createPlannerSupabaseClient.mockReturnValue(client);
+    await removeSopAnnexFile(sampleFile);
+    expect(state.rowDeleted).toBe(true);
+    expect(state.removedPaths).toEqual([]);
+  });
+
   it("throws and never removes the object when the row delete is rejected", async () => {
     const { client, state } = makeClient({ deleteError: { message: "row level security" } });
     mocks.createPlannerSupabaseClient.mockReturnValue(client);
@@ -122,6 +132,7 @@ describe("uploadSopAnnexFile race cleanup", () => {
   }) {
     const state = { uploadedPath: "", removedPaths: [] as string[][] };
     const client = {
+      rpc: async () => ({ data: "released" in opts ? opts.released : false, error: null }),
       from: () => ({
         select: () => ({
           eq: () => ({

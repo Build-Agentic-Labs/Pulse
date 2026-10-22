@@ -1,3 +1,4 @@
+import { kickSopNotifications } from "./notify-kick";
 import {
   createPlannerSupabaseClient,
   getUserFromSession,
@@ -87,6 +88,18 @@ export async function submitEditorDraft({
       await submitSopWithApproverInvitations(sopId, control.updatedAt);
     }
     return { control, destination: "draft-review" as const, refresh: false };
+  }
+  if (control.effectiveRevisionId && control.changeSignificance && !seats.some((seat) => seat.nomination)) {
+    const db = createPlannerSupabaseClient();
+    const { error } = await db.rpc("submit_sop_controlled_draft", {
+      p_sop: sopId, p_expected_hash: control.contentHash ?? "", p_expected_cycle: control.reviewCycle,
+    });
+    if (error) throw new Error(error.message);
+    const next = await getSopControl(sopId);
+    if (!next) throw new Error("The controlled change could not be refreshed.");
+    kickSopNotifications();
+    return { control: next, destination: next.status === "approved" ? "quality-approval" as const :
+      next.finalApprovalRequestedAt ? "final-approval" as const : "draft-review" as const, refresh: true };
   }
   if (readyForSignatures) {
     const requested = await requestEditorSignatures(

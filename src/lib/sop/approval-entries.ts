@@ -99,7 +99,8 @@ export async function buildApprovalEntries(
     );
     entries.push({
       key: `seat-${seat.id ?? `${seat.departmentId}:${seat.signerId}`}`,
-      approval: department?.name || department?.code || "Department approval",
+      approval: (department?.name || department?.code || "Department approval") +
+        (signature?.carriedFromVersion ? ` · Approval carried forward from ${signature.carriedFromVersion}` : ""),
       name: signature?.signerName || (seat.signerId ? names.get(seat.signerId) : "") || "Assigned approver",
       position:
         (seat.signerId ? memberPositionByDepartmentAndUser.get(`${seat.departmentId}:${seat.signerId}`) : "") ||

@@ -31,6 +31,7 @@ import type { SopStatus } from "./schema";
  * disabled button. Neither is the gate — the database is.
  */
 export interface SopDeletionContext {
+  hasEffectiveRelease?: boolean;
   status: SopStatus;
   /** May this user write SOPs at all (workspace owner/admin, or org-tool `edit`)? */
   canEditSops: boolean;
@@ -46,6 +47,7 @@ export interface SopDeletionContext {
 
 export function canDeleteSop({
   status,
+  hasEffectiveRelease = false,
   canEditSops,
   isManager,
   isSuperAdmin = false,
@@ -55,7 +57,7 @@ export function canDeleteSop({
   if (!canEditSops) return false;
 
   // Terminal by design: an effective SOP is superseded by a new version, never removed.
-  if (status === "effective") return false;
+  if (status === "effective" || hasEffectiveRelease) return false;
 
   if (isSuperAdmin) return true;
 

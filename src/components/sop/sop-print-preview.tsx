@@ -294,6 +294,8 @@ function PlanPageBody({ page, blockById }: { page: PagePlan; blockById: Map<stri
 }
 
 export function SopPrintPreview({
+  frozenAuthorName,
+  frozenApprovals,
   sop: sopProp,
   departmentCode,
   annexFiles,
@@ -320,6 +322,8 @@ export function SopPrintPreview({
   revealSignatureId,
   backLink,
 }: {
+  frozenAuthorName?: string;
+  frozenApprovals?: ApprovalSignatureEntry[];
   sop: Sop;
   /**
    * Owning department code, used to render `SOP-PRO-###` while the SOP has not earned a number.
@@ -467,6 +471,9 @@ export function SopPrintPreview({
   useEffect(() => {
     let active = true;
     // Shared with the Word export so the two documents cannot disagree about who approved.
+    if (frozenApprovals) {
+      setApprovalEntries(frozenApprovals); setSystemAuthorName(frozenAuthorName || "SOP author"); setApprovalDetailsReady(true); return;
+    }
     buildApprovalEntries(sop.id)
       .then(({ entries, systemAuthorName: authorName }) => {
         if (!active) return;
@@ -480,7 +487,7 @@ export function SopPrintPreview({
     return () => {
       active = false;
     };
-  }, [approvalRefreshKey, sop.id]);
+  }, [approvalRefreshKey, sop.id, frozenApprovals, frozenAuthorName]);
 
   useEffect(() => {
     if (!revealSignatureId || !approvalEntries?.some((entry) => entry.key === revealSignatureId)) return;

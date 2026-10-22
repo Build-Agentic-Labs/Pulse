@@ -1,3 +1,4 @@
+import { listCarriedApprovals } from "./controlled-changes";
 /**
  * Store layer for SOP document control: reading control-column state, recording e-signatures,
  * and driving lifecycle transitions. The database triggers (enforce_sop_transition) and definer
@@ -80,6 +81,9 @@ export function isBlockingSeat(rasic: SopRasic): boolean {
 }
 
 export interface SopSignature {
+  carriedFromVersion?: string;
+  carriedToCycle?: number;
+  carriedToHash?: string;
   id: string;
   signerId: string;
   signerName: string;
@@ -636,7 +640,7 @@ export async function listSignatures(
       .eq("sop_id", sopId)
       .order("signed_at", { ascending: true }),
   );
-  return (rows ?? []).map((row: Record<string, unknown>) => ({
+  const mapped: SopSignature[] = (rows ?? []).map((row: Record<string, unknown>) => ({
     id: String(row.id),
     signerId: String(row.signer_id),
     signerName: String(row.signer_printed_name ?? ""),
@@ -648,7 +652,14 @@ export async function listSignatures(
     resolvesSignatureId: (row.resolves_signature_id as string | null) ?? null,
     signedContentHash: String(row.signed_content_hash ?? ""),
     signatureStrokes: parseSignatureStrokes(row.signature_strokes),
-  }));
+  }));  const carried = await listCarriedApprovals([sopId], supabase);
+  const result = new Map(mapped.map((signature) => [signature.id, signature]));
+  for (const source of carried) {
+    const signature = result.get(source.id);
+    if (signature) result.set(source.id, { ...signature, carriedFromVersion: source.source_version,
+      carriedToCycle: source.carried_to_cycle, carriedToHash: source.carried_to_hash });
+  }
+  return [...result.values()];
 }
 
 /**
@@ -660,7 +671,8 @@ export async function listSignatures(
  */
 export function isSignatureCurrent(signature: SopSignature, control: SopControl): boolean {
   if (!control.contentHash) return false;
-  return signature.reviewCycle === control.reviewCycle && signature.signedContentHash === control.contentHash;
+  return (signature.reviewCycle === control.reviewCycle && signature.signedContentHash === control.contentHash) ||
+    (signature.meaning === "dept_approval" && signature.carriedToCycle === control.reviewCycle && signature.carriedToHash === control.contentHash);
 }
 
 /**

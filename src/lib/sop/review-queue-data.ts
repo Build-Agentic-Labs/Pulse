@@ -1,3 +1,4 @@
+import { listCarriedApprovals } from "./controlled-changes";
 /**
  * Review-queue data assembly, shared by the client tab (background refresh) and
  * app/sops/page.tsx (server first paint — refactor plan, Stage 5). Extracted
@@ -114,7 +115,9 @@ export async function fetchReviewQueueData(
     (department) => department.isQualityGate && deptRoles.get(department.id) === "approver",
   );
 
-  const inReviewSeats = seats.filter((seat) => seat.status === "in_review" && isBlockingSeat(seat.rasic));
+  const carried = await listCarriedApprovals(sops.filter((sop) => sop.changeSignificance === "MINOR").map((sop) => sop.id), client);
+  const inReviewSeats = seats.filter((seat) => seat.status === "in_review" && isBlockingSeat(seat.rasic) && !carried.some((approval) =>
+    approval.sop_id === seat.sopId && approval.signer_id === userId && approval.seat_department_id === seat.departmentId && approval.carried_to_cycle === seat.reviewCycle));
   const finalApprovalSeats = inReviewSeats.filter(
     (seat) =>
       Boolean(seat.finalApprovalRequestedAt) &&
@@ -151,7 +154,7 @@ export async function fetchReviewQueueData(
   const authoredReturns = {
     userId,
     sops: authoredUnderReview,
-    seats: authoredSeats,
+    seats: authoredSeats.filter((seat) => !carried.some((approval) => approval.sop_id === seat.sopId && approval.signer_id === seat.signerId && approval.seat_department_id === seat.departmentId)),
     submissions: mySubmissions,
     openAnnotations,
   };

@@ -1,8 +1,9 @@
 import { getSopProcessState, type SopProcessStateInput } from "./process-state";
 
-export type ReviewerStatus = "reviewing" | "changes_requested" | "review_complete" | "awaiting_signature" | "signed";
+export type ReviewerStatus = "carried_forward" | "reviewing" | "changes_requested" | "review_complete" | "awaiting_signature" | "signed";
 
 export const REVIEWER_STATUS_LABELS: Record<ReviewerStatus, string> = {
+  carried_forward: "Approval carried forward",
   reviewing: "Still reviewing",
   changes_requested: "Unresolved feedback",
   review_complete: "Review complete",

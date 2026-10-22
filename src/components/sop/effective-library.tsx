@@ -1,6 +1,12 @@
 "use client";
+import { ModalSurface } from "@/components/ui/modal-surface";
+import { listEffectiveLibrary } from "@/lib/sop/controlled-changes";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
+import { getSopControl, transitionSop } from "@/lib/sop/review";
+import { nextVersion, parseVersion, formatVersion, type ChangeSignificance } from "@/domain/sop/version";
+import { useRouter } from "next/navigation";
 
-import { Library } from "lucide-react";
+import { Library, Pencil } from "lucide-react";
 import { listNumberLabel } from "@/domain/sop/authoring";
 import { formatDate } from "@/domain/formatting";
 import Link from "next/link";
@@ -9,7 +15,7 @@ import { QualitySkeleton } from "./quality-skeleton";
 import type { Department } from "@/domain/departments";
 import { SOP_STATUS_LABELS } from "@/domain/sop/schema";
 import { listDepartments } from "@/lib/departments/store";
-import { listSops, type SopListItem } from "@/lib/sop/store";
+import { type SopListItem } from "@/lib/sop/store";
 import { useSopWorkspace } from "./sop-workspace-provider";
 
 type ListStatus = "loading" | "ready" | "error";
@@ -30,7 +36,25 @@ export function EffectiveLibrary({
   initialDepartments?: Department[];
   initialWorkspaceId?: string;
 }) {
-  const { workspaceId } = useSopWorkspace();
+  const { workspaceId, canEditSops } = useSopWorkspace();
+  const router = useRouter();
+  const [userId, setUserId] = useState<string>();
+  const [changing, setChanging] = useState<SopListItem | null>(null);
+  const [kind, setKind] = useState<ChangeSignificance>("MINOR");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { void getUserFromSession(createPlannerSupabaseClient()).then(({ data }) => setUserId(data.user?.id)); }, []);
+  async function startChange() {
+    if (!changing || !reason.trim() || saving) return;
+    setSaving(true); setError("");
+    try {
+      const control = await getSopControl(changing.id);
+      if (!control || control.status !== "effective") throw new Error("A working change already exists or this SOP is no longer effective.");
+      await transitionSop(changing.id, "draft", control.updatedAt, { changeSignificance: kind, revisionReason: reason.trim() });
+      router.push(`/sops/${changing.id}?step=document`);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "The change could not be started."); }
+    finally { setSaving(false); }
+  }
   const seededFromServer =
     initialSops !== undefined &&
     initialDepartments !== undefined &&
@@ -60,7 +84,7 @@ export function EffectiveLibrary({
     }
     try {
       const [nextSops, nextDepartments] = await Promise.all([
-        listSops(workspaceId),
+        listEffectiveLibrary(workspaceId),
         listDepartments(workspaceId),
       ]);
       setSops(nextSops.filter((sop) => sop.status === "effective"));
@@ -123,6 +147,16 @@ export function EffectiveLibrary({
         </div>
       </div>
 
+      {changing ? <ModalSurface label="Make a controlled change" onCancel={() => { if (!saving) setChanging(null); }}><section className="ui-panel w-[min(36rem,calc(100vw-2rem))] space-y-3 p-5">
+        <h2 className="ui-setup-section-title">Make a change · {changing.title}</h2>
+        <p className="text-xs text-ink-secondary">The current release remains effective until Quality releases the replacement.</p>
+        <div className="flex gap-2">{(["MINOR", "MAJOR"] as const).map((value) => <button key={value} type="button" aria-pressed={kind === value} className="ui-btn-ghost border border-line px-3"
+          onClick={() => setKind(value)}>{value === "MINOR" ? "Minor revision" : "New version"} · {formatVersion(nextVersion(parseVersion(changing.version) ?? { major: 1, minor: 0 }, value))}</button>)}</div>
+        <p className="text-xs text-ink-tertiary">{kind === "MINOR" ? "Unchanged approvals are carried forward. Only new or replacement approvers review and sign; Quality must approve the release." : "Every approver completes the full review and signature loop again."}</p>
+        <label className="block text-xs">Reason for change<textarea className="ui-field-standalone mt-2 w-full" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+        <div className="flex gap-2"><button type="button" disabled={saving || !reason.trim()} className="ui-btn-primary px-3" onClick={() => void startChange()}>{saving ? "Creating draft…" : "Create draft"}</button>
+        <button type="button" disabled={saving} className="ui-btn-ghost px-3" onClick={() => setChanging(null)}>Cancel</button></div>
+      </section></ModalSurface> : null}
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
@@ -168,7 +202,7 @@ export function EffectiveLibrary({
                                 </th>
                               </tr>
                               {group.sops.map((sop) => {
-                            const previewHref = `/sops/${sop.id}?preview=pdf`;
+                            const previewHref = `/sops/${sop.id}/released`;
                             return (
                               <tr
                                 key={sop.id}
@@ -202,6 +236,9 @@ export function EffectiveLibrary({
                                 </td>
                                 <td className="px-5 py-3.5 align-middle text-[12px] tabular-nums text-ink-tertiary">
                                   {formatDate(sop.updatedAt) || "—"}
+                                  {sop.hasWorkingDraft ? <Link className="mt-2 block text-xs underline" href={`/sops/${sop.id}`}>Version {sop.workingVersion} in progress</Link> :
+                                    userId === sop.createdBy && canEditSops && sop.supportsControlledChanges ? <button type="button" className="ui-btn-ghost mt-2 h-8 gap-1 px-2 text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 max-sm:opacity-100"
+                                      onClick={() => { setChanging(sop); setReason(""); setKind("MINOR"); }}><Pencil size={12} />Make a change</button> : null}
                                 </td>
                               </tr>
                             );

@@ -120,12 +120,12 @@ export function SopQualitySection({
               {[
                 {
                   kind: "MINOR" as const,
-                  title: "Amendment",
+                  title: "Minor revision",
                   description: "A focused correction or clarification.",
                 },
                 {
                   kind: "MAJOR" as const,
-                  title: "New revision",
+                  title: "New version",
                   description:
                     "A substantive process or responsibility change.",
                 },

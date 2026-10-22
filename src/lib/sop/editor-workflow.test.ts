@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getUserFromSession } from "@/domain/supabase-planner";
+import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
 import {
   getSopControl,
   listSignatures,
@@ -129,5 +129,18 @@ describe("SOP editor approval orchestration", () => {
     expect(signSop).not.toHaveBeenCalled();
     expect(transitionSop).not.toHaveBeenCalled();
     expect(result?.refresh).toBe(false);
+  });
+});
+
+describe("controlled-change submission", () => {
+  it("uses the server-controlled route for a minor revision and opens Quality when approvals carry", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    vi.mocked(createPlannerSupabaseClient).mockReturnValue({ rpc } as unknown as ReturnType<typeof createPlannerSupabaseClient>);
+    vi.mocked(getSopControl).mockResolvedValueOnce({ ...control, effectiveRevisionId: "release-1", changeSignificance: "MINOR" })
+      .mockResolvedValueOnce({ ...control, status: "approved", effectiveRevisionId: "release-1", changeSignificance: "MINOR" });
+    const result = await submitEditorDraft({ sopId: "test", persist: async () => true, seats: [], readyForSignatures: false });
+    expect(rpc).toHaveBeenCalledWith("submit_sop_controlled_draft", { p_sop: "test", p_expected_hash: "hash", p_expected_cycle: 1 });
+    expect(result?.destination).toBe("quality-approval");
+    expect(transitionSop).not.toHaveBeenCalled();
   });
 });

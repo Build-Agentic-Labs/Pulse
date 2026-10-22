@@ -82,6 +82,7 @@ function markImportDone(workspaceId: string) {
 }
 
 const REVIEWER_STATUS_COLORS: Record<ReviewerStatus, string> = {
+  carried_forward: "bg-teal-700 text-white",
   reviewing: "bg-zinc-400 text-white",
   changes_requested: "bg-red-600 text-white",
   review_complete: "bg-emerald-600 text-white",
@@ -744,6 +745,7 @@ export function SopList({
                               // on canEditRow hid it on every non-draft, leaving no way to
                               // clear an in_review SOP and no explanation on screen.
                               const canDeleteRow = canDeleteSop({
+                                hasEffectiveRelease: Boolean(sop.effectiveRevisionId),
                                 status: sop.status,
                                 canEditSops: editable,
                                 isManager,
@@ -778,7 +780,10 @@ export function SopList({
                                     {flag ? (
                                       <span className={`mt-1 block text-[11px] ${flag.className}`}>{flag.label}</span>
                                     ) : null}
-                                  </Link>
+                                  </Link>{sop.effectiveRevisionId && sop.status !== "effective" && sop.status !== "obsolete" ? <span className="mt-1 block text-[11px] text-ink-secondary">
+                                      {sop.changeSignificance === "MINOR" ? "Revision" : "New version"} {sop.version} · Based on {sop.releasedVersion}
+                                      <Link className="ml-2 underline" href={`/sops/${sop.id}/released`}>Version {sop.releasedVersion} remains effective</Link>
+                                    </span> : null}
                                 </td>
                                 <td className="px-5 py-3.5 align-middle">
                                   <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">

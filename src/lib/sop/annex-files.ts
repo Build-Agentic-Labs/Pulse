@@ -23,7 +23,7 @@ export interface SopAnnexFile {
 }
 
 
-function mapFile(row: Record<string, unknown>): SopAnnexFile {
+export function mapFile(row: Record<string, unknown>): SopAnnexFile {
   return {
     id: String(row.id),
     workspaceId: String(row.workspace_id),
@@ -155,7 +155,7 @@ export async function uploadSopAnnexFile(input: {
     if (winnerFile.storagePath !== storagePath) {
       await supabase.storage.from(BUCKET).remove([storagePath]);
     } else if (existingFile && existingFile.storagePath !== storagePath) {
-      await supabase.storage.from(BUCKET).remove([existingFile.storagePath]);
+      await removeUnreleasedObject(existingFile.storagePath);
     }
     return winnerFile;
   } catch (error) {
@@ -173,6 +173,16 @@ export async function renameSopAnnexFile(file: SopAnnexFile, name: string): Prom
   return mapFile(row as Record<string, unknown>);
 }
 
+async function removeUnreleasedObject(path: string) {
+  const db = createPlannerSupabaseClient();
+  const { data, error } = await db.rpc("sop_file_is_released", { p_path: path });
+  if (error && error.code !== "PGRST202") return;
+  if (!data) {
+    const { error: failure } = await db.storage.from(BUCKET).remove([path]);
+    if (failure) console.warn("Could not remove unused annex object", failure.message);
+  }
+}
+
 export async function removeSopAnnexFile(file: SopAnnexFile): Promise<void> {
   const supabase = createPlannerSupabaseClient();
   // Delete the metadata row first — it is the authoritative reference the
@@ -181,10 +191,8 @@ export async function removeSopAnnexFile(file: SopAnnexFile): Promise<void> {
   // error. Only once the row is gone do we remove the object, best-effort, so a
   // storage failure leaves a harmless orphan rather than a dangling reference.
   await throwIfError(supabase.from("sop_annex_files").delete().eq("id", file.id));
-  const { error } = await supabase.storage.from(BUCKET).remove([file.storagePath]);
-  if (error) {
-    console.warn(`Failed to remove annex object ${file.storagePath} from the ${BUCKET} bucket: ${error.message}`);
-  }
+  await removeUnreleasedObject(file.storagePath);
+
 }
 
 /**

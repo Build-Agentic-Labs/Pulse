@@ -78,6 +78,9 @@ end $$;
 create or replace function release_sop_cl_1() returns void language plpgsql as $$
 begin
   perform test_as('70000000-0000-0000-0000-000000000001');
+  if exists(select 1 from public.sops where id='sop_cl_1' and change_significance='MINOR' and effective_revision_id is not null) then
+    perform public.submit_sop_controlled_draft('sop_cl_1',(select content_hash from public.sops where id='sop_cl_1'),(select review_cycle from public.sops where id='sop_cl_1'));
+  else
   perform public.sign_sop('sop_cl_1', 'authorship');
   update public.sops set status = 'in_review' where id = 'sop_cl_1';
   -- Preconditions added after this suite was written; see
@@ -87,6 +90,7 @@ begin
   perform public.sign_sop('sop_cl_1', 'dept_approval', p_seat_department => 'dept_cl_a');
   perform test_as('70000000-0000-0000-0000-000000000003');
   perform public.sign_sop('sop_cl_1', 'dept_approval', p_seat_department => 'dept_cl_b');
+  end if;
   perform test_as('70000000-0000-0000-0000-000000000004');
   perform public.sign_sop('sop_cl_1', 'quality_approval');
   update public.sops set status = 'effective' where id = 'sop_cl_1';

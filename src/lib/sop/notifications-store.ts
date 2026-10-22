@@ -1,3 +1,4 @@
+import { listCarriedApprovals } from "./controlled-changes";
 /**
  * Supabase-backed DrainStore: assembles plain-value contexts for the domain
  * resolvers and owns every read/write against sop_notifications. Service-role
@@ -55,12 +56,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // which made the two `.select(SOP_COLUMNS)` calls below fall back to a
 // `GenericStringError` return type instead of `SopRow[]`.
 const SOP_COLUMNS =
-  "id, workspace_id, department_id, title, sop_number, version, status, deleted_at, created_by, submitted_by, content_hash, final_approval_requested_at, final_approval_content_hash, rejected_reason, review_cycle, approved_at, updated_at";
+  "id, workspace_id, department_id, title, sop_number, version, status, deleted_at, created_by, submitted_by, content_hash, final_approval_requested_at, final_approval_content_hash, rejected_reason, review_cycle, approved_at, updated_at, change_significance";
 
 /** SOPs the reminder scan owns: signer stalls AND author stalls (a rejected draft awaiting rework). */
 const STALL_SCAN_FILTER = "status.in.(in_review,approved),and(status.eq.draft,rejected_reason.not.is.null)";
 
 export type SopRow = {
+  change_significance?: string | null;
   id: string;
   workspace_id: string;
   department_id: string | null;
@@ -316,6 +318,11 @@ export function createSopContextLoader(admin: SupabaseClient<Database>) {
           ),
         })),
       );
+    }
+    const carried = await listCarriedApprovals([...bundle.sops.values()].filter((sop) => sop.change_significance === "MINOR").map((sop) => sop.id), admin);
+    for (const approval of carried) {
+      bundle.seatsBySop.set(approval.sop_id, (bundle.seatsBySop.get(approval.sop_id) ?? []).filter((seat) =>
+        !(seat.signerId === approval.signer_id && seat.departmentId === approval.seat_department_id)));
     }
     return bundle;
   }

@@ -58,7 +58,13 @@ grant select, insert, update, delete on
 to authenticated;
 -- Legacy SOP tables have explicit write revokes but assumed default read/create grants.
 grant select, insert, update on public.sops to authenticated;
-grant select, insert on public.sop_revisions, public.sop_signatures to authenticated;
+grant select, insert on public.sop_signatures to authenticated;
+grant insert on public.sop_revisions to authenticated;
+-- Release content is served only through get_sop_effective_release. Do not re-enable
+-- direct historical-document downloads after the controlled revision migration.
+revoke select on public.sop_revisions from authenticated;
+grant select(id,sop_id,workspace_id,version_label,content_hash,created_by,created_at)
+ on public.sop_revisions to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
 -- ---------------------------------------------------------------------------------------------

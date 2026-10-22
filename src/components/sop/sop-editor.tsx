@@ -1,5 +1,7 @@
 "use client";
 
+import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { ControlledChangeHistory } from "./controlled-change-history";
 import { automaticRoutingDetails } from "@/domain/sop/activity-label";
 import { useCoalescedRefresh } from "@/lib/use-coalesced-refresh";
 
@@ -132,6 +134,8 @@ const STEP_REVIEW_CATEGORIES: Partial<Record<StepId, string[]>> = {
 };
 
 const AUDIT_EVENT_LABELS: Record<string, string> = {
+  controlled_change_started: "Controlled change started",
+  controlled_change_returned: "Quality returned the controlled change",
   review_sent: "Sent for review",
   review_recalled: "Recalled for changes",
   review_returned: "Review returned",
@@ -323,6 +327,7 @@ export function SopEditor({
   const [approvalAuthorId, setApprovalAuthorId] = useState<string | null>(
     () => initialApprovalRouting?.control?.createdBy ?? null,
   );
+  const [approvalChangeSignificance, setApprovalChangeSignificance] = useState(initialApprovalRouting?.control?.changeSignificance ?? null);
   const [approvalReviewCycle, setApprovalReviewCycle] = useState(
     () => initialApprovalRouting?.control?.reviewCycle ?? 0,
   );
@@ -421,6 +426,7 @@ export function SopEditor({
       setApprovalMyDeptRoles(departmentRoles);
       setApprovalAuthorId(control?.createdBy ?? null);
       setApprovalReviewCycle(control?.reviewCycle ?? 0);
+      setApprovalChangeSignificance(control?.changeSignificance ?? null);
       setApprovalContentHash(control?.contentHash ?? null);
       setFinalApprovalRequestedAt(control?.finalApprovalRequestedAt ?? null);
       setFinalApprovalContentHash(control?.finalApprovalContentHash ?? null);
@@ -600,7 +606,7 @@ export function SopEditor({
   const draftReviewers = useMemo(() => {
     const reviewers = new Map<string, { userId: string; name: string; submission?: SopReviewSubmission }>();
     for (const seat of approvalSeats) {
-      if (!seat.signerId || reviewers.has(seat.signerId)) continue;
+      if (!seat.signerId || reviewers.has(seat.signerId) || approvalSignatures.some((signature) => signature.carriedFromVersion && signature.signerId === seat.signerId && signature.seatDepartmentId === seat.departmentId)) continue;
       reviewers.set(seat.signerId, {
         userId: seat.signerId,
         name: approvalReviewerNames.get(seat.signerId) || "Assigned reviewer",
@@ -616,7 +622,7 @@ export function SopEditor({
       });
     }
     return Array.from(reviewers.values());
-  }, [approvalReviewerNames, approvalSeats, reviewSubmissions]);
+  }, [approvalReviewerNames, approvalSeats, approvalSignatures, reviewSubmissions]);
   const reviewGate = draftReviewGate(draftReviewers);
   // Single review round: once every reviewer has responded and the returned
   // remarks are addressed, the only forward path is final approval (signatures),
@@ -634,8 +640,8 @@ export function SopEditor({
           item.meaning === "dept_approval" &&
           item.seatDepartmentId === seat.departmentId &&
           item.signerId === seat.signerId &&
-          item.reviewCycle === approvalReviewCycle &&
-          item.signedContentHash === (approvalContentHash ?? ""),
+          ((item.reviewCycle === approvalReviewCycle && item.signedContentHash === (approvalContentHash ?? "")) ||
+            (item.carriedToCycle === approvalReviewCycle && item.carriedToHash === approvalContentHash)),
       );
       return {
         seat,
@@ -942,6 +948,9 @@ export function SopEditor({
     setStartingControlledChange(true);
     clearSaveError();
     try {
+      const { error: availabilityError } = await createPlannerSupabaseClient().rpc("list_sop_controlled_changes", { p_sop: sop.id });
+      if (availabilityError) throw new Error(availabilityError.code === "PGRST202" ?
+        "Controlled revisions are not activated in this database yet." : availabilityError.message);
       const latest = await getSopControl(sop.id);
       if (!latest) throw new Error("The SOP could not be loaded before starting this change.");
       if (latest.status !== "effective") {
@@ -957,6 +966,7 @@ export function SopEditor({
 
       beginControlledDraft(refreshed.sop);
       setApprovalReviewCycle(transitioned.reviewCycle);
+      setApprovalChangeSignificance(transitioned.changeSignificance);
       setApprovalContentHash(transitioned.contentHash);
       setFinalApprovalRequestedAt(transitioned.finalApprovalRequestedAt);
       setFinalApprovalContentHash(transitioned.finalApprovalContentHash);
@@ -1064,7 +1074,7 @@ export function SopEditor({
         await refreshApprovalRouting({ background: true, force: true });
         setAuditEvents(await listSopAuditEvents(sop.id));
       }
-      setStepIndex(CREATOR_STEPS.length + (submitted.destination === "final-approval" ? 1 : 0));
+      setStepIndex(CREATOR_STEPS.length + (submitted.destination === "quality-approval" ? 2 : submitted.destination === "final-approval" ? 1 : 0));
       window.history.replaceState(window.history.state, "", `/sops/${encodeURIComponent(sop.id)}?step=${submitted.destination}`);
     } catch (error) {
       // Delivery may fail after the review has already started. Adopt that state so retrying
@@ -1300,7 +1310,7 @@ export function SopEditor({
     }
   } else if (sop.status === "draft" && canEdit) {
     feedbackAction = {
-      label: submittingForApproval ? "Sending…" : reviewGate.allResponded ? "Send for signatures" : "Send for review",
+      label: submittingForApproval ? "Sending…" : approvalChangeSignificance === "MINOR" ? "Submit revision" : reviewGate.allResponded ? "Send for signatures" : "Send for review",
       icon: <ShieldCheck size={14} />,
       onClick: () => void handleStartApproval(),
       disabled: startApprovalDisabled || openRemarkCount > 0,
@@ -1774,7 +1784,7 @@ export function SopEditor({
                           <p className="text-xs font-medium text-ink">{name}</p>
                           <p className="text-[11px] text-ink-tertiary">{department?.name ?? "Department approver"}</p>
                         </div>
-                        <span className="text-[11px] text-ink-secondary">{signature ? "Signed" : finalApprovalRequested ? "Awaiting signature" : "Not requested"}</span>
+                        <span className="text-[11px] text-ink-secondary">{signature?.carriedFromVersion ? `Approval carried forward from ${signature.carriedFromVersion}` : signature ? "Signed" : finalApprovalRequested ? "Awaiting signature" : "Not requested"}</span>
                       </div>
                     ))}
                   </section>,
@@ -1783,6 +1793,7 @@ export function SopEditor({
             ) : null}
 
             {step.id === "qualityApproval" ? (
+              <> <ControlledChangeHistory sopId={sop.id} refreshKey={`${sop.status}:${sop.meta.version}`} />
               <SopQualitySection
                 sop={sop}
                 qualitySignature={qualitySignature}
@@ -1797,7 +1808,7 @@ export function SopEditor({
                 setPreviewing={setPreviewing}
                 isCurrentUserQualityApprover={isCurrentUserQualityApprover}
                 setQualityApprovalOpen={setQualityApprovalOpen}
-              />
+              /></>
             ) : null}
 
             {/* Footer nav */}
@@ -1936,6 +1947,9 @@ export function SopEditor({
                           <p className="text-xs font-medium text-ink">
                             {automaticRoutingDetails(event.eventType, event.details)?.title ?? AUDIT_EVENT_LABELS[event.eventType] ?? event.eventType.replaceAll("_", " ")}
                           </p>
+                          {event.eventType.startsWith("controlled_change_") && typeof event.details.reason === "string" ? <p className="mt-1 text-xs text-ink-secondary">
+                            {String(event.details.from_version ?? "")} → {String(event.details.to_version ?? "")} · {event.details.reason}
+                          </p> : null}
                           {automaticRoutingDetails(event.eventType, event.details) ? <p className="mt-1 text-[11px] leading-4 text-ink-secondary">
                             {automaticRoutingDetails(event.eventType, event.details)?.reason}
                           </p> : null}

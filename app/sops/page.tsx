@@ -1,3 +1,4 @@
+import { listEffectiveLibrary } from "@/lib/sop/controlled-changes";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
 import {
@@ -85,7 +86,7 @@ export default async function SopsPage({
           }
           case "library": {
             const [sops, departments] = await Promise.all([
-              listSops(workspaceId, supabase),
+              listEffectiveLibrary(workspaceId, supabase),
               listDepartments(workspaceId, supabase),
             ]);
             initial = { tab, workspaceId, sops, departments };

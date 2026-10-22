@@ -1,3 +1,4 @@
+import { listCarriedApprovals } from "./controlled-changes";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { listSopApproverNames, listSeatsForSops } from "@/lib/sop/review";
@@ -49,6 +50,9 @@ export async function fetchSopListReviewData(
     listSeatsForSops(sopIds, client),
     listReviewProgress(sopIds, client),
   ]);
+  const carried = await listCarriedApprovals(sops.filter((sop) => sop.changeSignificance === "MINOR").map((sop) => sop.id), client);
+  const isCarried = (id: string, departmentId: string, userId: string) => carried.some((item) =>
+    item.sop_id === id && item.seat_department_id === departmentId && item.signer_id === userId);
   const profileNames = await listSopApproverNames(
     sopIds,
     client,
@@ -71,13 +75,13 @@ export async function fetchSopListReviewData(
       if (seat.sopId !== sop.id || !seat.signerId || unique.has(seat.signerId)) continue;
       unique.set(seat.signerId, {
         userId: seat.signerId,
-        status: reviewerStatus({
+        status: isCarried(sop.id, seat.departmentId, seat.signerId) ? "carried_forward" : reviewerStatus({
           sop,
-          returned: submissions.some((item) => item.sopId === sop.id && item.reviewerId === seat.signerId),
+          returned: isCarried(sop.id, seat.departmentId, seat.signerId) || submissions.some((item) => item.sopId === sop.id && item.reviewerId === seat.signerId),
           hasOpenComments: progress.comments.some((item) => item.sop_id === sop.id && item.review_cycle === sop.reviewCycle && item.created_by === seat.signerId),
           allSeatsSigned: Boolean(sop.contentHash) && seats
             .filter((item) => item.sopId === sop.id && item.signerId === seat.signerId)
-            .every((item) => progress.signatures.some((signature) =>
+            .every((item) => isCarried(sop.id, item.departmentId, seat.signerId!) || progress.signatures.some((signature) =>
               signature.sop_id === sop.id && signature.signer_id === seat.signerId &&
               signature.seat_department_id === item.departmentId &&
               signature.review_cycle === sop.reviewCycle && signature.signed_content_hash === sop.contentHash)),
@@ -91,7 +95,7 @@ export async function fetchSopListReviewData(
     return { sopId: sop.id, participants: Array.from(unique.values()) };
   });
 
-  const gate = { userId: currentUserId, sops, seats, submissions, openAnnotations: progress.comments.map(item => ({ sopId: item.sop_id, reviewCycle: item.review_cycle })) };
+  const gate = { userId: currentUserId, sops, seats: seats.filter((seat) => !seat.signerId || !isCarried(seat.sopId,seat.departmentId,seat.signerId)), submissions, openAnnotations: progress.comments.map(item => ({ sopId: item.sop_id, reviewCycle: item.review_cycle })) };
   const authorActions: NonNullable<SopListReviewData["authorActions"]> = [
     ...selectFeedbackToAddress(gate).map(item => ({ sopId: item.id, label: "Address feedback" as const })),
     ...selectReadyForFinalApproval(gate).map(item => ({ sopId: item.id, label: "Ready for signatures" as const })),

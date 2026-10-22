@@ -2391,35 +2391,194 @@ export type Database = {
           },
         ]
       }
+      sop_approval_carry_forwards: {
+        Row: {
+          department_id: string
+          review_cycle: number
+          signer_id: string
+          sop_id: string
+          source_signature_id: string
+          source_version: string
+        }
+        Insert: {
+          department_id: string
+          review_cycle: number
+          signer_id: string
+          sop_id: string
+          source_signature_id: string
+          source_version: string
+        }
+        Update: {
+          department_id?: string
+          review_cycle?: number
+          signer_id?: string
+          sop_id?: string
+          source_signature_id?: string
+          source_version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_approval_carry_forwards_sop_id_review_cycle_fkey"
+            columns: ["sop_id", "review_cycle"]
+            isOneToOne: false
+            referencedRelation: "sop_change_requests"
+            referencedColumns: ["sop_id", "review_cycle"]
+          },
+          {
+            foreignKeyName: "sop_approval_carry_forwards_source_signature_id_fkey"
+            columns: ["source_signature_id"]
+            isOneToOne: false
+            referencedRelation: "sop_signatures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sop_change_requests: {
+        Row: {
+          approval_handling: Json | null
+          base_revision_id: string
+          closed_at: string | null
+          closed_reason: string | null
+          from_version: string
+          kind: string
+          original_roster: Json
+          reason: string
+          release_roster: Json | null
+          released_at: string | null
+          released_by: string | null
+          requested_at: string
+          requested_by: string
+          review_cycle: number
+          sop_id: string
+          to_version: string
+        }
+        Insert: {
+          approval_handling?: Json | null
+          base_revision_id: string
+          closed_at?: string | null
+          closed_reason?: string | null
+          from_version: string
+          kind: string
+          original_roster: Json
+          reason: string
+          release_roster?: Json | null
+          released_at?: string | null
+          released_by?: string | null
+          requested_at?: string
+          requested_by: string
+          review_cycle: number
+          sop_id: string
+          to_version: string
+        }
+        Update: {
+          approval_handling?: Json | null
+          base_revision_id?: string
+          closed_at?: string | null
+          closed_reason?: string | null
+          from_version?: string
+          kind?: string
+          original_roster?: Json
+          reason?: string
+          release_roster?: Json | null
+          released_at?: string | null
+          released_by?: string | null
+          requested_at?: string
+          requested_by?: string
+          review_cycle?: number
+          sop_id?: string
+          to_version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_change_requests_base_revision_id_fkey"
+            columns: ["base_revision_id"]
+            isOneToOne: false
+            referencedRelation: "sop_revisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sop_change_requests_sop_id_fkey"
+            columns: ["sop_id"]
+            isOneToOne: false
+            referencedRelation: "sops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sop_release_files: {
+        Row: {
+          file_id: string
+          metadata: Json
+          revision_id: string
+          sop_id: string
+          storage_path: string
+        }
+        Insert: {
+          file_id: string
+          metadata: Json
+          revision_id: string
+          sop_id: string
+          storage_path: string
+        }
+        Update: {
+          file_id?: string
+          metadata?: Json
+          revision_id?: string
+          sop_id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_release_files_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: false
+            referencedRelation: "sop_revisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sop_release_files_sop_id_fkey"
+            columns: ["sop_id"]
+            isOneToOne: false
+            referencedRelation: "sops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sop_revisions: {
         Row: {
+          approval_snapshot: Json | null
           content_hash: string
           created_at: string
           created_by: string | null
           document: Json
           id: string
+          release_review_cycle: number | null
           roster: Json | null
           sop_id: string
           version_label: string
           workspace_id: string
         }
         Insert: {
+          approval_snapshot?: Json | null
           content_hash: string
           created_at?: string
           created_by?: string | null
           document: Json
           id?: string
+          release_review_cycle?: number | null
           roster?: Json | null
           sop_id: string
           version_label: string
           workspace_id: string
         }
         Update: {
+          approval_snapshot?: Json | null
           content_hash?: string
           created_at?: string
           created_by?: string | null
           document?: Json
           id?: string
+          release_review_cycle?: number | null
           roster?: Json | null
           sop_id?: string
           version_label?: string
@@ -4387,6 +4546,18 @@ export type Database = {
       }
     }
     Functions: {
+      return_sop_controlled_change: { Args: { p_sop: string; p_reason: string; p_expected_hash: string; p_require_full_review?: boolean }; Returns: undefined }
+
+      sop_file_is_released: { Args: { p_path: string }; Returns: boolean }
+      submit_sop_controlled_draft: {
+        Args: { p_sop: string; p_expected_hash: string; p_expected_cycle: number }
+        Returns: undefined
+      }
+      list_sop_carried_approvals: { Args: { p_sops: string[] }; Returns: Json }
+      list_sop_controlled_changes: { Args: { p_sop: string }; Returns: Json }
+      get_sop_effective_release: { Args: { p_sop: string }; Returns: Json }
+      list_sop_effective_library: { Args: { p_workspace: string }; Returns: Json }
+
       acquire_sop_submission_lock: {
         Args: { p_sop_id: string }
         Returns: string

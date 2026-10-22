@@ -1,5 +1,8 @@
 "use client";
 
+import { kickSopNotifications } from "@/lib/sop/notify-kick";
+import Link from "next/link";
+import { ControlledChangeHistory } from "./controlled-change-history";
 import { formatDateTime } from "@/domain/formatting";
 import { CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -41,6 +44,7 @@ export function SopQualityApprovalWorkspace({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState("You");
   const [status, setStatus] = useState<"loading" | "ready" | "releasing" | "error">("loading");
+  const [returnReason, setReturnReason] = useState("");
   const [error, setError] = useState("");
   const [signatureStrokes, setSignatureStrokes] = useState<SignatureStrokes>([]);
   const [approvalRefreshKey, setApprovalRefreshKey] = useState(0);
@@ -155,7 +159,28 @@ export function SopQualityApprovalWorkspace({
   }
 
   const released = control.status === "effective";
-  const panel = <QualitySignaturePanel released={released} currentUserName={currentUserName} qualitySignature={qualitySignature} version={control.version} error={error} signatureStrokes={signatureStrokes} status={status} returnLabel={returnLabel} onClose={onClose} onRelease={() => void releaseToEffectiveLibrary()} onChange={strokes => { setSignatureStrokes(strokes); setError(""); }} />;
+  async function returnChange(requireFullReview: boolean) {
+    if (!control || !returnReason.trim()) return;
+    setStatus("releasing"); setError("");
+    try {
+      const { error: failure } = await createPlannerSupabaseClient().rpc("return_sop_controlled_change", {
+        p_sop: sopId, p_reason: returnReason.trim(), p_expected_hash: control.contentHash ?? "", p_require_full_review: requireFullReview,
+      });
+      if (failure) throw new Error(failure.message);
+      kickSopNotifications(); onReleased?.(); onClose();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "The revision could not be returned."); setStatus("error"); }
+  }
+  const panel = <div className="flex min-h-0 flex-col overflow-auto">
+    {control.changeSignificance === "MINOR" && !released ? <section className="space-y-2 border-b border-line p-5">
+      <Link className="block text-xs underline" href={`/sops/${sopId}/released`} target="_blank" rel="noopener noreferrer">Compare with current effective release</Link>
+      <p className="text-xs text-ink-secondary">Minor revision: verify the changes and any approvals carried forward before release.</p>
+      <label className="block text-xs">Reason for returning<textarea className="ui-field-standalone mt-1 w-full" value={returnReason} onChange={(event) => setReturnReason(event.target.value)} /></label>
+      <div className="flex flex-wrap gap-2"><button type="button" className="ui-btn-ghost px-2 text-xs" disabled={!returnReason.trim() || status === "releasing"} onClick={() => void returnChange(false)}>Return to author</button>
+      <button type="button" className="ui-btn-ghost px-2 text-xs" disabled={!returnReason.trim() || status === "releasing"} onClick={() => void returnChange(true)}>Require full version review</button></div>
+    </section> : null}
+    <ControlledChangeHistory sopId={sopId} refreshKey={control.updatedAt} />
+    <QualitySignaturePanel released={released} currentUserName={currentUserName} qualitySignature={qualitySignature} version={control.version} error={error} signatureStrokes={signatureStrokes} status={status} returnLabel={returnLabel} onClose={onClose} onRelease={() => void releaseToEffectiveLibrary()} onChange={strokes => { setSignatureStrokes(strokes); setError(""); }} />
+  </div>;
 
   return (
     <SopPrintPreview

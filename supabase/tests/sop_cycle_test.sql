@@ -108,8 +108,8 @@ select is(
 -- ---------------------------------------------------------------------------
 select test_as('60000000-0000-0000-0000-000000000001');
 select lives_ok(
-  $$ update public.sops set status = 'draft', revision_reason = 'periodic review', change_significance = 'MINOR' where id = 'sop_cy_1' $$,
-  'an owning-department member starts a revision with a reason'
+  $$ update public.sops set status = 'draft', revision_reason = 'periodic review', change_significance = 'MAJOR' where id = 'sop_cy_1' $$,
+  'the author starts a major version with a reason'
 );
 select is(
   (select review_cycle from public.sops where id = 'sop_cy_1'),
@@ -119,7 +119,7 @@ select is(
 
 -- ---------------------------------------------------------------------------
 -- 4. Edit, then revert the body to the released v1.0 content. The draft still carries the
---    system-managed V1.1 history row appended at effective -> draft (20260805200000), the
+--    system-managed V2 history row appended at effective -> draft (20260805200000), the
 --    trigger reinstates stored history on every save, and changeHistory is hashed — so the
 --    reverted draft can never reproduce the released v1.0 hash. The replay precondition
 --    itself is now unconstructible.

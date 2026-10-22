@@ -1130,16 +1130,10 @@
     padding-inline: var(--planner-content-rail);
   }
 
-.ui-planner-notice-good {
-    box-shadow: inset 2px 0 0 var(--color-success);
-  }
-
-.ui-planner-notice-warn {
-    box-shadow: inset 2px 0 0 var(--color-warn);
-  }
-
+.ui-planner-notice-good,
+.ui-planner-notice-warn,
 .ui-planner-notice-bad {
-    box-shadow: inset 2px 0 0 var(--color-danger);
+    box-shadow: none;
   }
 
 .ui-planner-dashboard-kpis {

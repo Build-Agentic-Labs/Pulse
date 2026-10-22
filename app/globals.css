@@ -932,7 +932,7 @@ body {
   left: 0.75rem;
   z-index: 3;
   max-width: calc(100% - 1.5rem);
-  border: 1px solid color-mix(in srgb, var(--color-danger) 36%, var(--color-border));
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-surface);
   padding: 0.5rem 0.75rem;
@@ -2370,16 +2370,11 @@ body {
     @apply ui-panel p-4;
   }
 
-  .ui-notice-good {
-    box-shadow: inset 2px 0 0 var(--color-success);
-  }
-
-  .ui-notice-warn {
-    box-shadow: inset 2px 0 0 var(--color-warn);
-  }
-
+  /* Notice severity affects meaning, while all notices share the neutral app surface. */
+  .ui-notice-good,
+  .ui-notice-warn,
   .ui-notice-bad {
-    box-shadow: inset 2px 0 0 var(--color-danger);
+    box-shadow: none;
   }
 
   .ui-section-title {

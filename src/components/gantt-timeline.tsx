@@ -280,7 +280,7 @@ function TaktConditionFlag({ label }: { label: string }) {
       className="group absolute -right-1 -top-1 z-30 inline-flex h-4 w-4 items-center justify-center rounded-full bg-danger text-canvas outline-none ring-offset-1 ring-offset-surface focus:ring-2 focus:ring-danger"
     >
       <AlertTriangle size={10} strokeWidth={2.5} />
-      <span className="pointer-events-none absolute right-0 top-5 hidden w-56 rounded border border-danger/30 bg-accent px-2 py-1.5 text-left text-[11px] font-bold leading-snug text-canvas  group-hover:block group-focus:block">
+      <span className="pointer-events-none absolute right-0 top-5 hidden w-56 rounded border border-line bg-accent px-2 py-1.5 text-left text-[11px] font-bold leading-snug text-canvas  group-hover:block group-focus:block">
         {label}
       </span>
     </span>
@@ -2184,7 +2184,7 @@ export function GanttTimeline({
               {mappingPreviewCode || "Uncoded"}
             </div>
             {mappingDuplicateTask ? (
-              <div className="mt-2 rounded border border-danger/25 bg-danger-muted px-3 py-2 text-xs font-semibold text-danger">
+              <div className="mt-2 rounded border border-line bg-surface px-3 py-2 text-xs font-semibold text-danger">
                 Duplicate code already used by {mappingDuplicateTask.name || "another task"}.
               </div>
             ) : null}

@@ -1,3 +1,4 @@
+import type { ImpactAssessment } from "@/components/sop/change-impact-confirmations";
 import { kickSopNotifications } from "./notify-kick";
 import {
   createPlannerSupabaseClient,
@@ -70,11 +71,13 @@ export async function submitEditorDraft({
   persist,
   seats,
   readyForSignatures,
+  impactAssessment,
 }: {
   sopId: string;
   persist: () => Promise<boolean>;
   seats: SopReviewSeat[];
   readyForSignatures: boolean;
+  impactAssessment?: ImpactAssessment;
 }) {
   if (!(await persist())) return null;
   const control = await getSopControl(sopId);
@@ -88,6 +91,17 @@ export async function submitEditorDraft({
       await submitSopWithApproverInvitations(sopId, control.updatedAt);
     }
     return { control, destination: "draft-review" as const, refresh: false };
+  }
+  if (control.effectiveRevisionId && control.changeSignificance) {
+    if (!impactAssessment?.impactConfirmed ||
+      (control.changeSignificance === "MINOR" && !impactAssessment.processOwnerConfirmed))
+      throw new Error("Complete the change impact assessment before submitting.");
+    const { error } = await createPlannerSupabaseClient().rpc("confirm_sop_change_impact", {
+      p_sop: sopId, p_expected_hash: control.contentHash ?? "", p_expected_cycle: control.reviewCycle,
+      p_sections: "", p_impact_confirmed: impactAssessment.impactConfirmed,
+      p_process_owner_confirmed: impactAssessment.processOwnerConfirmed,
+    });
+    if (error) throw new Error(error.message);
   }
   if (control.effectiveRevisionId && control.changeSignificance && !seats.some((seat) => seat.nomination)) {
     const db = createPlannerSupabaseClient();

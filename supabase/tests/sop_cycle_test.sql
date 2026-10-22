@@ -137,6 +137,8 @@ select isnt(
 -- ---------------------------------------------------------------------------
 -- 5/6. Resubmit in the new cycle: the v1.0 approvals must count for NOTHING.
 -- ---------------------------------------------------------------------------
+update public.sops set document=document||jsonb_build_object('purpose','Controlled revision cycle '||review_cycle::text) where id='sop_cy_1' and cardinality(public.get_sop_detected_changes(id))=0;
+select public.confirm_sop_change_impact('sop_cy_1',(select content_hash from public.sops where id='sop_cy_1'),(select review_cycle from public.sops where id='sop_cy_1'),'5. Procedure',true,false);
 select public.sign_sop('sop_cy_1', 'authorship');
 update public.sops set status = 'in_review' where id = 'sop_cy_1';
 -- Preconditions added after this suite was written; see

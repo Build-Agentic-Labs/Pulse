@@ -310,8 +310,7 @@
 }
 .ui-auth-msg-error {
   color: var(--color-danger);
-  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
-  background: var(--color-danger-muted);
+  background: var(--color-surface);
 }
 .ui-auth-msg-info {
   color: var(--color-ink-secondary);

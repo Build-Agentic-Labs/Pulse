@@ -1,6 +1,7 @@
 "use client";
 
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
+import { ChangeImpactAssessment, emptyImpactAssessment } from "./change-impact-confirmations";
 import { ControlledChangeHistory } from "./controlled-change-history";
 import { automaticRoutingDetails } from "@/domain/sop/activity-label";
 import { useCoalescedRefresh } from "@/lib/use-coalesced-refresh";
@@ -134,6 +135,8 @@ const STEP_REVIEW_CATEGORIES: Partial<Record<StepId, string[]>> = {
 };
 
 const AUDIT_EVENT_LABELS: Record<string, string> = {
+  change_impact_confirmed: "Impact assessment confirmed",
+  change_quality_confirmed: "Quality verified classification and change history",
   controlled_change_started: "Controlled change started",
   controlled_change_returned: "Quality returned the controlled change",
   review_sent: "Sent for review",
@@ -258,8 +261,10 @@ export function SopEditor({
   authoringDepartments,
   initialApprovalRouting,
   initialView,
+  documentRecovered = false,
 }: {
   initial: Sop;
+  documentRecovered?: boolean;
   workspaceId?: string;
   /** Persisted owner for an existing SOP. New SOPs derive this from authoringDepartments. */
   owningDepartment?: Department;
@@ -327,6 +332,7 @@ export function SopEditor({
   const [approvalAuthorId, setApprovalAuthorId] = useState<string | null>(
     () => initialApprovalRouting?.control?.createdBy ?? null,
   );
+  const [impactAssessment, setImpactAssessment] = useState(emptyImpactAssessment);
   const [approvalChangeSignificance, setApprovalChangeSignificance] = useState(initialApprovalRouting?.control?.changeSignificance ?? null);
   const [approvalReviewCycle, setApprovalReviewCycle] = useState(
     () => initialApprovalRouting?.control?.reviewCycle ?? 0,
@@ -379,7 +385,7 @@ export function SopEditor({
   /** The remark card whose section editor is open in the review margin. */
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [submittingForApproval, setSubmittingForApproval] = useState(false);
-  const [controlledChangeKind, setControlledChangeKind] = useState<ChangeSignificance | null>(null);
+  const [controlledChangeKind, setControlledChangeKind] = useState<ChangeSignificance | null>(() => { const requested = searchParams.get("change"); return requested === "MINOR" || requested === "MAJOR" ? requested : null; });
   const [controlledChangeReason, setControlledChangeReason] = useState("");
   const [startingControlledChange, setStartingControlledChange] = useState(false);
   const {
@@ -1061,7 +1067,7 @@ export function SopEditor({
     clearSaveError();
     try {
       const submitted = await submitEditorDraft({
-        sopId: sop.id, persist, seats: approvalSeats,
+        sopId: sop.id, persist, seats: approvalSeats, impactAssessment,
         readyForSignatures: reviewGate.allResponded && reviewAnnotations.length === 0,
       });
       if (!submitted) return;
@@ -1070,12 +1076,10 @@ export function SopEditor({
       } else {
         adoptWorkflowTransition(submitted.control);
       }
-      if (submitted.refresh) {
-        await refreshApprovalRouting({ background: true, force: true });
-        setAuditEvents(await listSopAuditEvents(sop.id));
-      }
-      setStepIndex(CREATOR_STEPS.length + (submitted.destination === "quality-approval" ? 2 : submitted.destination === "final-approval" ? 1 : 0));
-      window.history.replaceState(window.history.state, "", `/sops/${encodeURIComponent(sop.id)}?step=${submitted.destination}`);
+      // Submission is complete. Leave the builder instead of opening a passive review
+      // preview; the list owns the next routing snapshot. A secondary refresh here could
+      // otherwise turn an already-successful submission into an apparent failure.
+      router.replace("/sops?tab=all");
     } catch (error) {
       // Delivery may fail after the review has already started. Adopt that state so retrying
       // sends pending invitations rather than trying to save or submit a frozen draft again.
@@ -1555,6 +1559,7 @@ export function SopEditor({
       >
         <div className={`mx-auto ${builderHasFeedback ? "max-w-[92rem]" : "max-w-4xl"} ${step.id === "document" ? "" : "pb-16"}`}>
           <div className="min-w-0 space-y-5">
+            {documentRecovered ? <p role="status" className="ui-notice ui-notice-warn p-3 text-xs">Some document fields were missing or invalid and are shown as empty. Review those sections before saving or submitting. Opening this page has not changed the saved SOP.</p> : null}
 
             {showConvertedReview && !reviewDismissed ? (
               <div
@@ -1583,6 +1588,12 @@ export function SopEditor({
                 </button>
               </div>
             ) : null}
+
+            {sop.status === "effective" && controlledChangeKind && isCurrentUserAuthor ? <form className="ui-panel space-y-3 p-4" onSubmit={(event) => { event.preventDefault(); void handleStartControlledChange(); }}>
+              <h3 className="ui-setup-section-title">{controlledChangeKind === "MINOR" ? "Minor revision" : "New version"}</h3>
+              <label className="block text-xs">Reason for change<AutoTextarea autoFocus className="ui-field-standalone mt-2 min-h-20 w-full px-3 py-2 leading-6 caret-current" value={controlledChangeReason} onChange={(event) => setControlledChangeReason(event.target.value)} disabled={startingControlledChange} /></label>
+              <button type="submit" className="ui-btn-primary h-9 px-3" disabled={!controlledChangeReason.trim() || startingControlledChange}>{startingControlledChange ? "Creating draft…" : "Create draft"}</button>
+            </form> : null}
 
             {sop.status === "in_review" && approvalSeats.some((seat) => seat.nomination && !seat.nomination.deliveredAt) && (isCurrentUserAuthor || isCurrentUserSubmitter) ? (
               <div className="flex items-center justify-between gap-3 rounded border border-line p-3 text-sm">
@@ -1745,6 +1756,8 @@ export function SopEditor({
                 refreshApprovalRouting={refreshApprovalRouting}
               />
             ) : null}
+
+            {step.id === "approvals" && sop.status === "draft" && approvalChangeSignificance && isCurrentUserAuthor ? <ChangeImpactAssessment sopId={sop.id} document={sop} refreshKey={JSON.stringify([approvalSeats, annexFiles.map(file => [file.id, file.storagePath, file.originalName, file.updatedAt])])} minor={approvalChangeSignificance === "MINOR"} value={impactAssessment} onChange={setImpactAssessment} /> : null}
 
             {step.id === "draftReview" ? (
               <SopPrintPreview

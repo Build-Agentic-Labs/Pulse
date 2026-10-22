@@ -11,7 +11,7 @@ vi.mock("@/domain/supabase-planner", () => ({
 }));
 
 import { createEmptySop } from "@/domain/sop/schema";
-import { saveSop, SopConflictError } from "./store";
+import { getSop, saveSop, SopConflictError } from "./store";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -152,5 +152,21 @@ describe("saveSop first-INSERT dropped-response recovery", () => {
     await expect(saveSop(createEmptySop("sop-1", "2026-07-23T00:00:00Z"), "ws-1")).rejects.toThrow(
       "An SOP with this number already exists in this workspace.",
     );
+  });
+});
+
+
+describe("reading incomplete SOP documents", () => {
+  it("returns a usable document and recovery notice without writing to storage", async () => {
+    const document = Object.freeze({ body: "legacy incomplete document", procedure: null });
+    const { client, calls } = makeClient({ insert: { data: null, error: null }, existing: { data: sopRow({ title: "Existing title", version: "2.3", document }), error: null } });
+    mocks.createPlannerSupabaseClient.mockReturnValue(client);
+    const record = await getSop("sop-1");
+    expect(record?.documentRecovered).toBe(true);
+    expect(record?.sop.meta.title).toBe("Existing title");
+    expect(record?.sop.meta.version).toBe("2.3");
+    expect(record?.sop.procedure.activities).toEqual([]);
+    expect(calls.updatedWith).toBeNull();
+    expect(document).toEqual({ body: "legacy incomplete document", procedure: null });
   });
 });

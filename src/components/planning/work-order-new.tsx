@@ -252,7 +252,7 @@ export function WorkOrderNew() {
           <div className="ui-panel p-5 text-sm text-ink-secondary">Loading sales orders…</div>
         ) : null}
 
-        {error ? <div className="ui-panel border-danger/40 p-4 text-sm text-danger">{error}</div> : null}
+        {error ? <div className="ui-panel border-line p-4 text-sm text-danger">{error}</div> : null}
 
         {status === "ready" && salesOrders.length === 0 ? (
           <section className="ui-panel p-5">

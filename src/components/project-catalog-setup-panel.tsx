@@ -289,7 +289,7 @@ export function MasterBomPanel({
 
       {error ? (
         <div
-          className="mb-3 flex items-center justify-between gap-3 rounded border border-danger/40 bg-danger-muted px-3 py-2 text-xs font-semibold text-ink"
+          className="mb-3 flex items-center justify-between gap-3 rounded border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink"
           role="alert"
         >
           <span>{error}</span>

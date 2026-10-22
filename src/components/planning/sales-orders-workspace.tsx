@@ -147,7 +147,7 @@ export function SalesOrdersWorkspace({
 
         {/* A failed line load must be visible here — the export column would otherwise render an
             all-blank column and simply look like nothing has been approved yet. */}
-        {error ? <div className="ui-panel border-danger/40 p-4 text-sm text-danger">{error}</div> : null}
+        {error ? <div className="ui-panel border-line p-4 text-sm text-danger">{error}</div> : null}
 
         <ExportColumnPanel scheduleImport={view.scheduleImport} lines={lines} />
 

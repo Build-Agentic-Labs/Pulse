@@ -172,7 +172,7 @@ export function ScheduleUpload({
       </div>
 
       {error ? (
-        <div className="ui-panel border-danger/40 p-4 text-sm text-danger">{error}</div>
+        <div className="ui-panel border-line p-4 text-sm text-danger">{error}</div>
       ) : null}
 
       {stage === "idle" ? (
@@ -290,7 +290,7 @@ export function ScheduleUpload({
           </dl>
 
           {preview.alreadyBuilt.length > 0 ? (
-            <div className="ui-panel border-danger/40 p-4">
+            <div className="ui-panel border-line p-4">
               <div className="ui-mono-label text-danger">Already built</div>
               <p className="mt-2 text-[13px] text-ink-secondary">
                 {preview.alreadyBuilt.length}{" "}

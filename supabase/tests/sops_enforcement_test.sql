@@ -307,11 +307,14 @@ select is(
 );
 
 -- Minor corrections retain existing departmental approvals and still require a fresh Quality signature.
+update public.sops set document=document||jsonb_build_object('purpose','Controlled revision cycle '||review_cycle::text) where id='sop_1' and cardinality(public.get_sop_detected_changes(id))=0;
+select public.confirm_sop_change_impact('sop_1',(select content_hash from public.sops where id='sop_1'),(select review_cycle from public.sops where id='sop_1'),'5. Procedure',true,true);
 select public.submit_sop_controlled_draft('sop_1',
  (select content_hash from public.sops where id='sop_1'),
  (select review_cycle from public.sops where id='sop_1'));
 select test_as('33333333-3333-3333-3333-333333333333');
 select public.sign_sop('sop_1', 'quality_approval');
+select public.confirm_sop_change_quality('sop_1',(select content_hash from public.sops where id='sop_1'),(select review_cycle from public.sops where id='sop_1'),true,true,true);
 update public.sops set status = 'effective' where id = 'sop_1';
 select is(
   (select sop_number || ' @ ' || version from public.sops where id = 'sop_1'),

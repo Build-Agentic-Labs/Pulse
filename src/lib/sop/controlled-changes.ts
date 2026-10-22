@@ -12,6 +12,8 @@ export interface CarriedApproval {
 export interface ControlledChange {
   review_cycle: number; kind: "MINOR" | "MAJOR"; from_version: string; to_version: string;
   closed_at?: string | null; closed_reason?: string | null;
+  impact_confirmed_by_name?: string | null; quality_confirmed_by_name?: string | null;
+  sections_affected?: string | null; impact_confirmed_by?: string | null; impact_confirmed_at?: string | null; process_owner_confirmed?: boolean; quality_confirmed_by?: string | null; quality_confirmed_at?: string | null;
   reason: string; requested_at: string; requested_by: string;
   released_at: string | null; released_by: string | null;
   requested_by_name: string; released_by_name: string;
@@ -43,4 +45,14 @@ export async function listEffectiveLibrary(workspaceId: string, client?: Supabas
   }
   if (error) throw new Error(error.message);
   return Array.isArray(data) ? data as unknown as SopListItem[] : [];
+}
+
+
+/** Preview includes unsaved editor content; submission always recalculates from the saved row. */
+export async function getSopDetectedChanges(id: string, document: unknown): Promise<string[]> {
+  const { data, error } = await createPlannerSupabaseClient().rpc("get_sop_detected_changes", {
+    p_sop: id, p_document: document as import("@/lib/database.types").Json,
+  });
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) ? data.filter((item): item is string => typeof item === "string") : [];
 }

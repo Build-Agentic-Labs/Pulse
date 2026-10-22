@@ -52,12 +52,12 @@ const toneStyles: Record<FeedbackTone, { border: string; label: string; text: st
     text: "text-success",
   },
   warning: {
-    border: "border-warn/45",
+    border: "border-line",
     label: "Review",
     text: "text-warn-strong",
   },
   danger: {
-    border: "border-danger/35",
+    border: "border-line",
     label: "Blocked",
     text: "text-danger",
   },

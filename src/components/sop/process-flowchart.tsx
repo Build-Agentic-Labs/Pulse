@@ -67,7 +67,7 @@ function DecisionRequirementFlag({ requirement }: { requirement: DecisionBranchR
       <AlertTriangle size={10} strokeWidth={2.5} aria-hidden="true" />
       <span
         role="tooltip"
-        className="pointer-events-none absolute right-0 top-5 z-50 hidden w-64 rounded-md border border-danger/30 bg-surface-raised px-2.5 py-2 text-left text-[11px] font-medium leading-4 text-ink shadow-lg group-hover:block group-focus:block"
+        className="pointer-events-none absolute right-0 top-5 z-50 hidden w-64 rounded-md border border-line bg-surface-raised px-2.5 py-2 text-left text-[11px] font-medium leading-4 text-ink shadow-lg group-hover:block group-focus:block"
       >
         {requirement.message}
       </span>
@@ -584,7 +584,7 @@ function MatrixView({
                     {branchRequirement ? (
                       <p
                         role="alert"
-                        className="mx-0.5 flex items-start gap-1.5 rounded border border-danger/30 bg-surface px-2 py-1.5 text-[10px] font-medium leading-4 text-danger"
+                        className="mx-0.5 flex items-start gap-1.5 rounded border border-line bg-surface px-2 py-1.5 text-[10px] font-medium leading-4 text-danger"
                       >
                         <AlertTriangle className="mt-0.5 shrink-0" size={11} strokeWidth={2.5} aria-hidden="true" />
                         <span>{branchRequirement.message}</span>

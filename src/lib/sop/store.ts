@@ -1,3 +1,4 @@
+import { normalizeSopDocument } from "@/domain/sop/normalize-document";
 import { readAllPages } from "@/lib/supabase/read-all-pages";
 /**
  * Supabase-backed persistence for SOPs.
@@ -42,6 +43,7 @@ const SOP_LIST_COLUMNS =
 
 /** A persisted SOP plus the workspace it belongs to (the persistence-boundary wrapper). */
 export interface SopRecord {
+  documentRecovered?: boolean;
   workspaceId: string;
   departmentId: string | null;
   /** Owning department's code, e.g. "PRO". Stands in for the number until the SOP is released. */
@@ -121,7 +123,7 @@ function throwIfError<T>(operation: PromiseLike<{ data: T; error: SupabaseResult
 // The jsonb `document` is canonical for the body; the row's own id/status/created_at/updated_at
 // are overlaid on top so the columns stay authoritative for those four fields.
 function mapSop(row: Record<string, unknown>): Sop {
-  const document = (row.document ?? {}) as Sop;
+  const document = normalizeSopDocument(row.document, String(row.id), String(row.created_at ?? "")).sop;
   const status = (row.status as SopStatus | null) ?? "draft";
   return {
     ...document,
@@ -134,6 +136,7 @@ function mapSop(row: Record<string, unknown>): Sop {
     // jsonb copy so the editor and list never disagree.
     meta: {
       ...document.meta,
+      title: document.meta.title || String(row.title ?? ""),
       sopNumber: effectiveSopNumber(row.sop_number as string | null | undefined, document.meta?.sopNumber ?? ""),
       version: String(row.version ?? document.meta?.version ?? ""),
       // The lifecycle trigger owns this date. Draft/review documents stay blank; the
@@ -218,6 +221,7 @@ export async function getSop(
     workspaceId: String(row.workspace_id),
     departmentId: (row.department_id as string | null) ?? null,
     departmentCode: embeddedDepartmentCode(row),
+    documentRecovered: normalizeSopDocument(row.document, String(row.id), String(row.created_at ?? "")).recovered,
     sop: mapSop(row),
   };
 }

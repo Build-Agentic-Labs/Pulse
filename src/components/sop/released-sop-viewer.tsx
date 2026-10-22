@@ -1,10 +1,11 @@
 "use client";
+import { normalizeSopDocument } from "@/domain/sop/normalize-document";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createPlannerSupabaseClient } from "@/domain/supabase-planner";
 import { parseSignatureStrokes } from "@/domain/sop/signature";
-import { createEmptySop, type Sop } from "@/domain/sop/schema";
+import { type Sop } from "@/domain/sop/schema";
 import type { ApprovalSignatureEntry } from "@/lib/sop/approval-entries";
 import type { SopAnnexFile } from "@/lib/sop/annex-files";
 import { mapFile } from "@/lib/sop/annex-files";
@@ -35,10 +36,7 @@ export function ReleasedSopViewer({ sopId }: { sopId: string }) {
       if (failure) throw new Error(failure.message);
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("No current effective release is available.");
       const value = data as Record<string, unknown>;
-      const source = value.document as Sop;
-      const document = { ...createEmptySop(sopId, String(value.released_at)), ...source,
-        linkedSops: Array.isArray(source.linkedSops) ? source.linkedSops : [],
-        referenceDocs: Array.isArray(source.referenceDocs) ? source.referenceDocs : [] };
+      const document = normalizeSopDocument(value.document, sopId, String(value.released_at)).sop;
       const approvals = (Array.isArray(value.approvals) ? value.approvals : []) as Record<string, unknown>[];
       if (active) setState({
         sop: { ...document, id: sopId, status: "effective", meta: { ...document.meta,
@@ -58,7 +56,7 @@ export function ReleasedSopViewer({ sopId }: { sopId: string }) {
   }, [sopId]);
   if (error) return <div className="p-8"><p role="alert">{error}</p><Link href="/sops?tab=library">Back to Effective Library</Link></div>;
   if (!state) return <p className="p-8" role="status">Loading effective release…</p>;
-  return <>{showHistory ? <ModalSurface label="Published change log" onCancel={() => setShowHistory(false)}><div className="ui-panel max-h-[85vh] w-[min(40rem,calc(100vw-2rem))] overflow-auto p-4"><button type="button" className="ui-btn-ghost mb-2 px-3" onClick={() => setShowHistory(false)}>Close change log</button><ControlledChangeHistory sopId={sopId} refreshKey={state.sop.meta.version} releasedOnly /></div></ModalSurface> : null}<SopPrintPreview sop={state.sop} frozenApprovals={state.approvals} frozenAuthorName={state.authorName} annexFiles={state.files}
+  return <>{showHistory ? <ModalSurface label="Published change log" onCancel={() => setShowHistory(false)}><div className="flex min-h-dvh items-center justify-center bg-black/20 p-4"><div className="ui-panel max-h-[85vh] w-[min(40rem,calc(100vw-2rem))] overflow-auto p-4"><button type="button" className="ui-btn-ghost mb-2 px-3" onClick={() => setShowHistory(false)}>Close change log</button><ControlledChangeHistory sopId={sopId} refreshKey={state.sop.meta.version} releasedOnly /></div></div></ModalSurface> : null}<SopPrintPreview sop={state.sop} frozenApprovals={state.approvals} frozenAuthorName={state.authorName} annexFiles={state.files}
     toolbarActions={<button type="button" className="ui-btn-ghost h-9 px-3" onClick={() => setShowHistory(true)}>Change log</button>}
     onClose={() => router.push("/sops?tab=library")} toolbarNote="Current effective release · working drafts do not replace this document." /></>;
 }

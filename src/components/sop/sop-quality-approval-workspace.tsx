@@ -2,6 +2,7 @@
 
 import { kickSopNotifications } from "@/lib/sop/notify-kick";
 import Link from "next/link";
+import { ChangeQualityConfirmations, emptyQualityConfirmations } from "./change-impact-confirmations";
 import { ControlledChangeHistory } from "./controlled-change-history";
 import { formatDateTime } from "@/domain/formatting";
 import { CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
@@ -44,6 +45,7 @@ export function SopQualityApprovalWorkspace({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState("You");
   const [status, setStatus] = useState<"loading" | "ready" | "releasing" | "error">("loading");
+  const [changeConfirmations, setChangeConfirmations] = useState(emptyQualityConfirmations);
   const [returnReason, setReturnReason] = useState("");
   const [error, setError] = useState("");
   const [signatureStrokes, setSignatureStrokes] = useState<SignatureStrokes>([]);
@@ -107,6 +109,15 @@ export function SopQualityApprovalWorkspace({
     setStatus("releasing");
     setError("");
     try {
+      if (control.effectiveRevisionId && control.changeSignificance) {
+        if (!Object.values(changeConfirmations).every(Boolean)) throw new Error("Complete the Quality / Document Control verification before releasing.");
+        const { error: failure } = await createPlannerSupabaseClient().rpc("confirm_sop_change_quality", {
+          p_sop: sopId, p_expected_hash: control.contentHash ?? "", p_expected_cycle: control.reviewCycle,
+          p_classification_confirmed: changeConfirmations.classification, p_document_verified: changeConfirmations.document,
+          p_history_verified: changeConfirmations.history,
+        });
+        if (failure) throw new Error(failure.message);
+      }
       const signatureId = qualitySignature?.id ?? await signSopWithMark(sopId, "quality_approval", signatureStrokes, control.contentHash ?? "", control.reviewCycle);
       const signedControl = await getSopControl(sopId);
       if (!signedControl) throw new Error("The Quality-signed SOP could not be reloaded.");
@@ -178,8 +189,9 @@ export function SopQualityApprovalWorkspace({
       <div className="flex flex-wrap gap-2"><button type="button" className="ui-btn-ghost px-2 text-xs" disabled={!returnReason.trim() || status === "releasing"} onClick={() => void returnChange(false)}>Return to author</button>
       <button type="button" className="ui-btn-ghost px-2 text-xs" disabled={!returnReason.trim() || status === "releasing"} onClick={() => void returnChange(true)}>Require full version review</button></div>
     </section> : null}
+    {control.effectiveRevisionId && control.changeSignificance && !released ? <ChangeQualityConfirmations minor={control.changeSignificance === "MINOR"} value={changeConfirmations} onChange={setChangeConfirmations} /> : null}
     <ControlledChangeHistory sopId={sopId} refreshKey={control.updatedAt} />
-    <QualitySignaturePanel released={released} currentUserName={currentUserName} qualitySignature={qualitySignature} version={control.version} error={error} signatureStrokes={signatureStrokes} status={status} returnLabel={returnLabel} onClose={onClose} onRelease={() => void releaseToEffectiveLibrary()} onChange={strokes => { setSignatureStrokes(strokes); setError(""); }} />
+    <QualitySignaturePanel verificationComplete={!control.effectiveRevisionId || !control.changeSignificance || Object.values(changeConfirmations).every(Boolean)} released={released} currentUserName={currentUserName} qualitySignature={qualitySignature} version={control.version} error={error} signatureStrokes={signatureStrokes} status={status} returnLabel={returnLabel} onClose={onClose} onRelease={() => void releaseToEffectiveLibrary()} onChange={strokes => { setSignatureStrokes(strokes); setError(""); }} />
   </div>;
 
   return (
@@ -199,8 +211,8 @@ export function SopQualityApprovalWorkspace({
   );
 }
 
-export function QualitySignaturePanel({ released, currentUserName, qualitySignature, version, error, signatureStrokes, status, returnLabel, onClose, onRelease, onChange }: {
- released: boolean; currentUserName: string; qualitySignature: SopSignature | null; version: string; error: string; signatureStrokes: SignatureStrokes; status: string; returnLabel: string; onClose: () => void; onRelease: () => void; onChange: (strokes: SignatureStrokes) => void;
+export function QualitySignaturePanel({ verificationComplete = true, released, currentUserName, qualitySignature, version, error, signatureStrokes, status, returnLabel, onClose, onRelease, onChange }: {
+ verificationComplete?: boolean; released: boolean; currentUserName: string; qualitySignature: SopSignature | null; version: string; error: string; signatureStrokes: SignatureStrokes; status: string; returnLabel: string; onClose: () => void; onRelease: () => void; onChange: (strokes: SignatureStrokes) => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas">
@@ -211,7 +223,7 @@ export function QualitySignaturePanel({ released, currentUserName, qualitySignat
         <p className="text-[11px] leading-5 text-ink-secondary">Verify the approved document. Signing releases version {version} to the Effective Library.</p>
       </div>
       <div className="border-t border-line p-4">
-        {released ? <button type="button" className="ui-btn-primary h-9 w-full gap-2" onClick={onClose}><CheckCircle2 size={14} />{returnLabel}</button> : <button type="button" className="ui-btn-primary h-9 w-full gap-2 disabled:opacity-40" disabled={status === "releasing" || (!qualitySignature && !signatureStrokes.length)} onClick={onRelease}>{status === "releasing" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}{status === "releasing" ? "Releasing…" : "Sign & release"}</button>}
+        {released ? <button type="button" className="ui-btn-primary h-9 w-full gap-2" onClick={onClose}><CheckCircle2 size={14} />{returnLabel}</button> : <button type="button" className="ui-btn-primary h-9 w-full gap-2 disabled:opacity-40" disabled={!verificationComplete || status === "releasing" || (!qualitySignature && !signatureStrokes.length)} onClick={onRelease}>{status === "releasing" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}{status === "releasing" ? "Releasing…" : "Sign & release"}</button>}
       </div>
     </div>
   );

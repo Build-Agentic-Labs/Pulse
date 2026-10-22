@@ -79,6 +79,7 @@ create or replace function release_sop_cl_1() returns void language plpgsql as $
 begin
   perform test_as('70000000-0000-0000-0000-000000000001');
   if exists(select 1 from public.sops where id='sop_cl_1' and change_significance='MINOR' and effective_revision_id is not null) then
+    perform public.confirm_sop_change_impact('sop_cl_1',(select content_hash from public.sops where id='sop_cl_1'),(select review_cycle from public.sops where id='sop_cl_1'),'5. Procedure',true,true);
     perform public.submit_sop_controlled_draft('sop_cl_1',(select content_hash from public.sops where id='sop_cl_1'),(select review_cycle from public.sops where id='sop_cl_1'));
   else
   perform public.sign_sop('sop_cl_1', 'authorship');
@@ -93,6 +94,9 @@ begin
   end if;
   perform test_as('70000000-0000-0000-0000-000000000004');
   perform public.sign_sop('sop_cl_1', 'quality_approval');
+  if exists(select 1 from public.sop_change_requests where sop_id='sop_cl_1' and review_cycle=(select review_cycle from public.sops where id='sop_cl_1')) then
+   perform public.confirm_sop_change_quality('sop_cl_1',(select content_hash from public.sops where id='sop_cl_1'),(select review_cycle from public.sops where id='sop_cl_1'),true,true,true);
+  end if;
   update public.sops set status = 'effective' where id = 'sop_cl_1';
 end $$;
 

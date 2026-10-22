@@ -203,7 +203,7 @@ export function MobileStepEditor({
           </div>
         </div>
         {confirmingDelete ? (
-          <div className="mt-2 rounded border border-danger/30 bg-danger-muted p-2.5">
+          <div className="mt-2 rounded border border-line bg-surface p-2.5">
             <div className="ui-photo-mobile-caption text-danger">
               Delete step {step.sequence}?
             </div>

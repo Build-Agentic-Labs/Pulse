@@ -1,12 +1,12 @@
 "use client";
-import { ModalSurface } from "@/components/ui/modal-surface";
+import { UiContextMenu } from "@/components/ui-context-menu";
 import { listEffectiveLibrary } from "@/lib/sop/controlled-changes";
 import { createPlannerSupabaseClient, getUserFromSession } from "@/domain/supabase-planner";
-import { getSopControl, transitionSop } from "@/lib/sop/review";
-import { nextVersion, parseVersion, formatVersion, type ChangeSignificance } from "@/domain/sop/version";
+import { getSopControl } from "@/lib/sop/review";
+import { formatVersion, nextVersion, parseVersion, type ChangeSignificance } from "@/domain/sop/version";
 import { useRouter } from "next/navigation";
 
-import { Library, Pencil } from "lucide-react";
+import { Library, Pencil, GitPullRequest } from "lucide-react";
 import { listNumberLabel } from "@/domain/sop/authoring";
 import { formatDate } from "@/domain/formatting";
 import Link from "next/link";
@@ -40,21 +40,21 @@ export function EffectiveLibrary({
   const router = useRouter();
   const [userId, setUserId] = useState<string>();
   const [changing, setChanging] = useState<SopListItem | null>(null);
-  const [kind, setKind] = useState<ChangeSignificance>("MINOR");
-  const [reason, setReason] = useState("");
+  const [changeAnchor, setChangeAnchor] = useState<DOMRect | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { void getUserFromSession(createPlannerSupabaseClient()).then(({ data }) => setUserId(data.user?.id)); }, []);
-  async function startChange() {
-    if (!changing || !reason.trim() || saving) return;
+  async function startChange(kind: ChangeSignificance) {
+    if (!changing || saving) return;
     setSaving(true); setError("");
     try {
       const control = await getSopControl(changing.id);
       if (!control || control.status !== "effective") throw new Error("A working change already exists or this SOP is no longer effective.");
-      await transitionSop(changing.id, "draft", control.updatedAt, { changeSignificance: kind, revisionReason: reason.trim() });
-      router.push(`/sops/${changing.id}?step=document`);
+      router.push(`/sops/${changing.id}?change=${kind}`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The change could not be started."); }
     finally { setSaving(false); }
   }
+  const currentChangeVersion = changing ? parseVersion(changing.version) : null;
+  const nextChangeVersion = (kind: ChangeSignificance) => currentChangeVersion ? `(${formatVersion(nextVersion(currentChangeVersion, kind))})` : undefined;
   const seededFromServer =
     initialSops !== undefined &&
     initialDepartments !== undefined &&
@@ -147,16 +147,11 @@ export function EffectiveLibrary({
         </div>
       </div>
 
-      {changing ? <ModalSurface label="Make a controlled change" onCancel={() => { if (!saving) setChanging(null); }}><section className="ui-panel w-[min(36rem,calc(100vw-2rem))] space-y-3 p-5">
-        <h2 className="ui-setup-section-title">Make a change · {changing.title}</h2>
-        <p className="text-xs text-ink-secondary">The current release remains effective until Quality releases the replacement.</p>
-        <div className="flex gap-2">{(["MINOR", "MAJOR"] as const).map((value) => <button key={value} type="button" aria-pressed={kind === value} className="ui-btn-ghost border border-line px-3"
-          onClick={() => setKind(value)}>{value === "MINOR" ? "Minor revision" : "New version"} · {formatVersion(nextVersion(parseVersion(changing.version) ?? { major: 1, minor: 0 }, value))}</button>)}</div>
-        <p className="text-xs text-ink-tertiary">{kind === "MINOR" ? "Unchanged approvals are carried forward. Only new or replacement approvers review and sign; Quality must approve the release." : "Every approver completes the full review and signature loop again."}</p>
-        <label className="block text-xs">Reason for change<textarea className="ui-field-standalone mt-2 w-full" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-        <div className="flex gap-2"><button type="button" disabled={saving || !reason.trim()} className="ui-btn-primary px-3" onClick={() => void startChange()}>{saving ? "Creating draft…" : "Create draft"}</button>
-        <button type="button" disabled={saving} className="ui-btn-ghost px-3" onClick={() => setChanging(null)}>Cancel</button></div>
-      </section></ModalSurface> : null}
+      {changing && changeAnchor ? <UiContextMenu anchorRect={changeAnchor} ariaLabel="Make a change" density="comfortable" menuWidth={200}
+        onClose={() => { setChanging(null); setChangeAnchor(null); }} items={[
+          { id: "minor", label: "Minor Revision", hint: nextChangeVersion("MINOR"), disabled: !currentChangeVersion, onSelect: () => void startChange("MINOR") },
+          { id: "major", label: "New Version", hint: nextChangeVersion("MAJOR"), disabled: !currentChangeVersion, onSelect: () => void startChange("MAJOR") },
+        ]} /> : null}
       {error ? <div className="ui-notice ui-notice-warn px-4 py-3 ui-section-subtitle">{error}</div> : null}
 
       {listStatus === "loading" ? (
@@ -183,6 +178,7 @@ export function EffectiveLibrary({
                           <th className="px-5 py-3 text-[11px] font-medium text-ink-secondary">Title</th>
                           <th className="w-32 px-5 py-3 text-[11px] font-medium text-ink-secondary">Status</th>
                           <th className="w-28 px-5 py-3 text-[11px] font-medium text-ink-secondary">Updated</th>
+                          <th className="w-24 px-3 py-3"><span className="sr-only">Actions</span></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -192,7 +188,7 @@ export function EffectiveLibrary({
                           return (
                             <Fragment key={group.key}>
                               <tr className="border-b border-line bg-canvas/70">
-                                <th colSpan={4} className="px-5 py-2.5 text-left">
+                                <th colSpan={5} className="px-5 py-2.5 text-left">
                                   <div className="flex items-center justify-between gap-3">
                                     <span className="truncate text-sm font-semibold text-ink">{name}</span>
                                     <span className="shrink-0 text-xs font-normal tabular-nums text-ink-tertiary">
@@ -203,6 +199,10 @@ export function EffectiveLibrary({
                               </tr>
                               {group.sops.map((sop) => {
                             const previewHref = `/sops/${sop.id}/released`;
+                            const releasedVersion = parseVersion(sop.version ?? "");
+                            const workingVersion = parseVersion(sop.workingVersion ?? "");
+                            const isMinor = sop.changeSignificance === "MINOR" || (!sop.changeSignificance && releasedVersion && workingVersion && releasedVersion.major === workingVersion.major);
+                            const changeLabel = `${isMinor ? "New revision" : "New version"}${sop.workingVersion ? ` (${sop.workingVersion})` : ""} in progress`;
                             return (
                               <tr
                                 key={sop.id}
@@ -220,25 +220,32 @@ export function EffectiveLibrary({
                                   </Link>
                                 </td>
                                 <td className="max-w-0 px-5 py-3.5 align-middle">
-                                  <Link href={previewHref} className="block min-w-0">
-                                    <span className="block truncate text-[13px] font-medium leading-snug text-ink">
+                                  <Link href={previewHref} className="flex min-w-0 items-baseline gap-2">
+                                    <span className="truncate text-[13px] font-medium leading-snug text-ink">
                                       {sop.title || sop.sopNumber || "Untitled SOP"}
                                     </span>
                                     {sop.version ? (
-                                      <span className="mt-1 block text-[11px] text-ink-tertiary">Version {sop.version}</span>
+                                      <span className="shrink-0 whitespace-nowrap text-[11px] text-ink-tertiary">Version {sop.version}</span>
                                     ) : null}
                                   </Link>
                                 </td>
                                 <td className="px-5 py-3.5 align-middle">
+                                  <div className="flex items-center gap-2">
                                   <span className="inline-flex shrink-0 items-center rounded bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">
                                     {SOP_STATUS_LABELS.effective}
                                   </span>
+                                  {sop.hasWorkingDraft ? <Link href={`/sops/${sop.id}`} aria-label={changeLabel} className="group/change relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-tertiary hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                                    <GitPullRequest size={14} aria-hidden="true" />
+                                    <span role="tooltip" className="pointer-events-none absolute bottom-full right-0 z-20 mb-1 hidden whitespace-nowrap rounded border border-line bg-surface px-2 py-1 text-[11px] text-ink shadow-sm group-hover/change:block group-focus-visible/change:block">{changeLabel}</span>
+                                  </Link> : null}
+                                  </div>
                                 </td>
                                 <td className="px-5 py-3.5 align-middle text-[12px] tabular-nums text-ink-tertiary">
                                   {formatDate(sop.updatedAt) || "—"}
-                                  {sop.hasWorkingDraft ? <Link className="mt-2 block text-xs underline" href={`/sops/${sop.id}`}>Version {sop.workingVersion} in progress</Link> :
-                                    userId === sop.createdBy && canEditSops && sop.supportsControlledChanges ? <button type="button" className="ui-btn-ghost mt-2 h-8 gap-1 px-2 text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 max-sm:opacity-100"
-                                      onClick={() => { setChanging(sop); setReason(""); setKind("MINOR"); }}><Pencil size={12} />Make a change</button> : null}
+                                </td>
+                                <td className="px-2 py-2.5 align-middle">
+                                  {!sop.hasWorkingDraft && userId === sop.createdBy && canEditSops && sop.supportsControlledChanges ? <button type="button" title="Make a change" disabled={saving} aria-haspopup="menu" aria-expanded={changing?.id === sop.id} className="ui-btn-ghost h-8 w-8 px-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 max-sm:opacity-100"
+                                      onClick={(event) => { setChanging(sop); setChangeAnchor(event.currentTarget.getBoundingClientRect()); }}><Pencil size={14} /><span className="sr-only">Make a change</span></button> : null}
                                 </td>
                               </tr>
                             );

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 export type ContextMenuItem = {
   id: string;
   label: string;
+  hint?: string;
   danger?: boolean;
   disabled?: boolean;
   onSelect: () => void;
@@ -80,6 +81,7 @@ export function UiContextMenu({
             key={item.id}
             type="button"
             role="menuitem"
+            aria-label={item.hint ? `${item.label} ${item.hint}` : undefined}
             className={`ui-context-menu-item ${item.danger ? "ui-context-menu-item-danger" : ""}`}
             disabled={item.disabled}
             onClick={() => {
@@ -91,7 +93,7 @@ export function UiContextMenu({
               onClose();
             }}
           >
-            {item.label}
+            {item.label}{item.hint ? <span className="ml-2 text-[11px] text-ink-tertiary">{` ${item.hint}`}</span> : null}
           </button>
         ))}
       </div>

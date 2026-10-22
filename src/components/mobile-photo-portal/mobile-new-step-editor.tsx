@@ -132,7 +132,7 @@ export function MobileNewStepEditor({
         </button>
       </div>
       {errorMessage ? (
-        <div className="m-3 rounded border border-danger/30 bg-danger-muted px-3 py-2 ui-photo-mobile-caption text-danger">
+        <div className="m-3 rounded border border-line bg-surface px-3 py-2 ui-photo-mobile-caption text-danger">
           {errorMessage}
           {saveState === "error" ? (
             <button

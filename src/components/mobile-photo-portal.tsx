@@ -2958,7 +2958,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
           </div>
         ) : null}
         {confirmPrompt ? (
-          <div className="mb-3 rounded-md border border-danger/30 bg-danger-muted p-3">
+          <div className="mb-3 rounded-md border border-line bg-surface p-3">
             <div className="ui-photo-mobile-notice-title text-danger">{confirmPrompt.title}</div>
             <div className="ui-photo-mobile-notice-body">{confirmPrompt.body}</div>
             <div className="mt-3 grid grid-cols-2 gap-2">
@@ -3018,7 +3018,7 @@ function AccountMobilePhotoPortal({ projectId, projectContext, onBackToProjects,
                   />
         ) : (
         <section className="min-w-0 ui-panel">
-          {errorMessage && !showNewStepForm ? <div role="alert" className="m-3 rounded border border-danger/30 bg-danger-muted px-3 py-2 ui-photo-mobile-caption text-danger">
+          {errorMessage && !showNewStepForm ? <div role="alert" className="m-3 rounded border border-line bg-surface px-3 py-2 ui-photo-mobile-caption text-danger">
             {errorMessage}
             {failedDraftPatchesRef.current.size > 0 ? <button type="button" className="ui-photo-mobile-btn-secondary mt-2" disabled={writesPending} onClick={() => void retryFailedStepSaves()}>Retry save</button> : null}
           </div> : null}

@@ -6,14 +6,9 @@
   align-items: flex-start;
   gap: 10px 14px;
   padding: 10px 12px;
-  border: 1px solid var(--color-line);
-  border-left: 3px solid var(--color-accent);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   font-size: 12px;
-}
-
-.notif-admin-health[data-healthy="false"] {
-  border-left-color: #dc2626;
 }
 
 .notif-admin-health ul {
@@ -32,7 +27,7 @@
   padding: 6px 8px;
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .notif-admin-table th {
@@ -48,7 +43,7 @@
 .notif-state {
   display: inline-block;
   padding: 1px 6px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   font-size: 11px;
   font-weight: 600;
@@ -56,19 +51,16 @@
 }
 
 .notif-state[data-state="sent"] {
-  border-color: #059669;
-  color: #059669;
+  color: var(--color-success);
 }
 
 .notif-state[data-state="dead"],
 .notif-state[data-state="blocked"] {
-  border-color: #dc2626;
-  color: #dc2626;
+  color: var(--color-danger);
 }
 
 .notif-state[data-state="pending"] {
-  border-color: #b45309;
-  color: #b45309;
+  color: var(--color-warn-strong);
 }
 
 .notif-admin-error {
@@ -89,7 +81,7 @@
   min-width: 0;
   height: 32px;
   padding: 0 8px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   background: var(--color-surface);
   color: var(--color-ink);

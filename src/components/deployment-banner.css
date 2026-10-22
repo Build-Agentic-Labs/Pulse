@@ -9,7 +9,7 @@
   line-height: 16px;
   letter-spacing: 0.02em;
   text-align: center;
-  color: #1c1917;
-  background: #fde68a;
-  border-bottom: 1px solid #f59e0b;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
 }

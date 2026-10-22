@@ -90,6 +90,7 @@ export function SopDetailClient({
       <SopEditor
         key={state.record.sop.id}
         initial={state.record.sop}
+        documentRecovered={state.record.documentRecovered}
         workspaceId={state.record.workspaceId}
         owningDepartment={state.department}
         canEdit={

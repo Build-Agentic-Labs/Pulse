@@ -32,16 +32,22 @@ describe("Effective Library controlled changes", () => {
     show();
     expect(screen.getByRole("link", { name: /Controlled document/ }).getAttribute("href")).toBe("/sops/s1/released");
     fireEvent.click(await screen.findByRole("button", { name: "Make a change" }));
-    expect(screen.getByRole("button", { name: /Minor revision · 1.1/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /New version · 2.0/ }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Reason for change" }), { target: { value: "Change the process" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
-    await waitFor(() => expect(transitionSop).toHaveBeenCalledWith("s1", "draft", "token", { changeSignificance: "MAJOR", revisionReason: "Change the process" }));
-    expect(push).toHaveBeenCalledWith("/sops/s1?step=document");
+    expect(screen.getByRole("menuitem", { name: "Minor Revision (1.1)" })).toBeTruthy();
+    expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "New Version (2.0)" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/sops/s1?change=MAJOR"));
+    expect(transitionSop).not.toHaveBeenCalled();
+  });
+  it("shows the actual next numbers for an already revised SOP", async () => {
+    show([{ ...row, version: "3.9" }]);
+    fireEvent.click(await screen.findByRole("button", { name: "Make a change" }));
+    expect(screen.getByRole("menuitem", { name: "Minor Revision (3.10)" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "New Version (4.0)" })).toBeTruthy();
   });
   it("does not offer a second draft while a controlled change is open", async () => {
-    show([{ ...row, hasWorkingDraft: true, workingVersion: "1.1" }]);
-    expect(await screen.findByRole("link", { name: /1.1 in progress/ })).toBeTruthy();
+    show([{ ...row, hasWorkingDraft: true, workingVersion: "1.1", changeSignificance: "MINOR" }]);
+    expect(await screen.findByRole("link", { name: /New revision \(1.1\) in progress/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Make a change" })).toBeNull();
   });
   it("does not offer author actions to another member", async () => {
@@ -54,8 +60,7 @@ describe("Effective Library controlled changes", () => {
     vi.mocked(getSopControl).mockResolvedValue({ status: "draft" } as Awaited<ReturnType<typeof getSopControl>>);
     show();
     fireEvent.click(await screen.findByRole("button", { name: "Make a change" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Reason for change" }), { target: { value: "Fix typo" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Minor Revision (1.1)" }));
     expect(await screen.findByText(/working change already exists/)).toBeTruthy();
     expect(transitionSop).not.toHaveBeenCalled();
   });

@@ -19,6 +19,9 @@ export function ControlledChangeHistory({ sopId, refreshKey, releasedOnly = fals
     {rows.map((row) => <div key={row.review_cycle} className="mt-3 border-t border-line pt-3 text-xs">
       <p className="font-medium">{row.from_version} → {row.to_version} · {row.kind === "MINOR" ? "Minor revision" : "New version"} · {row.released_at ? "Effective" : row.closed_at ? "Returned by Quality" : "Pending release"}</p>
       <p className="mt-1 text-ink-secondary">{row.reason}</p>
+      <p className="mt-1 text-ink-secondary">Sections affected: {row.sections_affected || "Not recorded"}</p>
+      {row.impact_confirmed_at ? <p className="mt-1 text-ink-tertiary">Impact assessment{row.process_owner_confirmed ? " and process-owner no-impact confirmation" : ""} · {row.impact_confirmed_by_name || row.impact_confirmed_by} · {formatDate(row.impact_confirmed_at)}</p> : null}
+      {row.quality_confirmed_at ? <p className="mt-1 text-ink-tertiary">Classification, document and history verified by Quality / Document Control · {row.quality_confirmed_by_name || row.quality_confirmed_by} · {formatDate(row.quality_confirmed_at)}</p> : null}
       {row.closed_reason ? <p className="mt-1 text-ink-secondary">Quality feedback: {row.closed_reason}</p> : null}
       <p className="mt-1 text-ink-tertiary">Requested {formatDate(row.requested_at)} · Author {row.requested_by_name}</p>
       {row.released_at ? <p className="mt-1 text-ink-tertiary">Released by Quality {row.released_by_name} · {formatDate(row.released_at)}</p> : null}

@@ -133,12 +133,19 @@ describe("SOP editor approval orchestration", () => {
 });
 
 describe("controlled-change submission", () => {
+  it("does not submit a controlled change without its required assessment", async () => {
+    vi.mocked(getSopControl).mockResolvedValue({ ...control, effectiveRevisionId: "release-1", changeSignificance: "MINOR" });
+    await expect(submitEditorDraft({ sopId: "test", persist: async () => true, seats: [], readyForSignatures: false })).rejects.toThrow("Complete the change impact assessment");
+    expect(transitionSop).not.toHaveBeenCalled();
+    expect(signSop).not.toHaveBeenCalled();
+  });
+
   it("uses the server-controlled route for a minor revision and opens Quality when approvals carry", async () => {
     const rpc = vi.fn(async () => ({ data: null, error: null }));
     vi.mocked(createPlannerSupabaseClient).mockReturnValue({ rpc } as unknown as ReturnType<typeof createPlannerSupabaseClient>);
     vi.mocked(getSopControl).mockResolvedValueOnce({ ...control, effectiveRevisionId: "release-1", changeSignificance: "MINOR" })
       .mockResolvedValueOnce({ ...control, status: "approved", effectiveRevisionId: "release-1", changeSignificance: "MINOR" });
-    const result = await submitEditorDraft({ sopId: "test", persist: async () => true, seats: [], readyForSignatures: false });
+    const result = await submitEditorDraft({ sopId: "test", persist: async () => true, seats: [], readyForSignatures: false, impactAssessment: { impactConfirmed: true, processOwnerConfirmed: true } });
     expect(rpc).toHaveBeenCalledWith("submit_sop_controlled_draft", { p_sop: "test", p_expected_hash: "hash", p_expected_cycle: 1 });
     expect(result?.destination).toBe("quality-approval");
     expect(transitionSop).not.toHaveBeenCalled();

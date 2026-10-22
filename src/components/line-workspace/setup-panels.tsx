@@ -899,7 +899,7 @@ export function NomenclatureSetupPanel({
         </div>
 
         {duplicateCodeEntries.length || uncodedTaskCount ? (
-          <div className="rounded border border-warn/35 bg-warn-muted px-3 py-2 text-sm font-semibold text-ink">
+          <div className="rounded border border-line bg-surface px-3 py-2 text-sm font-semibold text-ink">
             {duplicateCodeEntries.length ? (
               <div>
                 Duplicate task codes:{" "}

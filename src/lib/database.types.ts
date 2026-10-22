@@ -1895,6 +1895,48 @@ export type Database = {
           },
         ]
       }
+      sop_approval_carry_forwards: {
+        Row: {
+          department_id: string
+          review_cycle: number
+          signer_id: string
+          sop_id: string
+          source_signature_id: string
+          source_version: string
+        }
+        Insert: {
+          department_id: string
+          review_cycle: number
+          signer_id: string
+          sop_id: string
+          source_signature_id: string
+          source_version: string
+        }
+        Update: {
+          department_id?: string
+          review_cycle?: number
+          signer_id?: string
+          sop_id?: string
+          source_signature_id?: string
+          source_version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_approval_carry_forwards_sop_id_review_cycle_fkey"
+            columns: ["sop_id", "review_cycle"]
+            isOneToOne: false
+            referencedRelation: "sop_change_requests"
+            referencedColumns: ["sop_id", "review_cycle"]
+          },
+          {
+            foreignKeyName: "sop_approval_carry_forwards_source_signature_id_fkey"
+            columns: ["source_signature_id"]
+            isOneToOne: false
+            referencedRelation: "sop_signatures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sop_approver_delivery_payloads: {
         Row: {
           content: Json
@@ -1920,7 +1962,6 @@ export type Database = {
       }
       sop_approver_nominations: {
         Row: {
-          seat_id: string
           created_by: string
           delivered_at: string | null
           delivery_id: string
@@ -1928,10 +1969,10 @@ export type Database = {
           department_id: string
           email: string
           position_title: string
+          seat_id: string
           sop_id: string
         }
         Insert: {
-          seat_id: string
           created_by?: string
           delivered_at?: string | null
           delivery_id?: string
@@ -1939,10 +1980,10 @@ export type Database = {
           department_id: string
           email: string
           position_title: string
+          seat_id: string
           sop_id: string
         }
         Update: {
-          seat_id?: string
           created_by?: string
           delivered_at?: string | null
           delivery_id?: string
@@ -1950,13 +1991,14 @@ export type Database = {
           department_id?: string
           email?: string
           position_title?: string
+          seat_id?: string
           sop_id?: string
         }
         Relationships: [
           {
             foreignKeyName: "sop_approver_nominations_seat_fkey"
             columns: ["seat_id", "sop_id", "department_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "sop_review_seats"
             referencedColumns: ["id", "sop_id", "department_id"]
           },
@@ -2009,6 +2051,114 @@ export type Database = {
           },
           {
             foreignKeyName: "sop_change_log_sop_id_fkey"
+            columns: ["sop_id"]
+            isOneToOne: false
+            referencedRelation: "sops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sop_change_requests: {
+        Row: {
+          approval_handling: Json | null
+          base_revision_id: string
+          closed_at: string | null
+          closed_reason: string | null
+          from_version: string
+          impact_confirmed_at: string | null
+          impact_confirmed_by: string | null
+          impact_content_hash: string | null
+          impact_files: Json | null
+          impact_roster: Json | null
+          kind: string
+          original_roster: Json
+          process_owner_confirmed: boolean
+          quality_confirmed_at: string | null
+          quality_confirmed_by: string | null
+          quality_content_hash: string | null
+          quality_files: Json | null
+          quality_roster: Json | null
+          reason: string
+          release_roster: Json | null
+          released_at: string | null
+          released_by: string | null
+          requested_at: string
+          requested_by: string
+          review_cycle: number
+          sections_affected: string | null
+          sop_id: string
+          to_version: string
+        }
+        Insert: {
+          approval_handling?: Json | null
+          base_revision_id: string
+          closed_at?: string | null
+          closed_reason?: string | null
+          from_version: string
+          impact_confirmed_at?: string | null
+          impact_confirmed_by?: string | null
+          impact_content_hash?: string | null
+          impact_files?: Json | null
+          impact_roster?: Json | null
+          kind: string
+          original_roster: Json
+          process_owner_confirmed?: boolean
+          quality_confirmed_at?: string | null
+          quality_confirmed_by?: string | null
+          quality_content_hash?: string | null
+          quality_files?: Json | null
+          quality_roster?: Json | null
+          reason: string
+          release_roster?: Json | null
+          released_at?: string | null
+          released_by?: string | null
+          requested_at?: string
+          requested_by: string
+          review_cycle: number
+          sections_affected?: string | null
+          sop_id: string
+          to_version: string
+        }
+        Update: {
+          approval_handling?: Json | null
+          base_revision_id?: string
+          closed_at?: string | null
+          closed_reason?: string | null
+          from_version?: string
+          impact_confirmed_at?: string | null
+          impact_confirmed_by?: string | null
+          impact_content_hash?: string | null
+          impact_files?: Json | null
+          impact_roster?: Json | null
+          kind?: string
+          original_roster?: Json
+          process_owner_confirmed?: boolean
+          quality_confirmed_at?: string | null
+          quality_confirmed_by?: string | null
+          quality_content_hash?: string | null
+          quality_files?: Json | null
+          quality_roster?: Json | null
+          reason?: string
+          release_roster?: Json | null
+          released_at?: string | null
+          released_by?: string | null
+          requested_at?: string
+          requested_by?: string
+          review_cycle?: number
+          sections_affected?: string | null
+          sop_id?: string
+          to_version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_change_requests_base_revision_id_fkey"
+            columns: ["base_revision_id"]
+            isOneToOne: false
+            referencedRelation: "sop_revisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sop_change_requests_sop_id_fkey"
             columns: ["sop_id"]
             isOneToOne: false
             referencedRelation: "sops"
@@ -2243,6 +2393,45 @@ export type Database = {
           },
         ]
       }
+      sop_release_files: {
+        Row: {
+          file_id: string
+          metadata: Json
+          revision_id: string
+          sop_id: string
+          storage_path: string
+        }
+        Insert: {
+          file_id: string
+          metadata: Json
+          revision_id: string
+          sop_id: string
+          storage_path: string
+        }
+        Update: {
+          file_id?: string
+          metadata?: Json
+          revision_id?: string
+          sop_id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sop_release_files_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: false
+            referencedRelation: "sop_revisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sop_release_files_sop_id_fkey"
+            columns: ["sop_id"]
+            isOneToOne: false
+            referencedRelation: "sops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sop_review_annotations: {
         Row: {
           author_name: string
@@ -2307,27 +2496,27 @@ export type Database = {
       }
       sop_review_seats: {
         Row: {
-          id: string
           created_by: string | null
           department_id: string
+          id: string
           rasic: Database["public"]["Enums"]["sop_rasic"]
           signer_id: string | null
           sop_id: string
           updated_at: string
         }
         Insert: {
-          id?: string
           created_by?: string | null
           department_id: string
+          id?: string
           rasic: Database["public"]["Enums"]["sop_rasic"]
           signer_id?: string | null
           sop_id: string
           updated_at?: string
         }
         Update: {
-          id?: string
           created_by?: string | null
           department_id?: string
+          id?: string
           rasic?: Database["public"]["Enums"]["sop_rasic"]
           signer_id?: string | null
           sop_id?: string
@@ -2384,159 +2573,6 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "sop_review_submissions_sop_id_fkey"
-            columns: ["sop_id"]
-            isOneToOne: false
-            referencedRelation: "sops"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      sop_approval_carry_forwards: {
-        Row: {
-          department_id: string
-          review_cycle: number
-          signer_id: string
-          sop_id: string
-          source_signature_id: string
-          source_version: string
-        }
-        Insert: {
-          department_id: string
-          review_cycle: number
-          signer_id: string
-          sop_id: string
-          source_signature_id: string
-          source_version: string
-        }
-        Update: {
-          department_id?: string
-          review_cycle?: number
-          signer_id?: string
-          sop_id?: string
-          source_signature_id?: string
-          source_version?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sop_approval_carry_forwards_sop_id_review_cycle_fkey"
-            columns: ["sop_id", "review_cycle"]
-            isOneToOne: false
-            referencedRelation: "sop_change_requests"
-            referencedColumns: ["sop_id", "review_cycle"]
-          },
-          {
-            foreignKeyName: "sop_approval_carry_forwards_source_signature_id_fkey"
-            columns: ["source_signature_id"]
-            isOneToOne: false
-            referencedRelation: "sop_signatures"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      sop_change_requests: {
-        Row: {
-          approval_handling: Json | null
-          base_revision_id: string
-          closed_at: string | null
-          closed_reason: string | null
-          from_version: string
-          kind: string
-          original_roster: Json
-          reason: string
-          release_roster: Json | null
-          released_at: string | null
-          released_by: string | null
-          requested_at: string
-          requested_by: string
-          review_cycle: number
-          sop_id: string
-          to_version: string
-        }
-        Insert: {
-          approval_handling?: Json | null
-          base_revision_id: string
-          closed_at?: string | null
-          closed_reason?: string | null
-          from_version: string
-          kind: string
-          original_roster: Json
-          reason: string
-          release_roster?: Json | null
-          released_at?: string | null
-          released_by?: string | null
-          requested_at?: string
-          requested_by: string
-          review_cycle: number
-          sop_id: string
-          to_version: string
-        }
-        Update: {
-          approval_handling?: Json | null
-          base_revision_id?: string
-          closed_at?: string | null
-          closed_reason?: string | null
-          from_version?: string
-          kind?: string
-          original_roster?: Json
-          reason?: string
-          release_roster?: Json | null
-          released_at?: string | null
-          released_by?: string | null
-          requested_at?: string
-          requested_by?: string
-          review_cycle?: number
-          sop_id?: string
-          to_version?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sop_change_requests_base_revision_id_fkey"
-            columns: ["base_revision_id"]
-            isOneToOne: false
-            referencedRelation: "sop_revisions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sop_change_requests_sop_id_fkey"
-            columns: ["sop_id"]
-            isOneToOne: false
-            referencedRelation: "sops"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      sop_release_files: {
-        Row: {
-          file_id: string
-          metadata: Json
-          revision_id: string
-          sop_id: string
-          storage_path: string
-        }
-        Insert: {
-          file_id: string
-          metadata: Json
-          revision_id: string
-          sop_id: string
-          storage_path: string
-        }
-        Update: {
-          file_id?: string
-          metadata?: Json
-          revision_id?: string
-          sop_id?: string
-          storage_path?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sop_release_files_revision_id_fkey"
-            columns: ["revision_id"]
-            isOneToOne: false
-            referencedRelation: "sop_revisions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sop_release_files_sop_id_fkey"
             columns: ["sop_id"]
             isOneToOne: false
             referencedRelation: "sops"
@@ -4546,18 +4582,6 @@ export type Database = {
       }
     }
     Functions: {
-      return_sop_controlled_change: { Args: { p_sop: string; p_reason: string; p_expected_hash: string; p_require_full_review?: boolean }; Returns: undefined }
-
-      sop_file_is_released: { Args: { p_path: string }; Returns: boolean }
-      submit_sop_controlled_draft: {
-        Args: { p_sop: string; p_expected_hash: string; p_expected_cycle: number }
-        Returns: undefined
-      }
-      list_sop_carried_approvals: { Args: { p_sops: string[] }; Returns: Json }
-      list_sop_controlled_changes: { Args: { p_sop: string }; Returns: Json }
-      get_sop_effective_release: { Args: { p_sop: string }; Returns: Json }
-      list_sop_effective_library: { Args: { p_workspace: string }; Returns: Json }
-
       acquire_sop_submission_lock: {
         Args: { p_sop_id: string }
         Returns: string
@@ -4601,6 +4625,28 @@ export type Database = {
         Returns: boolean
       }
       close_moot_objections: { Args: { p_sop: string }; Returns: undefined }
+      confirm_sop_change_impact: {
+        Args: {
+          p_expected_cycle: number
+          p_expected_hash: string
+          p_impact_confirmed: boolean
+          p_process_owner_confirmed: boolean
+          p_sections: string
+          p_sop: string
+        }
+        Returns: undefined
+      }
+      confirm_sop_change_quality: {
+        Args: {
+          p_classification_confirmed: boolean
+          p_document_verified: boolean
+          p_expected_cycle: number
+          p_expected_hash: string
+          p_history_verified: boolean
+          p_sop: string
+        }
+        Returns: undefined
+      }
       create_awi_master: {
         Args: {
           p_document_number?: string
@@ -4665,6 +4711,11 @@ export type Database = {
         Args: { p_error?: string; p_id: string }
         Returns: undefined
       }
+      get_sop_detected_changes: {
+        Args: { p_document?: Json; p_sop: string }
+        Returns: string[]
+      }
+      get_sop_effective_release: { Args: { p_sop: string }; Returns: Json }
       has_department_role: {
         Args: {
           dept_id: string
@@ -4735,6 +4786,12 @@ export type Database = {
         Returns: boolean
       }
       is_super_admin: { Args: never; Returns: boolean }
+      list_sop_carried_approvals: { Args: { p_sops: string[] }; Returns: Json }
+      list_sop_controlled_changes: { Args: { p_sop: string }; Returns: Json }
+      list_sop_effective_library: {
+        Args: { p_workspace: string }
+        Returns: Json
+      }
       load_quality_wi_document: {
         Args: { p_id: string; p_workspace: string }
         Returns: Json
@@ -4824,7 +4881,12 @@ export type Database = {
         Returns: boolean
       }
       reassign_sop_seat: {
-        Args: { p_department: string; p_new_signer: string; p_sop: string; p_seat_id?: string }
+        Args: {
+          p_department: string
+          p_new_signer: string
+          p_seat_id?: string
+          p_sop: string
+        }
         Returns: undefined
       }
       redeem_workspace_access_grants: { Args: never; Returns: number }
@@ -4867,6 +4929,15 @@ export type Database = {
       }
       resolve_sop_review_annotation: {
         Args: { p_annotation: string; p_resolved?: boolean }
+        Returns: undefined
+      }
+      return_sop_controlled_change: {
+        Args: {
+          p_expected_hash: string
+          p_reason: string
+          p_require_full_review?: boolean
+          p_sop: string
+        }
         Returns: undefined
       }
       save_awi_procedure: {
@@ -4913,7 +4984,7 @@ export type Database = {
       sign_sop_with_mark: {
         Args: {
           p_cycle: number
-          // SQL accepts NULL for quality approval; the generator omits argument nullability.
+          // SQL accepts NULL for Quality signatures; the generator omits argument nullability.
           p_department: string | null
           p_hash: string
           p_meaning: string
@@ -4926,13 +4997,40 @@ export type Database = {
         Args: { p_document?: Json; p_sop: string }
         Returns: string
       }
+      sop_approver_candidate_names: {
+        Args: { p_sop: string }
+        Returns: {
+          display_name: string
+          user_id: string
+        }[]
+      }
+      sop_approver_display_names: {
+        Args: { p_sops: string[] }
+        Returns: {
+          display_name: string
+          signer_id: string
+        }[]
+      }
       sop_author_display_name: { Args: { p_sop: string }; Returns: string }
-      sop_approver_candidate_names: { Args: { p_sop: string }; Returns: { user_id: string; display_name: string | null }[] }
-      sop_approver_display_names: { Args: { p_sops: string[] }; Returns: { signer_id: string; display_name: string | null }[] }
+      sop_change_array: { Args: { p_value: Json }; Returns: Json }
+      sop_change_files: { Args: { p_sop: string }; Returns: Json }
+      sop_change_procedure: { Args: { p_value: Json }; Returns: Json }
+      sop_change_roster: { Args: { p_sop: string }; Returns: Json }
+      sop_detect_changed_sections: {
+        Args: { p_document?: Json; p_sop: string }
+        Returns: string[]
+      }
       sop_doc_hash: { Args: { doc: Json }; Returns: string }
+      sop_file_is_released: { Args: { p_path: string }; Returns: boolean }
       sop_has_open_objection: { Args: { p_sop: string }; Returns: boolean }
       sop_quorum_met: { Args: { p_sop: string }; Returns: boolean }
+      sop_released_file_readable: { Args: { p_path: string }; Returns: boolean }
+      sop_seat_approval_carried: {
+        Args: { p_department: string; p_sop: string; p_user: string }
+        Returns: boolean
+      }
       sop_self_review_test_active: { Args: { p_sop: string }; Returns: boolean }
+      sop_unanimous_review_ready: { Args: { p_sop: string }; Returns: boolean }
       sop_workspace_id: { Args: { p_sop: string }; Returns: string }
       stage_sop_approver: {
         Args: {
@@ -4940,6 +5038,14 @@ export type Database = {
           p_email: string
           p_position_title: string
           p_sop_id: string
+        }
+        Returns: undefined
+      }
+      submit_sop_controlled_draft: {
+        Args: {
+          p_expected_cycle: number
+          p_expected_hash: string
+          p_sop: string
         }
         Returns: undefined
       }
@@ -5010,7 +5116,7 @@ export type Database = {
         | "status"
         | "rating"
         | "risk_score"
-      demand_period: "shift" | "day" | "week" | "month" | "year" | "custom"
+      demand_period: "shift" | "day" | "week" | "month" | "custom" | "year"
       department_sop_role: "author" | "reviewer" | "approver"
       dependency_type:
         | "finish_to_start"
@@ -5068,12 +5174,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -5097,11 +5203,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -5122,11 +5228,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -5147,11 +5253,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -5164,11 +5270,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -5224,7 +5330,7 @@ export const Constants = {
         "rating",
         "risk_score",
       ],
-      demand_period: ["shift", "day", "week", "month", "year", "custom"],
+      demand_period: ["shift", "day", "week", "month", "custom", "year"],
       department_sop_role: ["author", "reviewer", "approver"],
       dependency_type: [
         "finish_to_start",

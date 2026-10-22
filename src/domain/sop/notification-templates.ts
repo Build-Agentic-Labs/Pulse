@@ -88,6 +88,24 @@ function copyFor(input: SopEmailInput, label: string): TemplateCopy {
           ? `Your formal ${input.departmentName} department signature is needed to approve it.`
           : `Your formal department signature is needed to approve it.`,
       };
+    case "automatically_routed":
+      return {
+        subject: `Automatically sent for signatures: ${label}`,
+        eyebrow: "Awaiting signatures",
+        accent: "#7c3aed",
+        reason: AUTHOR_REASON,
+        happened: `All required reviewers selected “No comments needed” for ${label}. Pulse automatically sent it for signatures.`,
+        needed: "No action is needed from you while the required signatures are collected.",
+      };
+    case "awaiting_quality":
+      return {
+        subject: `Awaiting final Quality approval: ${label}`,
+        eyebrow: "Awaiting Quality approval",
+        accent: "#059669",
+        reason: AUTHOR_REASON,
+        happened: `${label} has every required department signature and was automatically routed to Quality for final approval.`,
+        needed: "No action is needed from you while an independent Quality approver reviews and signs it.",
+      };
     case "quality_release_requested":
       return {
         subject: `Ready for release: ${label}`,

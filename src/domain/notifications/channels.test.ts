@@ -10,6 +10,8 @@ describe("NOTIFICATION_KINDS", () => {
         "quality_release_requested",
         "sent_back",
         "review_complete",
+        "automatically_routed",
+        "awaiting_quality",
         "released",
         "seat_assigned",
         "objection_raised",

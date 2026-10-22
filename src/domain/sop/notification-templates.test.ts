@@ -40,6 +40,18 @@ describe("renderSopNotificationEmail", () => {
     expect(out.html).toContain("author of this SOP");
   });
 
+  it("explains automatic handoffs to the author without asking them to resend", () => {
+    const signatures = renderSopNotificationEmail(input({ kind: "automatically_routed" }));
+    expect(signatures.subject).toContain("Automatically sent for signatures");
+    expect(signatures.text).toContain("All required reviewers");
+    expect(signatures.text).toContain("No action is needed");
+    expect(signatures.html).toContain("author of this SOP");
+    const quality = renderSopNotificationEmail(input({ kind: "awaiting_quality" }));
+    expect(quality.subject).toContain("Awaiting final Quality approval");
+    expect(quality.text).toContain("every required department signature");
+    expect(quality.text).toContain("independent Quality approver");
+  });
+
   it("stall_escalated names who the SOP waits on and speaks to a workspace manager", () => {
     const out = renderSopNotificationEmail(
       input({

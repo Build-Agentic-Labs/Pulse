@@ -562,9 +562,12 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
       // 2) Ledger rows for those events — the per-recipient anti-join set.
       const eventIds = events.map((event) => event.id);
       const { data: ledgerRows, error: ledgerError } = eventIds.length
-        ? await admin.from("sop_notifications").select("event_id, recipient_id").in("event_id", eventIds)
+        ? await admin.from("sop_notifications").select("event_id, recipient_id, sop_id, kind, review_cycle, reminder_index").in("event_id", eventIds)
         : { data: [], error: null };
       if (ledgerError) throw new Error(ledgerError.message);
+      const completed = new Set((ledgerRows ?? [])
+        .filter((row) => row.kind === "review_complete" && row.reminder_index === 0)
+        .map((row) => `${row.sop_id}:${row.recipient_id}:${row.review_cycle}`));
       const covered = new Set((ledgerRows ?? []).map((row) => `${row.event_id}:${row.recipient_id}`));
 
       // 3) Stalled SOPs (reminders, escalations) + the event window's SOPs, one context load.
@@ -577,6 +580,11 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
         if (!ctx) continue;
         for (const pending of resolveEventRecipients(event, ctx)) {
           if (covered.has(`${event.id}:${pending.recipientId}`)) continue;
+          if (pending.kind === "review_complete") {
+            const key = `${pending.sopId}:${pending.recipientId}:${pending.reviewCycle}`;
+            if (completed.has(key)) continue;
+            completed.add(key);
+          }
           eventItems.push({ pending, event });
         }
       }
@@ -662,8 +670,11 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
 
       const bundle = await loader.loadContext(Array.from(new Set(rows.map((row) => row.sop_id))));
       await loader.loadEmails(bundle, rows.map((row) => row.recipient_id));
+      await loader.loadChannels(bundle, rows.map((row) => row.recipient_id));
 
       return rows.flatMap((row) => {
+        const sop = bundle.sops.get(row.sop_id);
+        if (!sop || sop.deleted_at || sop.review_cycle !== row.review_cycle) return [];
         const item = toItem(
           bundle,
           {
@@ -678,7 +689,7 @@ export function createSopNotificationDrainStore(admin: SupabaseClient<Database>)
           "Pulse",
           row.reminder_index > 0 ? row.reminder_index * REMINDER_AFTER_DAYS : null,
         );
-        if (!item) return [];
+        if (!item || !item.channels.email || item.channels.suppressed) return [];
         // The snapshot taken at claim time is what the idempotency key was issued
         // for; only rows claimed before snapshots existed fall back to a re-render.
         const content = snapshotContent(row.content) ?? item.content;

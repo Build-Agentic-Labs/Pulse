@@ -22,6 +22,8 @@ export const NOTIFICATION_KINDS: Record<string, NotificationKindMeta> = {
   final_approval_requested: { label: "Signature needed", group: "sop", defaultEmail: true },
   quality_release_requested: { label: "Ready for release", group: "sop", defaultEmail: true },
   sent_back: { label: "Sent back with remarks", group: "sop", defaultEmail: true },
+  automatically_routed: { label: "Automatically sent for signatures", group: "sop", defaultEmail: true },
+  awaiting_quality: { label: "Awaiting Quality approval", group: "sop", defaultEmail: true },
   review_complete: { label: "Ready for final approval", group: "sop", defaultEmail: true },
   released: { label: "SOP released", group: "sop", defaultEmail: true },
   seat_assigned: { label: "Review seat assigned to you", group: "sop", defaultEmail: true },

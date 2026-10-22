@@ -1,5 +1,6 @@
 "use client";
 
+import { automaticRoutingDetails } from "@/domain/sop/activity-label";
 import { useCoalescedRefresh } from "@/lib/use-coalesced-refresh";
 
 import { kickSopNotifications } from "@/lib/sop/notify-kick";
@@ -1933,10 +1934,13 @@ export function SopEditor({
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-ink-tertiary" aria-hidden />
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium text-ink">
-                            {AUDIT_EVENT_LABELS[event.eventType] ?? event.eventType.replaceAll("_", " ")}
+                            {automaticRoutingDetails(event.eventType, event.details)?.title ?? AUDIT_EVENT_LABELS[event.eventType] ?? event.eventType.replaceAll("_", " ")}
                           </p>
+                          {automaticRoutingDetails(event.eventType, event.details) ? <p className="mt-1 text-[11px] leading-4 text-ink-secondary">
+                            {automaticRoutingDetails(event.eventType, event.details)?.reason}
+                          </p> : null}
                           <p className="mt-1 text-[11px] leading-4 text-ink-tertiary">
-                            {event.actorName || "System"} · Review cycle {event.reviewCycle + 1}
+                            {automaticRoutingDetails(event.eventType, event.details) ? "System" : event.actorName || "System"} · Review cycle {event.reviewCycle + 1}
                           </p>
                         </div>
                         <span className="shrink-0 text-[11px] tabular-nums text-ink-tertiary">

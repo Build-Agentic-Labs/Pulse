@@ -121,6 +121,15 @@ describe("createSopNotificationDrainStore.collect — author stall context", () 
     expect(firstTouch[0].content.subject).toBe('Ready for final approval: SOP-0042 "Line Clearance"');
   });
 
+  it("does not repeat completion for a different event already claimed in this cycle", async () => {
+    const store = createSopNotificationDrainStore(makeAdmin(fixtures({
+      sop_notifications: { data: [{ event_id: 49, recipient_id: AUTHOR, sop_id: "sop-1",
+        kind: "review_complete", review_cycle: 0, reminder_index: 0 }], error: null },
+    })));
+    const batch = await store.collect(now, origin);
+    expect(batch.items.filter((item) => item.pending.kind === "review_complete" && item.pending.eventId !== null)).toEqual([]);
+  });
+
   it("counts only UNRESOLVED current-cycle remarks as blocking", async () => {
     const store = createSopNotificationDrainStore(
       makeAdmin(
@@ -146,6 +155,45 @@ describe("createSopNotificationDrainStore.collect — author stall context", () 
       { recipientId: AUTHOR, kind: "review_complete", sopId: "sop-1", eventId: null, reminderIndex: 1, reviewCycle: 0 },
     ]);
     expect(reminders[0].content.subject).toContain("Reminder: Ready for final approval");
+  });
+});
+
+describe("automatic routing notification collection", () => {
+  const now = new Date("2026-07-29T18:28:00Z");
+  it("queues the author notice and signature request for the reviewer who triggered the route", async () => {
+    const store = createSopNotificationDrainStore(makeAdmin(fixtures({
+      sops: { data: [{ ...sopRow, final_approval_requested_at: "2026-07-29T18:27:33Z",
+        final_approval_content_hash: "hash-1" }], error: null },
+      sop_event_log: { data: [{ id: 51, sop_id: "sop-1", review_cycle: 0,
+        event_type: "final_approval_requested", actor_id: REVIEWER, actor_name: "Last Reviewer",
+        details: { automatic: true }, created_at: "2026-07-29T18:27:33Z" }], error: null },
+      profiles: { data: [{ id: AUTHOR, email: "author@anacorp.com" },
+        { id: REVIEWER, email: "reviewer@anacorp.com" }], error: null },
+    })));
+    const { items } = await store.collect(now, origin);
+    expect(items.map((item) => [item.pending.recipientId, item.pending.kind])).toEqual([
+      [REVIEWER, "final_approval_requested"], [AUTHOR, "automatically_routed"],
+    ]);
+    const author = items.find((item) => item.pending.recipientId === AUTHOR)!;
+    expect(author.channels.email).toBe(true);
+    expect(author.content.text).toContain("automatically sent it for signatures");
+    expect(author.inbox.link).toBe("/sops/sop-1");
+    expect(author.content.text).not.toContain("send it for final approval");
+  });
+
+  it("queues an author notice when all department signatures route the SOP to Quality", async () => {
+    const store = createSopNotificationDrainStore(makeAdmin(fixtures({
+      sops: { data: [{ ...sopRow, status: "approved", approved_at: "2026-07-29T18:27:33Z" }], error: null },
+      sop_event_log: { data: [{ id: 52, sop_id: "sop-1", review_cycle: 0,
+        event_type: "status_changed", actor_id: REVIEWER, actor_name: "Last Signer",
+        details: { to_status: "approved", automatic_review_routing: true }, created_at: "2026-07-29T18:27:33Z" }], error: null },
+    })));
+    const { items } = await store.collect(now, origin);
+    const author = items.find((item) => item.pending.kind === "awaiting_quality")!;
+    expect(author.pending.recipientId).toBe(AUTHOR);
+    expect(author.channels.email).toBe(true);
+    expect(author.content.subject).toContain("Awaiting final Quality approval");
+    expect(author.inbox.link).toBe("/sops/sop-1");
   });
 });
 
@@ -183,6 +231,23 @@ describe("createSopNotificationDrainStore.retryItems", () => {
     );
     const items = await createSopNotificationDrainStore(admin).retryItems(now, origin);
     expect(items).toEqual([{ ledgerId: 9, email: "reviewer@anacorp.com", content: stored, attempts: 0 }]);
+  });
+
+  it.each(["previous-cycle", "deleted", "opt-out", "suppressed"])("does not retry %s mail", async (reason) => {
+    const store = createSopNotificationDrainStore(makeAdmin(fixtures({
+      sop_notifications: { data: [{
+        id: 9, sop_id: "sop-1", recipient_id: REVIEWER, kind: "review_requested",
+        reminder_index: 0, review_cycle: reason === "previous-cycle" ? -1 : 0,
+        attempts: 0, last_attempt_at: null, created_at: hoursAgo(2), content: stored,
+      }], error: null },
+      sops: { data: [{ ...sopRow, deleted_at: reason === "deleted" ? hoursAgo(1) : null }], error: null },
+      profiles: { data: [{ id: REVIEWER, email: "reviewer@anacorp.com" }], error: null },
+      notification_preferences: { data: reason === "opt-out" ? [{
+        user_id: REVIEWER, workspace_id: "", kind: "review_requested", channel: "email", mode: "off",
+      }] : [], error: null },
+      email_suppressions: { data: reason === "suppressed" ? [{ email: "reviewer@anacorp.com" }] : [], error: null },
+    })));
+    expect(await store.retryItems(now, origin)).toEqual([]);
   });
 
   it("re-renders only rows claimed before content snapshots existed", async () => {

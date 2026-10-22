@@ -120,6 +120,15 @@ describe("resolveEventRecipients: final_approval_requested", () => {
     expect(out.every((n) => n.kind === "final_approval_requested")).toBe(true);
   });
 
+  it("automatically requests every signature and notifies the author exactly once", () => {
+    const out = resolveEventRecipients(event({
+      eventType: "final_approval_requested", actorId: "acct", details: { automatic: true },
+    }), fa());
+    expect(out.find((item) => item.recipientId === "author")?.kind).toBe("automatically_routed");
+    expect(out.filter((item) => item.kind === "automatically_routed")).toHaveLength(1);
+    expect(out.filter((item) => item.kind === "final_approval_requested").map((item) => item.recipientId).sort()).toEqual(["acct", "resp"]);
+  });
+
   it("skips when the content changed after the request (phase reset)", () => {
     const c = ctx({
       sop: sop({ finalApprovalRequestedAt: "2026-07-21T13:00:00Z", finalApprovalContentHash: "old-hash" }),
@@ -130,7 +139,7 @@ describe("resolveEventRecipients: final_approval_requested", () => {
 
 describe("resolveEventRecipients: quality gate", () => {
   const approvedEvent = () =>
-    event({ eventType: "status_changed", actorId: "resp", details: { from_status: "in_review", to_status: "approved" } });
+    event({ eventType: "status_changed", actorId: "resp", details: { from_status: "in_review", to_status: "approved", automatic_review_routing: true } });
   const qctx = () =>
     ctx({
       sop: sop({ status: "approved" }),
@@ -145,8 +154,14 @@ describe("resolveEventRecipients: quality gate", () => {
 
   it("emails only unbarred quality approvers", () => {
     const out = resolveEventRecipients(approvedEvent(), qctx());
-    expect(ids(out)).toEqual(["q-clean"]);
-    expect(out[0].kind).toBe("quality_release_requested");
+    expect(ids(out)).toEqual(["author", "q-clean"]);
+    expect(out.find((item) => item.recipientId === "q-clean")?.kind).toBe("quality_release_requested");
+    expect(out.find((item) => item.recipientId === "author")?.kind).toBe("awaiting_quality");
+  });
+
+  it("does not backfill author notices for historical or manually routed SOPs", () => {
+    const old = approvedEvent();
+    expect(ids(resolveEventRecipients({ ...old, details: { to_status: "approved" } }, qctx()))).toEqual(["q-clean"]);
   });
 
   it("ignores status_changed events that are not -> approved", () => {
@@ -174,7 +189,7 @@ describe("resolveEventRecipients: quality gate", () => {
       ],
     };
     const out = resolveEventRecipients(approvedEvent(), withActorAsApprover);
-    expect(ids(out)).toEqual(["q-clean"]);
+    expect(ids(out)).toEqual(["author", "q-clean"]);
   });
 });
 
@@ -333,7 +348,7 @@ describe("resolveReminders", () => {
     });
     const out = resolveReminders(NOW, [q]);
     expect(ids(out)).toEqual(["q-clean"]);
-    expect(out[0].kind).toBe("quality_release_requested");
+    expect(out.find((item) => item.recipientId === "q-clean")?.kind).toBe("quality_release_requested");
   });
 
   it("self-cancels: a recalled SOP produces no reminders", () => {
@@ -357,6 +372,7 @@ describe("resolveEventRecipients: review_complete", () => {
   const returnedEvent = (over: Partial<NotifiableEvent> = {}): NotifiableEvent =>
     event({
       id: 20,
+      createdAt: "2026-07-22T12:00:00Z",
       eventType: "review_returned",
       actorId: "acct",
       actorName: "Ann Acct",
@@ -368,6 +384,23 @@ describe("resolveEventRecipients: review_complete", () => {
     expect(resolveEventRecipients(returnedEvent(), completeCtx())).toEqual([
       { recipientId: "author", kind: "review_complete", sopId: "sop-1", eventId: 20, reminderIndex: 0, reviewCycle: 1 },
     ]);
+  });
+
+  it("does not replay earlier reviewer acceptances when the last review arrives", () => {
+    const complete = completeCtx({
+      reviewReturns: [returned("resp", true, "2026-07-21T12:00:00Z"), returned("acct")],
+    });
+    expect(resolveEventRecipients(returnedEvent({
+      id: 19, actorId: "resp", details: { no_changes: true, reviewer_id: "resp" },
+      createdAt: "2026-07-21T12:00:00Z",
+    }), complete)).toEqual([]);
+    expect(resolveEventRecipients(returnedEvent(), complete)).toHaveLength(1);
+  });
+
+  it("ignores returns from people who no longer hold a required seat", () => {
+    expect(resolveEventRecipients(returnedEvent({
+      details: { no_changes: true, reviewer_id: "supp" },
+    }), completeCtx({ reviewReturns: [returned("resp"), returned("acct"), returned("supp")] }))).toEqual([]);
   });
 
   it("stays silent while a required approver is still waiting", () => {
@@ -418,6 +451,13 @@ describe("resolveReminders: author stalls", () => {
     eventId: null,
     reminderIndex,
     reviewCycle: 1,
+  });
+
+  it("asks for rework rather than final approval when a reviewer requested changes without an open remark", () => {
+    const pending = resolveReminders(NOW, [state({
+      reviewReturns: [returned("resp", false)],
+    })]);
+    expect(pending.map((item) => item.kind)).toEqual(["sent_back"]);
   });
 
   it("nudges the author when every review is back and remarks are addressed", () => {

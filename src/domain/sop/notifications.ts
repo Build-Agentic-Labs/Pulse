@@ -36,6 +36,8 @@ export type SopNotificationKind =
   | "quality_release_requested"
   | "sent_back"
   | "review_complete"
+  | "automatically_routed"
+  | "awaiting_quality"
   | "stall_escalated"
   | "released"
   | "seat_assigned"
@@ -161,6 +163,8 @@ function latestReturnAt(returns: ReviewReturnSnapshot[]): string | null {
 }
 
 interface EventDetails {
+  automatic?: boolean;
+  automaticReviewRouting?: boolean;
   toStatus?: string;
   noChanges?: boolean;
   meaning?: string;
@@ -175,6 +179,8 @@ function parseEventDetails(details: unknown): EventDetails {
   const record = details as Record<string, unknown>;
   const str = (key: string): string | undefined => (typeof record[key] === "string" ? (record[key] as string) : undefined);
   return {
+    automatic: record.automatic === true,
+    automaticReviewRouting: record.automatic_review_routing === true,
     toStatus: str("to_status"),
     noChanges: typeof record.no_changes === "boolean" ? record.no_changes : undefined,
     meaning: str("meaning"),
@@ -252,7 +258,11 @@ export function resolveEventRecipients(
 
     case "final_approval_requested": {
       if (sop.status !== "in_review" || !finalApprovalPhaseActive(sop)) return [];
-      return seatRecipients(event, ctx, "final_approval_requested", isBlocking);
+      const automatic = parseEventDetails(event.details).automatic === true;
+      // The last reviewer triggered this event but still owes their own formal signature.
+      const signers = seatRecipients(automatic ? { ...event, actorId: null } : event, ctx, "final_approval_requested", isBlocking);
+      if (!parseEventDetails(event.details).automatic || !sop.authorId) return signers;
+      return [...signers, firstTouch(ctx, event, sop.authorId, "automatically_routed")];
     }
 
     case "status_changed": {
@@ -269,7 +279,7 @@ export function resolveEventRecipients(
       }
       if (toStatus !== "approved") return [];
       if (sop.status !== "approved") return [];
-      return ctx.qualityApprovers
+      return [...(sop.authorId && parseEventDetails(event.details).automaticReviewRouting ? [firstTouch(ctx, event, sop.authorId, "awaiting_quality")] : []), ...ctx.qualityApprovers
         .filter(
           (approver) =>
             !approver.holdsSeat &&
@@ -278,7 +288,7 @@ export function resolveEventRecipients(
             approver.userId !== sop.submittedBy &&
             approver.userId !== event.actorId,
         )
-        .map((approver) => firstTouch(ctx, event, approver.userId, "quality_release_requested"));
+        .map((approver) => firstTouch(ctx, event, approver.userId, "quality_release_requested"))];
     }
 
     case "seat_reassigned": {
@@ -338,7 +348,7 @@ export function resolveEventRecipients(
     }
 
     case "review_returned": {
-      const { noChanges } = parseEventDetails(event.details);
+      const { noChanges, reviewerId } = parseEventDetails(event.details);
       // Malformed details -> no mail.
       if (noChanges === undefined) return [];
       if (noChanges === false) {
@@ -352,6 +362,16 @@ export function resolveEventRecipients(
       if (!everyBlockingSignerReturned(ctx.seats, ctx.reviewReturns)) return [];
       if (anyChangesRequested(ctx.seats, ctx.reviewReturns)) return [];
       if (ctx.openAnnotationCount > 0) return [];
+      // Historical acceptances are scanned again when the last reviewer returns.
+      // Only the last current required reviewer owns the completion event.
+      const required = new Set(blockingSignerIds(ctx.seats));
+      const lastReturn = ctx.reviewReturns
+        .filter((entry) => required.has(entry.reviewerId))
+        .slice()
+        .sort((a, b) => Date.parse(b.returnedAt) - Date.parse(a.returnedAt) ||
+          a.reviewerId.localeCompare(b.reviewerId))[0];
+      if (!reviewerId || reviewerId !== lastReturn?.reviewerId ||
+          Date.parse(event.createdAt) < Date.parse(lastReturn.returnedAt)) return [];
       return authorRecipient(event, ctx, "review_complete");
     }
 
@@ -619,7 +639,7 @@ function authorCandidates(state: SopReminderState): ReminderCandidate[] {
     if (!anchorAt) return [];
     // Remarks still open: the author owes rework. None open: the author owes the
     // "send for final approval" click — the stall the pipeline used to be blind to.
-    const kind: SopNotificationKind = state.openAnnotationCount > 0 ? "sent_back" : "review_complete";
+    const kind: SopNotificationKind = state.openAnnotationCount > 0 || anyChangesRequested(state.seats, state.reviewReturns) ? "sent_back" : "review_complete";
     return [{ recipientId: sop.authorId, kind, anchorAt, departmentId: null }];
   }
 

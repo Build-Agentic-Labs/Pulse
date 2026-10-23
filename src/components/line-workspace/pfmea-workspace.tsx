@@ -4,9 +4,14 @@ import { ModalSurface } from "@/components/ui/modal-surface";
 
 import Image from "next/image";
 import {
+  Archive,
+  RotateCcw,
   AlertCircle,
   AlertTriangle,
   Check,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
   CircleHelp,
   Download,
   ExternalLink,
@@ -23,18 +28,20 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
+  formatPfmeaRevision,
+  pfmeaAssessmentState,
   calculateResidualRpn,
   calculateRowRpn,
   createPfmeaControlProposal,
   createPfmeaRowForProcedureLink,
   createPfmeaDocumentFromProcedure,
+  serializePfmeaDocument,
   duplicatePfmeaRow,
   getPfmeaRowIssues,
   getProductPfmeaDocument,
   isHighPriorityPfmeaRow,
   isPfmeaRowStarted,
   normalizePfmeaScore,
-  syncPfmeaDocumentWithProcedure,
   type PfmeaDocument,
   type PfmeaControlTarget,
   type PfmeaRow,
@@ -47,22 +54,23 @@ import {
   type PfmeaImportPreview,
   type PfmeaTabularValue,
 } from "@/domain/pfmea-import";
-import type { SaveState } from "@/domain/supabase-planner";
+import { PfmeaRowEditor } from "./pfmea-row-editor";
+import { isPfmeaActionOverdue, pfmeaActionStatus, patchPfmeaRow, pfmeaLinkIssue, previewPfmeaSync, relinkPfmeaRow } from "@/domain/pfmea-workflow";
 import type { Product, Scenario, Task, Zone } from "@/domain/types";
 
 type PfmeaWorkspaceProps = {
   product: Product;
+  workspaceId?: string;
   scenario: Scenario;
   tasks: Task[];
   zones: Zone[];
   readOnly?: boolean;
-  saveState?: SaveState;
-  saveError?: string;
+  saveResult?: { document: unknown; state: "saving" | "saved" | "error"; error?: string };
   onDocumentChange: (document: PfmeaDocument) => void;
   onOpenTask?: (taskId: string) => void;
 };
 
-type PfmeaFilter = "all" | "started" | "high" | "incomplete";
+type PfmeaFilter = "all" | "started" | "high" | "incomplete" | "not_assessed" | "complete" | "links" | "archived" | "overdue" | "awaiting_verification";
 type PfmeaColumnView = "risk" | "actions" | "all";
 
 const PFMEA_SCORE_GUIDE = [
@@ -101,6 +109,11 @@ const PFMEA_SCORE_GUIDE = [
   },
 ] as const;
 
+function localToday() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 function displayDate(value?: string) {
   if (!value) {
     return "—";
@@ -114,14 +127,6 @@ function pfmeaTabularValue(value: unknown): PfmeaTabularValue {
     return value as PfmeaTabularValue;
   }
   return String(value);
-}
-
-function saveLabel(saveState: SaveState | undefined, hasPersistedDocument: boolean) {
-  if (saveState === "saving" || saveState === "retrying") return "Saving";
-  if (saveState === "error" || saveState === "conflict") return "Save failed";
-  if (saveState === "loading") return "Loading";
-  if (saveState === "idle" || saveState === "draft") return "Unsaved changes";
-  return hasPersistedDocument ? "Saved" : "Not saved";
 }
 
 function safeExportName(value: string) {
@@ -255,20 +260,48 @@ function PfmeaModal({
 
 export function PfmeaWorkspace({
   product,
+  workspaceId,
   scenario,
   tasks,
   zones,
   readOnly = false,
-  saveState,
-  saveError,
+  saveResult,
   onDocumentChange,
   onOpenTask,
 }: PfmeaWorkspaceProps) {
   const storedDocument = useMemo(() => getProductPfmeaDocument(product.customFields), [product.customFields]);
   const productIdRef = useRef(product.id);
+  const [pendingDocument, setPendingDocument] = useState<string>();
+  const [saveNotice, setSaveNotice] = useState<"saving" | "saved" | "error">();
+  const [pfmeaError, setPfmeaError] = useState<string>();
+
+  useEffect(() => {
+    if (!pendingDocument || !saveResult || JSON.stringify(saveResult.document) !== pendingDocument) return;
+    setSaveNotice(saveResult.state);
+    setPfmeaError(saveResult.error);
+    if (saveResult.state !== "saved") return;
+    setPendingDocument(undefined);
+  }, [pendingDocument, saveResult]);
+
+  useEffect(() => {
+    if (saveNotice !== "saved") return;
+    const timer = window.setTimeout(() => setSaveNotice(undefined), 2500);
+    return () => window.clearTimeout(timer);
+  }, [saveNotice]);
   const [document, setDocument] = useState<PfmeaDocument>(() =>
     storedDocument ?? createPfmeaDocumentFromProcedure(product, scenario, tasks, zones),
   );
+  const [editingId, setEditingId] = useState<string>();
+  const [taskFilter, setTaskFilter] = useState("");
+  const [areaFilter, setAreaFilter] = useState("");
+  const gridScrollRef = useRef<HTMLDivElement>(null);
+  const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
+  useEffect(() => { if (gridScrollRef.current) gridScrollRef.current.scrollLeft = 0; }, [collapsedTasks]);
+  const [syncPreview, setSyncPreview] = useState<ReturnType<typeof previewPfmeaSync>>();
+  const [relinkId, setRelinkId] = useState<string>();
+  const [relinkTask, setRelinkTask] = useState("");
+  const [relinkStep, setRelinkStep] = useState("");
+  const [archiveId, setArchiveId] = useState<string>();
   const [filter, setFilter] = useState<PfmeaFilter>("all");
   const [columnView, setColumnView] = useState<PfmeaColumnView>("risk");
   const [query, setQuery] = useState("");
@@ -297,7 +330,17 @@ export function PfmeaWorkspace({
       return;
     }
     productIdRef.current = product.id;
+    setPendingDocument(undefined);
+    setSaveNotice(undefined);
+    setPfmeaError(undefined);
     setDocument(storedDocument ?? createPfmeaDocumentFromProcedure(product, scenario, tasks, zones));
+    setEditingId(undefined);
+    setTaskFilter("");
+    setAreaFilter("");
+    setCollapsedTasks(new Set());
+    setSyncPreview(undefined);
+    setRelinkId(undefined);
+    setArchiveId(undefined);
     setFilter("all");
     setColumnView("risk");
     setQuery("");
@@ -351,17 +394,26 @@ export function PfmeaWorkspace({
     [selectedTask],
   );
   const mappingRow = mappingRowId ? document.rows.find((row) => row.id === mappingRowId) : undefined;
-  const startedRows = useMemo(() => document.rows.filter(isPfmeaRowStarted), [document.rows]);
+  const activeRows = useMemo(() => document.rows.filter(row => !row.archivedAt), [document.rows]);
+  const startedRows = useMemo(() => activeRows.filter(isPfmeaRowStarted), [activeRows]);
   const highPriorityRows = useMemo(() => startedRows.filter(isHighPriorityPfmeaRow), [startedRows]);
   const incompleteRows = useMemo(() => startedRows.filter((row) => getPfmeaRowIssues(row).length > 0), [startedRows]);
   const staleLinkCount = useMemo(
-    () => document.rows.filter((row) => row.linkStatus !== "linked").length,
-    [document.rows],
+    () => activeRows.filter((row) => pfmeaLinkIssue(row, tasks)).length,
+    [activeRows, tasks],
   );
 
-  const visibleRows = useMemo(() => {
+  const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return document.rows.filter((row) => {
+      if (filter === "archived" ? !row.archivedAt : row.archivedAt) return false;
+      if (taskFilter && pfmeaTaskGroupKey(row) !== taskFilter) return false;
+      if (areaFilter && (row.zoneNameSnapshot || "Unassigned") !== areaFilter) return false;
+      if (filter === "overdue" && !isPfmeaActionOverdue(row, localToday())) return false;
+      if (filter === "awaiting_verification" && pfmeaActionStatus(row) !== "awaiting_verification") return false;
+      if (filter === "links" && !pfmeaLinkIssue(row, tasks)) return false;
+      if (filter === "not_assessed" && pfmeaAssessmentState(row) !== "not_assessed") return false;
+      if (filter === "complete" && pfmeaAssessmentState(row) !== "complete") return false;
       if (filter === "started" && !isPfmeaRowStarted(row)) return false;
       if (filter === "high" && !isHighPriorityPfmeaRow(row)) return false;
       if (
@@ -381,11 +433,24 @@ export function PfmeaWorkspace({
         row.recommendedActions,
       ].some((value) => value?.toLowerCase().includes(normalizedQuery));
     });
-  }, [document.rows, filter, query]);
+  }, [document.rows, filter, query, tasks, taskFilter, areaFilter]);
+  const visibleRows = useMemo(() => {
+    const groups = new Map<string, PfmeaRow[]>();
+    filteredRows.forEach(row => { const key = pfmeaTaskGroupKey(row); groups.set(key, [...(groups.get(key) ?? []), row]); });
+    return [...groups.values()].flat();
+  }, [filteredRows]);
+  const taskFilters = [...new Map(document.rows.map(row => [pfmeaTaskGroupKey(row), row.taskNameSnapshot || "Unmapped"])).entries()];
+  const areas = [...new Set(document.rows.map(row => row.zoneNameSnapshot || "Unassigned"))].sort();
+  const editingRow = document.rows.find(row => row.id === editingId);
+  function toggleTask(key: string) { setCollapsedTasks(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }); }
+
 
   function applyDocument(nextDocument: PfmeaDocument) {
     const next = { ...nextDocument, updatedAt: new Date().toISOString() };
     setDocument(next);
+    setPendingDocument(JSON.stringify(serializePfmeaDocument(next)));
+    setSaveNotice("saving");
+    setPfmeaError(undefined);
     onDocumentChange(next);
   }
 
@@ -394,10 +459,9 @@ export function PfmeaWorkspace({
   }
 
   function updateRow(rowId: string, patch: Partial<PfmeaRow>) {
-    const timestamp = new Date().toISOString();
     applyDocument({
       ...document,
-      rows: document.rows.map((row) => (row.id === rowId ? { ...row, ...patch, updatedAt: timestamp } : row)),
+      rows: document.rows.map((row) => (row.id === rowId ? patchPfmeaRow(row, patch) : row)),
     });
   }
 
@@ -575,15 +639,10 @@ export function PfmeaWorkspace({
   }
 
   function syncProcedure() {
-    applyDocument(syncPfmeaDocumentWithProcedure(document, scenario, tasks, zones));
+    setSyncPreview(previewPfmeaSync(document, scenario, tasks, zones));
   }
 
-  const currentSaveLabel = saveLabel(saveState, Boolean(storedDocument));
-  const saveTone = saveState === "error" || saveState === "conflict"
-    ? "text-danger"
-    : saveState === "saving" || saveState === "retrying"
-      ? "text-warning"
-      : "text-ink-secondary";
+  const workspaceReadOnly = readOnly;
   const duplicateImport = importPreview
     ? document.imports.some((record) => record.sourceKey === importPreview.record.sourceKey)
     : false;
@@ -602,16 +661,18 @@ export function PfmeaWorkspace({
               <p className="ui-pfmea-document-subtitle">Process Failure Mode and Effects Analysis</p>
               <p className="ui-pfmea-document-reference">
                 <span>{document.documentNumber}</span>
-                <span>Rev {document.revision}</span>
+                <span>{formatPfmeaRevision(document.revision)}</span>
                 <span>{displayDate(document.originalDate)}</span>
               </p>
             </div>
           </div>
           <div className="ui-pfmea-head-actions">
-            <span className={`text-xs ${saveTone}`} title={saveError}>
-              {saveState === "saved" && storedDocument ? <Check className="mr-1 inline" size={13} aria-hidden="true" /> : null}
-              {currentSaveLabel}
-            </span>
+            {saveNotice ? (
+              <span role="status" aria-label="PFMEA save status" className="text-xs text-ink-secondary" title={pfmeaError}>
+                {saveNotice === "saved" ? <Check className="mr-1 inline" size={13} aria-hidden="true" /> : null}
+                {saveNotice === "saving" ? "Saving…" : saveNotice === "saved" ? "Saved" : "Save failed"}
+              </span>
+            ) : null}
             <input
               ref={importInputRef}
               className="sr-only"
@@ -719,10 +780,17 @@ export function PfmeaWorkspace({
           </div>
           <select aria-label="Filter PFMEA rows" value={filter} onChange={(event) => setFilter(event.target.value as PfmeaFilter)}>
             <option value="all">All process rows</option>
-            <option value="started">Risks started ({startedRows.length})</option>
+            <option value="overdue">Overdue actions</option>
+            <option value="awaiting_verification">Awaiting verification</option>
+            <option value="links">Links need review ({staleLinkCount})</option>
+            <option value="archived">Archived ({document.rows.length - activeRows.length})</option>
+            <option value="not_assessed">Not assessed ({activeRows.length - startedRows.length})</option>
+            <option value="complete">Complete ({startedRows.length - incompleteRows.length})</option>
             <option value="high">High priority ({highPriorityRows.length})</option>
-            <option value="incomplete">Incomplete ({incompleteRows.length})</option>
+            <option value="incomplete">In progress ({incompleteRows.length})</option>
           </select>
+          <select aria-label="Filter PFMEA task" value={taskFilter} onChange={event => setTaskFilter(event.target.value)}><option value="">All tasks</option>{taskFilters.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
+          <select aria-label="Filter PFMEA area" value={areaFilter} onChange={event => setAreaFilter(event.target.value)}><option value="">All areas</option>{areas.map(area => <option key={area} value={area}>{area}</option>)}</select>
           <select aria-label="PFMEA column view" value={columnView} onChange={(event) => setColumnView(event.target.value as PfmeaColumnView)}>
             <option value="risk">Core risk fields</option>
             <option value="actions">Action tracking</option>
@@ -736,7 +804,15 @@ export function PfmeaWorkspace({
           <span className="ml-auto">RPN = Severity × Occurrence × Detection</span>
         </div>
 
-        <div className="ui-pfmea-grid-wrap">
+        <div className="ui-pfmea-progress" aria-label="Assessment progress">
+          {staleLinkCount > 0 ? <button type="button" onClick={() => setFilter("links")} className="underline">{staleLinkCount} links need review</button> : null}
+          <span>Not assessed <strong>{activeRows.length - startedRows.length}</strong></span>
+          <span>In progress <strong>{incompleteRows.length}</strong></span>
+          <span>Complete <strong>{startedRows.length - incompleteRows.length}</strong></span>
+          <button type="button" className="ml-auto" onClick={() => setCollapsedTasks(new Set(visibleRows.map(pfmeaTaskGroupKey)))}>Collapse tasks</button>
+          <button type="button" onClick={() => setCollapsedTasks(new Set())}>Expand tasks</button>
+        </div>
+        <div className="ui-pfmea-grid-wrap" ref={gridScrollRef}>
           <table className="ui-pfmea-grid" data-column-view={columnView}>
             <thead>
               <tr>
@@ -747,7 +823,7 @@ export function PfmeaWorkspace({
                 <th data-pfmea-column="risk-detail" title="Severity">S</th>
                 <th data-pfmea-column="risk-detail">Potential cause</th>
                 <th data-pfmea-column="risk-detail" title="Occurrence">O</th>
-                <th data-pfmea-column="risk-detail">Current process controls</th>
+                <th data-pfmea-column="risk-detail">Prevention controls</th>
                 <th data-pfmea-column="risk-detail" title="Detection">D</th>
                 <th data-pfmea-column="risk-detail">Detection activity</th>
                 <th data-pfmea-column="shared">RPN</th>
@@ -763,6 +839,7 @@ export function PfmeaWorkspace({
             </thead>
             <tbody>
               {visibleRows.map((row, index) => {
+                const readOnly = workspaceReadOnly || Boolean(row.archivedAt);
                 const rowRpn = calculateRowRpn(row);
                 const residualRpn = calculateResidualRpn(row);
                 const highPriority = isHighPriorityPfmeaRow(row);
@@ -783,6 +860,10 @@ export function PfmeaWorkspace({
                 const rowIssues = getPfmeaRowIssues(row);
                 const issueFields = new Set(rowIssues.map((issue) => issue.field));
                 const rowLabel = row.processStepSnapshot || row.taskNameSnapshot || `row ${index + 1}`;
+                if (collapsedTasks.has(taskGroupKey)) {
+                  if (!startsTask) return null;
+                  return <tr key={row.id} className="ui-pfmea-task-start ui-pfmea-collapsed"><td colSpan={columnView === "all" ? 19 : 12}><button type="button" className="ui-pfmea-group-toggle" aria-expanded={false} onClick={() => toggleTask(taskGroupKey)}><ChevronRight size={14} />{row.taskCodeSnapshot} · {row.taskNameSnapshot} · {normalizedTaskRowSpan} rows</button></td></tr>;
+                }
                 return (
                   <tr
                     key={row.id}
@@ -795,6 +876,7 @@ export function PfmeaWorkspace({
                         rowSpan={normalizedTaskRowSpan}
                         title={row.zoneNameSnapshot || undefined}
                       >
+                        <button type="button" className="ui-pfmea-group-toggle" aria-label={`Collapse ${row.taskNameSnapshot || "task"}`} aria-expanded={true} onClick={() => toggleTask(taskGroupKey)}><ChevronDown size={14} />Collapse</button>
                         <button
                           type="button"
                           disabled={!task || !onOpenTask}
@@ -805,29 +887,29 @@ export function PfmeaWorkspace({
                           <span>{row.taskNameSnapshot || "Choose a Procedure task"}</span>
                           {task && onOpenTask ? <ExternalLink size={11} aria-hidden="true" /> : null}
                         </button>
-                        {row.linkStatus !== "linked" ? (
-                          <em><AlertTriangle size={11} aria-hidden="true" /> {row.linkStatus}</em>
-                        ) : null}
+
                       </td>
                     ) : null}
                     {startsStep ? (
                       <td className="ui-pfmea-step-cell" data-pfmea-column="shared" rowSpan={normalizedStepRowSpan}>
                         <span>{row.stepSequenceSnapshot ? `Step ${row.stepSequenceSnapshot}` : "Task level"}</span>
                         <strong>{row.processStepSnapshot || "Unmapped process step"}</strong>
-                        <button type="button" className="ui-pfmea-add-failure" disabled={readOnly} onClick={() => addFailureMode(row)}>
+                        <button type="button" className="ui-pfmea-add-failure" onClick={() => setEditingId(row.id)}><Pencil size={11} />Edit risk</button>
+
+                        <button type="button" className="ui-pfmea-add-failure" disabled={readOnly || Boolean(row.archivedAt)} onClick={() => addFailureMode(row)}>
                           <Plus size={11} aria-hidden="true" />
                           Failure mode
                         </button>
                       </td>
                     ) : null}
-                    <td data-pfmea-column="shared"><PfmeaTextCell label={`Failure mode for ${rowLabel}`} value={row.failureMode} placeholder="What could fail?" readOnly={readOnly} invalid={issueFields.has("failureMode")} autoFocus={focusRowId === row.id} onChange={(value) => updateRow(row.id, { failureMode: value })} /></td>
+                    <td data-pfmea-column="shared"><PfmeaTextCell label={`Failure mode for ${rowLabel}`} value={row.failureMode} placeholder="What could fail?" readOnly={readOnly} invalid={issueFields.has("failureMode")} autoFocus={focusRowId === row.id} onChange={(value) => updateRow(row.id, { failureMode: value })} />                        {pfmeaLinkIssue(row, tasks) ? <button type="button" className="ui-pfmea-link-review" disabled={readOnly} onClick={() => { setRelinkId(row.id); setRelinkTask(task?.id ?? ""); setRelinkStep(""); }}><AlertTriangle size={12} aria-hidden="true" />{pfmeaLinkIssue(row, tasks)} · Review</button> : null}</td>
                     <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Failure effect for ${rowLabel}`} value={row.effect} placeholder="What happens?" readOnly={readOnly} invalid={issueFields.has("effect")} onChange={(value) => updateRow(row.id, { effect: value })} /></td>
                     <td data-pfmea-column="risk-detail"><PfmeaScoreCell label={`Severity for ${rowLabel}`} value={row.severity} readOnly={readOnly} invalid={issueFields.has("severity")} onChange={(value) => updateRow(row.id, { severity: value })} /></td>
                     <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Failure cause for ${rowLabel}`} value={row.cause} placeholder="What causes it?" readOnly={readOnly} invalid={issueFields.has("cause")} onChange={(value) => updateRow(row.id, { cause: value })} /></td>
                     <td data-pfmea-column="risk-detail"><PfmeaScoreCell label={`Occurrence for ${rowLabel}`} value={row.occurrence} readOnly={readOnly} invalid={issueFields.has("occurrence")} onChange={(value) => updateRow(row.id, { occurrence: value })} /></td>
                     <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Current controls for ${rowLabel}`} value={row.currentControls} placeholder="Existing prevention controls" readOnly={readOnly} invalid={issueFields.has("currentControls")} onChange={(value) => updateRow(row.id, { currentControls: value })} /></td>
                     <td data-pfmea-column="risk-detail"><PfmeaScoreCell label={`Detection for ${rowLabel}`} value={row.detection} readOnly={readOnly} invalid={issueFields.has("detection")} onChange={(value) => updateRow(row.id, { detection: value })} /></td>
-                    <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Detection activity for ${rowLabel}`} value={row.detectionActivity} placeholder="How is it detected?" readOnly={readOnly} onChange={(value) => updateRow(row.id, { detectionActivity: value })} /></td>
+                    <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Detection activity for ${rowLabel}`} value={row.detectionActivity} placeholder="How is it detected?" readOnly={readOnly} invalid={issueFields.has("detectionActivity")} onChange={(value) => updateRow(row.id, { detectionActivity: value })} /></td>
                     <td data-pfmea-column="shared"><PfmeaRpnCell label={`Current RPN for ${rowLabel}`} value={rowRpn} high={highPriority} /></td>
                     <td data-pfmea-column="action">
                       <div className="ui-pfmea-action-cell">
@@ -838,7 +920,7 @@ export function PfmeaWorkspace({
                         </button>
                       </div>
                     </td>
-                    <td data-pfmea-column="action"><PfmeaTextCell label={`Action owner for ${rowLabel}`} value={row.actionOwner} placeholder="Owner" readOnly={readOnly} invalid={issueFields.has("actionOwner")} onChange={(value) => updateRow(row.id, { actionOwner: value })} /></td>
+                    <td data-pfmea-column="action"><button type="button" className="ui-pfmea-owner" onClick={() => setEditingId(row.id)}>{row.actionOwner || "Choose owner"}</button><span className="ui-pfmea-action-status">{pfmeaActionStatus(row)?.replaceAll("_", " ") || "No action"}{isPfmeaActionOverdue(row, localToday()) ? " · Overdue" : ""}</span></td>
                     <td data-pfmea-column="action">
                       <input
                         aria-label={`Target date for ${rowLabel}`}
@@ -863,6 +945,8 @@ export function PfmeaWorkspace({
                           {rowIssues.length}
                         </span>
                       ) : null}
+                      <button type="button" aria-label={`Edit risk for ${rowLabel}`} title="Open focused editor" onClick={() => setEditingId(row.id)}><Pencil size={13} /></button>
+                      <button type="button" disabled={workspaceReadOnly} aria-label={row.archivedAt ? "Restore" : "Archive"} title={row.archivedAt ? "Restore row" : "Archive row"} onClick={() => row.archivedAt ? updateRow(row.id, { archivedAt: undefined }) : setArchiveId(row.id)}>{row.archivedAt ? <RotateCcw size={13} /> : <Archive size={13} />}</button>
                       <button type="button" title="Delete this failure mode" aria-label={`Delete PFMEA row for ${rowLabel}`} disabled={readOnly} onClick={() => setPendingDeleteRow(row)}><Trash2 size={13} /></button>
                     </td>
                   </tr>
@@ -986,6 +1070,17 @@ export function PfmeaWorkspace({
           </div>
         </PfmeaModal>
       ) : null}
+
+
+      {editingRow ? <PfmeaModal title="Edit risk" onClose={() => setEditingId(undefined)}><PfmeaRowEditor key={editingRow.id} row={editingRow} workspaceId={workspaceId} readOnly={readOnly || Boolean(editingRow.archivedAt)} onCancel={() => setEditingId(undefined)} onSave={next => { applyDocument({ ...document, rows: document.rows.map(row => row.id === next.id ? next : row) }); setEditingId(undefined); }} /></PfmeaModal> : null}
+      {syncPreview ? <PfmeaModal title="Review Procedure changes" description="Refresh source labels and add new steps. Existing risk analysis is preserved; missing sources remain for review." onClose={() => setSyncPreview(undefined)} actions={<><button className="ui-btn-secondary h-9" onClick={() => setSyncPreview(undefined)}>Cancel</button><button className="ui-btn-primary h-9" disabled={readOnly} onClick={() => { applyDocument(syncPreview.next); setSyncPreview(undefined); }}>Apply sync</button></>}>
+        {([['Added', syncPreview.added], ['Changed', syncPreview.changed], ['Source missing', syncPreview.missing]] as const).map(([label, rows]) => <section key={label} className="ui-pfmea-sync-section"><h4>{label} ({rows.length})</h4><ul>{rows.map(row => <li key={row.id}>{row.taskCodeSnapshot} · {row.processStepSnapshot || row.taskNameSnapshot}</li>)}</ul></section>)}
+      </PfmeaModal> : null}
+      {relinkId ? <PfmeaModal title="Review source link" description="Relink this risk to an existing task or step, or archive it. Its analysis will be retained." onClose={() => setRelinkId(undefined)} actions={<><button className="ui-btn-secondary h-9" disabled={readOnly} onClick={() => { setArchiveId(relinkId); setRelinkId(undefined); }}>Archive row</button><button className="ui-btn-primary h-9" disabled={readOnly || !relinkTask} onClick={() => { const row = document.rows.find(row => row.id === relinkId); const task = taskById.get(relinkTask); if (row && task) updateRow(row.id, relinkPfmeaRow(row, task, relinkStep || undefined, zones)); setRelinkId(undefined); }}>Relink</button></>}>
+        <div className="ui-pfmea-form-grid"><label><span>Procedure task</span><select aria-label="Relink task" value={relinkTask} onChange={event => { setRelinkTask(event.target.value); setRelinkStep(""); }}><option value="">Choose a task</option>{procedureTaskOptions.map(task => <option key={task.id} value={task.id}>{task.manufacturingCode || task.wbs} · {task.name}</option>)}</select></label>
+        <label><span>Process step</span><select aria-label="Relink step" value={relinkStep} onChange={event => setRelinkStep(event.target.value)}><option value="">Task-level risk</option>{taskById.get(relinkTask)?.manufacturingSteps?.map(step => <option key={step.id} value={step.id}>{step.sequence} · {step.name}</option>)}</select></label></div>
+      </PfmeaModal> : null}
+      {archiveId ? <PfmeaModal title="Archive risk row?" description="Keep the analysis in Archived and remove it from the active register. You can restore it later." onClose={() => setArchiveId(undefined)} actions={<><button className="ui-btn-secondary h-9" onClick={() => setArchiveId(undefined)}>Cancel</button><button className="ui-btn-primary h-9" disabled={readOnly} onClick={() => { updateRow(archiveId, { archivedAt: new Date().toISOString() }); setArchiveId(undefined); }}>Archive</button></>}><p>{document.rows.find(row => row.id === archiveId)?.processStepSnapshot}</p></PfmeaModal> : null}
 
       {showScoringGuide ? (
         <PfmeaModal

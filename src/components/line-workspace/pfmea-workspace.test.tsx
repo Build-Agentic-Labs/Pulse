@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { emptyPlannerState } from "@/domain/empty-planner-state";
-import { PRODUCT_PFMEA_DOCUMENT_FIELD, type PfmeaDocument } from "@/domain/pfmea";
+import { PRODUCT_PFMEA_DOCUMENT_FIELD, createPfmeaDocumentFromProcedure, serializePfmeaDocument, type PfmeaDocument } from "@/domain/pfmea";
 import type { Product, Task } from "@/domain/types";
 import { PfmeaWorkspace } from "./pfmea-workspace";
 
@@ -50,7 +50,6 @@ function Harness({
       scenario={{ ...emptyPlannerState.scenario, id: "scenario-current", name: "Current production" }}
       tasks={tasks}
       zones={emptyPlannerState.zones}
-      saveState="saved"
       onDocumentChange={onChange}
       onOpenTask={vi.fn()}
     />
@@ -58,6 +57,36 @@ function Harness({
 }
 
 describe("PFMEA workspace", () => {
+  it("shows only acknowledgement of the latest PFMEA edit and briefly confirms success", () => {
+    vi.useFakeTimers();
+    try {
+      const onChange = vi.fn();
+      const props = {
+        product: { ...emptyPlannerState.product, id: "product-flexboost" },
+        scenario: { ...emptyPlannerState.scenario, id: "scenario-current" },
+        tasks: [fixtureTask()], zones: emptyPlannerState.zones,
+        onDocumentChange: onChange, onOpenTask: vi.fn(),
+      };
+      const { rerender } = render(<PfmeaWorkspace {...props} saveResult={{ document: undefined, state: "saving" }} />);
+      expect(screen.queryByRole("status", { name: "PFMEA save status" })).not.toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText("Failure mode for Remove side panel"), { target: { value: "First edit" } });
+      const first = serializePfmeaDocument(onChange.mock.calls.at(-1)![0]);
+      expect(screen.getByRole("status", { name: "PFMEA save status" })).toHaveTextContent("Saving…");
+      fireEvent.change(screen.getByLabelText("Failure mode for Remove side panel"), { target: { value: "Latest edit" } });
+      const latest = serializePfmeaDocument(onChange.mock.calls.at(-1)![0]);
+      rerender(<PfmeaWorkspace {...props} saveResult={{ document: first, state: "saved" }} />);
+      expect(screen.getByRole("status", { name: "PFMEA save status" })).toHaveTextContent("Saving…");
+      rerender(<PfmeaWorkspace {...props} saveResult={{ document: latest, state: "error", error: "Offline" }} />);
+      expect(screen.getByRole("status", { name: "PFMEA save status" })).toHaveTextContent("Save failed");
+      rerender(<PfmeaWorkspace {...props} saveResult={{ document: latest, state: "saved" }} />);
+      expect(screen.getByRole("status", { name: "PFMEA save status" })).toHaveTextContent("Saved");
+      act(() => vi.advanceTimersByTime(2500));
+      expect(screen.queryByRole("status", { name: "PFMEA save status" })).not.toBeInTheDocument();
+      rerender(<PfmeaWorkspace {...props} saveResult={{ document: latest, state: "saving" }} />);
+      expect(screen.queryByRole("status", { name: "PFMEA save status" })).not.toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("renders an ANA-branded document generated from Procedure steps", () => {
     render(<Harness />);
 
@@ -172,4 +201,50 @@ describe("PFMEA workspace", () => {
     expect(screen.getByRole("button", { name: /Export Excel/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Print \/ Save PDF/ })).toBeInTheDocument();
   });
+});
+
+it("previews synchronization without writing and archives only after confirmation", () => {
+  const onChange = vi.fn();
+  render(<Harness onChange={onChange} />);
+  expect(screen.getByLabelText("Assessment progress")).toHaveTextContent("Not assessed 1");
+  fireEvent.click(screen.getByRole("button", { name: "Sync Procedure" }));
+  expect(screen.getByRole("heading", { name: "Review Procedure changes" })).toBeInTheDocument();
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getAllByRole("button", { name: "Archive" }).at(-1)!);
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange.mock.calls[0][0].rows[0].archivedAt).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Filter PFMEA rows"), { target: { value: "archived" } });
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  expect(onChange.mock.calls.at(-1)![0].rows[0].archivedAt).toBeUndefined();
+});
+
+it("filters and collapses task groups without changing the PFMEA", () => {
+  const onChange = vi.fn(); render(<Harness onChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse Panel Removal" }));
+  expect(screen.queryByLabelText("Failure mode for Remove side panel")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Expand tasks" }));
+  expect(screen.getByLabelText("Failure mode for Remove side panel")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Filter PFMEA rows"), { target: { value: "complete" } });
+  expect(screen.getByText("No PFMEA rows match this filter.")).toBeInTheDocument();
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+it("relinks a missing source only after an explicit choice, preserving the analysis", () => {
+  const onChange = vi.fn();
+  const task = fixtureTask();
+  const scenario = { ...emptyPlannerState.scenario, id: "scenario-current" };
+  const product = { ...emptyPlannerState.product, id: "product-flexboost" };
+  const document = createPfmeaDocumentFromProcedure(product, scenario, [task], []);
+  document.rows[0].stepId = "removed"; document.rows[0].failureMode = "Keep this analysis";
+  const before = structuredClone(document);
+  render(<PfmeaWorkspace product={{ ...product, customFields: { [PRODUCT_PFMEA_DOCUMENT_FIELD]: document } }} scenario={scenario} tasks={[task]} zones={[]} onDocumentChange={onChange} />);
+  fireEvent.click(screen.getByRole("button", { name: "Source step missing · Review" }));
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Relink step"), { target: { value: "step-panel" } });
+  fireEvent.click(screen.getByRole("button", { name: /^Relink$/ }));
+  expect(onChange.mock.calls[0][0].rows[0]).toMatchObject({ stepId: "step-panel", failureMode: "Keep this analysis" });
+  expect(document).toEqual(before);
 });

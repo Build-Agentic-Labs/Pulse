@@ -93,3 +93,18 @@ describe("PFMEA exports", () => {
     expect(html).toContain(">32<");
   });
 });
+
+it('exports only active analysis and retains action verification evidence without mutating the source', async () => {
+  const document = testDocument();
+  document.revision = 'Rev A';
+  document.rows[0].actionStatus = 'closed';
+  document.rows[0].verificationNotes = 'Verified with fixture run';
+  document.rows.push({ ...document.rows[0], id:'archived', failureMode:'ARCHIVED ONLY', archivedAt:'2026-10-23' });
+  const before = structuredClone(document);
+  const html = buildPfmeaPrintHtml(document, 'Test');
+  expect(html).not.toContain('ARCHIVED ONLY'); expect(html).toContain('Verified with fixture run');
+  const zip = new PizZip(await (await buildPfmeaXlsx(document, 'Test')).arrayBuffer());
+  const sheet = zip.file('xl/worksheets/sheet1.xml')!.asText();
+  expect(sheet).not.toContain('ARCHIVED ONLY'); expect(sheet).toContain('Verified with fixture run');
+  expect(sheet).not.toContain('Rev Rev'); expect(document).toEqual(before);
+});

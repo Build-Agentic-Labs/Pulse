@@ -1,6 +1,6 @@
 import PizZip from "pizzip";
 
-import { calculateResidualRpn, calculateRowRpn, type PfmeaDocument, type PfmeaRow } from "./pfmea";
+import { formatPfmeaRevision, calculateResidualRpn, calculateRowRpn, type PfmeaDocument, type PfmeaRow } from "./pfmea";
 
 const EXPORT_COLUMNS = [
   "Procedure Task",
@@ -10,7 +10,7 @@ const EXPORT_COLUMNS = [
   "Severity",
   "Potential Cause",
   "Occurrence",
-  "Current Process Controls",
+  "Prevention Controls",
   "Detection",
   "Detection Activity",
   "RPN",
@@ -44,6 +44,10 @@ function formulaCell(reference: string, formula: string) {
   return `<c r="${reference}" s="4"><f>${xml(formula)}</f></c>`;
 }
 
+function actionEvidence(row: PfmeaRow) {
+  return [row.actionsTaken, row.actionStatus ? `Status: ${row.actionStatus.replaceAll("_", " ")}` : "", row.verificationNotes ? `Verification: ${row.verificationNotes}` : "", row.verifiedAt ? `Verified: ${row.verifiedAt}` : ""].filter(Boolean).join("\n");
+}
+
 function proposalText(row: PfmeaRow) {
   const proposals = row.controlProposals.map((proposal) => `[${proposal.target} · ${proposal.status}] ${proposal.title}`);
   return [row.recommendedActions, ...proposals].filter(Boolean).join("\n");
@@ -67,7 +71,7 @@ function worksheetXml(document: PfmeaDocument, productName: string, includeLogo:
       ${inlineCell(`L${sheetRow}`, proposalText(row))}
       ${inlineCell(`M${sheetRow}`, row.actionOwner)}
       ${inlineCell(`N${sheetRow}`, row.targetDate ?? "")}
-      ${inlineCell(`O${sheetRow}`, row.actionsTaken)}
+      ${inlineCell(`O${sheetRow}`, actionEvidence(row))}
       ${numberCell(`P${sheetRow}`, row.resultOccurrence)}
       ${numberCell(`Q${sheetRow}`, row.resultDetection)}
       ${formulaCell(`R${sheetRow}`, `IF(COUNT(E${sheetRow},P${sheetRow},Q${sheetRow})=3,E${sheetRow}*P${sheetRow}*Q${sheetRow},"")`)}
@@ -94,7 +98,7 @@ function worksheetXml(document: PfmeaDocument, productName: string, includeLogo:
   </cols>
   <sheetData>
     <row r="1" ht="34" customHeight="1">${includeLogo ? "" : inlineCell("A1", "ANA", 2)}${inlineCell("B1", `${productName} PFMEA`, 2)}</row>
-    <row r="2">${inlineCell("B2", "Process Failure Mode and Effects Analysis", 5)}${inlineCell("G2", document.documentNumber, 5)}${inlineCell("I2", `Rev ${document.revision}`, 5)}${inlineCell("K2", document.originalDate, 5)}</row>
+    <row r="2">${inlineCell("B2", "Process Failure Mode and Effects Analysis", 5)}${inlineCell("G2", document.documentNumber, 5)}${inlineCell("I2", formatPfmeaRevision(document.revision), 5)}${inlineCell("K2", document.originalDate, 5)}</row>
     <row r="3">${inlineCell("B3", `Model: ${document.model}`, 5)}${inlineCell("F3", `Responsibility: ${document.owner}`, 5)}${inlineCell("K3", `Scenario: ${document.sourceScenarioName}`, 5)}</row>
     <row r="4"/>
     <row r="5" ht="30" customHeight="1">${headerCells}</row>
@@ -146,6 +150,7 @@ function drawingXml() {
 }
 
 export async function buildPfmeaXlsx(document: PfmeaDocument, productName: string, logoBytes?: ArrayBuffer) {
+  document = { ...document, rows: document.rows.filter(row => !row.archivedAt) };
   const includeLogo = Boolean(logoBytes);
   const zip = new PizZip();
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${includeLogo ? '<Default Extension="png" ContentType="image/png"/>' : ""}<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${includeLogo ? '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' : ""}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`);
@@ -175,12 +180,13 @@ function printRows(document: PfmeaDocument) {
     <td>${xml(row.failureMode)}</td><td>${xml(row.effect)}</td><td class="score">${xml(row.severity ?? "")}</td>
     <td>${xml(row.cause)}</td><td class="score">${xml(row.occurrence ?? "")}</td><td>${xml(row.currentControls)}</td>
     <td class="score">${xml(row.detection ?? "")}</td><td>${xml(row.detectionActivity)}</td><td class="score">${xml(calculateRowRpn(row) ?? "")}</td>
-    <td>${xml(proposalText(row))}</td><td>${xml(row.actionOwner)}</td><td>${xml(row.targetDate)}</td><td>${xml(row.actionsTaken)}</td>
+    <td>${xml(proposalText(row))}</td><td>${xml(row.actionOwner)}</td><td>${xml(row.targetDate)}</td><td>${xml(actionEvidence(row))}</td>
     <td class="score">${xml(row.resultOccurrence ?? "")}</td><td class="score">${xml(row.resultDetection ?? "")}</td><td class="score">${xml(calculateResidualRpn(row) ?? "")}</td>
   </tr>`).join("");
 }
 
 export function buildPfmeaPrintHtml(document: PfmeaDocument, productName: string, logoUrl = "/sop/ana-logo.png") {
+  document = { ...document, rows: document.rows.filter(row => !row.archivedAt) };
   const headings = EXPORT_COLUMNS.map((column) => `<th>${xml(column)}</th>`).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${xml(productName)} PFMEA</title><style>
     @page{size:A3 landscape;margin:9mm}*{box-sizing:border-box}body{margin:0;color:#1f2428;font-family:Arial,sans-serif;font-size:7px}

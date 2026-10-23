@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { emptyPlannerState } from "./empty-planner-state";
 import {
+  formatPfmeaRevision,
+  pfmeaAssessmentState,
   calculatePfmeaRpn,
   calculateResidualRpn,
   createPfmeaControlProposal,
@@ -219,4 +221,18 @@ describe("PFMEA domain", () => {
     });
     expect(row).toEqual(snapshot);
   });
+});
+
+it("distinguishes unassessed rows and requires a detection control without mutating data", () => {
+  const document = createPfmeaDocumentFromProcedure(emptyPlannerState.product, emptyPlannerState.scenario, [task("a", "A", [step("s", 1, "Step")])], [], NOW);
+  const row = document.rows[0];
+  const before = structuredClone(row);
+  expect(pfmeaAssessmentState(row)).toBe("not_assessed");
+  expect(row).toEqual(before);
+  const assessed = { ...row, failureMode: "Loose", effect: "Leak", cause: "Missing torque", severity: 5, occurrence: 2, detection: 3, currentControls: "Torque specification" };
+  expect(pfmeaAssessmentState(assessed)).toBe("in_progress");
+  expect(getPfmeaRowIssues(assessed)).toContainEqual(expect.objectContaining({ field: "detectionActivity" }));
+  expect(pfmeaAssessmentState({ ...assessed, detectionActivity: "Leak test" })).toBe("complete");
+  expect(formatPfmeaRevision("Rev A")).toBe("Rev A");
+  expect(formatPfmeaRevision("A")).toBe("Rev A");
 });

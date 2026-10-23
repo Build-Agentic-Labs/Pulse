@@ -399,6 +399,7 @@ export function LineWorkspace({
     saveError,
     writeTracker,
     dirtyVersion,
+    pfmeaSaveResult,
     markDirty,
     saveInFlightRef,
     releaseShellLock,
@@ -2674,13 +2675,13 @@ export function LineWorkspace({
                     </div>
                   ) : activeModule === "pfmea" ? (
                     <PfmeaWorkspace
+                      workspaceId={activeProjectContext?.workspaceId}
                       product={derivedState.product}
                       scenario={derivedState.scenario}
                       tasks={derivedState.tasks}
                       zones={derivedState.zones}
                       readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
-                      saveState={saveState}
-                      saveError={saveError}
+                      saveResult={pfmeaSaveResult}
                       onDocumentChange={updateProductPfmeaDocument}
                       onOpenTask={(taskId) => {
                         selectTask(taskId);

@@ -6,6 +6,7 @@ export const PFMEA_HIGH_RPN_THRESHOLD = 100;
 export const PFMEA_HIGH_SEVERITY_THRESHOLD = 9;
 
 export type PfmeaDocumentStatus = "draft" | "in_review" | "approved" | "released" | "obsolete";
+export type PfmeaActionStatus = "open" | "in_progress" | "awaiting_verification" | "closed";
 export type PfmeaLinkStatus = "linked" | "stale" | "unmapped";
 export type PfmeaRowSource = "procedure" | "manual" | "import";
 export type PfmeaControlTarget = "procedure" | "checklist" | "traveler" | "inspection" | "training" | "documentation";
@@ -46,6 +47,8 @@ export interface PfmeaRow {
   updatedAt: string;
   sourceKind: PfmeaRowSource;
   sourceImportId?: string;
+  archivedAt?: string;
+  linkHistory?: { taskId?: string; stepId?: string; label: string; changedAt: string }[];
   taskId?: string;
   taskCodeSnapshot?: string;
   taskNameSnapshot?: string;
@@ -65,6 +68,10 @@ export interface PfmeaRow {
   detectionActivity: string;
   recommendedActions: string;
   actionOwner: string;
+  actionOwnerId?: string;
+  actionStatus?: PfmeaActionStatus;
+  verificationNotes?: string;
+  verifiedAt?: string;
   targetDate?: string;
   actionsTaken: string;
   resultOccurrence?: number;
@@ -166,6 +173,7 @@ export function isPfmeaRowStarted(row: PfmeaRow) {
     row.detectionActivity.trim() ||
     row.recommendedActions.trim() ||
     row.actionsTaken.trim() ||
+    row.actionOwner.trim() || row.targetDate || row.resultOccurrence || row.resultDetection ||
     row.severity ||
     row.occurrence ||
     row.detection,
@@ -188,6 +196,7 @@ export function getPfmeaRowIssues(row: PfmeaRow): PfmeaRowIssue[] {
   if (!row.cause.trim()) issues.push({ field: "cause", message: "Failure cause is required." });
   if (row.occurrence == null) issues.push({ field: "occurrence", message: "Occurrence score is required." });
   if (!row.currentControls.trim()) issues.push({ field: "currentControls", message: "Current process controls are required." });
+  if (row.detection != null && !row.detectionActivity.trim()) issues.push({ field: "detectionActivity", message: "Describe the detection control for this score." });
   if (row.detection == null) issues.push({ field: "detection", message: "Detection score is required." });
   if (row.recommendedActions.trim() && !row.actionOwner.trim()) {
     issues.push({ field: "actionOwner", message: "An owner is required when an action is recommended." });
@@ -369,6 +378,10 @@ export function syncPfmeaDocumentWithProcedure(
   const existingLinkKeys = new Set<string>();
 
   const rows: PfmeaRow[] = document.rows.map((row): PfmeaRow => {
+    if (row.archivedAt) {
+      if (row.taskId) existingLinkKeys.add(`${row.taskId}:${row.stepId ?? "task"}`);
+      return row;
+    }
     const task = row.taskId ? taskById.get(row.taskId) : undefined;
     if (!task) {
       return { ...row, linkStatus: row.taskId ? "stale" as const : "unmapped" as const };
@@ -446,6 +459,8 @@ function parsePfmeaRow(value: unknown, fallbackTimestamp: string): PfmeaRow | un
     updatedAt: text(value.updatedAt) || fallbackTimestamp,
     sourceKind: value.sourceKind === "manual" || value.sourceKind === "import" ? value.sourceKind : "procedure",
     sourceImportId: optionalText(value.sourceImportId),
+    archivedAt: optionalText(value.archivedAt),
+    linkHistory: Array.isArray(value.linkHistory) ? value.linkHistory.filter(isRecord).map(entry => ({ taskId: optionalText(entry.taskId), stepId: optionalText(entry.stepId), label: text(entry.label), changedAt: text(entry.changedAt) })) : undefined,
     taskId: optionalText(value.taskId),
     taskCodeSnapshot: optionalText(value.taskCodeSnapshot),
     taskNameSnapshot: optionalText(value.taskNameSnapshot),
@@ -465,6 +480,10 @@ function parsePfmeaRow(value: unknown, fallbackTimestamp: string): PfmeaRow | un
     detectionActivity: text(value.detectionActivity),
     recommendedActions: text(value.recommendedActions),
     actionOwner: text(value.actionOwner),
+    actionOwnerId: optionalText(value.actionOwnerId),
+    actionStatus: value.actionStatus === "open" || value.actionStatus === "in_progress" || value.actionStatus === "awaiting_verification" || value.actionStatus === "closed" ? value.actionStatus : undefined,
+    verificationNotes: optionalText(value.verificationNotes),
+    verifiedAt: optionalText(value.verifiedAt),
     targetDate: optionalText(value.targetDate),
     actionsTaken: text(value.actionsTaken),
     resultOccurrence: normalizePfmeaScore(value.resultOccurrence),
@@ -543,4 +562,14 @@ export function serializePfmeaDocument(document: PfmeaDocument): PfmeaDocument {
       controlProposals: row.controlProposals.map((proposal) => ({ ...proposal })),
     })),
   };
+}
+
+/** Display-only normalization; never rewrites the stored revision. */
+export function formatPfmeaRevision(revision: string) {
+  return `Rev ${revision.replace(/^(?:rev(?:ision)?\.?\s+)+/i, "").trim()}`;
+}
+
+export function pfmeaAssessmentState(row: PfmeaRow): "not_assessed" | "in_progress" | "complete" {
+  if (!isPfmeaRowStarted(row)) return "not_assessed";
+  return isPfmeaRowComplete(row) ? "complete" : "in_progress";
 }

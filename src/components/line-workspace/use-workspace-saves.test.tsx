@@ -207,6 +207,22 @@ describe("master BOM", () => {
     expect(writeCachedPlannerState).toHaveBeenCalledWith(PROJECT_ID, expect.anything(), "scenario-main");
   });
 
+  it("acknowledges the PFMEA snapshot only after its shell write succeeds", async () => {
+    const request = deferred<void>();
+    saveShell.mockReturnValueOnce(request.promise as ReturnType<typeof saveShell>);
+    const { result } = renderSaves();
+    let done!: Promise<void>;
+    await act(async () => {
+      done = result.current.saves.persistPlannerState(initialState);
+    });
+    expect(result.current.saves.pfmeaSaveResult?.state).toBe("saving");
+    await act(async () => { request.resolve(); await done; });
+    expect(result.current.saves.pfmeaSaveResult?.state).toBe("saved");
+    saveShell.mockRejectedValueOnce(new Error("Offline"));
+    await act(async () => { await result.current.saves.persistPlannerState(initialState); });
+    expect(result.current.saves.pfmeaSaveResult).toMatchObject({ state: "error", error: "Offline" });
+  });
+
   it("queues shell saves behind the BOM save and sends them with the verified BOM", async () => {
     const bomSave = deferred<Product>();
     saveBom.mockReturnValueOnce(bomSave.promise);

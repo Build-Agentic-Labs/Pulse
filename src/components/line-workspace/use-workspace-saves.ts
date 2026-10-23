@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { PRODUCT_PFMEA_DOCUMENT_FIELD } from "@/domain/pfmea";
 import { workspaceSaveBarrier, workspaceSaveStatus } from "@/domain/workspace-save-status";
 import { clearCachedPlannerState, writeCachedPlannerState } from "@/lib/planner-state-cache";
 import {
@@ -89,6 +90,7 @@ export function useWorkspaceSaves({
   const reportedSaveStatusRef = useRef({ state: reportedSaveState, error: reportedSaveError });
   reportedSaveStatusRef.current = { state: reportedSaveState, error: reportedSaveError };
   const { tracker: writeTracker, snapshot: writeSnapshot } = useWriteTracker(projectId);
+  const [pfmeaSaveResult, setPfmeaSaveResult] = useState<{ document: unknown; state: "saving" | "saved" | "error"; error?: string }>();
   const [dirtyVersion, setDirtyVersion] = useState(0);
   const saveInFlightRef = useRef(false);
   const masterBomSaveInFlightRef = useRef(false);
@@ -176,6 +178,7 @@ export function useWorkspaceSaves({
 
     if (stateToSave.tasks.length === 0) {
       const message = "Refusing to save an empty Gantt. Add at least one task before saving.";
+      setPfmeaSaveResult({ document: stateToSave.product.customFields?.[PRODUCT_PFMEA_DOCUMENT_FIELD], state: "error", error: message });
       setSaveError(message);
       setSaveState("error");
       notifyFeedback({
@@ -204,12 +207,16 @@ export function useWorkspaceSaves({
     while (nextState) {
       queuedSaveStateRef.current = null;
 
+      const pfmeaDocument = nextState.product.customFields?.[PRODUCT_PFMEA_DOCUMENT_FIELD];
+      setPfmeaSaveResult({ document: pfmeaDocument, state: "saving" });
       try {
         await savePlannerShellToSupabase(nextState);
+        setPfmeaSaveResult({ document: pfmeaDocument, state: "saved" });
         lastPersistedState = nextState;
       } catch (error) {
         finishWrite(error);
         const message = error instanceof Error ? error.message : "Unable to save planner state.";
+        setPfmeaSaveResult({ document: pfmeaDocument, state: "error", error: message });
         setSaveError(message);
         setSaveState("error");
         notifyFeedback({
@@ -426,6 +433,7 @@ export function useWorkspaceSaves({
     saveError,
     writeTracker,
     dirtyVersion,
+    pfmeaSaveResult,
     markDirty,
     // The shell-save lock. Media and Gantt-order writes in LineWorkspace also take it, so shell saves
     // queue behind them (queuedSaveStateRef) exactly as before the extraction. They release it only

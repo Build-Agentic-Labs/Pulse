@@ -30,3 +30,11 @@ it("shows the final gate even when no eligible approver exists", async () => {
   vi.mocked(departments.listMembersForDepartments).mockResolvedValue([]);
   expect((await buildApprovalEntries("sop")).entries.at(-1)?.name).toBe("No eligible Quality approver assigned");
 });
+it("shows a cross-department approver's actual job title rather than the approval department", async () => {
+  vi.mocked(departments.listMembersForDepartments).mockResolvedValue([{ userId: "reviewer", departmentId: "production", deptRole: "reviewer", positionTitle: "EVP of Operations" }] as never);
+  expect((await buildApprovalEntries("sop")).entries[0].position).toBe("EVP of Operations");
+});
+it("shows a missing-title label rather than inventing a position from the department", async () => {
+  vi.mocked(departments.listMembersForDepartments).mockResolvedValue([]);
+  expect((await buildApprovalEntries("sop")).entries[0].position).toBe("Job title not set");
+});

@@ -12,6 +12,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { memberPositionTitle } from "@/domain/departments";
 import { listDepartments, listMembersForDepartments } from "@/lib/departments/store";
 import type { SignatureStrokes } from "@/domain/sop/signature";
 import type { Database } from "@/lib/database.types";
@@ -103,8 +104,8 @@ export async function buildApprovalEntries(
         (signature?.carriedFromVersion ? ` · Approval carried forward from ${signature.carriedFromVersion}` : ""),
       name: signature?.signerName || (seat.signerId ? names.get(seat.signerId) : "") || "Assigned approver",
       position:
-        (seat.signerId ? memberPositionByDepartmentAndUser.get(`${seat.departmentId}:${seat.signerId}`) : "") ||
-        (department ? `${department.code} · ${department.name}` : "Department approver"),
+        (seat.signerId ? memberPositionTitle(allMembers, seat.signerId, seat.departmentId) : seat.nomination?.positionTitle) ||
+        "Job title not set",
       signedAt: signature?.signedAt ?? null,
       signatureStrokes: signature?.signatureStrokes ?? [],
     });

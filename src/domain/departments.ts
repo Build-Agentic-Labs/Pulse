@@ -42,6 +42,17 @@ export interface DepartmentMember {
   pendingInviteAt?: string | null;
 }
 
+/** Assigned SOP seats may belong to a different department than the person's membership. */
+export function memberPositionTitle(members: readonly DepartmentMember[], userId: string, departmentId: string): string {
+  const memberships = members.filter(member => member.userId === userId && !member.pendingInviteAt);
+  const uniqueTitle = (rows: readonly DepartmentMember[]) => {
+    const titles = new Map(rows.map(member => member.positionTitle.trim()).filter(Boolean).map(title => [title.toLowerCase(), title]));
+    return titles.size === 1 ? [...titles.values()][0] : "";
+  };
+  const assignedDepartment = memberships.filter(member => member.departmentId === departmentId && member.positionTitle.trim());
+  return uniqueTitle(assignedDepartment.length ? assignedDepartment : memberships);
+}
+
 const STANDARD_POSITION_TITLES: Record<string, readonly string[]> = {
   INS: ["VP Sales", "Director Sales", "Inside Sales Manager", "Sales Manager", "Senior Sales Representative", "Inside Sales Representative", "Sales Coordinator"],
   INV: ["Inventory Control Manager", "Inventory Control Supervisor", "Inventory Analyst", "Inventory Control Specialist"],

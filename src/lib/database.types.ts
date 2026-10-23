@@ -4582,6 +4582,8 @@ export type Database = {
       }
     }
     Functions: {
+      copy_awi_master: { Args: { p_source: string; p_title: string }; Returns: string }
+      rename_awi_master: { Args: { p_master: string; p_title: string; p_expected_title: string }; Returns: undefined }
       list_department_member_identities: {
         Args: { p_workspace: string }
         Returns: { user_id: string; full_name: string | null; email: string | null }[]

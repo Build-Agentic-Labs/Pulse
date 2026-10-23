@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AwiMaster } from "@/lib/awi/store";
-import { listAwiMasters } from "@/lib/awi/store";
+import type { WorkspaceProjectGroup } from "@/domain/types";
+import { copyAwiMaster, renameAwiMaster, listAwiMasters } from "@/lib/awi/store";
 import { AwiDirectory } from "./awi-directory";
 import { AwiDirectoryLoadingState } from "./awi-directory-loading";
 
@@ -11,7 +12,7 @@ vi.mock("./sidebar-workspace-panel", () => ({ SidebarWorkspacePanel: () => null 
 vi.mock("./line-workspace/nav", () => ({ SidebarReopenButton: () => null }));
 vi.mock("./line-workspace", () => ({}));
 vi.mock("@/lib/awi/store", () => ({
-  awiDraftStatus: () => "Draft", createAwiMaster: vi.fn(), listAwiMasters: vi.fn(),
+  copyAwiMaster: vi.fn(), renameAwiMaster: vi.fn(), awiDraftStatus: () => "Draft", createAwiMaster: vi.fn(), listAwiMasters: vi.fn(),
 }));
 
 function master(id: string, title: string): AwiMaster {
@@ -86,5 +87,31 @@ describe("AWI directory freshness", () => {
     view.rerender(<AwiDirectory workspaceId="a" initialMasters={[master("a", "Recovered instruction")]} />);
     expect(screen.getByText("Recovered instruction")).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("AWI row actions", () => {
+  const groups = [{ workspace: { id: "a", name: "Workspace" }, role: "owner", projects: [] }] as unknown as WorkspaceProjectGroup[];
+  it("copies with the chosen name without replacing the source", async () => {
+    vi.mocked(copyAwiMaster).mockResolvedValue(master("copy", "New instruction"));
+    render(<AwiDirectory workspaceId="a" groups={groups} initialMasters={[master("source", "Original")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Original" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy" }));
+    fireEvent.change(screen.getByLabelText("Instruction title"), { target: { value: "New instruction" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create copy" }));
+    await waitFor(() => expect(screen.getByText("New instruction")).toBeVisible());
+    expect(screen.getByText("Original")).toBeVisible();
+    expect(copyAwiMaster).toHaveBeenCalledWith(expect.objectContaining({id:"source"}),"New instruction");
+  });
+  it("renames only the selected row", async () => {
+    vi.mocked(renameAwiMaster).mockResolvedValue(master("source", "Renamed"));
+    render(<AwiDirectory workspaceId="a" groups={groups} initialMasters={[master("source", "Original"),master("other","Unchanged")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Original" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.change(screen.getByLabelText("Instruction title"), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    await waitFor(() => expect(screen.getByText("Renamed")).toBeVisible());
+    expect(screen.getByText("Unchanged")).toBeVisible();
   });
 });

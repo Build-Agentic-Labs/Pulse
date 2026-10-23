@@ -27,3 +27,29 @@ describe("AWI master collection reads", () => {
     await expect(listAwiMasters("workspace-a", client as never)).rejects.toThrow("Connection lost");
   });
 });
+
+describe('AWI copy attachments', () => {
+  it('creates separate storage objects and remaps attachments to copied steps', async () => {
+    const { copyAwiMaster } = await import('./store');
+    const source = { id: 'source', task_id: 'old-task', title: 'Original' } as import('./store').AwiMaster;
+    const target = { id: 'copy', task_id: 'new-task', project_id: 'new-project', workspace_id: 'ws', title: 'Copy' };
+    const inserts: {table:string;row: Record<string,unknown>}[] = [];
+    const copies: string[][] = [];
+    const client = {
+      rpc: vi.fn(async () => ({data:'copy',error:null})),
+      storage: {from: () => ({copy: async (from:string,to:string) => {copies.push([from,to]);return {data:{},error:null};}})},
+      from: (table:string) => {
+        let taskId = ''; let write = false;
+        const result = () => ({error:null,data:write ? null : table === 'awi_masters' ? target : table === 'tasks' ? {custom_fields:{},version:1} : table === 'manufacturing_steps' ? [{id:taskId==='old-task'?'old-step':'new-step',sequence:1}] : table === 'step_photos' ? [{id:'old-photo',task_id:'old-task',step_id:'old-step',storage_path:'original/photo',thumbnail_storage_path:'original/thumb',file_name:'photo.png',public_url:''}] : []});
+        const q = {select:()=>q,eq:(key:string,val:string)=>{if(key==='task_id')taskId=val;return q;},is:()=>q,order:()=>q,range:async()=>result(),maybeSingle:async()=>result(),single:async()=>result(),insert:(row:Record<string,unknown>)=>{write=true;inserts.push({table,row});return q;},then:(resolve:(value:unknown)=>unknown)=>Promise.resolve(result()).then(resolve)};
+        return q;
+      },
+    };
+    await copyAwiMaster(source,'Copy',client as never);
+    expect(copies).toHaveLength(2);
+    expect(copies.every(([from,to])=>from!==to && to.startsWith('workspaces/ws/projects/new-project/'))).toBe(true);
+    expect(inserts[0].row).toMatchObject({task_id:'new-task',step_id:'new-step'});
+    expect(inserts[0].row.id).not.toBe('old-photo');
+    expect(source.title).toBe('Original');
+  });
+});

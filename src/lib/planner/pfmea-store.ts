@@ -8,14 +8,14 @@ import type { Json } from '@/lib/database.types';
 export async function savePfmeaToSupabase(productId: string, projectId: string, document: PfmeaDocument, base: unknown, client = plannerClient()) {
   const expected = serializePfmeaDocument(document);
   for (let attempt = 0; attempt < 3; attempt++) {
-    const current = await throwIfError(client.from('products').select('custom_fields').eq('id', productId).eq('project_id', projectId).maybeSingle());
+    const current = await throwIfError(client.from('products').select('custom_fields, updated_at').eq('id', productId).eq('project_id', projectId).maybeSingle());
     if (!current) throw new Error('PFMEA product unavailable. Check project access before retrying.');
     const fields = current.custom_fields && typeof current.custom_fields === 'object' && !Array.isArray(current.custom_fields) ? current.custom_fields : {};
     const existing = fields[PRODUCT_PFMEA_DOCUMENT_FIELD];
     if (samePfmeaValue(existing, expected)) return; // A lost response may have committed successfully.
     if (!samePfmeaValue(existing, base)) throw new Error('PFMEA conflict: another edit was saved. Your changes remain pending; reload only after resolving the conflict.');
     const saved = await throwIfError(client.from('products').update({ custom_fields: { ...fields, [PRODUCT_PFMEA_DOCUMENT_FIELD]: expected } as unknown as Json })
-      .eq('id', productId).eq('project_id', projectId).eq('custom_fields', JSON.stringify(current.custom_fields)).select('custom_fields').maybeSingle());
+      .eq('id', productId).eq('project_id', projectId).eq('updated_at', current.updated_at).select('custom_fields, updated_at').maybeSingle());
     if (saved) {
       const actual = saved.custom_fields as Record<string, unknown>;
       if (!samePfmeaValue(actual[PRODUCT_PFMEA_DOCUMENT_FIELD], expected)) throw new Error('PFMEA save could not be verified. Retry before leaving.');
@@ -30,7 +30,7 @@ export async function saveShellProductPreservingPfmea(product: import('@/domain/
   const { productRow } = await import('./row-mappers');
   const payload = productRow(product);
   for (let attempt = 0; attempt < 3; attempt++) {
-    const current = await throwIfError(client.from('products').select('custom_fields').eq('id', product.id).maybeSingle());
+    const current = await throwIfError(client.from('products').select('custom_fields, updated_at').eq('id', product.id).maybeSingle());
     if (!current) {
       await throwIfError(client.from('products').insert(payload));
       return;
@@ -40,7 +40,7 @@ export async function saveShellProductPreservingPfmea(product: import('@/domain/
     delete fields[PRODUCT_PFMEA_DOCUMENT_FIELD];
     if (existing?.[PRODUCT_PFMEA_DOCUMENT_FIELD] !== undefined) fields[PRODUCT_PFMEA_DOCUMENT_FIELD] = existing[PRODUCT_PFMEA_DOCUMENT_FIELD];
     const saved = await throwIfError(client.from('products').update({ ...payload, custom_fields: fields })
-      .eq('id', product.id).eq('custom_fields', JSON.stringify(current.custom_fields)).select('id').maybeSingle());
+      .eq('id', product.id).eq('updated_at', current.updated_at).select('id').maybeSingle());
     if (saved) return;
   }
   throw new Error('Product changed while saving. Retry to preserve the latest PFMEA.');

@@ -47,7 +47,7 @@ const existing: Record<string, Array<Record<string, unknown>>> = {
 function recorder(rows = existing) {
   return createRecordingSupabase({
     reply: (request: RecordedRequest): ScriptedReply | undefined =>
-      request.kind === "from" && request.op === "select" ? { data: rows[request.target] ?? [] } : undefined,
+      request.target === "products" ? { data: request.op === "select" ? { custom_fields: {} } : { id: "product-1" } } : request.kind === "from" && request.op === "select" ? { data: rows[request.target] ?? [] } : undefined,
   });
 }
 
@@ -60,7 +60,8 @@ const EXISTENCE_READS = [
   "custom_columns.select(id) or(product_id.eq.product-1,scenario_id.eq.scenario-1)",
 ];
 const PARENT_WRITES = [
-  "products.upsert",
+  "products.select(custom_fields) id=product-1 | maybeSingle",
+  'products.update id=product-1 custom_fields={} | returning(id) maybeSingle',
   "scenarios.upsert",
   "stations.update id=station-1",
   "stations.update id=stale-station",
@@ -89,7 +90,7 @@ describe("whole-plan save request order", () => {
     expect(db.lines()).toEqual([...EXISTENCE_READS, ...PARENT_WRITES, "rpc:replace_task_children", ...STALE_DELETES]);
     const replace = db.requests.find((r) => r.target === "replace_task_children")!;
     expect(replace.payload).toMatchObject({ p_task_ids: ["task-1", "task-2", "stale-task"] });
-    expect(db.requests.filter((r) => r.op === "update").map((r) => r.payload)).toEqual([
+    expect(db.requests.filter((r) => r.op === "update" && r.target !== "products").map((r) => r.payload)).toEqual([
       { sequence: 100003 }, { sequence: 100004 }, { sequence: 100003 }, { sequence: 100004 },
     ]);
   });
@@ -122,7 +123,7 @@ describe("whole-plan save request order", () => {
   ] as const)("%s save: a failed write stops every later request, including stale deletes", async (_name, save) => {
     const db = createRecordingSupabase({
       reply: (r) => (r.target === "tasks" && r.op === "upsert" ? { error: { message: "tasks_station_id_fkey" } }
-        : r.kind === "from" && r.op === "select" ? { data: existing[r.target] ?? [] } : undefined),
+        : r.target === "products" ? { data: r.op === "select" ? { custom_fields: {} } : { id: "product-1" } } : r.kind === "from" && r.op === "select" ? { data: existing[r.target] ?? [] } : undefined),
     });
     await expect(save(state, db.client as unknown as Client)).rejects.toThrow("tasks_station_id_fkey");
     expect(db.lines().at(-1)).toBe("tasks.upsert");

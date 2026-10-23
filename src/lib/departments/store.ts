@@ -14,6 +14,11 @@ import { throwIfError as throwIfSupabaseError, type SupabaseResultError } from "
 const DEPT_COLUMNS = "id, workspace_id, code, name, is_quality_gate, sop_target";
 const MEMBER_COLUMNS = "department_id, user_id, dept_role, position_title, pending_invite_at";
 
+export async function listDepartmentMemberIdentities(workspaceId: string) {
+  const rows = await throwIfError(createPlannerSupabaseClient().rpc("list_department_member_identities", { p_workspace: workspaceId }));
+  return rows ?? [];
+}
+
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();

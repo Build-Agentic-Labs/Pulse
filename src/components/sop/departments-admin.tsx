@@ -19,6 +19,7 @@ import {
   deleteDepartment,
   listDepartments,
   listMembersForDepartments,
+  listDepartmentMemberIdentities,
   removeMember,
   saveDepartment,
   setDepartmentSopTarget,
@@ -43,7 +44,7 @@ function messageFrom(error: unknown, fallback: string): string {
 
 /** Display a member by their real identity, never the raw Supabase UUID. */
 function memberLabel(member: MemberAccess): string {
-  return member.fullName || member.email || member.userId;
+  return member.fullName || member.email || "Member name unavailable";
 }
 
 function groupMembers(
@@ -608,10 +609,22 @@ function MembersPanel({
   const [adding, setAdding] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
+  const [identities, setIdentities] = useState<Map<string, { full_name: string | null; email: string | null }>>(new Map());
+  useEffect(() => {
+    let active = true;
+    setIdentities(new Map());
+    void listDepartmentMemberIdentities(department.workspaceId).then(rows => {
+      if (active) setIdentities(new Map(rows.map(row => [row.user_id, row])));
+    }).catch(() => { /* Never expose raw IDs when a directory read is unavailable. */ });
+    return () => { active = false; };
+  }, [department.workspaceId, members]);
+
   const byId = useMemo(() => new Map(directory.map((member) => [member.userId, member])), [directory]);
   const labelFor = (userId: string) => {
     const member = byId.get(userId);
-    return member ? memberLabel(member) : userId;
+    const identity = identities.get(userId);
+    if (members.some(row => row.userId === userId && row.pendingInviteAt)) return identity?.email || member?.email || "Invited member";
+    return member ? memberLabel(member) : identity?.full_name || identity?.email || "Member name unavailable";
   };
   const emailFor = (userId: string) => {
     const member = byId.get(userId);
@@ -734,9 +747,10 @@ function MembersPanel({
             <li key={member.userId}>
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium text-ink" title={member.userId}>
+                  <div className="truncate text-[13px] font-medium text-ink">
                     {labelFor(member.userId)}
                   </div>
+                  {member.pendingInviteAt ? <div className="mt-0.5 text-[11px] text-ink-tertiary">Invitation pending</div> : null}
                   {emailFor(member.userId) ? (
                     <div className="ui-mono-label truncate text-ink-tertiary">{emailFor(member.userId)}</div>
                   ) : null}

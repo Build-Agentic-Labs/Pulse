@@ -4582,6 +4582,10 @@ export type Database = {
       }
     }
     Functions: {
+      list_department_member_identities: {
+        Args: { p_workspace: string }
+        Returns: { user_id: string; full_name: string | null; email: string | null }[]
+      }
       acquire_sop_submission_lock: {
         Args: { p_sop_id: string }
         Returns: string

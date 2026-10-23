@@ -40,7 +40,7 @@ function createRecordingClient(rows: Record<string, Array<Record<string, unknown
     }
 
     select() {
-      return this.record("select");
+      return this.current ? this : this.record("select");
     }
 
     upsert(payload: unknown) {
@@ -68,6 +68,10 @@ function createRecordingClient(rows: Record<string, Array<Record<string, unknown
     or(filter: string) {
       this.current?.filters.push(["or", filter]);
       return this;
+    }
+
+    maybeSingle() {
+      return Promise.resolve({ data: this.current?.op === "select" ? { custom_fields: {} } : { id: "product-1" }, error: null });
     }
 
     then<TResult1 = unknown, TResult2 = never>(

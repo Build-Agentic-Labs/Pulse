@@ -27,7 +27,7 @@ vi.hoisted(() => {
 
 const PROJECT_ID = "project-tools";
 type Row = Record<string, unknown>;
-type Op = "select" | "upsert" | "update" | "delete";
+type Op = "select" | "upsert" | "insert" | "update" | "delete";
 
 function createInMemoryDatabase() {
   const tables = new Map<string, Row[]>();
@@ -41,10 +41,11 @@ function createInMemoryDatabase() {
     private one = false;
     constructor(private readonly table: string) {}
     select() { return this; }
+    insert(payload: unknown) { this.op = "insert"; this.payload = payload; return this; }
     upsert(payload: unknown) { this.op = "upsert"; this.payload = payload; return this; }
     update(payload: unknown) { this.op = "update"; this.payload = payload; return this; }
     delete() { this.op = "delete"; return this; }
-    eq(column: string, value: unknown) { this.filters.push((row) => String(row[column]) === String(value)); return this; }
+    eq(column: string, value: unknown) { this.filters.push((row) => (column === "custom_fields" ? JSON.stringify(row[column]) : String(row[column])) === String(value)); return this; }
     in(column: string, values: unknown[]) {
       const allowed = new Set(values.map(String));
       this.filters.push((row) => allowed.has(String(row[column])));
@@ -67,7 +68,7 @@ function createInMemoryDatabase() {
       if (this.op === "select") {
         const found = rows(this.table).filter(matches);
         data = this.one ? found[0] ?? null : found;
-      } else if (this.op === "upsert") {
+      } else if ((this.op === "upsert" || this.op === "insert")) {
         const incoming = (Array.isArray(this.payload) ? this.payload : [this.payload]) as Row[];
         const next = [...rows(this.table)];
         const saved = incoming.map((row) => {
@@ -79,7 +80,9 @@ function createInMemoryDatabase() {
         tables.set(this.table, next);
         data = this.one ? saved[0] : saved;
       } else if (this.op === "update") {
+        const saved = rows(this.table).filter(matches).map(row => ({ ...row, ...(this.payload as Row) }));
         tables.set(this.table, rows(this.table).map((row) => (matches(row) ? { ...row, ...(this.payload as Row) } : row)));
+        data = this.one ? saved[0] ?? null : saved;
       } else {
         tables.set(this.table, rows(this.table).filter((row) => !matches(row)));
       }

@@ -57,6 +57,53 @@ function Harness({
 }
 
 describe("PFMEA workspace", () => {
+  it("memoized rows keep earlier edits when another row changes", () => {
+    const task = fixtureTask();
+    task.manufacturingSteps!.push({ ...task.manufacturingSteps![0], id: "second", sequence: 2, name: "Second step" });
+    const onChange = vi.fn(); render(<Harness tasks={[task]} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("Failure mode for Remove side panel"), { target: { value: "First edit" } });
+    fireEvent.change(screen.getByLabelText("Failure mode for Second step"), { target: { value: "Second edit" } });
+    expect(onChange.mock.calls.at(-1)![0].rows.map((row: {failureMode:string}) => row.failureMode)).toEqual(["First edit", "Second edit"]);
+  });
+
+  it("closes a complete action inline and reopens verification after an edit", () => {
+    const task = fixtureTask();
+    const product = { ...emptyPlannerState.product, id: "inline-test" };
+    const document = createPfmeaDocumentFromProcedure(product, emptyPlannerState.scenario, [task], []);
+    Object.assign(document.rows[0], { failureMode: "Loose panel", effect: "Injury", cause: "Missing bolt", currentControls: "Torque", detectionActivity: "Inspection", severity: 5, occurrence: 3, detection: 2, recommendedActions: "Check bolts", actionOwner: "Existing owner", targetDate: "2026-10-23", actionsTaken: "Check added", resultOccurrence: 2, resultDetection: 1, verificationNotes: "Trial passed" });
+    const onChange = vi.fn();
+    render(<PfmeaWorkspace product={{ ...product, customFields: { [PRODUCT_PFMEA_DOCUMENT_FIELD]: serializePfmeaDocument(document) } }} scenario={emptyPlannerState.scenario} tasks={[task]} zones={[]} onDocumentChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("PFMEA column view"), { target: { value: "actions" } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm effective & close" }));
+    expect(onChange.mock.calls.at(-1)![0].rows[0]).toMatchObject({ actionStatus: "closed", actionOwner: "Existing owner", verifiedAt: expect.any(String) });
+    fireEvent.change(screen.getByLabelText("Effectiveness verification for Remove side panel"), { target: { value: "Recheck needed" } });
+    expect(onChange.mock.calls.at(-1)![0].rows[0]).toMatchObject({ actionStatus: "awaiting_verification", verifiedAt: undefined });
+  });
+
+  it("edits and verifies actions in the table without a risk dialog", () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    expect(screen.queryByRole("button", { name: /Edit risk/i })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("PFMEA column view"), { target: { value: "all" } });
+    expect(screen.getByRole("button", { name: "Confirm effective & close" })).toBeDisabled();
+    const fields = {
+      "Failure mode": "Loose panel", "Failure effect": "Panel falls", "Failure cause": "Missing bolt",
+      "Current controls": "Torque check", "Detection activity": "Inspection", "Severity": "5",
+      "Occurrence": "3", "Detection": "2", "Recommended actions": "Add inspection",
+      "Actions taken": "Inspection added", "Result occurrence": "2", "Result detection": "1",
+      "Effectiveness verification": "Trial passed", "Target date": "2026-10-23",
+    };
+    for (const [label, value] of Object.entries(fields)) {
+      fireEvent.change(screen.getByLabelText(`${label} for Remove side panel`), { target: { value } });
+    }
+    // Owner is required, so closing cannot bypass a missing assignment.
+    expect(screen.getByRole("button", { name: "Confirm effective & close" })).toBeDisabled();
+    expect(onChange.mock.calls.at(-1)![0].rows[0].verificationNotes).toBe("Trial passed");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("shows only acknowledgement of the latest PFMEA edit and briefly confirms success", () => {
     vi.useFakeTimers();
     try {

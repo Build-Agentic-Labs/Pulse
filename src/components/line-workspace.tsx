@@ -1,4 +1,5 @@
 "use client";
+import { usePfmeaSaveQueue } from "./line-workspace/use-pfmea-save-queue";
 
 import { AddTaskMenu } from "./line-workspace/add-task-menu";
 import { AWI_TASK_LINK_FIELD, LINKED_AWI_EDIT_MESSAGE, awiTaskLink, withLinkedAwiProcedure } from "@/domain/awi-task-link";
@@ -399,7 +400,6 @@ export function LineWorkspace({
     saveError,
     writeTracker,
     dirtyVersion,
-    pfmeaSaveResult,
     markDirty,
     saveInFlightRef,
     releaseShellLock,
@@ -429,6 +429,13 @@ export function LineWorkspace({
     flushDeferredRemoteRefresh,
     setChromeStatus,
     isForegroundSaveScope,
+  });
+
+  // PFMEA has its own product-scoped queue; typing never schedules a planner-shell save.
+  const { queue: pfmeaQueue, result: pfmeaSaveResult } = usePfmeaSaveQueue(String(derivedState.product.id), projectId, writeTracker, (document, productId) => {
+    setPlannerState(current => String(current.product.id) === productId ? {
+      ...current, product: { ...current.product, customFields: { ...current.product.customFields, [PRODUCT_PFMEA_DOCUMENT_FIELD]: serializePfmeaDocument(document) } },
+    } : current);
   });
 
   // Per-field procedure drafts: merge/defer/acknowledge server tasks against local typing.
@@ -1533,20 +1540,8 @@ export function LineWorkspace({
   }
 
   function updateProductPfmeaDocument(document: PfmeaDocument) {
-    if (blockViewOnlyWrite()) {
-      return;
-    }
-    markDirty();
-    setPlannerState((current) => ({
-      ...current,
-      product: {
-        ...current.product,
-        customFields: {
-          ...(current.product.customFields ?? {}),
-          [PRODUCT_PFMEA_DOCUMENT_FIELD]: serializePfmeaDocument(document),
-        },
-      },
-    }));
+    if (blockViewOnlyWrite()) return;
+    pfmeaQueue.schedule(document, derivedState.product.customFields?.[PRODUCT_PFMEA_DOCUMENT_FIELD]);
   }
 
   function updateTask(taskId: string, patch: Partial<Task>) {
@@ -2676,12 +2671,13 @@ export function LineWorkspace({
                   ) : activeModule === "pfmea" ? (
                     <PfmeaWorkspace
                       workspaceId={activeProjectContext?.workspaceId}
-                      product={derivedState.product}
+                      product={pfmeaQueue.latest() ? { ...derivedState.product, customFields: { ...derivedState.product.customFields, [PRODUCT_PFMEA_DOCUMENT_FIELD]: pfmeaQueue.latest() } } : derivedState.product}
                       scenario={derivedState.scenario}
                       tasks={derivedState.tasks}
                       zones={derivedState.zones}
                       readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
                       saveResult={pfmeaSaveResult}
+                      onRetrySave={() => { void pfmeaQueue.flush(); }}
                       onDocumentChange={updateProductPfmeaDocument}
                       onOpenTask={(taskId) => {
                         selectTask(taskId);

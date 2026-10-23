@@ -1,3 +1,4 @@
+import { saveShellProductPreservingPfmea } from "./pfmea-store";
 // The two guarded whole-plan saves (full state with atomic task-child replacement, and the planner
 // shell with dependency sync), their deletion tripwire and station/zone sequence parking, plus the
 // save-status type. These are separate requests, not a transaction: their ORDER is the safety property
@@ -16,7 +17,6 @@ import {
   manufacturingStepRows,
   num,
   partReferenceRows,
-  productRow,
   scenarioRow,
   stationRow,
   taskRow,
@@ -160,7 +160,7 @@ export async function savePlannerStateToSupabase(state: PlannerState, client?: R
   assertSaneStateDeletion("document types", (existingDocumentTypes ?? []).length, staleDocumentTypeIds.length);
   assertSaneStateDeletion("custom columns", (existingCustomColumns ?? []).length, staleCustomColumnIds.length);
 
-  await throwIfError(supabase.from("products").upsert(productRow(state.product)));
+  await saveShellProductPreservingPfmea(state.product, supabase);
   await throwIfError(supabase.from("scenarios").upsert(scenarioRow(state.scenario)));
 
   if (state.stations.length) {
@@ -289,7 +289,7 @@ export async function savePlannerShellToSupabase(state: PlannerState, client?: R
   assertSaneStateDeletion("document types", (existingDocumentTypes ?? []).length, staleDocumentTypeIds.length);
   assertSaneStateDeletion("custom columns", (existingCustomColumns ?? []).length, staleCustomColumnIds.length);
 
-  await throwIfError(supabase.from("products").upsert(productRow(state.product)));
+  await saveShellProductPreservingPfmea(state.product, supabase);
   await throwIfError(supabase.from("scenarios").upsert(scenarioRow(state.scenario)));
 
   if (state.stations.length) {

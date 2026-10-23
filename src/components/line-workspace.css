@@ -2147,26 +2147,6 @@
   text-transform: uppercase;
 }
 
-.ui-pfmea-grid th:nth-child(1) { width: 190px; left: 0; z-index: 6; }
-.ui-pfmea-grid th:nth-child(2) { width: 190px; }
-.ui-pfmea-grid th:nth-child(3),
-.ui-pfmea-grid th:nth-child(4),
-.ui-pfmea-grid th:nth-child(6),
-.ui-pfmea-grid th:nth-child(8),
-.ui-pfmea-grid th:nth-child(10),
-.ui-pfmea-grid th:nth-child(12),
-.ui-pfmea-grid th:nth-child(15) { width: 205px; }
-.ui-pfmea-grid th:nth-child(5),
-.ui-pfmea-grid th:nth-child(7),
-.ui-pfmea-grid th:nth-child(9),
-.ui-pfmea-grid th:nth-child(11),
-.ui-pfmea-grid th:nth-child(16),
-.ui-pfmea-grid th:nth-child(17),
-.ui-pfmea-grid th:nth-child(18) { width: 64px; text-align: center; }
-.ui-pfmea-grid th:nth-child(13) { width: 110px; }
-.ui-pfmea-grid th:nth-child(14) { width: 118px; }
-.ui-pfmea-grid th:nth-child(19) { width: 64px; }
-
 .ui-pfmea-grid td {
   height: 4.7rem;
   padding: 0;
@@ -2184,19 +2164,19 @@
   background: color-mix(in srgb, var(--color-warn) 5%, var(--ui-pfmea-sheet));
 }
 
-.ui-pfmea-grid th:first-child,
+.ui-pfmea-grid thead > tr:first-child > th:first-child,
 .ui-pfmea-task-cell {
   position: sticky;
   left: 0;
 }
 
-.ui-pfmea-grid th:nth-child(2),
+.ui-pfmea-grid thead > tr:first-child > th:nth-child(2),
 .ui-pfmea-step-cell {
   position: sticky;
   left: 190px;
 }
 
-.ui-pfmea-grid th:nth-child(2) {
+.ui-pfmea-grid thead > tr:first-child > th:nth-child(2) {
   z-index: 5;
 }
 
@@ -2328,10 +2308,16 @@
   color: var(--color-ink-tertiary);
 }
 
-.ui-pfmea-cell-text:focus,
-.ui-pfmea-score-input:focus,
-.ui-pfmea-date-input:focus {
-  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+/* Keep clicked cells visually flat; keyboard focus uses a subtle underline. */
+.ui-pfmea-page .ui-pfmea-grid :is(textarea, input, select):focus {
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.ui-pfmea-page .ui-pfmea-grid :is(textarea, input, select):focus-visible {
+  outline: none;
+  box-shadow: inset 0 -1px 0 var(--color-border-strong);
 }
 
 .ui-pfmea-field-invalid:not(:focus) {
@@ -3178,3 +3164,41 @@
 
 .ui-pfmea-grid tr.ui-pfmea-collapsed td { height: 2.6rem; vertical-align: middle; }
 .ui-pfmea-collapsed .ui-pfmea-group-toggle { position: sticky; left: 0; width: fit-content; max-width: min(45rem, 70vw); padding: .5rem .65rem; background: var(--ui-pfmea-sheet); }
+
+.ui-pfmea-grid .ui-pfmea-inline-select {
+  width: 100%; min-width: 140px; padding: 8px; border: 0;
+  background: transparent; color: inherit; font: inherit;
+}
+.ui-pfmea-grid .ui-pfmea-close-action {
+  margin: 4px 8px 8px; font-size: 11px; text-align: left;
+}
+.ui-pfmea-grid .ui-pfmea-close-action:disabled { opacity: .45; cursor: default; }
+
+.ui-pfmea-verification-cell {
+  display: flex;
+  flex-direction: column;
+  min-height: 4.7rem;
+}
+
+.ui-pfmea-verification-cell .ui-pfmea-cell-text {
+  display: block;
+  height: auto;
+  min-height: 3.5rem;
+  flex: 1 0 auto;
+}
+
+.ui-pfmea-verification-cell .ui-pfmea-close-action,
+.ui-pfmea-verification-cell .ui-pfmea-action-status {
+  position: static;
+  flex: none;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.ui-pfmea-grid thead > tr:first-child > th { height: 3.5rem; }
+.ui-pfmea-grid thead > tr:first-child > th:first-child { z-index: 6; }
+.ui-pfmea-grid th small { display: block; margin-top: 4px; font-size: 9px; font-weight: 400; letter-spacing: 0; }
+.ui-pfmea-grid .ui-pfmea-results-heading { text-align: center; }
+.ui-pfmea-grid .ui-pfmea-results-subhead th { top: 3.5rem; height: 2rem; text-align: center; }
+.ui-pfmea-responsibility-cell .ui-pfmea-date-input { display: block; height: 2rem; min-height: 2rem; padding: 0 8px; }
+.ui-pfmea-result-severity { display: block; padding: .4rem; text-align: center; color: var(--color-ink-secondary); }

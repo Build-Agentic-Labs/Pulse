@@ -147,7 +147,7 @@ describe("PFMEA workspace", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows only acknowledgement of the latest PFMEA edit and briefly confirms success", () => {
+  it("keeps routine saves silent and shows failures for the latest edit", () => {
     vi.useFakeTimers();
     try {
       const onChange = vi.fn();
@@ -161,15 +161,15 @@ describe("PFMEA workspace", () => {
       expect(screen.queryByRole("status", { name: "PFMEA save status" })).not.toBeInTheDocument();
       fireEvent.change(screen.getByLabelText("Failure mode for Remove side panel"), { target: { value: "First edit" } });
       const first = serializePfmeaDocument(onChange.mock.calls.at(-1)![0]);
-      expect(screen.getByRole("status", { name: "PFMEA save status" })).toHaveTextContent("Saving…");
+      expect(screen.queryByRole("status", { name: "PFMEA save status" })).not.toBeInTheDocument();
       fireEvent.change(screen.getByLabelText("Failure mode for Remove side panel"), { target: { value: "Latest edit" } });
       const latest = serializePfmeaDocument(onChange.mock.calls.at(-1)![0]);
       rerender(<PfmeaWorkspace {...props} saveResult={{ document: first, state: "saved" }} />);
-      expect(screen.getByRole("status", { name: "PFMEA save status" })).toHaveTextContent("Saving…");
+      expect(screen.queryByRole("status", { name: "PFMEA save status" })).not.toBeInTheDocument();
       rerender(<PfmeaWorkspace {...props} saveResult={{ document: latest, state: "error", error: "Offline" }} />);
-      expect(screen.getByRole("status", { name: "PFMEA save status" })).toHaveTextContent("Save failed");
+      expect(screen.getByRole("alert")).toHaveTextContent("Offline");
       rerender(<PfmeaWorkspace {...props} saveResult={{ document: latest, state: "saved" }} />);
-      expect(screen.getByRole("status", { name: "PFMEA save status" })).toHaveTextContent("Saved");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       act(() => vi.advanceTimersByTime(2500));
       expect(screen.queryByRole("status", { name: "PFMEA save status" })).not.toBeInTheDocument();
       rerender(<PfmeaWorkspace {...props} saveResult={{ document: latest, state: "saving" }} />);

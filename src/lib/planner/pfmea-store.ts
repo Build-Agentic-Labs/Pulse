@@ -12,6 +12,7 @@ export async function savePfmeaToSupabase(productId: string, projectId: string, 
     if (!current) throw new Error('PFMEA product unavailable. Check project access before retrying.');
     const fields = current.custom_fields && typeof current.custom_fields === 'object' && !Array.isArray(current.custom_fields) ? current.custom_fields : {};
     const existing = fields[PRODUCT_PFMEA_DOCUMENT_FIELD];
+    if (existing && typeof existing === 'object' && !Array.isArray(existing) && 'cellVersions' in existing) throw new Error('This PFMEA uses cell saves. Reload in a client with cell saving enabled; snapshot writes are blocked.');
     if (samePfmeaValue(existing, expected)) return; // A lost response may have committed successfully.
     if (!samePfmeaValue(existing, base)) throw new Error('PFMEA conflict: another edit was saved. Your changes remain pending; reload only after resolving the conflict.');
     const saved = await throwIfError(client.from('products').update({ custom_fields: { ...fields, [PRODUCT_PFMEA_DOCUMENT_FIELD]: expected } as unknown as Json })

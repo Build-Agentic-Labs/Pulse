@@ -82,6 +82,8 @@ export interface PfmeaRow {
 }
 
 export interface PfmeaDocument {
+  commandReceipts?: string[];
+  cellVersions?: Record<string, Record<string, { version: number; mutationId: string }>>;
   version: typeof PFMEA_DOCUMENT_VERSION;
   id: string;
   productId: string;
@@ -537,6 +539,11 @@ export function getProductPfmeaDocument(customFields?: Record<string, unknown>):
   return {
     version: PFMEA_DOCUMENT_VERSION,
     id: raw.id,
+    ...(Array.isArray(raw.commandReceipts) ? { commandReceipts: raw.commandReceipts.filter((receipt): receipt is string => typeof receipt === 'string') } : {}),
+    ...(isRecord(raw.cellVersions) ? { cellVersions: Object.fromEntries(Object.entries(raw.cellVersions).filter(([, cells]) => isRecord(cells)).map(([row, cells]) => [row, Object.fromEntries(Object.entries(cells as Record<string, unknown>).filter((entry): entry is [string, { version: number; mutationId: string }] => {
+      const stamp = entry[1];
+      return isRecord(stamp) && typeof stamp.version === 'number' && Number.isSafeInteger(stamp.version) && stamp.version >= 0 && typeof stamp.mutationId === 'string';
+    }))])) } : {}),
     productId: raw.productId,
     sourceScenarioId: text(raw.sourceScenarioId),
     sourceScenarioName: text(raw.sourceScenarioName),

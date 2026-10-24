@@ -1,7 +1,8 @@
 import { getProductPfmeaDocument, PRODUCT_PFMEA_DOCUMENT_FIELD, type PfmeaDocument } from '@/domain/pfmea';
 import { samePfmeaValue } from '@/domain/pfmea-save-queue';
+import type { PfmeaPendingCellMutation } from '@/domain/pfmea-cell-session';
 
-type Draft = { version: 1; revision: string; base: unknown; document: PfmeaDocument; updatedAt: number; ancestors?: { key: string; revision: string }[] };
+type Draft = { version: 1; revision: string; base: unknown; document: PfmeaDocument; updatedAt: number; cellMutation?: PfmeaPendingCellMutation; ancestors?: { key: string; revision: string }[] };
 type Entry = { key: string; raw: string; draft: Draft };
 /** Independent journals prevent a second tab from replacing another tab's unsaved work. */
 export function createPfmeaDraftJournal(storage: Storage, account: string, project: string, product: string, writer: string) {
@@ -37,14 +38,25 @@ export function createPfmeaDraftJournal(storage: Storage, account: string, proje
       return selected?.draft;
     },
     write(document: PfmeaDocument, base: unknown) {
-      storage.setItem(key, JSON.stringify({ version: 1, revision: crypto.randomUUID(), base, document, updatedAt: Date.now(), ancestors: inherited.flatMap(entry => [{ key: entry.key, revision: entry.draft.revision }, ...(entry.draft.ancestors ?? [])]) } satisfies Draft));
+      const current = storage.getItem(key);
+      const cellMutation = current ? (JSON.parse(current) as Draft).cellMutation : inherited[0]?.draft.cellMutation;
+      storage.setItem(key, JSON.stringify({ version: 1, revision: crypto.randomUUID(), base, document, cellMutation, updatedAt: Date.now(), ancestors: inherited.flatMap(entry => [{ key: entry.key, revision: entry.draft.revision }, ...(entry.draft.ancestors ?? [])]) } satisfies Draft));
     },
-    acknowledge(saved: PfmeaDocument) {
+    pendingCellMutation() {
+      const current = storage.getItem(key);
+      return current ? (JSON.parse(current) as Draft).cellMutation : inherited[0]?.draft.cellMutation;
+    },
+    retainCellMutation(cellMutation: PfmeaPendingCellMutation) {
+      const current = storage.getItem(key);
+      if (!current) throw new Error('PFMEA draft must be retained before sending cell edits.');
+      storage.setItem(key, JSON.stringify({ ...JSON.parse(current), cellMutation }));
+    },
+    acknowledge(saved: PfmeaDocument, baseline: PfmeaDocument = saved) {
       const raw = storage.getItem(key);
       if (raw) {
         const current = JSON.parse(raw) as Draft;
         if (samePfmeaValue(current.document, saved)) storage.removeItem(key);
-        else storage.setItem(key, JSON.stringify({ ...current, base: saved }));
+        else storage.setItem(key, JSON.stringify({ ...current, base: baseline, cellMutation: undefined }));
       }
       for (const entry of inherited) removeExact(entry);
       inherited = [];

@@ -13,7 +13,6 @@ import {
   RotateCcw,
   AlertCircle,
   AlertTriangle,
-  Check,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -75,9 +74,11 @@ type PfmeaWorkspaceProps = {
   zones: Zone[];
   readOnly?: boolean;
   backupError?: string;
+  connectionError?: string;
   saveResult?: { document: unknown; state: "saving" | "saved" | "error"; error?: string };
   onDocumentChange: (document: PfmeaDocument) => void;
   onRetrySave?: () => void;
+  onCellCommit?: () => void;
   onOpenTask?: (taskId: string) => void;
 };
 
@@ -327,8 +328,10 @@ export function PfmeaWorkspace({
   readOnly = false,
   saveResult,
   backupError,
+  connectionError,
   onDocumentChange,
   onRetrySave,
+  onCellCommit,
   onOpenTask,
 }: PfmeaWorkspaceProps) {
   const storedDocument = useMemo(() => getProductPfmeaDocument(product.customFields), [product.customFields]);
@@ -506,6 +509,7 @@ export function PfmeaWorkspace({
   );
 
   const keyboard = usePfmeaGridKeyboard({
+    commit: onCellCommit,
     begin: id => { history.current.seal(); editGroup.current = `cell-${++editSequence.current}`; editBaseline.current = document.rows.find(row => row.id === id); setActiveGridRow(id); },
     cancel: id => {
       const baseline = editBaseline.current;
@@ -785,13 +789,6 @@ export function PfmeaWorkspace({
       <section className="ui-pfmea-document" aria-label="PFMEA document actions" hidden={fullScreen}>
         <div className="ui-pfmea-document-tools">
           <div className="ui-pfmea-head-actions">
-            {saveNotice ? (
-              <span role="status" aria-label="PFMEA save status" className="text-xs text-ink-secondary" title={pfmeaError}>
-                {saveNotice === "saved" ? <Check className="mr-1 inline" size={13} aria-hidden="true" /> : null}
-                {saveNotice === "saving" ? "Saving…" : saveNotice === "saved" ? "Saved" : "Save failed"}
-                {saveNotice === "error" && onRetrySave ? <button type="button" onClick={onRetrySave} className="ml-2 underline">Retry</button> : null}
-              </span>
-            ) : null}
             <input
               ref={importInputRef}
               className="sr-only"
@@ -922,6 +919,7 @@ export function PfmeaWorkspace({
           <button type="button" onClick={() => setCollapsedTasks(new Set())}>Expand tasks</button>
         </div>
         {backupError ? <div role="alert" className="ui-notice">{backupError}</div> : null}
+        {connectionError || saveNotice === 'error' ? <div role="alert" className="ui-notice">{connectionError ?? pfmeaError ?? 'Saving failed. Your pending changes are retained.'}{onRetrySave ? <button type="button" onClick={onRetrySave} className="ml-2 underline">Retry</button> : null}</div> : null}
         {pasteError ? <div role="alert" className="ui-notice">{pasteError}</div> : null}
         <div className="ui-pfmea-form">
         <div className="ui-pfmea-document-head">

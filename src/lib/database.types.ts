@@ -4582,6 +4582,14 @@ export type Database = {
       }
     }
     Functions: {
+      commit_pfmea_document_command: {
+        Args: { p_base: Json; p_document: Json; p_document_id: string; p_mutation_id: string; p_product_id: string; p_project_id: string };
+        Returns: Json;
+      };
+      patch_pfmea_cells: {
+        Args: { p_changes: Json; p_document_id: string; p_mutation_id: string; p_product_id: string; p_project_id: string }
+        Returns: Json
+      }
       copy_awi_master: { Args: { p_source: string; p_title: string }; Returns: string }
       rename_awi_master: { Args: { p_master: string; p_title: string; p_expected_title: string }; Returns: undefined }
       list_department_member_identities: {

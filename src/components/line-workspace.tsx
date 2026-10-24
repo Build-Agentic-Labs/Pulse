@@ -443,11 +443,11 @@ export function LineWorkspace({
   );
 
   // PFMEA has its own product-scoped queue; typing never schedules a planner-shell save.
-  const { queue: pfmeaQueue, result: pfmeaSaveResult, ready: pfmeaDraftReady, localError: pfmeaDraftError } = usePfmeaSaveQueue(String(derivedState.product.id), projectId, writeTracker, (document, productId) => {
+  const { queue: pfmeaQueue, connection: pfmeaConnection, result: pfmeaSaveResult, ready: pfmeaDraftReady, localError: pfmeaDraftError } = usePfmeaSaveQueue(String(derivedState.product.id), projectId, writeTracker, (document, productId) => {
     setPlannerState(current => String(current.product.id) === productId ? {
       ...current, product: { ...current.product, customFields: { ...current.product.customFields, [PRODUCT_PFMEA_DOCUMENT_FIELD]: serializePfmeaDocument(document) } },
     } : current);
-  }, { remote: derivedState.product.customFields?.[PRODUCT_PFMEA_DOCUMENT_FIELD], enabled: hasConfirmedRemoteState && !isViewOnlyAccess });
+  }, { remote: derivedState.product.customFields?.[PRODUCT_PFMEA_DOCUMENT_FIELD], enabled: hasConfirmedRemoteState && !isViewOnlyAccess, active: activeModule === 'pfmea', cellSaving: process.env.NEXT_PUBLIC_PFMEA_CELL_SAVES !== 'false' });
 
   // Per-field procedure drafts: merge/defer/acknowledge server tasks against local typing.
   const procedureDrafts = useProcedureDrafts({
@@ -1541,7 +1541,7 @@ export function LineWorkspace({
   }
 
   function updateProductPfmeaDocument(document: PfmeaDocument) {
-    if (blockViewOnlyWrite()) return;
+    if (blockViewOnlyWrite() || pfmeaConnection.paused) return;
     pfmeaQueue.schedule(document, derivedState.product.customFields?.[PRODUCT_PFMEA_DOCUMENT_FIELD]);
   }
 
@@ -2676,10 +2676,12 @@ export function LineWorkspace({
                       scenario={derivedState.scenario}
                       tasks={derivedState.tasks}
                       zones={derivedState.zones}
-                      readOnly={isViewOnlyAccess || !hasConfirmedRemoteState || !pfmeaDraftReady}
+                      readOnly={isViewOnlyAccess || !hasConfirmedRemoteState || !pfmeaDraftReady || pfmeaConnection.paused}
+                      connectionError={pfmeaConnection.paused ? pfmeaConnection.message : undefined}
                       backupError={pfmeaDraftError}
                       saveResult={pfmeaSaveResult}
-                      onRetrySave={() => { void pfmeaQueue.flush(); }}
+                      onRetrySave={() => { void pfmeaConnection.reconnect(); }}
+                      onCellCommit={() => { if (!pfmeaConnection.paused) void pfmeaQueue.flush(); }}
                       onDocumentChange={updateProductPfmeaDocument}
                       onOpenTask={(taskId) => {
                         selectTask(taskId);

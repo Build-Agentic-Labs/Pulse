@@ -10,7 +10,7 @@ function editor(target: EventTarget | null): Editor | undefined {
 }
 
 /** Event delegation keeps keyboard focus out of memoized row render state. */
-export function usePfmeaGridKeyboard(callbacks: { begin: (row: string) => void; cancel: (row: string) => void; leave: () => void }) {
+export function usePfmeaGridKeyboard(callbacks: { begin: (row: string) => void; cancel: (row: string) => void; leave: () => void; commit?: () => void }) {
   const active = useRef<Editor | undefined>(undefined);
   const editing = useRef(false);
   function setEditing(value: boolean) {
@@ -28,6 +28,7 @@ export function usePfmeaGridKeyboard(callbacks: { begin: (row: string) => void; 
     if (cell instanceof HTMLTextAreaElement || (cell instanceof HTMLInputElement && cell.type === 'number')) cell.select();
   }
   function blur(event: FocusEvent<HTMLDivElement>) {
+    if (editor(event.target)) callbacks.commit?.();
     if (event.currentTarget.contains(event.relatedTarget as Node | null) && editor(event.relatedTarget)) return;
     if (active.current) { delete active.current.dataset.pfmeaActive; delete active.current.dataset.pfmeaEditing; }
     active.current = undefined;

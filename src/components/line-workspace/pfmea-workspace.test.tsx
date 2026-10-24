@@ -57,6 +57,49 @@ function Harness({
 }
 
 describe("PFMEA workspace", () => {
+  it("expands the mounted grid without saving and restores it on exit", () => {
+    const onChange = vi.fn(); render(<Harness onChange={onChange} />);
+    const cell = screen.getByLabelText("Severity for Remove side panel");
+    fireEvent.click(screen.getByRole("button", {name:"Full screen"}));
+    expect(cell.closest(".ui-pfmea-page")).toHaveClass("ui-pfmea-fullscreen");
+    expect(screen.getByLabelText("Severity for Remove side panel")).toBe(cell);
+    fireEvent.click(screen.getByRole("button", {name:"Exit full screen"}));
+    expect(cell.closest(".ui-pfmea-page")).not.toHaveClass("ui-pfmea-fullscreen");
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", {name:"Full screen"}));
+    fireEvent.keyDown(document, {key:"Escape"});
+    expect(cell.closest(".ui-pfmea-page")).not.toHaveClass("ui-pfmea-fullscreen");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("offers score choices while retaining direct typing", () => {
+    const onChange = vi.fn(); render(<Harness onChange={onChange} />);
+    const score = screen.getByLabelText("Severity for Remove side panel");
+    fireEvent.pointerDown(score.closest("td")!);
+    expect(score).toHaveFocus();
+    fireEvent.click(score.closest("td")!);
+    fireEvent.click(screen.getByRole("option", {name:"7"}));
+    expect(screen.getByLabelText("Severity for Remove side panel")).toHaveValue(7);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText("Severity for Remove side panel"), {target:{value:"9"}});
+    expect(screen.getByLabelText("Severity for Remove side panel")).toHaveValue(9);
+  });
+
+  it("pastes a block with one save and one undo step", () => {
+    const task = fixtureTask();
+    task.manufacturingSteps!.push({ ...task.manufacturingSteps![0], id: "paste-second", sequence: 2, name: "Second step" });
+    const onChange = vi.fn(); render(<Harness tasks={[task]} onChange={onChange} />);
+    const cell = screen.getByLabelText("Failure mode for Remove side panel");
+    fireEvent.focus(cell);
+    fireEvent.paste(cell, { clipboardData: { getData: () => "A\tB\nC\tD" } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].rows.map((row: {failureMode:string;effect:string}) => [row.failureMode,row.effect])).toEqual([["A","B"],["C","D"]]);
+    fireEvent.click(screen.getByRole("button", {name:"Undo PFMEA edit"}));
+    expect(onChange.mock.calls.at(-1)![0].rows[0].failureMode).toBe("");
+    fireEvent.click(screen.getByRole("button", {name:"Redo PFMEA edit"}));
+    expect(onChange.mock.calls.at(-1)![0].rows[1].effect).toBe("D");
+  });
+
   it("memoized rows keep earlier edits when another row changes", () => {
     const task = fixtureTask();
     task.manufacturingSteps!.push({ ...task.manufacturingSteps![0], id: "second", sequence: 2, name: "Second step" });
@@ -75,7 +118,7 @@ describe("PFMEA workspace", () => {
     render(<PfmeaWorkspace product={{ ...product, customFields: { [PRODUCT_PFMEA_DOCUMENT_FIELD]: serializePfmeaDocument(document) } }} scenario={emptyPlannerState.scenario} tasks={[task]} zones={[]} onDocumentChange={onChange} />);
     fireEvent.change(screen.getByLabelText("PFMEA column view"), { target: { value: "actions" } });
     expect(onChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm effective & close" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Confirm effective & close for Remove side panel" }));
     expect(onChange.mock.calls.at(-1)![0].rows[0]).toMatchObject({ actionStatus: "closed", actionOwner: "Existing owner", verifiedAt: expect.any(String) });
     fireEvent.change(screen.getByLabelText("Effectiveness verification for Remove side panel"), { target: { value: "Recheck needed" } });
     expect(onChange.mock.calls.at(-1)![0].rows[0]).toMatchObject({ actionStatus: "awaiting_verification", verifiedAt: undefined });
@@ -87,7 +130,7 @@ describe("PFMEA workspace", () => {
     expect(screen.queryByRole("button", { name: /Edit risk/i })).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("PFMEA column view"), { target: { value: "all" } });
-    expect(screen.getByRole("button", { name: "Confirm effective & close" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Confirm effective & close for Remove side panel" })).toBeDisabled();
     const fields = {
       "Failure mode": "Loose panel", "Failure effect": "Panel falls", "Failure cause": "Missing bolt",
       "Current controls": "Torque check", "Detection activity": "Inspection", "Severity": "5",
@@ -99,7 +142,7 @@ describe("PFMEA workspace", () => {
       fireEvent.change(screen.getByLabelText(`${label} for Remove side panel`), { target: { value } });
     }
     // Owner is required, so closing cannot bypass a missing assignment.
-    expect(screen.getByRole("button", { name: "Confirm effective & close" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Confirm effective & close for Remove side panel" })).toBeDisabled();
     expect(onChange.mock.calls.at(-1)![0].rows[0].verificationNotes).toBe("Trial passed");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -142,7 +185,7 @@ describe("PFMEA workspace", () => {
     expect(screen.getByText("Process Failure Mode and Effects Analysis")).toBeInTheDocument();
     expect(screen.getByText("PNL-DIS-10")).toBeInTheDocument();
     expect(screen.getByText("Remove side panel")).toBeInTheDocument();
-    expect(screen.getByLabelText("PFMEA document number")).toHaveValue("FB-V2-PFMEA-001");
+    expect(screen.getByText("FB-V2-PFMEA-001")).toBeInTheDocument();
   });
 
   it("calculates RPN automatically from validated S, O, and D fields", () => {
@@ -214,24 +257,14 @@ describe("PFMEA workspace", () => {
     expect(screen.getByLabelText("Severity for Remove side panel")).toHaveAttribute("aria-invalid", "true");
   });
 
-  it("stores downstream control ideas as PFMEA-owned proposals", () => {
+  it("keeps control mapping disabled without changing the PFMEA or Procedure", () => {
     const onChange = vi.fn();
     const task = fixtureTask();
     const taskSnapshot = structuredClone(task);
     render(<Harness onChange={onChange} tasks={[task]} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Map control" }));
-    fireEvent.change(screen.getByLabelText("Proposed control title"), { target: { value: "Verify panel fasteners" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add proposal" }));
-
-    const document = onChange.mock.calls.at(-1)?.[0] as PfmeaDocument;
-    expect(document.rows[0].controlProposals).toMatchObject([{
-      target: "checklist",
-      status: "draft",
-      title: "Verify panel fasteners",
-      taskId: "task-panel",
-      stepId: "step-panel",
-    }]);
+    expect(screen.getByRole("button", { name: "Map control" })).toBeDisabled();
+    expect(screen.queryByText("Control mapping proposals")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
     expect(task).toEqual(taskSnapshot);
   });
 
@@ -239,7 +272,7 @@ describe("PFMEA workspace", () => {
     render(<Harness />);
 
     const table = screen.getByRole("table");
-    expect(table).toHaveAttribute("data-column-view", "risk");
+    expect(table).toHaveAttribute("data-column-view", "all");
     fireEvent.change(screen.getByLabelText("PFMEA column view"), { target: { value: "actions" } });
     expect(table).toHaveAttribute("data-column-view", "actions");
 
@@ -294,4 +327,84 @@ it("relinks a missing source only after an explicit choice, preserving the analy
   fireEvent.click(screen.getByRole("button", { name: /^Relink$/ }));
   expect(onChange.mock.calls[0][0].rows[0]).toMatchObject({ stepId: "step-panel", failureMode: "Keep this analysis" });
   expect(document).toEqual(before);
+});
+
+describe('PFMEA keyboard grid', () => {
+  function twoRows() {
+    const task = fixtureTask();
+    task.manufacturingSteps!.push({ ...task.manufacturingSteps![0], id:'step-second',sequence:2,name:'Second step' });
+    render(<Harness tasks={[task]} />);
+    return { first: screen.getByLabelText('Failure mode for Remove side panel'), second: screen.getByLabelText('Failure mode for Second step') };
+  }
+  it('moves horizontally with Tab, vertically with Enter, and skips row buttons', () => {
+    const {first,second} = twoRows();
+    act(()=>first.focus());
+    fireEvent.keyDown(first,{key:'Tab'});
+    expect(screen.getByLabelText('Failure effect for Remove side panel')).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!,{key:'Tab',shiftKey:true});
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first,{key:'Enter'});
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second,{key:'Enter',shiftKey:true});
+    expect(first).toHaveFocus();
+  });
+  it('preserves native arrow editing after F2 and restores a canceled edit', () => {
+    const {first} = twoRows();
+    act(()=>first.focus());
+    fireEvent.keyDown(first,{key:'F2'});
+    fireEvent.change(first,{target:{value:'Temporary'}});
+    fireEvent.keyDown(first,{key:'ArrowRight'});
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first,{key:'Escape'});
+    expect(first).toHaveValue('');
+    fireEvent.keyDown(first,{key:'ArrowRight'});
+    expect(screen.getByLabelText('Failure effect for Remove side panel')).toHaveFocus();
+  });
+  it('pins a row while it is edited under the not-assessed filter', () => {
+    twoRows();
+    fireEvent.change(screen.getByLabelText('Filter PFMEA rows'),{target:{value:'not_assessed'}});
+    const first=screen.getByLabelText('Failure mode for Remove side panel');
+    act(()=>first.focus());
+    fireEvent.change(first,{target:{value:'Started risk'}});
+    expect(first).toBeInTheDocument();
+    act(()=>screen.getByLabelText('Search PFMEA').focus());
+    expect(screen.queryByLabelText('Failure mode for Remove side panel')).not.toBeInTheDocument();
+  });
+});
+
+describe('PFMEA undo and redo',()=>{
+ it('undoes a whole typing session and redoes it with minimal toolbar controls',()=>{
+  render(<Harness/>);
+  const first=screen.getByLabelText('Failure mode for Remove side panel');
+  act(()=>first.focus());
+  fireEvent.change(first,{target:{value:'T'}});
+  fireEvent.change(first,{target:{value:'Typed risk'}});
+  fireEvent.keyDown(first,{key:'z',ctrlKey:true});
+  expect(first).toHaveValue('');
+  fireEvent.keyDown(first,{key:'z',metaKey:true,shiftKey:true});
+  expect(first).toHaveValue('Typed risk');
+  fireEvent.click(screen.getByRole('button',{name:'Undo PFMEA edit'}));
+  expect(first).toHaveValue('');
+  fireEvent.click(screen.getByRole('button',{name:'Redo PFMEA edit'}));
+  expect(first).toHaveValue('Typed risk');
+ });
+ it('keeps separate cell edits separate and clears redo after new typing',()=>{
+  render(<Harness/>);
+  const first=screen.getByLabelText('Failure mode for Remove side panel');
+  const effect=screen.getByLabelText('Failure effect for Remove side panel');
+  act(()=>first.focus());fireEvent.change(first,{target:{value:'Risk'}});
+  fireEvent.keyDown(first,{key:'Tab'});fireEvent.change(effect,{target:{value:'Effect'}});
+  fireEvent.keyDown(effect,{key:'z',ctrlKey:true});
+  expect(effect).toHaveValue('');expect(first).toHaveValue('Risk');
+  fireEvent.change(effect,{target:{value:'Different effect'}});
+  expect(screen.getByRole('button',{name:'Redo PFMEA edit'})).toBeDisabled();
+ });
+ it('does not undo an Escape cancellation as another edit',()=>{
+  render(<Harness/>);
+  const first=screen.getByLabelText('Failure mode for Remove side panel');
+  act(()=>first.focus());fireEvent.change(first,{target:{value:'Canceled'}});
+  fireEvent.keyDown(first,{key:'Escape'});
+  expect(first).toHaveValue('');
+  expect(screen.getByRole('button',{name:'Undo PFMEA edit'})).toBeDisabled();
+ });
 });

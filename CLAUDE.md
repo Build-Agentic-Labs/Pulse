@@ -87,6 +87,30 @@ Every new feature, in this order:
   MM/DD/YYYY by design. UI surfaces use `formatDate`/`formatDateTime` from
   `@/domain/formatting`. Do not add local copies.
 
+## UI design
+
+- **Clarity:** Make layout, hierarchy, and controls carry the interface. Omit
+  taglines, helper text, and secondary labels that repeat what is already clear.
+  Keep text that explains a consequence, resolves ambiguity, or supports
+  accessibility.
+- **Consistency and reuse:** Before adding a page, layout, or interaction, inspect
+  the closest existing screen and the shared UI components. Reuse their layout
+  patterns, design tokens, and interaction behavior, including spacing,
+  typography, hover and focus states, dropdowns, menus, dialogs, and feedback.
+  Prefer shared components over recreating them locally. When a pattern needs a
+  new capability, extend the shared component and verify its affected uses. Keep
+  changes within the requested feature; do not restyle unrelated screens.
+
+## Code organization
+
+Follow the existing feature folders and keep files focused on a clear
+responsibility. Keep UI rendering in components, pure business logic in
+`src/domain/`, data access in the relevant store, and feature styles scoped to
+their component or route. Extract reusable behavior when it has a concrete use.
+Split large files along responsibility boundaries rather than arbitrary line
+counts. Avoid duplicate implementations, speculative abstractions, and unrelated
+file reorganizations.
+
 ## Process
 
 - Branch per feature → CI green → merge to main → delete branch. No PRs

@@ -106,7 +106,7 @@ function worksheetXml(document: PfmeaDocument, productName: string, includeLogo:
   </sheetData>
   <mergeCells count="5"><mergeCell ref="B1:F1"/><mergeCell ref="B2:F2"/><mergeCell ref="G2:H2"/><mergeCell ref="B3:E3"/><mergeCell ref="F3:J3"/></mergeCells>
   <autoFilter ref="A5:R${Math.max(5, document.rows.length + 5)}"/>
-  <conditionalFormatting sqref="K6:K${Math.max(6, document.rows.length + 5)} R6:R${Math.max(6, document.rows.length + 5)}"><cfRule type="cellIs" dxfId="0" priority="1" operator="greaterThanOrEqual"><formula>${document.settings.highRpnThreshold}</formula></cfRule></conditionalFormatting>
+  ${document.settings.highRpnThreshold == null ? "" : `<conditionalFormatting sqref="K6:K${Math.max(6, document.rows.length + 5)} R6:R${Math.max(6, document.rows.length + 5)}"><cfRule type="cellIs" dxfId="0" priority="1" operator="greaterThanOrEqual"><formula>${document.settings.highRpnThreshold}</formula></cfRule></conditionalFormatting>`}
   <pageMargins left="0.2" right="0.2" top="0.3" bottom="0.3" header="0.1" footer="0.1"/>
   <pageSetup orientation="landscape" paperSize="8" fitToWidth="1" fitToHeight="0"/>
   ${drawing}

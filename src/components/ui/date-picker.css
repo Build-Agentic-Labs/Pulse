@@ -1,0 +1,18 @@
+.ui-date-picker-field { position: relative; min-width: 0; }
+.ui-date-picker-field > input { width: 100%; padding-right: 26px; }
+.ui-date-picker-trigger { position: absolute; right: 2px; top: 1px; width: 24px; height: 28px; display: inline-flex; align-items: center; justify-content: center; color: var(--color-ink-secondary); }
+.ui-date-picker-trigger:hover { color: var(--color-ink); }
+.ui-date-picker-trigger:focus-visible { outline: 1px solid var(--color-border-strong); }
+.ui-date-picker-backdrop { position: fixed; inset: 0; }
+.ui-date-picker-calendar { position: fixed; width: 280px; max-width: calc(100vw - 16px); padding: 8px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-panel, 8px); background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-float); font-size: 12px; }
+.ui-date-picker-calendar header, .ui-date-picker-calendar footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ui-date-picker-calendar header button { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; }
+.ui-date-picker-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; padding: 6px 0; text-align: center; }
+.ui-date-picker-days > span { padding: 4px 0; color: var(--color-ink-secondary); font-size: 10px; }
+.ui-date-picker-days > button { height: 32px; border-radius: 4px; font-variant-numeric: tabular-nums; }
+.ui-date-picker-days > button[data-outside] { color: var(--color-ink-tertiary); }
+.ui-date-picker-days > button:hover { background: var(--color-surface-raised); }
+.ui-date-picker-days > button[data-selected] { background: var(--color-ink); color: var(--color-canvas); }
+.ui-date-picker-days > button:focus-visible { outline: 1px solid var(--color-border-strong); outline-offset: -1px; }
+.ui-date-picker-calendar footer { border-top: 1px solid var(--color-border); padding-top: 6px; }
+.ui-date-picker-calendar footer button { padding: 5px 8px; }

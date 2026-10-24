@@ -15,6 +15,8 @@ export function createPfmeaSaveQueue(options: {
   save: (document: PfmeaDocument, base: unknown) => Promise<void>;
   report: (result: PfmeaSaveResult) => void;
   delay?: number;
+  retain?: (document: PfmeaDocument, base: unknown) => void;
+  acknowledge?: (document: PfmeaDocument) => void;
 }) {
   let pending: PfmeaDocument | undefined;
   let latest: PfmeaDocument | undefined;
@@ -36,6 +38,7 @@ export function createPfmeaSaveQueue(options: {
       try {
         await options.save(snapshot, base);
         base = snapshot;
+        options.acknowledge?.(snapshot);
         retries = 0;
         options.report({ document: snapshot, state: 'saved' });
       } catch (cause) {
@@ -64,6 +67,7 @@ export function createPfmeaSaveQueue(options: {
     if (!initialized) { base = initialBase; initialized = true; }
     pending = document;
     latest = document;
+    options.retain?.(document, base);
     failed = false;
     retries = 0;
     finish ??= options.tracker.begin(options.key); // Debounced work also blocks navigation.

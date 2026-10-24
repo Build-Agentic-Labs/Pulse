@@ -305,3 +305,19 @@ localStorage parked fields are preserved but not exposed by the IndexedDB legacy
 empty occupied slots are not overwritten by legacy adoption. A failed local put warns and does not
 block remote saving; a fresh edit is needed to attempt another local put for an otherwise unchanged
 snapshot. See the C1 results for rollback behavior. Do not describe this as full offline recovery.
+
+
+## PFMEA to checklist generation — deferred 2026-10-23
+
+**Status: planned; Map control disabled in the PFMEA grid.** Existing control proposals
+remain stored unchanged. The current proposal panel does not create downstream records.
+
+Keep Recommended Actions as free text. A future explicit “Add to checklist” flow should
+capture the exact check and pass criteria, inherit the linked Procedure task and process
+step, and present a review before creating a checklist item. Preserve a link back to the
+originating PFMEA failure mode. Do not infer or create operational checks automatically
+from ambiguous action text. Define synchronization, duplicate prevention, permissions,
+and what happens when the source risk or Procedure changes before enabling generation.
+
+This backlog item does not authorize implementing generation or modifying existing
+PFMEA records, Procedure tasks, checklists, or SOPs.

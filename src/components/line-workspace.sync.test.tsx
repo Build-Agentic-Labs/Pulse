@@ -48,6 +48,11 @@ const { router, fakeSupabaseClient } = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/lib/planner/client", async (original) => ({
+  ...await original<typeof import("@/lib/planner/client")>(),
+  plannerClient: vi.fn(() => fakeSupabaseClient),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => router,
   usePathname: () => "/projects/sync",

@@ -431,12 +431,23 @@ export function LineWorkspace({
     isForegroundSaveScope,
   });
 
+  const activeProjectContext = projectContext?.projectId === derivedState.project?.projectId
+    ? projectContext
+    : derivedState.project ?? projectContext;
+  // Module-wide view-only access. RLS already rejects these writes server-side; gating
+  // here keeps the UI honest instead of letting edits look saved and silently vanish.
+  const isViewOnlyAccess = Boolean(
+    activeProjectContext &&
+      (activeProjectContext.accessLevel === "view" ||
+        (activeProjectContext.accessLevel === undefined && activeProjectContext.role === "viewer")),
+  );
+
   // PFMEA has its own product-scoped queue; typing never schedules a planner-shell save.
-  const { queue: pfmeaQueue, result: pfmeaSaveResult } = usePfmeaSaveQueue(String(derivedState.product.id), projectId, writeTracker, (document, productId) => {
+  const { queue: pfmeaQueue, result: pfmeaSaveResult, ready: pfmeaDraftReady, localError: pfmeaDraftError } = usePfmeaSaveQueue(String(derivedState.product.id), projectId, writeTracker, (document, productId) => {
     setPlannerState(current => String(current.product.id) === productId ? {
       ...current, product: { ...current.product, customFields: { ...current.product.customFields, [PRODUCT_PFMEA_DOCUMENT_FIELD]: serializePfmeaDocument(document) } },
     } : current);
-  });
+  }, { remote: derivedState.product.customFields?.[PRODUCT_PFMEA_DOCUMENT_FIELD], enabled: hasConfirmedRemoteState && !isViewOnlyAccess });
 
   // Per-field procedure drafts: merge/defer/acknowledge server tasks against local typing.
   const procedureDrafts = useProcedureDrafts({
@@ -569,16 +580,6 @@ export function LineWorkspace({
       : currentAllocationRecommendations;
   // The route gate revalidates Product access on tab return. Prefer its current
   // context to the permission captured inside an older planner snapshot.
-  const activeProjectContext = projectContext?.projectId === derivedState.project?.projectId
-    ? projectContext
-    : derivedState.project ?? projectContext;
-  // Module-wide view-only access. RLS already rejects these writes server-side; gating
-  // here keeps the UI honest instead of letting edits look saved and silently vanish.
-  const isViewOnlyAccess = Boolean(
-    activeProjectContext &&
-      (activeProjectContext.accessLevel === "view" ||
-        (activeProjectContext.accessLevel === undefined && activeProjectContext.role === "viewer")),
-  );
   const isViewOnlyAccessRef = useRef(isViewOnlyAccess);
   isViewOnlyAccessRef.current = isViewOnlyAccess;
   const viewOnlyNoticeShownRef = useRef(false);
@@ -2669,13 +2670,14 @@ export function LineWorkspace({
                       ) : null}
                     </div>
                   ) : activeModule === "pfmea" ? (
-                    <PfmeaWorkspace
+                    !pfmeaDraftReady ? <div className="p-4 text-sm text-ink-secondary" role="status">Loading PFMEA…</div> : <PfmeaWorkspace
                       workspaceId={activeProjectContext?.workspaceId}
                       product={pfmeaQueue.latest() ? { ...derivedState.product, customFields: { ...derivedState.product.customFields, [PRODUCT_PFMEA_DOCUMENT_FIELD]: pfmeaQueue.latest() } } : derivedState.product}
                       scenario={derivedState.scenario}
                       tasks={derivedState.tasks}
                       zones={derivedState.zones}
-                      readOnly={isViewOnlyAccess || !hasConfirmedRemoteState}
+                      readOnly={isViewOnlyAccess || !hasConfirmedRemoteState || !pfmeaDraftReady}
+                      backupError={pfmeaDraftError}
                       saveResult={pfmeaSaveResult}
                       onRetrySave={() => { void pfmeaQueue.flush(); }}
                       onDocumentChange={updateProductPfmeaDocument}

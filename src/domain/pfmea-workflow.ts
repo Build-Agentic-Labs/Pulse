@@ -1,4 +1,4 @@
-import { getPfmeaRowIssues, createPfmeaRowForProcedureLink, syncPfmeaDocumentWithProcedure, type PfmeaDocument, type PfmeaRow } from './pfmea';
+import { getPfmeaRowIssues, createPfmeaRowForProcedureLink, syncPfmeaDocumentWithProcedure, calculateResidualRpn, type PfmeaSettings, type PfmeaDocument, type PfmeaRow } from './pfmea';
 import type { Task, Scenario, Zone } from './types';
 
 export function pfmeaLinkIssue(row: PfmeaRow, tasks: Task[]): string | undefined {
@@ -46,7 +46,7 @@ export function isPfmeaActionOverdue(row: PfmeaRow, today: string) {
   return !row.archivedAt && pfmeaActionStatus(row) !== 'closed' && Boolean(row.targetDate && row.targetDate < today);
 }
 
-export function pfmeaClosureIssues(row: PfmeaRow): string[] {
+export function pfmeaClosureIssues(row: PfmeaRow, settings?: PfmeaSettings): string[] {
   const issues = getPfmeaRowIssues(row).map(issue => issue.message);
   if (!row.failureMode.trim()) issues.push('Describe the risk before closing its action.');
   if (!row.recommendedActions.trim()) issues.push('Describe the recommended action.');
@@ -55,6 +55,7 @@ export function pfmeaClosureIssues(row: PfmeaRow): string[] {
   if (!row.actionsTaken.trim()) issues.push('Record what was implemented.');
   if (row.resultOccurrence == null || row.resultDetection == null) issues.push('Record both residual scores.');
   if (!row.verificationNotes?.trim()) issues.push('Record how effectiveness was verified.');
+  if (settings?.highRpnThreshold != null && (calculateResidualRpn(row) == null || calculateResidualRpn(row)! >= settings.highRpnThreshold)) issues.push('Final RPN must be below the threshold.');
   return [...new Set(issues)];
 }
 
@@ -69,8 +70,8 @@ export function patchPfmeaRow(row: PfmeaRow, patch: Partial<PfmeaRow>, now = new
   return next;
 }
 
-export function closePfmeaAction(row: PfmeaRow, confirmed: boolean, now = new Date()): PfmeaRow {
-  const issues = pfmeaClosureIssues(row);
+export function closePfmeaAction(row: PfmeaRow, confirmed: boolean, now = new Date(), settings?: PfmeaSettings): PfmeaRow {
+  const issues = pfmeaClosureIssues(row, settings);
   if (!confirmed || issues.length) throw new Error(issues[0] ?? 'Confirm effectiveness before closing.');
   return { ...row, actionStatus: 'closed', verifiedAt: now.toISOString(), updatedAt: now.toISOString() };
 }

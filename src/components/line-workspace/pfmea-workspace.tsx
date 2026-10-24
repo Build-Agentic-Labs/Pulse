@@ -1,5 +1,10 @@
 "use client";
 
+import { pastePfmeaGrid, type PfmeaPasteTarget } from "@/domain/pfmea-grid-paste";
+import { createPfmeaEditHistory } from "@/domain/pfmea-edit-history";
+import { usePfmeaGridKeyboard } from "./use-pfmea-grid-keyboard";
+import { DatePicker } from "@/components/ui/date-picker";
+import { ThemedSelect } from "@/components/themed-select";
 import { ModalSurface } from "@/components/ui/modal-surface";
 
 import Image from "next/image";
@@ -15,16 +20,21 @@ import {
   Download,
   ExternalLink,
   FileUp,
+  FileText,
   Link2,
+  Maximize2,
+  Minimize2,
   Plus,
   Printer,
   RefreshCw,
   Search,
+  Settings2,
   Trash2,
   Undo2,
+  Redo2,
   X,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   formatPfmeaRevision,
@@ -64,6 +74,7 @@ type PfmeaWorkspaceProps = {
   tasks: Task[];
   zones: Zone[];
   readOnly?: boolean;
+  backupError?: string;
   saveResult?: { document: unknown; state: "saving" | "saved" | "error"; error?: string };
   onDocumentChange: (document: PfmeaDocument) => void;
   onRetrySave?: () => void;
@@ -148,6 +159,7 @@ const PfmeaRenderedRow = memo(function PfmeaRenderedRow({ render }: {
 
 function PfmeaTextCell({
   label,
+  field,
   value,
   placeholder,
   readOnly,
@@ -156,6 +168,7 @@ function PfmeaTextCell({
   onChange,
 }: {
   label: string;
+  field: string;
   value: string;
   placeholder: string;
   readOnly: boolean;
@@ -163,9 +176,19 @@ function PfmeaTextCell({
   autoFocus?: boolean;
   onChange: (value: string) => void;
 }) {
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    if (field !== "verificationNotes" || !textRef.current) return;
+    const textarea = textRef.current;
+    if (!value) { textarea.style.height = ""; return; }
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.max(56, textarea.scrollHeight)}px`;
+  }, [field, value]);
   return (
     <textarea
+      ref={textRef}
       aria-label={label}
+      data-pfmea-field={field}
       value={value}
       placeholder={placeholder}
       rows={2}
@@ -173,27 +196,44 @@ function PfmeaTextCell({
       aria-invalid={invalid || undefined}
       autoFocus={autoFocus}
       onChange={(event) => onChange(event.target.value)}
+      onKeyDown={event => {
+        if (!event.altKey || event.key !== "Enter") return;
+        event.preventDefault();
+        const cell = event.currentTarget;
+        const start = cell.selectionStart;
+        const end = cell.selectionEnd;
+        onChange(cell.value.slice(0, start) + "\n" + cell.value.slice(end));
+        requestAnimationFrame(() => { if (cell.isConnected) cell.setSelectionRange(start + 1, start + 1); });
+      }}
       className={`ui-pfmea-cell-text ${invalid ? "ui-pfmea-field-invalid" : ""}`}
     />
   );
 }
 
+const PFMEA_SCORE_OPTIONS = Array.from({ length: 10 }, (_, index) => ({ value: String(index + 1), label: String(index + 1) }));
+
 function PfmeaScoreCell({
   label,
+  field,
   value,
   readOnly,
   invalid = false,
   onChange,
 }: {
   label: string;
+  field: string;
   value?: number;
   readOnly: boolean;
   invalid?: boolean;
   onChange: (value: number | undefined) => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
+    <>
     <input
+      ref={inputRef}
       aria-label={label}
+      data-pfmea-field={field}
       type="number"
       min={1}
       max={10}
@@ -205,12 +245,28 @@ function PfmeaScoreCell({
       onChange={(event) => onChange(normalizePfmeaScore(event.target.value))}
       className={`ui-pfmea-score-input ${invalid ? "ui-pfmea-field-invalid" : ""}`}
     />
+    {!readOnly ? <ThemedSelect
+      className="ui-pfmea-score-picker"
+      triggerClassName="ui-pfmea-score-picker-trigger"
+      ariaLabel={`Choose ${label.toLowerCase()}`}
+      value={value == null ? "" : String(value)}
+      selectedLabel=""
+      options={PFMEA_SCORE_OPTIONS}
+      menuMinWidth={96}
+      menuMaxHeight={360}
+      onChange={next => {
+        onChange(normalizePfmeaScore(next));
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }}
+    /> : null}
+    </>
   );
 }
 
-function PfmeaRpnCell({ value, high, label }: { value?: number; high?: boolean; label: string }) {
+function PfmeaRpnCell({ value, threshold, label }: { value?: number; threshold?: number | null; label: string }) {
+  const state = value == null || threshold == null ? "neutral" : value >= threshold ? "high" : "low";
   return (
-    <output aria-label={label} className={`ui-pfmea-rpn ${high ? "ui-pfmea-rpn-high" : ""}`}>
+    <output aria-label={label} className={`ui-pfmea-rpn ui-pfmea-rpn-${state}`}>
       {value ?? "—"}
     </output>
   );
@@ -270,6 +326,7 @@ export function PfmeaWorkspace({
   zones,
   readOnly = false,
   saveResult,
+  backupError,
   onDocumentChange,
   onRetrySave,
   onOpenTask,
@@ -279,9 +336,47 @@ export function PfmeaWorkspace({
   const [pendingDocument, setPendingDocument] = useState<string>();
   const [saveNotice, setSaveNotice] = useState<"saving" | "saved" | "error">();
   const [pfmeaError, setPfmeaError] = useState<string>();
+  const [pasteError, setPasteError] = useState<string>();
+  const [showSettings, setShowSettings] = useState(false);
+  const [showDocumentDetails, setShowDocumentDetails] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
+  const fullScreenRoot = useRef<HTMLElement>(null);
+  const [thresholdDraft, setThresholdDraft] = useState("");
 
   useEffect(() => {
-    if (!pendingDocument || !saveResult || JSON.stringify(saveResult.document) !== pendingDocument) return;
+    if (!fullScreen) return;
+    // Keep keyboard focus out of the covered app shell; new popup portals remain usable.
+    const covered: HTMLElement[] = [];
+    let branch: HTMLElement | null = fullScreenRoot.current;
+    while (branch?.parentElement) {
+      const parent = branch.parentElement;
+      for (const sibling of Array.from(parent.children)) {
+        if (sibling !== branch && sibling instanceof HTMLElement && !sibling.hasAttribute("inert")) {
+          sibling.setAttribute("inert", "");
+          covered.push(sibling);
+        }
+      }
+      if (parent === window.document.body) break;
+      branch = parent;
+    }
+    fullScreenRoot.current?.querySelector<HTMLButtonElement>("[data-pfmea-exit-fullscreen]")?.focus();
+    function exitOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // Close an open popup first; otherwise Escape exits without reverting edits.
+      if (window.document.querySelector('dialog[open], [role="listbox"], .ui-pfmea-file-menu[open]')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setFullScreen(false);
+    }
+    window.document.addEventListener("keydown", exitOnEscape, true);
+    return () => {
+      window.document.removeEventListener("keydown", exitOnEscape, true);
+      for (const sibling of covered) sibling.removeAttribute("inert");
+    };
+  }, [fullScreen]);
+
+  useEffect(() => {
+    if (!saveResult || (pendingDocument ? JSON.stringify(saveResult.document) !== pendingDocument : saveResult.state !== "error")) return;
     setSaveNotice(saveResult.state);
     setPfmeaError(saveResult.error);
     if (saveResult.state !== "saved") return;
@@ -296,6 +391,13 @@ export function PfmeaWorkspace({
   const [document, setDocument] = useState<PfmeaDocument>(() =>
     storedDocument ?? createPfmeaDocumentFromProcedure(product, scenario, tasks, zones),
   );
+  const history = useRef(createPfmeaEditHistory());
+  const editGroup = useRef<string | undefined>(undefined);
+  const editSequence = useRef(0);
+  const [historyStatus, setHistoryStatus] = useState({undo:false,redo:false});
+  function refreshHistory() { const next = history.current.status(); setHistoryStatus(current => current.undo === next.undo && current.redo === next.redo ? current : next); }
+  const [activeGridRow, setActiveGridRow] = useState<string>();
+  const editBaseline = useRef<PfmeaRow | undefined>(undefined);
   const [members, setMembers] = useState<WorkspaceMemberProfile[]>([]);
   const [directoryReady, setDirectoryReady] = useState(false);
   const [taskFilter, setTaskFilter] = useState("");
@@ -309,15 +411,13 @@ export function PfmeaWorkspace({
   const [relinkStep, setRelinkStep] = useState("");
   const [archiveId, setArchiveId] = useState<string>();
   const [filter, setFilter] = useState<PfmeaFilter>("all");
-  const [columnView, setColumnView] = useState<PfmeaColumnView>("risk");
+  const [columnView, setColumnView] = useState<PfmeaColumnView>("all");
   const [query, setQuery] = useState("");
   const [showAddFailure, setShowAddFailure] = useState(false);
   const [showScoringGuide, setShowScoringGuide] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [selectedStepId, setSelectedStepId] = useState("");
   const [focusRowId, setFocusRowId] = useState<string>();
-  const [pendingDeleteRow, setPendingDeleteRow] = useState<PfmeaRow>();
-  const [undoDelete, setUndoDelete] = useState<{ row: PfmeaRow; index: number }>();
   const [importPreview, setImportPreview] = useState<PfmeaImportPreview>();
   const [importError, setImportError] = useState<string>();
   const [importLoading, setImportLoading] = useState(false);
@@ -340,6 +440,11 @@ export function PfmeaWorkspace({
     setSaveNotice(undefined);
     setPfmeaError(undefined);
     setDocument(storedDocument ?? createPfmeaDocumentFromProcedure(product, scenario, tasks, zones));
+    history.current.clear();
+    editGroup.current = undefined;
+    setHistoryStatus({undo:false,redo:false});
+    setActiveGridRow(undefined);
+    editBaseline.current = undefined;
     setTaskFilter("");
     setAreaFilter("");
     setCollapsedTasks(new Set());
@@ -351,19 +456,11 @@ export function PfmeaWorkspace({
     setQuery("");
     setShowAddFailure(false);
     setShowScoringGuide(false);
-    setPendingDeleteRow(undefined);
-    setUndoDelete(undefined);
     setImportPreview(undefined);
     setImportError(undefined);
     setExportError(undefined);
     setMappingRowId(undefined);
   }, [product, scenario, storedDocument, tasks, zones]);
-
-  useEffect(() => {
-    if (!undoDelete) return;
-    const timeout = window.setTimeout(() => setUndoDelete(undefined), 8000);
-    return () => window.clearTimeout(timeout);
-  }, [undoDelete]);
 
   useEffect(() => {
     function closeFileMenuFromPage(event: PointerEvent | KeyboardEvent) {
@@ -401,29 +498,41 @@ export function PfmeaWorkspace({
   const mappingRow = mappingRowId ? document.rows.find((row) => row.id === mappingRowId) : undefined;
   const activeRows = useMemo(() => document.rows.filter(row => !row.archivedAt), [document.rows]);
   const startedRows = useMemo(() => activeRows.filter(isPfmeaRowStarted), [activeRows]);
-  const highPriorityRows = useMemo(() => startedRows.filter(isHighPriorityPfmeaRow), [startedRows]);
-  const incompleteRows = useMemo(() => startedRows.filter((row) => getPfmeaRowIssues(row).length > 0), [startedRows]);
+  const highPriorityRows = useMemo(() => startedRows.filter(row => isHighPriorityPfmeaRow(row, document.settings)), [startedRows, document.settings]);
+  const incompleteRows = useMemo(() => startedRows.filter((row) => getPfmeaRowIssues(row, document.settings).length > 0), [startedRows, document.settings]);
   const staleLinkCount = useMemo(
     () => activeRows.filter((row) => pfmeaLinkIssue(row, tasks)).length,
     [activeRows, tasks],
   );
 
+  const keyboard = usePfmeaGridKeyboard({
+    begin: id => { history.current.seal(); editGroup.current = `cell-${++editSequence.current}`; editBaseline.current = document.rows.find(row => row.id === id); setActiveGridRow(id); },
+    cancel: id => {
+      const baseline = editBaseline.current;
+      const previous = history.current.cancel(editGroup.current);
+      if (baseline?.id === id && previous) applyDocument(previous, false);
+      editGroup.current = `cell-${++editSequence.current}`;
+      refreshHistory();
+    },
+    leave: () => { history.current.seal(); editGroup.current = undefined; editBaseline.current = undefined; setActiveGridRow(undefined); },
+  });
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return document.rows.filter((row) => {
+      if (row.id === activeGridRow) return true;
       if (filter === "archived" ? !row.archivedAt : row.archivedAt) return false;
       if (taskFilter && pfmeaTaskGroupKey(row) !== taskFilter) return false;
       if (areaFilter && (row.zoneNameSnapshot || "Unassigned") !== areaFilter) return false;
       if (filter === "overdue" && !isPfmeaActionOverdue(row, localToday())) return false;
       if (filter === "awaiting_verification" && pfmeaActionStatus(row) !== "awaiting_verification") return false;
       if (filter === "links" && !pfmeaLinkIssue(row, tasks)) return false;
-      if (filter === "not_assessed" && pfmeaAssessmentState(row) !== "not_assessed") return false;
-      if (filter === "complete" && pfmeaAssessmentState(row) !== "complete") return false;
+      if (filter === "not_assessed" && pfmeaAssessmentState(row, document.settings) !== "not_assessed") return false;
+      if (filter === "complete" && pfmeaAssessmentState(row, document.settings) !== "complete") return false;
       if (filter === "started" && !isPfmeaRowStarted(row)) return false;
-      if (filter === "high" && !isHighPriorityPfmeaRow(row)) return false;
+      if (filter === "high" && !isHighPriorityPfmeaRow(row, document.settings)) return false;
       if (
         filter === "incomplete" &&
-        (!isPfmeaRowStarted(row) || getPfmeaRowIssues(row).length === 0)
+        (!isPfmeaRowStarted(row) || getPfmeaRowIssues(row, document.settings).length === 0)
       ) return false;
       if (!normalizedQuery) return true;
       return [
@@ -438,7 +547,7 @@ export function PfmeaWorkspace({
         row.recommendedActions,
       ].some((value) => value?.toLowerCase().includes(normalizedQuery));
     });
-  }, [document.rows, filter, query, tasks, taskFilter, areaFilter]);
+  }, [document.rows, document.settings, filter, query, tasks, taskFilter, areaFilter, activeGridRow]);
   const visibleRows = useMemo(() => {
     const groups = new Map<string, PfmeaRow[]>();
     filteredRows.forEach(row => { const key = pfmeaTaskGroupKey(row); groups.set(key, [...(groups.get(key) ?? []), row]); });
@@ -462,14 +571,15 @@ export function PfmeaWorkspace({
   function closeRow(rowId: string) {
     const row = document.rows.find(item => item.id === rowId);
     if (!row) return;
-    const closed = closePfmeaAction(row, true);
+    const closed = closePfmeaAction(row, true, new Date(), document.settings);
     applyDocument({ ...document, rows: document.rows.map(item => item.id === rowId ? closed : item) });
   }
 
   function toggleTask(key: string) { setCollapsedTasks(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }); }
 
 
-  function applyDocument(nextDocument: PfmeaDocument) {
+  function applyDocument(nextDocument: PfmeaDocument, record = true) {
+    if (record) { history.current.record(document, nextDocument, editGroup.current); refreshHistory(); }
     const next = { ...nextDocument, updatedAt: new Date().toISOString() };
     setDocument(next);
     setPendingDocument(JSON.stringify(serializePfmeaDocument(next)));
@@ -478,6 +588,15 @@ export function PfmeaWorkspace({
     onDocumentChange(next);
   }
 
+  function replayHistory(direction: "undo" | "redo") {
+    if (readOnly) return;
+    const next = history.current[direction]();
+    if (!next) return;
+    editGroup.current = `cell-${++editSequence.current}`;
+    editBaseline.current = next.rows.find(row => row.id === activeGridRow);
+    applyDocument(next, false);
+    refreshHistory();
+  }
   function updateMetadata(patch: Partial<PfmeaDocument>) {
     applyDocument({ ...document, ...patch });
   }
@@ -525,22 +644,6 @@ export function PfmeaWorkspace({
     applyDocument({ ...document, rows });
     setFocusRowId(nextRow.id);
     setShowAddFailure(false);
-  }
-
-  function confirmDeleteRow() {
-    if (!pendingDeleteRow) return;
-    const index = document.rows.findIndex((row) => row.id === pendingDeleteRow.id);
-    applyDocument({ ...document, rows: document.rows.filter((row) => row.id !== pendingDeleteRow.id) });
-    setUndoDelete({ row: pendingDeleteRow, index });
-    setPendingDeleteRow(undefined);
-  }
-
-  function restoreDeletedRow() {
-    if (!undoDelete) return;
-    const rows = [...document.rows];
-    rows.splice(Math.min(Math.max(undoDelete.index, 0), rows.length), 0, undoDelete.row);
-    applyDocument({ ...document, rows });
-    setUndoDelete(undefined);
   }
 
   async function selectImportFile(file: File | undefined) {
@@ -672,24 +775,15 @@ export function PfmeaWorkspace({
     : false;
 
   return (
-    <section className="ui-pfmea-page space-y-4" aria-labelledby="planner-pfmea-title">
-      <section className="ui-pfmea-document" aria-label="ANA PFMEA controlled document">
-        <div className="ui-pfmea-document-head">
-          <div className="ui-pfmea-brand">
-            <Image src="/sop/ana-logo.png" alt="ANA" width={116} height={32} priority />
-            <div>
-              <div className="ui-pfmea-title-line">
-                <h2 id="planner-pfmea-title" className="ui-pfmea-document-title">{product.name} PFMEA</h2>
-                <span className="ui-pfmea-status">{document.status.replace("_", " ")}</span>
-              </div>
-              <p className="ui-pfmea-document-subtitle">Process Failure Mode and Effects Analysis</p>
-              <p className="ui-pfmea-document-reference">
-                <span>{document.documentNumber}</span>
-                <span>{formatPfmeaRevision(document.revision)}</span>
-                <span>{displayDate(document.originalDate)}</span>
-              </p>
-            </div>
-          </div>
+    <section ref={fullScreenRoot} className={`ui-pfmea-page space-y-4${fullScreen ? " ui-pfmea-fullscreen" : ""}`} aria-labelledby="planner-pfmea-title" onKeyDownCapture={event => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.nativeEvent.isComposing || event.key.toLowerCase() !== "z" && event.key.toLowerCase() !== "y") return;
+      const target = event.target as HTMLElement;
+      if (!target.closest('.ui-pfmea-grid-wrap') && !target.closest('[data-pfmea-history]')) return;
+      event.preventDefault(); event.stopPropagation();
+      replayHistory(event.shiftKey || event.key.toLowerCase() === "y" ? "redo" : "undo");
+    }}>
+      <section className="ui-pfmea-document" aria-label="PFMEA document actions" hidden={fullScreen}>
+        <div className="ui-pfmea-document-tools">
           <div className="ui-pfmea-head-actions">
             {saveNotice ? (
               <span role="status" aria-label="PFMEA save status" className="text-xs text-ink-secondary" title={pfmeaError}>
@@ -706,6 +800,8 @@ export function PfmeaWorkspace({
               aria-label="Choose PFMEA import file"
               onChange={(event) => void selectImportFile(event.target.files?.[0])}
             />
+            <button type="button" className="ui-btn-ghost h-9 gap-2" data-pfmea-fullscreen-toggle aria-pressed={fullScreen} onClick={() => setFullScreen(current => !current)}>{fullScreen ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}{fullScreen ? "Exit full screen" : "Full screen"}</button>
+            <button type="button" className="ui-btn-ghost h-9 gap-2" onClick={() => setShowDocumentDetails(true)}><FileText size={14} aria-hidden="true" />Document details</button>
             <details ref={fileMenuRef} className="ui-pfmea-file-menu">
               <summary className="ui-btn-ghost h-9 gap-2" aria-label="PFMEA file options">
                 <FileUp size={14} aria-hidden="true" />
@@ -741,29 +837,12 @@ export function PfmeaWorkspace({
               Add failure mode
             </button>
           </div>
-        </div>
 
-        <details className="ui-pfmea-details">
-          <summary>Document details</summary>
+        </div>
+      </section>
+
+      {showDocumentDetails ? <PfmeaModal title="Document details" onClose={() => setShowDocumentDetails(false)} actions={<button type="button" className="ui-btn-primary h-9" onClick={() => setShowDocumentDetails(false)}>Done</button>}>
           <div className="ui-pfmea-details-grid">
-            <label>
-              <span>Document no.</span>
-              <input
-                aria-label="PFMEA document number"
-                value={document.documentNumber}
-                readOnly={readOnly}
-                onChange={(event) => updateMetadata({ documentNumber: event.target.value })}
-              />
-            </label>
-            <label>
-              <span>Revision</span>
-              <input
-                aria-label="PFMEA revision"
-                value={document.revision}
-                readOnly={readOnly}
-                onChange={(event) => updateMetadata({ revision: event.target.value })}
-              />
-            </label>
             <label>
               <span>Item / product</span>
               <input aria-label="PFMEA item" value={document.item} readOnly={readOnly} onChange={(event) => updateMetadata({ item: event.target.value })} />
@@ -789,9 +868,11 @@ export function PfmeaWorkspace({
               <strong>{displayDate(document.originalDate)}</strong>
             </div>
           </div>
-        </details>
-      </section>
-
+      </PfmeaModal> : null}
+      {showSettings ? <PfmeaModal title="PFMEA settings" onClose={() => setShowSettings(false)} actions={<><button type="button" className="ui-btn-secondary h-9" onClick={() => setShowSettings(false)}>Cancel</button><button type="button" className="ui-btn-primary h-9" disabled={readOnly || Boolean(thresholdDraft && (!/^\d+$/.test(thresholdDraft) || Number(thresholdDraft) < 1 || Number(thresholdDraft) > 1000))} onClick={() => { history.current.seal(); editGroup.current = undefined; updateMetadata({ settings: { ...document.settings, highRpnThreshold: thresholdDraft ? Number(thresholdDraft) : null } }); setShowSettings(false); }}>Save settings</button></>}>
+        <label className="block text-sm">RPN mitigation threshold<input className="ui-input mt-2 w-full" aria-label="RPN mitigation threshold" type="number" min={1} max={1000} step={1} placeholder="Not set" value={thresholdDraft} readOnly={readOnly} onChange={event => setThresholdDraft(event.target.value)} /></label>
+        <p className="mt-3 text-xs text-ink-secondary">RPN at or above this number requires mitigation. Final RPN must be below it. Applies to this PFMEA.</p>
+      </PfmeaModal> : null}
       <section className="ui-pfmea-register" aria-label="PFMEA register">
         <div className="ui-pfmea-toolbar">
           <div className="ui-pfmea-search">
@@ -822,12 +903,16 @@ export function PfmeaWorkspace({
             <option value="all">All fields</option>
           </select>
           <span>{visibleRows.length} of {document.rows.length} rows</span>
-          <button type="button" className="ui-pfmea-toolbar-action" onClick={() => setShowScoringGuide(true)}>
-            <CircleHelp size={13} aria-hidden="true" />
-            Scoring guide
+          <button type="button" className="ui-pfmea-toolbar-action" title="Scoring and keyboard guide" onClick={() => setShowScoringGuide(true)}>
+            <CircleHelp size={14} aria-hidden="true" />
+            <span className="sr-only">Scoring guide</span>
           </button>
+          <button type="button" className="ui-pfmea-toolbar-action" aria-label="PFMEA settings" title={document.settings.highRpnThreshold == null ? "RPN threshold not set" : `Mitigate RPN ≥ ${document.settings.highRpnThreshold}`} onClick={() => { setThresholdDraft(document.settings.highRpnThreshold?.toString() ?? ""); setShowSettings(true); }}><Settings2 size={14} aria-hidden="true" /></button>
+          <button type="button" data-pfmea-history className="ui-pfmea-toolbar-action disabled:opacity-35" aria-label="Undo PFMEA edit" title="Undo (Ctrl/Cmd+Z)" disabled={readOnly || !historyStatus.undo} onClick={() => replayHistory("undo")}><Undo2 size={14} aria-hidden="true" /></button>
+          <button type="button" data-pfmea-history className="ui-pfmea-toolbar-action disabled:opacity-35" aria-label="Redo PFMEA edit" title="Redo (Ctrl+Y or Ctrl/Cmd+Shift+Z)" disabled={readOnly || !historyStatus.redo} onClick={() => replayHistory("redo")}><Redo2 size={14} aria-hidden="true" /></button>
         </div>
 
+        <p id="pfmea-keyboard-help" className="sr-only">Tab across · Enter down · F2 or double-click to edit · Alt+Enter for a new line · Esc to revert the active edit</p>
         <div className="ui-pfmea-progress" aria-label="Assessment progress">
           {staleLinkCount > 0 ? <button type="button" onClick={() => setFilter("links")} className="underline">{staleLinkCount} links need review</button> : null}
           <span>Not assessed <strong>{activeRows.length - startedRows.length}</strong></span>
@@ -836,18 +921,79 @@ export function PfmeaWorkspace({
           <button type="button" className="ml-auto" onClick={() => setCollapsedTasks(new Set(visibleRows.map(pfmeaTaskGroupKey)))}>Collapse tasks</button>
           <button type="button" onClick={() => setCollapsedTasks(new Set())}>Expand tasks</button>
         </div>
-        <div className="ui-pfmea-grid-wrap" ref={gridScrollRef}>
+        {backupError ? <div role="alert" className="ui-notice">{backupError}</div> : null}
+        {pasteError ? <div role="alert" className="ui-notice">{pasteError}</div> : null}
+        <div className="ui-pfmea-form">
+        <div className="ui-pfmea-document-head">
+          <div className="ui-pfmea-brand">
+            <div className="ui-pfmea-logo-cell"><Image src="/sop/ana-logo.png" alt="ANA" width={116} height={32} priority /></div>
+            <div>
+              <div className="ui-pfmea-title-line">
+                <h2 id="planner-pfmea-title" className="ui-pfmea-document-title">{product.name} PFMEA</h2>
+                <span className="ui-pfmea-status">{document.status.replace("_", " ")}</span>
+                {fullScreen ? <button type="button" data-pfmea-exit-fullscreen className="ui-btn-ghost ml-auto h-8 w-8" aria-label="Exit full screen" title="Exit full screen (Esc)" onClick={() => setFullScreen(false)}><Minimize2 size={16} aria-hidden="true" /></button> : null}
+              </div>
+              <p className="ui-pfmea-document-subtitle">Process Failure Mode and Effects Analysis</p>
+
+            </div>
+          </div>
+          <dl className="ui-pfmea-document-control" aria-label="Document control">
+            <div><dt>Document no.</dt><dd>{document.documentNumber || "—"}</dd></div>
+            <div><dt>Revision</dt><dd>{formatPfmeaRevision(document.revision)}</dd></div>
+            <div><dt>Original date</dt><dd>{displayDate(document.originalDate)}</dd></div>
+            <div><dt>Owner</dt><dd>{document.owner || "—"}</dd></div>
+          </dl>
+        </div>
+        <div onPointerDownCapture={event => {
+          const target = event.target as HTMLElement;
+          const cell = target.closest("td.ui-pfmea-score-cell");
+          const input = cell?.querySelector<HTMLInputElement>("input.ui-pfmea-score-input");
+          if (!input || input.readOnly || input.disabled || target.closest("button")) return;
+          event.preventDefault();
+          input.focus();
+          input.select();
+        }} onClickCapture={event => {
+          const target = event.target as HTMLElement;
+          const cell = target.closest("td.ui-pfmea-score-cell");
+          if (!cell || target.closest("button, input")) return;
+          cell.querySelector<HTMLButtonElement>(".ui-pfmea-score-picker-trigger:not(:disabled)")?.click();
+        }} onPaste={event => {
+          const text = event.clipboardData.getData("text/plain");
+          if (!text.includes("\t") && !/[\r\n]/.test(text)) return;
+          const cell = event.target as HTMLElement;
+          if (!cell.dataset.pfmeaField || !cell.closest("tbody")) return;
+          // Editing mode retains normal multiline text paste in a single cell.
+          if (cell.dataset.pfmeaEditing === "true" && !text.includes("\t")) return;
+          event.preventDefault();
+          if (readOnly) return;
+          const table = cell.closest("table")!;
+          const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr[data-pfmea-row]"));
+          const editors = (row: HTMLTableRowElement) => Array.from(row.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-pfmea-field]")).filter(item => {
+            const column = item.closest("td")?.dataset.pfmeaColumn;
+            return !(columnView === "risk" && column === "action") && !(columnView === "actions" && column === "risk-detail");
+          });
+          const startRow = rows.indexOf(cell.closest("tr")!);
+          const startColumn = editors(rows[startRow]).findIndex(item => item === cell);
+          const targets: PfmeaPasteTarget[][] = rows.slice(startRow).map(row => editors(row).slice(startColumn).map(item => ({ rowId: row.dataset.pfmeaRow!, field: item.disabled || ("readOnly" in item && item.readOnly) ? "" : item.dataset.pfmeaField!, options: item instanceof HTMLSelectElement ? Array.from(item.options).map(option => ({ value: option.value, label: option.text })) : undefined })));
+          try {
+            const next = pastePfmeaGrid(document, text, targets);
+            history.current.seal(); editGroup.current = undefined;
+            applyDocument(next);
+            history.current.seal(); editGroup.current = `cell-${++editSequence.current}`;
+            setPasteError(undefined);
+          } catch (error) { setPasteError(error instanceof Error ? error.message : "The block could not be pasted."); }
+        }} className="ui-pfmea-grid-wrap" ref={gridScrollRef} aria-describedby="pfmea-keyboard-help" {...keyboard}>
           <table className="ui-pfmea-grid" data-column-view={columnView}>
             <colgroup>
-              <col data-pfmea-column="shared" style={{ width: 190 }} />
-              <col data-pfmea-column="shared" style={{ width: 190 }} />
+              <col data-pfmea-column="shared" style={{ width: 140 }} />
+              <col data-pfmea-column="shared" style={{ width: 170 }} />
               <col data-pfmea-column="shared" style={{ width: 205 }} />
               <col data-pfmea-column="risk-detail" style={{ width: 220 }} />
-              <col data-pfmea-column="risk-detail" style={{ width: 90 }} />
+              <col data-pfmea-column="risk-detail" style={{ width: 60 }} />
               <col data-pfmea-column="risk-detail" style={{ width: 230 }} />
-              <col data-pfmea-column="risk-detail" style={{ width: 100 }} />
+              <col data-pfmea-column="risk-detail" style={{ width: 60 }} />
               <col data-pfmea-column="risk-detail" style={{ width: 205 }} />
-              <col data-pfmea-column="risk-detail" style={{ width: 100 }} />
+              <col data-pfmea-column="risk-detail" style={{ width: 60 }} />
               <col data-pfmea-column="risk-detail" style={{ width: 205 }} />
               <col data-pfmea-column="shared" style={{ width: 64 }} />
               <col data-pfmea-column="action" style={{ width: 205 }} />
@@ -867,11 +1013,11 @@ export function PfmeaWorkspace({
                 <th scope="col" rowSpan={2} data-pfmea-column="shared">Process step</th>
                 <th scope="col" rowSpan={2} data-pfmea-column="shared">Potential Failure Mode<small>What failed</small></th>
                 <th scope="col" rowSpan={2} data-pfmea-column="risk-detail">Potential Effect(s) of Failure<small>What happens due to the failure</small></th>
-                <th scope="col" rowSpan={2} data-pfmea-column="risk-detail">Severity<small>(1–10)</small></th>
+                <th scope="col" rowSpan={2} data-pfmea-column="risk-detail" className="ui-pfmea-score-heading" aria-label="Severity (1–10)" title="Severity (1–10)">Sev<small>(1–10)</small></th>
                 <th scope="col" rowSpan={2} data-pfmea-column="risk-detail">Potential Cause(s) / Mechanism(s) of Failure<small>What caused the failure</small></th>
-                <th scope="col" rowSpan={2} data-pfmea-column="risk-detail">Occurrence<small>(1–10)</small></th>
+                <th scope="col" rowSpan={2} data-pfmea-column="risk-detail" className="ui-pfmea-score-heading" aria-label="Occurrence (1–10)" title="Occurrence (1–10)">Occ<small>(1–10)</small></th>
                 <th scope="col" rowSpan={2} data-pfmea-column="risk-detail">Current Process Controls</th>
-                <th scope="col" rowSpan={2} data-pfmea-column="risk-detail">Detection<small>(1–10)</small></th>
+                <th scope="col" rowSpan={2} data-pfmea-column="risk-detail" className="ui-pfmea-score-heading" aria-label="Detection (1–10)" title="Detection (1–10)">Det<small>(1–10)</small></th>
                 <th scope="col" rowSpan={2} data-pfmea-column="risk-detail">Detection Activity</th>
                 <th scope="col" rowSpan={2} data-pfmea-column="shared">RPN</th>
                 <th scope="col" rowSpan={2} data-pfmea-column="action">Recommended Action(s)</th>
@@ -890,7 +1036,8 @@ export function PfmeaWorkspace({
                 const readOnly = workspaceReadOnly || Boolean(row.archivedAt);
                 const rowRpn = calculateRowRpn(row);
                 const residualRpn = calculateResidualRpn(row);
-                const highPriority = isHighPriorityPfmeaRow(row);
+                const highPriority = isHighPriorityPfmeaRow(row, document.settings);
+                const verified = row.actionStatus === "closed" && Boolean(row.verifiedAt) && pfmeaClosureIssues(row, document.settings).length === 0;
                 const task = row.taskId ? taskById.get(row.taskId) : undefined;
                 const prior = visibleRows[index - 1];
                 const taskGroupKey = pfmeaTaskGroupKey(row);
@@ -905,17 +1052,18 @@ export function PfmeaWorkspace({
                   ? visibleRows.slice(index).findIndex((candidate) => pfmeaStepGroupKey(candidate) !== stepGroupKey)
                   : 0;
                 const normalizedStepRowSpan = stepRowSpan === -1 ? visibleRows.length - index : stepRowSpan;
-                const rowIssues = getPfmeaRowIssues(row);
+                const rowIssues = getPfmeaRowIssues(row, document.settings);
                 const issueFields = new Set(rowIssues.map((issue) => issue.field));
                 const rowLabel = row.processStepSnapshot || row.taskNameSnapshot || `row ${index + 1}`;
                 if (collapsedTasks.has(taskGroupKey)) {
                   if (!startsTask) return null;
                   return <tr key={row.id} className="ui-pfmea-task-start ui-pfmea-collapsed"><td colSpan={columnView === "all" ? 21 : columnView === "actions" ? 14 : 12}><button type="button" className="ui-pfmea-group-toggle" aria-expanded={false} onClick={() => toggleTask(taskGroupKey)}><ChevronRight size={14} />{row.taskCodeSnapshot} · {row.taskNameSnapshot} · {normalizedTaskRowSpan} rows</button></td></tr>;
                 }
-                return (<PfmeaRenderedRow key={row.id} row={row} context={[task, readOnly, workspaceReadOnly, startsTask, startsStep, normalizedTaskRowSpan, normalizedStepRowSpan, highPriority, focusRowId === row.id, members, directoryReady]} render={() => (
+                return (<PfmeaRenderedRow key={row.id} row={row} context={[task, readOnly, workspaceReadOnly, startsTask, startsStep, normalizedTaskRowSpan, normalizedStepRowSpan, highPriority, document.settings, focusRowId === row.id, members, directoryReady]} render={() => (
                   <tr
                     key={row.id}
-                    className={`${startsTask ? "ui-pfmea-task-start" : ""} ${highPriority ? "ui-pfmea-row-high" : ""}`}
+                    data-pfmea-row={row.id}
+                    className={`${startsTask ? "ui-pfmea-task-start" : ""} ${verified ? "ui-pfmea-row-verified" : ""}`}
                   >
                     {startsTask ? (
                       <td
@@ -949,26 +1097,26 @@ export function PfmeaWorkspace({
                         </button>
                       </td>
                     ) : null}
-                    <td data-pfmea-column="shared"><PfmeaTextCell label={`Failure mode for ${rowLabel}`} value={row.failureMode} placeholder="What could fail?" readOnly={readOnly} invalid={issueFields.has("failureMode")} autoFocus={focusRowId === row.id} onChange={(value) => rowActions.current.updateRow(row.id, { failureMode: value })} />                        {pfmeaLinkIssue(row, tasks) ? <button type="button" className="ui-pfmea-link-review" disabled={readOnly} onClick={() => { setRelinkId(row.id); setRelinkTask(task?.id ?? ""); setRelinkStep(""); }}><AlertTriangle size={12} aria-hidden="true" />{pfmeaLinkIssue(row, tasks)} · Review</button> : null}</td>
-                    <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Failure effect for ${rowLabel}`} value={row.effect} placeholder="What happens?" readOnly={readOnly} invalid={issueFields.has("effect")} onChange={(value) => rowActions.current.updateRow(row.id, { effect: value })} /></td>
-                    <td data-pfmea-column="risk-detail"><PfmeaScoreCell label={`Severity for ${rowLabel}`} value={row.severity} readOnly={readOnly} invalid={issueFields.has("severity")} onChange={(value) => rowActions.current.updateRow(row.id, { severity: value })} /></td>
-                    <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Failure cause for ${rowLabel}`} value={row.cause} placeholder="What causes it?" readOnly={readOnly} invalid={issueFields.has("cause")} onChange={(value) => rowActions.current.updateRow(row.id, { cause: value })} /></td>
-                    <td data-pfmea-column="risk-detail"><PfmeaScoreCell label={`Occurrence for ${rowLabel}`} value={row.occurrence} readOnly={readOnly} invalid={issueFields.has("occurrence")} onChange={(value) => rowActions.current.updateRow(row.id, { occurrence: value })} /></td>
-                    <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Current controls for ${rowLabel}`} value={row.currentControls} placeholder="Existing prevention controls" readOnly={readOnly} invalid={issueFields.has("currentControls")} onChange={(value) => rowActions.current.updateRow(row.id, { currentControls: value })} /></td>
-                    <td data-pfmea-column="risk-detail"><PfmeaScoreCell label={`Detection for ${rowLabel}`} value={row.detection} readOnly={readOnly} invalid={issueFields.has("detection")} onChange={(value) => rowActions.current.updateRow(row.id, { detection: value })} /></td>
-                    <td data-pfmea-column="risk-detail"><PfmeaTextCell label={`Detection activity for ${rowLabel}`} value={row.detectionActivity} placeholder="How is it detected?" readOnly={readOnly} invalid={issueFields.has("detectionActivity")} onChange={(value) => rowActions.current.updateRow(row.id, { detectionActivity: value })} /></td>
-                    <td data-pfmea-column="shared"><PfmeaRpnCell label={`Current RPN for ${rowLabel}`} value={rowRpn} high={highPriority} /></td>
+                    <td data-pfmea-column="shared"><PfmeaTextCell field="failureMode" label={`Failure mode for ${rowLabel}`} value={row.failureMode} placeholder="What could fail?" readOnly={readOnly} invalid={issueFields.has("failureMode")} autoFocus={focusRowId === row.id} onChange={(value) => rowActions.current.updateRow(row.id, { failureMode: value })} />                        {pfmeaLinkIssue(row, tasks) ? <button type="button" className="ui-pfmea-link-review" disabled={readOnly} onClick={() => { setRelinkId(row.id); setRelinkTask(task?.id ?? ""); setRelinkStep(""); }}><AlertTriangle size={12} aria-hidden="true" />{pfmeaLinkIssue(row, tasks)} · Review</button> : null}</td>
+                    <td data-pfmea-column="risk-detail"><PfmeaTextCell field="effect" label={`Failure effect for ${rowLabel}`} value={row.effect} placeholder="What happens?" readOnly={readOnly} invalid={issueFields.has("effect")} onChange={(value) => rowActions.current.updateRow(row.id, { effect: value })} /></td>
+                    <td className="ui-pfmea-score-cell" data-pfmea-column="risk-detail"><PfmeaScoreCell field="severity" label={`Severity for ${rowLabel}`} value={row.severity} readOnly={readOnly} invalid={issueFields.has("severity")} onChange={(value) => rowActions.current.updateRow(row.id, { severity: value })} /></td>
+                    <td data-pfmea-column="risk-detail"><PfmeaTextCell field="cause" label={`Failure cause for ${rowLabel}`} value={row.cause} placeholder="What causes it?" readOnly={readOnly} invalid={issueFields.has("cause")} onChange={(value) => rowActions.current.updateRow(row.id, { cause: value })} /></td>
+                    <td className="ui-pfmea-score-cell" data-pfmea-column="risk-detail"><PfmeaScoreCell field="occurrence" label={`Occurrence for ${rowLabel}`} value={row.occurrence} readOnly={readOnly} invalid={issueFields.has("occurrence")} onChange={(value) => rowActions.current.updateRow(row.id, { occurrence: value })} /></td>
+                    <td data-pfmea-column="risk-detail"><PfmeaTextCell field="currentControls" label={`Current controls for ${rowLabel}`} value={row.currentControls} placeholder="Existing prevention controls" readOnly={readOnly} invalid={issueFields.has("currentControls")} onChange={(value) => rowActions.current.updateRow(row.id, { currentControls: value })} /></td>
+                    <td className="ui-pfmea-score-cell" data-pfmea-column="risk-detail"><PfmeaScoreCell field="detection" label={`Detection for ${rowLabel}`} value={row.detection} readOnly={readOnly} invalid={issueFields.has("detection")} onChange={(value) => rowActions.current.updateRow(row.id, { detection: value })} /></td>
+                    <td data-pfmea-column="risk-detail"><PfmeaTextCell field="detectionActivity" label={`Detection activity for ${rowLabel}`} value={row.detectionActivity} placeholder="How is it detected?" readOnly={readOnly} invalid={issueFields.has("detectionActivity")} onChange={(value) => rowActions.current.updateRow(row.id, { detectionActivity: value })} /></td>
+                    <td data-pfmea-column="shared"><PfmeaRpnCell label={`Current RPN for ${rowLabel}`} value={rowRpn} threshold={document.settings.highRpnThreshold} /></td>
                     <td data-pfmea-column="action">
                       <div className="ui-pfmea-action-cell">
-                        <PfmeaTextCell label={`Recommended actions for ${rowLabel}`} value={row.recommendedActions} placeholder="Required controls or improvements" readOnly={readOnly} onChange={(value) => rowActions.current.updateRow(row.id, { recommendedActions: value })} />
-                        <button type="button" disabled={readOnly} onClick={() => rowActions.current.openControlMapping(row)}>
+                        <PfmeaTextCell field="recommendedActions" label={`Recommended actions for ${rowLabel}`} value={row.recommendedActions} placeholder="Required controls or improvements" readOnly={readOnly} onChange={(value) => rowActions.current.updateRow(row.id, { recommendedActions: value })} />
+                        <button type="button" disabled title="Control mapping is deferred; checklist generation is planned.">
                           <Link2 size={11} aria-hidden="true" />
                           {row.controlProposals.length > 0 ? `${row.controlProposals.length} mapping${row.controlProposals.length === 1 ? "" : "s"}` : "Map control"}
                         </button>
                       </div>
                     </td>
                     <td data-pfmea-column="action" className="ui-pfmea-responsibility-cell">
-                      <select className="ui-pfmea-inline-select" aria-label={`Action owner for ${rowLabel}`} disabled={readOnly || !directoryReady} value={row.actionOwnerId ?? (row.actionOwner ? "legacy" : "")} onChange={event => {
+                      <select data-pfmea-field="actionOwnerId" className="ui-pfmea-inline-select" aria-label={`Action owner for ${rowLabel}`} disabled={readOnly || !directoryReady} value={row.actionOwnerId ?? (row.actionOwner ? "legacy" : "")} onChange={event => {
                         const member = members.find(item => item.userId === event.target.value);
                         rowActions.current.updateRow(row.id, { actionOwnerId: member?.userId, actionOwner: member?.fullName || member?.email || "" });
                       }}>
@@ -976,24 +1124,17 @@ export function PfmeaWorkspace({
                         {row.actionOwner && !members.some(member => member.userId === row.actionOwnerId) ? <option value={row.actionOwnerId ?? "legacy"}>{row.actionOwner} (existing)</option> : null}
                         {members.map(member => <option key={member.userId} value={member.userId}>{member.fullName || member.email}</option>)}
                       </select>
-                      <input
-                        aria-label={`Target date for ${rowLabel}`}
-                        type="date"
-                        value={row.targetDate ?? ""}
-                        readOnly={readOnly}
-                        onChange={(event) => rowActions.current.updateRow(row.id, { targetDate: event.target.value || undefined })}
-                        className="ui-pfmea-date-input"
-                      />
+                      <DatePicker label={`Target date for ${rowLabel}`} value={row.targetDate} readOnly={readOnly} inputClassName="ui-pfmea-date-input" inputProps={{"data-pfmea-field":"targetDate"}} onChange={value => rowActions.current.updateRow(row.id, { targetDate: value })} />
                     </td>
-                    <td data-pfmea-column="action"><PfmeaTextCell label={`Actions taken for ${rowLabel}`} value={row.actionsTaken} placeholder="Implementation evidence" readOnly={readOnly} onChange={(value) => rowActions.current.updateRow(row.id, { actionsTaken: value })} /></td>
+                    <td data-pfmea-column="action"><PfmeaTextCell field="actionsTaken" label={`Actions taken for ${rowLabel}`} value={row.actionsTaken} placeholder="Implementation evidence" readOnly={readOnly} onChange={(value) => rowActions.current.updateRow(row.id, { actionsTaken: value })} /></td>
                     <td data-pfmea-column="action"><span className="ui-pfmea-result-severity" aria-label={`Result severity for ${rowLabel}`} title="Original severity (read-only)">{row.severity ?? "—"}</span></td>
-                    <td data-pfmea-column="action"><PfmeaScoreCell label={`Result occurrence for ${rowLabel}`} value={row.resultOccurrence} readOnly={readOnly} invalid={issueFields.has("resultOccurrence")} onChange={(value) => rowActions.current.updateRow(row.id, { resultOccurrence: value })} /></td>
-                    <td data-pfmea-column="action"><PfmeaScoreCell label={`Result detection for ${rowLabel}`} value={row.resultDetection} readOnly={readOnly} invalid={issueFields.has("resultDetection")} onChange={(value) => rowActions.current.updateRow(row.id, { resultDetection: value })} /></td>
+                    <td className="ui-pfmea-score-cell" data-pfmea-column="action"><PfmeaScoreCell field="resultOccurrence" label={`Result occurrence for ${rowLabel}`} value={row.resultOccurrence} readOnly={readOnly} invalid={issueFields.has("resultOccurrence")} onChange={(value) => rowActions.current.updateRow(row.id, { resultOccurrence: value })} /></td>
+                    <td className="ui-pfmea-score-cell" data-pfmea-column="action"><PfmeaScoreCell field="resultDetection" label={`Result detection for ${rowLabel}`} value={row.resultDetection} readOnly={readOnly} invalid={issueFields.has("resultDetection")} onChange={(value) => rowActions.current.updateRow(row.id, { resultDetection: value })} /></td>
                     <td data-pfmea-column="action">
-                      <PfmeaRpnCell label={`Residual RPN for ${rowLabel}`} value={residualRpn} high={residualRpn != null && residualRpn >= 100} />
+                      <PfmeaRpnCell label={`Residual RPN for ${rowLabel}`} value={residualRpn} threshold={document.settings.highRpnThreshold} />
                     </td>
                     <td data-pfmea-column="action">
-                      <select className="ui-pfmea-inline-select" aria-label={`Action status for ${rowLabel}`} disabled={readOnly} value={pfmeaActionStatus(row) ?? ""} onChange={event => rowActions.current.updateRow(row.id, { actionStatus: event.target.value as "open" | "in_progress" | "awaiting_verification", verifiedAt: undefined })}>
+                      <select data-pfmea-field="actionStatus" className="ui-pfmea-inline-select" aria-label={`Action status for ${rowLabel}`} disabled={readOnly} value={pfmeaActionStatus(row) ?? ""} onChange={event => rowActions.current.updateRow(row.id, { actionStatus: event.target.value as "open" | "in_progress" | "awaiting_verification", verifiedAt: undefined })}>
                         <option value="" disabled>No action</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="awaiting_verification">Awaiting verification</option>
                         {row.actionStatus === "closed" ? <option value="closed">Closed</option> : null}
                       </select>
@@ -1001,13 +1142,13 @@ export function PfmeaWorkspace({
                     </td>
                     <td data-pfmea-column="action">
                       <div className="ui-pfmea-verification-cell">
-                      <PfmeaTextCell label={`Effectiveness verification for ${rowLabel}`} value={row.verificationNotes ?? ""} placeholder="How was effectiveness verified?" readOnly={readOnly} onChange={value => rowActions.current.updateRow(row.id, { verificationNotes: value })} />
-                      {row.actionStatus === "closed" ? <span className="ui-pfmea-action-status">Verified · {row.verifiedAt?.slice(0, 10)}</span> : <button type="button" className="ui-pfmea-close-action" disabled={readOnly || pfmeaClosureIssues(row).length > 0} title={pfmeaClosureIssues(row).join("\n") || "Confirm the recorded evidence demonstrates effectiveness"} onClick={() => {
-                        rowActions.current.closeRow(row.id);
-                      }}>Confirm effective &amp; close</button>}
+                      <PfmeaTextCell field="verificationNotes" label={`Effectiveness verification for ${rowLabel}`} value={row.verificationNotes ?? ""} placeholder="How was effectiveness verified?" readOnly={readOnly} onChange={value => rowActions.current.updateRow(row.id, { verificationNotes: value })} />
                       </div>
                     </td>
                     <td className="ui-pfmea-row-actions" data-pfmea-column="shared">
+                      <input type="checkbox" checked={row.actionStatus === "closed"} aria-label={`Confirm effective & close for ${rowLabel}`} className="ui-pfmea-close-action" disabled={row.actionStatus === "closed" || readOnly || pfmeaClosureIssues(row, document.settings).length > 0} title={pfmeaClosureIssues(row, document.settings).join("\n") || "Confirm the recorded evidence demonstrates effectiveness"} onChange={() => {
+                        rowActions.current.closeRow(row.id);
+                      }} />
                       {rowIssues.length > 0 ? (
                         <span className="ui-pfmea-issue-count" title={rowIssues.map((issue) => issue.message).join("\n")} aria-label={`${rowIssues.length} validation issue(s)`}>
                           <AlertCircle size={13} aria-hidden="true" />
@@ -1015,7 +1156,6 @@ export function PfmeaWorkspace({
                         </span>
                       ) : null}
                       <button type="button" disabled={workspaceReadOnly} aria-label={row.archivedAt ? "Restore" : "Archive"} title={row.archivedAt ? "Restore row" : "Archive row"} onClick={() => row.archivedAt ? rowActions.current.updateRow(row.id, { archivedAt: undefined }) : setArchiveId(row.id)}>{row.archivedAt ? <RotateCcw size={13} /> : <Archive size={13} />}</button>
-                      <button type="button" title="Delete this failure mode" aria-label={`Delete PFMEA row for ${rowLabel}`} disabled={readOnly} onClick={() => setPendingDeleteRow(row)}><Trash2 size={13} /></button>
                     </td>
                   </tr>
                 )} />);
@@ -1025,6 +1165,7 @@ export function PfmeaWorkspace({
               ) : null}
             </tbody>
           </table>
+        </div>
         </div>
       </section>
 
@@ -1156,6 +1297,7 @@ export function PfmeaWorkspace({
           onClose={() => setShowScoringGuide(false)}
           actions={<button type="button" className="ui-btn-primary h-9" onClick={() => setShowScoringGuide(false)}>Done</button>}
         >
+          <p className="mb-4 text-xs text-ink-secondary">Tab across · Enter down · F2 or double-click to edit · Alt+Enter for a new line · Esc to revert. Block paste fills editable cells, skipping calculated columns.</p>
           <div className="ui-pfmea-score-guide">
             {PFMEA_SCORE_GUIDE.map((guide) => (
               <section key={guide.title}>
@@ -1231,31 +1373,6 @@ export function PfmeaWorkspace({
         </PfmeaModal>
       ) : null}
 
-      {pendingDeleteRow ? (
-        <PfmeaModal
-          title="Delete failure mode?"
-          description="This removes only the selected PFMEA risk row. Its Procedure task and step are not changed."
-          onClose={() => setPendingDeleteRow(undefined)}
-          actions={(
-            <>
-              <button type="button" className="ui-btn-ghost h-9" onClick={() => setPendingDeleteRow(undefined)}>Cancel</button>
-              <button type="button" className="ui-btn-primary ui-pfmea-delete-button h-9" onClick={confirmDeleteRow}>Delete</button>
-            </>
-          )}
-        >
-          <p className="ui-pfmea-delete-summary">
-            <strong>{pendingDeleteRow.failureMode || "Blank failure mode"}</strong>
-            <span>{pendingDeleteRow.taskCodeSnapshot} · {pendingDeleteRow.processStepSnapshot}</span>
-          </p>
-        </PfmeaModal>
-      ) : null}
-
-      {undoDelete ? (
-        <div className="ui-pfmea-undo" role="status">
-          <span>Failure mode deleted.</span>
-          <button type="button" onClick={restoreDeletedRow}><Undo2 size={13} aria-hidden="true" /> Undo</button>
-        </div>
-      ) : null}
     </section>
   );
 }

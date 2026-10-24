@@ -37,7 +37,7 @@ export interface PfmeaImportRecord {
 }
 
 export interface PfmeaSettings {
-  highRpnThreshold: number;
+  highRpnThreshold: number | null;
   highSeverityThreshold: number;
 }
 
@@ -180,12 +180,12 @@ export function isPfmeaRowStarted(row: PfmeaRow) {
   );
 }
 
-export function isHighPriorityPfmeaRow(row: PfmeaRow) {
+export function isHighPriorityPfmeaRow(row: PfmeaRow, settings?: PfmeaSettings) {
   const rpn = calculateRowRpn(row);
-  return (rpn != null && rpn >= PFMEA_HIGH_RPN_THRESHOLD) || (row.severity ?? 0) >= PFMEA_HIGH_SEVERITY_THRESHOLD;
+  return (rpn != null && rpn >= (settings ? settings.highRpnThreshold ?? Infinity : PFMEA_HIGH_RPN_THRESHOLD)) || (!settings && (row.severity ?? 0) >= PFMEA_HIGH_SEVERITY_THRESHOLD);
 }
 
-export function getPfmeaRowIssues(row: PfmeaRow): PfmeaRowIssue[] {
+export function getPfmeaRowIssues(row: PfmeaRow, settings?: PfmeaSettings): PfmeaRowIssue[] {
   if (!isPfmeaRowStarted(row)) {
     return [];
   }
@@ -207,11 +207,20 @@ export function getPfmeaRowIssues(row: PfmeaRow): PfmeaRowIssue[] {
   if (row.actionsTaken.trim() && row.resultDetection == null) {
     issues.push({ field: "resultDetection", message: "Result detection is required when actions are recorded." });
   }
+  const threshold = settings?.highRpnThreshold;
+  const rpn = calculateRowRpn(row);
+  if (threshold != null && rpn != null && rpn >= threshold) {
+    if (!row.recommendedActions.trim()) issues.push({ field: "recommendedActions", message: "Mitigation is required at or above the RPN threshold." });
+    if (!row.actionsTaken.trim()) issues.push({ field: "actionsTaken", message: "Record the implemented mitigation." });
+    const residual = calculateResidualRpn(row);
+    if (residual == null || residual >= threshold) issues.push({ field: "resultOccurrence", message: "Final RPN must be below the threshold." });
+    if (row.actionStatus !== "closed") issues.push({ field: "verificationNotes", message: "Verify the mitigation before marking this risk complete." });
+  }
   return issues;
 }
 
-export function isPfmeaRowComplete(row: PfmeaRow) {
-  return isPfmeaRowStarted(row) && getPfmeaRowIssues(row).length === 0;
+export function isPfmeaRowComplete(row: PfmeaRow, settings?: PfmeaSettings) {
+  return isPfmeaRowStarted(row) && getPfmeaRowIssues(row, settings).length === 0;
 }
 
 export function createPfmeaRowForProcedureLink(
@@ -305,7 +314,7 @@ export function createPfmeaDocumentFromProcedure(
     createdAt: timestamp,
     updatedAt: timestamp,
     settings: {
-      highRpnThreshold: PFMEA_HIGH_RPN_THRESHOLD,
+      highRpnThreshold: null,
       highSeverityThreshold: PFMEA_HIGH_SEVERITY_THRESHOLD,
     },
     imports: [],
@@ -523,7 +532,7 @@ export function getProductPfmeaDocument(customFields?: Record<string, unknown>):
     ? status
     : "draft";
   const createdAt = text(raw.createdAt) || new Date(0).toISOString();
-  const highRpnThreshold = isRecord(raw.settings) ? Number(raw.settings.highRpnThreshold) : PFMEA_HIGH_RPN_THRESHOLD;
+  const highRpnThreshold = isRecord(raw.settings) && raw.settings.highRpnThreshold != null ? Number(raw.settings.highRpnThreshold) : NaN;
   const highSeverityThreshold = isRecord(raw.settings) ? Number(raw.settings.highSeverityThreshold) : PFMEA_HIGH_SEVERITY_THRESHOLD;
   return {
     version: PFMEA_DOCUMENT_VERSION,
@@ -543,7 +552,7 @@ export function getProductPfmeaDocument(customFields?: Record<string, unknown>):
     createdAt,
     updatedAt: text(raw.updatedAt) || createdAt,
     settings: {
-      highRpnThreshold: Number.isFinite(highRpnThreshold) ? Math.max(1, Math.round(highRpnThreshold)) : PFMEA_HIGH_RPN_THRESHOLD,
+      highRpnThreshold: Number.isInteger(highRpnThreshold) && highRpnThreshold >= 1 && highRpnThreshold <= 1000 ? highRpnThreshold : null,
       highSeverityThreshold: normalizePfmeaScore(highSeverityThreshold) ?? PFMEA_HIGH_SEVERITY_THRESHOLD,
     },
     imports: Array.isArray(raw.imports) ? raw.imports.map(parseImportRecord).filter((record): record is PfmeaImportRecord => Boolean(record)) : [],
@@ -569,7 +578,7 @@ export function formatPfmeaRevision(revision: string) {
   return `Rev ${revision.replace(/^(?:rev(?:ision)?\.?\s+)+/i, "").trim()}`;
 }
 
-export function pfmeaAssessmentState(row: PfmeaRow): "not_assessed" | "in_progress" | "complete" {
+export function pfmeaAssessmentState(row: PfmeaRow, settings?: PfmeaSettings): "not_assessed" | "in_progress" | "complete" {
   if (!isPfmeaRowStarted(row)) return "not_assessed";
-  return isPfmeaRowComplete(row) ? "complete" : "in_progress";
+  return isPfmeaRowComplete(row, settings) ? "complete" : "in_progress";
 }

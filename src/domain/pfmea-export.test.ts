@@ -37,6 +37,7 @@ function testDocument() {
     emptyPlannerState.zones,
     new Date("2026-08-21T12:00:00.000Z"),
   );
+    document.settings.highRpnThreshold = 150;
   const row = document.rows[0];
   Object.assign(row, {
     failureMode: "Panel loosens",

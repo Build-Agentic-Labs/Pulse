@@ -2086,7 +2086,7 @@
 }
 
 .ui-pfmea-grid-wrap {
-  max-height: calc(100vh - 18rem);
+  max-height: calc(100dvh - 20rem);
   min-height: 27rem;
   overflow: auto;
   scrollbar-color: var(--color-border-strong) transparent;
@@ -2116,7 +2116,7 @@
 }
 
 .ui-pfmea-grid[data-column-view="risk"] {
-  min-width: 1760px;
+  min-width: 1650px;
 }
 
 .ui-pfmea-grid[data-column-view="actions"] {
@@ -2160,8 +2160,8 @@
   border-top: 1px solid var(--color-border-strong);
 }
 
-.ui-pfmea-grid tr.ui-pfmea-row-high td {
-  background: color-mix(in srgb, var(--color-warn) 5%, var(--ui-pfmea-sheet));
+.ui-pfmea-grid tr.ui-pfmea-row-verified td {
+  background: color-mix(in srgb, var(--color-success) 6%, var(--ui-pfmea-sheet));
 }
 
 .ui-pfmea-grid thead > tr:first-child > th:first-child,
@@ -2173,7 +2173,7 @@
 .ui-pfmea-grid thead > tr:first-child > th:nth-child(2),
 .ui-pfmea-step-cell {
   position: sticky;
-  left: 190px;
+  left: 140px;
 }
 
 .ui-pfmea-grid thead > tr:first-child > th:nth-child(2) {
@@ -2303,8 +2303,15 @@
   color: var(--color-ink);
 }
 
-.ui-pfmea-cell-text::placeholder,
 .ui-pfmea-date-input {
+  color: var(--color-ink-tertiary);
+}
+
+.ui-pfmea-grid .ui-pfmea-cell-text::placeholder {
+  color: transparent;
+}
+
+.ui-pfmea-grid .ui-pfmea-cell-text:focus::placeholder {
   color: var(--color-ink-tertiary);
 }
 
@@ -2325,11 +2332,15 @@
 }
 
 .ui-pfmea-score-input {
-  padding: 0;
+  display: block;
+  height: calc(1.35em + 0.8rem);
+  min-height: 0;
+  padding: 0.4rem 0.2rem;
   font-family: var(--type-mono);
-  font-size: 0.75rem;
+  font-size: 0.675rem;
   font-weight: 600;
   text-align: center;
+  appearance: textfield;
 }
 
 .ui-pfmea-date-input {
@@ -2339,18 +2350,25 @@
 
 .ui-pfmea-rpn {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   width: 100%;
   min-height: 3.15rem;
+  padding-top: 0.4rem;
+  line-height: 1.35;
   color: var(--color-ink-secondary);
   font-family: var(--type-mono);
-  font-size: 0.78rem;
+  font-size: 0.675rem;
   font-weight: 600;
 }
 
-.ui-pfmea-rpn-high {
-  color: var(--color-danger);
+.ui-pfmea-rpn-high { color: color-mix(in srgb, var(--color-danger) 78%, var(--color-ink)); }
+.ui-pfmea-rpn-low { color: color-mix(in srgb, var(--color-success) 78%, var(--color-ink)); }
+.ui-pfmea-grid tr td:has(> .ui-pfmea-rpn-high) {
+  background: color-mix(in srgb, var(--color-danger) 7%, var(--ui-pfmea-sheet));
+}
+.ui-pfmea-grid tr td:has(> .ui-pfmea-rpn-low) {
+  background: color-mix(in srgb, var(--color-success) 7%, var(--ui-pfmea-sheet));
 }
 
 .ui-pfmea-severity-lock {
@@ -2393,9 +2411,6 @@
   color: var(--color-ink);
 }
 
-.ui-pfmea-row-actions button:last-child:hover:not(:disabled) {
-  color: var(--color-danger);
-}
 
 .ui-pfmea-empty {
   height: 12rem !important;
@@ -3150,7 +3165,6 @@
 .ui-pfmea-page .ui-pfmea-link-review { padding: .3rem .45rem; }
 .ui-pfmea-page .ui-pfmea-row-actions button { min-width: 28px; min-height: 28px; }
 .ui-pfmea-page .ui-pfmea-grid th { font-size: .65rem; letter-spacing: .025em; }
-.ui-pfmea-page .ui-pfmea-grid textarea::placeholder { color: var(--color-ink-secondary); }
 .ui-pfmea-focused-editor .ui-pfmea-form-grid input,
 .ui-pfmea-focused-editor .ui-pfmea-form-grid textarea,
 .ui-pfmea-focused-editor .ui-pfmea-form-grid select {
@@ -3170,24 +3184,34 @@
   background: transparent; color: inherit; font: inherit;
 }
 .ui-pfmea-grid .ui-pfmea-close-action {
-  margin: 4px 8px 8px; font-size: 11px; text-align: left;
+  appearance: auto; display: block; width: 14px; height: 14px; margin: 7px auto;
+  accent-color: var(--color-ink-primary); opacity: 1; cursor: pointer;
+  transition: opacity 120ms ease;
 }
+.ui-pfmea-row-actions:hover .ui-pfmea-close-action,
+.ui-pfmea-row-actions:focus-within .ui-pfmea-close-action { opacity: 1; }
 .ui-pfmea-grid .ui-pfmea-close-action:disabled { opacity: .45; cursor: default; }
+.ui-pfmea-row-actions:hover .ui-pfmea-close-action:disabled,
+.ui-pfmea-row-actions:focus-within .ui-pfmea-close-action:disabled { opacity: .45; }
+@media (hover: none) {
+  .ui-pfmea-grid .ui-pfmea-close-action { opacity: 1; }
+  .ui-pfmea-grid .ui-pfmea-close-action:disabled { opacity: .45; }
+}
 
 .ui-pfmea-verification-cell {
-  display: flex;
-  flex-direction: column;
+  position: relative;
   min-height: 4.7rem;
 }
 
 .ui-pfmea-verification-cell .ui-pfmea-cell-text {
   display: block;
   height: auto;
-  min-height: 3.5rem;
-  flex: 1 0 auto;
+  min-height: 4.7rem;
 }
 
-.ui-pfmea-verification-cell .ui-pfmea-close-action,
+.ui-pfmea-verification-cell .ui-pfmea-cell-text[data-pfmea-active="true"] {
+  box-shadow: none;
+}
 .ui-pfmea-verification-cell .ui-pfmea-action-status {
   position: static;
   flex: none;
@@ -3202,3 +3226,134 @@
 .ui-pfmea-grid .ui-pfmea-results-subhead th { top: 3.5rem; height: 2rem; text-align: center; }
 .ui-pfmea-responsibility-cell .ui-pfmea-date-input { display: block; height: 2rem; min-height: 2rem; padding: 0 8px; }
 .ui-pfmea-result-severity { display: block; padding: .4rem; text-align: center; color: var(--color-ink-secondary); }
+
+/* Spreadsheet focus stays neutral and distinct from validation colours. */
+.ui-pfmea-page .ui-pfmea-grid [data-pfmea-active="true"] {
+  box-shadow: inset 0 -2px 0 var(--color-border-strong);
+  scroll-margin-top: 6rem;
+  scroll-margin-left: 320px;
+}
+.ui-pfmea-page .ui-pfmea-grid [data-pfmea-active="true"][data-pfmea-editing="true"] {
+  box-shadow: inset 0 -1px 0 var(--color-border-strong);
+}
+
+/* Keep the PFMEA sheet prominent while retaining the shared app controls. */
+.ui-pfmea-page { gap: 0.5rem; }
+.ui-pfmea-page > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
+.ui-pfmea-document-head { padding-bottom: 0.4rem; }
+.ui-pfmea-toolbar { gap: 0.45rem; padding: 0.25rem 0.5rem; flex-wrap: wrap; }
+.ui-pfmea-search { width: min(19rem, 28vw); flex: 1 1 12rem; }
+.ui-pfmea-toolbar-action { min-width: 1.75rem; min-height: 1.75rem; justify-content: center; }
+
+.ui-pfmea-grid .ui-pfmea-score-heading { text-align: center; }
+.ui-pfmea-grid .ui-pfmea-inline-select { padding-top: 0.4rem; padding-bottom: 0.4rem; line-height: 1.35; }
+.ui-pfmea-result-severity { padding: 0.4rem 0.2rem; font-size: 0.675rem; line-height: 1.35; }
+
+.ui-pfmea-score-input::-webkit-inner-spin-button,
+.ui-pfmea-score-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+.ui-pfmea-score-cell { position: relative; cursor: text; }
+.ui-pfmea-grid .ui-pfmea-score-picker { position: absolute; right: 0; top: 0; width: 20px; }
+.ui-pfmea-grid .ui-pfmea-score-picker-trigger {
+  width: 20px; min-width: 0; height: 28px; min-height: 28px;
+  padding: 0; gap: 0; justify-content: center;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+}
+.ui-pfmea-score-picker .ui-themed-select-value { display: none; }
+.ui-pfmea-score-picker .ui-themed-select-icon { width: 10px; height: 10px; }
+
+/* The table cell carries focus, rather than drawing a small box around its number. */
+.ui-pfmea-page .ui-pfmea-grid .ui-pfmea-score-input[data-pfmea-active] { box-shadow: none; }
+.ui-pfmea-score-cell:focus-within { box-shadow: inset 0 -1px 0 var(--color-border-strong); }
+
+/* One controlled-form frame joins the branding, document control and working sheet. */
+.ui-pfmea-page {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 0.5rem;
+  background: var(--ui-pfmea-sheet);
+}
+.ui-pfmea-page > :not([hidden]) ~ :not([hidden]) { margin-top: 0; }
+.ui-pfmea-document { border: 0; border-radius: 0.5rem 0.5rem 0 0; }
+.ui-pfmea-document-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) 280px;
+  align-items: stretch; gap: 0; padding: 0;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+.ui-pfmea-brand { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 0; align-items: stretch; }
+.ui-pfmea-logo-cell { display: flex; align-items: center; justify-content: center; border-right: 1px solid var(--color-border); padding: 12px; }
+.ui-pfmea-brand > div:not(.ui-pfmea-logo-cell) { display: flex; flex-direction: column; justify-content: center; padding: 12px 16px; }
+.ui-pfmea-brand img { width: 104px; height: 36px; }
+.ui-pfmea-document-control { margin: 0; border-left: 1px solid var(--color-border); font-size: 0.675rem; }
+.ui-pfmea-document-control > div { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 8px; padding: 6px 10px; }
+.ui-pfmea-document-control > div + div { border-top: 1px solid var(--color-border); }
+.ui-pfmea-document-control dt { color: var(--color-ink-secondary); }
+.ui-pfmea-document-control dd { margin: 0; overflow-wrap: anywhere; }
+.ui-pfmea-document-tools { position: relative; min-height: 42px; border-bottom: 1px solid var(--color-border); }
+.ui-pfmea-document-tools .ui-pfmea-head-actions { position: absolute; right: 6px; top: 3px; }
+.ui-pfmea-document-tools .ui-pfmea-details { border: 0; padding: 0; }
+.ui-pfmea-document-tools .ui-pfmea-details > summary { min-height: 42px; padding: 13px 430px 10px 12px; }
+.ui-pfmea-document-tools .ui-pfmea-details-grid { padding: 12px; border-top: 1px solid var(--color-border); }
+.ui-pfmea-register { border: 0; border-radius: 0 0 0.5rem 0.5rem; }
+@media (max-width: 760px) {
+  .ui-pfmea-document-head { grid-template-columns: minmax(0, 1fr); }
+  .ui-pfmea-document-control { border-left: 0; border-top: 1px solid var(--color-border); }
+  .ui-pfmea-document-tools .ui-pfmea-head-actions { position: static; padding: 4px; }
+  .ui-pfmea-document-tools .ui-pfmea-details > summary { padding-right: 12px; }
+}
+
+/* App controls sit outside the document; the form header meets the column headings. */
+.ui-pfmea-page { border: 0; border-radius: 0; background: transparent; }
+.ui-pfmea-document-tools { border-bottom: 0; }
+.ui-pfmea-register { overflow: visible; background: transparent; }
+.ui-pfmea-form { border: 1px solid var(--color-border-strong); border-radius: 0.5rem; background: var(--ui-pfmea-sheet); }
+.ui-pfmea-form > .ui-pfmea-document-head { border-radius: 0.5rem 0.5rem 0 0; }
+.ui-pfmea-form > .ui-pfmea-grid-wrap { border-radius: 0 0 0.5rem 0.5rem; }
+
+.ui-pfmea-modal .ui-pfmea-details-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0; }
+
+/* Fill the app viewport without leaving the mounted grid or its save queue. */
+.ui-pfmea-page.ui-pfmea-fullscreen {
+  position: fixed; inset: 0; z-index: 60;
+  width: 100%; height: 100dvh; min-height: 0;
+  display: flex; flex-direction: column;
+  padding: 12px; overflow: hidden;
+  background: var(--ui-pfmea-sheet); color: var(--color-ink);
+}
+.ui-pfmea-fullscreen > .ui-pfmea-document { flex: none; }
+.ui-pfmea-fullscreen > .ui-pfmea-register,
+.ui-pfmea-fullscreen .ui-pfmea-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.ui-pfmea-fullscreen .ui-pfmea-toolbar,
+.ui-pfmea-fullscreen .ui-pfmea-progress,
+.ui-pfmea-fullscreen .ui-pfmea-document-head { flex: none; }
+.ui-pfmea-fullscreen .ui-pfmea-grid-wrap { flex: 1; min-height: 0; max-height: none; }
+@media (max-width: 760px) {
+  .ui-pfmea-fullscreen .ui-pfmea-document-tools .ui-pfmea-head-actions { justify-content: flex-start; }
+}
+
+/* In full screen, the document itself starts at the top edge. */
+.ui-pfmea-page.ui-pfmea-fullscreen { padding: 0; }
+.ui-pfmea-fullscreen > .ui-pfmea-document,
+.ui-pfmea-fullscreen .ui-pfmea-register > .ui-pfmea-toolbar,
+.ui-pfmea-fullscreen .ui-pfmea-register > .ui-pfmea-progress { display: none; }
+.ui-pfmea-fullscreen .ui-pfmea-form { border: 0; border-radius: 0; }
+.ui-pfmea-fullscreen .ui-pfmea-form > .ui-pfmea-document-head { border-radius: 0; }
+
+.ui-pfmea-date-input::placeholder { color: transparent; }
+.ui-pfmea-date-input:focus::placeholder { color: var(--color-ink-tertiary); }
+
+.ui-pfmea-responsibility-cell :is(.ui-pfmea-inline-select, .ui-pfmea-date-input) {
+  height: 28px;
+  min-height: 28px;
+  padding: 0.4rem 8px;
+  color: var(--color-ink);
+  font: inherit;
+  line-height: 1.35;
+  text-align: left;
+}
+.ui-pfmea-responsibility-cell .ui-pfmea-date-input { padding-right: 28px; }
+/* Match the native owner's text inset, rather than just its outer control edge. */
+.ui-pfmea-responsibility-cell .ui-pfmea-date-input { padding-left: 12px; }
+
+/* Verification notes are one uninterrupted cell; completion lives in row actions. */
+.ui-pfmea-page .ui-pfmea-grid .ui-pfmea-verification-cell .ui-pfmea-cell-text[data-pfmea-active="true"],
+.ui-pfmea-page .ui-pfmea-grid .ui-pfmea-verification-cell .ui-pfmea-cell-text[data-pfmea-active="true"][data-pfmea-editing="true"] { box-shadow: none; }

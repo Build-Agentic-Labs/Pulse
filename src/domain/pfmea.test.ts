@@ -167,7 +167,7 @@ describe("PFMEA domain", () => {
 
     expect(migrated).toMatchObject({
       version: 2,
-      settings: { highRpnThreshold: 100, highSeverityThreshold: 9 },
+      settings: { highRpnThreshold: null, highSeverityThreshold: 9 },
       imports: [],
     });
     expect(migrated?.rows[0]).toMatchObject({ sourceKind: "procedure", controlProposals: [] });

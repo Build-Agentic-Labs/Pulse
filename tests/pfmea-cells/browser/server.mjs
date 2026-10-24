@@ -23,9 +23,11 @@ const api = { name: 'isolated-pfmea-database', configureServer(server) {
       await client.query('set local role authenticated');
       await client.query("select set_config('request.jwt.claim.sub',$1,true)", [actor]);
       let data;
-      if (url.pathname === '/patch') {
+      if (url.pathname === '/patch' || url.pathname === '/command') {
         if (args.p_product_id !== 'browser-product-v2' || args.p_project_id !== 'fixture-project') throw new Error('Fixture scope required');
-        data = (await client.query('select patch_pfmea_cells($1,$2,$3,$4,$5) as document', [args.p_product_id,args.p_project_id,args.p_document_id,args.p_mutation_id,JSON.stringify(args.p_changes)])).rows[0].document;
+        data = url.pathname === '/command'
+          ? (await client.query('select commit_pfmea_document_command($1,$2,$3,$4,$5,$6) as document', [args.p_product_id,args.p_project_id,args.p_document_id,args.p_mutation_id,JSON.stringify(args.p_base),JSON.stringify(args.p_document)])).rows[0].document
+          : (await client.query('select patch_pfmea_cells($1,$2,$3,$4,$5) as document', [args.p_product_id,args.p_project_id,args.p_document_id,args.p_mutation_id,JSON.stringify(args.p_changes)])).rows[0].document;
       } else data = (await client.query("select custom_fields->'productPfmeaDocument' as document from products where id='browser-product-v2' and project_id='fixture-project'")).rows[0]?.document;
       await client.query('commit');
       res.setHeader('Content-Type','application/json'); res.end(JSON.stringify({ data, error: null }));

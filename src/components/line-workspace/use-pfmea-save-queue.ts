@@ -60,9 +60,16 @@ export function usePfmeaSaveQueue(productId: string, projectId: string | undefin
         const current = await getUserFromSession(plannerClient());
         if (!actor || current.data.user?.id !== actor || actorRef.current !== actor) throw new Error('Account changed. Your PFMEA draft remains on this device.');
       }
+      let recoveredMutation;
+      if (cellSaving && journal && !cellWriter) {
+        try { recoveredMutation = journal.pendingCellMutation(); }
+        catch { setLocalError('Device backup unavailable. Keep this page open until the server save finishes.'); }
+      }
       const confirmed = cellSaving
         ? (await (cellWriter ??= createPfmeaCellWriter(productId, projectId, base, plannerClient(), journal ? {
-          pending: journal.pendingCellMutation(), retain: pending => journal.retainCellMutation(pending), acknowledge: (saved, baseline) => journal.acknowledge(saved, baseline),
+          pending: recoveredMutation,
+          retain: pending => { try { journal.retainCellMutation(pending); } catch { setLocalError('Device backup unavailable. Keep this page open until the server save finishes.'); } },
+          acknowledge: (saved, baseline) => { try { journal.acknowledge(saved, baseline); } catch { setLocalError('Device backup could not be updated. Server saving is still available.'); } },
         } : undefined, document)).save(document)).document
         : await savePfmeaToSupabase(productId, projectId, document, base).then(() => document);
       if (mounted.current && (!recoveryActive || actorRef.current === actor)) savedCallback.current(confirmed, productId);

@@ -23,6 +23,20 @@ function mount(remote: unknown, cellSaving = false) {
   return { ...hook, saved };
 }
 describe('automatic PFMEA draft recovery', () => {
+  it('still confirms cell saves when device backup storage is full', async () => {
+    const remote = base(); remote.rows = [createPfmeaRowForProcedureLink({ id: 'task', name: 'Step', wbs: '1', customFields: {} } as Task, undefined, undefined)];
+    const edited = structuredClone(remote); edited.rows[0].severity = 7;
+    auth.rpc.mockResolvedValue({ data: edited, error: null });
+    const hook = mount(remote, true);
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Quota'); });
+    try {
+      act(() => hook.result.current.queue.schedule(edited, remote));
+      await act(async () => { await hook.result.current.queue.flush(); });
+      expect(auth.rpc).toHaveBeenCalledTimes(1);
+      expect(hook.result.current.result?.state).toBe('saved');
+      expect(hook.result.current.localError).toContain('Device backup unavailable');
+    } finally { write.mockRestore(); hook.unmount(); }
+  });
   it('routes committed pilot edits through the cell RPC and acknowledges the server document', async () => {
     const remote = base(); remote.rows = [createPfmeaRowForProcedureLink({ id: 'task', name: 'Step', wbs: '1', customFields: {} } as Task, undefined, undefined)];
     const edited = structuredClone(remote); edited.rows[0].severity = 7;
